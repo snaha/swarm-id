@@ -6,6 +6,7 @@ import { BatchId, PrivateKey } from "@ethersphere/bee-js"
 
 import { AccountBus, BroadcastChannelTransport } from "./account-bus"
 import type { BusTransport } from "./account-bus"
+import { deriveBusContext } from "./bus-context"
 import type { BusMessage, BusMessageInput } from "./messages"
 import { serializeAccountStateSnapshot } from "../utils/account-state-snapshot"
 import { mergeSnapshotWithRemote } from "../sync/merge-snapshot"
@@ -139,9 +140,41 @@ describe("AccountBus over BroadcastChannelTransport", () => {
     }
   })
 
+  // The channel used to be one origin-wide constant, so every co-resident
+  // account's contexts shared it. Harmless while the only traffic was
+  // batch-scoped counters; not once `account-delta` rides the bus, since that
+  // payload carries `postageStamps[].signerKey`.
+  it("does not deliver between contexts of different accounts", async () => {
+    const mine = await deriveBusContext("11".repeat(32))
+    const theirs = await deriveBusContext("22".repeat(32))
+    expect(mine.topic).not.toBe(theirs.topic)
+
+    const sender = new AccountBus([new BroadcastChannelTransport(mine.topic)])
+    const sameAccount = new AccountBus([
+      new BroadcastChannelTransport(mine.topic),
+    ])
+    const otherAccount = new AccountBus([
+      new BroadcastChannelTransport(theirs.topic),
+    ])
+    try {
+      const mineReceived = collect(sameAccount)
+      const theirsReceived = collect(otherAccount)
+
+      sender.publish(UTILIZATION_MESSAGE)
+      await waitForMessages(mineReceived, 1)
+      expect(theirsReceived).toEqual([])
+    } finally {
+      sender.close()
+      sameAccount.close()
+      otherAccount.close()
+    }
+  })
+
   it("drops messages that fail schema validation", async () => {
-    const receiver = makeBus()
-    const rawChannel = new BroadcastChannel(receiver.channelName)
+    // Straight onto the transport's channel, bypassing `AccountBus.publish`.
+    const transport = new BroadcastChannelTransport(TOPIC)
+    const receiver = new AccountBus([transport])
+    const rawChannel = new BroadcastChannel(transport.channelName)
     const sender = makeBus()
     try {
       const received = collect(receiver)

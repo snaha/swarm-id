@@ -66,13 +66,10 @@ import {
   NULL_ADDRESS,
 } from "@ethersphere/bee-js"
 import { makeContentAddressedChunk } from "./chunk"
-import {
-  AccountBus,
-  BroadcastChannelTransport,
-  ORIGIN_TOPIC,
-} from "./bus/account-bus"
+import { AccountBus, BroadcastChannelTransport } from "./bus/account-bus"
 import { SignalingTransport } from "./bus/signaling-transport"
 import { deriveBusContext } from "./bus/bus-context"
+import type { BusContext } from "./bus/bus-context"
 import type { BeeRequestOptions } from "@ethersphere/bee-js"
 import {
   uploadData,
@@ -270,9 +267,16 @@ export class SwarmIdProxy {
    * first-class writer despite the partition (docs/Account-Bus.md, phase 3).
    */
   private partitionAccount: SignedInAccount | undefined
-  /** Topic of the currently attached bus signaling transport (dedup guard). */
-  private busSignalingTopic: string | undefined
-  private removeBusSignalingTransport: (() => void) | undefined
+  /** Account-derived topic the attached bus transports share; undefined when
+   *  none are attached. */
+  private busTopic: string | undefined
+  private removeBusLocal: (() => void) | undefined
+  private removeBusSignaling: (() => void) | undefined
+  /** Derivation key of a join that attached everything it wanted. Lets the
+   *  synchronous `joinAccountBus` return without re-deriving, and — because it
+   *  stays unset when a transport failed to attach — makes the next join a
+   *  RETRY rather than a dedup'd no-op. */
+  private busJoinedKey: string | undefined
   /** Bumped by every bus join and by `clearAuthData`, so a join whose key
    *  derivation is still in flight can tell it has been superseded. */
   private busJoinGeneration = 0
@@ -366,7 +370,7 @@ export class SwarmIdProxy {
     this.setupStorageListeners()
 
     // Multi-tab coordination rides the account bus (docs/Account-Bus.md).
-    this.bus = new AccountBus([new BroadcastChannelTransport(ORIGIN_TOPIC)])
+    this.bus = new AccountBus([])
     this.setupBusListeners()
 
     // Announce readiness to parent window immediately
@@ -743,55 +747,123 @@ export class SwarmIdProxy {
    * would never reach past this origin+partition outside Safari.
    */
   private joinAccountBus(): void {
-    // Before the storage read: this runs on every accounts storage event, and
-    // without a signaling URL there is nothing to join.
-    if (!this.signalingUrl) return
     const connection = this.findConnectionForParent()
     if (!connection) return
-    void this.ensureBusSignalingTransport(connection.account.derivationKey)
+    const { derivationKey } = connection.account
+    // Already joined for this account, with everything it wanted attached.
+    // This runs on every accounts storage event, so returning here (rather
+    // than after the derivation) saves two HMACs and an `importKey` per event
+    // — and avoids bumping `busJoinGeneration`, which retires a join still in
+    // flight. A join left incomplete (a transport that threw) does not latch
+    // the key, so it retries here instead.
+    if (derivationKey === this.busJoinedKey) return
+    void this.ensureAccountBusTransports(derivationKey)
   }
 
   /**
-   * Attach the cross-partition/cross-device bus transport for the account
-   * (docs/Account-Bus.md). Idempotent per account; no-op without a configured
-   * signaling URL. Same code path on every browser — Safari is not special.
+   * Attach the account's bus transports (docs/Account-Bus.md). Idempotent per
+   * account; same code path on every browser — Safari is not special.
+   *
+   * BOTH transports hang off the account-derived topic, so a context only ever
+   * shares a channel with other contexts of the same account. The local one is
+   * attached whether or not a signaling URL is configured: without it there is
+   * still same-device tab↔tab traffic to carry, and a build with no bus server
+   * (GitHub Pages, plain `pnpm dev`) must not lose cross-tab utilization.
+   *
+   * Because the topic is derived, both transports now attach a few ticks after
+   * an auth event rather than at construction, so a peer publishing inside
+   * that window loses that one message. Bounded by a single HMAC derivation,
+   * and no worse than a tab that has not finished loading — which has no
+   * listener either; durable counters reconcile on the next read. `busTopic`
+   * is set exactly when the local transport goes live, so it is the signal to
+   * wait on.
+   *
+   * The two attaches are INDEPENDENT. `SignalingTransport` connects in its
+   * constructor, where `new URL` / `new WebSocket` throw synchronously on a
+   * url that is set but unusable (`ws://` from an https page, a CSP that omits
+   * the bus host, a typo) — and that must cost the signaling transport only.
+   * Letting it take the local one down produces "no bus at all, for the whole
+   * session", silently and indistinguishably from a healthy build with no
+   * signaling url at all.
    */
-  private async ensureBusSignalingTransport(
+  private async ensureAccountBusTransports(
     derivationKey: string,
   ): Promise<void> {
-    const url = this.signalingUrl
-    if (!url) return
     const generation = ++this.busJoinGeneration
+    let context: BusContext
     try {
-      const context = await deriveBusContext(derivationKey)
-      // Superseded while the key derivation was in flight — by a later join
-      // (another account) or by `clearAuthData`, which drops the remover
-      // synchronously. Attaching now would put a socket in a room this
-      // session no longer belongs to, and overwrite a remover that a live
-      // join owns.
-      if (generation !== this.busJoinGeneration) return
-      if (this.busSignalingTopic === context.topic) return
-      this.removeBusSignalingTransport?.()
-      // Construct BEFORE latching the topic. `SignalingTransport` connects in
-      // its constructor, where `new URL` and `new WebSocket` throw
-      // synchronously on a malformed url or `ws://` from an https page. Marking
-      // the topic attached first would leave the dedup check above matching a
-      // transport that never existed — bus silently off for the whole session,
-      // with no retry on any later join.
-      const transport = new SignalingTransport({
-        url,
-        topic: context.topic,
-        encryptionKey: context.encryptionKey,
-        createPeerConnection:
-          typeof RTCPeerConnection !== "undefined"
-            ? () => new RTCPeerConnection()
-            : undefined,
-      })
-      this.removeBusSignalingTransport = this.bus.addTransport(transport)
-      this.busSignalingTopic = context.topic
+      context = await deriveBusContext(derivationKey)
     } catch (error) {
-      console.error("[Proxy] Failed to attach bus signaling transport:", error)
+      console.error("[Proxy] Failed to derive the account bus context:", error)
+      // Fail safe, not fail wrong: we no longer know this session's room, so
+      // the previous account's must not stay attached under it.
+      if (generation === this.busJoinGeneration) this.detachBusTransports()
+      return
     }
+    // Superseded while the key derivation was in flight — by a later join
+    // (another account) or by `clearAuthData`, which drops the removers
+    // synchronously. Attaching now would put a socket in a room this session
+    // no longer belongs to, and overwrite a remover that a live join owns.
+    if (generation !== this.busJoinGeneration) return
+
+    if (this.busTopic !== context.topic) {
+      // Leave the old room BEFORE anything can throw. A switch that fails
+      // otherwise leaves this session publishing the new account's traffic
+      // into the previous account's channel — the leak the account-derived
+      // topic closes, surviving in the error path.
+      this.detachBusTransports()
+      try {
+        this.removeBusLocal = this.bus.addTransport(
+          new BroadcastChannelTransport(context.topic),
+        )
+      } catch (error) {
+        // `new BroadcastChannel` throws in a detaching document. Nothing to
+        // unwind: the signaling transport is constructed below, so this order
+        // never leaves a live socket with no handle to close it.
+        console.error(
+          "[Proxy] Failed to attach the local bus transport:",
+          error,
+        )
+        return
+      }
+      this.busTopic = context.topic
+    }
+
+    if (this.signalingUrl && !this.removeBusSignaling) {
+      try {
+        this.removeBusSignaling = this.bus.addTransport(
+          new SignalingTransport({
+            url: this.signalingUrl,
+            topic: context.topic,
+            encryptionKey: context.encryptionKey,
+            createPeerConnection:
+              typeof RTCPeerConnection !== "undefined"
+                ? () => new RTCPeerConnection()
+                : undefined,
+          }),
+        )
+      } catch (error) {
+        console.error(
+          "[Proxy] Failed to attach the bus signaling transport:",
+          error,
+        )
+        // Leaves `busJoinedKey` unset, so the next join retries it — against
+        // a local transport that is already live and stays that way.
+        return
+      }
+    }
+    this.busJoinedKey = derivationKey
+  }
+
+  /** Leave the account's bus room: both transports detached and closed, and
+   *  every latch cleared so the next join is a fresh one. */
+  private detachBusTransports(): void {
+    this.removeBusSignaling?.()
+    this.removeBusSignaling = undefined
+    this.removeBusLocal?.()
+    this.removeBusLocal = undefined
+    this.busTopic = undefined
+    this.busJoinedKey = undefined
   }
 
   /**
@@ -817,8 +889,10 @@ export class SwarmIdProxy {
     // with no handle left to close it. (`AccountBus.addTransport` also
     // refuses once closed; this just avoids opening the socket at all.)
     this.busJoinGeneration += 1
-    this.removeBusSignalingTransport = undefined
-    this.busSignalingTopic = undefined
+    this.removeBusLocal = undefined
+    this.removeBusSignaling = undefined
+    this.busTopic = undefined
+    this.busJoinedKey = undefined
     this.bus.close()
   }
 
@@ -2280,9 +2354,7 @@ export class SwarmIdProxy {
     this.storagePartitioned = false
     this.storagePartitionedIdentity = undefined
     this.partitionAccount = undefined
-    this.removeBusSignalingTransport?.()
-    this.removeBusSignalingTransport = undefined
-    this.busSignalingTopic = undefined
+    this.detachBusTransports()
     // Retire any join still deriving its key, or it would re-attach behind us.
     this.busJoinGeneration += 1
     this.pendingChallenge = undefined

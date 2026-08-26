@@ -39,18 +39,22 @@ export interface PublishOptions {
 
 const CHANNEL_PREFIX = "swarm-id-bus-v1"
 
-/**
- * The one origin-wide topic: every context in this origin+partition. Messages
- * carry their own scoping (batchId, snapshot.accountId). Account-derived,
- * unlinkable topics arrive with the cross-partition transports (phase 2 of
- * `docs/Account-Bus.md`), where contexts of different accounts must not share
- * a channel.
- */
-export const ORIGIN_TOPIC = "origin"
+/** The channel a topic's local transport speaks on. Exported so nothing has to
+ *  re-spell the prefix: a copy of it in a test keeps passing after a bump, on a
+ *  channel the proxy no longer listens to. */
+export function busChannelName(topic: string): string {
+  return `${CHANNEL_PREFIX}:${topic}`
+}
 
 /**
  * Same-origin, same-partition transport. Covers SwarmID tab↔tab and same-dApp
  * Safari tabs; delivery is per browsing-context, never back to the sender.
+ *
+ * The topic is the account-derived one from `deriveBusContext`, the same value
+ * the signaling transport uses as its room. It used to be a single origin-wide
+ * constant, which put every co-resident account's contexts on one unencrypted
+ * channel — fine while the only traffic was batch-scoped utilization counters,
+ * untenable for `account-delta`, whose payload carries `postageStamps[].signerKey`.
  */
 export class BroadcastChannelTransport implements BusTransport {
   readonly local = true
@@ -59,7 +63,7 @@ export class BroadcastChannelTransport implements BusTransport {
   private handlers = new Set<(raw: unknown) => void>()
 
   constructor(topic: string) {
-    this.channelName = `${CHANNEL_PREFIX}:${topic}`
+    this.channelName = busChannelName(topic)
     this.channel = new BroadcastChannel(this.channelName)
     this.channel.onmessage = (event: MessageEvent) => {
       for (const handler of this.handlers) {
@@ -99,14 +103,6 @@ export class AccountBus {
     this.transportUnsubscribers = transports.map((transport) =>
       transport.subscribe((raw) => this.dispatch(raw)),
     )
-  }
-
-  /** The single transport's channel name (test/debug aid). */
-  get channelName(): string {
-    const [transport] = this.transports
-    return transport instanceof BroadcastChannelTransport
-      ? transport.channelName
-      : ""
   }
 
   /**
