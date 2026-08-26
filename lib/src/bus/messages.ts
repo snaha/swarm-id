@@ -27,6 +27,11 @@ export const AccountDeltaMessageSchema = z.object({
   snapshot: AccountStateSnapshotSchemaV1,
 })
 
+/** One slot-wait round, as every holder must read it: lower-case hex of a
+ *  fixed width, so `parseInt(_, 16)` is a number for all of them or the
+ *  message never reaches a handler. */
+const LeaseRequestIdSchema = z.string().regex(/^[0-9a-f]{8}$/)
+
 /**
  * A context waiting for a batch-write partition (all slots held by live
  * peers) asks live holders to yield. An idle holder releases via the normal
@@ -37,13 +42,31 @@ export const AccountDeltaMessageSchema = z.object({
  * holder answers: each derives the same permutation of the partitions from it
  * and yields at its own rank (`swarm-id-proxy.ts`, `yieldRankDelayMs`). It is
  * optional so a peer on an older bundle still gets served — its request is
- * answered by every idle holder, as it was before.
+ * answered by every idle holder, as it was before — but a present one is
+ * format-checked: the rank is `parseInt(requestId, 16)`, so an unconstrained
+ * string reintroduces the very bug this fixes (`NaN` or a negative collapses
+ * every holder onto the same rank), silently and with nothing to diagnose.
  */
 export const LeaseRequestMessageSchema = z.object({
   type: z.literal("lease-request"),
   accountId: z.string().length(40),
   fromDeviceId: z.string(),
-  requestId: z.string().optional(),
+  requestId: LeaseRequestIdSchema.optional(),
+})
+
+/**
+ * The holder that drew the lowest rank for `requestId` is answering it. Sent
+ * BEFORE the release starts, because the release itself is two stamped Swarm
+ * writes — an order of magnitude longer than the rank step — so a signal sent
+ * after it would reach the other holders only once they had all begun yielding
+ * too, which is #576 again. Holders further down the order stand down on this;
+ * the waiter ignores it (no slot is free yet).
+ */
+export const LeaseClaimMessageSchema = z.object({
+  type: z.literal("lease-claim"),
+  accountId: z.string().length(40),
+  fromDeviceId: z.string(),
+  requestId: LeaseRequestIdSchema,
 })
 
 /**
@@ -60,13 +83,14 @@ export const LeaseReleasedMessageSchema = z.object({
   accountId: z.string().length(40),
   partition: z.number().int().min(0),
   fromDeviceId: z.string(),
-  requestId: z.string().optional(),
+  requestId: LeaseRequestIdSchema.optional(),
 })
 
 export const BusMessageSchema = z.discriminatedUnion("type", [
   UtilizationUpdateMessageSchema,
   AccountDeltaMessageSchema,
   LeaseRequestMessageSchema,
+  LeaseClaimMessageSchema,
   LeaseReleasedMessageSchema,
 ])
 

@@ -235,7 +235,9 @@ type Internals = {
   acquire: () => Promise<void>
   acquireWithSlotWait: () => Promise<void>
   pauseLeaseBackgroundWork: () => void
-  slotWaitWake: (() => void) | undefined
+  slotWait:
+    | { wake?: () => void; maybeFree: boolean; fastRoundUsed: boolean }
+    | undefined
 }
 
 describe("BatchWriteCoordinator.withWrite — wait fork", () => {
@@ -1591,13 +1593,137 @@ describe("BatchWriteCoordinator — bus-accelerated leases (docs/Account-Bus.md)
 
       const inFlight = internals.acquireWithSlotWait()
       await vi.advanceTimersByTimeAsync(0)
-      expect(internals.slotWaitWake).toBeDefined()
+      expect(internals.slotWait?.wake).toBeDefined()
 
       coordinator.teardown()
       await vi.advanceTimersByTimeAsync(0)
       await inFlight
-      // The resolver describes a sleep that is over; it must not outlive it.
-      expect(internals.slotWaitWake).toBeUndefined()
+      // The state describes a sleep that is over; it must not outlive it.
+      expect(internals.slotWait).toBeUndefined()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  /** A read-only lease whose `acquire` blocks until the returned `let go` is
+   *  called — the window where a peer's announcement actually lands. */
+  function makeGatedLease(): {
+    lease: unknown
+    acquire: ReturnType<typeof vi.fn>
+    letGo: () => Promise<void>
+  } {
+    let pending: (() => void) | undefined
+    const acquire = vi.fn(async () => {
+      await new Promise<void>((resolve) => {
+        pending = resolve
+      })
+      return { partition: undefined, partitionCount: 4, isReadOnly: true }
+    })
+    const lease = makeLease()
+    ;(lease as unknown as { acquire: unknown }).acquire = acquire
+    return {
+      lease,
+      acquire,
+      letGo: async () => {
+        pending?.()
+        await vi.advanceTimersByTimeAsync(0)
+      },
+    }
+  }
+
+  // `ensureLease` races this loop against a timeout it cannot cancel, so a
+  // superseded wait keeps running. Its timer and its exit must not reach into
+  // the wait that replaced it — that re-loses exactly the wake this fast path
+  // adds, and leaves `notifySlotMaybeFree` calling a dead resolver.
+  it("a detached slot-wait cannot clear the live one's wake or flag", async () => {
+    vi.useFakeTimers()
+    try {
+      leaseController.lease = makeLease()
+      const coordinator = new BatchWriteCoordinator(
+        makeDeps({
+          stamper: makeStamper(
+            [],
+          ) as unknown as BatchWriteCoordinatorDeps["stamper"],
+          mode: "oneshot",
+        }),
+      )
+      const internals = coordinator as unknown as Internals
+
+      const detached = internals.acquireWithSlotWait()
+      await vi.advanceTimersByTimeAsync(0)
+      const stateA = internals.slotWait
+      expect(stateA?.wake).toBeDefined()
+
+      // The live wait starts while A is still asleep, and is mid-`acquire()`
+      // when the announcement lands.
+      const gate = makeGatedLease()
+      leaseController.lease = gate.lease
+      const live = internals.acquireWithSlotWait()
+      await vi.advanceTimersByTimeAsync(0)
+      const stateB = internals.slotWait
+      expect(stateB).toBeDefined()
+      expect(stateB).not.toBe(stateA)
+
+      coordinator.notifySlotMaybeFree()
+      expect(stateB?.maybeFree).toBe(true)
+
+      // A's poll timer fires, and A then returns on the bumped epoch.
+      internals.pauseLeaseBackgroundWork()
+      await vi.advanceTimersByTimeAsync(LEASE_REFRESH_MS)
+      await detached
+
+      expect(stateB?.maybeFree).toBe(true)
+      expect(internals.slotWait).toBe(stateB)
+      expect(stateB?.wake ?? (() => {})).toBeDefined()
+
+      await gate.letGo()
+      await live
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  // Every round re-broadcasts a `lease-request`, and its answer re-arms the
+  // flag — so an unconditional skip is one full acquire per bus round-trip,
+  // each one making another holder drop its partition. The skip is what the
+  // mid-acquire window costs, once.
+  it("skips the poll sleep at most once per wait", async () => {
+    vi.useFakeTimers()
+    try {
+      const gate = makeGatedLease()
+      leaseController.lease = gate.lease
+      const coordinator = new BatchWriteCoordinator(
+        makeDeps({
+          stamper: makeStamper(
+            [],
+          ) as unknown as BatchWriteCoordinatorDeps["stamper"],
+          mode: "oneshot",
+        }),
+      )
+      const internals = coordinator as unknown as Internals
+
+      const inFlight = internals.acquireWithSlotWait()
+      await vi.advanceTimersByTimeAsync(0)
+      expect(gate.acquire).toHaveBeenCalledTimes(1)
+
+      // Round 1: announced while mid-acquire — the scan that just ran was
+      // stale, so the sleep is skipped and round 2 starts at once.
+      coordinator.notifySlotMaybeFree()
+      await gate.letGo()
+      expect(gate.acquire).toHaveBeenCalledTimes(2)
+
+      // Round 2: announced the same way, but this wait has spent its skip.
+      coordinator.notifySlotMaybeFree()
+      await gate.letGo()
+      expect(gate.acquire).toHaveBeenCalledTimes(2)
+
+      // Only the poll interval moves it on now.
+      await vi.advanceTimersByTimeAsync(LEASE_REFRESH_MS)
+      expect(gate.acquire).toHaveBeenCalledTimes(3)
+
+      coordinator.teardown()
+      await gate.letGo()
+      await inFlight
     } finally {
       vi.useRealTimers()
     }

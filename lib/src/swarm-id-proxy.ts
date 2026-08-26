@@ -174,15 +174,22 @@ const DEVICE_REGISTRY_REFRESH_THROTTLE_MS = 8_000
 
 /**
  * Gap between consecutive ranks when holders take turns answering a peer's
- * `lease-request` (`yieldRankDelayMs`). Long enough for the winner's
- * `lease-released` to reach the others — instant over BroadcastChannel, a
- * server round trip over signaling — and short enough that falling through a
- * few ranks still beats the 10 s poll the fast path exists to skip.
+ * `lease-request` (`yieldRankDelayMs`). It budgets ONE bus hop — the winner's
+ * `lease-claim`, which it publishes before it starts releasing (instant over
+ * BroadcastChannel, a server round trip over signaling) — and nothing else.
+ * Sizing it against the release itself would be hopeless: that is two stamped
+ * Swarm writes, so no step short enough to keep the fallthrough useful could
+ * ever gate it.
  */
 const PEER_YIELD_RANK_STEP_MS = 250
 
 /** Hex chars of request id — parsed straight into the rank seed. */
 const LEASE_REQUEST_ID_LENGTH = 8
+
+/** Request ids remembered as already answered, so a `lease-claim` can still
+ *  call off a yield whose rank timer has fired. Small: a round's id is spent
+ *  the moment a holder claims it, and stale entries only cost a `Set` slot. */
+const ANSWERED_REQUEST_MEMORY = 32
 
 /** Identifies one slot-wait round, so every holder ranks itself the same way.
  *  A UUID's first block is hex, so this is hex without any rewriting. */
@@ -274,6 +281,11 @@ export class SwarmIdProxy {
   /** Scheduled answers to peers' `lease-request`s, by request id, so a peer
    *  earlier in the rank order can call ours off (`yieldRankDelayMs`). */
   private pendingYields = new Map<string, ReturnType<typeof setTimeout>>()
+  /** Request ids somebody has claimed (us or a peer). Insertion-ordered and
+   *  capped at `ANSWERED_REQUEST_MEMORY`. Separate from `pendingYields`
+   *  because the cancel window has to outlive the rank timer: the timer only
+   *  starts the yield, whose first Swarm write is still ahead of it. */
+  private answeredRequests = new Set<string>()
   /**
    * Utilization deltas that arrived while the stamper had no lane, held until
    * a bind names one (`applyPendingLaneUpdate`). Keyed by lane so a delta for
@@ -896,10 +908,32 @@ export class SwarmIdProxy {
    * Run this holder's answer to a peer's `lease-request`, announcing the
    * partition it gave up so the waiter (and holders further down the rank
    * order) hear about it.
+   *
+   * The `lease-claim` goes out FIRST. Releasing is two stamped Swarm writes
+   * (`yieldIdleLease` → `lease.release()`), which is orders of magnitude
+   * longer than a rank step, so announcing only on completion would reach the
+   * other holders long after every one of them had begun releasing too — #576
+   * with extra steps. A claim is cheap to send and is what the rank step
+   * actually budgets for.
    */
   private answerLeaseRequest(accountId: string, requestId?: string): void {
     const coordinator = this.coordinator
     if (!coordinator) return
+    if (requestId !== undefined) {
+      // Once the rank timer fires its handle is gone from `pendingYields`, so
+      // the answered-id memory is what keeps a round from being answered twice
+      // from here on. The claim below goes out in this same tick, so nothing
+      // can slip between the two — the guard is what keeps that true if a
+      // caller ever gets here after an await.
+      if (this.answeredRequests.has(requestId)) return
+      this.markRequestAnswered(requestId)
+      this.bus.publish({
+        type: "lease-claim",
+        accountId,
+        fromDeviceId: this.requireDeviceId(),
+        requestId,
+      })
+    }
     coordinator
       .yieldForPeer()
       .then((partition) => {
@@ -929,19 +963,49 @@ export class SwarmIdProxy {
    * The request id gives every holder the same permutation of the partitions,
    * and each waits its own rank in it. Exactly one draws rank 0 and answers
    * immediately — so the ordinary one-holder handover is not slowed at all —
-   * while the rest stand down as soon as they see its `lease-released`. If the
-   * rank-0 holder turns out to be mid-write it announces nothing, and rank 1
-   * answers a step later, which still beats waiting out a poll interval.
+   * while the rest stand down as soon as they see its `lease-claim`. Only
+   * holders that would presently yield take a rank at all (`canYieldForPeer`),
+   * so a holder mid-burst does not sit at the front of the order and decline
+   * in silence; the next eligible rank answers a step later, which still beats
+   * waiting out a poll interval.
    */
   private yieldRankDelayMs(requestId: string): number {
     const coordinator = this.coordinator
     const partition = coordinator?.currentPartition
     const partitionCount = coordinator?.partitionCount ?? 1
     if (partition === undefined || partitionCount <= 1) return 0
-    // The id is hex, so the seed needs no hash function.
-    const seed = Number.parseInt(requestId.slice(0, 8), 16)
-    if (!Number.isFinite(seed)) return 0
+    // The id is hex (schema-enforced), so the seed needs no hash function.
+    const seed = Number.parseInt(
+      requestId.slice(0, LEASE_REQUEST_ID_LENGTH),
+      16,
+    )
+    // Unreachable behind the schema, and deliberately LAST rather than first
+    // if it ever becomes reachable: a seed nobody can agree on must not put
+    // every holder at the front of the order — that is the bug, not the guard.
+    if (!Number.isFinite(seed)) {
+      return (partitionCount - 1) * PEER_YIELD_RANK_STEP_MS
+    }
     return ((seed + partition) % partitionCount) * PEER_YIELD_RANK_STEP_MS
+  }
+
+  /** Stop answering `requestId` — somebody else claimed it (or we just did).
+   *  Remembered as well as cancelled, because the rank timer may already have
+   *  fired: it hands off to `answerLeaseRequest`, which re-checks this. */
+  private standDownFromRequest(requestId: string | undefined): void {
+    if (requestId === undefined) return
+    this.markRequestAnswered(requestId)
+    const scheduled = this.pendingYields.get(requestId)
+    if (scheduled === undefined) return
+    clearTimeout(scheduled)
+    this.pendingYields.delete(requestId)
+  }
+
+  private markRequestAnswered(requestId: string): void {
+    this.answeredRequests.add(requestId)
+    if (this.answeredRequests.size <= ANSWERED_REQUEST_MEMORY) return
+    // Insertion-ordered: the oldest round is the one safest to forget.
+    const oldest = this.answeredRequests.values().next().value
+    if (oldest !== undefined) this.answeredRequests.delete(oldest)
   }
 
   /** Drop every scheduled answer — nothing they would release is ours now. */
@@ -1026,11 +1090,30 @@ export class SwarmIdProxy {
           // Idempotent per request: the same message reaches us over every
           // attached transport, and the waiter re-broadcasts each round.
           if (this.pendingYields.has(requestId)) return
+          if (this.answeredRequests.has(requestId)) return
+          // Only holders that would actually yield take a rank. Otherwise a
+          // holder mid-burst — with a 3 s idle threshold, the common case on
+          // an active account — sits at the front of the order and declines in
+          // silence, and every later rank falls through behind it.
+          if (!coordinator.canYieldForPeer) return
           const timer = setTimeout(() => {
             this.pendingYields.delete(requestId)
             this.answerLeaseRequest(message.accountId, requestId)
           }, this.yieldRankDelayMs(requestId))
           this.pendingYields.set(requestId, timer)
+          return
+        }
+        case "lease-claim": {
+          if (
+            message.fromDeviceId === this.deviceId ||
+            message.accountId !== this.coordinatorAccountId
+          ) {
+            return
+          }
+          // A peer earlier in the rank order is answering this request — stand
+          // down rather than dropping a second lease for one waiter. No slot is
+          // free yet, so nothing wakes a waiting poll here.
+          this.standDownFromRequest(message.requestId)
           return
         }
         case "lease-released": {
@@ -1040,16 +1123,9 @@ export class SwarmIdProxy {
           ) {
             return
           }
-          // A peer earlier in the rank order already answered this request —
-          // stand down rather than dropping a second lease for one waiter.
-          const answeredId = message.requestId
-          if (answeredId !== undefined) {
-            const scheduled = this.pendingYields.get(answeredId)
-            if (scheduled !== undefined) {
-              clearTimeout(scheduled)
-              this.pendingYields.delete(answeredId)
-            }
-          }
+          // The claim normally arrives first; this also covers a peer whose
+          // claim we missed, and a release that answers no request at all.
+          this.standDownFromRequest(message.requestId)
           this.coordinator?.notifySlotMaybeFree()
           return
         }

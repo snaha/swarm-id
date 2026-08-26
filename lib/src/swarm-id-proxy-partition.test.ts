@@ -57,6 +57,10 @@ vi.mock("./bus/signaling-transport", () => ({
     }
   }),
 }))
+/** How long the mocked `yieldForPeer` takes — past rank 1's step (250 ms), as
+ *  the real one (two stamped Swarm writes) always is. */
+const SLOW_YIELD_MS = vi.hoisted(() => 400)
+
 /** Devices the mocked `readRoster` reports for the account's Swarm roster. */
 const rosterDevices = vi.hoisted(
   () => [] as { deviceId: string; createdAt: number; lastSignedInAt: number }[],
@@ -72,12 +76,25 @@ vi.mock("./sync/batch-write-coordinator", () => ({
       startLease: vi.fn(),
       teardown: vi.fn(),
       withWrite: vi.fn(),
-      yieldForPeer: vi.fn(async () => 1),
+      // Deliberately NOT instant. The real yield is two stamped Swarm writes
+      // (`yieldIdleLease` → `release`), i.e. far longer than a rank step, so a
+      // mock that resolves in a microtask exercises the one timing production
+      // never has — and hides whether the election's cancel signal actually
+      // arrives before the other ranks fire.
+      yieldForPeer: vi.fn(
+        async () =>
+          await new Promise<number>((resolve) =>
+            setTimeout(() => resolve(1), SLOW_YIELD_MS),
+          ),
+      ),
       notifySlotMaybeFree: vi.fn(),
       currentPartition: undefined as number | undefined,
       // The modulus for the yield rank order; a test sets `currentPartition`
       // to place this holder in it.
       partitionCount: 4,
+      /** Whether this holder would presently yield — only such holders take a
+       *  rank. Mutable: a test can make the holder mid-burst. */
+      canYieldForPeer: true,
     }
   }),
 }))
@@ -321,28 +338,31 @@ describe("SwarmIdProxy partitioned write enablement", () => {
   // idle holder used to answer, so a 4-partition account dropped all four
   // leases at once and whoever lost the re-race got "Uploads are unavailable".
   // The request id gives every holder the same rank order; only rank 0 answers
-  // at once, and the rest stand down when they see its release.
+  // at once, and the rest stand down when they see it claim the request.
   describe("only one holder answers a lease-request", () => {
     /** Seed 0, so rank == the holder's own partition index. */
     const REQUEST_ID = "00000000"
+    const ACCOUNT_ID = "aa".repeat(20)
+    /** Past rank 1's step, but well inside the mocked yield. */
+    const PAST_RANK_1_MS = 300
 
-    async function hydrateHolder(partition: number): Promise<{
+    type MockCoordinator = {
       yieldForPeer: ReturnType<typeof vi.fn>
       currentPartition: number | undefined
       partitionCount: number
-    }> {
+      canYieldForPeer: boolean
+    }
+
+    async function hydrateHolder(partition: number): Promise<MockCoordinator> {
       const challenge = await startPartitionedConnect()
       await sendSetSecret(challenge, {
         account: serializeSyncedAccount(makeSyncedAccount()),
       })
       const coordinator = vi.mocked(BatchWriteCoordinator).mock.results.at(-1)!
-        .value as {
-        yieldForPeer: ReturnType<typeof vi.fn>
-        currentPartition: number | undefined
-        partitionCount: number
-      }
+        .value as MockCoordinator
       coordinator.currentPartition = partition
       coordinator.partitionCount = 4
+      coordinator.canYieldForPeer = true
       coordinator.yieldForPeer.mockClear()
       return coordinator
     }
@@ -350,10 +370,19 @@ describe("SwarmIdProxy partitioned write enablement", () => {
     function postRequest(channel: BroadcastChannel, requestId?: string): void {
       channel.postMessage({
         type: "lease-request",
-        accountId: "aa".repeat(20),
+        accountId: ACCOUNT_ID,
         fromDeviceId: "peer-device",
         requestId,
       })
+    }
+
+    /** Everything this proxy publishes on the bus, in order. */
+    function recordPublished(channel: BroadcastChannel): { type: string }[] {
+      const seen: { type: string }[] = []
+      channel.addEventListener("message", (event) => {
+        seen.push((event as MessageEvent).data as { type: string })
+      })
+      return seen
     }
 
     it("answers immediately at rank 0", async () => {
@@ -365,6 +394,30 @@ describe("SwarmIdProxy partitioned write enablement", () => {
         await vi.waitFor(() =>
           expect(coordinator.yieldForPeer).toHaveBeenCalledTimes(1),
         )
+      } finally {
+        busChannel.close()
+      }
+    })
+
+    // The signal the other ranks stand down on must precede the release, not
+    // follow it: releasing is two stamped Swarm writes, so a signal sent after
+    // it arrives long after every later rank has started releasing too.
+    it("claims the request before its yield completes", async () => {
+      await hydrateHolder(0)
+      const busChannel = new BroadcastChannel("swarm-id-bus-v1:origin")
+      try {
+        const published = recordPublished(busChannel)
+        postRequest(busChannel, REQUEST_ID)
+        await vi.waitFor(() =>
+          expect(published).toContainEqual({
+            type: "lease-claim",
+            accountId: ACCOUNT_ID,
+            fromDeviceId: expect.any(String),
+            requestId: REQUEST_ID,
+          }),
+        )
+        // Still mid-yield: no release announced yet.
+        expect(published.some((m) => m.type === "lease-released")).toBe(false)
       } finally {
         busChannel.close()
       }
@@ -389,6 +442,25 @@ describe("SwarmIdProxy partitioned write enablement", () => {
       }
     })
 
+    it("stands down when a peer claims the same request first", async () => {
+      const coordinator = await hydrateHolder(1)
+      const busChannel = new BroadcastChannel("swarm-id-bus-v1:origin")
+      try {
+        postRequest(busChannel, REQUEST_ID)
+        busChannel.postMessage({
+          type: "lease-claim",
+          accountId: ACCOUNT_ID,
+          fromDeviceId: "peer-device",
+          requestId: REQUEST_ID,
+        })
+        // Well past this holder's step — and past the winner's whole yield.
+        await new Promise((resolve) => setTimeout(resolve, SLOW_YIELD_MS + 200))
+        expect(coordinator.yieldForPeer).not.toHaveBeenCalled()
+      } finally {
+        busChannel.close()
+      }
+    })
+
     it("stands down when a peer answers the same request first", async () => {
       const coordinator = await hydrateHolder(1)
       const busChannel = new BroadcastChannel("swarm-id-bus-v1:origin")
@@ -396,7 +468,7 @@ describe("SwarmIdProxy partitioned write enablement", () => {
         postRequest(busChannel, REQUEST_ID)
         busChannel.postMessage({
           type: "lease-released",
-          accountId: "aa".repeat(20),
+          accountId: ACCOUNT_ID,
           partition: 0,
           fromDeviceId: "peer-device",
           requestId: REQUEST_ID,
@@ -408,6 +480,68 @@ describe("SwarmIdProxy partitioned write enablement", () => {
         busChannel.close()
       }
     })
+
+    // The rank timer only STARTS the answer; the yield's first Swarm write is
+    // still ahead of it. A claim landing in that window must still call it off,
+    // which needs a memory of answered ids — the timer handle is already gone.
+    it("stands down on a claim that arrives after its rank timer fired", async () => {
+      const coordinator = await hydrateHolder(1)
+      const busChannel = new BroadcastChannel("swarm-id-bus-v1:origin")
+      try {
+        postRequest(busChannel, REQUEST_ID)
+        await new Promise((resolve) => setTimeout(resolve, PAST_RANK_1_MS))
+        busChannel.postMessage({
+          type: "lease-claim",
+          accountId: ACCOUNT_ID,
+          fromDeviceId: "peer-device",
+          requestId: REQUEST_ID,
+        })
+        // Same round, re-delivered (every transport, every re-broadcast): the
+        // claim we just saw must keep this holder out of it. Waited out past a
+        // full rank step, which is when a re-scheduled answer would fire.
+        postRequest(busChannel, REQUEST_ID)
+        await new Promise((resolve) => setTimeout(resolve, SLOW_YIELD_MS))
+        expect(coordinator.yieldForPeer).toHaveBeenCalledTimes(1)
+      } finally {
+        busChannel.close()
+      }
+    })
+
+    // A holder mid-burst declines in silence, so letting it hold a rank just
+    // delays every holder behind it. With a 3 s idle threshold that is the
+    // common case on an active account.
+    it("takes no rank while it would decline anyway", async () => {
+      const coordinator = await hydrateHolder(0)
+      coordinator.canYieldForPeer = false
+      const busChannel = new BroadcastChannel("swarm-id-bus-v1:origin")
+      try {
+        const published = recordPublished(busChannel)
+        postRequest(busChannel, REQUEST_ID)
+        await new Promise((resolve) => setTimeout(resolve, PAST_RANK_1_MS))
+        expect(coordinator.yieldForPeer).not.toHaveBeenCalled()
+        expect(published.some((m) => m.type === "lease-claim")).toBe(false)
+      } finally {
+        busChannel.close()
+      }
+    })
+
+    // The rank is `parseInt(requestId, 16)`. A nanoid parses to NaN and a
+    // leading minus parses negative — both used to put every holder at rank 0,
+    // i.e. #576 again, silently. The schema drops them instead.
+    it.each(["not-hex!", "-0000002", "00000000000000"])(
+      "ignores a request whose id is %s",
+      async (requestId) => {
+        const coordinator = await hydrateHolder(0)
+        const busChannel = new BroadcastChannel("swarm-id-bus-v1:origin")
+        try {
+          postRequest(busChannel, requestId)
+          await new Promise((resolve) => setTimeout(resolve, PAST_RANK_1_MS))
+          expect(coordinator.yieldForPeer).not.toHaveBeenCalled()
+        } finally {
+          busChannel.close()
+        }
+      },
+    )
 
     it("schedules one answer however many times the request is delivered", async () => {
       const coordinator = await hydrateHolder(1)
