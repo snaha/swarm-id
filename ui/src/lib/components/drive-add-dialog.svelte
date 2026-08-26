@@ -396,8 +396,8 @@
     <div class="flex items-start gap-2">
       <TriangleAlert class="text-destructive mt-0.5 size-4 shrink-0" />
       <p class="text-sm">
-        The payment window closed before we could confirm the purchase. If you completed payment,
-        your drive may still appear shortly — don't pay again without checking.
+        Your payment went through, but the payment window closed before the purchase was confirmed.
+        The drive may still appear shortly — don't pay again without checking.
       </p>
     </div>
     <Button variant="outline" class="w-full" onclick={close}>Close</Button>

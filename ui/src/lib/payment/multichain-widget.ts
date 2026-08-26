@@ -11,8 +11,16 @@
  */
 import { strip0x } from '$lib/crypto/hex'
 
-const WIDGET_BASE_URL = 'https://fund.bzz.limo/'
-const ALLOWED_ORIGINS = ['https://fund.bzz.limo', 'https://fund.ethswarm.org']
+// The deployment carrying the `window.opener` fix (ethersphere/multichain-widget
+// 85eb9c37) — without it the widget posts every event to `window.parent`, which
+// in a popup is the popup itself, so nothing ever reaches us (#342). The older
+// origins stay allowed so a later redeploy of either keeps working.
+const WIDGET_BASE_URL = 'https://swarmbucks.eth.limo/'
+const ALLOWED_ORIGINS = [
+  'https://swarmbucks.eth.limo',
+  'https://fund.bzz.limo',
+  'https://fund.ethswarm.org',
+]
 const POPUP_FEATURES = 'popup,width=500,height=700'
 
 /** Batch event posted by the multichain widget once a purchase settles. */
@@ -29,13 +37,12 @@ export interface PurchaseStampOptions {
   destination: string // Batch owner address (0x...)
   onSuccess: (batch: BatchEvent) => void
   onError: (error: Error) => void
-  // The user explicitly backed out of the widget (a `finish` event) without
-  // completing a purchase.
+  // The user backed out before any money moved — no `payment` event was seen, so
+  // there is nothing to lose by returning to the form.
   onCancel: () => void
-  // The popup closed without us receiving a recognized batch event — ambiguous,
-  // because the on-chain purchase may have succeeded but its message was missed
-  // (e.g. the widget didn't auto-close and the user closed it manually). The
-  // caller MUST NOT treat this as a clean cancel that discards the purchase.
+  // The widget ended without a batch we could record, but a `payment` event told
+  // us money is already in flight. The caller MUST NOT treat this as a clean
+  // cancel: the purchase may still settle on-chain.
   onUnconfirmedClose: () => void
   mocked?: boolean // For testing - simulate the settlement instead of paying
   mockPopup?: boolean // For testing - also open the widget's `?mocked=true` popup
@@ -193,10 +200,10 @@ export function parseBatchEvent(data: unknown): BatchEvent | undefined {
 /** Handle over an in-flight widget purchase. */
 export interface StampPurchaseHandle {
   /**
-   * Abort the purchase from OUR UI (e.g. the pending dialog's Cancel): closes
-   * the popup and detaches the listeners, so a payment can no longer complete
-   * invisibly after the user backed out. Fires no callback — the caller
-   * initiated it. No-op once the purchase has already settled.
+   * Abort the purchase from OUR UI (e.g. the pending dialog's Cancel): detaches
+   * the listeners, and closes the popup only while nothing has been paid or
+   * settled — once money is in flight the popup has to run to the end, so it is
+   * left open. Fires no callback — the caller initiated it.
    */
   cancel: () => void
 }
@@ -266,7 +273,13 @@ export function openStampPurchaseWidget(options: PurchaseStampOptions): StampPur
     return { cancel: () => undefined }
   }
 
-  let completed = false
+  // A `batch` event was recorded — onSuccess has already fired.
+  let settled = false
+  // A `payment` event arrived: the user's money is in flight and the widget's
+  // pipeline must be allowed to run to the end, whatever we do with our UI.
+  let paid = false
+  // Terminal: listeners are detached and no further callback may fire.
+  let finished = false
   let closeGraceTimer: ReturnType<typeof setTimeout> | undefined
 
   // Handle messages from the widget
@@ -281,31 +294,49 @@ export function openStampPurchaseWidget(options: PurchaseStampOptions): StampPur
 
     const batchEvent = parseBatchEvent(data)
     if (batchEvent) {
-      completed = true
-      cleanup()
-      popup.close()
+      // Record the batch, but leave the popup running: `create-batch` is not the
+      // last step — the trailing transfer steps sweep leftover xDAI off the
+      // widget's temporary wallet back to the owner. Closing here would strand
+      // it. The widget closes itself once it posts `finish`.
+      settled = true
       settle(onSuccess, onError, batchEvent)
       return
     }
 
     const obj = coerceObject(data)
 
+    // Money is committed from here on: the funds reach the temporary wallet
+    // whether or not the widget stays open, so a close is no longer a clean
+    // back-out and we must never force one.
+    if (obj?.event === 'payment') {
+      paid = true
+      return
+    }
+
     // Error event
     if (obj?.event === 'error') {
-      completed = true
+      finished = true
       cleanup()
       popup.close()
       onError(new Error(String(obj.message || 'Widget error')))
       return
     }
 
-    // Finish event (user explicitly closed the widget without completing a
-    // purchase) — a genuine cancel.
+    // The flow ran to the end. Not a cancel — the widget posts nothing when the
+    // user aborts, so `finish` only ever means completion.
     if (obj?.event === 'finish') {
-      completed = true
+      finished = true
       cleanup()
       popup.close()
-      onCancel()
+      if (!settled) {
+        // Completed without a batch we could record: paid means the purchase may
+        // still be out there, unpaid means nothing was lost.
+        if (paid) {
+          onUnconfirmedClose()
+        } else {
+          onCancel()
+        }
+      }
       return
     }
 
@@ -318,25 +349,31 @@ export function openStampPurchaseWidget(options: PurchaseStampOptions): StampPur
     })
   }
 
-  // Conclude an ambiguous popup close: the on-chain purchase may have succeeded
-  // but its message was never recognized. NOT a clean cancel — the caller must
-  // not discard a possible purchase.
-  const concludeUnconfirmedClose = () => {
-    if (completed) {
+  // The popup went away without a `finish`. Harmless once the batch is recorded;
+  // ambiguous once money moved; a plain back-out otherwise.
+  const concludeClose = () => {
+    if (finished) {
       return
     }
-    completed = true
+    finished = true
     cleanup()
-    onUnconfirmedClose()
+    if (settled) {
+      return
+    }
+    if (paid) {
+      onUnconfirmedClose()
+      return
+    }
+    onCancel()
   }
 
   const checkClosed = setInterval(() => {
-    if (popup.closed && !completed && closeGraceTimer === undefined) {
+    if (popup.closed && !finished && closeGraceTimer === undefined) {
       // Stop polling but keep the message listener alive for the grace window,
       // so a `batch`/`finish` message arriving right as the popup closes is
       // still handled.
       clearInterval(checkClosed)
-      closeGraceTimer = setTimeout(concludeUnconfirmedClose, CLOSE_GRACE_MS)
+      closeGraceTimer = setTimeout(concludeClose, CLOSE_GRACE_MS)
     }
   }, CLOSE_POLL_MS)
 
@@ -352,14 +389,17 @@ export function openStampPurchaseWidget(options: PurchaseStampOptions): StampPur
 
   return {
     cancel: () => {
-      if (completed) {
+      if (finished) {
         return
       }
-      // Close the popup BEFORE detaching so the user can't keep paying in a
-      // window whose result we would silently drop.
-      completed = true
+      finished = true
       cleanup()
-      popup.close()
+      // Never close a popup that still has the user's money in it: the pipeline
+      // runs client-side there, and killing it strands funds on the temporary
+      // wallet (#550). Detach only and let it finish on its own.
+      if (!paid && !settled) {
+        popup.close()
+      }
     },
   }
 }

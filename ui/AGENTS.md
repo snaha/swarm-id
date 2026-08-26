@@ -14,7 +14,7 @@ The identity UI is a SvelteKit SPA.
   toggles that make the product **Add drive** flow settle a mocked postage batch instead of a real
   cross-chain payment. "Open widget popup" **off** simulates locally with **no `window.open`** — the
   only mode that works where popups are blocked (headless previews) or the widget origin is offline;
-  **on** also opens the `fund.bzz.limo?mocked=true` popup. "Outcome" picks success vs. a failed
+  **on** also opens the `swarmbucks.eth.limo?mocked=true` popup. "Outcome" picks success vs. a failed
   purchase. Settings persist in localStorage (`dev-mock-stamp-*`) and are read by
   `drive-add-dialog.svelte`; production leaves them off.
 - **Hex helpers**: byte⇄hex conversion comes from the lib — `uint8ArrayToHex`/`hexToUint8Array`
