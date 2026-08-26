@@ -6,6 +6,7 @@ import { BatchId } from "@ethersphere/bee-js"
 import {
   resolveStampForApp,
   collectAccountStampBatchIds,
+  stampsReachableByApp,
 } from "./postage-stamp-association"
 import {
   TEST_BATCH_ID_HEX,
@@ -98,5 +99,64 @@ describe("collectAccountStampBatchIds", () => {
       connectedApps: [],
     })
     expect(result).toEqual([])
+  })
+})
+
+// A partitioned session is handed its account view by the connect popup, and
+// before #578 that view carried EVERY stamp with its signer key — in a context
+// embedded by an arbitrary dApp page. It can only ever spend the one resolved
+// for it, so that is all it should hold (#578).
+describe("stampsReachableByApp", () => {
+  it("keeps only the app's override and the account default", () => {
+    const otherStamp = createPostageStamp({
+      batchID: new BatchId("dd".repeat(32)),
+    })
+
+    const result = stampsReachableByApp(
+      { postageStampBatchID: appBatch },
+      { defaultPostageStampBatchID: accountBatch },
+      [accountStamp, appStamp, otherStamp],
+    )
+
+    expect(result.map((s) => s.batchID.toHex()).sort()).toEqual(
+      [TEST_BATCH_ID_HEX, TEST_BATCH_ID_2_HEX].sort(),
+    )
+  })
+
+  // The default is the fallthrough `resolveStampForApp` takes when the
+  // override's stamp is gone, so shipping only the override would turn a
+  // recoverable stale pointer into an unusable session.
+  it("keeps the default even when the app has a live override", () => {
+    const result = stampsReachableByApp(
+      { postageStampBatchID: appBatch },
+      { defaultPostageStampBatchID: accountBatch },
+      [accountStamp, appStamp],
+    )
+    expect(result).toHaveLength(2)
+  })
+
+  it("keeps nothing when neither pointer resolves", () => {
+    const result = stampsReachableByApp(
+      { postageStampBatchID: undefined },
+      { defaultPostageStampBatchID: undefined },
+      [accountStamp, appStamp],
+    )
+    expect(result).toEqual([])
+  })
+
+  // A tombstone for our own stamp is news: it is how the session learns the
+  // stamp it was spending is gone.
+  it("keeps a tombstoned stamp its pointers still name", () => {
+    const deleted = createPostageStamp({
+      batchID: accountBatch,
+      deletedAt: 2_000_000,
+    })
+    const result = stampsReachableByApp(
+      { postageStampBatchID: undefined },
+      { defaultPostageStampBatchID: accountBatch },
+      [deleted],
+    )
+    expect(result).toHaveLength(1)
+    expect(result[0].deletedAt).toBe(2_000_000)
   })
 })

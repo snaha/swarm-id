@@ -64,3 +64,34 @@ export function collectAccountStampBatchIds(
   }
   return result
 }
+
+/**
+ * The stamps a connected app's session can ever reach: the ones its pointers
+ * name — its own batch override, and the account default it falls through to.
+ *
+ * This is what a PARTITIONED session is handed and allowed to keep (#578). It
+ * holds its account view in memory, in a context embedded by an arbitrary dApp
+ * page, and it can only ever spend the stamp `resolveStampForApp` picks — so
+ * the rest of the collection is signer keys it has no use for. Least privilege
+ * rather than a broken boundary: an unpartitioned proxy reads the same material
+ * out of shared storage, but it does not have to be handed it.
+ *
+ * BOTH pointers, not just the winner: the default is the fallthrough
+ * `resolveStampForApp` takes when the override's stamp is gone, so shipping
+ * only the override would turn a recoverable stale pointer into a session that
+ * cannot upload at all. Tombstones its pointers still name are kept too — a
+ * tombstone is how the session learns the stamp it was spending is deleted.
+ */
+export function stampsReachableByApp(
+  app: Pick<ConnectedApp, "postageStampBatchID">,
+  account: Pick<SignedInAccount, "defaultPostageStampBatchID">,
+  stamps: PostageStamp[],
+): PostageStamp[] {
+  const reachable = [
+    app.postageStampBatchID,
+    account.defaultPostageStampBatchID,
+  ]
+    .filter((batchId) => batchId !== undefined)
+    .map((batchId) => batchId.toHex())
+  return stamps.filter((stamp) => reachable.includes(stamp.batchID.toHex()))
+}

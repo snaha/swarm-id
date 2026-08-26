@@ -1305,6 +1305,38 @@ describe("SwarmIdProxy partitioned write enablement", () => {
       }
     })
 
+    // A narrowed handover is undone by the first delta if the fold keeps
+    // everything it is sent: the publisher is an unpartitioned context, and it
+    // publishes the whole collection. The session may hold only what its own
+    // pointers name (#578).
+    it("does not accumulate stamps it cannot spend from a delta", async () => {
+      const busChannel = await hydratedSession()
+      const stamp = makeSyncedAccount().postageStamps[0]
+      const foreign = {
+        ...stamp,
+        batchID: new BatchId("dd".repeat(32)),
+        signerKey: new PrivateKey("ee".repeat(32)),
+        updatedAt: Date.now(),
+      }
+      try {
+        busChannel.postMessage(
+          accountDelta({ postageStamps: [stamp, foreign] }),
+        )
+        await flushBus()
+
+        const held = (
+          proxy as unknown as {
+            partitionAccount: {
+              postageStamps: { batchID: { toHex(): string } }[]
+            }
+          }
+        ).partitionAccount.postageStamps
+        expect(held.map((s) => s.batchID.toHex())).toEqual([BATCH_ID_HEX])
+      } finally {
+        busChannel.close()
+      }
+    })
+
     it("ignores a delta for a different account", async () => {
       const busChannel = await hydratedSession()
       try {

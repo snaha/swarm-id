@@ -89,7 +89,10 @@ import {
   saveMantarayTree,
 } from "./proxy/mantaray"
 import { createFeedManifestDirect } from "./proxy/feed-manifest"
-import { resolveStampForApp } from "./utils/postage-stamp-association"
+import {
+  resolveStampForApp,
+  stampsReachableByApp,
+} from "./utils/postage-stamp-association"
 import {
   accountStateToDeviceView,
   foldAccount,
@@ -1373,26 +1376,47 @@ export class SwarmIdProxy {
         ],
         mergeDevicesList(account.devices, snapshot.metadata.devices),
       )
+      const foldedAccount = foldedToSyncedAccount({
+        id: account.id,
+        derivationKey: account.derivationKey,
+        account: folded,
+        // The NEWER of the two inputs, never a fresh `Date.now()` (the
+        // default): a fold states what the two sides already say, it does not
+        // make a change. `accountAsStateSnapshot` reads this back as the
+        // snapshot clock on the next fold, so a fresh one here would let this
+        // session outrank a peer's genuine edit purely by having consumed a
+        // message.
+        lastModified: Math.max(
+          account.lastModified ?? account.createdAt,
+          snapshot.metadata.lastModified,
+        ),
+      })
+      const connectedApps = restoreLocalSessionFields(
+        folded.connectedApps,
+        account.connectedApps,
+      )
       this.partitionAccount = {
         ...this.partitionAccount,
-        ...foldedToSyncedAccount({
-          id: account.id,
-          derivationKey: account.derivationKey,
-          account: folded,
-          // The NEWER of the two inputs, never a fresh `Date.now()` (the
-          // default): a fold states what the two sides already say, it does not
-          // make a change. `accountAsStateSnapshot` reads this back as the
-          // snapshot clock on the next fold, so a fresh one here would let this
-          // session outrank a peer's genuine edit purely by having consumed a
-          // message.
-          lastModified: Math.max(
-            account.lastModified ?? account.createdAt,
-            snapshot.metadata.lastModified,
-          ),
-        }),
-        connectedApps: restoreLocalSessionFields(
-          folded.connectedApps,
-          account.connectedApps,
+        ...foldedAccount,
+        connectedApps,
+        // Narrowed back down after the fold: the publisher is an unpartitioned
+        // context and sends the whole collection, so keeping what it sends
+        // would undo the narrowed handover (#578) on the first delta. The fold
+        // still runs, because the session must hear about ITS stamp — a
+        // rotated signer key, a tombstone — and LWW is what tells it.
+        //
+        // Narrowed by the pointers the fold just decided, never the pre-fold
+        // ones: one delta can carry both a re-pointed app (or a moved account
+        // default) and the stamp it now names, and filtering by the old
+        // pointers drops the stamp while keeping the pointer —
+        // `resolveStampForApp` then falls through, and the session spends the
+        // wrong batch or nothing at all, with nothing to correct it until some
+        // unrelated change publishes again.
+        postageStamps: stampsReachableByApp(
+          connectedApps.find((app) => app.appUrl === connection.app.appUrl) ??
+            connection.app,
+          foldedAccount,
+          foldedAccount.postageStamps,
         ),
       }
     }

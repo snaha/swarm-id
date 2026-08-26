@@ -605,5 +605,6 @@ export type {
 // Postage stamp <-> account/app association
 export {
   resolveStampForApp,
+  stampsReachableByApp,
   collectAccountStampBatchIds,
 } from "./utils/postage-stamp-association"
