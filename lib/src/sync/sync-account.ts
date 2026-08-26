@@ -34,6 +34,7 @@ import type {
   PostageStampsStoreInterface,
 } from "./store-interfaces"
 import type { SyncResult } from "./types"
+import { accountStateSnapshot } from "../utils/account-state-snapshot"
 import type { AccountStateSnapshot } from "../utils/account-state-snapshot"
 import { withTimeout } from "../utils/promise"
 import type { PostageStamp } from "../schemas"
@@ -264,30 +265,10 @@ export function createSyncAccount(
     // Derive swarm encryption key from stored derivation key
     const encryptionKey = await deriveSwarmEncryptionKey(account.derivationKey)
 
-    // Account state is read straight off the nested account document.
-    const snapshot: AccountStateSnapshot = {
-      version: 1,
-      timestamp: Date.now(),
-      accountId,
-      metadata: {
-        accountName: account.name,
-        defaultPostageStampBatchID: defaultStampBatchID.toHex(),
-        publicKey: account.publicKey,
-        settings: account.settings,
-        // Unedited scalar → STABLE createdAt, never the fresh lastModified: a
-        // device editing a *different* field must not restamp an unchanged scalar
-        // and clobber a peer's genuine concurrent edit under per-field LWW (§9.3).
-        accountNameAt: account.accountNameAt ?? account.createdAt,
-        defaultStampAt: account.defaultStampAt ?? account.createdAt,
-        settingsAt: account.settingsAt ?? account.createdAt,
-        createdAt: account.createdAt,
-        lastModified: Date.now(),
-        devices: account.devices,
-        partitionCount: account.partitionCount ?? 1,
-      },
-      connectedApps: account.connectedApps,
-      postageStamps: account.postageStamps,
-    }
+    // Account state is read straight off the nested account document, by the
+    // one builder every publisher shares (the per-field clock rules live there).
+    const snapshot = accountStateSnapshot(account)
+    if (!snapshot) return undefined
 
     return {
       snapshot,

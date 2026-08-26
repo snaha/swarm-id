@@ -13,15 +13,11 @@
 
   import { initProxy } from '@snaha/swarm-id'
 
-  import { dev } from '$app/environment'
+  import { busSignalingUrl } from '$lib/bus-signaling-url'
 
-  import { env } from '$env/dynamic/public'
-
-  // Account-bus signaling server (docs/Account-Bus.md). Baked at build time:
-  // the DO deployment sets PUBLIC_BUS_SIGNALING_URL; dev uses the local server
-  // from `pnpm dev`; other static hosts (GitHub Pages) run without a bus.
-  const DEV_SIGNALING_URL = 'ws://localhost:5520'
-  const signalingUrl = env.PUBLIC_BUS_SIGNALING_URL || (dev ? DEV_SIGNALING_URL : undefined)
+  // Account-bus signaling server (docs/Account-Bus.md). Shared with the SwarmID
+  // tab's publisher, so a build cannot end up with a bus on one and not the other.
+  const signalingUrl = busSignalingUrl()
 
   let container = $state<HTMLDivElement>()
 

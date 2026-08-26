@@ -68,6 +68,7 @@ import {
 import { makeContentAddressedChunk } from "./chunk"
 import { AccountBus, BroadcastChannelTransport } from "./bus/account-bus"
 import { SignalingTransport } from "./bus/signaling-transport"
+import { accountStateSnapshot } from "./utils/account-state-snapshot"
 import { deriveBusContext } from "./bus/bus-context"
 import type { BusContext } from "./bus/bus-context"
 import type { BeeRequestOptions } from "@ethersphere/bee-js"
@@ -2133,34 +2134,7 @@ export class SwarmIdProxy {
     if (!this.parentOrigin || this.isDownloadOnlyPartition) return undefined
     const connection = this.findConnectionForParent()
     if (!connection) return undefined
-    const { account } = connection
-
-    const defaultStampBatchID = account.defaultPostageStampBatchID
-    if (!defaultStampBatchID) return undefined
-
-    return {
-      version: 1,
-      timestamp: Date.now(),
-      accountId: account.id.toHex(),
-      metadata: {
-        accountName: account.name,
-        defaultPostageStampBatchID: defaultStampBatchID.toHex(),
-        publicKey: account.publicKey,
-        settings: account.settings,
-        // Unedited scalar → STABLE createdAt, never the fresh lastModified: a
-        // device editing a *different* field must not restamp an unchanged
-        // scalar and clobber a peer's concurrent edit under per-field LWW (§9.3).
-        accountNameAt: account.accountNameAt ?? account.createdAt,
-        defaultStampAt: account.defaultStampAt ?? account.createdAt,
-        settingsAt: account.settingsAt ?? account.createdAt,
-        createdAt: account.createdAt,
-        lastModified: Date.now(),
-        devices: account.devices,
-        partitionCount: account.partitionCount ?? 1,
-      },
-      connectedApps: account.connectedApps,
-      postageStamps: account.postageStamps,
-    }
+    return accountStateSnapshot(connection.account)
   }
 
   /**

@@ -732,11 +732,16 @@ export const accountsStore = {
 }
 
 // ----------------------------------------------------------------------------
-// Dev-only sync seam — consumed only by the /dev sync subsystem.
+// Propagation seam — "this change should reach other contexts".
 //
-// The plain product app leaves the hook unset, so a rename or app-connect never
-// attempts a network publish; the /dev page sets `triggerSync` in onMount so its
-// mutations publish to Swarm.
+// Wired app-wide in `+layout.svelte` (#389; it was dev-only before that), and
+// it now drives two publishers: the Swarm feed write for durability, and the
+// account bus for the live contexts a `storage` event cannot reach — a
+// partitioned dApp iframe learns about a revoke no other way.
+//
+// `skipSync` therefore means "peers must not hear about this": a change folded
+// FROM a peer (re-publishing it is an echo loop), or a volatile field nobody
+// else needs.
 // ----------------------------------------------------------------------------
 
 let syncHook: ((accountIdHex: string) => void) | undefined
