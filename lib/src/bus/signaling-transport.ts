@@ -80,6 +80,15 @@ export interface SignalingTransportOptions {
 interface PeerState {
   connection?: RTCPeerConnection
   dataChannel?: RTCDataChannel
+  /** True once this connection's remote description is set. `addIceCandidate`
+   *  rejects before that, so candidates arriving first have to wait. */
+  remoteDescriptionSet?: boolean
+  /** Candidates that arrived before the remote description, replayed once it
+   *  lands. Signals are handled concurrently (`void this.handleSignal(...)`),
+   *  so an `ice` message routinely reaches us mid-negotiation — without this
+   *  the candidate was logged and dropped, and the pair silently fell back to
+   *  the server relay it was trying to stop using. */
+  pendingCandidates?: RTCIceCandidateInit[]
 }
 
 export class SignalingTransport implements BusTransport {
@@ -318,7 +327,7 @@ export class SignalingTransport implements BusTransport {
       const connection = create()
       const peer = this.peers.get(peerId)
       if (!peer) return
-      peer.connection = connection
+      this.adoptConnection(peer, connection)
       this.adoptDataChannel(
         connection.createDataChannel(DATA_CHANNEL_LABEL),
         peer,
@@ -344,7 +353,7 @@ export class SignalingTransport implements BusTransport {
     try {
       if (signal.kind === "offer") {
         const connection = create()
-        peer.connection = connection
+        this.adoptConnection(peer, connection)
         connection.ondatachannel = (event) => {
           this.adoptDataChannel(event.channel, peer)
         }
@@ -353,6 +362,7 @@ export class SignalingTransport implements BusTransport {
           type: "offer",
           sdp: signal.sdp,
         })
+        await this.flushPendingCandidates(peer)
         const answer = await connection.createAnswer()
         await connection.setLocalDescription(answer)
         this.sendSignal(from, { kind: "answer", sdp: answer.sdp ?? "" })
@@ -363,6 +373,14 @@ export class SignalingTransport implements BusTransport {
           type: "answer",
           sdp: signal.sdp,
         })
+        await this.flushPendingCandidates(peer)
+        return
+      }
+      // Queue rather than apply while the sibling offer/answer handler is
+      // still awaiting its `setRemoteDescription`. The check and the push are
+      // one synchronous step, so they cannot interleave with the flush.
+      if (!peer.remoteDescriptionSet) {
+        peer.pendingCandidates?.push(signal.candidate as RTCIceCandidateInit)
         return
       }
       await peer.connection?.addIceCandidate(
@@ -370,6 +388,38 @@ export class SignalingTransport implements BusTransport {
       )
     } catch (error) {
       console.error("[SignalingTransport] WebRTC signal failed:", error)
+    }
+  }
+
+  /**
+   * Install a freshly created connection on a peer, closing whatever was there.
+   * A duplicate or renegotiated offer used to overwrite the field and leak the
+   * previous `RTCPeerConnection`, which keeps its ICE agent and sockets alive.
+   * The candidate queue resets with it: the new connection has no remote
+   * description, and candidates gathered for the old one are meaningless.
+   */
+  private adoptConnection(
+    peer: PeerState,
+    connection: RTCPeerConnection,
+  ): void {
+    peer.connection?.close()
+    peer.connection = connection
+    peer.remoteDescriptionSet = false
+    peer.pendingCandidates = []
+  }
+
+  /** Replay the candidates that arrived before the remote description. One bad
+   *  candidate must not strand the rest, so each is applied on its own. */
+  private async flushPendingCandidates(peer: PeerState): Promise<void> {
+    peer.remoteDescriptionSet = true
+    const pending = peer.pendingCandidates ?? []
+    peer.pendingCandidates = []
+    for (const candidate of pending) {
+      try {
+        await peer.connection?.addIceCandidate(candidate)
+      } catch (error) {
+        console.warn("[SignalingTransport] ICE candidate rejected:", error)
+      }
     }
   }
 
