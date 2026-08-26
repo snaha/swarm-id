@@ -440,6 +440,11 @@ describe("SwarmIdProxy partitioned write enablement", () => {
       coordinator.partitionCount = 4
       coordinator.canYieldForPeer = true
       coordinator.yieldForPeer.mockClear()
+      // The transports attach a few ticks after the auth event (the topic is
+      // derived), so a test that posts straight after `sendSetSecret` would
+      // race the channel into existence — and a negative assertion would pass
+      // for the wrong reason.
+      await awaitBusJoin()
       return coordinator
     }
 
@@ -463,7 +468,7 @@ describe("SwarmIdProxy partitioned write enablement", () => {
 
     it("answers immediately at rank 0", async () => {
       const coordinator = await hydrateHolder(0)
-      const busChannel = new BroadcastChannel("swarm-id-bus-v1:origin")
+      const busChannel = new BroadcastChannel(accountChannelName)
       try {
         postRequest(busChannel, REQUEST_ID)
         // No step waited: the ordinary one-holder handover must not get slower.
@@ -480,7 +485,7 @@ describe("SwarmIdProxy partitioned write enablement", () => {
     // it arrives long after every later rank has started releasing too.
     it("claims the request before its yield completes", async () => {
       await hydrateHolder(0)
-      const busChannel = new BroadcastChannel("swarm-id-bus-v1:origin")
+      const busChannel = new BroadcastChannel(accountChannelName)
       try {
         const published = recordPublished(busChannel)
         postRequest(busChannel, REQUEST_ID)
@@ -501,7 +506,7 @@ describe("SwarmIdProxy partitioned write enablement", () => {
 
     it("waits its step at a later rank, then answers if nobody else did", async () => {
       const coordinator = await hydrateHolder(1)
-      const busChannel = new BroadcastChannel("swarm-id-bus-v1:origin")
+      const busChannel = new BroadcastChannel(accountChannelName)
       try {
         postRequest(busChannel, REQUEST_ID)
         await new Promise((resolve) => setTimeout(resolve, 60))
@@ -520,7 +525,7 @@ describe("SwarmIdProxy partitioned write enablement", () => {
 
     it("stands down when a peer claims the same request first", async () => {
       const coordinator = await hydrateHolder(1)
-      const busChannel = new BroadcastChannel("swarm-id-bus-v1:origin")
+      const busChannel = new BroadcastChannel(accountChannelName)
       try {
         postRequest(busChannel, REQUEST_ID)
         busChannel.postMessage({
@@ -539,7 +544,7 @@ describe("SwarmIdProxy partitioned write enablement", () => {
 
     it("stands down when a peer answers the same request first", async () => {
       const coordinator = await hydrateHolder(1)
-      const busChannel = new BroadcastChannel("swarm-id-bus-v1:origin")
+      const busChannel = new BroadcastChannel(accountChannelName)
       try {
         postRequest(busChannel, REQUEST_ID)
         busChannel.postMessage({
@@ -562,7 +567,7 @@ describe("SwarmIdProxy partitioned write enablement", () => {
     // which needs a memory of answered ids — the timer handle is already gone.
     it("stands down on a claim that arrives after its rank timer fired", async () => {
       const coordinator = await hydrateHolder(1)
-      const busChannel = new BroadcastChannel("swarm-id-bus-v1:origin")
+      const busChannel = new BroadcastChannel(accountChannelName)
       try {
         postRequest(busChannel, REQUEST_ID)
         await new Promise((resolve) => setTimeout(resolve, PAST_RANK_1_MS))
@@ -589,7 +594,7 @@ describe("SwarmIdProxy partitioned write enablement", () => {
     it("takes no rank while it would decline anyway", async () => {
       const coordinator = await hydrateHolder(0)
       coordinator.canYieldForPeer = false
-      const busChannel = new BroadcastChannel("swarm-id-bus-v1:origin")
+      const busChannel = new BroadcastChannel(accountChannelName)
       try {
         const published = recordPublished(busChannel)
         postRequest(busChannel, REQUEST_ID)
@@ -608,7 +613,7 @@ describe("SwarmIdProxy partitioned write enablement", () => {
       "ignores a request whose id is %s",
       async (requestId) => {
         const coordinator = await hydrateHolder(0)
-        const busChannel = new BroadcastChannel("swarm-id-bus-v1:origin")
+        const busChannel = new BroadcastChannel(accountChannelName)
         try {
           postRequest(busChannel, requestId)
           await new Promise((resolve) => setTimeout(resolve, PAST_RANK_1_MS))
@@ -621,7 +626,7 @@ describe("SwarmIdProxy partitioned write enablement", () => {
 
     it("schedules one answer however many times the request is delivered", async () => {
       const coordinator = await hydrateHolder(1)
-      const busChannel = new BroadcastChannel("swarm-id-bus-v1:origin")
+      const busChannel = new BroadcastChannel(accountChannelName)
       try {
         // The same message reaches us over every attached transport, and the
         // waiter re-broadcasts each round.
