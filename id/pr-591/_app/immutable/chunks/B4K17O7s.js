@@ -1,0 +1,1 @@
+import{d as s,b as r,g as a}from"./W8IPe6xn.js";const i=4e3;function m(){let t=r(void 0),e;return{get message(){return a(t)},show:o=>{s(t,o,!0),clearTimeout(e),e=setTimeout(()=>s(t,void 0),i)}}}const u=m();export{u as t};
