@@ -9,11 +9,12 @@
     "build": "vite build",
     "preview": "vite preview",
     "check": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json",
-    "check:all": "pnpm lint && pnpm check && pnpm knip",
+    "check:all": "pnpm lint && pnpm check && pnpm knip && pnpm test",
     "lint": "prettier --check . && eslint .",
     "format": "prettier --write . && eslint . --fix",
     "knip": "knip",
-    "clean": "rm -rf build .svelte-kit"
+    "clean": "rm -rf build .svelte-kit",
+    "test": "vitest run --passWithNoTests"
   },
   "devDependencies": {
     "@eslint/js": "9.39.1",
@@ -39,7 +40,8 @@
     "tailwindcss": "4.1.8",
     "typescript": "5.8.3",
     "typescript-eslint": "8.48.1",
-    "vite": "7.2.6"
+    "vite": "7.2.6",
+    "vitest": "4.0.14"
   },
   "engines": {
     "node": ">=22",

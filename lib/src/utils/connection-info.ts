@@ -31,6 +31,10 @@ export function connectionInfoEqual(
     a.identity?.avatar.url === b.identity?.avatar.url &&
     a.appKey?.address === b.appKey?.address &&
     a.appKey?.publicKey === b.appKey?.publicKey &&
+    // A device id that changed is exactly the signal worth reporting: for a
+    // partitioned session it means the storage holding it was evicted, and the
+    // session rejoined the roster as a new device (#584, #570).
+    a.deviceId === b.deviceId &&
     a.partition === b.partition
   )
 }

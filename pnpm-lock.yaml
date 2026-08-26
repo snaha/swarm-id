@@ -101,6 +101,9 @@ importers:
       vite:
         specifier: 7.2.6
         version: 7.2.6(@types/node@24.10.1)(jiti@2.6.1)(lightningcss@1.32.0)(terser@5.44.1)(tsx@4.23.12)
+      vitest:
+        specifier: 4.0.14
+        version: 4.0.14(@types/node@24.10.1)(@vitest/ui@4.0.16)(jiti@2.6.1)(lightningcss@1.32.0)(terser@5.44.1)(tsx@4.23.12)
 
   docs-site:
     devDependencies:
@@ -6108,7 +6111,7 @@ snapshots:
     dependencies:
       '@types/estree': 1.0.8
       estree-walker: 2.0.2
-      picomatch: 4.0.3
+      picomatch: 4.0.5
     optionalDependencies:
       rollup: 4.53.3
 
@@ -6618,7 +6621,7 @@ snapshots:
       debug: 4.4.3
       minimatch: 9.0.5
       semver: 7.7.3
-      tinyglobby: 0.2.15
+      tinyglobby: 0.2.17
       ts-api-utils: 2.1.0(typescript@5.8.3)
       typescript: 5.8.3
     transitivePeerDependencies:
@@ -6649,7 +6652,7 @@ snapshots:
       '@vitest/spy': 4.0.14
       '@vitest/utils': 4.0.14
       chai: 6.2.1
-      tinyrainbow: 3.0.3
+      tinyrainbow: 3.1.0
 
   '@vitest/mocker@4.0.14(vite@7.2.6(@types/node@24.10.1)(jiti@2.6.1)(lightningcss@1.32.0)(terser@5.44.1)(tsx@4.23.12))':
     dependencies:
@@ -6661,7 +6664,7 @@ snapshots:
 
   '@vitest/pretty-format@4.0.14':
     dependencies:
-      tinyrainbow: 3.0.3
+      tinyrainbow: 3.1.0
 
   '@vitest/pretty-format@4.0.16':
     dependencies:
@@ -6694,7 +6697,7 @@ snapshots:
   '@vitest/utils@4.0.14':
     dependencies:
       '@vitest/pretty-format': 4.0.14
-      tinyrainbow: 3.0.3
+      tinyrainbow: 3.1.0
 
   '@vitest/utils@4.0.16':
     dependencies:
@@ -9901,12 +9904,12 @@ snapshots:
       magic-string: 0.30.21
       obug: 2.1.1
       pathe: 2.0.3
-      picomatch: 4.0.3
+      picomatch: 4.0.5
       std-env: 3.10.0
       tinybench: 2.9.0
       tinyexec: 0.3.2
-      tinyglobby: 0.2.15
-      tinyrainbow: 3.0.3
+      tinyglobby: 0.2.17
+      tinyrainbow: 3.1.0
       vite: 7.2.6(@types/node@24.10.1)(jiti@2.6.1)(lightningcss@1.32.0)(terser@5.44.1)(tsx@4.23.12)
       why-is-node-running: 2.3.0
     optionalDependencies:

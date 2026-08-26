@@ -465,6 +465,7 @@ export class SwarmIdClient {
           canUpload: message.canUpload,
           storagePartitioned: message.storagePartitioned,
           uploadMode: message.uploadMode,
+          deviceId: message.deviceId,
           identity: message.identity,
           appKey: message.appKey,
           partition: message.partition,
