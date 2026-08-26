@@ -77,6 +77,22 @@ vi.mock("./sync", async (importActual) => {
   const actual = await importActual<typeof import("./sync")>()
   return { ...actual, readRoster: vi.fn(async () => rosterDevices) }
 })
+/** Lets a test count derivations (they run on every accounts storage event)
+ *  and make one fail, without faking what a topic is. */
+const busContextController = vi.hoisted(() => ({ failNext: false }))
+vi.mock("./bus/bus-context", async (importActual) => {
+  const actual = await importActual<typeof import("./bus/bus-context")>()
+  return {
+    ...actual,
+    deriveBusContext: vi.fn(async (derivationKey: string) => {
+      if (busContextController.failNext) {
+        busContextController.failNext = false
+        throw new Error("bus context derivation failed")
+      }
+      return actual.deriveBusContext(derivationKey)
+    }),
+  }
+})
 vi.mock("./sync/batch-write-coordinator", () => ({
   BatchWriteCoordinator: vi.fn(function (deps: unknown) {
     return {
@@ -112,6 +128,7 @@ import { BatchId, EthAddress, PrivateKey } from "@ethersphere/bee-js"
 import { SwarmIdProxy } from "./swarm-id-proxy"
 import type { ProxyConfig } from "./swarm-id-proxy"
 import { SignalingTransport } from "./bus/signaling-transport"
+import { busChannelName } from "./bus/account-bus"
 import { deriveBusContext } from "./bus/bus-context"
 import { BatchWriteCoordinator } from "./sync/batch-write-coordinator"
 import { UtilizationAwareStamper } from "./utils/batch-utilization"
@@ -126,6 +143,17 @@ import type { SignedInAccount, SyncedAccount } from "./schemas"
 const PARENT_ORIGIN = "https://dapp.example.com"
 const ID_ORIGIN = "https://id.example.com"
 const BATCH_ID_HEX = "cc".repeat(32)
+/** A second account: same dApp connection, different bus room. */
+const OTHER_DERIVATION_KEY = "99".repeat(32)
+/** A delta on the lane the tests bind (`partition 0` of 2), so a proxy that
+ *  receives it folds it in — i.e. it doubles as "did this channel reach it". */
+const UTILIZATION_DELTA = {
+  type: "utilization-updated",
+  batchId: BATCH_ID_HEX,
+  partition: 0,
+  partitionCount: 2,
+  buckets: [{ index: 7, value: 6 }],
+}
 
 type MessageListener = (event: MessageEvent) => Promise<void>
 
@@ -208,11 +236,15 @@ describe("SwarmIdProxy partitioned write enablement", () => {
    * has to derive the same one — posting on a fixed origin-wide name reaches
    * nobody.
    */
-  let busChannelName: string
+  let accountChannelName: string
+
+  const topicFor = async (derivationKey: string): Promise<string> =>
+    (await deriveBusContext(derivationKey)).topic
 
   beforeAll(async () => {
-    const { topic } = await deriveBusContext(makeSyncedAccount().derivationKey)
-    busChannelName = `swarm-id-bus-v1:${topic}`
+    accountChannelName = busChannelName(
+      await topicFor(makeSyncedAccount().derivationKey),
+    )
   })
 
   beforeEach(() => {
@@ -238,11 +270,18 @@ describe("SwarmIdProxy partitioned write enablement", () => {
    * failure.
    */
   const awaitBusJoin = () =>
-    vi.waitFor(() =>
-      expect(
-        (proxy as unknown as { busTopic: string | undefined }).busTopic,
-      ).toBeDefined(),
-    )
+    vi.waitFor(() => expect(busTopicNow()).toBeDefined())
+
+  const busTopicNow = () =>
+    (proxy as unknown as { busTopic: string | undefined }).busTopic
+
+  /** The join every accounts storage event runs. */
+  const rejoinBus = () =>
+    (proxy as unknown as { joinAccountBus(): void }).joinAccountBus()
+
+  /** Let a posted BroadcastChannel message be delivered (or provably not).
+   *  Waiting on the receiver would only ever prove the positive case. */
+  const flushBus = () => new Promise((resolve) => setTimeout(resolve, 20))
 
   const dispatch = (data: unknown, origin: string, source: unknown = {}) =>
     messageListener({ data, origin, source } as MessageEvent)
@@ -333,7 +372,7 @@ describe("SwarmIdProxy partitioned write enablement", () => {
       notifySlotMaybeFree: ReturnType<typeof vi.fn>
     }
     await awaitBusJoin()
-    const busChannel = new BroadcastChannel(busChannelName)
+    const busChannel = new BroadcastChannel(accountChannelName)
     const published: Record<string, unknown>[] = []
     busChannel.onmessage = (event) =>
       published.push(event.data as Record<string, unknown>)
@@ -607,7 +646,7 @@ describe("SwarmIdProxy partitioned write enablement", () => {
     coordinator.currentPartition = 2
 
     await awaitBusJoin()
-    const busChannel = new BroadcastChannel(busChannelName)
+    const busChannel = new BroadcastChannel(accountChannelName)
     const published: Record<string, unknown>[] = []
     busChannel.onmessage = (event) =>
       published.push(event.data as Record<string, unknown>)
@@ -640,7 +679,7 @@ describe("SwarmIdProxy partitioned write enablement", () => {
     const ownDeviceId = localStorageFake.getItem("swarm-id-device-id")
     expect(ownDeviceId).toBeTruthy()
     await awaitBusJoin()
-    const busChannel = new BroadcastChannel(busChannelName)
+    const busChannel = new BroadcastChannel(accountChannelName)
     try {
       // Own echo (same deviceId) and a foreign account: both ignored.
       busChannel.postMessage({
@@ -719,7 +758,7 @@ describe("SwarmIdProxy partitioned write enablement", () => {
     it("drops a delta from a peer holding a different partition", async () => {
       await hydrateOnLane(0)
       await awaitBusJoin()
-      const busChannel = new BroadcastChannel(busChannelName)
+      const busChannel = new BroadcastChannel(accountChannelName)
       try {
         // A peer device on partition 1 is far ahead in ITS lane. Folding its
         // `j` in would skip ~900 of our own partition-0 slots and publish that
@@ -754,7 +793,7 @@ describe("SwarmIdProxy partitioned write enablement", () => {
     it("drops a delta from a peer on a different partition count", async () => {
       await hydrateOnLane(0)
       await awaitBusJoin()
-      const busChannel = new BroadcastChannel(busChannelName)
+      const busChannel = new BroadcastChannel(accountChannelName)
       try {
         // Same partition index, different split: `j` maps to a different slot
         // under `partitionCount + partition + partitionCount·j`.
@@ -794,7 +833,7 @@ describe("SwarmIdProxy partitioned write enablement", () => {
       // Between leases: no lane to compare against.
       stamperStub.currentPartition = undefined
       await awaitBusJoin()
-      const busChannel = new BroadcastChannel(busChannelName)
+      const busChannel = new BroadcastChannel(accountChannelName)
       try {
         busChannel.postMessage({
           type: "utilization-updated",
@@ -847,7 +886,7 @@ describe("SwarmIdProxy partitioned write enablement", () => {
     it("labels a published delta with the lane held before the flush", async () => {
       await hydrateOnLane(1)
       await awaitBusJoin()
-      const busChannel = new BroadcastChannel(busChannelName)
+      const busChannel = new BroadcastChannel(accountChannelName)
       const seen: { partition: number; partitionCount: number }[] = []
       busChannel.onmessage = (event) => seen.push(event.data)
       try {
@@ -874,7 +913,7 @@ describe("SwarmIdProxy partitioned write enablement", () => {
       await hydrateOnLane(0)
       stamperStub.currentPartition = undefined
       await awaitBusJoin()
-      const busChannel = new BroadcastChannel(busChannelName)
+      const busChannel = new BroadcastChannel(accountChannelName)
       try {
         busChannel.postMessage({
           type: "utilization-updated",
@@ -964,9 +1003,13 @@ describe("SwarmIdProxy partitioned write enablement", () => {
   describe("account-bus signaling transport", () => {
     const SIGNALING_URL = "ws://signaling.test"
 
-    /** Seed shared storage with an account already connected to the dApp. */
-    function seedConnectedAccount(): SyncedAccount {
-      const synced = makeSyncedAccount()
+    /** Seed shared storage with an account already connected to the dApp.
+     *  A different `derivationKey` makes it a different account — a different
+     *  bus room — while staying connected to the same dApp, which is what an
+     *  account switch looks like from in here. */
+    function seedConnectedAccount(derivationKey?: string): SyncedAccount {
+      const synced = { ...makeSyncedAccount() }
+      if (derivationKey !== undefined) synced.derivationKey = derivationKey
       const stored: SignedInAccount = {
         ...synced,
         connectedApps: [
@@ -1053,7 +1096,7 @@ describe("SwarmIdProxy partitioned write enablement", () => {
       // synchronously, and the join's continuation then attaches — and
       // re-registers — a transport for a session that no longer exists: an
       // open socket sitting in the signed-out account's room.
-      ;(proxy as unknown as { joinAccountBus(): void }).joinAccountBus()
+      rejoinBus()
       await dispatch(
         { type: "disconnect", requestId: "r2" },
         PARENT_ORIGIN,
@@ -1077,7 +1120,7 @@ describe("SwarmIdProxy partitioned write enablement", () => {
       // Same in-flight window as the disconnect case, on the unload path.
       // `destroy()` closes the bus; a continuation attaching after it would
       // open a socket into the account's room with no handle left to close it.
-      ;(proxy as unknown as { joinAccountBus(): void }).joinAccountBus()
+      rejoinBus()
       proxy.destroy()
       await new Promise((resolve) => setTimeout(resolve, 20))
 
@@ -1085,13 +1128,17 @@ describe("SwarmIdProxy partitioned write enablement", () => {
     })
 
     // The constructor connects synchronously, so a malformed url (or `ws://`
-    // from an https page) throws right here. Latching the topic before that
-    // would make every later join dedup out against a transport that never
-    // existed — bus off for the session, with no retry.
-    it("does not latch the topic when the transport constructor throws", async () => {
+    // from an https page) throws right here. A failed attach must not count as
+    // a completed join, or every later one dedups out against a transport that
+    // never existed — signaling off for the session, with no retry.
+    //
+    // `function`, not an arrow: an arrow cannot be `new`'d, so the runtime
+    // threw `TypeError: … is not a constructor` and the intended `SyntaxError`
+    // body never ran. The test passed on the wrong throw.
+    it("retries the signaling transport after its constructor throws", async () => {
       seedConnectedAccount()
       await remountWithSignaling()
-      vi.mocked(SignalingTransport).mockImplementationOnce(() => {
+      vi.mocked(SignalingTransport).mockImplementationOnce(function () {
         throw new SyntaxError("The URL's scheme must be 'ws' or 'wss'")
       })
 
@@ -1105,7 +1152,7 @@ describe("SwarmIdProxy partitioned write enablement", () => {
       )
 
       // A later join retries instead of dedup'ing against the failed attempt.
-      ;(proxy as unknown as { joinAccountBus(): void }).joinAccountBus()
+      rejoinBus()
       await vi.waitFor(() =>
         expect(SignalingTransport).toHaveBeenCalledTimes(2),
       )
@@ -1131,7 +1178,7 @@ describe("SwarmIdProxy partitioned write enablement", () => {
       expect(SignalingTransport).not.toHaveBeenCalled()
 
       await awaitBusJoin()
-      const busChannel = new BroadcastChannel(busChannelName)
+      const busChannel = new BroadcastChannel(accountChannelName)
       try {
         busChannel.postMessage({
           type: "utilization-updated",
@@ -1164,7 +1211,7 @@ describe("SwarmIdProxy partitioned write enablement", () => {
 
       await awaitBusJoin()
       const legacy = new BroadcastChannel("swarm-id-bus-v1:origin")
-      const scoped = new BroadcastChannel(busChannelName)
+      const scoped = new BroadcastChannel(accountChannelName)
       try {
         const delta = {
           type: "utilization-updated",
@@ -1174,8 +1221,12 @@ describe("SwarmIdProxy partitioned write enablement", () => {
           buckets: [{ index: 7, value: 6 }],
         }
         legacy.postMessage(delta)
-        // The account-scoped copy is the barrier: if the legacy one had landed
-        // it would have arrived ahead of this.
+        // Settle the legacy delivery on its own before the scoped one is even
+        // sent: asserting on ordering across two channel names would be
+        // asserting something the spec does not promise.
+        await flushBus()
+        expect(stamperStub.applyUtilizationUpdate).not.toHaveBeenCalled()
+
         scoped.postMessage(delta)
         await vi.waitFor(() =>
           expect(stamperStub.applyUtilizationUpdate).toHaveBeenCalledTimes(1),
@@ -1184,6 +1235,160 @@ describe("SwarmIdProxy partitioned write enablement", () => {
         legacy.close()
         scoped.close()
       }
+    })
+
+    // The signaling constructor throws synchronously on a url that is SET but
+    // unusable (`ws://` from an https page, a CSP that omits the bus host, a
+    // typo). That must cost the signaling transport only: taking the local one
+    // down with it is the same "no bus at all, silently" this PR exists to
+    // prevent, and it is indistinguishable from the healthy no-url case.
+    it("keeps the local bus when the signaling constructor throws", async () => {
+      seedConnectedAccount()
+      await remountWithSignaling()
+      vi.mocked(SignalingTransport).mockImplementation(function () {
+        throw new SyntaxError("The URL's scheme must be 'ws' or 'wss'")
+      } as never)
+      stamperStub.currentPartition = 0
+      stamperStub.partitionCount = 2
+      stamperStub.applyUtilizationUpdate.mockClear()
+
+      await dispatch(
+        { type: "parentIdentify", requestId: "r1", metadata: { name: "dApp" } },
+        PARENT_ORIGIN,
+        parentWindow,
+      )
+      await vi.waitFor(() => expect(SignalingTransport).toHaveBeenCalled())
+
+      const busChannel = new BroadcastChannel(accountChannelName)
+      try {
+        busChannel.postMessage(UTILIZATION_DELTA)
+        await vi.waitFor(() =>
+          expect(stamperStub.applyUtilizationUpdate).toHaveBeenCalledTimes(1),
+        )
+      } finally {
+        busChannel.close()
+      }
+    })
+
+    // Switching accounts must LEAVE the old room, not just enter the new one:
+    // the proxy is authenticated as B, and everything it publishes — once
+    // `account-delta` rides the bus, that includes B's stamp signer keys —
+    // would otherwise go to A's contexts as well.
+    it("leaves the previous account's channel on a switch", async () => {
+      seedConnectedAccount()
+      stamperStub.currentPartition = 0
+      stamperStub.partitionCount = 2
+      stamperStub.applyUtilizationUpdate.mockClear()
+
+      await dispatch(
+        { type: "parentIdentify", requestId: "r1", metadata: { name: "dApp" } },
+        PARENT_ORIGIN,
+        parentWindow,
+      )
+      await awaitBusJoin()
+      const first = busTopicNow()
+
+      const switched = seedConnectedAccount(OTHER_DERIVATION_KEY)
+      rejoinBus()
+      await vi.waitFor(() => expect(busTopicNow()).not.toBe(first))
+
+      const previous = new BroadcastChannel(accountChannelName)
+      const current = new BroadcastChannel(
+        busChannelName(await topicFor(switched.derivationKey)),
+      )
+      try {
+        previous.postMessage(UTILIZATION_DELTA)
+        await flushBus()
+        expect(stamperStub.applyUtilizationUpdate).not.toHaveBeenCalled()
+
+        current.postMessage(UTILIZATION_DELTA)
+        await vi.waitFor(() =>
+          expect(stamperStub.applyUtilizationUpdate).toHaveBeenCalledTimes(1),
+        )
+      } finally {
+        previous.close()
+        current.close()
+      }
+    })
+
+    // A switch that fails must fail SAFE. Keeping the old transports attached
+    // leaves this session publishing B's traffic into A's room — the very leak
+    // the account-scoped topic closes, surviving in the error path.
+    it("drops the previous account's transports when a switch fails", async () => {
+      seedConnectedAccount()
+      stamperStub.currentPartition = 0
+      stamperStub.partitionCount = 2
+      stamperStub.applyUtilizationUpdate.mockClear()
+
+      await dispatch(
+        { type: "parentIdentify", requestId: "r1", metadata: { name: "dApp" } },
+        PARENT_ORIGIN,
+        parentWindow,
+      )
+      await awaitBusJoin()
+
+      seedConnectedAccount(OTHER_DERIVATION_KEY)
+      busContextController.failNext = true
+      rejoinBus()
+      await vi.waitFor(() => expect(busTopicNow()).toBeUndefined())
+
+      const previous = new BroadcastChannel(accountChannelName)
+      try {
+        previous.postMessage(UTILIZATION_DELTA)
+        await flushBus()
+        expect(stamperStub.applyUtilizationUpdate).not.toHaveBeenCalled()
+      } finally {
+        previous.close()
+      }
+    })
+
+    // `new BroadcastChannel` throws `InvalidStateError` in a detaching
+    // document. Whatever else fails, nothing may be left holding a live socket
+    // with no handle to close it — the signaling transport connects in its
+    // constructor and re-arms its own reconnect loop.
+    it("opens no signaling socket when the local transport throws", async () => {
+      seedConnectedAccount()
+      await remountWithSignaling()
+      const realBroadcastChannel = globalThis.BroadcastChannel
+      vi.stubGlobal("BroadcastChannel", function () {
+        throw new Error("InvalidStateError")
+      } as never)
+      try {
+        await dispatch(
+          {
+            type: "parentIdentify",
+            requestId: "r1",
+            metadata: { name: "dApp" },
+          },
+          PARENT_ORIGIN,
+          parentWindow,
+        )
+        await flushBus()
+        expect(SignalingTransport).not.toHaveBeenCalled()
+      } finally {
+        vi.stubGlobal("BroadcastChannel", realBroadcastChannel)
+      }
+    })
+
+    // `joinAccountBus` runs on every accounts storage event. Re-deriving there
+    // costs two HMACs and an `importKey` per event, and bumps the join
+    // generation, which cancels any join still in flight.
+    it("does not re-derive the bus context for the same account", async () => {
+      seedConnectedAccount()
+
+      await dispatch(
+        { type: "parentIdentify", requestId: "r1", metadata: { name: "dApp" } },
+        PARENT_ORIGIN,
+        parentWindow,
+      )
+      await awaitBusJoin()
+      const derivations = vi.mocked(deriveBusContext).mock.calls.length
+
+      rejoinBus()
+      rejoinBus()
+      await flushBus()
+
+      expect(vi.mocked(deriveBusContext).mock.calls.length).toBe(derivations)
     })
   })
 })

@@ -39,6 +39,13 @@ export interface PublishOptions {
 
 const CHANNEL_PREFIX = "swarm-id-bus-v1"
 
+/** The channel a topic's local transport speaks on. Exported so nothing has to
+ *  re-spell the prefix: a copy of it in a test keeps passing after a bump, on a
+ *  channel the proxy no longer listens to. */
+export function busChannelName(topic: string): string {
+  return `${CHANNEL_PREFIX}:${topic}`
+}
+
 /**
  * Same-origin, same-partition transport. Covers SwarmID tab↔tab and same-dApp
  * Safari tabs; delivery is per browsing-context, never back to the sender.
@@ -56,7 +63,7 @@ export class BroadcastChannelTransport implements BusTransport {
   private handlers = new Set<(raw: unknown) => void>()
 
   constructor(topic: string) {
-    this.channelName = `${CHANNEL_PREFIX}:${topic}`
+    this.channelName = busChannelName(topic)
     this.channel = new BroadcastChannel(this.channelName)
     this.channel.onmessage = (event: MessageEvent) => {
       for (const handler of this.handlers) {
