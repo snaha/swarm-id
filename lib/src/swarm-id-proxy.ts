@@ -2652,6 +2652,9 @@ export class SwarmIdProxy {
       canUpload: uploadMode !== "unavailable",
       storagePartitioned: this.storagePartitioned || undefined,
       uploadMode,
+      // Read, not created: reporting it must not be what mints one, or the
+      // "did this survive the reload" comparison would always say yes.
+      deviceId: this.deviceId,
       identity,
       appKey,
       partition: this.coordinator?.currentPartition,
@@ -2677,6 +2680,7 @@ export class SwarmIdProxy {
       canUpload: info.canUpload,
       storagePartitioned: info.storagePartitioned,
       uploadMode: info.uploadMode,
+      deviceId: info.deviceId,
       identity: info.identity,
       appKey: info.appKey,
       partition: info.partition,

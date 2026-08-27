@@ -616,6 +616,17 @@ export const ConnectionInfoSchema = z.object({
    * pre-first-upload) or for legacy single-device accounts.
    */
   partition: z.number().int().min(0).optional(),
+  /**
+   * This proxy's device id — the random per-context id the partition lease and
+   * the device roster identify it by, kept in the proxy's own storage.
+   *
+   * Exposed because whether it CHANGES is a real signal: a partitioned iframe
+   * (Safari ITP) keeps it in partitioned storage, so an id that differs across
+   * loads means that storage was evicted and every session is joining the
+   * roster as a new device (#584, #570). Not a secret — a random uuid the
+   * embedding page already shares a browser with.
+   */
+  deviceId: z.string().optional(),
   identity: ConnectionIdentitySchema.optional(),
   /** App-specific key derived from identity + app origin (use publicKey for ACT grantee operations) */
   appKey: z
@@ -1244,6 +1255,7 @@ export const ConnectionInfoChangedMessageSchema = z.object({
   canUpload: z.boolean(),
   storagePartitioned: z.boolean().optional(),
   uploadMode: UploadModeSchema.optional(),
+  deviceId: z.string().optional(),
   identity: ConnectionIdentitySchema.optional(),
   appKey: z
     .object({

@@ -368,6 +368,26 @@ describe("SwarmIdProxy partitioned write enablement", () => {
     expect(String(createCalls[0][1])).toBe(BATCH_ID_HEX)
   })
 
+  // A partitioned session keeps its device id in the iframe's OWN (partitioned)
+  // storage, which nothing outside the iframe can read. Whether that storage
+  // survives a reload is the open question about real Safari (#584) — and if it
+  // does not, every session is a new device in the roster (#570). Surfacing the
+  // id is what lets a page answer that by comparing across loads.
+  it("reports the proxy's device id in the connection info", async () => {
+    const challenge = await startPartitionedConnect()
+    await sendSetSecret(challenge, {
+      account: serializeSyncedAccount(makeSyncedAccount()),
+    })
+
+    const storedId = localStorageFake.getItem("swarm-id-device-id")
+    expect(storedId).toBeTruthy()
+
+    const infos = messagesOfType("connectionInfoChanged")
+    const reported = infos.map((info) => info.deviceId).filter(Boolean)
+    expect(reported).not.toHaveLength(0)
+    for (const id of reported) expect(id).toBe(storedId)
+  })
+
   it("answers a bus lease-request by yielding and announcing the release", async () => {
     const account = makeSyncedAccount()
     const challenge = await startPartitionedConnect()

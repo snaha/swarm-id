@@ -109,6 +109,10 @@ jobs:
         working-directory: ./demo
         run: pnpm knip
 
+      - name: Run demo unit tests
+        working-directory: ./demo
+        run: pnpm test
+
   # On-chain tests against the baked snapshot. Its own job so it can start a
   # chain without slowing the checks above, and because a failure here means
   # something different: the contract calls, not the code around them.
