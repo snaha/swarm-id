@@ -157,6 +157,66 @@ curl "http://localhost:1633/stamps/<batchID>"
 
 See the [Local Development guide](https://swarm.snaha.net/docs/local-development) for client-side stamp signing, known dev keys, SSH tunnel setup, and more.
 
+### Paying for storage locally
+
+Buying, extending and resizing a drive all cost money, and the money is real: the payment is a
+transfer from your wallet to the batch owner on Gnosis — in xDAI, WXDAI, USDC or BZZ — which is then
+swapped for BZZ through a real SushiSwap pool and spent against the real PostageStamp contract.
+Locally all of that runs against the baked hybrid chain at the production addresses, so it is the
+same code path as mainnet on a chain whose funds are worth nothing.
+
+Where the chain carries the EIP-7702 delegate, as Gnosis mainnet does, the postage calls run as one
+atomic transaction. The baked snapshot cannot carry it — a state dump only keeps storage the bake
+wrote — so locally they run one at a time until something splices the delegate in, which `/dev` →
+**Chain** → **Create drive to test with** does.
+
+That is the payment dialog's **built-in** method. The other one, `Pay with crypto (fund.bzz.limo)` —
+the default when buying a drive — settles on Gnosis **mainnet** only, so locally there is nothing for
+it to settle against: pick the built-in method to pay on the local chain, or turn on `/dev` →
+**Chain** → **Simulated purchase**, which stands in for the widget with a fabricated batch so that
+method's own screens stay reachable here. (It is also offered for buying alone; its contract ABI
+cannot top up or dilute, so extend and resize list the built-in method by itself.)
+
+```bash
+pnpm dev:local         # cluster, chain, identity UI, demo
+pnpm dev:local:fresh   # the same, from a clean chain and empty node state
+pnpm dev:local:stop    # tear the containers down
+```
+
+| What                    | Where                   |
+| ----------------------- | ----------------------- |
+| Identity UI             | `http://localhost:5500` |
+| Demo                    | `http://localhost:3500` |
+| Queen Bee API           | `http://localhost:1633` |
+| Gnosis-side chain (100) | `http://localhost:9545` |
+
+The containers run in the background; the UI and demo run in the foreground. Re-running `dev:local`
+is a no-op for whatever is already up.
+
+Then, once: open the UI → **Settings** → **Network settings** → **Use local** → **Save**.
+
+To pay, point the wallet at `http://localhost:9545` — chain 100, offered as _Gnosis Chain (fake)_.
+`/dev` → **Chain** → **Wallet networks** adds it to MetaMask so a balance shows before you reach the
+payment screens, and the **Faucet** beside it stocks the account you connect with — **Use connected
+wallet** fills its recipient with the address you would be paying from, which is the one that has to
+hold something. Nothing funds the payer for you: the wallet must already hold what it pays with.
+
+Chain id alone cannot tell the local chain from the real one — it answers as 100 deliberately — so
+before anything is signed the app compares **genesis hashes**, which a chain cannot borrow, against
+the endpoint's own. It refuses in words whenever the two are not the same chain: your wallet on real
+Gnosis while the app is pointed at the local one, the reverse, or a wallet simply left on some third
+network. That is what stops a rehearsal spending real xDAI.
+
+Reach for `dev:local:fresh` when the chain has drifted — every purchase trades against a real, thin
+BZZ pool, and this restores the baked snapshot (it also wipes node state, so drives you created
+earlier will point at batches that no longer exist; clear the UI's site data too).
+
+**The built-in method pays from Gnosis only.** Carrying money across chains is what the payment rail
+seam (`ui/src/lib/payment/payment-rail.ts`) exists for, and it has one rail behind it today — paying
+from elsewhere means fund.bzz.limo, which does carry it, and which is why that is the default for
+buying a drive. Funding never falls back to a free transfer: when no rail resolves, that is an error.
+See [docs/Drive-Payment-Flow.md](docs/Drive-Payment-Flow.md).
+
 ### Developer Tools (/dev route)
 
 The Identity UI includes a Developer Tools page at http://localhost:5500/dev with utilities for local development:

@@ -11,8 +11,9 @@
   import TriangleAlert from '@lucide/svelte/icons/triangle-alert'
   import { BatchIdSchema, PrivateKeySchema } from '@snaha/swarm-id'
 
-  import { createAttemptTracker } from '$lib/attempt'
+  import { type Attempt, createAttemptTracker } from '$lib/attempt'
   import DriveDialogStatus from '$lib/components/drive-dialog-status.svelte'
+  import PaymentDialog from '$lib/components/payment-dialog.svelte'
   import { Button } from '$lib/components/ui/button'
   import { Dialog } from '$lib/components/ui/dialog'
   import { Input } from '$lib/components/ui/input'
@@ -28,11 +29,18 @@
   import { verifyBatchStampable } from '$lib/payment/bee'
   import { currentChainPrice } from '$lib/payment/chain-price'
   import { fetchExistingBatchFromChain } from '$lib/payment/contract'
+  import { createCostEstimate } from '$lib/payment/cost-estimate.svelte'
+  import { runPurchase } from '$lib/payment/drive-operation'
+  import {
+    PaymentCancelledError,
+    UseWidgetError,
+    createFundingRequester,
+    describeStep,
+  } from '$lib/payment/funding-request.svelte'
   import { type StampPurchaseHandle, openStampPurchaseWidget } from '$lib/payment/multichain-widget'
   import {
     derivePostageSigner,
     stampAmountForSeconds,
-    stampCostBzz,
     stampFromBatch,
     stampTtlSeconds,
   } from '$lib/payment/purchase'
@@ -53,7 +61,7 @@
   let { account, onClose, onAdded }: Props = $props()
 
   type Storage = 'new' | 'existing'
-  type Phase = 'form' | 'pending' | 'error' | 'unconfirmed'
+  type Phase = 'form' | 'pending' | 'success' | 'error' | 'unconfirmed'
 
   let storage = $state<Storage>('new')
   let name = $state('')
@@ -66,10 +74,12 @@
   let phase = $state<Phase>('form')
   let pendingLabel = $state('')
   let errorMessage = $state('')
+  let errorDetail = $state('')
 
   let currentPrice = $state<bigint | undefined>(undefined)
   // Superseded on cancel/close so a late ceremony or widget callback can't complete.
   const attempts = createAttemptTracker()
+  const funding = createFundingRequester(() => account)
   // In-flight widget purchase; cancelled on close so the popup can't settle a
   // payment we would silently drop.
   let purchase: StampPurchaseHandle | undefined
@@ -84,7 +94,8 @@
 
   const lifespanSeconds = $derived(lifespanToSeconds(Number(lifespanValue), lifespanUnit))
 
-  const estimateBzz = $derived.by(() => {
+  /** Per-chunk PLUR the batch would be funded with at the current price. */
+  const amountPerChunk = $derived.by(() => {
     if (
       storage !== 'new' ||
       depthValue === '' ||
@@ -93,8 +104,12 @@
     ) {
       return undefined
     }
-    return stampCostBzz(Number(depthValue), stampAmountForSeconds(currentPrice, lifespanSeconds))
+    return stampAmountForSeconds(currentPrice, lifespanSeconds)
   })
+
+  const estimate = createCostEstimate(() =>
+    amountPerChunk === undefined ? undefined : { depth: Number(depthValue), amountPerChunk },
+  )
 
   // Validate through the lib's canonical schemas (bare 64-hex), tolerating a
   // `0x` prefix by stripping first.
@@ -124,7 +139,7 @@
     if (!canProceed) {
       return 'Set storage options to proceed.'
     }
-    return estimateBzz ? `Estimated cost ≈ ${estimateBzz} BZZ` : 'Final cost is shown at payment.'
+    return estimate.value ? `Estimated cost ≈ ${estimate.value}` : 'Final cost is shown at payment.'
   })
 
   // Best-effort: the price only feeds the cost estimate here (and the TTL guess
@@ -135,22 +150,49 @@
       .catch(() => undefined)
   })
 
-  function close() {
+  /**
+   * Let go of everything still in flight, leaving the dialog on screen. A
+   * settled purchase uses this to stop a late widget callback or ceremony from
+   * writing over the success screen the user is looking at.
+   */
+  function release() {
     attempts.supersede()
+    funding.cancel()
     purchase?.cancel()
     purchase = undefined
+  }
+
+  function close() {
+    release()
+    // Whichever way the success screen is dismissed — Done, Esc, the backdrop —
+    // is the point the drive counts as added: `onAdded` is the toast for some
+    // callers and the "continue" step of onboarding for others, so it must fire
+    // exactly once, here.
+    if (phase === 'success') {
+      onAdded?.('Drive added')
+    }
     onClose()
   }
 
-  // The dialog can unmount without close() (tab switch, navigation) — treat
-  // that as a cancel so the popup poll and message listener don't outlive us.
-  onDestroy(() => purchase?.cancel())
+  // The dialog can unmount without close() (tab switch, navigation) — abandon
+  // any pending payment request so nothing is left waiting on a dialog that no
+  // longer exists, and cancel a widget popup so its poll and message listener
+  // don't outlive us. A payment already with the wallet is not abandoned by
+  // this: the requester keeps that one armed, and its own outcome settles it.
+  onDestroy(() => {
+    funding.cancel()
+    purchase?.cancel()
+  })
 
   function proceed() {
     errorMessage = ''
+    // Cleared with the message it belongs to: a later failure that sets only
+    // `errorMessage` would otherwise put the previous run's stack behind "View
+    // details".
+    errorDetail = ''
     // The batch owner is a deterministic function of the account's (plaintext)
-    // derivation key, so no unlock is needed — buying spends real money in the
-    // widget, which is confirmation enough.
+    // derivation key, so no unlock is needed — buying spends real money, and
+    // the payment screens are confirmation enough.
     if (storage === 'existing') {
       void attachExisting()
     } else {
@@ -160,6 +202,61 @@
 
   async function purchaseNew() {
     const attempt = attempts.begin()
+    phase = 'pending'
+    pendingLabel = 'Checking the chain…'
+    try {
+      // `beforeSpend` is where a cancel lands: it throws `SupersededError`
+      // once this attempt is stale, so the pre-spend chain reads abort with
+      // nothing bought — including when the owner address already holds funds
+      // and no payment screen ever opened to cancel through. Everything AFTER
+      // it is deliberately unguarded: the batch is paid for, so its record must
+      // land even if the dialog closed. Only the UI epilogue is gated on
+      // `attempt.current`.
+      await runPurchase({
+        account,
+        depth: Number(depthValue),
+        lifespanSeconds,
+        // Left blank, the drive stays unnamed and the UI falls back to its
+        // stable batch-ID-derived label.
+        name: name.trim(),
+        requestFunding: funding.request,
+        beforeSpend: () => attempt.guard(Promise.resolve()),
+        onStep: (step) => (pendingLabel = describeStep(step, 'purchase')),
+      })
+      if (!attempt.current) {
+        return
+      }
+      succeed()
+    } catch (caught) {
+      if (!attempt.current) {
+        return
+      }
+      // The method screen handed the payment to fund.bzz.limo. The engine
+      // operation is abandoned with nothing spent — the funding seam is raised
+      // before any spend — so carry on with the widget on the same attempt,
+      // which a close still supersedes.
+      if (caught instanceof UseWidgetError) {
+        void purchaseWithWidget(attempt)
+        return
+      }
+      // Backing out of the payment is a choice, not a failure — return to the
+      // form with the selection intact rather than reporting an error.
+      if (caught instanceof PaymentCancelledError) {
+        phase = 'form'
+        return
+      }
+      errorDetail = caught instanceof Error ? (caught.stack ?? caught.message) : String(caught)
+      errorMessage = caught instanceof Error ? caught.message : 'Could not buy the drive.'
+      phase = 'error'
+    }
+  }
+
+  /**
+   * Buy the drive through the fund.bzz.limo popup, which settles the payment
+   * and creates the batch itself and hands back the finished thing. Nothing
+   * here goes near the rail or the on-chain engine.
+   */
+  async function purchaseWithWidget(attempt: Attempt) {
     phase = 'pending'
     // The popup-less /dev mock settles locally — telling the user to look for a
     // popup window there is wrong.
@@ -204,6 +301,7 @@
           if (!attempt.current) {
             return
           }
+          errorDetail = error.stack ?? error.message
           errorMessage = error.message
           phase = 'error'
         },
@@ -222,6 +320,7 @@
       if (!attempt.current) {
         return
       }
+      errorDetail = caught instanceof Error ? (caught.stack ?? caught.message) : String(caught)
       errorMessage = caught instanceof Error ? caught.message : 'Could not start the purchase.'
       phase = 'error'
     }
@@ -268,26 +367,29 @@
       if (!attempt.current) {
         return
       }
+      errorDetail = caught instanceof Error ? (caught.stack ?? caught.message) : String(caught)
       errorMessage = caught instanceof Error ? caught.message : 'Could not add the drive.'
       phase = 'error'
     }
   }
 
+  /**
+   * Stay on screen and say so, the way extending and resizing do. `onAdded`
+   * waits for the user to dismiss that screen — see `close`.
+   */
   function succeed() {
-    onAdded?.('Drive added')
-    close()
+    release()
+    phase = 'success'
   }
 </script>
 
-{#if phase === 'pending' || phase === 'error'}
-  <DriveDialogStatus
-    title="Add drive"
-    {phase}
-    {pendingLabel}
-    {errorMessage}
-    cancellable
-    onRetry={() => ((phase = 'form'), (errorMessage = ''))}
-    onClose={close}
+{#if funding.pending}
+  <PaymentDialog
+    need={funding.pending.need}
+    rail={funding.pending.rail}
+    onPaid={funding.resolve}
+    onCancel={funding.cancel}
+    onUseWidget={() => funding.cancel({ reason: 'use-widget' })}
   />
 {:else if phase === 'unconfirmed'}
   <Dialog onclose={close} title="Purchase not confirmed">
@@ -300,6 +402,25 @@
     </div>
     <Button variant="outline" class="w-full" onclick={close}>Close</Button>
   </Dialog>
+{:else if phase === 'pending' || phase === 'success' || phase === 'error'}
+  <!-- Cancel only while nothing has been paid for. Once a funding request is
+       armed the money is with the wallet or already swapped, and cancelling
+       would supersede the attempt at `beforeSpend` — leaving the user paid up
+       with no drive and, being `attempt.current`-gated, nothing on screen to
+       say so. The early "Checking the chain…" phase keeps its Cancel: aborting
+       there spends nothing. -->
+  <DriveDialogStatus
+    title="Add drive"
+    {phase}
+    {pendingLabel}
+    {errorMessage}
+    errorDetails={errorDetail}
+    successTitle="Purchase completed!"
+    successBody="Your drive is ready to use."
+    cancellable={!funding.armed}
+    onRetry={() => (phase = 'form')}
+    onClose={close}
+  />
 {:else}
   <Dialog onclose={close} title="Add drive">
     <div class="flex w-full flex-col gap-2">

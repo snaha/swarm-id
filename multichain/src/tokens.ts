@@ -19,19 +19,33 @@ import { withFeeTooLowRetry } from "./write-retry"
 const NATIVE_TRANSFER_GAS_MARGIN = 2n
 const ERC20_GAS = 100_000n
 
-/** BZZ token balance in PLUR (the token's base unit; 1 BZZ = 1e16 PLUR). */
-export async function getBzzBalance(
+/**
+ * Any ERC20's balance, in that token's own units. Named by address so a
+ * caller reporting several assets — the dev faucet panel — reads them all
+ * through one function instead of one per asset.
+ */
+export async function getTokenBalance(
+  token: `0x${string}`,
   address: `0x${string}`,
   settings: MultichainSettings,
   rpcProvider: RollingValueProvider<string>,
 ): Promise<bigint> {
   const client = publicClientFor(settings, rpcProvider)
   return client.readContract({
-    address: settings.addresses.bzz,
+    address: token,
     abi: ERC20_ABI,
     functionName: "balanceOf",
     args: [address],
   })
+}
+
+/** BZZ token balance in PLUR (the token's base unit; 1 BZZ = 1e16 PLUR). */
+export async function getBzzBalance(
+  address: `0x${string}`,
+  settings: MultichainSettings,
+  rpcProvider: RollingValueProvider<string>,
+): Promise<bigint> {
+  return getTokenBalance(settings.addresses.bzz, address, settings, rpcProvider)
 }
 
 export async function getBzzAllowance(
@@ -86,6 +100,46 @@ export async function transferNative(
   })
 }
 
+export interface TransferTokenOptions {
+  /** Which ERC20 — an address rather than a name, so this stays generic. */
+  token: `0x${string}`
+  /** Amount in the token's own units. */
+  amount: bigint
+  originPrivateKey: `0x${string}`
+  to: `0x${string}`
+  nonce?: number
+}
+
+/**
+ * Move any ERC20. Named by address so this serves the dev faucet, which hands
+ * out whatever a payment can be made in and cannot know the list at compile
+ * time.
+ */
+export async function transferToken(
+  options: TransferTokenOptions,
+  settings: MultichainSettings,
+  rpcProvider: RollingValueProvider<string>,
+): Promise<`0x${string}`> {
+  const account = privateKeyToAccount(options.originPrivateKey)
+  const client = walletClientFor(settings, rpcProvider)
+  return withFeeTooLowRetry(async () =>
+    client.writeContract({
+      account,
+      abi: ERC20_ABI,
+      address: options.token,
+      functionName: "transfer",
+      args: [options.to, options.amount],
+      gas: ERC20_GAS,
+      gasPrice: await getGasPrice(settings, rpcProvider),
+      type: "legacy",
+      chain: chainFromSettings(settings),
+      nonce:
+        options.nonce ??
+        (await getTransactionCount(account.address, settings, rpcProvider)),
+    }),
+  )
+}
+
 export interface TransferBzzOptions {
   /** Amount in PLUR. */
   amount: bigint
@@ -99,23 +153,10 @@ export async function transferBzz(
   settings: MultichainSettings,
   rpcProvider: RollingValueProvider<string>,
 ): Promise<`0x${string}`> {
-  const account = privateKeyToAccount(options.originPrivateKey)
-  const client = walletClientFor(settings, rpcProvider)
-  return withFeeTooLowRetry(async () =>
-    client.writeContract({
-      account,
-      abi: ERC20_ABI,
-      address: settings.addresses.bzz,
-      functionName: "transfer",
-      args: [options.to, options.amount],
-      gas: ERC20_GAS,
-      gasPrice: await getGasPrice(settings, rpcProvider),
-      type: "legacy",
-      chain: chainFromSettings(settings),
-      nonce:
-        options.nonce ??
-        (await getTransactionCount(account.address, settings, rpcProvider)),
-    }),
+  return transferToken(
+    { ...options, token: settings.addresses.bzz },
+    settings,
+    rpcProvider,
   )
 }
 

@@ -6,6 +6,9 @@ on:
   pull_request:
     paths:
       - 'lib/**'
+      - 'multichain/**'
+      - 'ui/tests/**'
+      - 'ui/playwright.cluster.config.ts'
       - 'pnpm-lock.yaml'
       - '.github/workflows/integration-tests.yml'
 
@@ -91,6 +94,13 @@ jobs:
       # and shares it across all test files, so there is no separate buy step.
       - name: Run integration tests
         run: pnpm --filter @snaha/swarm-id test:integration
+
+      # Takes no `page`, so it needs neither a browser nor the dev servers —
+      # only the cluster already up in this job.
+      - name: Run the cluster e2e
+        run: pnpm --filter @swarm-id/ui test:cluster
+        env:
+          CHAIN_RPC_URL: http://localhost:9545
 
       - name: Dump cluster logs on failure
         if: failure()

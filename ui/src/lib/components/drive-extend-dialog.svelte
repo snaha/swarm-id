@@ -4,6 +4,8 @@
 -->
 
 <script lang="ts">
+  import { onDestroy } from 'svelte'
+
   import ArrowRight from '@lucide/svelte/icons/arrow-right'
   import Minus from '@lucide/svelte/icons/minus'
   import Plus from '@lucide/svelte/icons/plus'
@@ -11,6 +13,8 @@
 
   import { createAttemptTracker } from '$lib/attempt'
   import DriveDialogStatus from '$lib/components/drive-dialog-status.svelte'
+  import DriveInfoStrip from '$lib/components/drive-info-strip.svelte'
+  import PaymentDialog from '$lib/components/payment-dialog.svelte'
   import { Button } from '$lib/components/ui/button'
   import { Dialog } from '$lib/components/ui/dialog'
   import { Input } from '$lib/components/ui/input'
@@ -22,9 +26,15 @@
     lifespanToSeconds,
     remainingLifespanSeconds,
   } from '$lib/drives'
-  import { topUpStamp } from '$lib/payment/bee'
   import { currentChainPrice } from '$lib/payment/chain-price'
-  import { extendedStamp, stampAmountForSeconds, stampCostBzz } from '$lib/payment/purchase'
+  import { createCostEstimate } from '$lib/payment/cost-estimate.svelte'
+  import { type OperationStep, reconciledChainDepth, runExtend } from '$lib/payment/drive-operation'
+  import {
+    PaymentCancelledError,
+    createFundingRequester,
+    describeStep,
+  } from '$lib/payment/funding-request.svelte'
+  import { stampAmountForSeconds } from '$lib/payment/purchase'
   import type { Account } from '$lib/types'
 
   const MS_PER_SECOND = 1000
@@ -33,19 +43,25 @@
     account: Account
     drive: PostageStamp
     onClose: () => void
-    onUpdated?: (message: string) => void
   }
 
-  let { account, drive, onClose, onUpdated }: Props = $props()
+  let { account, drive, onClose }: Props = $props()
 
-  type Phase = 'form' | 'pending' | 'error'
+  type Phase = 'form' | 'pending' | 'success' | 'error'
 
   let count = $state('0')
   let unit = $state<LifespanUnit>('months')
   let phase = $state<Phase>('form')
   let errorMessage = $state('')
+  let errorDetail = $state('')
   let currentPrice = $state<bigint | undefined>(undefined)
+  // The depth the chain has, which the top-up is really spread over. Read once
+  // on open; until it lands the record's own depth stands in.
+  let liveDepth = $state<number | undefined>(undefined)
+  let step = $state<OperationStep>('checking')
   const attempts = createAttemptTracker()
+  // Owns the funding seam: it surfaces the payment dialog and resolves once paid.
+  const funding = createFundingRequester(() => account)
 
   const addedSeconds = $derived(lifespanToSeconds(Number(count), unit))
 
@@ -57,29 +73,51 @@
     ),
   )
 
-  const estimateBzz = $derived.by(() => {
-    if (!changed || currentPrice === undefined) {
-      return undefined
-    }
-    return stampCostBzz(drive.depth, stampAmountForSeconds(currentPrice, addedSeconds))
-  })
+  /** Per-chunk PLUR the top-up would cost at the current price. */
+  const topUpPerChunk = $derived(
+    changed && currentPrice !== undefined
+      ? stampAmountForSeconds(currentPrice, addedSeconds)
+      : undefined,
+  )
 
-  // Best-effort prefetch for the live estimate; proceed() fetches for real (and
-  // therefore retries after a failure), so a miss here only hides the estimate.
+  // The top-up is spread over the drive's CURRENT depth — nothing dilutes here
+  // — and "current" is the chain's, which the engine charges against. A record
+  // lagging a resize prices the extension at half what it will cost.
+  const estimate = createCostEstimate(() =>
+    topUpPerChunk === undefined
+      ? undefined
+      : { depth: liveDepth ?? drive.depth, amountPerChunk: topUpPerChunk },
+  )
+
+  // Best-effort prefetch for the live estimate; the run fetches for real, so a
+  // miss here only hides the estimate.
   $effect(() => {
     currentChainPrice()
       .then((price) => (currentPrice = price))
       .catch(() => undefined)
   })
 
-  function step(delta: number) {
+  // Once per open, not per keystroke: the per-chunk amount re-derives locally
+  // from the price above, and only the depth has to come from the chain.
+  $effect(() => {
+    void reconciledChainDepth(account, drive).then((depth) => (liveDepth = depth))
+  })
+
+  function stepDelta(delta: number) {
     count = String(Math.max(0, (Number(count) || 0) + delta))
   }
 
   function close() {
     attempts.supersede()
+    funding.cancel()
     onClose()
   }
+
+  // The dialog can unmount without close() (tab switch, navigation) — abandon
+  // any pending payment request so nothing is left waiting on a dialog that no
+  // longer exists. A payment already with the wallet is not abandoned by this:
+  // the requester keeps that one armed, and its own outcome settles it.
+  onDestroy(() => funding.cancel())
 
   async function proceed() {
     if (!changed) {
@@ -87,45 +125,66 @@
     }
     const attempt = attempts.begin()
     phase = 'pending'
+    // Back to the first step and a clean error: the run's own `onStep` only
+    // arrives after its first await, so a retry would otherwise open on the
+    // previous run's last label, and a failure that sets just `errorMessage`
+    // would put the previous stack behind "View details".
+    step = 'checking'
     errorMessage = ''
+    errorDetail = ''
     try {
-      // Guarded: closing during the price fetch must not go on to spend.
-      const price = (currentPrice ??= await attempt.guard(currentChainPrice()))
-      const topUpAmount = stampAmountForSeconds(price, addedSeconds)
-      // The drive may have been removed meanwhile (another tab, a sync fold) —
-      // check before spending on the node against a record we'd never show.
-      if (!account.hasLiveStamp(drive.batchID)) {
-        throw new Error('This drive was removed in the meantime.')
-      }
-      // Deliberately unguarded from here: once the top-up is sent the money is
-      // spent, so the record update must land even if the dialog was closed —
-      // only the UI epilogue below is skipped for a superseded attempt.
-      await topUpStamp(drive.batchID.toHex(), topUpAmount)
-      account.updateStamp(
-        drive.batchID,
-        extendedStamp(drive, addedSeconds, topUpAmount, remainingLifespanSeconds(drive)),
-      )
+      // `beforeSpend` is where a cancel lands: it throws `SupersededError` once
+      // this attempt is stale, so the pre-spend chain reads abort with nothing
+      // spent — including when the owner address already holds funds and no
+      // payment screen ever opened to cancel through. Everything AFTER it is
+      // deliberately unguarded: once a transaction is sent the money is spent,
+      // so the record update must land even if the dialog was closed — only the
+      // UI epilogue below is skipped for a superseded attempt.
+      await runExtend({
+        account,
+        drive,
+        addedSeconds,
+        requestFunding: funding.request,
+        beforeSpend: () => attempt.guard(Promise.resolve()),
+        onStep: (next) => (step = next),
+      })
       if (!attempt.current) {
         return
       }
-      onUpdated?.('Lifespan extended')
-      close()
+      phase = 'success'
     } catch (caught) {
       if (!attempt.current) {
         return
       }
+      // Backing out of the payment is a choice, not a failure — return to the
+      // form with the selection intact rather than reporting an error.
+      if (caught instanceof PaymentCancelledError) {
+        phase = 'form'
+        return
+      }
+      errorDetail = caught instanceof Error ? (caught.stack ?? caught.message) : String(caught)
       errorMessage = caught instanceof Error ? caught.message : 'Could not extend the lifespan.'
       phase = 'error'
     }
   }
 </script>
 
-{#if phase !== 'form'}
+{#if funding.pending}
+  <PaymentDialog
+    need={funding.pending.need}
+    rail={funding.pending.rail}
+    onPaid={funding.resolve}
+    onCancel={funding.cancel}
+  />
+{:else if phase !== 'form'}
   <DriveDialogStatus
     title={drive.name || 'Drive'}
     {phase}
-    pendingLabel="Extending the lifespan…"
+    pendingLabel={describeStep(step, 'extend')}
     {errorMessage}
+    errorDetails={errorDetail}
+    successTitle="Lifespan extended!"
+    successBody="Your drive's lifespan has been extended."
     onRetry={() => (phase = 'form')}
     onClose={close}
   />
@@ -139,12 +198,12 @@
           size="icon"
           aria-label="Decrease"
           disabled={Number(count) <= 0}
-          onclick={() => step(-1)}
+          onclick={() => stepDelta(-1)}
         >
           <Minus />
         </Button>
         <Input type="number" min="0" bind:value={count} class="flex-1 text-center" />
-        <Button variant="outline" size="icon" aria-label="Increase" onclick={() => step(1)}>
+        <Button variant="outline" size="icon" aria-label="Increase" onclick={() => stepDelta(1)}>
           <Plus />
         </Button>
         <Select options={LIFESPAN_UNIT_OPTIONS} bind:value={unit} class="w-32" />
@@ -152,13 +211,13 @@
       <p class="text-muted-foreground text-sm">Estimated until {estimatedUntil}</p>
     </div>
 
-    <p class="bg-muted text-muted-foreground rounded-md px-3 py-2 text-sm">
-      {!changed
-        ? 'No changes made yet.'
-        : estimateBzz
-          ? `Estimated cost ≈ ${estimateBzz} BZZ`
-          : 'Final cost is shown at payment.'}
-    </p>
+    {#if !changed}
+      <DriveInfoStrip label="No changes made yet" />
+    {:else if estimate.value}
+      <DriveInfoStrip label="Estimated cost" value={`~${estimate.value}`} />
+    {:else}
+      <DriveInfoStrip label="Final cost is shown at payment" />
+    {/if}
 
     <Button class="w-full" disabled={!changed} onclick={proceed}>
       Proceed

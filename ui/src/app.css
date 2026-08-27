@@ -145,3 +145,10 @@
     font-family: var(--font-sans);
   }
 }
+
+/* web3-onboard renders its wallet chooser in a custom element whose default
+   z-index (10) sits BELOW our dialog overlay (z-50) — a payment dialog open
+   during connect would swallow every click on the wallet list. Lift it above. */
+:root {
+  --onboard-modal-z-index: 60;
+}

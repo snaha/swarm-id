@@ -5,11 +5,12 @@ import type { PostageStamp } from '@snaha/swarm-id'
 import { describe, expect, it } from 'vitest'
 
 import {
-  dilutedStamp,
   extendedStamp,
   parseBlockNumber,
+  resizePlan,
   stampAmountForSeconds,
   stampTtlSeconds,
+  ttlSecondsFor,
 } from './purchase'
 
 const DAY = 24 * 60 * 60
@@ -63,36 +64,109 @@ describe('extendedStamp', () => {
   })
 })
 
-describe('dilutedStamp', () => {
-  it('halves balance and lifespan per depth step when not preserving lifespan', () => {
-    const { afterDilute, topUpAmount, afterTopUp } = dilutedStamp(
-      makeStamp({ depth: 20, amount: 1000n }),
-      22,
-      false,
-      100 * DAY,
-    )
-    expect(afterDilute.depth).toBe(22)
-    expect(afterDilute.amount).toBe(250n) // 1000 / 2^2
-    expect(afterDilute.batchTTL).toBe(25 * DAY) // 100d / 4
-    expect(topUpAmount).toBe(0n)
-    expect(afterTopUp).toEqual(afterDilute) // no top-up → nothing more changes
+describe('resizePlan', () => {
+  // A price of 1 PLUR/chunk/block makes TTLs read as blocks × 5s directly.
+  const PRICE = 1n
+  const BLOCKS_PER_DAY = (24n * 60n * 60n) / 5n
+  // Live remaining balance worth 100 days at PRICE; well above the floor.
+  const REMAINING = 100n * BLOCKS_PER_DAY
+  // Contract floor ≈ 1 day of storage.
+  const MINIMUM = 1n * BLOCKS_PER_DAY
+
+  it('keep-lifespan tops up remaining × (2^Δ − 1) BEFORE the increase', () => {
+    const plan = resizePlan(20, 22, true, REMAINING, MINIMUM, PRICE)
+    expect(plan.topUpAmount).toBe(REMAINING * 3n) // 2^2 − 1
+    expect(plan.clampedToFloor).toBe(false)
+    // Intermediate state: still the old depth, lifespan ×4.
+    expect(plan.afterTopUp.depth).toBeUndefined()
+    expect(plan.afterTopUp.amount).toBe(REMAINING * 4n)
+    expect(plan.afterTopUp.batchTTL).toBe(400 * DAY)
+    // Final state: new depth, lifespan back to the current 100 days.
+    expect(plan.afterDilute.depth).toBe(22)
+    expect(plan.afterDilute.amount).toBe(REMAINING)
+    expect(plan.afterDilute.batchTTL).toBe(100 * DAY)
   })
 
-  it('preserves balance and lifespan via a compensating top-up', () => {
-    const { afterDilute, topUpAmount, afterTopUp } = dilutedStamp(
-      makeStamp({ depth: 20, amount: 1000n }),
-      21,
-      true,
-      100 * DAY,
+  it('keep-lifespan total cost matches the old dilute-first model', () => {
+    // Old model: (amount − amount/2^Δ) per chunk at the NEW depth.
+    // New model: amount × (2^Δ − 1) per chunk at the OLD depth. Same total.
+    const oldTotal = (REMAINING - REMAINING / 4n) << 22n
+    const newTotal = resizePlan(20, 22, true, REMAINING, MINIMUM, PRICE).topUpAmount << 20n
+    expect(newTotal).toBe(oldTotal)
+  })
+
+  it('without keep-lifespan the balance and lifespan divide by 2^Δ', () => {
+    const plan = resizePlan(20, 22, false, REMAINING, MINIMUM, PRICE)
+    expect(plan.topUpAmount).toBe(0n)
+    expect(plan.clampedToFloor).toBe(false)
+    expect(plan.afterDilute.amount).toBe(REMAINING / 4n)
+    expect(plan.afterDilute.batchTTL).toBe(25 * DAY)
+  })
+
+  /**
+   * The top-up confirmation the unbundled path waits out before `increaseDepth`
+   * is even sent: 90 s at 5 s a block. The contract measures the post-dilution
+   * balance when the increase MINES, and the balance falls by `lastPrice` every
+   * block in between.
+   */
+  const CONFIRMATION_BLOCKS = 18n
+
+  it('raises the top-up to the contract floor when the projection misses it', () => {
+    // 2 days remaining, ÷4 would leave half a day — under the ~1-day minimum.
+    const low = 2n * BLOCKS_PER_DAY
+    const plan = resizePlan(20, 22, false, low, MINIMUM, PRICE)
+    expect(plan.clampedToFloor).toBe(true)
+    // The pre-dilution balance clears minimum × 2^Δ, by the decay margin.
+    expect(low + plan.topUpAmount).toBeGreaterThan(MINIMUM * 4n)
+    expect(plan.afterDilute.amount).toBeGreaterThan(MINIMUM)
+  })
+
+  it('clears the floor by at least the confirmation window of decay', () => {
+    // A clamp that lands EXACTLY on the minimum is a planned revert: by the
+    // time increaseDepth mines the batch has paid for the blocks in between,
+    // and the contract sees less than the minimum.
+    const low = 2n * BLOCKS_PER_DAY
+    const plan = resizePlan(20, 22, false, low, MINIMUM, PRICE)
+    expect(plan.afterDilute.amount).toBeGreaterThanOrEqual(
+      MINIMUM + 2n * CONFIRMATION_BLOCKS * PRICE,
     )
-    // The dilute alone halves the balance and lifespan…
-    expect(afterDilute.amount).toBe(500n)
-    expect(afterDilute.batchTTL).toBe(50 * DAY)
-    // …and the compensating top-up restores both.
-    expect(topUpAmount).toBe(500n) // 1000 - 1000/2
-    expect(afterTopUp.depth).toBe(21)
-    expect(afterTopUp.amount).toBe(1000n)
-    expect(afterTopUp.batchTTL).toBe(100 * DAY)
+  })
+
+  it('still clears the floor once the balance has decayed under the plan', () => {
+    const low = 2n * BLOCKS_PER_DAY
+    const plan = resizePlan(20, 22, false, low, MINIMUM, PRICE)
+    // What the contract actually divides: the topped-up balance, less the
+    // decay of every block between planning and the increase landing.
+    const atExecution = (low + plan.topUpAmount - CONFIRMATION_BLOCKS * PRICE) / 4n
+    expect(atExecution).toBeGreaterThanOrEqual(MINIMUM)
+  })
+
+  it('clamps keep-lifespan too when even that misses the floor', () => {
+    // Remaining under the minimum itself: keeping lifespan is not enough.
+    const tiny = MINIMUM / 2n
+    const plan = resizePlan(20, 21, true, tiny, MINIMUM, PRICE)
+    expect(plan.clampedToFloor).toBe(true)
+    expect(tiny + plan.topUpAmount).toBeGreaterThan(MINIMUM * 2n)
+    expect((tiny + plan.topUpAmount - CONFIRMATION_BLOCKS * PRICE) / 2n).toBeGreaterThanOrEqual(
+      MINIMUM,
+    )
+  })
+
+  it('reports unknown TTLs on a zero price instead of guessing', () => {
+    const plan = resizePlan(20, 21, true, REMAINING, MINIMUM, 0n)
+    expect(plan.afterTopUp.batchTTL).toBeUndefined()
+    expect(plan.afterDilute.batchTTL).toBeUndefined()
+  })
+})
+
+describe('ttlSecondsFor', () => {
+  it('converts a per-chunk balance to funded seconds', () => {
+    expect(ttlSecondsFor(17_280n * 24_000n, 24_000n)).toBe(DAY)
+  })
+
+  it('is 0 when drained and undefined when unpriceable', () => {
+    expect(ttlSecondsFor(0n, 24_000n)).toBe(0)
+    expect(ttlSecondsFor(1000n, 0n)).toBeUndefined()
   })
 })
 

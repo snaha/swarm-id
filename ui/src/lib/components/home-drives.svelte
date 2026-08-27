@@ -292,21 +292,11 @@
 {/if}
 
 {#if resizeDrive}
-  <DriveResizeDialog
-    {account}
-    drive={resizeDrive}
-    onClose={() => (resizeDrive = undefined)}
-    onUpdated={toastStore.show}
-  />
+  <DriveResizeDialog {account} drive={resizeDrive} onClose={() => (resizeDrive = undefined)} />
 {/if}
 
 {#if extendDrive}
-  <DriveExtendDialog
-    {account}
-    drive={extendDrive}
-    onClose={() => (extendDrive = undefined)}
-    onUpdated={toastStore.show}
-  />
+  <DriveExtendDialog {account} drive={extendDrive} onClose={() => (extendDrive = undefined)} />
 {/if}
 
 {#if removeDrive}

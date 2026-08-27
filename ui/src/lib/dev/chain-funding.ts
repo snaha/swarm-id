@@ -17,6 +17,7 @@
  */
 import { Bee, BeeResponseError, EthAddress } from '@ethersphere/bee-js'
 import { sleep } from '@snaha/swarm-id'
+import type { MultichainClient } from '@swarm-id/multichain'
 import {
   DEV_FAUCET_ADDRESS,
   ensureBundlingDelegate,
@@ -25,7 +26,7 @@ import {
 } from '@swarm-id/multichain/dev'
 import { generatePrivateKey } from 'viem/accounts'
 
-import { chainIdentity, ownerFunds, postageChain } from '$lib/payment/chain'
+import { chainIdentity, postageChain } from '$lib/payment/chain'
 import { fetchExistingBatchFromChain } from '$lib/payment/contract'
 import { type PostageSigner, derivePostageSigner } from '$lib/payment/purchase'
 import { networkSettingsStore } from '$lib/stores/network-settings.svelte'
@@ -109,6 +110,11 @@ export interface FaucetAmounts {
   xdai: bigint
   /** Gnosis-side BZZ, in PLUR. */
   bzzPlur: bigint
+  /**
+   * Any other ERC20 the bake stocked the faucet with — the assets a drive can
+   * be paid in. Empty for a plain xDAI or BZZ send.
+   */
+  tokens: readonly { token: `0x${string}`; amount: bigint }[]
 }
 
 /**
@@ -128,12 +134,19 @@ export async function sendFromFaucet(address: string, amounts: FaucetAmounts): P
   const to = new EthAddress(address).toChecksum() as `0x${string}`
   // Nothing to send is a mistyped amount, not a send: reporting "✅ Sent 0" for
   // it reads as a transfer that happened.
-  if (amounts.xdai <= 0n && amounts.bzzPlur <= 0n) {
+  if (
+    amounts.xdai <= 0n &&
+    amounts.bzzPlur <= 0n &&
+    amounts.tokens.every((entry) => entry.amount <= 0n)
+  ) {
     throw new Error('Enter an amount above zero.')
   }
   await assertDevChain('The faucet', rpcUrl)
   const chain = await postageChain(rpcUrl)
-  await fundLocalAccount({ to, xdai: amounts.xdai, bzzPlur: amounts.bzzPlur }, chain.settings)
+  await fundLocalAccount(
+    { to, xdai: amounts.xdai, bzzPlur: amounts.bzzPlur, tokens: amounts.tokens },
+    chain.settings,
+  )
 }
 
 /** An address and what it holds on the Gnosis-side chain, for the faucet panel. */
@@ -141,6 +154,29 @@ export interface FundsRow {
   address: `0x${string}`
   xdai: bigint
   bzz: bigint
+  wxdai: bigint
+  usdc: bigint
+}
+
+/**
+ * One address, in every asset the faucet dispenses.
+ *
+ * Wider than the payment engine's `ownerFunds`, which asks whether a batch
+ * owner can pay and is right to stop at xDAI and BZZ. This one is a report of
+ * what can be handed over, so it has to cover the whole payable set.
+ *
+ * The token addresses come from the client's own settings rather than the
+ * mainnet preset, so the figures belong to the chain the client talks to.
+ */
+async function fundsAt(address: `0x${string}`, chain: MultichainClient): Promise<FundsRow> {
+  const { wxdai, usdc } = chain.settings.addresses
+  const [xdaiHeld, bzzHeld, wxdaiHeld, usdcHeld] = await Promise.all([
+    chain.getNativeBalance(address),
+    chain.getBzzBalance(address),
+    chain.getTokenBalance(wxdai, address),
+    chain.getTokenBalance(usdc, address),
+  ])
+  return { address, xdai: xdaiHeld, bzz: bzzHeld, wxdai: wxdaiHeld, usdc: usdcHeld }
 }
 
 /**
@@ -156,14 +192,26 @@ export async function devChainFunds(
 ): Promise<{ faucet: FundsRow; recipient: FundsRow }> {
   const chain = await postageChain(rpcUrl)
   const recipient = new EthAddress(address).toChecksum() as `0x${string}`
-  const [faucetFunds, recipientFunds] = await Promise.all([
-    ownerFunds(DEV_FAUCET_ADDRESS, chain),
-    ownerFunds(recipient, chain),
+  const [faucet, recipientFunds] = await Promise.all([
+    fundsAt(DEV_FAUCET_ADDRESS, chain),
+    fundsAt(recipient, chain),
   ])
-  return {
-    faucet: { address: DEV_FAUCET_ADDRESS, ...faucetFunds },
-    recipient: { address: recipient, ...recipientFunds },
-  }
+  return { faucet, recipient: recipientFunds }
+}
+
+/**
+ * The same read for a single address — the panel's connected wallet, which is
+ * neither the faucet nor the recipient.
+ *
+ * @param rpcUrl — the chain the figures are FROM, on the same terms as
+ *   `devChainFunds`.
+ */
+export async function devAddressFunds(
+  address: string,
+  rpcUrl: string = networkSettingsStore.gnosisRpcUrl,
+): Promise<FundsRow> {
+  const chain = await postageChain(rpcUrl)
+  return fundsAt(new EthAddress(address).toChecksum() as `0x${string}`, chain)
 }
 
 /** A batch created on a local chain, in the terms a purchase reports. */

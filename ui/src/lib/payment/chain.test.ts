@@ -70,12 +70,20 @@ describe('probeChainId', () => {
 describe('chainIdentity', () => {
   it('calls the real genesis mainnet', async () => {
     stubRpc(mainnetAnswers)
-    await expect(chainIdentity(freshUrl())).resolves.toEqual({ chainId: 100, kind: 'mainnet' })
+    await expect(chainIdentity(freshUrl())).resolves.toEqual({
+      chainId: 100,
+      genesisHash: GNOSIS_GENESIS,
+      kind: 'mainnet',
+    })
   })
 
   it('calls a chain wearing id 100 with another genesis a dev chain', async () => {
     stubRpc(devChainAnswers)
-    await expect(chainIdentity(freshUrl())).resolves.toEqual({ chainId: 100, kind: 'dev' })
+    await expect(chainIdentity(freshUrl())).resolves.toEqual({
+      chainId: 100,
+      genesisHash: DEV_GENESIS,
+      kind: 'dev',
+    })
   })
 
   // The same invariant from the other side: a reachable chain that is not
@@ -87,7 +95,11 @@ describe('chainIdentity', () => {
     ['a genesis that matches Gnosis', { hash: GNOSIS_GENESIS }],
   ])('calls a chain that is not Gnosis unsupported, whatever %s says', async (_label, block) => {
     stubRpc({ eth_chainId: { result: '0x1' }, eth_getBlockByNumber: { result: block } })
-    await expect(chainIdentity(freshUrl())).resolves.toEqual({ chainId: 1, kind: 'unsupported' })
+    await expect(chainIdentity(freshUrl())).resolves.toEqual({
+      chainId: 1,
+      genesisHash: block.hash,
+      kind: 'unsupported',
+    })
   })
 
   // The invariant the whole module exists for: "we could not prove it" must
@@ -120,13 +132,25 @@ describe('chainIdentity', () => {
   it('re-probes a successful answer once it is evicted', async () => {
     const url = freshUrl()
     stubRpc(devChainAnswers)
-    await expect(chainIdentity(url)).resolves.toEqual({ chainId: 100, kind: 'dev' })
+    await expect(chainIdentity(url)).resolves.toEqual({
+      chainId: 100,
+      genesisHash: DEV_GENESIS,
+      kind: 'dev',
+    })
 
     stubRpc(mainnetAnswers)
-    await expect(chainIdentity(url)).resolves.toEqual({ chainId: 100, kind: 'dev' })
+    await expect(chainIdentity(url)).resolves.toEqual({
+      chainId: 100,
+      genesisHash: DEV_GENESIS,
+      kind: 'dev',
+    })
 
     evictChainCaches(url)
-    await expect(chainIdentity(url)).resolves.toEqual({ chainId: 100, kind: 'mainnet' })
+    await expect(chainIdentity(url)).resolves.toEqual({
+      chainId: 100,
+      genesisHash: GNOSIS_GENESIS,
+      kind: 'mainnet',
+    })
   })
 
   it('does not cache a failure — the node may just have been starting up', async () => {
@@ -135,7 +159,11 @@ describe('chainIdentity', () => {
     await expect(chainIdentity(url)).rejects.toThrow()
 
     stubRpc(mainnetAnswers)
-    await expect(chainIdentity(url)).resolves.toEqual({ chainId: 100, kind: 'mainnet' })
+    await expect(chainIdentity(url)).resolves.toEqual({
+      chainId: 100,
+      genesisHash: GNOSIS_GENESIS,
+      kind: 'mainnet',
+    })
   })
 })
 

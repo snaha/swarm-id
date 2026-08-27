@@ -16,6 +16,7 @@ import {
 import {
   getBzzAllowance,
   getBzzBalance,
+  getTokenBalance,
   approveBzz,
   transferBzz,
   transferNative,
@@ -47,9 +48,13 @@ import {
   type PostageWriteConstraints,
 } from "./postage-read"
 import {
+  type SwappableInput,
+  bestExactOutput,
   quoteBzzOutForXdaiIn,
   quoteXdaiInForBzzOut,
+  swapTokenToBzz,
   swapXdaiToBzz,
+  type SwapTokenToBzzOptions,
   type SwapXdaiToBzzOptions,
 } from "./sushi"
 import type { MultichainSettings } from "./settings"
@@ -76,6 +81,7 @@ export type {
   ResizeBundleOptions,
 } from "./postage-bundle"
 export { buildExactInputSwapData } from "./sushi"
+export type { SwapInput } from "./sushi"
 
 /**
  * One client per chain configuration. Construct with `gnosisMainnetSettings()`
@@ -129,6 +135,14 @@ export class MultichainClient {
 
   getBzzBalance(address: `0x${string}`): Promise<bigint> {
     return getBzzBalance(address, this.settings, this.rpcProvider)
+  }
+
+  /** Balance of the ERC20 at `token`, in that token's own units. */
+  getTokenBalance(
+    token: `0x${string}`,
+    address: `0x${string}`,
+  ): Promise<bigint> {
+    return getTokenBalance(token, address, this.settings, this.rpcProvider)
   }
 
   getBzzAllowance(
@@ -188,8 +202,25 @@ export class MultichainClient {
     return quoteXdaiInForBzzOut(bzzOut, this.settings, this.rpcProvider)
   }
 
+  /**
+   * What `bzzOut` PLUR of BZZ costs in `input`'s own units — the exact-output
+   * quote a payment in that token is sized from.
+   */
+  async quoteTokenInForBzzOut(
+    bzzOut: bigint,
+    input: SwappableInput,
+  ): Promise<bigint> {
+    return (
+      await bestExactOutput(bzzOut, this.settings, this.rpcProvider, input)
+    ).amount
+  }
+
   quoteBzzOutForXdaiIn(xdaiIn: bigint): Promise<bigint> {
     return quoteBzzOutForXdaiIn(xdaiIn, this.settings, this.rpcProvider)
+  }
+
+  swapTokenToBzz(options: SwapTokenToBzzOptions): Promise<`0x${string}`> {
+    return swapTokenToBzz(options, this.settings, this.rpcProvider)
   }
 
   swapXdaiToBzz(options: SwapXdaiToBzzOptions): Promise<`0x${string}`> {
