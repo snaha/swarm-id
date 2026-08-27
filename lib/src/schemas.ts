@@ -102,6 +102,9 @@ const StoredPrivateKey = z
  * Device Schema V1
  * Tracks devices that have accessed an account for multi-device support.
  */
+// Adding a field here? `DEVICE_COMPARED_FIELDS` (`utils/device-id.ts`) is typed
+// over `keyof Device` and will refuse to compile until the new field is
+// classified as one the registry-persist guard compares.
 export const DeviceSchemaV1 = z.object({
   deviceId: z.string(),
   createdAt: z.number(),

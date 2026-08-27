@@ -156,10 +156,34 @@ export function deviceRegistryChanged(
   return merged.some((device) => {
     const previous = before.get(device.deviceId)
     if (!previous) return true
-    if (previous.removedAt !== device.removedAt) return true
-    if (previous.name !== device.name) return true
-    if (previous.createdAt !== device.createdAt) return true
-    if (device.deviceId === selfDeviceId) return false
-    return previous.lastSignedInAt !== device.lastSignedInAt
+    const isSelf = device.deviceId === selfDeviceId
+    return DEVICE_COMPARED_FIELDS.some(([field, scope]) =>
+      isSelf && scope === "peers-only"
+        ? false
+        : previous[field] !== device[field],
+    )
   })
 }
+
+/**
+ * Every field of `DeviceSchemaV1`, classified for the comparison above.
+ *
+ * Typed as a full `Record<keyof Device, …>` on purpose: a field added to the
+ * schema fails to compile here until it is classified, because the alternative
+ * failure is silent — an unlisted field simply never triggers a persist, and
+ * what is lost is a registry write nobody is watching for.
+ *
+ * `deviceId` is in the list though it is the map key: keeping the record total
+ * is what makes the compiler the check.
+ */
+const DEVICE_COMPARED_FIELDS = Object.entries({
+  deviceId: "all",
+  createdAt: "all",
+  name: "all",
+  removedAt: "all",
+  // Ours is stamped by `mergeDevices` on every call — see the note above.
+  lastSignedInAt: "peers-only",
+} satisfies Record<keyof Device, "all" | "peers-only">) as [
+  keyof Device,
+  "all" | "peers-only",
+][]
