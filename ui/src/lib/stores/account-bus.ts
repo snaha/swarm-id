@@ -19,7 +19,7 @@ import {
   AccountBus,
   SignalingTransport,
   accountDeltaSnapshot,
-  accountStateSnapshot,
+  accountToStateSnapshot,
   deriveBusContext,
 } from '@snaha/swarm-id'
 import type { SyncedAccount } from '@snaha/swarm-id'
@@ -76,8 +76,10 @@ async function attach(account: SyncedAccount, forGeneration: number): Promise<vo
 function publishNow(account: SyncedAccount): void {
   // A superseded or failed join leaves no bus, and `leave()` clears the key.
   if (!bus || account.derivationKey !== joinedKey) return
-  const snapshot = accountStateSnapshot(account)
-  if (!snapshot) return
+  // No default-stamp gate: that is the FEED write's precondition (it is paid
+  // for by the stamp), not a bus message's. An account with no drives still has
+  // apps to revoke and partitioned sessions that hear about it only here.
+  const snapshot = accountToStateSnapshot(account, account.id.toHex(), Date.now())
   bus.publish({ type: 'account-delta', snapshot: accountDeltaSnapshot(snapshot) })
 }
 

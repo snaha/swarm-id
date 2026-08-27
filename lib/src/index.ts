@@ -153,7 +153,7 @@ export type { NetworkSettingsStorageManager } from "./utils/storage-managers"
 
 // Account state snapshot (shared by file export and Swarm sync)
 export {
-  accountStateSnapshot,
+  accountToStateSnapshot,
   serializeAccountStateSnapshot,
   deserializeAccountStateSnapshot,
   AccountStateSnapshotSchemaV1,
@@ -164,11 +164,12 @@ export type {
   AccountStateSnapshotResult,
 } from "./utils/account-state-snapshot"
 
-// Account bus (docs/Account-Bus.md). The proxy constructs its own; this is for
-// the SwarmID UI, which is where a revoke happens and which lives in a
-// different storage partition from the dApp iframe it has to reach — so it
-// needs the signaling transport, not the BroadcastChannel one. `"."` is the
-// only subpath `lib/package.json` exposes, so there is no other way in.
+// Account bus (docs/Account-Bus.md). The proxy constructs its own; these
+// exports are for the SwarmID UI to publish and consume account-deltas
+// (#608) — the UI is where a revoke happens, and it lives in a different
+// storage partition from the dApp iframe it has to reach, so it needs the
+// signaling transport, not the BroadcastChannel one. `"."` is the only
+// subpath `lib/package.json` exposes, so there is no other way in.
 export {
   AccountBus,
   BroadcastChannelTransport,

@@ -42,32 +42,23 @@ export function accountDeltaSnapshot(
     connectedApps: (wire.connectedApps as Record<string, unknown>[]).map(
       portableConnectedApp,
     ),
-    // Serialization is hand-written per field, so the compiler cannot see that
-    // it produces the schema's shape. `publishes a wire form the receive schema
-    // accepts` is what actually holds the two together — a drift would
-    // otherwise be invisible, since a receiver drops an unparseable message in
-    // silence.
+    // Hand-written serialization, so the compiler cannot verify this matches
+    // the schema's shape — a mismatched delta is dropped silently on receive.
   } as unknown as AccountDeltaInput["snapshot"]
 }
 
 /**
  * Put this context's own session fields back after a merge.
  *
- * `mergeConnectedApps` is last-writer-wins on the whole entry, so an incoming
- * entry that is merely NEWER — a rename, an icon change, a reconnect on another
- * device — replaces ours, and with the fields above stripped on the wire that
- * would silently log this session out of an app nobody revoked.
- *
- * A revoked entry is the exception, and the reason this is not simply "keep
- * local": clearing the secret and the deadline is precisely what a revoke is,
- * so a tombstoned winner keeps its cleared fields and the session ends.
- *
- * Ours WINS over anything incoming, rather than filling a gap. Under the wire
- * contract there is nothing to lose — the incoming entry has neither field —
- * but a session's own credential and deadline are not a peer's to set, so
- * preferring the incoming value would put a forgetful publisher (or anything
- * that reached the room) one message away from replacing them. The receive
- * schema already drops both; this is the same rule stated where it is used.
+ * `mergeConnectedApps` is last-writer-wins on the whole entry, so a merely
+ * newer incoming entry (a rename, an icon change, a reconnect elsewhere)
+ * would otherwise carry the wire's stripped `appSecret`/`connectedUntil` and
+ * silently log this session out of an app nobody revoked. Local session
+ * fields win — unless the incoming entry marks the session as ended: a
+ * `revokedAt` tombstone ("Remove"), or a `disconnectedAt` newer than our own
+ * `lastConnectedAt` (a plain "Disconnect", which is not a tombstone but is
+ * newer than the session we hold). Either way the incoming entry's cleared
+ * fields stand and the session ends.
  */
 export function restoreLocalSessionFields(
   merged: ConnectedApp[],
@@ -78,6 +69,12 @@ export function restoreLocalSessionFields(
     if (app.revokedAt) return app
     const ours = mine.get(app.appUrl)
     if (!ours) return app
+    if (
+      app.disconnectedAt !== undefined &&
+      app.disconnectedAt > ours.lastConnectedAt
+    ) {
+      return app
+    }
     return {
       ...app,
       appSecret: ours.appSecret ?? app.appSecret,

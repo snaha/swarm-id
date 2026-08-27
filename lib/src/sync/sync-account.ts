@@ -34,7 +34,7 @@ import type {
   PostageStampsStoreInterface,
 } from "./store-interfaces"
 import type { SyncResult } from "./types"
-import { accountStateSnapshot } from "../utils/account-state-snapshot"
+import { accountToStateSnapshot } from "../utils/account-state-snapshot"
 import type { AccountStateSnapshot } from "../utils/account-state-snapshot"
 import { withTimeout } from "../utils/promise"
 import type { PostageStamp } from "../schemas"
@@ -267,8 +267,7 @@ export function createSyncAccount(
 
     // Account state is read straight off the nested account document, by the
     // one builder every publisher shares (the per-field clock rules live there).
-    const snapshot = accountStateSnapshot(account)
-    if (!snapshot) return undefined
+    const snapshot = accountToStateSnapshot(account, accountId, Date.now())
 
     return {
       snapshot,

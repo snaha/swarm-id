@@ -45,43 +45,49 @@ export type AccountStateSnapshotResult =
   | { success: false; error: z.ZodError }
 
 // ============================================================================
-// Serialize
+// Build
 // ============================================================================
 
 /**
- * Read an account record into the snapshot every channel publishes: the Swarm
- * device-state feed, and the account bus.
+ * The account record as an account-state snapshot — the ONE assembly every
+ * publisher shares (the sync coordinator's feed write, the proxy's feed write,
+ * the proxy's `account-delta`, and the fold that consumes one).
  *
- * One copy, because the per-field clocks below are easy to get subtly wrong and
- * impossible to notice: an UNEDITED scalar must keep its stable `*At`, never a
- * fresh `lastModified`, or a device editing a different field restamps it and
- * clobbers a peer's genuine concurrent edit under per-field LWW
- * (Account-State.md §9.3). A second copy that forgets that is a data-loss bug
- * with no symptom on the device that causes it.
+ * `timestamp` is the caller's clock for this snapshot, used for both the
+ * envelope and `metadata.lastModified`: a publisher passes `Date.now()`, a
+ * caller re-reading a record it did not just change passes that record's own
+ * `lastModified` rather than restamping it.
  *
- * `undefined` when the account has no default drive — there is nothing to
- * publish for an account that cannot pay for a write.
+ * Every never-edited scalar clock falls back to the account's STABLE
+ * `createdAt`, NEVER a fresh `Date.now()`: re-stamping an unchanged name /
+ * default-stamp / settings on every publish would let a device that never
+ * touched the field clobber a peer's genuine concurrent edit under per-field
+ * LWW (§9.3). `createdAt` is identical across devices and predates every edit,
+ * so any real change still wins.
+ *
+ * `defaultPostageStampBatchID` may be absent: an account with no drives is a
+ * supported state, and only the feed write (which needs a stamp to pay for
+ * itself) may treat that as a reason not to publish.
  */
-export function accountStateSnapshot(
+export function accountToStateSnapshot(
   account: SyncedAccount,
-): AccountStateSnapshot | undefined {
-  const defaultStampBatchID = account.defaultPostageStampBatchID
-  if (!defaultStampBatchID) return undefined
-
+  accountId: string,
+  timestamp: number,
+): AccountStateSnapshot {
   return {
-    version: 1,
-    timestamp: Date.now(),
-    accountId: account.id.toHex(),
+    version: ACCOUNT_STATE_SNAPSHOT_VERSION,
+    timestamp,
+    accountId,
     metadata: {
       accountName: account.name,
-      defaultPostageStampBatchID: defaultStampBatchID.toHex(),
+      defaultPostageStampBatchID: account.defaultPostageStampBatchID?.toHex(),
       publicKey: account.publicKey,
       settings: account.settings,
       accountNameAt: account.accountNameAt ?? account.createdAt,
       defaultStampAt: account.defaultStampAt ?? account.createdAt,
       settingsAt: account.settingsAt ?? account.createdAt,
       createdAt: account.createdAt,
-      lastModified: Date.now(),
+      lastModified: timestamp,
       devices: account.devices,
       partitionCount: account.partitionCount ?? 1,
     },
@@ -89,6 +95,10 @@ export function accountStateSnapshot(
     postageStamps: account.postageStamps,
   }
 }
+
+// ============================================================================
+// Serialize
+// ============================================================================
 
 /**
  * Serialize account data into a plain object suitable for JSON encoding.

@@ -21,16 +21,9 @@ import {
 
 /**
  * A connected app as it travels the bus: without the per-context session
- * material. Zod drops unknown keys, so this ENFORCES the rule rather than
- * trusting it — a publisher that forgets to strip has its `appSecret` and
+ * material. Zod drops unknown keys, so this `.omit` enforces the strip on
+ * receive — a publisher that forgets it still has `appSecret` and
  * `connectedUntil` removed here, before any receiver sees them.
- *
- * Worth enforcing on receive because the cost of one forgetful publisher is
- * high on both counts: every partitioned iframe on the account would learn
- * every dApp's secret (the leak the strip exists to prevent), and an entry for
- * the receiving app carrying a live `connectedUntil` with a different secret
- * would drive the reconcile into `authenticateFromStorage`, which drops the
- * hydrated view a partitioned session cannot rebuild without a reload.
  */
 const BusConnectedAppSchema = ConnectedAppSchemaV1.omit({
   appSecret: true,
