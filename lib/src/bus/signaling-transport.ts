@@ -53,11 +53,15 @@ const RECONNECT_MAX_DELAY_MS = 30000
 const DATA_CHANNEL_LABEL = "bus"
 /**
  * The server's close code for a topic it refuses, and the only close it sends
- * that is permanent — everything transient comes back as 1013. Mirrors the
- * constant exported from `signaling/src/server.ts` rather than importing it:
- * that module pulls in `ws` and `node:http`, and `@swarm-id/signaling` is a
- * devDependency here, so an import would drag a Node-only server into the
- * browser bundle for the sake of one number.
+ * that is permanent — everything transient comes back as 1013, and a socket
+ * turned away for never naming a room gets 4408 (`WS_CLOSE_JOIN_TIMEOUT`),
+ * deliberately NOT this code: the fallback below reads 1008 as "a server older
+ * than the join frame", and answering a join timeout that way would put the
+ * topic back in the URL for the life of the page. Mirrors the constant exported
+ * from `signaling/src/server.ts` rather than importing it: that module pulls in
+ * `ws` and `node:http`, and `@swarm-id/signaling` is a devDependency here, so an
+ * import would drag a Node-only server into the browser bundle for the sake of
+ * one number.
  */
 const WS_CLOSE_POLICY_VIOLATION = 1008
 
@@ -80,6 +84,15 @@ export interface SignalingTransportOptions {
 interface PeerState {
   connection?: RTCPeerConnection
   dataChannel?: RTCDataChannel
+  /** True once this connection's remote description is set. `addIceCandidate`
+   *  rejects before that, so candidates arriving first have to wait. */
+  remoteDescriptionSet?: boolean
+  /** Candidates that arrived before the remote description, replayed once it
+   *  lands. Signals are handled concurrently (`void this.handleSignal(...)`),
+   *  so an `ice` message routinely reaches us mid-negotiation — without this
+   *  the candidate was logged and dropped, and the pair silently fell back to
+   *  the server relay it was trying to stop using. */
+  pendingCandidates?: RTCIceCandidateInit[]
 }
 
 export class SignalingTransport implements BusTransport {
@@ -89,6 +102,10 @@ export class SignalingTransport implements BusTransport {
   private peers = new Map<string, PeerState>()
   private handlers = new Set<(raw: unknown) => void>()
   private closed = false
+  /** Set after a server refuses the join frame — one that predates it reads the
+   *  topic from the URL only. Sticky for the transport's life: having learned
+   *  which server it is talking to, there is nothing to re-probe. */
+  private legacyTopicInUrl = false
   private reconnectDelayMs = RECONNECT_BASE_DELAY_MS
   private reconnectTimer: ReturnType<typeof setTimeout> | undefined
   /** In-flight `deliver` calls, awaited by `close()` so a teardown
@@ -154,10 +171,22 @@ export class SignalingTransport implements BusTransport {
   // ==========================================================================
 
   private connect(): void {
+    // The topic travels in the first frame, not the query string: query strings
+    // are recorded by every ingress and proxy access log as a matter of course,
+    // and the topic IS the room capability — anything reading those logs can
+    // join (#577). Payload confidentiality is unaffected either way (topic and
+    // envelope key come from separate HMAC contexts); what a topic buys is
+    // membership: presence, traffic patterns, ciphertext to keep, and a
+    // position to inject from.
     const url = new URL(this.options.url)
-    url.searchParams.set("topic", this.options.topic)
+    if (this.legacyTopicInUrl) url.searchParams.set("topic", this.options.topic)
     const socket = new WebSocket(url.toString())
     this.socket = socket
+
+    socket.addEventListener("open", () => {
+      if (this.legacyTopicInUrl) return
+      this.sendToServer({ type: "join", topic: this.options.topic })
+    })
 
     socket.addEventListener("message", (event) => {
       // Backoff resets here, not on `open`. The server accepts the socket and
@@ -172,6 +201,19 @@ export class SignalingTransport implements BusTransport {
       // for a topic it will reject identically next time); retrying is a hot
       // loop against an answer that will not change.
       if (event.code === WS_CLOSE_POLICY_VIOLATION) {
+        // Unless it is a server from before the join frame existed, which
+        // refuses a socket that named no topic in the URL. Retry once the old
+        // way rather than leave this context bus-less for the life of the page
+        // — the deploy window is exactly when a reload happens.
+        // `closed` is checked here for the same reason `scheduleReconnect`
+        // checks it: a `close()` racing a server-initiated 1008 would otherwise
+        // reopen a socket nothing holds a handle to, join the room, and leave a
+        // ghost peer there until the page unloads.
+        if (!this.legacyTopicInUrl && !this.closed) {
+          this.legacyTopicInUrl = true
+          this.connect()
+          return
+        }
         console.error(
           "[SignalingTransport] Signaling server rejected the topic; not reconnecting.",
         )
@@ -318,7 +360,7 @@ export class SignalingTransport implements BusTransport {
       const connection = create()
       const peer = this.peers.get(peerId)
       if (!peer) return
-      peer.connection = connection
+      this.adoptConnection(peer, connection)
       this.adoptDataChannel(
         connection.createDataChannel(DATA_CHANNEL_LABEL),
         peer,
@@ -344,7 +386,7 @@ export class SignalingTransport implements BusTransport {
     try {
       if (signal.kind === "offer") {
         const connection = create()
-        peer.connection = connection
+        this.adoptConnection(peer, connection)
         connection.ondatachannel = (event) => {
           this.adoptDataChannel(event.channel, peer)
         }
@@ -353,6 +395,7 @@ export class SignalingTransport implements BusTransport {
           type: "offer",
           sdp: signal.sdp,
         })
+        await this.flushPendingCandidates(peer)
         const answer = await connection.createAnswer()
         await connection.setLocalDescription(answer)
         this.sendSignal(from, { kind: "answer", sdp: answer.sdp ?? "" })
@@ -363,6 +406,14 @@ export class SignalingTransport implements BusTransport {
           type: "answer",
           sdp: signal.sdp,
         })
+        await this.flushPendingCandidates(peer)
+        return
+      }
+      // Queue rather than apply while the sibling offer/answer handler is
+      // still awaiting its `setRemoteDescription`. The check and the push are
+      // one synchronous step, so they cannot interleave with the flush.
+      if (!peer.remoteDescriptionSet) {
+        peer.pendingCandidates?.push(signal.candidate as RTCIceCandidateInit)
         return
       }
       await peer.connection?.addIceCandidate(
@@ -370,6 +421,38 @@ export class SignalingTransport implements BusTransport {
       )
     } catch (error) {
       console.error("[SignalingTransport] WebRTC signal failed:", error)
+    }
+  }
+
+  /**
+   * Install a freshly created connection on a peer, closing whatever was there.
+   * A duplicate or renegotiated offer used to overwrite the field and leak the
+   * previous `RTCPeerConnection`, which keeps its ICE agent and sockets alive.
+   * The candidate queue resets with it: the new connection has no remote
+   * description, and candidates gathered for the old one are meaningless.
+   */
+  private adoptConnection(
+    peer: PeerState,
+    connection: RTCPeerConnection,
+  ): void {
+    peer.connection?.close()
+    peer.connection = connection
+    peer.remoteDescriptionSet = false
+    peer.pendingCandidates = []
+  }
+
+  /** Replay the candidates that arrived before the remote description. One bad
+   *  candidate must not strand the rest, so each is applied on its own. */
+  private async flushPendingCandidates(peer: PeerState): Promise<void> {
+    peer.remoteDescriptionSet = true
+    const pending = peer.pendingCandidates ?? []
+    peer.pendingCandidates = []
+    for (const candidate of pending) {
+      try {
+        await peer.connection?.addIceCandidate(candidate)
+      } catch (error) {
+        console.warn("[SignalingTransport] ICE candidate rejected:", error)
+      }
     }
   }
 

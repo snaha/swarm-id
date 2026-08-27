@@ -4,9 +4,11 @@
 /**
  * Account-bus signaling and relay server (docs/Account-Bus.md, phase 2).
  *
- * Peers connect over WebSocket to `/?topic=<hex>` and form a room per topic
- * (topics are account-derived and unguessable). The server does two things and
- * nothing else:
+ * Peers connect over WebSocket and name their room in a `join` frame, forming
+ * one room per topic (topics are account-derived and unguessable). The topic
+ * used to travel as `/?topic=<hex>`, which put the room capability into every
+ * ingress and proxy access log; `/?topic=` is still accepted for clients cached
+ * from before that change (#577). The server does two things and nothing else:
  *
  * - `signal`: forward WebRTC SDP/ICE blobs to one named peer, so browsers can
  *   upgrade to direct DataChannels — the preferred data path.
@@ -44,6 +46,16 @@ const HTTP_SERVICE_UNAVAILABLE = 503
 export const WS_CLOSE_POLICY_VIOLATION = 1008
 /** Transient — the client backs off and comes back. */
 export const WS_CLOSE_TRY_AGAIN_LATER = 1013
+/**
+ * A socket that never named a room (`preJoinTimeoutMs`). Its own code rather
+ * than 1008, because 1008 already means "this server predates the join frame"
+ * to a client, which answers it by putting the topic back in the URL for the
+ * life of the page — the exact thing #577 removes. Application range (4000+),
+ * numbered after HTTP 408 so it reads as what it is; a client that does not
+ * know it backs off and retries, which is the right answer for a socket that
+ * failed to speak in time.
+ */
+export const WS_CLOSE_JOIN_TIMEOUT = 4408
 
 /**
  * `ws` keeps a closing socket in `wss.clients` for up to 30 s waiting for the
@@ -80,8 +92,20 @@ const DEFAULT_MAX_PEERS_PER_ROOM = 24
  */
 const MESSAGES_PER_PEER_NEGOTIATION = 40
 const DEFAULT_MESSAGE_RATE_WINDOW_MS = 10_000
+/**
+ * How long a socket may sit unjoined. The topic now arrives in the first frame
+ * rather than the URL, so there is a window where a socket has been accepted
+ * and named nothing — and a socket that never names a room holds a connection
+ * slot for free, which is a cheaper flood than any the caps above bound.
+ * Generous next to a round trip, far below anything a real client takes.
+ */
+const DEFAULT_PRE_JOIN_TIMEOUT_MS = 10_000
 
 const ClientMessageSchema = z.discriminatedUnion('type', [
+  z.object({
+    type: z.literal('join'),
+    topic: z.string(),
+  }),
   z.object({
     type: z.literal('relay'),
     to: z.string(),
@@ -130,6 +154,8 @@ export interface SignalingServerOptions {
   maxPeersPerRoom?: number
   messageRateLimit?: number
   messageRateWindowMs?: number
+  /** How long a socket may stay unjoined before it is turned away. */
+  preJoinTimeoutMs?: number
 }
 
 /**
@@ -163,6 +189,7 @@ export function createSignalingServer(options: SignalingServerOptions): Promise<
   const messageRateLimit =
     options.messageRateLimit ?? maxPeersPerRoom * MESSAGES_PER_PEER_NEGOTIATION
   const messageRateWindowMs = options.messageRateWindowMs ?? DEFAULT_MESSAGE_RATE_WINDOW_MS
+  const preJoinTimeoutMs = options.preJoinTimeoutMs ?? DEFAULT_PRE_JOIN_TIMEOUT_MS
 
   const httpServer: Server = createServer((request, response) => {
     if (request.url === '/healthz') {
@@ -223,23 +250,14 @@ export function createSignalingServer(options: SignalingServerOptions): Promise<
     socket.on('error', () => socket.terminate())
 
     const url = new URL(request.url ?? '/', 'http://localhost')
-    const topic = url.searchParams.get('topic') ?? ''
-    if (!TOPIC_PATTERN.test(topic)) {
-      refuse(socket, WS_CLOSE_POLICY_VIOLATION, 'invalid topic')
-      return
-    }
-
-    // Both caps are load, so both refuse with 1013 (see the close codes above).
-    const existing = rooms.get(topic)
-    if (!existing && rooms.size >= maxRooms) {
-      refuse(socket, WS_CLOSE_TRY_AGAIN_LATER, 'too many rooms')
-      return
-    }
-    const room = existing ?? new Map<string, Peer>()
-    if (room.size >= maxPeersPerRoom) {
-      refuse(socket, WS_CLOSE_TRY_AGAIN_LATER, 'room full')
-      return
-    }
+    // The topic belongs in the first frame, not the URL: query strings are
+    // recorded by every ingress and proxy access log as a matter of course, and
+    // the topic IS the room capability — anything that reads those logs can
+    // join (#577). The query string is still accepted, and has to be: a client
+    // bundle cached from before this change puts it there, and a mid-deploy
+    // reload that could not join its own account's room would silently stop
+    // seeing its other tabs.
+    const queryTopic = url.searchParams.get('topic')
 
     const peer: Peer = {
       id: randomUUID(),
@@ -248,20 +266,64 @@ export function createSignalingServer(options: SignalingServerOptions): Promise<
       windowStartedAt: Date.now(),
       messagesInWindow: 0,
     }
-    rooms.set(topic, room)
+    let joined: { topic: string; room: Map<string, Peer> } | undefined
     socket.on('pong', () => {
       peer.alive = true
     })
 
-    send(peer, {
-      type: 'welcome',
-      peerId: peer.id,
-      peers: [...room.keys()],
-    })
-    for (const other of room.values()) {
-      send(other, { type: 'peer-joined', peerId: peer.id })
+    /** Admit this socket to a room, or refuse it. Same answer either way in,
+     *  so the query string and the join frame cannot drift apart. */
+    const join = (topic: string): void => {
+      // Refusing a socket closes it, but cannot stop the client talking — a
+      // frame may already be in flight, and a rude client ignores the close
+      // outright (`REFUSAL_LINGER_MS`). Admitting one anyway would put a
+      // CLOSING socket in the room and announce a peer that is about to be
+      // terminated. The `joined` half is the same guard read the other way: a
+      // peer already in a room does not get moved to another.
+      if (joined || socket.readyState !== WebSocket.OPEN) return
+      if (!TOPIC_PATTERN.test(topic)) {
+        refuse(socket, WS_CLOSE_POLICY_VIOLATION, 'invalid topic')
+        return
+      }
+
+      // Both caps are load, so both refuse with 1013 (see the close codes above).
+      const existing = rooms.get(topic)
+      if (!existing && rooms.size >= maxRooms) {
+        refuse(socket, WS_CLOSE_TRY_AGAIN_LATER, 'too many rooms')
+        return
+      }
+      const room = existing ?? new Map<string, Peer>()
+      if (room.size >= maxPeersPerRoom) {
+        refuse(socket, WS_CLOSE_TRY_AGAIN_LATER, 'room full')
+        return
+      }
+
+      rooms.set(topic, room)
+      joined = { topic, room }
+
+      send(peer, {
+        type: 'welcome',
+        peerId: peer.id,
+        peers: [...room.keys()],
+      })
+      for (const other of room.values()) {
+        send(other, { type: 'peer-joined', peerId: peer.id })
+      }
+      room.set(peer.id, peer)
     }
-    room.set(peer.id, peer)
+
+    // Unjoined sockets are turned away rather than left to sit: one that never
+    // names a room costs a connection slot for nothing. Unref'd so it cannot be
+    // what keeps the process alive.
+    const preJoinTimer =
+      queryTopic !== null
+        ? undefined
+        : setTimeout(() => {
+            if (!joined) refuse(socket, WS_CLOSE_JOIN_TIMEOUT, 'no join')
+          }, preJoinTimeoutMs)
+    preJoinTimer?.unref()
+
+    if (queryTopic !== null) join(queryTopic)
 
     socket.on('message', (data) => {
       // Counted before the parse, so a flood of garbage is bounded too. A
@@ -300,6 +362,20 @@ export function createSignalingServer(options: SignalingServerOptions): Promise<
       if (!result.success) return
       const message = result.data
 
+      // Until a room is named, the join frame is the only thing this socket can
+      // say. Relaying or signalling before it would let an unjoined socket
+      // address a room it never named.
+      if (!joined) {
+        if (message.type !== 'join') return
+        if (preJoinTimer) clearTimeout(preJoinTimer)
+        join(message.topic)
+        return
+      }
+      // A second join is not a room change: the peer is already in one, and
+      // moving it would leave the first room announcing a peer that left it.
+      if (message.type === 'join') return
+      const room = joined.room
+
       if (message.type === 'signal') {
         const target = room.get(message.to)
         if (target) {
@@ -319,6 +395,9 @@ export function createSignalingServer(options: SignalingServerOptions): Promise<
     })
 
     socket.on('close', () => {
+      if (preJoinTimer) clearTimeout(preJoinTimer)
+      if (!joined) return
+      const { topic, room } = joined
       room.delete(peer.id)
       if (room.size === 0) {
         rooms.delete(topic)

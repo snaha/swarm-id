@@ -253,16 +253,37 @@ class FakeDataChannel {
  * The pair "negotiates" through real signaling: the offer sdp carries the
  * initiator connection's registry id; the responder links a channel pair on
  * setRemoteDescription(offer) and fires ondatachannel, after which both ends
- * are open. ICE is skipped entirely — loopback needs none.
+ * are open.
+ *
+ * ICE is modelled only as far as its ORDERING constraint, which is what #574
+ * is about: `addIceCandidate` before a remote description exists rejects, the
+ * way a real `RTCPeerConnection` throws `InvalidStateError`. `gate` holds
+ * `setRemoteDescription` open so a test can land an `ice` signal in the window
+ * the two handlers actually race in. Loopback still needs no real candidates.
  */
 class FakePeerConnection {
   static registry = new Map<string, FakePeerConnection>()
   static channels: FakeDataChannel[] = []
 
+  /** Holds every `setRemoteDescription` until resolved; set by a test. */
+  static gate: { promise: Promise<void>; release: () => void } | undefined
+
+  static openGate(): void {
+    let release = (): void => {}
+    const promise = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    FakePeerConnection.gate = { promise, release }
+  }
+
   private id = crypto.randomUUID()
   channel: FakeDataChannel | undefined
   ondatachannel: ((event: { channel: FakeDataChannel }) => void) | undefined
   onicecandidate: unknown
+  /** Candidates that actually reached the connection. */
+  iceCandidates: unknown[] = []
+  remoteDescriptionSet = false
+  closed = false
 
   createDataChannel(_label: string): FakeDataChannel {
     this.channel = new FakeDataChannel()
@@ -285,6 +306,8 @@ class FakePeerConnection {
     type: string
     sdp: string
   }): Promise<void> {
+    if (FakePeerConnection.gate) await FakePeerConnection.gate.promise
+    this.remoteDescriptionSet = true
     if (description.type !== "offer") return
     const initiator = FakePeerConnection.registry.get(description.sdp)
     const remoteChannel = initiator?.channel
@@ -299,14 +322,127 @@ class FakePeerConnection {
     this.ondatachannel?.({ channel: localChannel })
   }
 
-  async addIceCandidate(_candidate: unknown): Promise<void> {}
+  async addIceCandidate(candidate: unknown): Promise<void> {
+    // What a real connection does before a remote description exists.
+    if (!this.remoteDescriptionSet) {
+      throw new Error("InvalidStateError: no remote description")
+    }
+    this.iceCandidates.push(candidate)
+  }
 
-  close(): void {}
+  close(): void {
+    this.closed = true
+  }
 }
 
 function fakeRtcFactory(): RTCPeerConnection {
   return new FakePeerConnection() as unknown as RTCPeerConnection
 }
+
+// The topic is the room capability, and a query string is recorded by every
+// ingress and proxy access log there is. It goes in the first frame instead —
+// but a server that predates the change is still out there during a deploy, so
+// a refusal has to fall back rather than leave the context bus-less for the
+// life of the page (#577).
+describe("SignalingTransport — joining a room", () => {
+  it("keeps the room topic out of the URL", async () => {
+    const urls: string[] = []
+    const RealWebSocket = globalThis.WebSocket
+    vi.stubGlobal(
+      "WebSocket",
+      class extends RealWebSocket {
+        constructor(url: string | URL) {
+          urls.push(String(url))
+          super(url)
+        }
+      },
+    )
+    const first = makeTransport()
+    const second = makeTransport()
+    try {
+      // The room still forms, so the join frame reached the server.
+      await waitForPeers(first, 1)
+      expect(urls).toHaveLength(2)
+      for (const url of urls) {
+        expect(url).not.toContain(context.topic)
+      }
+    } finally {
+      vi.unstubAllGlobals()
+      first.close()
+      second.close()
+    }
+  })
+
+  // A server that only reads `?topic=` refuses the frame-only socket with a
+  // policy close, which the transport treats as permanent. Retrying once with
+  // the legacy URL is what keeps a mid-deploy reload from losing its bus until
+  // the page is closed.
+  it("falls back to the query string when the server refuses the frame", async () => {
+    const opened: { url: string; socket: FakeSocket }[] = []
+    class FakeSocket extends EventTarget {
+      static OPEN = 1
+      readyState = 0
+      constructor(readonly url: string) {
+        super()
+        opened.push({ url, socket: this })
+      }
+      send(): void {}
+      close(): void {}
+    }
+    vi.stubGlobal("WebSocket", FakeSocket)
+    const transport = makeTransport()
+    try {
+      await vi.waitFor(() => expect(opened).toHaveLength(1))
+      expect(opened[0].url).not.toContain(context.topic)
+
+      // The old server's answer to a socket that named no topic.
+      opened[0].socket.dispatchEvent(
+        Object.assign(new Event("close"), { code: 1008 }),
+      )
+
+      await vi.waitFor(() => expect(opened).toHaveLength(2))
+      expect(opened[1].url).toContain(`topic=${context.topic}`)
+    } finally {
+      vi.unstubAllGlobals()
+      transport.close()
+    }
+  })
+
+  // The fallback is the one reconnect path that did not ask whether this
+  // transport is still wanted. A close racing a server-initiated 1008 would
+  // reopen a socket nothing holds a handle to any more, join the room, and sit
+  // there as a ghost peer until the page unloads — every other reconnect goes
+  // through `scheduleReconnect`, which returns on `closed`.
+  it("does not fall back after the transport is closed", async () => {
+    const opened: { url: string; socket: FakeSocket }[] = []
+    class FakeSocket extends EventTarget {
+      static OPEN = 1
+      readyState = 0
+      constructor(readonly url: string) {
+        super()
+        opened.push({ url, socket: this })
+      }
+      send(): void {}
+      close(): void {}
+    }
+    vi.stubGlobal("WebSocket", FakeSocket)
+    const transport = makeTransport()
+    try {
+      await vi.waitFor(() => expect(opened).toHaveLength(1))
+      transport.close()
+
+      opened[0].socket.dispatchEvent(
+        Object.assign(new Event("close"), { code: 1008 }),
+      )
+
+      await new Promise((resolve) => setTimeout(resolve, 20))
+      expect(opened).toHaveLength(1)
+    } finally {
+      vi.unstubAllGlobals()
+      transport.close()
+    }
+  })
+})
 
 describe("SignalingTransport — WebRTC upgrade", () => {
   // A `send` that throws for one peer used to escape the fan-out loop and
@@ -343,6 +479,114 @@ describe("SignalingTransport — WebRTC upgrade", () => {
       FakePeerConnection.registry.clear()
       FakePeerConnection.channels = []
     }
+  })
+
+  // `handleServerMessage` fires `void this.handleSignal(...)` per message, so an
+  // `ice` message reaches the handler while the sibling `offer` is still
+  // awaiting `setRemoteDescription`. A real connection rejects that, and the
+  // candidate was gone — there was no queue to replay it from. The pair still
+  // "works" (it falls back to the server relay), which is what made this a
+  // silent downgrade rather than a visible failure (#574).
+  describe("ICE candidates racing the remote description", () => {
+    type Internals = {
+      peers: Map<string, { connection?: FakePeerConnection }>
+      handleSignal(from: string, payload: unknown): Promise<void>
+    }
+
+    /** An offer sdp the fake responder will accept (it carries the initiator's
+     *  registry id). */
+    async function offerFromFakeInitiator(): Promise<string> {
+      const initiator = new FakePeerConnection()
+      initiator.createDataChannel("data")
+      const offer = await initiator.createOffer()
+      return offer.sdp
+    }
+
+    it("applies a candidate that arrived mid-negotiation", async () => {
+      const transport = makeTransport({ createPeerConnection: fakeRtcFactory })
+      const internals = transport as unknown as Internals
+      try {
+        internals.peers.set("peer-1", {})
+        const sdp = await offerFromFakeInitiator()
+
+        FakePeerConnection.openGate()
+        const negotiating = internals.handleSignal("peer-1", {
+          kind: "offer",
+          sdp,
+        })
+        // The window the two handlers actually race in.
+        await internals.handleSignal("peer-1", {
+          kind: "ice",
+          candidate: { candidate: "candidate:1" },
+        })
+        FakePeerConnection.gate!.release()
+        await negotiating
+
+        await vi.waitFor(() =>
+          expect(
+            internals.peers.get("peer-1")?.connection?.iceCandidates,
+          ).toHaveLength(1),
+        )
+      } finally {
+        FakePeerConnection.gate = undefined
+        transport.close()
+        FakePeerConnection.registry.clear()
+        FakePeerConnection.channels = []
+      }
+    })
+
+    it("still applies a candidate that arrives after negotiation", async () => {
+      const transport = makeTransport({ createPeerConnection: fakeRtcFactory })
+      const internals = transport as unknown as Internals
+      try {
+        internals.peers.set("peer-1", {})
+        await internals.handleSignal("peer-1", {
+          kind: "offer",
+          sdp: await offerFromFakeInitiator(),
+        })
+
+        await internals.handleSignal("peer-1", {
+          kind: "ice",
+          candidate: { candidate: "candidate:late" },
+        })
+
+        expect(
+          internals.peers.get("peer-1")?.connection?.iceCandidates,
+        ).toHaveLength(1)
+      } finally {
+        transport.close()
+        FakePeerConnection.registry.clear()
+        FakePeerConnection.channels = []
+      }
+    })
+
+    // A duplicate or renegotiated offer overwrote `peer.connection` without
+    // closing what was there, leaking an RTCPeerConnection per offer.
+    it("closes the previous connection when a second offer arrives", async () => {
+      const transport = makeTransport({ createPeerConnection: fakeRtcFactory })
+      const internals = transport as unknown as Internals
+      try {
+        internals.peers.set("peer-1", {})
+        await internals.handleSignal("peer-1", {
+          kind: "offer",
+          sdp: await offerFromFakeInitiator(),
+        })
+        const first = internals.peers.get("peer-1")?.connection
+        expect(first?.closed).toBe(false)
+
+        await internals.handleSignal("peer-1", {
+          kind: "offer",
+          sdp: await offerFromFakeInitiator(),
+        })
+
+        expect(first?.closed).toBe(true)
+        expect(internals.peers.get("peer-1")?.connection).not.toBe(first)
+      } finally {
+        transport.close()
+        FakePeerConnection.registry.clear()
+        FakePeerConnection.channels = []
+      }
+    })
   })
 
   it("moves delivery onto the data channel once the pair connects", async () => {
