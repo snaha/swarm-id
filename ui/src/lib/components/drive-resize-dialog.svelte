@@ -226,7 +226,7 @@
     {errorMessage}
     errorDetails={errorDetail}
     tone={errorTone}
-    successTitle="Payment completed!"
+    successTitle="Drive resized!"
     successBody="Your drive is now larger."
     onRetry={() => (phase = 'form')}
     onClose={close}

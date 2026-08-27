@@ -56,7 +56,7 @@
     onClose,
     cancellable = false,
     tone = 'error',
-    successTitle = 'Payment completed!',
+    successTitle = 'Done!',
     successBody = '',
     errorDetails = '',
   }: Props = $props()

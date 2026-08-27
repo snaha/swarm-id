@@ -177,7 +177,7 @@
     pendingLabel={describeStep(step, 'extend')}
     {errorMessage}
     errorDetails={errorDetail}
-    successTitle="Payment completed!"
+    successTitle="Lifespan extended!"
     successBody="Your drive's lifespan has been extended."
     onRetry={() => (phase = 'form')}
     onClose={close}
