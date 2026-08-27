@@ -19,6 +19,7 @@ import type {
   PostageStamp,
   AccountMetadata,
   AccountStateSnapshot,
+  SyncedAccount,
 } from "../schemas"
 import {
   serializeConnectedApp,
@@ -46,6 +47,48 @@ export type AccountStateSnapshotResult =
 // ============================================================================
 // Serialize
 // ============================================================================
+
+/**
+ * Read an account record into the snapshot every channel publishes: the Swarm
+ * device-state feed, and the account bus.
+ *
+ * One copy, because the per-field clocks below are easy to get subtly wrong and
+ * impossible to notice: an UNEDITED scalar must keep its stable `*At`, never a
+ * fresh `lastModified`, or a device editing a different field restamps it and
+ * clobbers a peer's genuine concurrent edit under per-field LWW
+ * (Account-State.md §9.3). A second copy that forgets that is a data-loss bug
+ * with no symptom on the device that causes it.
+ *
+ * `undefined` when the account has no default drive — there is nothing to
+ * publish for an account that cannot pay for a write.
+ */
+export function accountStateSnapshot(
+  account: SyncedAccount,
+): AccountStateSnapshot | undefined {
+  const defaultStampBatchID = account.defaultPostageStampBatchID
+  if (!defaultStampBatchID) return undefined
+
+  return {
+    version: 1,
+    timestamp: Date.now(),
+    accountId: account.id.toHex(),
+    metadata: {
+      accountName: account.name,
+      defaultPostageStampBatchID: defaultStampBatchID.toHex(),
+      publicKey: account.publicKey,
+      settings: account.settings,
+      accountNameAt: account.accountNameAt ?? account.createdAt,
+      defaultStampAt: account.defaultStampAt ?? account.createdAt,
+      settingsAt: account.settingsAt ?? account.createdAt,
+      createdAt: account.createdAt,
+      lastModified: Date.now(),
+      devices: account.devices,
+      partitionCount: account.partitionCount ?? 1,
+    },
+    connectedApps: account.connectedApps,
+    postageStamps: account.postageStamps,
+  }
+}
 
 /**
  * Serialize account data into a plain object suitable for JSON encoding.

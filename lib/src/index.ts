@@ -153,6 +153,7 @@ export type { NetworkSettingsStorageManager } from "./utils/storage-managers"
 
 // Account state snapshot (shared by file export and Swarm sync)
 export {
+  accountStateSnapshot,
   serializeAccountStateSnapshot,
   deserializeAccountStateSnapshot,
   AccountStateSnapshotSchemaV1,
