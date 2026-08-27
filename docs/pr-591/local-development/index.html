@@ -152,10 +152,15 @@ UI’s origin allowed explicitly — see <a href="/own-bee-node">Using Your Own 
 <div class="sl-heading-wrapper level-h3"><h3 id="chain-tab">Chain Tab</h3><a class="sl-anchor-link" href="#chain-tab"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 1 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 0 0-1.42-1.42m8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 1 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 0 0 0 1.42 1 1 0 0 0 1.42 0l3.88-3.89a4.49 4.49 0 0 0 0-6.33M8.83 15.17a1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.92-4.92a1 1 0 1 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42"></path></svg></span><span class="sr-only" data-pagefind-ignore>Section titled “Chain Tab”</span></a></div>
 <p>Everything that talks to the Gnosis-side chain, acting on the account selected at the top of the page. These tools refuse to run anywhere but a chain that is provably a development one.</p>
 <ul>
-<li><strong>Buying a drive</strong> — nothing to toggle here any more: <strong>Add drive</strong> and the paid drive operations
-(extend, resize) all buy for real, against whichever chain the app is pointed at. Locally that is
-the baked dev chain, so the same code path as mainnet runs on a chain whose funds are worth
-nothing. See <a href="#paying-for-a-drive">Paying for a Drive</a>.</li>
+<li><strong>Buying a drive</strong> — <strong>Add drive</strong> offers two payment methods. The <strong>built-in</strong> engine — which the
+paid drive operations (extend, resize) also use — buys for real, against whichever chain the app is
+pointed at. Locally that is the baked dev chain, so the same code path as mainnet runs on a chain
+whose funds are worth nothing. See <a href="#paying-for-a-drive">Paying for a Drive</a>. The other method,
+<strong>fund.bzz.limo</strong>, settles on mainnet only; locally the simulated purchase below stands in for it.</li>
+<li><strong>Simulated purchase</strong> — makes the <strong>fund.bzz.limo</strong> method of <strong>Add drive</strong> settle a mocked batch
+instead of a real cross-chain payment. That widget only settles on mainnet, so this is what makes
+that method reachable locally at all. The batch it leaves behind is fabricated, which is why extend
+and resize cannot act on it. Nothing here touches the built-in method.</li>
 <li><strong>Wallet networks</strong> — adds the chains a payment can be signed on to MetaMask, so a balance shows
 before you reach the payment screens. <strong>Gnosis Chain (fake)</strong> — the local chain at
 <code dir="auto">http://localhost:9545</code> — is the one to add.</li>
@@ -220,6 +225,10 @@ swapped for BZZ through a real SushiSwap pool and spent against the real Postage
 a single atomic EIP-7702 transaction, using the same delegate contract mainnet uses. Locally all of
 that runs against the baked hybrid chain at the production addresses, so it is the same code path as
 mainnet on a chain whose funds are worth nothing.</p>
+<p>That is the payment dialog’s <strong>built-in</strong> method. The other one, <strong>fund.bzz.limo</strong> — the method
+offered first when buying a drive — settles on Gnosis mainnet only and has nothing to settle against
+here, so either pick the built-in method or turn on the <strong>Simulated purchase</strong> toggles described
+above.</p>
 <p>To run the flow end to end:</p>
 <ol>
 <li>Start everything with <code dir="auto">pnpm dev:local</code>.</li>
@@ -230,7 +239,8 @@ also reachable from the product’s Settings menu.</li>
 (<code dir="auto">http://localhost:9545</code>, chain id 100) to MetaMask, then use the <strong>Faucet</strong> to stock the
 account you will connect with — xDAI, WXDAI, USDC or BZZ, the assets a drive can be paid in.
 Nothing funds the payer for you: the wallet must already hold what it pays with.</li>
-<li>Add or manage a drive in the product UI and pay in the dialog — connect the wallet, pick a
+<li>Add or manage a drive in the product UI and pay in the dialog — for a new drive, switch the
+method to <strong>Pay with crypto (built in, experimental)</strong> first — then connect the wallet, pick a
 token, and sign.</li>
 </ol>
 <p>Chain id alone cannot tell the local chain from the real one — it answers as 100 deliberately — so
