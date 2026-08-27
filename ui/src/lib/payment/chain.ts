@@ -64,14 +64,31 @@ export type ChainKind = 'mainnet' | 'dev' | 'unsupported'
 
 export interface ChainIdentity {
   chainId: number
+  /**
+   * The endpoint's own genesis block hash, carried rather than collapsed into
+   * `kind`. Two chains that are both "not mainnet" are still two different
+   * chains, and only the hash can say so — which is what a wallet's genesis has
+   * to be compared against before a payment is signed.
+   */
+  genesisHash: string
   kind: ChainKind
+}
+
+/**
+ * Whether a genesis hash is Gnosis mainnet's own — the question `kindOf` asks
+ * of the configured endpoint, exported so it can be asked of a hash from
+ * somewhere else (a wallet's provider, which answers for whatever chain the
+ * wallet is really on). Case-insensitive: hex is hex, whoever wrote it.
+ */
+export function isGnosisMainnetGenesis(genesisHash: string): boolean {
+  return genesisHash.toLowerCase() === GNOSIS_GENESIS_HASH
 }
 
 function kindOf(chainId: number, genesisHash: string): ChainKind {
   if (chainId !== GNOSIS_CHAIN_ID) {
     return 'unsupported'
   }
-  return genesisHash === GNOSIS_GENESIS_HASH ? 'mainnet' : 'dev'
+  return isGnosisMainnetGenesis(genesisHash) ? 'mainnet' : 'dev'
 }
 
 /**
@@ -171,7 +188,7 @@ export function chainIdentity(
       probeChainId(rpcUrl),
       probeGenesisHash(rpcUrl),
     ])
-    return { chainId, kind: kindOf(chainId, genesisHash) }
+    return { chainId, genesisHash, kind: kindOf(chainId, genesisHash) }
   })
 }
 

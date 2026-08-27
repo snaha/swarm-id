@@ -9,16 +9,33 @@
  */
 import { type Page, expect, test } from '@playwright/test'
 
-import { DRIVE_SETTLE_TIMEOUT_MS, PASSWORD, addMockedDrive, completeCreateFlow } from './helpers'
+import {
+  CHAIN_TEST_TIMEOUT_MS,
+  DRIVE_SETTLE_TIMEOUT_MS,
+  PASSWORD,
+  addDrive,
+  chainReachable,
+  completeCreateFlow,
+  fundPostageSigner,
+  seedLocalChain,
+} from './helpers'
+
+// This suite buys through the built-in engine, which is a real on-chain
+// purchase — the /dev mock stands in for the fund.bzz.limo method alone, and
+// nothing here chooses it — so it needs a chain.
+const chainUp = await chainReachable()
+test.skip(!chainUp, 'requires a local chain (pnpm dev:local)')
 
 async function createAccountWithDrive(page: Page) {
+  await seedLocalChain(page)
   await page.goto('/')
   await page.getByRole('link', { name: 'Get started' }).first().click()
   await completeCreateFlow(page)
   await page.getByRole('button', { name: 'Stay local for now' }).click()
   await expect(page).toHaveURL(/\/$/)
   // A drive makes the account non-local — sign-out is only offered then.
-  await addMockedDrive(page)
+  await fundPostageSigner(page)
+  await addDrive(page)
   await expect(page.getByText(/^Drive [0-9a-f]{4}$/)).toBeVisible({
     timeout: DRIVE_SETTLE_TIMEOUT_MS,
   })
@@ -31,6 +48,7 @@ async function signOut(page: Page) {
 }
 
 test('sign out keeps only the encrypted remnant and signs back in from it', async ({ page }) => {
+  test.setTimeout(CHAIN_TEST_TIMEOUT_MS)
   await createAccountWithDrive(page)
   await signOut(page)
 
@@ -48,7 +66,7 @@ test('sign out keeps only the encrypted remnant and signs back in from it', asyn
     return { keys: Object.keys(record).sort(), raw: JSON.stringify(record) }
   })
   // `soonestDriveExpiry` is optional — it only exists when a drive's TTL is
-  // known, and the mocked purchase records none.
+  // known.
   expect(remnant.keys.filter((key) => key !== 'soonestDriveExpiry')).toEqual([
     'access',
     'createdAt',
@@ -73,6 +91,7 @@ test('sign out keeps only the encrypted remnant and signs back in from it', asyn
 })
 
 test('the storage warning survives sign-out and outranks the badge', async ({ page }) => {
+  test.setTimeout(CHAIN_TEST_TIMEOUT_MS)
   await createAccountWithDrive(page)
 
   // Fill the drive so the sign-out captures a storage warning, then reload so

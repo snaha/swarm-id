@@ -12,12 +12,18 @@ The project uses [@snaha/bee-compose](https://www.npmjs.com/package/@snaha/bee-c
 ### Quick Start
 
 ```bash
-# Start Bee cluster in background
-pnpm dev:cluster:start
+# Start everything: cluster and chain in background, identity UI and demo in foreground
+pnpm dev:local
 
-# Start the development servers
-pnpm dev
+# The same, from a clean chain and empty node state
+pnpm dev:local:fresh
+
+# Tear the containers down
+pnpm dev:local:stop
 ```
+
+Re-running `pnpm dev:local` is a no-op for whatever is already up. To drive the pieces separately,
+`pnpm dev:cluster:start` starts just the containers and `pnpm dev` just the servers.
 
 ### All Cluster Commands
 
@@ -63,9 +69,26 @@ A menu in the page header switches the whole app between the local endpoints and
 
 Everything that talks to the Gnosis-side chain, acting on the account selected at the top of the page. These tools refuse to run anywhere but a chain that is provably a development one.
 
-- **Simulated purchase** — makes the product's **Add drive** flow settle a mocked batch instead of a real cross-chain payment. The purchase widget only settles on mainnet, so this is what makes that flow reachable locally at all. The batch it leaves behind is fabricated, which is why extend and resize cannot act on it.
-- **Faucet** — hands any address xDAI or BZZ out of the float the local chain is baked with, and shows what that address and the faucet hold. It starts pointed at the selected account's postage signer, which is the address that usually needs topping up.
-- **On-chain drive tooling** — buys a batch the account's own postage signer OWNS, running the widget's real step list (swap → approve → createBatch) against the local chain's BZZ pool. **Create drive to test with** goes one step further and attaches the batch as an ordinary drive; that is the button to reach for before hand-testing extend or resize. A companion makes one that is already inside the "Expires soon" window, for testing that warning.
+- **Buying a drive** — **Add drive** offers two payment methods. The **built-in** engine — which the
+  paid drive operations (extend, resize) also use — buys for real, against whichever chain the app is
+  pointed at. Locally that is the baked dev chain, so the same code path as mainnet runs on a chain
+  whose funds are worth nothing. See [Paying for a Drive](#paying-for-a-drive). The other method,
+  **fund.bzz.limo**, settles on mainnet only; locally the simulated purchase below stands in for it.
+- **Simulated purchase** — makes the **fund.bzz.limo** method of **Add drive** settle a mocked batch
+  instead of a real cross-chain payment. That widget only settles on mainnet, so this is what makes
+  that method reachable locally at all. The batch it leaves behind is fabricated, which is why extend
+  and resize cannot act on it. Nothing here touches the built-in method.
+- **Wallet networks** — adds the chains a payment can be signed on to MetaMask, so a balance shows
+  before you reach the payment screens. **Gnosis Chain (fake)** — the local chain at
+  `http://localhost:9545` — is the one to add.
+- **Faucet** — hands any address xDAI, BZZ, WXDAI or USDC out of the float the local chain is baked
+  with, and shows what that address and the faucet hold. The two ERC20s are the ones a drive can be
+  paid in, so a token payment is testable without trading for the token first.
+- **On-chain drive tooling** — buys a batch the account's own postage signer OWNS, running the real
+  purchase steps (swap → approve → createBatch) against the local chain's BZZ pool. **Create drive
+  to test with** goes one step further and attaches the batch as an ordinary drive; that is the
+  button to reach for before hand-testing extend or resize. A companion makes one that is already
+  inside the "Expires soon" window, for testing that warning.
 - **Import batch by ID** — reads a batch's parameters straight from the PostageStamp contract, so any batch id works even when the configured node has never seen it. The signer key is not on chain, so paste the one the batch was bought with.
 
 ### Node Tab
@@ -83,7 +106,9 @@ The devices registered to the selected account, and which partitions each curren
 
 ## Getting a Postage Batch
 
-Postage stamps are required for uploading data to Swarm. In development, you can get stamps through the Developer Tools or via API.
+Postage stamps are required for uploading data to Swarm. In development, you can get stamps through
+the Developer Tools, via API, or through the product's own **Add drive** flow, paying from a wallet —
+see [Paying for a Drive](#paying-for-a-drive).
 
 ### Using Developer Tools (Recommended)
 
@@ -112,6 +137,50 @@ For local development, the defaults (amount: 500000000, depth: 20) are sufficien
 :::caution
 A batch exists on chain before the Bee node knows about it: until the node's chain sync reaches the block the purchase landed in, stamping with it is rejected with `400 invalid batch id`. **Create drive to test with** waits for that itself; a batch bought straight from the API needs roughly 30 seconds.
 :::
+
+## Paying for a Drive
+
+Buying, extending and resizing a drive all cost money, and the money is real even locally: the
+payment is a transfer from your wallet to the batch owner on Gnosis — in xDAI, WXDAI, USDC or BZZ —
+which is then swapped for BZZ through a real SushiSwap pool and spent against the real PostageStamp
+contract. Locally all of that runs against the baked hybrid chain at the production addresses, so it
+is the same code path as mainnet on a chain whose funds are worth nothing.
+
+Where the chain carries the EIP-7702 delegate, as Gnosis mainnet does, the postage calls run as one
+atomic transaction; the baked snapshot cannot carry it, so locally they run one at a time until
+**Create drive to test with** splices it in.
+
+That is the payment dialog's **built-in** method. The other one, **fund.bzz.limo** — the method
+offered first when buying a drive — settles on Gnosis mainnet only and has nothing to settle against
+here, so either pick the built-in method or turn on the **Simulated purchase** toggles described
+above.
+
+To run the flow end to end:
+
+1. Start everything with `pnpm dev:local`.
+2. Point the app at the local endpoints: the header menu on `/dev` switches Bee node and RPC to
+   **Use local** in one click. Anything else is edited through the **Network settings** dialog,
+   also reachable from the product's Settings menu.
+3. On `/dev` → **Chain**, use **Wallet networks** to add **Gnosis Chain (fake)**
+   (`http://localhost:9545`, chain id 100) to MetaMask, then use the **Faucet** to stock the
+   account you will connect with — xDAI, WXDAI, USDC or BZZ, the assets a drive can be paid in.
+   Nothing funds the payer for you: the wallet must already hold what it pays with.
+4. Add or manage a drive in the product UI and pay in the dialog — for a new drive, switch the
+   method to **Pay with crypto (built in, experimental)** first — then connect the wallet, pick a
+   token, and sign.
+
+Chain id alone cannot tell the local chain from the real one — it answers as 100 deliberately — so
+before anything is signed the app compares **genesis hashes**, which a chain cannot borrow, and
+refuses in words when your wallet is on real Gnosis while the app is pointed at the local chain (or
+the reverse). That is what stops a rehearsal spending real xDAI.
+
+Reach for `pnpm dev:local:fresh` when the chain has drifted — every purchase trades against a real,
+thin BZZ pool, and a fresh start restores the baked snapshot. It also wipes node state, so drives
+created earlier will point at batches that no longer exist; clear the UI's site data too.
+
+Paying from a chain other than Gnosis is not supported yet. See
+[docs/Drive-Payment-Flow.md](https://github.com/snaha/swarm-id/blob/main/docs/Drive-Payment-Flow.md)
+for the full design.
 
 ## Common Gotchas
 

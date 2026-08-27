@@ -21,7 +21,8 @@
     withTimeout,
   } from '@snaha/swarm-id'
   import { gnosisMainnetSettings } from '@swarm-id/multichain'
-  import { formatUnits, parseUnits } from 'viem'
+  import { DEV_FAUCET_ADDRESS } from '@swarm-id/multichain/dev'
+  import { type Chain, formatUnits, parseUnits } from 'viem'
 
   import { resolve } from '$app/paths'
 
@@ -37,12 +38,14 @@
   import { Select } from '$lib/components/ui/select'
   import { Switch } from '$lib/components/ui/switch'
   import { Tabs } from '$lib/components/ui/tabs'
+  import { onboard } from '$lib/crypto/onboard'
   import {
     ANVIL_ACCOUNT,
     type FundsRow,
     createExpiringTestDrive,
     createOwnedBatchOnChain,
     createTestDrive,
+    devAddressFunds,
     devChainFunds,
     sendFromFaucet,
   } from '$lib/dev/chain-funding'
@@ -50,12 +53,15 @@
   import { syncStore } from '$lib/dev/sync.svelte'
   import { chainIdentity, evictChainCaches, probeChainId } from '$lib/payment/chain'
   import { fetchExistingBatchFromChain } from '$lib/payment/contract'
+  import { type EthereumProvider, switchWalletChain } from '$lib/payment/payment-rail'
+  import { resolvePaymentRail } from '$lib/payment/resolve-rail'
   import routes from '$lib/routes'
   import { accountsStore } from '$lib/stores/accounts.svelte'
   import { devSettingsStore } from '$lib/stores/dev-settings.svelte'
   import { networkSettingsStore } from '$lib/stores/network-settings.svelte'
   import { sessionStore } from '$lib/stores/session.svelte'
   import type { Account } from '$lib/types'
+  import { truncateAddress } from '$lib/utils'
 
   import DeviceList from './device-list.svelte'
   import StatusDot from './status-dot.svelte'
@@ -250,22 +256,45 @@
   // point of the panel is to hand over an exact amount and watch it land.
   const XDAI_DECIMALS = 18
   const BZZ_DECIMALS = 16
+  const USDC_DECIMALS = 6
   const AMOUNT_PRECISION = 4
   /** Stands in where the chain has no figure to give, rather than a lying zero. */
   const NO_FIGURE = '—'
-  /** The assets the faucet can hand over, and how to read an amount for each. */
+  /**
+   * The assets the faucet can hand over, and how to read an amount for each.
+   *
+   * The two ERC20s are the ones a drive can be PAID in, which the bake stocks
+   * the faucet with — dispensing them is what makes a token payment testable
+   * without trading for the token first.
+   */
   const FAUCET_TOKENS = [
     { value: 'xdai', label: 'xDAI', decimals: XDAI_DECIMALS, placeholder: '0.05' },
     { value: 'bzz', label: 'BZZ', decimals: BZZ_DECIMALS, placeholder: '1' },
+    { value: 'wxdai', label: 'WXDAI', decimals: XDAI_DECIMALS, placeholder: '10' },
+    { value: 'usdc', label: 'USDC', decimals: USDC_DECIMALS, placeholder: '10' },
   ]
+  /** Contract addresses for the ERC20 rows above, from the chain's own preset. */
+  const FAUCET_TOKEN_ADDRESSES: Record<string, `0x${string}`> = {
+    wxdai: gnosisMainnetSettings().addresses.wxdai,
+    usdc: gnosisMainnetSettings().addresses.usdc,
+  }
   let faucetTo = $state('')
   let faucetToken = $state(FAUCET_TOKENS[0].value)
   let faucetTyped = $state('0.05')
   let faucetHelpOpen = $state(false)
   let faucetBusy = $state(false)
+  let faucetWalletBusy = $state(false)
   let faucetMessage = $state('')
   let faucetError = $state('')
   let funds = $state<{ faucet: FundsRow; recipient: FundsRow } | undefined>(undefined)
+  /**
+   * The wallet a payment is signed from, once one is connected. Kept apart from
+   * the recipient box because it is normally a different address — the box
+   * defaults to the account's postage signer, which spends but never pays — and
+   * what it holds is what decides whether a payment can be made at all.
+   */
+  let connectedWallet = $state<string | undefined>(undefined)
+  let walletFunds = $state<FundsRow | undefined>(undefined)
   let fundsError = $state('')
 
   // The typed recipient, normalized. Undefined while it is not an address,
@@ -318,6 +347,36 @@
     prefilledSigner = owner
   })
 
+  /**
+   * Point the faucet at the wallet the user pays from.
+   *
+   * The signer prefill above is the address an operation SPENDS from; the
+   * wallet is the one it is paid from, and testing a payment starts with that
+   * one holding something. Through the same web3-onboard instance the payment
+   * screens use, so there is one wallet picker and one notion of "connected"
+   * — an already-connected wallet is read from its state rather than prompted
+   * for again.
+   */
+  async function useConnectedWallet() {
+    faucetError = ''
+    faucetWalletBusy = true
+    try {
+      const connected = onboard.state.get().wallets
+      const wallets = connected.length > 0 ? connected : await onboard.connectWallet()
+      const address = wallets[0]?.accounts[0]?.address
+      if (!address) {
+        throw new Error('No wallet connected — select one and try again.')
+      }
+      connectedWallet = new EthAddress(address).toChecksum()
+      faucetTo = connectedWallet
+    } catch (error) {
+      // A declined prompt leaves the recipient box exactly as it was.
+      faucetError = error instanceof Error ? error.message : String(error)
+    } finally {
+      faucetWalletBusy = false
+    }
+  }
+
   function formatAmount(value: bigint, decimals: number): string {
     return Number(formatUnits(value, decimals)).toLocaleString(undefined, {
       maximumFractionDigits: AMOUNT_PRECISION,
@@ -328,6 +387,7 @@
     const requested = faucetRecipient
     if (!requested) {
       funds = undefined
+      walletFunds = undefined
       fundsError = ''
       return
     }
@@ -336,6 +396,7 @@
     // pedantry: switching chains leaves the previous one's read in flight, and
     // it used to win — mainnet figures under the "Local dev chain" banner.
     const rpcUrl = networkSettingsStore.gnosisRpcUrl
+    const wallet = connectedWallet
     // Untracked because this runs from an $effect: reading `funds` normally
     // would make that effect depend on what it writes. Dropping a read that
     // belongs to another address now, rather than when the new one lands,
@@ -343,18 +404,31 @@
     if (untrack(() => funds)?.recipient.address !== requested) {
       funds = undefined
     }
+    if (untrack(() => walletFunds)?.address !== wallet) {
+      walletFunds = undefined
+    }
     const stale = () =>
-      faucetRecipient !== requested || networkSettingsStore.gnosisRpcUrl !== rpcUrl
+      faucetRecipient !== requested ||
+      connectedWallet !== wallet ||
+      networkSettingsStore.gnosisRpcUrl !== rpcUrl
     try {
-      const read = await devChainFunds(requested, rpcUrl)
+      // Both reads together, and one staleness decision over the pair: a
+      // wallet column kept past a check the other columns failed would be
+      // figures from an address, or a chain, the table is no longer about.
+      const [read, walletRead] = await Promise.all([
+        devChainFunds(requested, rpcUrl),
+        wallet ? devAddressFunds(wallet, rpcUrl) : undefined,
+      ])
       // Typing an address fires this per keystroke and two reads can land out
       // of order — never show one address's balances under another.
       if (stale()) return
       funds = read
+      walletFunds = walletRead
       fundsError = ''
     } catch (e) {
       if (stale()) return
       funds = undefined
+      walletFunds = undefined
       fundsError = e instanceof Error ? e.message : String(e)
     }
   }
@@ -368,34 +442,71 @@
   })
 
   /**
-   * The rows of the balances table, formatted.
-   *
-   * The read is only used for the address it was made for. The row is labelled
-   * with the CURRENT recipient, so pairing it with the previous read's figures
-   * — which is what pasting a second address did until the new read landed —
-   * puts one address's balances under another's name. Both are checksummed, so
-   * they compare directly.
+   * The assets the table reports, down the left edge. Each carries how to read
+   * itself off a read, so every column is formatted by walking this one list —
+   * which is what keeps a column that comes and goes in step with the rest.
    */
-  const balanceRows = $derived.by(() => {
-    const rows: { label: string; address: string; xdai: string; bzz: string }[] = []
+  const BALANCE_ASSETS = [
+    { label: 'xDAI', decimals: XDAI_DECIMALS, held: (row: FundsRow) => row.xdai },
+    { label: 'BZZ', decimals: BZZ_DECIMALS, held: (row: FundsRow) => row.bzz },
+    { label: 'WXDAI', decimals: XDAI_DECIMALS, held: (row: FundsRow) => row.wxdai },
+    { label: 'USDC', decimals: USDC_DECIMALS, held: (row: FundsRow) => row.usdc },
+  ]
+
+  interface BalanceColumn {
+    label: string
+    address: string
+    /** One figure per {@link BALANCE_ASSETS} entry, in that order. */
+    figures: string[]
+  }
+
+  /**
+   * One column of the balances table.
+   *
+   * `held` is the read made FOR `address`, or undefined when there is none yet
+   * — dashes then, since the alternative is another address's figures under
+   * this one's heading.
+   */
+  function balanceColumn(
+    label: string,
+    address: string,
+    held: FundsRow | undefined,
+  ): BalanceColumn {
+    return {
+      label,
+      address,
+      figures: BALANCE_ASSETS.map((asset) =>
+        held ? formatAmount(asset.held(held), asset.decimals) : NO_FIGURE,
+      ),
+    }
+  }
+
+  /**
+   * The columns of the balances table, formatted.
+   *
+   * A read is only ever used for the address it was made for. Each column is
+   * headed with the CURRENT address, so pairing it with the previous read's
+   * figures — which is what pasting a second address did until the new read
+   * landed — puts one address's balances under another's name. Every address
+   * here is checksummed, so they compare directly.
+   *
+   * The faucet leads: it is the column that is always there and the first one
+   * worth checking — whether there is anything left to hand out — and the two
+   * addresses that are the user's own follow it.
+   */
+  const balanceColumns = $derived.by(() => {
+    // Nothing is read without a recipient, so there is nothing to show — not
+    // even the faucet, whose figures come from that same read.
+    if (!faucetRecipient) return []
     const shown = funds?.recipient.address === faucetRecipient ? funds : undefined
-    if (faucetRecipient) {
-      rows.push({
-        label: 'Recipient',
-        address: faucetRecipient,
-        xdai: shown ? formatAmount(shown.recipient.xdai, XDAI_DECIMALS) : NO_FIGURE,
-        bzz: shown ? formatAmount(shown.recipient.bzz, BZZ_DECIMALS) : NO_FIGURE,
-      })
+    const columns = [balanceColumn('Faucet', DEV_FAUCET_ADDRESS, shown?.faucet)]
+    // A wallet that is already the recipient would be the same column twice.
+    if (connectedWallet && connectedWallet !== faucetRecipient) {
+      const held = walletFunds?.address === connectedWallet ? walletFunds : undefined
+      columns.push(balanceColumn('Connected wallet', connectedWallet, held))
     }
-    if (shown) {
-      rows.push({
-        label: 'Faucet',
-        address: shown.faucet.address,
-        xdai: formatAmount(shown.faucet.xdai, XDAI_DECIMALS),
-        bzz: formatAmount(shown.faucet.bzz, BZZ_DECIMALS),
-      })
-    }
-    return rows
+    columns.push(balanceColumn('Recipient', faucetRecipient, shown?.recipient))
+    return columns
   })
 
   async function sendFaucetFunds() {
@@ -411,9 +522,11 @@
     faucetMessage = ''
     faucetError = ''
     try {
+      const erc20 = FAUCET_TOKEN_ADDRESSES[faucetToken]
       await sendFromFaucet(to, {
         xdai: faucetToken === 'xdai' ? faucetValue : 0n,
         bzzPlur: faucetToken === 'bzz' ? faucetValue : 0n,
+        tokens: erc20 ? [{ token: erc20, amount: faucetValue }] : [],
       })
       faucetMessage = `✅ Sent ${amountLabel} ${assetLabel} to ${to}`
     } catch (error) {
@@ -422,6 +535,46 @@
       faucetBusy = false
     }
     await refreshFunds()
+  }
+
+  // RAW: these descriptors are handed to a wallet, which structured-clones its
+  // arguments, and a `$state` proxy cannot be cloned.
+  let walletChains = $state.raw<Chain[]>([])
+  let walletMessage = $state('')
+
+  // Read from the resolved rails rather than listed here, so this offers
+  // exactly the chains the payment screens will ask the wallet for.
+  $effect(() => {
+    if (activeTab === 'chain') {
+      void resolvePaymentRail().then((rail) => {
+        walletChains = rail ? [...rail.chains] : []
+      })
+    }
+  })
+
+  /**
+   * Add a chain to the injected wallet, and switch to it.
+   *
+   * Adding is what makes a wallet show a balance for a network at all, so doing
+   * it here means the payment screens are reached with something already
+   * visible rather than an account that looks empty.
+   */
+  async function addChainToWallet(chain: Chain) {
+    walletMessage = ''
+    const injected = (window as { ethereum?: EthereumProvider }).ethereum
+    if (!injected) {
+      walletMessage = '❌ No injected wallet found — is MetaMask installed and enabled here?'
+      return
+    }
+    try {
+      // MetaMask ignores chain requests from a site it has never been connected
+      // to, so ask for accounts first even though nothing here needs one.
+      await injected.request({ method: 'eth_requestAccounts' })
+      await switchWalletChain(injected, chain.id, walletChains)
+      walletMessage = `✅ ${chain.name} added — the wallet is on it now.`
+    } catch (e) {
+      walletMessage = `❌ ${e instanceof Error ? e.message : String(e)}`
+    }
   }
 
   async function runChainTool(label: string, action: (account: Account) => Promise<string>) {
@@ -1247,13 +1400,29 @@ Check console logs for details:
   <!-- Chain Tab -->
   {#if activeTab === 'chain'}
     <div class="flex flex-col gap-4">
+      <h3 class="text-lg font-semibold">Buying a drive</h3>
+      <p class="text-muted-foreground text-sm">
+        <strong>Add drive</strong> offers two payment methods, and they behave differently here. The
+        <strong>built-in</strong> engine — which is also what extend and resize use — always buys
+        for real, against whichever chain this page is pointed at: money reaches the batch owner
+        through a payment the user makes from Gnosis, which is a plain transfer with no bridge in
+        the way.
+        <strong>fund.bzz.limo</strong>, the method the payment screen offers first, settles on
+        Gnosis mainnet and nowhere else, so it cannot be exercised here at all — the simulated
+        purchase below is what stands in for it. Nothing in the app settles an operation out of the
+        faucet below; that is yours to do here, before an operation needs it.
+      </p>
+
+      <div class="bg-border my-4 h-px"></div>
+
       <h3 class="text-lg font-semibold">Simulated purchase</h3>
       <p class="text-muted-foreground text-sm">
         Simulate the product <strong>Add drive</strong> flow (Storage tab / Upgrade) without a real
         cross-chain payment — the purchase widget only settles on mainnet, so this is what makes
-        that flow reachable at all here. The batch it leaves behind is fabricated, which is why
-        extend and resize cannot act on it; for a drive backed by a real batch, use
-        <strong>Create drive to test with</strong> below.
+        that flow reachable at all here. Applies to the <strong>fund.bzz.limo</strong> method only:
+        the built-in engine never opens the widget, so nothing here reaches it. The batch it leaves
+        behind is fabricated, which is why extend and resize cannot act on it; for a drive backed by
+        a real batch, use <strong>Create drive to test with</strong> below.
       </p>
       <label class="flex items-center gap-2">
         <Switch
@@ -1324,10 +1493,15 @@ Check console logs for details:
       {/if}
 
       <div class="flex flex-col gap-2">
-        <label class={LABEL_CLASS}>
-          <span class={LABEL_TEXT_CLASS}>Recipient</span>
-          <Input bind:value={faucetTo} placeholder="0x… any address" />
-        </label>
+        <div class="flex items-end gap-2">
+          <label class="{LABEL_CLASS} flex-1">
+            <span class={LABEL_TEXT_CLASS}>Recipient</span>
+            <Input bind:value={faucetTo} placeholder="0x… any address" />
+          </label>
+          <Button variant="secondary" disabled={faucetWalletBusy} onclick={useConnectedWallet}>
+            {faucetWalletBusy ? 'Connecting…' : 'Use connected wallet'}
+          </Button>
+        </div>
         {#if faucetTo.trim() && !faucetRecipient}
           <span class="text-destructive text-sm">Not an address.</span>
         {/if}
@@ -1336,18 +1510,37 @@ Check console logs for details:
       {#if fundsError}
         <p class="text-destructive text-sm">{fundsError}</p>
       {/if}
-      {#if balanceRows.length}
-        <div class="grid grid-cols-[auto_1fr_auto_auto] items-center gap-x-4 gap-y-1 text-sm">
-          <span></span>
-          <span></span>
-          <span class="text-muted-foreground text-right text-xs">xDAI</span>
-          <span class="text-muted-foreground text-right text-xs">BZZ</span>
-          {#each balanceRows as row (row.label)}
-            <span class="text-muted-foreground">{row.label}</span>
-            <span class="font-mono text-xs break-all">{row.address}</span>
-            <span class="text-right font-mono">{row.xdai}</span>
-            <span class="text-right font-mono">{row.bzz}</span>
-          {/each}
+      {#if balanceColumns.length}
+        <!-- Scrolls rather than widening the panel: a wallet column that comes
+             and goes must not be able to push the page out of shape. -->
+        <div class="overflow-x-auto">
+          <table class="text-sm">
+            <thead>
+              <tr>
+                <th></th>
+                {#each balanceColumns as column (column.label)}
+                  <th class="pl-6 text-right font-normal">
+                    <span class="block whitespace-nowrap">{column.label}</span>
+                    <span class="text-muted-foreground block font-mono text-xs">
+                      {truncateAddress(column.address)}
+                    </span>
+                  </th>
+                {/each}
+              </tr>
+            </thead>
+            <tbody>
+              {#each BALANCE_ASSETS as asset, index (asset.label)}
+                <tr>
+                  <th scope="row" class="text-muted-foreground text-left font-normal">
+                    {asset.label}
+                  </th>
+                  {#each balanceColumns as column (column.label)}
+                    <td class="pl-6 text-right font-mono">{column.figures[index]}</td>
+                  {/each}
+                </tr>
+              {/each}
+            </tbody>
+          </table>
         </div>
       {:else}
         <p class="text-muted-foreground text-sm">Enter a recipient to see balances.</p>
@@ -1390,6 +1583,31 @@ Check console logs for details:
       {/if}
       {#if faucetError}
         <p class="text-destructive text-sm">{faucetError}</p>
+      {/if}
+
+      <div class="bg-border my-4 h-px"></div>
+
+      <h3 class="text-lg font-semibold">Wallet networks</h3>
+      <p class="text-muted-foreground text-sm">
+        Adds the chains a payment can be signed on to MetaMask, so a balance shows before you reach
+        the payment screens. <strong>Gnosis Chain (fake)</strong> is the one to add: paying from it is
+        a plain transfer to the batch owner, with no bridge in the way.
+      </p>
+      {#if walletChains.length === 0}
+        <p class="text-muted-foreground text-sm">
+          No payment chains resolved — is the Gnosis RPC in Network settings reachable?
+        </p>
+      {:else}
+        <div class="flex flex-wrap items-center gap-2">
+          {#each walletChains as chain (chain.id)}
+            <Button variant="secondary" onclick={() => addChainToWallet(chain)}>
+              Add {chain.name}
+            </Button>
+          {/each}
+        </div>
+      {/if}
+      {#if walletMessage}
+        <p class="font-mono text-sm">{walletMessage}</p>
       {/if}
 
       <div class="bg-border my-4 h-px"></div>

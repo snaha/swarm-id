@@ -7,9 +7,12 @@
   "scripts": {
     "dev": "concurrently -n ui,demo,bus -c blue,green,magenta \"pnpm dev:ui\" \"pnpm dev:demo\" \"pnpm dev:signaling\"",
     "dev:signaling": "PORT=5520 pnpm --filter @swarm-id/signaling start",
+    "dev:local": "pnpm dev:cluster:start && pnpm dev",
+    "dev:local:fresh": "pnpm dev:cluster:start --fresh && pnpm dev",
+    "dev:local:stop": "pnpm dev:chain:stop",
+    "dev:ui": "pnpm --filter @swarm-id/ui dev",
     "dev:demo": "PUBLIC_ID_DOMAIN=http://localhost:5500 pnpm --filter @swarm-id/demo exec vite dev --port 3500",
     "dev:lib": "pnpm --filter @snaha/swarm-id build:watch",
-    "dev:ui": "pnpm --filter @swarm-id/ui dev",
     "dev:docs": "pnpm --filter @swarm-id/docs dev",
     "dev:cluster": "bee-compose",
     "dev:cluster:start": "bee-compose start --full 4",

@@ -9,17 +9,18 @@
 import Onboard from '@web3-onboard/core'
 import injectedModule from '@web3-onboard/injected-wallets'
 
+import { WALLET_CHAINS } from '$lib/payment/payment-rail'
+
 const injected = injectedModule()
 const wallets = [injected]
-const chains = [
-  {
-    id: '0x1',
-    token: 'ETH',
-    label: 'Ethereum Mainnet',
-    // We don't need RPC — there are no blockchain transactions.
-    rpcUrl: 'https://swarm-id.snaha.net',
-  },
-]
+// Every chain a payment can be signed on. Declaring them is what stops onboard
+// reporting the user's network as unsupported once they switch to pay.
+const chains = WALLET_CHAINS.map((chain) => ({
+  id: `0x${chain.id.toString(16)}`,
+  token: chain.nativeCurrency.symbol,
+  label: chain.name,
+  rpcUrl: chain.rpcUrls.default.http[0],
+}))
 const appMetadata = {
   name: 'Swarm ID',
   description: 'The identity system for Swarm',

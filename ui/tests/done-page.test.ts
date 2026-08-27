@@ -3,12 +3,22 @@
 import { type Page, expect, test } from '@playwright/test'
 
 import {
+  CHAIN_TEST_TIMEOUT_MS,
   DRIVE_SETTLE_TIMEOUT_MS,
   PASSWORD,
-  addMockedDrive,
+  addDrive,
+  chainReachable,
   completeCreateFlow,
+  fundPostageSigner,
   openConnectPopup,
+  seedLocalChain,
 } from './helpers'
+
+// This suite buys through the built-in engine, which is a real on-chain
+// purchase — the /dev mock stands in for the fund.bzz.limo method alone, and
+// nothing here chooses it — so it needs a chain.
+const chainUp = await chainReachable()
+test.skip(!chainUp, 'requires a local chain (pnpm dev:local)')
 
 const DEMO_URL = 'http://localhost:3500'
 const APP_NAME = 'Swarm ID Demo'
@@ -34,6 +44,7 @@ async function expectDrivePitch(page: Page) {
 }
 
 test('create flow ends on the done page with the drive pitch', async ({ page }) => {
+  await seedLocalChain(page)
   await page.goto('/')
   // A first visit lands on the product page; "Get started" opts into the
   // account chooser (/?signin).
@@ -50,13 +61,16 @@ test('create flow ends on the done page with the drive pitch', async ({ page }) 
 })
 
 test('first connect with a single drive confirms without picker or pitch', async ({ page }) => {
+  test.setTimeout(CHAIN_TEST_TIMEOUT_MS)
   // Account created standalone with exactly one drive, never connected.
+  await seedLocalChain(page)
   await page.goto('/')
   await page.getByRole('link', { name: 'Get started' }).first().click()
   await completeCreateFlow(page)
   await page.getByRole('button', { name: 'Stay local for now' }).click()
   await expect(page).toHaveURL(/\/$/)
-  await addMockedDrive(page)
+  await fundPostageSigner(page)
+  await addDrive(page)
   await expect(page.getByText(/^Drive [0-9a-f]{4}$/)).toBeVisible({
     timeout: DRIVE_SETTLE_TIMEOUT_MS,
   })
@@ -77,6 +91,7 @@ test('first connect with a single drive confirms without picker or pitch', async
 })
 
 test('connect flow shows the done screen variants and closes the popup', async ({ page }) => {
+  test.setTimeout(CHAIN_TEST_TIMEOUT_MS)
   await page.goto(DEMO_URL)
 
   // Fresh profile: create the account inside the connect popup. No drives yet
@@ -95,10 +110,12 @@ test('connect flow shows the done screen variants and closes the popup', async (
   const accountButton = page.getByRole('button', { name: /0x|[0-9a-f]{6}\.\.\./ }).first()
   await expect(accountButton).toBeVisible({ timeout: 10000 })
 
-  // Give the account a drive via the mocked Add-drive flow (dev default:
-  // mock enabled, no widget popup).
+  // Give the account a drive. Funded out of band first, so the purchase finds
+  // the owner address already stocked and no payment screen opens.
+  await seedLocalChain(page)
   await page.goto('/')
-  await addMockedDrive(page)
+  await fundPostageSigner(page)
+  await addDrive(page)
   // Drive cards are labelled "Drive <4 hex chars>" (batch-ID-derived name).
   await expect(page.getByText(/^Drive [0-9a-f]{4}$/)).toBeVisible({
     timeout: DRIVE_SETTLE_TIMEOUT_MS,
@@ -129,6 +146,7 @@ test('connect flow shows the done screen variants and closes the popup', async (
   // association entirely — unlike a disconnect, the account must no longer
   // list under "Previously used with this app" (the removal leaves a revoked
   // tombstone in the record for sync, which must not resurrect it).
+  await seedLocalChain(page)
   await page.goto('/')
   await page.getByRole('tab', { name: 'Apps' }).click()
   await page.getByRole('button', { name: 'App actions' }).click()
@@ -136,7 +154,8 @@ test('connect flow shows the done screen variants and closes the popup', async (
 
   // A second drive, so the NEXT (first-again) connect must ask which drive
   // the app should use.
-  await addMockedDrive(page)
+  await fundPostageSigner(page)
+  await addDrive(page)
   await expect(page.getByText(/^Drive [0-9a-f]{4}$/)).toHaveCount(2, {
     timeout: DRIVE_SETTLE_TIMEOUT_MS,
   })
@@ -159,6 +178,7 @@ test('connect flow shows the done screen variants and closes the popup', async (
   await drivePicker.selectOption({ index: 1 })
   await goToApp(popup)
 
+  await seedLocalChain(page)
   await page.goto('/')
   const appDrive = await page.evaluate(() => {
     const doc = JSON.parse(localStorage.getItem('swarm-id-accounts') ?? '{}') as {

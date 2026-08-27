@@ -24,6 +24,7 @@ import {
   getBzzBalance,
   transferBzz,
   transferNative,
+  transferToken,
 } from "./tokens"
 import { waitForTransactionSuccess } from "./waiter"
 
@@ -52,6 +53,19 @@ export interface FundLocalAccountOptions {
   xdai: bigint
   /** BZZ in PLUR; 0n skips the token transfer. */
   bzzPlur: bigint
+  /**
+   * Any other ERC20 the faucet holds, by address and amount. Open-ended
+   * because the payment tokens are the app's list, not this module's — the
+   * bake stocks the faucet with them and this hands them on.
+   */
+  tokens?: readonly { token: `0x${string}`; amount: bigint }[]
+  /**
+   * Who pays. Defaults to the chain's faucet, which is the right answer for
+   * anything funding one address at a time. Callers that fund CONCURRENTLY
+   * must each pass their own key: two senders sharing an address read the same
+   * pending nonce and one of the two transactions is thrown away.
+   */
+  from?: `0x${string}`
 }
 
 /**
@@ -63,11 +77,12 @@ export async function fundLocalAccount(
   settings: MultichainSettings,
 ): Promise<void> {
   const rpcProvider = new RollingValueProvider(settings.rpcUrls)
+  const from = options.from ?? DEV_FAUCET_PRIVATE_KEY
   if (options.xdai > 0n) {
     const hash = await transferNative(
       {
         amount: options.xdai,
-        originPrivateKey: DEV_FAUCET_PRIVATE_KEY,
+        originPrivateKey: from,
         to: options.to,
       },
       settings,
@@ -79,7 +94,25 @@ export async function fundLocalAccount(
     const hash = await transferBzz(
       {
         amount: options.bzzPlur,
-        originPrivateKey: DEV_FAUCET_PRIVATE_KEY,
+        originPrivateKey: from,
+        to: options.to,
+      },
+      settings,
+      rpcProvider,
+    )
+    await waitForTransactionSuccess(hash, settings, rpcProvider)
+  }
+  // Sequential, and each awaited: they share a sender, so two in flight would
+  // read the same pending nonce and one would be dropped silently.
+  for (const entry of options.tokens ?? []) {
+    if (entry.amount <= 0n) {
+      continue
+    }
+    const hash = await transferToken(
+      {
+        token: entry.token,
+        amount: entry.amount,
+        originPrivateKey: from,
         to: options.to,
       },
       settings,
