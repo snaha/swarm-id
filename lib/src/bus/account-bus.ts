@@ -3,10 +3,13 @@
 
 /**
  * The account bus: a real-time message channel between the live contexts of an
- * account. Today that is the proxy iframes — the only place it is constructed;
- * SwarmID tabs are in scope per `docs/Account-Bus.md` but do not join one, and
- * nothing yet needs them to (they are not batch writers, and account data
- * reaches an unpartitioned iframe through storage events).
+ * account. Two contexts construct one: the proxy iframes, and — since the
+ * `account-delta` publisher — the SwarmID tab, which is where a revoke happens
+ * and the only context that can tell a partitioned iframe about one. The tab
+ * attaches the signaling transport alone: everything a `BroadcastChannel`
+ * reaches from there already converges through storage events, and the
+ * partitioned iframe is in another storage partition, which only a server round
+ * trip crosses.
  *
  * Durable truth stays in storage; the bus only carries deltas and coordination
  * between live peers. Publishers never receive their own messages back.

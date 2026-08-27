@@ -11,7 +11,7 @@ import type { SignedInAccount } from '@snaha/swarm-id'
 import { deriveBusContext } from '@snaha/swarm-id'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
-import { accountBusStore } from './account-bus.svelte'
+import { PUBLISH_DEBOUNCE_MS, accountBusStore } from './account-bus'
 
 const SIGNALING_URL = 'ws://signaling.test'
 const signalingUrlStub = vi.hoisted(() => ({ value: undefined as string | undefined }))
@@ -28,10 +28,18 @@ const transports = vi.hoisted(
       close: ReturnType<typeof vi.fn>
     }[],
 )
+/** Holds the topic derivation open, so "a publish during the join" is a real
+ *  window rather than a race the two HMACs would normally win. Unset for every
+ *  test that does not care. */
+const deriveGate = vi.hoisted(() => ({ value: undefined as Promise<void> | undefined }))
 vi.mock('@snaha/swarm-id', async (importActual) => {
   const actual = await importActual<typeof import('@snaha/swarm-id')>()
   return {
     ...actual,
+    deriveBusContext: async (derivationKey: string) => {
+      await deriveGate.value
+      return actual.deriveBusContext(derivationKey)
+    },
     SignalingTransport: vi.fn(function (options: { url: string; topic: string }) {
       const transport = {
         options,
@@ -96,14 +104,16 @@ function makeAccount(overrides?: Partial<SignedInAccount>): SignedInAccount {
 /** The join derives a topic (two HMACs + importKey), so it is not synchronous. */
 const settle = () => new Promise((resolve) => setTimeout(resolve, 60))
 /** Past the publish debounce — a "did not publish" assertion that resolves
- *  before the timer would have fired proves nothing. */
-const settlePublish = () => new Promise((resolve) => setTimeout(resolve, 400))
+ *  before the timer would have fired proves nothing, so this is derived from
+ *  the store's own constant rather than a number that can drift behind it. */
+const settlePublish = () => new Promise((resolve) => setTimeout(resolve, PUBLISH_DEBOUNCE_MS + 100))
 
 describe('accountBusStore', () => {
   beforeEach(() => {
     accountBusStore.leave()
     transports.length = 0
     signalingUrlStub.value = SIGNALING_URL
+    deriveGate.value = undefined
   })
 
   it('joins the account-derived room, not one named by the account id', async () => {
@@ -151,6 +161,49 @@ describe('accountBusStore', () => {
     await settlePublish()
 
     expect(transports[0].publish).not.toHaveBeenCalled()
+  })
+
+  // The debounce holds ONE pending account. A commit for another account
+  // landing in the same window used to overwrite it, and the publish-time guard
+  // then dropped the intruder — losing the joined account's delta rather than
+  // ignoring the other one's. A revoke is what goes missing.
+  it('keeps the joined account pending when another account commits in the same window', async () => {
+    const account = makeAccount()
+    accountBusStore.join(account)
+    await settle()
+
+    accountBusStore.publish(account)
+    accountBusStore.publish(
+      makeAccount({
+        id: new EthAddress('bb'.repeat(20)),
+        derivationKey: OTHER_DERIVATION_KEY,
+      }),
+    )
+    await settlePublish()
+
+    const published = transports[0].publish.mock.calls.map(([message]) => message)
+    expect(published).toHaveLength(1)
+    expect(published[0].snapshot.accountId).toBe(account.id.toHex())
+  })
+
+  // Joining derives the topic, which is async. A revoke committed right after
+  // an account is selected falls in that window, and a publish dropped there is
+  // never re-sent — the next mutation is the earliest the iframe hears anything.
+  it('publishes a commit that lands while the join is still deriving', async () => {
+    let openGate = () => {}
+    deriveGate.value = new Promise<void>((resolve) => {
+      openGate = resolve
+    })
+    const account = makeAccount()
+
+    accountBusStore.join(account)
+    accountBusStore.publish(account)
+    await settlePublish()
+    openGate()
+    await settle()
+
+    expect(transports).toHaveLength(1)
+    expect(transports[0].publish).toHaveBeenCalledTimes(1)
   })
 
   it('closes the previous room when the account switches', async () => {

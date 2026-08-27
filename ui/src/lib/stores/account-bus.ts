@@ -31,10 +31,15 @@ import { busSignalingUrl } from '$lib/bus-signaling-url'
  * Swarm-sync debounce: that one batches feed writes, this one carries a revoke,
  * and a revoke the user is watching for should not wait on a batching window.
  */
-const PUBLISH_DEBOUNCE_MS = 300
+export const PUBLISH_DEBOUNCE_MS = 300
 
 let bus: AccountBus | undefined
+/** The account this tab is committed to, set the moment `join()` is called
+ *  rather than when the transport comes up: a publish landing during the
+ *  derivation belongs to this account and must be held, not dropped. */
 let joinedKey: string | undefined
+/** The in-flight join, so a publish can wait for it instead of racing it. */
+let attaching: Promise<void> | undefined
 let publishTimer: ReturnType<typeof setTimeout> | undefined
 let pending: SyncedAccount | undefined
 /** Bumped by every join and leave, so a join whose key derivation is still in
@@ -46,6 +51,7 @@ function closeBus(): void {
   bus?.close()
   bus = undefined
   joinedKey = undefined
+  attaching = undefined
 }
 
 async function attach(account: SyncedAccount, forGeneration: number): Promise<void> {
@@ -65,14 +71,22 @@ async function attach(account: SyncedAccount, forGeneration: number): Promise<vo
       typeof RTCPeerConnection !== 'undefined' ? () => new RTCPeerConnection() : undefined,
   })
   bus = new AccountBus([transport])
-  joinedKey = account.derivationKey
 }
 
 function publishNow(account: SyncedAccount): void {
+  // A superseded or failed join leaves no bus, and `leave()` clears the key.
   if (!bus || account.derivationKey !== joinedKey) return
   const snapshot = accountStateSnapshot(account)
   if (!snapshot) return
   bus.publish({ type: 'account-delta', snapshot: accountDeltaSnapshot(snapshot) })
+}
+
+/** Wait out a join still deriving its topic, then publish. Without the wait a
+ *  revoke committed right after an account is selected is dropped, and nothing
+ *  re-sends it — the next mutation is the earliest a peer hears anything. */
+async function flush(account: SyncedAccount): Promise<void> {
+  await attaching
+  publishNow(account)
 }
 
 export const accountBusStore = {
@@ -83,8 +97,9 @@ export const accountBusStore = {
   join(account: SyncedAccount): void {
     if (joinedKey === account.derivationKey) return
     closeBus()
+    joinedKey = account.derivationKey
     const forGeneration = ++generation
-    void attach(account, forGeneration).catch((error: unknown) => {
+    attaching = attach(account, forGeneration).catch((error: unknown) => {
       console.error('[AccountBus] Failed to join the account room:', error)
     })
   },
@@ -107,13 +122,18 @@ export const accountBusStore = {
    * derived topic exists to prevent.
    */
   publish(account: SyncedAccount): void {
+    // Refused HERE, not at publish time: the debounce holds one account, so an
+    // unjoined one accepted now evicts the joined one's pending delta and is
+    // then dropped on its way out — losing a revoke rather than ignoring a
+    // stranger.
+    if (account.derivationKey !== joinedKey) return
     pending = account
     if (publishTimer !== undefined) clearTimeout(publishTimer)
     publishTimer = setTimeout(() => {
       publishTimer = undefined
       const account = pending
       pending = undefined
-      if (account) publishNow(account)
+      if (account) void flush(account)
     }, PUBLISH_DEBOUNCE_MS)
   },
 }

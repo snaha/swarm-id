@@ -14,7 +14,7 @@
   // data — #389 can relocate it out of `$lib/dev`; not worth the churn here.
   import { foldCurrentAccount, startFoldInterval } from '$lib/dev/account-refresh'
   import { triggerSync } from '$lib/dev/sync-hooks'
-  import { accountBusStore } from '$lib/stores/account-bus.svelte'
+  import { accountBusStore } from '$lib/stores/account-bus'
   import { accountsStore, setAccountsSyncHook } from '$lib/stores/accounts.svelte'
   import { sessionStore } from '$lib/stores/session.svelte'
   import { themeStore } from '$lib/stores/theme.svelte'
