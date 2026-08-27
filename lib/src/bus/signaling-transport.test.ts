@@ -407,6 +407,41 @@ describe("SignalingTransport — joining a room", () => {
       transport.close()
     }
   })
+
+  // The fallback is the one reconnect path that did not ask whether this
+  // transport is still wanted. A close racing a server-initiated 1008 would
+  // reopen a socket nothing holds a handle to any more, join the room, and sit
+  // there as a ghost peer until the page unloads — every other reconnect goes
+  // through `scheduleReconnect`, which returns on `closed`.
+  it("does not fall back after the transport is closed", async () => {
+    const opened: { url: string; socket: FakeSocket }[] = []
+    class FakeSocket extends EventTarget {
+      static OPEN = 1
+      readyState = 0
+      constructor(readonly url: string) {
+        super()
+        opened.push({ url, socket: this })
+      }
+      send(): void {}
+      close(): void {}
+    }
+    vi.stubGlobal("WebSocket", FakeSocket)
+    const transport = makeTransport()
+    try {
+      await vi.waitFor(() => expect(opened).toHaveLength(1))
+      transport.close()
+
+      opened[0].socket.dispatchEvent(
+        Object.assign(new Event("close"), { code: 1008 }),
+      )
+
+      await new Promise((resolve) => setTimeout(resolve, 20))
+      expect(opened).toHaveLength(1)
+    } finally {
+      vi.unstubAllGlobals()
+      transport.close()
+    }
+  })
 })
 
 describe("SignalingTransport — WebRTC upgrade", () => {

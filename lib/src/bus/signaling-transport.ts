@@ -53,11 +53,15 @@ const RECONNECT_MAX_DELAY_MS = 30000
 const DATA_CHANNEL_LABEL = "bus"
 /**
  * The server's close code for a topic it refuses, and the only close it sends
- * that is permanent — everything transient comes back as 1013. Mirrors the
- * constant exported from `signaling/src/server.ts` rather than importing it:
- * that module pulls in `ws` and `node:http`, and `@swarm-id/signaling` is a
- * devDependency here, so an import would drag a Node-only server into the
- * browser bundle for the sake of one number.
+ * that is permanent — everything transient comes back as 1013, and a socket
+ * turned away for never naming a room gets 4408 (`WS_CLOSE_JOIN_TIMEOUT`),
+ * deliberately NOT this code: the fallback below reads 1008 as "a server older
+ * than the join frame", and answering a join timeout that way would put the
+ * topic back in the URL for the life of the page. Mirrors the constant exported
+ * from `signaling/src/server.ts` rather than importing it: that module pulls in
+ * `ws` and `node:http`, and `@swarm-id/signaling` is a devDependency here, so an
+ * import would drag a Node-only server into the browser bundle for the sake of
+ * one number.
  */
 const WS_CLOSE_POLICY_VIOLATION = 1008
 
@@ -201,7 +205,11 @@ export class SignalingTransport implements BusTransport {
         // refuses a socket that named no topic in the URL. Retry once the old
         // way rather than leave this context bus-less for the life of the page
         // — the deploy window is exactly when a reload happens.
-        if (!this.legacyTopicInUrl) {
+        // `closed` is checked here for the same reason `scheduleReconnect`
+        // checks it: a `close()` racing a server-initiated 1008 would otherwise
+        // reopen a socket nothing holds a handle to, join the room, and leave a
+        // ghost peer there until the page unloads.
+        if (!this.legacyTopicInUrl && !this.closed) {
           this.legacyTopicInUrl = true
           this.connect()
           return

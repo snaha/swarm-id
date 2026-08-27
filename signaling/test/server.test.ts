@@ -10,6 +10,7 @@ import { WebSocket as WS } from 'ws'
 
 import {
   createSignalingServer,
+  WS_CLOSE_JOIN_TIMEOUT,
   WS_CLOSE_POLICY_VIOLATION,
   WS_CLOSE_TRY_AGAIN_LATER,
 } from '../src/server'
@@ -399,6 +400,10 @@ describe('signaling server', () => {
 
     // A socket that never joins holds a connection slot for nothing, which is
     // a cheaper flood than any the caps in #575 bound.
+    //
+    // Its own close code, NOT 1008: a client reads 1008 as "this server is
+    // older than the join frame" and answers by putting the topic back in the
+    // URL for the life of the page, which is what #577 exists to stop.
     it('drops a socket that never sends its join frame', async () => {
       const quick = await createSignalingServer({ port: 0, preJoinTimeoutMs: 100 })
       try {
@@ -406,9 +411,48 @@ describe('signaling server', () => {
         const code = await new Promise<number>((resolve) => {
           socket.addEventListener('close', (event) => resolve(event.code))
         })
-        expect(code).toBe(WS_CLOSE_POLICY_VIOLATION)
+        expect(code).toBe(WS_CLOSE_JOIN_TIMEOUT)
+        expect(code).not.toBe(WS_CLOSE_POLICY_VIOLATION)
       } finally {
         await quick.close()
+      }
+    })
+
+    // A second join is not a room change: the peer is already in one, and
+    // moving it would leave the first room announcing a peer that left it.
+    it('ignores a second join frame', async () => {
+      const client = await joinByFrame(randomTopic())
+      try {
+        client.socket.send(JSON.stringify({ type: 'join', topic: randomTopic() }))
+        await new Promise((resolve) => setTimeout(resolve, EVENT_SETTLE_MS))
+
+        expect(client.received.filter((m) => m.type === 'welcome')).toHaveLength(1)
+      } finally {
+        client.close()
+      }
+    })
+
+    // A refusal closes the socket but cannot make the client stop talking: the
+    // frame may already be in flight, and a rude client ignores the close
+    // outright. Admitting it then puts a CLOSING socket in the room and tells
+    // every member a peer joined that is about to be terminated — the members'
+    // rosters carry a phantom until the `close` event self-heals it.
+    it('ignores a join from a socket it already refused', async () => {
+      const capped = await createSignalingServer({ port: 0, maxRooms: 1 })
+      const topic = randomTopic()
+      const resident = await connect(topic, capped.port)
+      // The room cap is what refuses this one; the room it then asks for is the
+      // one that already exists, so nothing else would turn it away.
+      const rude = await rudeUpgrade(capped.port, randomTopic())
+      try {
+        rude.write(clientFrame(JSON.stringify({ type: 'join', topic })))
+        await new Promise((resolve) => setTimeout(resolve, EVENT_SETTLE_MS))
+
+        expect(resident.received.filter((m) => m.type === 'peer-joined')).toHaveLength(0)
+      } finally {
+        rude.destroy()
+        resident.close()
+        await capped.close()
       }
     })
 

@@ -46,6 +46,16 @@ const HTTP_SERVICE_UNAVAILABLE = 503
 export const WS_CLOSE_POLICY_VIOLATION = 1008
 /** Transient — the client backs off and comes back. */
 export const WS_CLOSE_TRY_AGAIN_LATER = 1013
+/**
+ * A socket that never named a room (`preJoinTimeoutMs`). Its own code rather
+ * than 1008, because 1008 already means "this server predates the join frame"
+ * to a client, which answers it by putting the topic back in the URL for the
+ * life of the page — the exact thing #577 removes. Application range (4000+),
+ * numbered after HTTP 408 so it reads as what it is; a client that does not
+ * know it backs off and retries, which is the right answer for a socket that
+ * failed to speak in time.
+ */
+export const WS_CLOSE_JOIN_TIMEOUT = 4408
 
 /**
  * `ws` keeps a closing socket in `wss.clients` for up to 30 s waiting for the
@@ -264,6 +274,13 @@ export function createSignalingServer(options: SignalingServerOptions): Promise<
     /** Admit this socket to a room, or refuse it. Same answer either way in,
      *  so the query string and the join frame cannot drift apart. */
     const join = (topic: string): void => {
+      // Refusing a socket closes it, but cannot stop the client talking — a
+      // frame may already be in flight, and a rude client ignores the close
+      // outright (`REFUSAL_LINGER_MS`). Admitting one anyway would put a
+      // CLOSING socket in the room and announce a peer that is about to be
+      // terminated. The `joined` half is the same guard read the other way: a
+      // peer already in a room does not get moved to another.
+      if (joined || socket.readyState !== WebSocket.OPEN) return
       if (!TOPIC_PATTERN.test(topic)) {
         refuse(socket, WS_CLOSE_POLICY_VIOLATION, 'invalid topic')
         return
@@ -298,11 +315,12 @@ export function createSignalingServer(options: SignalingServerOptions): Promise<
     // Unjoined sockets are turned away rather than left to sit: one that never
     // names a room costs a connection slot for nothing. Unref'd so it cannot be
     // what keeps the process alive.
-    const preJoinTimer = queryTopic
-      ? undefined
-      : setTimeout(() => {
-          if (!joined) refuse(socket, WS_CLOSE_POLICY_VIOLATION, 'no join')
-        }, preJoinTimeoutMs)
+    const preJoinTimer =
+      queryTopic !== null
+        ? undefined
+        : setTimeout(() => {
+            if (!joined) refuse(socket, WS_CLOSE_JOIN_TIMEOUT, 'no join')
+          }, preJoinTimeoutMs)
     preJoinTimer?.unref()
 
     if (queryTopic !== null) join(queryTopic)
