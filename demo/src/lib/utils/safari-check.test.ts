@@ -21,7 +21,6 @@ function verdictOf(results: CheckResult[], id: string): string {
 
 function connected(overrides: Partial<NonNullable<CheckInput['connection']>> = {}) {
   return {
-    canUpload: true,
     storagePartitioned: true,
     uploadMode: 'user-stamp' as const,
     deviceId: DEVICE,
@@ -31,7 +30,7 @@ function connected(overrides: Partial<NonNullable<CheckInput['connection']>> = {
 
 describe('runChecks', () => {
   it('reports nothing as known before a connection', () => {
-    const results = runChecks({ loadsSinceFirstSeen: 0 })
+    const results = runChecks({ loadCount: 0 })
     for (const result of results) expect(result.verdict).toBe('unknown')
   })
 
@@ -40,7 +39,7 @@ describe('runChecks', () => {
   it('does not credit the handover when storage was never partitioned', () => {
     const results = runChecks({
       connection: connected({ storagePartitioned: false }),
-      loadsSinceFirstSeen: 0,
+      loadCount: 0,
     })
     expect(verdictOf(results, 'partitioned')).toBe('fail')
     expect(verdictOf(results, 'handover')).toBe('unknown')
@@ -49,20 +48,20 @@ describe('runChecks', () => {
   // On the partitioned path the only way to hold a stamp is the popup's
   // postMessage having reached the iframe through `window.opener`.
   it('credits the handover when a partitioned session holds its own stamp', () => {
-    const results = runChecks({ connection: connected(), loadsSinceFirstSeen: 0 })
+    const results = runChecks({ connection: connected(), loadCount: 0 })
     expect(verdictOf(results, 'handover')).toBe('pass')
   })
 
   it('fails the handover when a partitioned session cannot write', () => {
     const results = runChecks({
-      connection: connected({ uploadMode: 'unavailable', canUpload: false }),
-      loadsSinceFirstSeen: 0,
+      connection: connected({ uploadMode: 'unavailable' }),
+      loadCount: 0,
     })
     expect(verdictOf(results, 'handover')).toBe('fail')
   })
 
   it('cannot judge persistence on the first load', () => {
-    const results = runChecks({ connection: connected(), loadsSinceFirstSeen: 0 })
+    const results = runChecks({ connection: connected(), loadCount: 0 })
     expect(verdictOf(results, 'persistence')).toBe('unknown')
   })
 
@@ -70,7 +69,7 @@ describe('runChecks', () => {
     const results = runChecks({
       connection: connected(),
       previousDeviceId: DEVICE,
-      loadsSinceFirstSeen: 3,
+      loadCount: 3,
     })
     expect(verdictOf(results, 'persistence')).toBe('pass')
   })
@@ -81,7 +80,7 @@ describe('runChecks', () => {
     const results = runChecks({
       connection: connected(),
       previousDeviceId: OTHER_DEVICE,
-      loadsSinceFirstSeen: 1,
+      loadCount: 1,
     })
     const persistence = results.find((result) => result.id === 'persistence')!
     expect(persistence.verdict).toBe('fail')
@@ -89,18 +88,18 @@ describe('runChecks', () => {
   })
 
   it('reports the upload round trip only once attempted', () => {
-    expect(
-      verdictOf(runChecks({ connection: connected(), loadsSinceFirstSeen: 0 }), 'upload'),
-    ).toBe('unknown')
+    expect(verdictOf(runChecks({ connection: connected(), loadCount: 0 }), 'upload')).toBe(
+      'unknown',
+    )
     expect(
       verdictOf(
-        runChecks({ connection: connected(), loadsSinceFirstSeen: 0, uploadRoundTrip: 'ok' }),
+        runChecks({ connection: connected(), loadCount: 0, uploadRoundTrip: 'ok' }),
         'upload',
       ),
     ).toBe('pass')
     expect(
       verdictOf(
-        runChecks({ connection: connected(), loadsSinceFirstSeen: 0, uploadRoundTrip: 'failed' }),
+        runChecks({ connection: connected(), loadCount: 0, uploadRoundTrip: 'failed' }),
         'upload',
       ),
     ).toBe('fail')
@@ -111,7 +110,7 @@ describe('formatReport', () => {
   // The tester pastes this back; it has to carry the verdicts AND the device
   // it ran on, or a result cannot be attributed to an iOS version.
   it('renders every verdict and the environment', () => {
-    const report = formatReport(runChecks({ connection: connected(), loadsSinceFirstSeen: 0 }), {
+    const report = formatReport(runChecks({ connection: connected(), loadCount: 0 }), {
       userAgent: 'iPhone',
       idOrigin: 'https://swarm-id.snaha.net',
     })

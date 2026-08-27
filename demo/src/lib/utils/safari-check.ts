@@ -18,15 +18,14 @@
 export interface CheckInput {
   /** ConnectionInfo as last reported by the proxy. */
   connection?: {
-    canUpload: boolean
     storagePartitioned?: boolean
     uploadMode?: 'user-stamp' | 'subsidised' | 'unavailable'
     deviceId?: string
   }
   /** The device id this page recorded on an earlier load, if any. */
   previousDeviceId?: string
-  /** How many page loads ago that was recorded (0 = this load). */
-  loadsSinceFirstSeen: number
+  /** Page loads this page has counted since the last reset, including this one. */
+  loadCount: number
   /** Whether an upload attempt in this session round-tripped. */
   uploadRoundTrip?: 'ok' | 'failed'
 }
@@ -137,7 +136,7 @@ function storagePersistence(input: CheckInput): CheckResult {
         id: 'persistence',
         title: 'Partitioned storage survives reloads',
         verdict: 'pass',
-        detail: `Same device id across ${input.loadsSinceFirstSeen} load(s): ${current.slice(0, 8)}….`,
+        detail: `Same device id across ${input.loadCount} load(s): ${current.slice(0, 8)}….`,
       }
     : {
         id: 'persistence',

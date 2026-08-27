@@ -26,9 +26,17 @@
   const SEEN_KEY = 'safari-check-device'
   const LOADS_KEY = 'safari-check-loads'
   const TEST_PAYLOAD = 'swarm-id safari check'
+  const COPY_RESET_MS = 2000
+
+  /**
+   * Module scope, so it is read once per real page load rather than once per
+   * mount: navigating away in the SPA and back would otherwise re-read the id
+   * this same JS session just recorded and report a reload it never survived.
+   */
+  let pageLoad: { previousDeviceId?: string; loadCount: number } | undefined
 
   let previousDeviceId = $state<string | undefined>(undefined)
-  let loadsSinceFirstSeen = $state(0)
+  let loadCount = $state(0)
   let uploadRoundTrip = $state<'ok' | 'failed' | undefined>(undefined)
   let uploading = $state(false)
   let reference = $state<string | undefined>(undefined)
@@ -37,14 +45,13 @@
   const input = $derived<CheckInput>({
     connection: clientStore.authenticated
       ? {
-          canUpload: clientStore.canUpload,
           storagePartitioned: clientStore.storagePartitioned,
           uploadMode: clientStore.uploadMode,
           deviceId: clientStore.deviceId,
         }
       : undefined,
     previousDeviceId,
-    loadsSinceFirstSeen,
+    loadCount,
     uploadRoundTrip,
   })
   const results = $derived(runChecks(input))
@@ -54,16 +61,23 @@
     dAppOrigin: typeof location === 'undefined' ? 'unknown' : location.origin,
     identityOrigin: resolveProxyOrigin(),
     deviceId: clientStore.deviceId ?? '(none yet)',
-    loads: String(loadsSinceFirstSeen),
+    loads: String(loadCount),
   })
 
   onMount(() => {
     // Read BEFORE this load's id arrives, so the comparison is against what an
-    // earlier load recorded rather than against itself.
-    previousDeviceId = localStorage.getItem(SEEN_KEY) ?? undefined
-    loadsSinceFirstSeen = Number(localStorage.getItem(LOADS_KEY) ?? '0') + 1
-    localStorage.setItem(LOADS_KEY, String(loadsSinceFirstSeen))
+    // earlier load recorded rather than against itself — and only once per page
+    // load, so a remount cannot count as one.
+    pageLoad ??= readPageLoad()
+    previousDeviceId = pageLoad.previousDeviceId
+    loadCount = pageLoad.loadCount
   })
+
+  function readPageLoad() {
+    const count = Number(localStorage.getItem(LOADS_KEY) ?? '0') + 1
+    localStorage.setItem(LOADS_KEY, String(count))
+    return { previousDeviceId: localStorage.getItem(SEEN_KEY) ?? undefined, loadCount: count }
+  }
 
   // Record this load's id only once it is known, so a reload has something to
   // compare against next time.
@@ -99,14 +113,15 @@
   async function copyReport() {
     await navigator.clipboard.writeText(formatReport(results, environment))
     copied = true
-    setTimeout(() => (copied = false), 2000)
+    setTimeout(() => (copied = false), COPY_RESET_MS)
   }
 
   function resetHistory() {
     localStorage.removeItem(SEEN_KEY)
     localStorage.removeItem(LOADS_KEY)
+    pageLoad = { loadCount: 0 }
     previousDeviceId = undefined
-    loadsSinceFirstSeen = 0
+    loadCount = 0
   }
 </script>
 
@@ -184,7 +199,11 @@
       <li>Open this page on the iPhone, in normal (non-private) Safari.</li>
       <li>Tap <strong>Connect</strong> and complete the popup on the identity site.</li>
       <li>Tap <strong>Upload &amp; read back</strong>.</li>
-      <li>Reload this page. The device-id check turns green or red on the second load.</li>
+      <li>
+        Reload this page and tap <strong>Connect</strong> again — credentials live only in memory on the
+        partitioned path, so nothing reports a device id until the session is back. The device-id check
+        turns green or red then.
+      </li>
       <li>
         Repeat in a <strong>Private</strong> tab — the session is expected to be ephemeral there, so a
         fresh device id is the correct answer, not a failure.
