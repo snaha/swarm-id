@@ -122,7 +122,12 @@ describe('openStampPurchaseWidget', () => {
     vi.stubGlobal('window', {
       open: () => popup,
       addEventListener: (_type: string, fn: (event: unknown) => void) => (listener = fn),
-      removeEventListener: () => undefined,
+      // Actually drops the listener. A no-op here lets `post()` keep delivering
+      // after `cleanup()`, so any test about what happens once the service has
+      // detached would pass while exercising a listener the real code removed.
+      removeEventListener: (_type: string, fn: (event: unknown) => void) => {
+        if (listener === fn) listener = undefined
+      },
     })
   })
 
@@ -204,6 +209,46 @@ describe('openStampPurchaseWidget', () => {
     expect(popup.close).toHaveBeenCalled()
   })
 
+  // What the deployed build actually posts (`{event: 'error', error: <err>}`).
+  // Reading only `message` turned every real widget failure into the generic
+  // "Widget error", which is the one string a user can do nothing with.
+  it('reports the error the widget actually sends', () => {
+    open()
+    post({ event: 'error', error: 'Insufficient balance for the swap' })
+    expect(callbacks.onError).toHaveBeenCalledWith(
+      expect.objectContaining({ message: 'Insufficient balance for the swap' }),
+    )
+  })
+
+  it('unwraps an Error object posted by the widget', () => {
+    open()
+    post({ event: 'error', error: new Error('Swap reverted') })
+    expect(callbacks.onError).toHaveBeenCalledWith(
+      expect.objectContaining({ message: 'Swap reverted' }),
+    )
+  })
+
+  // The same rule `cancel()` and `finish` follow: a popup holding the user's
+  // money on the temporary wallet is never forced shut — its pipeline runs
+  // client-side, so killing it strands the funds (#550). The widget can also
+  // recover in-popup (its `payment` events carry a `resumed` flag), so the
+  // listener stays attached: a batch that recovery settles must still land.
+  it('leaves an errored popup open once money is in flight', () => {
+    open()
+    post(PAYMENT_SENT)
+    post({ event: 'error', error: 'Swap failed' })
+    expect(callbacks.onError).toHaveBeenCalled()
+    expect(popup.close).not.toHaveBeenCalled()
+  })
+
+  it('still records a batch the widget settles after an error', () => {
+    open()
+    post(PAYMENT_SENT)
+    post({ event: 'error', error: 'Swap failed' })
+    post(makeEvent())
+    expect(callbacks.onSuccess).toHaveBeenCalledWith(expect.objectContaining({ batchId: BATCH_ID }))
+  })
+
   it('cancel() closes the popup before any payment', () => {
     const handle = open()
     handle.cancel()
@@ -215,6 +260,22 @@ describe('openStampPurchaseWidget', () => {
     post(PAYMENT_SENT)
     handle.cancel()
     expect(popup.close).not.toHaveBeenCalled()
+  })
+
+  // Cancelling after a payment is the one exit that tells the user nothing: no
+  // callback fires (they asked for it), and the popup keeps running with their
+  // money in it. `cancel()` reports that, so the caller can say so.
+  it('cancel() reports whether the popup was left running with money in it', () => {
+    const clean = open()
+    expect(clean.cancel()).toBe(false)
+
+    callbacks = makeCallbacks()
+    const paid = open()
+    post(PAYMENT_SENT)
+    expect(paid.cancel()).toBe(true)
+    // Terminal either way: a second cancel (the dialog's `onDestroy` after its
+    // own `close()`) must not toast twice.
+    expect(paid.cancel()).toBe(false)
   })
 
   it('cancel() leaves the popup open once a batch settled, so the sweep finishes', () => {

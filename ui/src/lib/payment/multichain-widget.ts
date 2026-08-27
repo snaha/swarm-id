@@ -126,6 +126,28 @@ function coerceObject(data: unknown): Record<string, unknown> | undefined {
 }
 
 /**
+ * The message out of a widget `error` event.
+ *
+ * The deployed build posts `{event: 'error', error: <err>}`, where `<err>` is a
+ * string or a structured-cloned `Error`; `message` is accepted too, since the
+ * widget's shapes are not a documented contract. Reading only `message` turned
+ * every real failure into the generic fallback below — the one string a user can
+ * do nothing with, on the screen where they most need to know what went wrong.
+ */
+function widgetErrorMessage(obj: Record<string, unknown>): string {
+  for (const candidate of [obj.error, obj.message]) {
+    if (typeof candidate === 'string' && candidate.trim() !== '') {
+      return candidate
+    }
+    const nested = (candidate as { message?: unknown } | undefined)?.message
+    if (typeof nested === 'string' && nested.trim() !== '') {
+      return nested
+    }
+  }
+  return 'Widget error'
+}
+
+/**
  * Coerce a value that may arrive as a number or a numeric string into a finite
  * number, else `undefined`. The widget's message-field types are not
  * contractually guaranteed, so we accept either form.
@@ -204,8 +226,16 @@ export interface StampPurchaseHandle {
    * the listeners, and closes the popup only while nothing has been paid or
    * settled — once money is in flight the popup has to run to the end, so it is
    * left open. Fires no callback — the caller initiated it.
+   *
+   * @returns `true` when the popup was left running because the user's money is
+   *   already in it. That exit is otherwise silent — no callback, and the
+   *   purchase may still settle after our UI is gone — so the caller is the one
+   *   place that can say so (and then recover it via "Use existing batch").
+   *   `false` on a clean back-out, and on any later call: cancelling is
+   *   terminal, so a second one (a dialog's `onDestroy` after its own close)
+   *   reports nothing.
    */
-  cancel: () => void
+  cancel: () => boolean
 }
 
 /**
@@ -261,6 +291,8 @@ export function openStampPurchaseWidget(options: PurchaseStampOptions): StampPur
       cancel: () => {
         clearTimeout(mockTimer)
         popup?.close()
+        // The mock never moves money.
+        return false
       },
     }
   }
@@ -270,7 +302,7 @@ export function openStampPurchaseWidget(options: PurchaseStampOptions): StampPur
 
   if (!popup) {
     onError(new Error('Failed to open widget popup. Please allow popups for this site.'))
-    return { cancel: () => undefined }
+    return { cancel: () => false }
   }
 
   // A `batch` event was recorded — onSuccess has already fired.
@@ -315,10 +347,22 @@ export function openStampPurchaseWidget(options: PurchaseStampOptions): StampPur
 
     // Error event
     if (obj?.event === 'error') {
+      const error = new Error(widgetErrorMessage(obj))
+      // Money in flight: the same rule `cancel()` and `finish` follow — never
+      // force a popup shut while the user's funds sit on the temporary wallet,
+      // because the pipeline that sweeps them back runs client-side there
+      // (#550). The listener stays attached too: the widget recovers in-popup
+      // (its `payment` events carry a `resumed` flag), and a detached listener
+      // would lose the batch that recovery settles. If the popup does end
+      // without one, the close poll concludes it as unconfirmed.
+      if (paid && !settled) {
+        onError(error)
+        return
+      }
       finished = true
       cleanup()
       popup.close()
-      onError(new Error(String(obj.message || 'Widget error')))
+      onError(error)
       return
     }
 
@@ -390,7 +434,7 @@ export function openStampPurchaseWidget(options: PurchaseStampOptions): StampPur
   return {
     cancel: () => {
       if (finished) {
-        return
+        return false
       }
       finished = true
       cleanup()
@@ -399,7 +443,12 @@ export function openStampPurchaseWidget(options: PurchaseStampOptions): StampPur
       // wallet (#550). Detach only and let it finish on its own.
       if (!paid && !settled) {
         popup.close()
+        return false
       }
+      // Settled means the batch is already recorded and only the sweep is left,
+      // which needs no warning. Paid-but-unsettled is the exit worth telling the
+      // user about.
+      return !settled
     },
   }
 }
