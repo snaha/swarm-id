@@ -40,9 +40,21 @@ export function withSwapBuffer(amount: bigint): bigint {
 }
 
 /** Price impact above which we refuse to swap — BZZ pools on Gnosis are thin
- * (~$10k total), and a large resize can move the price hard. */
-const MAX_PRICE_IMPACT_PERCENT = 5n
-const PERCENT = 100n
+ * (~$10k total), and a large resize can move the price hard. Exactly 5.00%:
+ * the impact is measured to a hundredth of a percent, so a trade at 5.01% is
+ * refused rather than rounded down into tolerance. */
+const MAX_PRICE_IMPACT_PERCENT = 5
+
+/**
+ * Impact is measured in basis points and reported in percent.
+ *
+ * Integer percent cannot carry this judgement: bigint division floors, so
+ * everything under 1% read as no impact at all and a trade at 5.99% presented
+ * itself as 5% — inside a 5% ceiling. Basis points are the finest unit the
+ * pool's own arithmetic supports without leaving integers behind.
+ */
+const BASIS_POINTS = 10_000n
+const BASIS_POINTS_PER_PERCENT = 100
 
 /**
  * Why this trade may not be swapped, or undefined when it may.
@@ -53,7 +65,7 @@ const PERCENT = 100n
  * price the payment never pays would leave the one user who could afford a big
  * resize unable to make it.
  */
-export function priceImpactRefusal(impactPercent: bigint): string | undefined {
+export function priceImpactRefusal(impactPercent: number): string | undefined {
   return impactPercent > MAX_PRICE_IMPACT_PERCENT
     ? `This amount would move the BZZ price by about ${impactPercent}%. Try a smaller change, or pay in BZZ.`
     : undefined
@@ -89,6 +101,33 @@ const SWAP_TIMEOUT_MS = 120_000
  */
 export const SWAP_GAS_XDAI_WEI = 2_000_000_000_000_000n // 0.002 xDAI
 
+/**
+ * The xDAI at the owner address that this operation has not been asked to
+ * deliver — the residual of an earlier attempt, above the operating budget.
+ *
+ * One rule, two readers. `quoteFunding` nets it off `xdaiWei`, which is what a
+ * payment made in xDAI collects; a payment made in a token collects its gas as
+ * a leg of its own and never touches `xdaiWei`, so the rail sizing that leg
+ * ({@link ownerGasCredit}) has to apply the same credit or charge for gas that
+ * already landed.
+ */
+function gasSurplus(ownerXdai: bigint): bigint {
+  return ownerXdai > GAS_BUDGET_XDAI_WEI ? ownerXdai - GAS_BUDGET_XDAI_WEI : 0n
+}
+
+/**
+ * What a gas leg delivered to `destination` need no longer carry: the xDAI
+ * already sitting there above the operating budget.
+ *
+ * Read live rather than taken from a quote, for the reason the quote reads it
+ * live — a gas leg that confirmed before its token leg was rejected is exactly
+ * the case this exists for, and it is invisible in anything captured earlier.
+ */
+export async function ownerGasCredit(destination: string): Promise<bigint> {
+  const client = await postageChain()
+  return gasSurplus(await client.getNativeBalance(prefix0x(destination) as `0x${string}`))
+}
+
 /** What the user must pay for, in Gnosis-side terms. */
 export interface FundingQuote {
   /**
@@ -105,12 +144,12 @@ export interface FundingQuote {
   /** BZZ (PLUR) the swap must deliver. */
   bzzPlur: bigint
   /**
-   * How far this trade would move the BZZ pool, in percent — 0 when no swap is
-   * priced at all. Carried rather than acted on here: only the pay screen knows
-   * which token was picked, and a payment made in BZZ runs no swap and so pays
-   * none of this ({@link priceImpactRefusal}).
+   * How far this trade would move the BZZ pool, in percent to two decimals — 0
+   * when no swap is priced at all. Carried rather than acted on here: only the
+   * pay screen knows which token was picked, and a payment made in BZZ runs no
+   * swap and so pays none of this ({@link priceImpactRefusal}).
    */
-  priceImpactPercent: bigint
+  priceImpactPercent: number
   /**
    * What the swap must spend at the owner address, and how much of it.
    *
@@ -126,23 +165,25 @@ export interface FundingQuote {
 }
 
 /**
- * How much worse than the near-spot rate this trade fills, in percent —
- * the pool's price impact for a trade this size. Compared against a small
- * reference trade rather than a spot oracle, which the pool does not expose.
+ * How much worse than the near-spot rate this trade fills, in percent to two
+ * decimals — the pool's price impact for a trade this size. Compared against a
+ * small reference trade rather than a spot oracle, which the pool does not
+ * expose.
  */
 function priceImpactPercent(
   referenceIn: bigint,
   referenceOut: bigint,
   actualIn: bigint,
   actualOut: bigint,
-): bigint {
+): number {
   // Cross-multiplied rates avoid dividing bigints down to zero.
   const referenceRate = referenceIn * actualOut
   const actualRate = actualIn * referenceOut
   if (actualRate <= referenceRate) {
-    return 0n
+    return 0
   }
-  return ((actualRate - referenceRate) * PERCENT) / referenceRate
+  const basisPoints = ((actualRate - referenceRate) * BASIS_POINTS) / referenceRate
+  return Number(basisPoints) / BASIS_POINTS_PER_PERCENT
 }
 
 /**
@@ -161,7 +202,7 @@ function priceImpactPercent(
 export async function quoteFunding(need: FundingNeed): Promise<FundingQuote> {
   const client = await postageChain()
   let xdaiForBzzWei = 0n
-  let impact = 0n
+  let impact = 0
   if (need.bzz > 0n) {
     const [quoted, reference] = await Promise.all([
       client.quoteXdaiInForBzzOut(need.bzz),
@@ -178,7 +219,7 @@ export async function quoteFunding(need: FundingNeed): Promise<FundingQuote> {
   // from.
   const ownerXdai = await client.getNativeBalance(prefix0x(need.destination) as `0x${string}`)
   const gasShortfall = ownerXdai >= GAS_BUDGET_XDAI_WEI ? 0n : GAS_BUDGET_XDAI_WEI - ownerXdai
-  const surplus = ownerXdai > GAS_BUDGET_XDAI_WEI ? ownerXdai - GAS_BUDGET_XDAI_WEI : 0n
+  const surplus = gasSurplus(ownerXdai)
   // The swap's own gas only when a swap will actually run — a gas-only
   // shortfall is delivered and spent directly, with nothing in between (and
   // asking the rail to deliver an allowance nobody spends would be the user's

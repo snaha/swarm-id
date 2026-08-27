@@ -103,14 +103,42 @@ describe('resizePlan', () => {
     expect(plan.afterDilute.batchTTL).toBe(25 * DAY)
   })
 
+  /**
+   * The top-up confirmation the unbundled path waits out before `increaseDepth`
+   * is even sent: 90 s at 5 s a block. The contract measures the post-dilution
+   * balance when the increase MINES, and the balance falls by `lastPrice` every
+   * block in between.
+   */
+  const CONFIRMATION_BLOCKS = 18n
+
   it('raises the top-up to the contract floor when the projection misses it', () => {
     // 2 days remaining, ÷4 would leave half a day — under the ~1-day minimum.
     const low = 2n * BLOCKS_PER_DAY
     const plan = resizePlan(20, 22, false, low, MINIMUM, PRICE)
     expect(plan.clampedToFloor).toBe(true)
-    // Top-up raises the pre-dilution balance to exactly minimum × 2^Δ.
-    expect(low + plan.topUpAmount).toBe(MINIMUM * 4n)
-    expect(plan.afterDilute.amount).toBe(MINIMUM)
+    // The pre-dilution balance clears minimum × 2^Δ, by the decay margin.
+    expect(low + plan.topUpAmount).toBeGreaterThan(MINIMUM * 4n)
+    expect(plan.afterDilute.amount).toBeGreaterThan(MINIMUM)
+  })
+
+  it('clears the floor by at least the confirmation window of decay', () => {
+    // A clamp that lands EXACTLY on the minimum is a planned revert: by the
+    // time increaseDepth mines the batch has paid for the blocks in between,
+    // and the contract sees less than the minimum.
+    const low = 2n * BLOCKS_PER_DAY
+    const plan = resizePlan(20, 22, false, low, MINIMUM, PRICE)
+    expect(plan.afterDilute.amount).toBeGreaterThanOrEqual(
+      MINIMUM + 2n * CONFIRMATION_BLOCKS * PRICE,
+    )
+  })
+
+  it('still clears the floor once the balance has decayed under the plan', () => {
+    const low = 2n * BLOCKS_PER_DAY
+    const plan = resizePlan(20, 22, false, low, MINIMUM, PRICE)
+    // What the contract actually divides: the topped-up balance, less the
+    // decay of every block between planning and the increase landing.
+    const atExecution = (low + plan.topUpAmount - CONFIRMATION_BLOCKS * PRICE) / 4n
+    expect(atExecution).toBeGreaterThanOrEqual(MINIMUM)
   })
 
   it('clamps keep-lifespan too when even that misses the floor', () => {
@@ -118,7 +146,10 @@ describe('resizePlan', () => {
     const tiny = MINIMUM / 2n
     const plan = resizePlan(20, 21, true, tiny, MINIMUM, PRICE)
     expect(plan.clampedToFloor).toBe(true)
-    expect(tiny + plan.topUpAmount).toBe(MINIMUM * 2n)
+    expect(tiny + plan.topUpAmount).toBeGreaterThan(MINIMUM * 2n)
+    expect((tiny + plan.topUpAmount - CONFIRMATION_BLOCKS * PRICE) / 2n).toBeGreaterThanOrEqual(
+      MINIMUM,
+    )
   })
 
   it('reports unknown TTLs on a zero price instead of guessing', () => {

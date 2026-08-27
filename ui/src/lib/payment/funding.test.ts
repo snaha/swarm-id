@@ -2,7 +2,13 @@
 // SPDX-License-Identifier: Apache-2.0
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
-import { SWAP_GAS_XDAI_WEI, priceImpactRefusal, quoteFunding, settleWith } from './funding'
+import {
+  SWAP_GAS_XDAI_WEI,
+  ownerGasCredit,
+  priceImpactRefusal,
+  quoteFunding,
+  settleWith,
+} from './funding'
 
 const XDAI = 10n ** 18n
 const PLUR = 10n ** 16n
@@ -24,12 +30,15 @@ vi.mock('$lib/payment/chain', () => ({
     }),
 }))
 
-/** Fill BZZ at a fixed rate, degrading by `impactPercent` for the real trade
- * (the reference trade always fills at the clean rate). */
-function pricedAt(rateXdaiPerBzz: bigint, referenceBzz: bigint, impactPercent: bigint) {
+/** One hundred percent, in the basis points the impact is measured in. */
+const BASIS_POINTS = 10_000n
+
+/** Fill BZZ at a fixed rate, degrading by `impactBasisPoints` for the real
+ * trade (the reference trade always fills at the clean rate). */
+function pricedAt(rateXdaiPerBzz: bigint, referenceBzz: bigint, impactBasisPoints: bigint) {
   return (bzz: bigint) => {
     const base = (bzz * rateXdaiPerBzz) / PLUR
-    return bzz === referenceBzz ? base : base + (base * impactPercent) / 100n
+    return bzz === referenceBzz ? base : base + (base * impactBasisPoints) / BASIS_POINTS
   }
 }
 
@@ -128,36 +137,70 @@ describe('quoteFunding', () => {
    * token is known.
    */
   it('reports how far the trade would move the pool', async () => {
-    quoteXdaiInForBzzOut.mockImplementation(pricedAt(XDAI, REFERENCE_BZZ, 12n))
+    quoteXdaiInForBzzOut.mockImplementation(pricedAt(XDAI, REFERENCE_BZZ, 1200n))
     const quote = await quoteFunding({ destination: '0x0', bzz: 1000n * PLUR, xdai: 0n })
-    expect(quote.priceImpactPercent).toBe(12n)
+    expect(quote.priceImpactPercent).toBe(12)
     expect(quote.xdaiWei).toBeGreaterThan(0n)
   })
 
   it('reports impact within tolerance too', async () => {
-    quoteXdaiInForBzzOut.mockImplementation(pricedAt(XDAI, REFERENCE_BZZ, 3n))
+    quoteXdaiInForBzzOut.mockImplementation(pricedAt(XDAI, REFERENCE_BZZ, 300n))
     const quote = await quoteFunding({ destination: '0x0', bzz: 10n * PLUR, xdai: 0n })
-    expect(quote.priceImpactPercent).toBe(3n)
+    expect(quote.priceImpactPercent).toBe(3)
+  })
+
+  /**
+   * Whole-percent arithmetic reported everything under 1% as no impact at all
+   * and everything else a percent low, so a trade at 5.9% passed a 5% ceiling.
+   */
+  it('measures a fraction of a percent rather than rounding it away', async () => {
+    quoteXdaiInForBzzOut.mockImplementation(pricedAt(XDAI, REFERENCE_BZZ, 40n))
+    const quote = await quoteFunding({ destination: '0x0', bzz: 10n * PLUR, xdai: 0n })
+    expect(quote.priceImpactPercent).toBe(0.4)
   })
 
   it('measures no impact where no swap is priced', async () => {
     const quote = await quoteFunding({ destination: '0x0', bzz: 0n, xdai: XDAI / 100n })
-    expect(quote.priceImpactPercent).toBe(0n)
+    expect(quote.priceImpactPercent).toBe(0)
+  })
+})
+
+/**
+ * The same surplus `quoteFunding` credits into `xdaiWei`, made available to the
+ * rails: a payment in a token quotes its gas leg separately, and nothing else
+ * would tell it that the gas already landed.
+ */
+describe('ownerGasCredit', () => {
+  it('credits every wei above the operating budget', async () => {
+    ownerXdai = GAS_BUDGET + SWAP_GAS_XDAI_WEI
+    expect(await ownerGasCredit('0x0')).toBe(SWAP_GAS_XDAI_WEI)
+  })
+
+  it('credits nothing while the owner is still short of the budget', async () => {
+    ownerXdai = GAS_BUDGET / 2n
+    expect(await ownerGasCredit('0x0')).toBe(0n)
   })
 })
 
 describe('priceImpactRefusal', () => {
   it('refuses a trade that would move the thin BZZ pool too far', () => {
-    expect(priceImpactRefusal(12n)).toMatch(/move the BZZ price by about 12%/)
+    expect(priceImpactRefusal(12)).toMatch(/move the BZZ price by about 12%/)
   })
 
   it('points at the one asset that touches no pool', () => {
-    expect(priceImpactRefusal(12n)).toMatch(/pay in BZZ/)
+    expect(priceImpactRefusal(12)).toMatch(/pay in BZZ/)
   })
 
   it('allows impact within tolerance', () => {
-    expect(priceImpactRefusal(5n)).toBeUndefined()
-    expect(priceImpactRefusal(0n)).toBeUndefined()
+    expect(priceImpactRefusal(5)).toBeUndefined()
+    expect(priceImpactRefusal(0)).toBeUndefined()
+  })
+
+  /** The ceiling is 5.00%, not "under 6" — the whole-percent form let every
+   * trade up to 5.99% through, on a pool a few thousand dollars deep. */
+  it('refuses just above the ceiling, not a whole percent above it', () => {
+    expect(priceImpactRefusal(5.01)).toMatch(/about 5.01%/)
+    expect(priceImpactRefusal(5.5)).toMatch(/move the BZZ price/)
   })
 })
 
@@ -172,7 +215,7 @@ describe('settleWith', () => {
     xdaiForBzzWei: 6n * XDAI,
     xdaiForGasWei: SWAP_GAS_XDAI_WEI,
     bzzPlur: 5n * PLUR,
-    priceImpactPercent: 0n,
+    priceImpactPercent: 0,
     paidWith: 'xdai',
     paidAmount: 6n * XDAI,
   } as const

@@ -76,10 +76,12 @@ export function stampCostBzz(depth: number, amount: bigint): string | undefined 
  * {@link stampAmountForSeconds}: blocks funded × block time.
  */
 export function stampTtlSeconds(amount: bigint, pricePerBlock: bigint): number | undefined {
-  if (amount <= 0n || pricePerBlock <= 0n) {
+  // A non-positive amount is "nothing to price" here (a prospective purchase),
+  // where ttlSecondsFor reads it as an already-expired live drive (0 seconds).
+  if (amount <= 0n) {
     return undefined
   }
-  return Number(amount / pricePerBlock) * GNOSIS_BLOCK_TIME
+  return ttlSecondsFor(amount, pricePerBlock)
 }
 
 /** Parse the widget's block number (hex `0x…` or decimal) into an integer; `0`
@@ -167,13 +169,32 @@ export interface ResizePlan {
 }
 
 /**
+ * Blocks of decay the floor clamp keeps in hand on top of the contract's
+ * minimum.
+ *
+ * A batch's per-chunk balance falls by `lastPrice` every block, and the
+ * contract measures the post-dilution balance when `increaseDepth` MINES — not
+ * when the plan is made. A clamp that targets the minimum exactly is therefore
+ * a planned revert: the unbundled path waits out a full top-up confirmation
+ * (90 s ≈ 18 Gnosis blocks) before the increase is even sent, and the bundled
+ * one still mines blocks in between.
+ *
+ * Invariant: the plan clears the minimum by this many blocks of decay per
+ * chunk, so it survives any delay up to that many × 2^Δ blocks — twice the
+ * confirmation window at the smallest resize, more at every other.
+ */
+const FLOOR_MARGIN_BLOCKS = 36n
+
+/**
  * Plan a resize to `newDepth` from the batch's LIVE remaining per-chunk
  * balance (chain truth — never the stored `stamp.amount`, which is a stale
  * snapshot that would over- or under-top). With `keepLifespan`, the top-up
  * restores the post-dilution balance to the current one (cost = remaining ×
  * (2^Δ − 1) per chunk, identical in total to the old dilute-first model).
  * Either way the plan is raised to clear `minimumInitialBalancePerChunk`
- * after division — a plan below the floor would be a guaranteed revert.
+ * after division, by {@link FLOOR_MARGIN_BLOCKS} of decay — a plan that only
+ * meets the floor is as certain a revert as one below it, since the balance
+ * keeps falling until the increase mines.
  */
 export function resizePlan(
   currentDepth: number,
@@ -186,8 +207,9 @@ export function resizePlan(
   const factor = 2n ** BigInt(Math.max(0, newDepth - currentDepth))
   const lifespanTopUp = keepLifespan ? liveRemaining * (factor - 1n) : 0n
 
-  // increaseDepth requires (remaining + topUp) / factor >= minimum.
-  const floorTarget = minimumInitialBalancePerChunk * factor
+  // increaseDepth requires (remaining + topUp) / factor >= minimum, measured
+  // when it mines — hence FLOOR_MARGIN_BLOCKS of decay on top.
+  const floorTarget = (minimumInitialBalancePerChunk + lastPrice * FLOOR_MARGIN_BLOCKS) * factor
   const clampedToFloor = liveRemaining + lifespanTopUp < floorTarget
   const topUpAmount = clampedToFloor ? floorTarget - liveRemaining : lifespanTopUp
 

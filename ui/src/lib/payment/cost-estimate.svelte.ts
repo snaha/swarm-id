@@ -15,12 +15,36 @@
  * pool the RPC cannot quote.
  */
 import { currentBzzXdaiRate, usdForPlur } from '$lib/payment/bzz-price'
+import { withSwapBuffer } from '$lib/payment/funding'
 import { stampCostBzz } from '$lib/payment/purchase'
 
 /** What is being priced: `amountPerChunk` PLUR, spread over `depth`. */
 export interface EstimatedCost {
   depth: number
   amountPerChunk: bigint
+}
+
+/**
+ * `cost` in dollars, as the pay screen will ask for it — empty when the pool
+ * rate is unknown or there is nothing to price.
+ *
+ * Invariant: this equals `quoteFunding`'s BZZ leg for the same batch. Both
+ * price the same trade through the same pool and both carry
+ * {@link withSwapBuffer}, so the form and the screen it leads to cannot differ
+ * by the buffer — a 20% jump between one and the next reads as a price that
+ * moved while the user was deciding. The buffer is applied to the BZZ rather
+ * than to the xDAI it converts to, which is the same figure: the conversion is
+ * a multiplication.
+ *
+ * Gas is the one part left out. It is a live balance read at the owner address
+ * — a form re-deriving this on every keystroke cannot make it — and a fraction
+ * of a cent beside the storage cost.
+ */
+export function estimatedUsd(cost: EstimatedCost, rateXdaiWei: bigint | undefined): string {
+  if (rateXdaiWei === undefined) {
+    return ''
+  }
+  return usdForPlur(withSwapBuffer(cost.amountPerChunk << BigInt(cost.depth)), rateXdaiWei)
 }
 
 export interface CostEstimate {
@@ -51,8 +75,7 @@ export function createCostEstimate(cost: () => EstimatedCost | undefined): CostE
     if (!priced) {
       return undefined
     }
-    const usd =
-      rate === undefined ? '' : usdForPlur(priced.amountPerChunk << BigInt(priced.depth), rate)
+    const usd = estimatedUsd(priced, rate)
     if (usd) {
       return `${usd} USD`
     }

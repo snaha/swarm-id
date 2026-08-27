@@ -22,7 +22,7 @@ import {
   isGnosisMainnetGenesis,
   postageChain,
 } from '$lib/payment/chain'
-import { withSwapBuffer } from '$lib/payment/funding'
+import { ownerGasCredit, withSwapBuffer } from '$lib/payment/funding'
 import {
   type EthereumProvider,
   type ExecutePaymentOptions,
@@ -158,11 +158,19 @@ function gnosisChain(isMainnet: boolean): Chain {
  */
 interface DirectHandle {
   recipient: `0x${string}`
-  /** The BZZ leg: `amount` of `input`, `token` undefined for native xDAI. */
+  /**
+   * The BZZ leg: `amount` of `input`, `token` undefined for native xDAI.
+   *
+   * What the WALLET sends, which on a token leg is the quote's amount less
+   * whatever of that token is already at the owner address — so zero is a
+   * legitimate leg (an earlier transfer covered it), not a broken one. The
+   * amount the swap spends is `delivers`.
+   */
   input: SwapInput
   token: string
   amount: bigint
-  /** The gas leg, always native xDAI. Zero means one transfer, not two. */
+  /** The gas leg, always native xDAI, net of the xDAI already at the owner
+   * address. Zero means nothing to send: one transfer, or none. */
   gasXdaiWei: bigint
 }
 
@@ -222,21 +230,37 @@ export async function quoteDirectPayment(request: QuoteRequest): Promise<Payment
   // executed exact-input later at a fresher price, the difference between the
   // two is under-delivery discovered after the token has been spent. Exact-input
   // spends the headroom on more BZZ, where the next funds check consumes it.
+  const chain = await postageChain()
   const amount =
     accepted.input === 'bzz'
       ? request.bzzPlur
-      : withSwapBuffer(
-          await (await postageChain()).quoteTokenInForBzzOut(request.bzzPlur, accepted.input),
-        )
-  const formatted = formatUnits(amount, accepted.token.decimals)
-  const gasXdai = formatUnits(request.gasXdaiWei, XDAI_DECIMALS)
+      : withSwapBuffer(await chain.quoteTokenInForBzzOut(request.bzzPlur, accepted.input))
+
+  // What is already at the owner address, in the very asset this leg is about
+  // to ask for: a transfer that landed after its confirmation wait timed out.
+  // Only the swapped tokens — the owner's BZZ is netted upstream, off the
+  // operation's own need (`fundingShortfall`), so crediting it here as well
+  // would take it off twice. Both legs are credited, because both can land on
+  // their own: the swap spends the full `amount` either way, and only the
+  // transfer that tops the address up to it is the user's to pay.
+  const [stranded, gasCredit] = await Promise.all([
+    accepted.input === 'bzz'
+      ? Promise.resolve(0n)
+      : chain.getTokenBalance(accepted.token.address as `0x${string}`, recipient),
+    ownerGasCredit(request.recipient),
+  ])
+  const transfer = amount > stranded ? amount - stranded : 0n
+  const gasXdaiWei = request.gasXdaiWei > gasCredit ? request.gasXdaiWei - gasCredit : 0n
+
+  const formatted = formatUnits(transfer, accepted.token.decimals)
+  const gasXdai = formatUnits(gasXdaiWei, XDAI_DECIMALS)
   return {
     handle: {
       recipient,
       input: accepted.input,
       token: accepted.token.address,
-      amount,
-      gasXdaiWei: request.gasXdaiWei,
+      amount: transfer,
+      gasXdaiWei,
     },
     amountFormatted: displayAmount(formatted),
     // Only the dollar tokens price themselves; BZZ has no dollar figure here
@@ -247,6 +271,10 @@ export async function quoteDirectPayment(request: QuoteRequest): Promise<Payment
       accepted.input === 'usdc' || accepted.input === 'wxdai'
         ? displayUsd(Number(formatted) + Number(gasXdai))
         : '',
+    // The whole leg, not the transfer: what the swap must spend is everything
+    // that will be at the owner address, and a credited residual is already
+    // there. Sizing the swap from the transfer alone would leave the residual
+    // stranded exactly as the retry that credited it was meant to prevent.
     delivers: { input: accepted.input, amount },
   }
 }
@@ -381,10 +409,12 @@ async function executeDirectPayment(options: ExecutePaymentOptions): Promise<voi
     return
   }
 
-  // A zero-value ERC20 transfer costs gas and buys nothing. It cannot be
-  // quoted any more, so reaching here means a handle from elsewhere.
+  // A zero-value ERC20 transfer costs gas and buys nothing. Here it means the
+  // token the leg asks for is already at the owner address in full — an earlier
+  // attempt's transfer, credited by the quote — so the payment is complete with
+  // nothing sent, and the swap that follows spends what is there.
   if (handle.amount === 0n) {
-    throw new Error(GAS_ONLY_REFUSAL)
+    return
   }
 
   if (handle.gasXdaiWei > 0n) {

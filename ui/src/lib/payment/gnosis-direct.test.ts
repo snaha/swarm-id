@@ -4,7 +4,9 @@ import { parseUnits } from 'viem'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import type { ChainIdentity } from '$lib/payment/chain'
+import { SWAP_GAS_XDAI_WEI } from '$lib/payment/funding'
 import { NATIVE_CURRENCY } from '$lib/payment/payment-rail'
+import { GAS_BUDGET_XDAI_WEI } from '$lib/payment/postage-onchain'
 
 import { quoteDirectPayment, resolveGnosisDirectRail, walletChainRefusal } from './gnosis-direct'
 
@@ -16,21 +18,35 @@ const DEV_GENESIS = '0x' + '11'.repeat(32)
 const OTHER_GENESIS = '0x' + '22'.repeat(32)
 
 // Hoisted with the mocks that read them: a factory runs before the module body.
-const { RPC_URL, chainIdentity, waitForTransactionSuccess, quoteTokenInForBzzOut } = vi.hoisted(
-  () => ({
-    RPC_URL: 'https://rpc.gnosischain.com',
-    chainIdentity: vi.fn(),
-    waitForTransactionSuccess: vi.fn(() => Promise.resolve()),
-    quoteTokenInForBzzOut: vi.fn(() => Promise.resolve(0n)),
-  }),
-)
+const {
+  RPC_URL,
+  chainIdentity,
+  waitForTransactionSuccess,
+  quoteTokenInForBzzOut,
+  getNativeBalance,
+  getTokenBalance,
+} = vi.hoisted(() => ({
+  RPC_URL: 'https://rpc.gnosischain.com',
+  chainIdentity: vi.fn(),
+  waitForTransactionSuccess: vi.fn(() => Promise.resolve()),
+  quoteTokenInForBzzOut: vi.fn(() => Promise.resolve(0n)),
+  /** An owner address holding nothing, unless a test parks something there. */
+  getNativeBalance: vi.fn(() => Promise.resolve(0n)),
+  getTokenBalance: vi.fn(() => Promise.resolve(0n)),
+}))
 
 // The real module for everything but the two probes — `isGnosisMainnetGenesis`
 // is the rule under test here, so a stubbed copy would test the stub.
 vi.mock('$lib/payment/chain', async (importOriginal) => ({
   ...(await importOriginal<typeof import('$lib/payment/chain')>()),
   chainIdentity,
-  postageChain: () => Promise.resolve({ waitForTransactionSuccess, quoteTokenInForBzzOut }),
+  postageChain: () =>
+    Promise.resolve({
+      waitForTransactionSuccess,
+      quoteTokenInForBzzOut,
+      getNativeBalance,
+      getTokenBalance,
+    }),
 }))
 vi.mock('$lib/stores/network-settings.svelte', () => ({
   networkSettingsStore: { gnosisRpcUrl: RPC_URL },
@@ -45,6 +61,11 @@ const identity = (
 
 afterEach(() => {
   vi.clearAllMocks()
+  // Implementations outlive `clearAllMocks`, and these two are read by every
+  // token quote: an owner address left holding something would credit the next
+  // test's payment.
+  getNativeBalance.mockResolvedValue(0n)
+  getTokenBalance.mockResolvedValue(0n)
 })
 
 function request(xdaiWei: bigint, currency = '0x0000000000000000000000000000000000000000') {
@@ -429,6 +450,103 @@ describe('paying in something other than xDAI', () => {
       'Approve the payment in your wallet',
       'Confirming your payment',
     ])
+  })
+
+  /**
+   * A token payment is two legs, and only the first one landing is the ordinary
+   * failure: the gas confirms, the wallet rejects the token, and the retry
+   * re-quotes. The surplus the gas leg left is credited into `xdaiWei`, which a
+   * token payment never spends — so without crediting it here too the retry
+   * prompts for a gas transfer the owner address is already holding.
+   */
+  it('does not charge again for a gas leg that already landed', async () => {
+    chainIdentity.mockResolvedValue(identity('mainnet'))
+    quoteTokenInForBzzOut.mockResolvedValue(9_030_000n)
+    getNativeBalance.mockResolvedValue(GAS_BUDGET_XDAI_WEI + SWAP_GAS_XDAI_WEI)
+    const rail = await resolveGnosisDirectRail()
+    const quote = await rail!.quote({
+      ...request(parseUnits('9.04', 18), USDC),
+      bzzPlur: 206n * 10n ** 16n,
+      gasXdaiWei: SWAP_GAS_XDAI_WEI,
+    })
+    expect((quote.handle as { gasXdaiWei: bigint }).gasXdaiWei).toBe(0n)
+  })
+
+  it('charges the part of the gas leg the owner address is still missing', async () => {
+    chainIdentity.mockResolvedValue(identity('mainnet'))
+    quoteTokenInForBzzOut.mockResolvedValue(9_030_000n)
+    getNativeBalance.mockResolvedValue(GAS_BUDGET_XDAI_WEI + SWAP_GAS_XDAI_WEI / 4n)
+    const rail = await resolveGnosisDirectRail()
+    const quote = await rail!.quote({
+      ...request(parseUnits('9.04', 18), USDC),
+      bzzPlur: 206n * 10n ** 16n,
+      gasXdaiWei: SWAP_GAS_XDAI_WEI,
+    })
+    expect((quote.handle as { gasXdaiWei: bigint }).gasXdaiWei).toBe(
+      SWAP_GAS_XDAI_WEI - SWAP_GAS_XDAI_WEI / 4n,
+    )
+  })
+
+  /**
+   * A token transfer that landed after its confirmation wait timed out is the
+   * user's money, in the very asset the retry is about to ask for again — and
+   * sitting at the address the swap spends from.
+   */
+  it('credits a token already at the owner address against the token leg', async () => {
+    chainIdentity.mockResolvedValue(identity('mainnet'))
+    quoteTokenInForBzzOut.mockResolvedValue(9_030_000n)
+    const stranded = 3_000_000n
+    getTokenBalance.mockResolvedValue(stranded)
+    const rail = await resolveGnosisDirectRail()
+    const quote = await rail!.quote({
+      ...request(parseUnits('9.04', 18), USDC),
+      bzzPlur: 206n * 10n ** 16n,
+      gasXdaiWei: 0n,
+    })
+    expect((quote.handle as { amount: bigint }).amount).toBe(BUFFERED_USDC - stranded)
+    // The swap still spends everything that will be at the owner address — the
+    // stranded USDC is part of the input, not a discount on the operation.
+    expect(quote.delivers).toEqual({ input: 'usdc', amount: BUFFERED_USDC })
+  })
+
+  it('asks for nothing more when the earlier transfer covers the leg in full', async () => {
+    chainIdentity.mockResolvedValue(identity('dev'))
+    quoteTokenInForBzzOut.mockResolvedValue(9_030_000n)
+    getTokenBalance.mockResolvedValue(BUFFERED_USDC)
+    getNativeBalance.mockResolvedValue(GAS_BUDGET_XDAI_WEI + SWAP_GAS_XDAI_WEI)
+    const { provider, sent } = wallet()
+    const rail = await resolveGnosisDirectRail()
+    const quote = await rail!.quote({
+      ...request(parseUnits('9.04', 18), USDC),
+      bzzPlur: 206n * 10n ** 16n,
+      gasXdaiWei: SWAP_GAS_XDAI_WEI,
+    })
+    await rail!.execute({
+      quote,
+      provider,
+      chainId: 100,
+      currency: USDC,
+      address: '0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266',
+    })
+    // Nothing to transfer and nothing to fund: both legs are already at the
+    // owner address, and the swap that follows consumes them.
+    expect(sent).toEqual([])
+    expect(quote.delivers).toEqual({ input: 'usdc', amount: BUFFERED_USDC })
+  })
+
+  /** BZZ at the owner address is netted upstream, by `fundingShortfall` —
+   * crediting it here as well would halve the leg twice. */
+  it('leaves a BZZ leg to the shortfall that already netted it', async () => {
+    chainIdentity.mockResolvedValue(identity('mainnet'))
+    getTokenBalance.mockResolvedValue(10n)
+    const rail = await resolveGnosisDirectRail()
+    const quote = await rail!.quote({
+      ...request(0n, BZZ),
+      bzzPlur: 42n,
+      gasXdaiWei: 0n,
+    })
+    expect((quote.handle as { amount: bigint }).amount).toBe(42n)
+    expect(getTokenBalance).not.toHaveBeenCalled()
   })
 
   /** Paying in xDAI stays one prompt — the gas rides along in the same send. */

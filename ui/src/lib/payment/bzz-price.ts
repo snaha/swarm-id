@@ -9,6 +9,12 @@
  * own rail does (`gnosis-direct.ts`), so the forms agree with the screen they
  * lead to.
  *
+ * A RATE is what this module answers with, and only that: the swap headroom
+ * that makes the estimate agree with the pay screen is applied by the caller
+ * (`cost-estimate.svelte.ts`), where the amount being priced is known. Gas is
+ * not priced here at all — it depends on a live balance read at the owner
+ * address, and it is a fraction of a cent beside the storage cost.
+ *
  * A RATE is cached, not a quote. `quoteExactOutputSingle` is a contract
  * simulation, and the extend dialog re-derives its estimate on every keystroke
  * — quoting the exact amount each time would put an RPC round-trip behind the

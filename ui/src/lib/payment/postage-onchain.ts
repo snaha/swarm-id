@@ -74,7 +74,12 @@ export async function fundingShortfall(
 
 /**
  * Ensure the PostageStamp contract may pull `totalPlur` from the owner —
- * approve EXACTLY the missing allowance (never unlimited) and wait for it.
+ * approve EXACTLY that, never unlimited, and wait for it.
+ *
+ * `approve` sets the allowance absolutely, it does not add to it: approving the
+ * DIFFERENCE on top of a partial allowance left by an interrupted attempt would
+ * lower the allowance to less than the operation needs, and the pull would
+ * revert. A standing allowance at or above `totalPlur` is left alone.
  */
 export async function ensureBzzAllowance(
   signerKey: PrivateKey,
