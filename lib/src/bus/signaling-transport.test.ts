@@ -268,12 +268,19 @@ class FakePeerConnection {
   /** Holds every `setRemoteDescription` until resolved; set by a test. */
   static gate: { promise: Promise<void>; release: () => void } | undefined
 
+  /** One release per held `setRemoteDescription`, in arrival order, so a test
+   *  can let ONE negotiation finish while another stays in flight — which is
+   *  the only shape in which a superseded handler can act on a live
+   *  connection. `gate.release()` frees them all at once. */
+  static holds: (() => void)[] = []
+
   static openGate(): void {
     let release = (): void => {}
     const promise = new Promise<void>((resolve) => {
       release = resolve
     })
     FakePeerConnection.gate = { promise, release }
+    FakePeerConnection.holds = []
   }
 
   private id = crypto.randomUUID()
@@ -306,7 +313,12 @@ class FakePeerConnection {
     type: string
     sdp: string
   }): Promise<void> {
-    if (FakePeerConnection.gate) await FakePeerConnection.gate.promise
+    if (FakePeerConnection.gate) {
+      await new Promise<void>((resolve) => {
+        FakePeerConnection.holds.push(resolve)
+        void FakePeerConnection.gate?.promise.then(resolve)
+      })
+    }
     this.remoteDescriptionSet = true
     if (description.type !== "offer") return
     const initiator = FakePeerConnection.registry.get(description.sdp)
@@ -522,11 +534,11 @@ describe("SignalingTransport — WebRTC upgrade", () => {
         FakePeerConnection.gate!.release()
         await negotiating
 
-        await vi.waitFor(() =>
-          expect(
-            internals.peers.get("peer-1")?.connection?.iceCandidates,
-          ).toHaveLength(1),
-        )
+        // No `waitFor`: the flush completes inside `await negotiating`, so a
+        // regression should fail here and now rather than after a poll window.
+        expect(
+          internals.peers.get("peer-1")?.connection?.iceCandidates,
+        ).toHaveLength(1)
       } finally {
         FakePeerConnection.gate = undefined
         transport.close()
@@ -582,6 +594,52 @@ describe("SignalingTransport — WebRTC upgrade", () => {
         expect(first?.closed).toBe(true)
         expect(internals.peers.get("peer-1")?.connection).not.toBe(first)
       } finally {
+        transport.close()
+        FakePeerConnection.registry.clear()
+        FakePeerConnection.channels = []
+      }
+    })
+
+    // The queue's invariant is "the flag describes THIS peer's current
+    // connection". A second offer landing while the first is still awaiting
+    // `setRemoteDescription` breaks it: the superseded handler resumes and
+    // marks the flag for a connection whose description is not set, which
+    // re-opens the very window the queue exists to close — the next candidate
+    // is applied straight to the new connection and rejected.
+    it("does not mark a superseded connection as described", async () => {
+      const transport = makeTransport({ createPeerConnection: fakeRtcFactory })
+      const internals = transport as unknown as Internals
+      try {
+        internals.peers.set("peer-1", {})
+
+        FakePeerConnection.openGate()
+        const first = internals.handleSignal("peer-1", {
+          kind: "offer",
+          sdp: await offerFromFakeInitiator(),
+        })
+        const second = internals.handleSignal("peer-1", {
+          kind: "offer",
+          sdp: await offerFromFakeInitiator(),
+        })
+        // Only the superseded negotiation finishes. The second connection is
+        // the peer's now, and its own remote description is still in flight.
+        FakePeerConnection.holds[0]()
+        await first
+
+        await internals.handleSignal("peer-1", {
+          kind: "ice",
+          candidate: { candidate: "candidate:after-supersede" },
+        })
+
+        FakePeerConnection.gate!.release()
+        await second
+
+        // Applied to the live connection, not lost to a rejection.
+        expect(
+          internals.peers.get("peer-1")?.connection?.iceCandidates,
+        ).toEqual([{ candidate: "candidate:after-supersede" }])
+      } finally {
+        FakePeerConnection.gate = undefined
         transport.close()
         FakePeerConnection.registry.clear()
         FakePeerConnection.channels = []

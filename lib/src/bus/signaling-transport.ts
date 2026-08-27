@@ -86,13 +86,23 @@ interface PeerState {
   dataChannel?: RTCDataChannel
   /** True once this connection's remote description is set. `addIceCandidate`
    *  rejects before that, so candidates arriving first have to wait. */
-  remoteDescriptionSet?: boolean
+  remoteDescriptionSet: boolean
   /** Candidates that arrived before the remote description, replayed once it
    *  lands. Signals are handled concurrently (`void this.handleSignal(...)`),
    *  so an `ice` message routinely reaches us mid-negotiation — without this
    *  the candidate was logged and dropped, and the pair silently fell back to
-   *  the server relay it was trying to stop using. */
-  pendingCandidates?: RTCIceCandidateInit[]
+   *  the server relay it was trying to stop using.
+   *
+   *  Neither field is optional: a `?.push` on the queue would drop a candidate
+   *  in exactly the state the queue is for, so every `PeerState` is born with
+   *  an empty one. */
+  pendingCandidates: RTCIceCandidateInit[]
+}
+
+/** A peer we have just heard of: no connection yet, and an empty queue rather
+ *  than an absent one, so a candidate arriving first has somewhere to go. */
+function newPeerState(): PeerState {
+  return { remoteDescriptionSet: false, pendingCandidates: [] }
 }
 
 export class SignalingTransport implements BusTransport {
@@ -303,14 +313,14 @@ export class SignalingTransport implements BusTransport {
     switch (message.type) {
       case "welcome":
         for (const peerId of message.peers) {
-          this.peers.set(peerId, {})
+          this.peers.set(peerId, newPeerState())
           // The newcomer (us) initiates toward every existing peer.
           void this.initiatePeerConnection(peerId)
         }
         return
       case "peer-joined":
         // The joiner initiates; we just track it.
-        this.peers.set(message.peerId, {})
+        this.peers.set(message.peerId, newPeerState())
         return
       case "peer-left": {
         const peer = this.peers.get(message.peerId)
@@ -395,25 +405,30 @@ export class SignalingTransport implements BusTransport {
           type: "offer",
           sdp: signal.sdp,
         })
-        await this.flushPendingCandidates(peer)
+        await this.flushPendingCandidates(peer, connection)
         const answer = await connection.createAnswer()
         await connection.setLocalDescription(answer)
         this.sendSignal(from, { kind: "answer", sdp: answer.sdp ?? "" })
         return
       }
       if (signal.kind === "answer") {
-        await peer.connection?.setRemoteDescription({
+        // An answer for no connection describes nothing, so it must not mark
+        // the queue as flushable either — the optional chain used to make this
+        // a no-op that still set the flag.
+        const connection = peer.connection
+        if (!connection) return
+        await connection.setRemoteDescription({
           type: "answer",
           sdp: signal.sdp,
         })
-        await this.flushPendingCandidates(peer)
+        await this.flushPendingCandidates(peer, connection)
         return
       }
       // Queue rather than apply while the sibling offer/answer handler is
       // still awaiting its `setRemoteDescription`. The check and the push are
       // one synchronous step, so they cannot interleave with the flush.
       if (!peer.remoteDescriptionSet) {
-        peer.pendingCandidates?.push(signal.candidate as RTCIceCandidateInit)
+        peer.pendingCandidates.push(signal.candidate as RTCIceCandidateInit)
         return
       }
       await peer.connection?.addIceCandidate(
@@ -441,15 +456,29 @@ export class SignalingTransport implements BusTransport {
     peer.pendingCandidates = []
   }
 
-  /** Replay the candidates that arrived before the remote description. One bad
-   *  candidate must not strand the rest, so each is applied on its own. */
-  private async flushPendingCandidates(peer: PeerState): Promise<void> {
+  /**
+   * Replay the candidates that arrived before the remote description. One bad
+   * candidate must not strand the rest, so each is applied on its own.
+   *
+   * Takes the connection whose description just landed, and does nothing if the
+   * peer has moved on to another: signals are handled concurrently, so a second
+   * offer can be adopted while this one is still awaiting
+   * `setRemoteDescription`, and marking the flag then would describe a
+   * connection that has no remote description — re-opening the drop window this
+   * queue exists to close, for candidates that arrive before the new
+   * negotiation finishes.
+   */
+  private async flushPendingCandidates(
+    peer: PeerState,
+    connection: RTCPeerConnection,
+  ): Promise<void> {
+    if (peer.connection !== connection) return
     peer.remoteDescriptionSet = true
-    const pending = peer.pendingCandidates ?? []
+    const pending = peer.pendingCandidates
     peer.pendingCandidates = []
     for (const candidate of pending) {
       try {
-        await peer.connection?.addIceCandidate(candidate)
+        await connection.addIceCandidate(candidate)
       } catch (error) {
         console.warn("[SignalingTransport] ICE candidate rejected:", error)
       }
