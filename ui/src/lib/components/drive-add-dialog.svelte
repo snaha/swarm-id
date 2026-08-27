@@ -45,6 +45,7 @@
     stampTtlSeconds,
   } from '$lib/payment/purchase'
   import { devSettingsStore } from '$lib/stores/dev-settings.svelte'
+  import { toastStore } from '$lib/stores/toast.svelte'
   import type { Account } from '$lib/types'
 
   const STORAGE_OPTIONS = [
@@ -151,6 +152,24 @@
   })
 
   /**
+   * Stop tracking the widget purchase. Cancelling once money is in flight leaves
+   * the popup running — killing it would strand the funds — so that exit is
+   * otherwise silent: no callback fires, and a batch settling afterwards lands
+   * nowhere. This dialog is the last place that can say so, hence the toast.
+   * A settled purchase says nothing: the batch is recorded and only the widget's
+   * trailing sweep is left.
+   */
+  function abandonPurchase() {
+    const stillPaying = purchase?.cancel()
+    purchase = undefined
+    if (stillPaying) {
+      toastStore.show(
+        'Payment is still finishing in the widget window. If the drive does not appear, add it with “Use existing batch”.',
+      )
+    }
+  }
+
+  /**
    * Let go of everything still in flight, leaving the dialog on screen. A
    * settled purchase uses this to stop a late widget callback or ceremony from
    * writing over the success screen the user is looking at.
@@ -158,8 +177,7 @@
   function release() {
     attempts.supersede()
     funding.cancel()
-    purchase?.cancel()
-    purchase = undefined
+    abandonPurchase()
   }
 
   function close() {
@@ -179,9 +197,11 @@
   // longer exists, and cancel a widget popup so its poll and message listener
   // don't outlive us. A payment already with the wallet is not abandoned by
   // this: the requester keeps that one armed, and its own outcome settles it.
+  // After a `close()` the cancel is a no-op — it is terminal — so this neither
+  // re-cancels nor toasts twice.
   onDestroy(() => {
     funding.cancel()
-    purchase?.cancel()
+    abandonPurchase()
   })
 
   function proceed() {
@@ -231,7 +251,7 @@
       if (!attempt.current) {
         return
       }
-      // The method screen handed the payment to fund.bzz.limo. The engine
+      // The method screen handed the payment to the multichain widget. The engine
       // operation is abandoned with nothing spent — the funding seam is raised
       // before any spend — so carry on with the widget on the same attempt,
       // which a close still supersedes.
@@ -252,9 +272,11 @@
   }
 
   /**
-   * Buy the drive through the fund.bzz.limo popup, which settles the payment
+   * Buy the drive through the multichain-widget popup, which settles the payment
    * and creates the batch itself and hands back the finished thing. Nothing
-   * here goes near the rail or the on-chain engine.
+   * here goes near the rail or the on-chain engine. (The popup is served from
+   * `swarmbucks.eth.limo` since this PR — the UI copy elsewhere still says
+   * `fund.bzz.limo`, which is the older deployment of the same widget.)
    */
   async function purchaseWithWidget(attempt: Attempt) {
     phase = 'pending'
@@ -396,8 +418,8 @@
     <div class="flex items-start gap-2">
       <TriangleAlert class="text-destructive mt-0.5 size-4 shrink-0" />
       <p class="text-sm">
-        The payment window closed before we could confirm the purchase. If you completed payment,
-        your drive may still appear shortly — don't pay again without checking.
+        Your payment went through, but the payment window closed before the purchase was confirmed.
+        The drive may still appear shortly — don't pay again without checking.
       </p>
     </div>
     <Button variant="outline" class="w-full" onclick={close}>Close</Button>
