@@ -150,6 +150,31 @@ describe('isUnrecognizedChainError', () => {
     expect(isUnrecognizedChainError({ code: -32000, message: 'insufficient funds' })).toBe(false)
     expect(isUnrecognizedChainError(undefined)).toBe(false)
   })
+
+  /**
+   * The message fallback used to be a bare `4902` and `not.*added`, which
+   * matched those patterns anywhere in the string — a chain id like 49020, a
+   * gas figure, an address fragment, or any unrelated "not ... added"
+   * pairing. None of those are a wallet saying it doesn't know the chain, and
+   * answering them with wallet_addEthereumChain is an unrequested prompt.
+   */
+  it('does not read "4902" inside an unrelated number as a missing chain', () => {
+    expect(
+      isUnrecognizedChainError({
+        code: -32000,
+        message: 'insufficient funds: chain 49020 gas too low',
+      }),
+    ).toBe(false)
+  })
+
+  it('does not read an unrelated "not ... added" as a missing chain', () => {
+    expect(
+      isUnrecognizedChainError({
+        code: -32000,
+        message: 'This feature has not been added to your plan.',
+      }),
+    ).toBe(false)
+  })
 })
 
 /**

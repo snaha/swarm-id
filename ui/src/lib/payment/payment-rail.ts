@@ -148,7 +148,9 @@ export interface Delivery {
   /** Which asset — `bzz` means the operation is already funded and no swap runs. */
   input: SwapInput
   /**
-   * How much of it the rail itself carried, in that asset's own units.
+   * How much of it the operation settles from, in that asset's own units — the
+   * full leg, including any residual already at the owner address that the
+   * rail credited rather than transferred.
    *
    * Asymmetric on purpose, and only the token legs are settled from it. A
    * token leg is swapped whole, so this IS the figure to swap. Native xDAI is
@@ -225,9 +227,12 @@ const USER_REJECTED = 4001
  * The wording left when the code is gone. Conservative on purpose — it decides
  * whether the app follows a failed switch with a second wallet prompt, so it
  * matches how wallets name this failure ("Unrecognized chain ID", "chain has
- * not been added") and nothing vaguer.
+ * not been added") and nothing vaguer. Anchored: an unrelated message that
+ * happens to contain the digits "4902" (a bigger chain id, a gas figure, an
+ * address fragment) or an unrelated "not ... added" pairing must not trigger
+ * an unrequested wallet_addEthereumChain prompt.
  */
-const UNRECOGNIZED_CHAIN_MESSAGE = /unrecognized chain|4902|not.*added/i
+const UNRECOGNIZED_CHAIN_MESSAGE = /unrecognized chain|chain (?:has )?not been added|\b4902\b/i
 
 /** The shapes a provider error is found in — all optional, none guaranteed. */
 interface ProviderError {

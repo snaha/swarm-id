@@ -150,11 +150,27 @@
       .catch(() => undefined)
   })
 
-  function close() {
+  /**
+   * Let go of everything still in flight, leaving the dialog on screen. A
+   * settled purchase uses this to stop a late widget callback or ceremony from
+   * writing over the success screen the user is looking at.
+   */
+  function release() {
     attempts.supersede()
     funding.cancel()
     purchase?.cancel()
     purchase = undefined
+  }
+
+  function close() {
+    release()
+    // Whichever way the success screen is dismissed — Done, Esc, the backdrop —
+    // is the point the drive counts as added: `onAdded` is the toast for some
+    // callers and the "continue" step of onboarding for others, so it must fire
+    // exactly once, here.
+    if (phase === 'success') {
+      onAdded?.('Drive added')
+    }
     onClose()
   }
 
@@ -170,6 +186,10 @@
 
   function proceed() {
     errorMessage = ''
+    // Cleared with the message it belongs to: a later failure that sets only
+    // `errorMessage` would otherwise put the previous run's stack behind "View
+    // details".
+    errorDetail = ''
     // The batch owner is a deterministic function of the account's (plaintext)
     // derivation key, so no unlock is needed — buying spends real money, and
     // the payment screens are confirmation enough.
@@ -353,9 +373,13 @@
     }
   }
 
+  /**
+   * Stay on screen and say so, the way extending and resizing do. `onAdded`
+   * waits for the user to dismiss that screen — see `close`.
+   */
   function succeed() {
-    onAdded?.('Drive added')
-    close()
+    release()
+    phase = 'success'
   }
 </script>
 
@@ -378,7 +402,13 @@
     </div>
     <Button variant="outline" class="w-full" onclick={close}>Close</Button>
   </Dialog>
-{:else if phase === 'pending' || phase === 'error'}
+{:else if phase === 'pending' || phase === 'success' || phase === 'error'}
+  <!-- Cancel only while nothing has been paid for. Once a funding request is
+       armed the money is with the wallet or already swapped, and cancelling
+       would supersede the attempt at `beforeSpend` — leaving the user paid up
+       with no drive and, being `attempt.current`-gated, nothing on screen to
+       say so. The early "Checking the chain…" phase keeps its Cancel: aborting
+       there spends nothing. -->
   <DriveDialogStatus
     title="Add drive"
     {phase}
@@ -387,8 +417,8 @@
     errorDetails={errorDetail}
     successTitle="Purchase completed!"
     successBody="Your drive is ready to use."
-    cancellable
-    onRetry={() => ((phase = 'form'), (errorMessage = ''))}
+    cancellable={!funding.armed}
+    onRetry={() => (phase = 'form')}
     onClose={close}
   />
 {:else}

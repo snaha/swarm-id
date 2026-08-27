@@ -13,14 +13,27 @@ import { WALLET_CHAINS } from '$lib/payment/payment-rail'
 
 const injected = injectedModule()
 const wallets = [injected]
-// Every chain a payment can be signed on. Declaring them is what stops onboard
-// reporting the user's network as unsupported once they switch to pay.
-const chains = WALLET_CHAINS.map((chain) => ({
-  id: `0x${chain.id.toString(16)}`,
-  token: chain.nativeCurrency.symbol,
-  label: chain.name,
-  rpcUrl: chain.rpcUrls.default.http[0],
-}))
+// Every chain onboard has to know about, or it reports the user's network as
+// unsupported. That covers two different callers: `eth-wallet.ts`'s
+// wallet-secured unlock, which only signs a plain message and stays on
+// whichever network the wallet already happens to be on — Ethereum mainnet,
+// the common default — and the payment flow (`payment-rail.ts`), which
+// switches the wallet to WALLET_CHAINS to sign there.
+const chains = [
+  {
+    id: '0x1',
+    token: 'ETH',
+    label: 'Ethereum Mainnet',
+    // We don't need RPC here — unlock only signs a message, no transaction.
+    rpcUrl: 'https://swarm-id.snaha.net',
+  },
+  ...WALLET_CHAINS.map((chain) => ({
+    id: `0x${chain.id.toString(16)}`,
+    token: chain.nativeCurrency.symbol,
+    label: chain.name,
+    rpcUrl: chain.rpcUrls.default.http[0],
+  })),
+]
 const appMetadata = {
   name: 'Swarm ID',
   description: 'The identity system for Swarm',

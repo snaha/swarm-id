@@ -166,7 +166,13 @@
     }
     const attempt = attempts.begin()
     phase = 'pending'
+    // Back to the first step and a clean error: the run's own `onStep` only
+    // arrives after its first await, so a retry would otherwise open on the
+    // previous run's last label, and a failure that sets just `errorMessage`
+    // would put the previous stack behind "View details".
+    step = 'checking'
     errorMessage = ''
+    errorDetail = ''
     errorTone = 'error'
     try {
       // `beforeSpend` is where a cancel lands: it throws `SupersededError` once

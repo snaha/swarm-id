@@ -11,6 +11,7 @@ import type { PaymentRail } from '$lib/payment/payment-rail'
 import type { Account } from '$lib/types'
 
 import {
+  type FundingRequester,
   PaymentCancelledError,
   UseWidgetError,
   createFundingRequester,
@@ -47,7 +48,7 @@ function quote(xdaiWei: bigint): FundingQuote {
     xdaiForBzzWei: 6n * XDAI,
     xdaiForGasWei: XDAI / 100n,
     bzzPlur: 5n,
-    priceImpactPercent: 0n,
+    priceImpactPercent: 0,
     paidWith: 'xdai',
     paidAmount: 6n * XDAI,
   }
@@ -127,6 +128,50 @@ describe('createFundingRequester', () => {
     requester.resolve(settled)
     await running
     expect(swapDelivered).toHaveBeenCalledWith('aa', settled)
+  })
+
+  /**
+   * What the add-drive dialog hides its Cancel on. Dismissing the payment
+   * screens with a signature already at the wallet drops the user back on the
+   * pending screen; a Cancel there supersedes the attempt, the payment lands
+   * anyway, and the operation dies at `beforeSpend` with the money swapped and
+   * no drive to show for it.
+   */
+  it('stays armed once a payment has been raised, through a dismissal and its settlement', async () => {
+    const requester = createFundingRequester(account)
+    expect(requester.armed).toBe(false)
+
+    const running = requester.request(need)
+    await vi.waitFor(() => expect(requester.pending).toBeDefined())
+    expect(requester.armed).toBe(true)
+
+    requester.cancel({ reason: 'payment-in-flight' })
+    requester.cancel()
+    expect(requester.armed).toBe(true)
+
+    // And past the settlement: the money is spent, so cancelling the rest of
+    // the operation is no cheaper than it was a moment ago.
+    requester.resolve(quote(XDAI))
+    await running
+    expect(requester.armed).toBe(true)
+  })
+
+  it('disarms when the request is let go, whichever way', async () => {
+    for (const letGo of [
+      (requester: FundingRequester) => requester.cancel(),
+      (requester: FundingRequester) => requester.cancel({ reason: 'wallet-rejected' }),
+      (requester: FundingRequester) => requester.cancel({ reason: 'use-widget' }),
+      (requester: FundingRequester) =>
+        requester.cancel({ reason: 'payment-unconfirmed', error: new Error('unconfirmed') }),
+    ]) {
+      const requester = createFundingRequester(account)
+      const running = requester.request(need)
+      await vi.waitFor(() => expect(requester.pending).toBeDefined())
+
+      letGo(requester)
+      await expect(running).rejects.toBeInstanceOf(Error)
+      expect(requester.armed).toBe(false)
+    }
   })
 
   it('ends the operation when the in-flight payment came back a wallet rejection', async () => {

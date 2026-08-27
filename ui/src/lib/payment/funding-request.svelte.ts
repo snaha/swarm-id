@@ -114,6 +114,15 @@ export type CancelOptions =
 export interface FundingRequester {
   /** The payment currently awaiting the user, or undefined. */
   readonly pending: PendingPayment | undefined
+  /**
+   * Whether a funding request has been raised and not since let go. From that
+   * moment the money is either with the wallet or already spent, and nothing
+   * in the UI can call it back — so a dialog must stop offering a Cancel that
+   * would only supersede the operation and leave the user paid up with no
+   * drive. Goes false again only when the request is failed (backed out,
+   * wallet rejection, unconfirmed, widget), which ends the operation anyway.
+   */
+  readonly armed: boolean
   /** Pass to `runExtend`/`runResize` as their funding seam. */
   request: RequestFunding
   /**
@@ -141,10 +150,14 @@ export function createFundingRequester(account: () => Account): FundingRequester
   // — a closed drive dialog, an unmount — and none of them can call the wallet
   // back either.
   let paymentInFlight = false
+  // Reactive, unlike `paymentInFlight`: the dialogs render off it, hiding the
+  // Cancel that would supersede an operation whose money is already committed.
+  let armed = $state(false)
 
   /** End the wait in failure, and forget that a payment was in flight. */
   const fail = (error: Error) => {
     paymentInFlight = false
+    armed = false
     settle?.reject(error)
     settle = undefined
   }
@@ -162,6 +175,9 @@ export function createFundingRequester(account: () => Account): FundingRequester
     // "already covered, nothing to pay" case, which it settles rather than
     // showing.
     pending = { need, rail }
+    // From here the operation is committed enough that cancelling it costs the
+    // user money; see `armed` on the interface.
+    armed = true
     // Settles with the quote the payment was finally made against: the screens
     // re-price after a failed attempt, and the swap has to spend the figure
     // the delivery that actually happened was sized for.
@@ -177,10 +193,15 @@ export function createFundingRequester(account: () => Account): FundingRequester
     get pending() {
       return pending
     },
+    get armed() {
+      return armed
+    },
     request,
     resolve(settled) {
       pending = undefined
       paymentInFlight = false
+      // `armed` deliberately stays: the payment landed, so from here to the end
+      // of the operation a cancel spends money for nothing.
       settle?.resolve(settled)
       settle = undefined
     },
