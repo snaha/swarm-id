@@ -136,7 +136,15 @@ With the bus in place the partitioned iframe becomes a first-class writer:
   origin, and an unpartitioned proxy reads the same material out of shared storage. What
   changed with #547 is that a partitioned session went from holding no credentials at all to
   holding real ones, in a context embedded by an arbitrary dApp page; narrowing the collection
-  bounds what script execution there would yield.
+  reduces what it holds at rest.
+
+  It does **not** bound what script execution in that iframe would yield. The session keeps the
+  `derivationKey`, so it can derive the envelope key and read the room — and every
+  `account-delta` a publisher sends carries the whole stamp collection, signer keys included,
+  because the publisher is unpartitioned and does not know which app each receiver is. Anything
+  running there can wait for one message. Narrowing that too means publishing per-app deltas,
+  which needs a per-app room; not in scope here, and worth stating so the next reader does not
+  mistake this for a boundary.
 
 - `handlePopupMessage` hydrates the projection into an **in-memory** account view
   (`partitionAccount`): the stored-account schema deliberately quarantines vault-less

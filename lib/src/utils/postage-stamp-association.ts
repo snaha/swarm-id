@@ -14,6 +14,14 @@ import type { ConnectedApp, PostageStamp, SignedInAccount } from "../schemas"
  * The lookup is existence-checked: a pointer whose stamp is missing (e.g. a
  * removed or replaced batch) is skipped so resolution falls through to the next
  * candidate instead of failing.
+ *
+ * Paired with `stampsReachableByApp` below, which decides what a partitioned
+ * session may HOLD while this decides what it SPENDS — over the same two
+ * pointers, and deliberately differing on tombstones: this one skips them (a
+ * deleted stamp cannot be spent), that one keeps them (a session learns its
+ * stamp is deleted no other way). Change the pointer rule in one and the other
+ * has to follow, or a session holds a stamp it cannot resolve, or resolves one
+ * it was never handed.
  */
 export function resolveStampForApp(
   app: Pick<ConnectedApp, "postageStampBatchID">,

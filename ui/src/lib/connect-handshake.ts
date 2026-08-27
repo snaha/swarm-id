@@ -70,6 +70,12 @@ function saveConnection(account: Account, request: ConnectRequest, appSecret: st
  * (`deriveBusContext`), and the partition lease derives the Swarm encryption
  * key and the lock-SOC signer from it (`deriveSwarmEncryptionKey` →
  * `backup-key`). A partitioned session cannot write without it.
+ *
+ * Which means this narrows what the session HOLDS, not what it could learn: the
+ * key that opens the room stays, and an `account-delta` carries the whole
+ * collection (the publisher is unpartitioned and does not know its receivers'
+ * apps), so script execution in that iframe can wait for one message. Bounding
+ * that as well needs per-app deltas in a per-app room — out of scope for #578.
  */
 export function partitionHandoverAccount(
   account: SyncedAccount,

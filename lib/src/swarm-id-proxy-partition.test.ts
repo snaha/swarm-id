@@ -967,6 +967,18 @@ describe("SwarmIdProxy partitioned write enablement", () => {
         busChannel.postMessage(
           accountDelta({
             lastModified: localAt - 10_000,
+            // The second stamp has to be one this app's pointers name, or the
+            // narrowing (#578) drops it and the fold is unobservable here: the
+            // delta re-points the app at it in the same message.
+            connectedApps: [
+              {
+                appUrl: PARENT_ORIGIN,
+                appName: "dApp",
+                lastConnectedAt: Date.now(),
+                updatedAt: Date.now() + 1,
+                postageStampBatchID: new BatchId(OTHER_BATCH_ID_HEX),
+              },
+            ],
             postageStamps: [
               stamp,
               {
@@ -1332,6 +1344,88 @@ describe("SwarmIdProxy partitioned write enablement", () => {
           }
         ).partitionAccount.postageStamps
         expect(held.map((s) => s.batchID.toHex())).toEqual([BATCH_ID_HEX])
+      } finally {
+        busChannel.close()
+      }
+    })
+
+    /** What the narrowing filters BY has to be what the merge just decided —
+     *  the delta carries both the new pointer and the stamp it names, and a
+     *  narrowing that reads the pre-merge pointers throws the stamp away while
+     *  keeping the pointer. `resolveStampForApp` then falls through to the
+     *  account default and the session uploads to the wrong batch, until some
+     *  unrelated change happens to publish again. */
+    function otherStamp(): PostageStamp {
+      return {
+        ...makeSyncedAccount().postageStamps[0],
+        batchID: new BatchId(OTHER_BATCH_ID_HEX),
+        signerKey: new PrivateKey("ee".repeat(32)),
+        updatedAt: Date.now(),
+      }
+    }
+
+    it("keeps the stamp a delta re-points this app at", async () => {
+      const busChannel = await hydratedSession()
+      try {
+        busChannel.postMessage(
+          accountDelta({
+            connectedApps: [
+              {
+                appUrl: PARENT_ORIGIN,
+                appName: "dApp",
+                lastConnectedAt: Date.now(),
+                // Strictly newer than the hydrated entry, so the fold cannot
+                // tie on a same-millisecond clock and keep the local pointer.
+                updatedAt: Date.now() + 1,
+                postageStampBatchID: new BatchId(OTHER_BATCH_ID_HEX),
+              },
+            ],
+            postageStamps: [makeSyncedAccount().postageStamps[0], otherStamp()],
+          }),
+        )
+        await flushBus()
+
+        const held = (
+          proxy as unknown as {
+            partitionAccount: {
+              postageStamps: { batchID: { toHex(): string } }[]
+            }
+          }
+        ).partitionAccount.postageStamps
+        expect(held.map((s) => s.batchID.toHex())).toContain(OTHER_BATCH_ID_HEX)
+      } finally {
+        busChannel.close()
+      }
+    })
+
+    /** Same shape, one field over: the account default moves. Before the
+     *  narrowing the session at least HELD the new default's stamp; now a
+     *  pointer that never folds filters it out, so the session goes
+     *  upload-dead the moment the old default is tombstoned. */
+    it("follows the account default a newer delta moves", async () => {
+      const busChannel = await hydratedSession()
+      try {
+        busChannel.postMessage(
+          accountDelta({
+            defaultPostageStampBatchID: OTHER_BATCH_ID_HEX,
+            defaultStampAt: Date.now() + 1,
+            postageStamps: [makeSyncedAccount().postageStamps[0], otherStamp()],
+          }),
+        )
+        await flushBus()
+
+        const held = proxy as unknown as {
+          partitionAccount: {
+            defaultPostageStampBatchID?: { toHex(): string }
+            postageStamps: { batchID: { toHex(): string } }[]
+          }
+        }
+        expect(held.partitionAccount.defaultPostageStampBatchID?.toHex()).toBe(
+          OTHER_BATCH_ID_HEX,
+        )
+        expect(
+          held.partitionAccount.postageStamps.map((s) => s.batchID.toHex()),
+        ).toContain(OTHER_BATCH_ID_HEX)
       } finally {
         busChannel.close()
       }
