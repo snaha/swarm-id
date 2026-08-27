@@ -139,9 +139,11 @@ import {
 } from "./utils/storage-managers"
 import { serializeAccountStateSnapshot } from "./utils/account-state-snapshot"
 import { STORAGE_CHALLENGE_KEY, STORAGE_KEY_ACCOUNTS } from "./types"
+import { KNOWN_DEVICE_MAX_AGE_MS } from "./utils/active-devices"
 import { DEFAULT_BEE_NODE_URL } from "./schemas"
 import type {
   ConnectedApp,
+  Device,
   PostageStamp,
   SignedInAccount,
   SyncedAccount,
@@ -1283,6 +1285,131 @@ describe("SwarmIdProxy partitioned write enablement", () => {
     expect(deps.knownDeviceIds()).toContain(peer.deviceId)
   })
 
+  /** Seed shared storage with an account already connected to the dApp.
+   *  A different `derivationKey` makes it a different account — a different
+   *  bus room — while staying connected to the same dApp, which is what an
+   *  account switch looks like from in here. */
+  function seedConnectedAccount(
+    derivationKey?: string,
+    devices?: Device[],
+  ): SyncedAccount {
+    const synced = { ...makeSyncedAccount() }
+    if (derivationKey !== undefined) synced.derivationKey = derivationKey
+    if (devices !== undefined) synced.devices = devices
+    const stored: SignedInAccount = {
+      ...synced,
+      connectedApps: [
+        {
+          appUrl: PARENT_ORIGIN,
+          appName: "dApp",
+          appSecret: "44".repeat(32),
+          lastConnectedAt: Date.now(),
+          connectedUntil: Date.now() + 60_000,
+        },
+      ],
+      // Inert but schema-valid: the vault is never opened here.
+      access: {
+        type: "password",
+        kdfSalt: "ab".repeat(16),
+        kdfIterations: 100_000,
+      },
+      encryptedSeed: "00".repeat(48),
+    }
+    localStorageFake.setItem(
+      STORAGE_KEY_ACCOUNTS,
+      JSON.stringify({ version: 1, data: [serializeAccount(stored)] }),
+    )
+    return synced
+  }
+
+  // The harm the length check caused: a peer ALREADY in the view, gone stale
+  // (`activeDeviceIds` prunes past `KNOWN_DEVICE_MAX_AGE_MS`), is refreshed by
+  // the roster — same list length, so the merge was discarded and the peer
+  // stayed pruned. It then never gets an intent read, which is the dual-acquire
+  // the refresh exists to prevent (#586).
+  it("folds a refreshed sign-in for a peer already in the view", async () => {
+    const staleSignIn = Date.now() - 2 * KNOWN_DEVICE_MAX_AGE_MS
+    const peerId = "peer-device-already-known"
+    // Our own device has to be in the list already, or `mergeDevices` adds it
+    // and the length changes — which is the one case the old guard did catch.
+    const selfId = "self-device-already-known"
+    localStorageFake.setItem("swarm-id-device-id", selfId)
+    const account = makeSyncedAccount()
+    account.devices = [
+      { deviceId: selfId, createdAt: staleSignIn, lastSignedInAt: Date.now() },
+      { deviceId: peerId, createdAt: staleSignIn, lastSignedInAt: staleSignIn },
+    ]
+
+    rosterDevices.length = 0
+    rosterDevices.push({
+      deviceId: peerId,
+      createdAt: staleSignIn,
+      lastSignedInAt: Date.now(),
+    })
+
+    const challenge = await startPartitionedConnect()
+    await sendSetSecret(challenge, {
+      account: serializeSyncedAccount(account),
+    })
+
+    const { deps } = vi.mocked(BatchWriteCoordinator).mock.results.at(-1)!
+      .value as {
+      deps: {
+        knownDeviceIds: () => string[]
+        refreshKnownDeviceIds: () => Promise<void>
+      }
+    }
+    // Aged out of the rival set, though the account view lists it.
+    expect(deps.knownDeviceIds()).not.toContain(peerId)
+
+    await deps.refreshKnownDeviceIds()
+
+    expect(deps.knownDeviceIds()).toContain(peerId)
+  })
+
+  // The same fold on the other branch. The guard is deliberately shared, so
+  // this is the half that pins `manager.save` — the rival set alone would pass
+  // on a merge that reached memory and never reached storage, and then every
+  // other context (and the next page load) keeps reading the stale copy.
+  it("saves the refreshed registry to shared storage when unpartitioned", async () => {
+    const staleSignIn = Date.now() - 2 * KNOWN_DEVICE_MAX_AGE_MS
+    const refreshedSignIn = Date.now()
+    const peerId = "peer-device-stored"
+    const selfId = "self-device-stored"
+    localStorageFake.setItem("swarm-id-device-id", selfId)
+    const synced = seedConnectedAccount(undefined, [
+      { deviceId: selfId, createdAt: staleSignIn, lastSignedInAt: Date.now() },
+      { deviceId: peerId, createdAt: staleSignIn, lastSignedInAt: staleSignIn },
+    ])
+
+    rosterDevices.length = 0
+    rosterDevices.push({
+      deviceId: peerId,
+      createdAt: staleSignIn,
+      lastSignedInAt: refreshedSignIn,
+    })
+
+    proxy.destroy()
+    mountProxy()
+    await dispatch(
+      { type: "parentIdentify", requestId: "r1", metadata: { name: "dApp" } },
+      PARENT_ORIGIN,
+      parentWindow,
+    )
+
+    const { deps } = vi.mocked(BatchWriteCoordinator).mock.results.at(-1)!
+      .value as { deps: { refreshKnownDeviceIds: () => Promise<void> } }
+    await deps.refreshKnownDeviceIds()
+
+    const stored = JSON.parse(
+      localStorageFake.getItem(STORAGE_KEY_ACCOUNTS)!,
+    ) as { data: { id: string; devices: Device[] }[] }
+    const savedPeer = stored.data
+      .find((a) => a.id === synced.id.toHex())!
+      .devices.find((d) => d.deviceId === peerId)
+    expect(savedPeer?.lastSignedInAt).toBe(refreshedSignIn)
+  })
+
   // Hydration must go through the same network-settings path as the storage-
   // backed one: an RPC-only difference is invisible to a `beeNodeUrl` guard,
   // and a partitioned session that keeps the default RPC reads stamp TTLs and
@@ -1317,39 +1444,6 @@ describe("SwarmIdProxy partitioned write enablement", () => {
   // on Safari (docs/Account-Bus.md, phase 2).
   describe("account-bus signaling transport", () => {
     const SIGNALING_URL = "ws://signaling.test"
-
-    /** Seed shared storage with an account already connected to the dApp.
-     *  A different `derivationKey` makes it a different account — a different
-     *  bus room — while staying connected to the same dApp, which is what an
-     *  account switch looks like from in here. */
-    function seedConnectedAccount(derivationKey?: string): SyncedAccount {
-      const synced = { ...makeSyncedAccount() }
-      if (derivationKey !== undefined) synced.derivationKey = derivationKey
-      const stored: SignedInAccount = {
-        ...synced,
-        connectedApps: [
-          {
-            appUrl: PARENT_ORIGIN,
-            appName: "dApp",
-            appSecret: "44".repeat(32),
-            lastConnectedAt: Date.now(),
-            connectedUntil: Date.now() + 60_000,
-          },
-        ],
-        // Inert but schema-valid: the vault is never opened here.
-        access: {
-          type: "password",
-          kdfSalt: "ab".repeat(16),
-          kdfIterations: 100_000,
-        },
-        encryptedSeed: "00".repeat(48),
-      }
-      localStorageFake.setItem(
-        STORAGE_KEY_ACCOUNTS,
-        JSON.stringify({ version: 1, data: [serializeAccount(stored)] }),
-      )
-      return synced
-    }
 
     async function remountWithSignaling(): Promise<void> {
       proxy.destroy()

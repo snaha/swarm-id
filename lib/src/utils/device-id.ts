@@ -129,3 +129,61 @@ export function detectDeviceName(): string {
 
   return `${browser} on ${device}`
 }
+
+/**
+ * Whether a merged device registry is worth persisting over the stored one.
+ *
+ * The old test was "did the list get LONGER", which threw away every merge that
+ * only refreshed a peer's `lastSignedInAt` or set a `removedAt` tombstone — and
+ * those are exactly the fields `activeDeviceIds` prunes the rival set on. A peer
+ * the roster shows as live could therefore age out of the stored copy, drop out
+ * of the rival set, and never get an intent read: the dual-acquire the registry
+ * refresh exists to prevent (#586).
+ *
+ * Our OWN `lastSignedInAt` is deliberately excluded. `mergeDevices` stamps it on
+ * every call, so counting it would report a change on every refresh — a save, and
+ * a storage event in every other tab, every poll round. That churn is what the
+ * length check was really avoiding, and our heartbeat reaches peers through the
+ * roster publish, not through this local save.
+ */
+export function deviceRegistryChanged(
+  stored: Device[],
+  merged: Device[],
+  selfDeviceId: string,
+): boolean {
+  if (stored.length !== merged.length) return true
+  const before = new Map(stored.map((device) => [device.deviceId, device]))
+  return merged.some((device) => {
+    const previous = before.get(device.deviceId)
+    if (!previous) return true
+    const isSelf = device.deviceId === selfDeviceId
+    return DEVICE_COMPARED_FIELDS.some(([field, scope]) =>
+      isSelf && scope === "peers-only"
+        ? false
+        : previous[field] !== device[field],
+    )
+  })
+}
+
+/**
+ * Every field of `DeviceSchemaV1`, classified for the comparison above.
+ *
+ * Typed as a full `Record<keyof Device, …>` on purpose: a field added to the
+ * schema fails to compile here until it is classified, because the alternative
+ * failure is silent — an unlisted field simply never triggers a persist, and
+ * what is lost is a registry write nobody is watching for.
+ *
+ * `deviceId` is in the list though it is the map key: keeping the record total
+ * is what makes the compiler the check.
+ */
+const DEVICE_COMPARED_FIELDS = Object.entries({
+  deviceId: "all",
+  createdAt: "all",
+  name: "all",
+  removedAt: "all",
+  // Ours is stamped by `mergeDevices` on every call — see the note above.
+  lastSignedInAt: "peers-only",
+} satisfies Record<keyof Device, "all" | "peers-only">) as [
+  keyof Device,
+  "all" | "peers-only",
+][]
