@@ -113,10 +113,13 @@ export function seedNoChain(page: Page) {
  * the payment screens, where choosing fund.bzz.limo is what reaches the /dev
  * mock. Either way a chain is needed — gate with {@link chainReachable}.
  *
- * It settles asynchronously — callers assert the outcome (a "Drive xxxx" card,
- * or the error phase) with `DRIVE_SETTLE_TIMEOUT_MS`.
+ * A settled purchase ends on a modal success screen whose Done click this
+ * waits for — the page behind it is not interactable until then. Suites whose
+ * purchase never succeeds (a dead RPC, a mocked failure) pass
+ * `settle: false` and assert the error/payment state themselves with
+ * `DRIVE_SETTLE_TIMEOUT_MS`.
  */
-export async function addDrive(page: Page) {
+export async function addDrive(page: Page, { settle = true } = {}) {
   await page.getByRole('tab', { name: 'Storage' }).click()
   await page.getByRole('button', { name: 'Add drive' }).click()
   const dialog = page.getByRole('dialog')
@@ -136,6 +139,9 @@ export async function addDrive(page: Page) {
   await dialog.getByRole('spinbutton').fill('30')
   await dialog.getByRole('combobox').nth(2).selectOption('days')
   await page.getByRole('button', { name: 'Proceed' }).click()
+  if (settle) {
+    await dialog.getByRole('button', { name: 'Done' }).click({ timeout: DRIVE_SETTLE_TIMEOUT_MS })
+  }
 }
 
 export const CHAIN_RPC_URL = process.env.CHAIN_RPC_URL ?? 'http://localhost:9545'
@@ -158,6 +164,12 @@ const DRIVE_FUNDING = {
  * Must run after the account exists (its derivation key is read from storage)
  * and before the operation that spends. Suites that assert a FAILED purchase
  * deliberately skip it.
+ *
+ * What this buys the e2e rig, and what it does not: pre-funding the owner
+ * means `quoteFunding` always comes back needing zero, so a suite that calls
+ * this never opens the payment screens or exercises a payment rail
+ * (`gnosis-direct.ts` and friends) — those are covered by
+ * `payment-rail.test.ts` and the multichain unit/fork tests, not here.
  */
 export async function fundPostageSigner(page: Page) {
   const to = await postageSignerAddress(page)
@@ -178,6 +190,10 @@ export async function fundPostageSigner(page: Page) {
  * Derived inside the page rather than here because the lib ships one bundle and
  * it is the browser one: importing `derivePostageSignerKey` into the Node test
  * process pulls a browser build of bee-js and dies on `window is not defined`.
+ *
+ * Re-implemented rather than imported — keep this in step with
+ * `derivePostageSignerKey` in `lib/src/utils/key-derivation.ts`, the source of
+ * truth this must match.
  */
 async function postageSignerAddress(page: Page): Promise<`0x${string}`> {
   const signerKey = await page.evaluate(async () => {

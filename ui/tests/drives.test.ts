@@ -152,7 +152,7 @@ test('a purchase that cannot reach the chain surfaces the error and adds nothing
   // and must say so rather than inventing a drive.
   await createLocalAccount(page, seedNoChain)
 
-  await addDrive(page)
+  await addDrive(page, { settle: false })
 
   await expect(page.getByRole('button', { name: 'Try again' })).toBeVisible({
     timeout: DRIVE_SETTLE_TIMEOUT_MS,
@@ -178,7 +178,7 @@ test('a failed mock purchase surfaces the error and adds nothing', async ({ page
 
   // Deliberately unfunded: the payment screen is the only way to hand a
   // purchase to fund.bzz.limo, and that method is what the mock stands in for.
-  await addDrive(page)
+  await addDrive(page, { settle: false })
   await page.getByRole('button', { name: 'Continue to fund.bzz.limo' }).click()
 
   await expect(page.getByText('Mock error: Purchase failed')).toBeVisible({

@@ -4,9 +4,9 @@
  * Extend and resize executed as REAL transactions against the bee-compose
  * anvil chain, signed by the account's derived postage signer — no Bee node
  * involved. Nothing about the funding is mocked either: the drive is made with
- * `/dev`'s Create-drive action, whose simulated purchase leaves its leftover
- * BZZ and xDAI with the owner, so the signer is already funded when it extends
- * and no payment is owed.
+ * `/dev`'s Create-drive action, a real purchase on the local chain that leaves
+ * its leftover BZZ and xDAI with the owner, so the signer is already funded
+ * when it extends and no payment is owed.
  *
  * Everything here READS the chain's shared state and writes only its own
  * account's. The one case that has to remove the EIP-7702 delegate — which

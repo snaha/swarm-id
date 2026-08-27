@@ -9,35 +9,20 @@
  */
 import { type Page, expect } from '@playwright/test'
 
-import { completeCreateFlow } from './helpers'
+import { CHAIN_RPC_URL, chainReachable, completeCreateFlow } from './helpers'
 
-// Defaults to the bee-compose cluster's chain; set CHAIN_RPC_URL
-// to run the identical suites against the same snapshot standalone
-// (`pnpm dev:chain`).
-export const ANVIL_RPC_URL = process.env.CHAIN_RPC_URL ?? 'http://localhost:9545'
+// Re-exported under its old name: `drive-onchain-serial.test.ts` imports it
+// from here, and the two files are owned separately — the shared probe and
+// URL live once, in `helpers.ts`, and this keeps their import untouched.
+export const ANVIL_RPC_URL = CHAIN_RPC_URL
 const BEE_NODE_URL = 'http://localhost:1633/'
 /** On-chain work spans several 5s-block confirmations. */
 export const ONCHAIN_TIMEOUT_MS = 120_000
-const PROBE_TIMEOUT_MS = 2000
 /** The depth `/dev`'s Create-drive action buys. */
 const DRIVE_DEPTH = 20
 
-async function anvilReachable(): Promise<boolean> {
-  try {
-    const response = await fetch(ANVIL_RPC_URL, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'eth_chainId', params: [] }),
-      signal: AbortSignal.timeout(PROBE_TIMEOUT_MS),
-    })
-    return typeof ((await response.json()) as { result?: string }).result === 'string'
-  } catch {
-    return false
-  }
-}
-
 /** Probed once per worker, so each suite can skip itself rather than fail. */
-export const chainUp = await anvilReachable()
+export const chainUp = await chainReachable(ANVIL_RPC_URL)
 
 /** The stored drive's on-chain-relevant fields. */
 export function storedDrive(page: Page) {
