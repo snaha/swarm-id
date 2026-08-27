@@ -206,7 +206,7 @@ To check if storage is partitioned:
 2. Go to **Application** → **Storage**
 3. Look for partitioned storage indicators
 
-On Chrome/Firefox localhost, storage should work immediately. If issues occur, try clicking the iframe first to trigger Storage Access API.
+On the local rig storage is not partitioned at all: `localhost:3500` and `localhost:5500` are the same _site_ (ports do not affect site), so the iframe reads the identity UI's first-party store directly. Browsing the demo under a different name for the same machine — `127.0.0.1:3500` instead of `localhost:3500` — makes it cross-site and partitions it, which is the quickest way to reproduce the partitioned path locally.
 
 ### Bee Requests Blocked by CORS
 

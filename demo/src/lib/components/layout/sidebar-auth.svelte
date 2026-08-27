@@ -43,13 +43,13 @@
   const iframeDescription = $derived(
     clientStore.authenticated
       ? 'Button rendered by the identity provider in an iframe.'
-      : 'Grants cross-site storage access via the Storage Access API.',
+      : 'Opens the identity popup from inside the iframe, which works even when storage is partitioned.',
   )
 
   const iframeTooltip = $derived(
     clientStore.authenticated
       ? 'This button is rendered by the identity provider inside a hidden iframe. It can also be used to disconnect your session.'
-      : 'This button is rendered by the identity provider inside a hidden iframe. Clicking it prompts the browser to grant cross-site storage access via the Storage Access API, needed when the browser blocks it by default (e.g. HTTP on Chrome).',
+      : "This button is rendered by the identity provider inside a hidden iframe. Because the popup is opened BY the iframe, the session can be handed straight back to it — the path that still works when the browser partitions the iframe's storage and a storage event would never arrive.",
   )
 </script>
 

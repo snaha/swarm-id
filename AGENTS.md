@@ -2,7 +2,11 @@
 
 Web-based identity and key management for decentralized applications on the Swarm network.
 
-**Key Innovation**: Popup-based authentication flow using shared localStorage. In production (secure context), storage works immediately for Chrome/Firefox. On localhost, Chrome/Firefox can request shared storage access via Storage Access API (requires clicking iframe button first). Where the browser partitions the iframe's storage (Safari ITP, or strict privacy settings elsewhere), the connect popup hands it the account's synced projection (stamps incl. signer keys) instead — uploads keep working, but credentials live only in memory and are re-seeded on every page load ([#277](https://github.com/snaha/swarm-id/issues/277), [docs/Account-Bus.md](docs/Account-Bus.md)). **Unverified on real Safari** — the path is confirmed on Chromium and Firefox with third-party storage partitioned; do not state Safari upload support as fact until that check lands. Safari private mode: sessions are ephemeral (lost when the private window closes).
+**Key Innovation**: Popup-based authentication flow using shared localStorage. The proxy iframe reads the trusted domain's first-party store whenever the embedding page is **same-site**, which is every context we run: the local rig (`localhost:3500` + `localhost:5500` — ports do not affect _site_), the PR previews (one origin), and DigitalOcean (`swarm-demo.snaha.net` / `swarm-id.snaha.net`, both under `snaha.net`). No Storage Access API is involved, on localhost or anywhere else.
+
+Where the two are genuinely cross-site, or the browser partitions regardless (Safari ITP, strict privacy settings), the iframe gets its own partitioned store and the connect popup hands it the account's synced projection (stamps incl. signer keys) instead — uploads keep working, but credentials live only in memory and are re-seeded on every page load ([#277](https://github.com/snaha/swarm-id/issues/277), [docs/Account-Bus.md](docs/Account-Bus.md)). That handover needs the popup to be opened **by the iframe**, so `window.opener` points back at it: the proxy's own auth button always does this, while `SwarmIdClient.connect()` only does it on WebKit ([#613](https://github.com/snaha/swarm-id/issues/613)).
+
+**Unverified on real Safari** — the path is confirmed on Chromium and Firefox with third-party storage partitioned; do not state Safari upload support as fact until that check lands. Safari private mode: sessions are ephemeral (lost when the private window closes).
 
 ## Architecture
 

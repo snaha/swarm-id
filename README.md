@@ -13,7 +13,7 @@ Cross-browser compatible authentication and identity management for Swarm dApps.
 
 ## Architecture
 
-The project uses an OAuth-style popup authentication flow using the Storage Access API. Chrome and Firefox work out of the box; where the browser partitions the iframe's storage — Safari's ITP, or strict privacy settings elsewhere — the connect popup hands the iframe the account's upload credentials directly, so uploads keep working ([Account bus](./docs/Account-Bus.md)). This path is verified on Chromium and Firefox with third-party storage partitioned; confirmation on real Safari is still pending, see [Safari limitations](#safari-limitations).
+The project uses an OAuth-style popup authentication flow over shared localStorage — no Storage Access API and no browser extension. The proxy iframe reads the trusted domain's first-party store while the embedding page is same-site, which covers the local rig and both deployments; where the two are cross-site, or the browser partitions regardless (Safari's ITP, strict privacy settings elsewhere), the connect popup hands the iframe the account's upload credentials directly instead, so uploads keep working ([Account bus](./docs/Account-Bus.md)). This path is verified on Chromium and Firefox with third-party storage partitioned; confirmation on real Safari is still pending, see [Safari limitations](#safari-limitations).
 
 **Key Innovation**: The popup-based authentication allows dApps to securely derive app-specific secrets from a master identity, with browser-enforced storage partitioning providing cross-app isolation.
 
