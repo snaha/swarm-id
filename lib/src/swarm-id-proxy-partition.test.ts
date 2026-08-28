@@ -390,6 +390,47 @@ describe("SwarmIdProxy partitioned write enablement", () => {
     expect(last.storagePartitioned).toBe(true)
     expect(last.uploadMode).toBe("unavailable")
     expect(last.canUpload).toBe(false)
+    expect(last.uploadUnavailableReason).toBe("download-only")
+  })
+
+  // Three ways a partitioned session ends up unable to upload, and from the
+  // dApp side they were indistinguishable — every one of them just said
+  // "unavailable". That cost a real-Safari run (#584): an account with no drive
+  // read as a failed `window.opener` handover, which is a claim about ITP.
+  it("reports no-stamp when the handed-over account has no drive", async () => {
+    const account = makeSyncedAccount()
+    const challenge = await startPartitionedConnect()
+    await sendSetSecret(challenge, {
+      account: serializeSyncedAccount({
+        ...account,
+        defaultPostageStampBatchID: undefined,
+        postageStamps: [],
+      }),
+    })
+
+    const infos = messagesOfType("connectionInfoChanged")
+    const last = infos[infos.length - 1]
+    // The handover itself landed — that is what `storagePartitioned` means.
+    expect(last.storagePartitioned).toBe(true)
+    expect(last.uploadMode).toBe("unavailable")
+    expect(last.uploadUnavailableReason).toBe("no-stamp")
+  })
+
+  it("reports stamper-failed when the stamp resolves but the stamper does not build", async () => {
+    vi.mocked(UtilizationAwareStamper.create).mockRejectedValueOnce(
+      new Error("IndexedDB unavailable"),
+    )
+    const account = makeSyncedAccount()
+    const challenge = await startPartitionedConnect()
+    await sendSetSecret(challenge, {
+      account: serializeSyncedAccount(account),
+    })
+
+    const infos = messagesOfType("connectionInfoChanged")
+    const last = infos[infos.length - 1]
+    expect(last.storagePartitioned).toBe(true)
+    expect(last.uploadMode).toBe("unavailable")
+    expect(last.uploadUnavailableReason).toBe("stamper-failed")
   })
 
   it("becomes a first-class writer when the payload carries the synced account", async () => {
@@ -406,6 +447,7 @@ describe("SwarmIdProxy partitioned write enablement", () => {
     expect(last.storagePartitioned).toBe(true)
     expect(last.uploadMode).toBe("user-stamp")
     expect(last.canUpload).toBe(true)
+    expect(last.uploadUnavailableReason).toBeUndefined()
     expect(last.identity?.name).toBe("Partition Test Account")
 
     // The default stamp was bound from the hydrated account view.

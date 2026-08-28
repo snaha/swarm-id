@@ -13,7 +13,7 @@ Cross-browser compatible authentication and identity management for Swarm dApps.
 
 ## Architecture
 
-The project uses an OAuth-style popup authentication flow over shared localStorage — no Storage Access API and no browser extension. The proxy iframe reads the trusted domain's first-party store while the embedding page is same-site, which covers the local rig and both deployments; where the two are cross-site, or the browser partitions regardless (Safari's ITP, strict privacy settings elsewhere), the connect popup hands the iframe the account's upload credentials directly instead, so uploads keep working ([Account bus](./docs/Account-Bus.md)). This path is verified on Chromium and Firefox with third-party storage partitioned; confirmation on real Safari is still pending, see [Safari limitations](#safari-limitations).
+The project uses an OAuth-style popup authentication flow over shared localStorage — no Storage Access API and no browser extension. The proxy iframe reads the trusted domain's first-party store while the embedding page is same-site, which covers the local rig and both deployments; where the two are cross-site, or the browser partitions regardless (Safari's ITP, strict privacy settings elsewhere), the connect popup hands the iframe the account's upload credentials directly instead, so uploads keep working ([Account bus](./docs/Account-Bus.md)). The credential handover is confirmed on real Safari (iOS 18.7 / Safari 26.6); the upload that follows it is still verified only on Chromium and Firefox with third-party storage partitioned, see [Safari limitations](#safari-limitations).
 
 **Key Innovation**: The popup-based authentication allows dApps to securely derive app-specific secrets from a master identity, with browser-enforced storage partitioning providing cross-app isolation.
 
@@ -94,7 +94,7 @@ Open http://localhost:3500 - that's it!
 - Identity UI runs on port 5500
 - No HTTPS, certificates, or custom domains required (`localhost` is a secure context)
 
-**Note:** On Safari the proxy iframe's storage is partitioned, so it is re-seeded by the connect popup on every load. Uploads are expected to work, but a session that was never handed credentials (an older identity deployment, or an account without a usable postage batch) stays download-only. See [Safari limitations](#safari-limitations).
+**Note:** On Safari the proxy iframe's storage is partitioned, so it is re-seeded by the connect popup on every load. A session that was handed no credentials (an older identity deployment) or whose account has no usable postage batch stays download-only; `ConnectionInfo.uploadUnavailableReason` says which. See [Safari limitations](#safari-limitations).
 
 ### Development Mode (with hot reload)
 
@@ -262,7 +262,9 @@ tools would be spending real money.
 
 Safari's Intelligent Tracking Prevention (ITP) partitions storage for third-party iframes, so the proxy cannot read the trusted domain's localStorage. Uploads are designed to keep working regardless: the connect popup hands the iframe the account's synced projection (postage stamps including their signer keys), and cross-context coordination rides the [account bus](./docs/Account-Bus.md) instead of storage events.
 
-> **Status: not yet confirmed on real Safari.** The partitioned write path is verified on Chromium and Firefox with third-party storage partitioned, which exercises the same runtime-detected code path. What only real WebKit can settle is whether `window.opener` survives to a popup opened by a partitioned iframe under ITP — the credential handover depends on it, and if it does not hold, a Safari session falls back to download-only rather than failing loudly. Treat Safari upload support as expected-but-unverified until this section says otherwise.
+> **Status: the handover is confirmed on real Safari; the upload is not yet.** Measured on iOS 18.7 / Safari 26.6 against the deployed sites (`swarm-demo.snaha.net` → `swarm-id.snaha.net`): ITP partitions the proxy iframe, and the connect popup's `postMessage` through `window.opener` reaches it. That was the one thing only real WebKit could settle, and it holds — the session authenticates on the partitioned path.
+>
+> Still open: an upload from that session, end to end on the device. The run that settled the handover used an account with no postage batch, so it never reached the write path. Everything below the handover — hydrating the account view, building the stamper, stamping and pushing chunks — remains verified only on Chromium and Firefox with third-party storage partitioned. Treat Safari **upload** support as expected-but-unverified until this section says otherwise.
 
 What remains regardless:
 

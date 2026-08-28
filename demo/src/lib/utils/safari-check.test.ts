@@ -45,19 +45,81 @@ describe('runChecks', () => {
     expect(verdictOf(results, 'handover')).toBe('unknown')
   })
 
-  // On the partitioned path the only way to hold a stamp is the popup's
-  // postMessage having reached the iframe through `window.opener`.
-  it('credits the handover when a partitioned session holds its own stamp', () => {
-    const results = runChecks({ connection: connected(), loadCount: 0 })
-    expect(verdictOf(results, 'handover')).toBe('pass')
+  // The proxy sets `storagePartitioned` in exactly one place — the `setSecret`
+  // handler — so a partitioned session that is authenticated at all got there
+  // through `window.opener`.
+  it('credits the handover on a partitioned session, whatever it can write', () => {
+    expect(verdictOf(runChecks({ connection: connected(), loadCount: 0 }), 'handover')).toBe('pass')
+    expect(
+      verdictOf(
+        runChecks({
+          connection: connected({ uploadMode: 'unavailable', uploadUnavailableReason: 'no-stamp' }),
+          loadCount: 0,
+        }),
+        'handover',
+      ),
+    ).toBe('pass')
   })
 
-  it('fails the handover when a partitioned session cannot write', () => {
+  // The run that made this split necessary: an iPhone connected an account
+  // created fresh in the popup, and the harness reported the missing drive as a
+  // failed `window.opener` handover — a claim about ITP, from a run that never
+  // reached the writer path at all.
+  it('replays the first device report: handover passed, the writer was never exercised', () => {
     const results = runChecks({
-      connection: connected({ uploadMode: 'unavailable' }),
+      connection: {
+        storagePartitioned: true,
+        uploadMode: 'unavailable',
+        uploadUnavailableReason: 'no-stamp',
+        deviceId: '7dc3690a-bd74-4b0f-8667-dd94a40a4e4f',
+      },
+      loadCount: 1,
+    })
+    expect(verdictOf(results, 'partitioned')).toBe('pass')
+    expect(verdictOf(results, 'handover')).toBe('pass')
+    expect(verdictOf(results, 'writer')).toBe('unknown')
+    expect(results.find((result) => result.id === 'writer')?.detail).toContain('no drive')
+    // Nothing here is a failure — the run is incomplete, not negative.
+    expect(results.some((result) => result.verdict === 'fail')).toBe(false)
+  })
+
+  it('credits the writer when a partitioned session holds its own stamp', () => {
+    const results = runChecks({ connection: connected(), loadCount: 0 })
+    expect(verdictOf(results, 'writer')).toBe('pass')
+  })
+
+  // Ours to fix, unlike a missing drive — so these are the two that go red.
+  it.each(['download-only', 'stamper-failed'] as const)(
+    'fails the writer when the reason is %s',
+    (uploadUnavailableReason) => {
+      const results = runChecks({
+        connection: connected({ uploadMode: 'unavailable', uploadUnavailableReason }),
+        loadCount: 0,
+      })
+      expect(verdictOf(results, 'writer')).toBe('fail')
+      expect(verdictOf(results, 'handover')).toBe('pass')
+    },
+  )
+
+  // Uploads work, but through the dApp's gateway rather than the account's own
+  // stamp — so it says nothing about the handed-over write path either way.
+  it('does not judge the writer when uploads run on a subsidised gateway', () => {
+    const results = runChecks({
+      connection: connected({ uploadMode: 'subsidised' }),
       loadCount: 0,
     })
-    expect(verdictOf(results, 'handover')).toBe('fail')
+    expect(verdictOf(results, 'writer')).toBe('unknown')
+  })
+
+  it('carries the upload error into the verdict, since the device has no console', () => {
+    const results = runChecks({
+      connection: connected(),
+      loadCount: 1,
+      uploadRoundTrip: 'failed',
+      uploadError: 'invalid batch id',
+    })
+    expect(verdictOf(results, 'upload')).toBe('fail')
+    expect(results.find((result) => result.id === 'upload')?.detail).toContain('invalid batch id')
   })
 
   it('cannot judge persistence on the first load', () => {

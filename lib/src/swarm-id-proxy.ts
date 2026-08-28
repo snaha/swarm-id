@@ -45,6 +45,7 @@ import type {
   ConnectedApp,
   ConnectionIdentity,
   ConnectionInfo,
+  UploadUnavailableReason,
 } from "./types"
 import {
   ParentToIframeMessageSchema,
@@ -2832,6 +2833,10 @@ export class SwarmIdProxy {
       canUpload: uploadMode !== "unavailable",
       storagePartitioned: this.storagePartitioned || undefined,
       uploadMode,
+      uploadUnavailableReason:
+        uploadMode === "unavailable"
+          ? this.uploadUnavailableReason()
+          : undefined,
       // Read, not created: reporting it must not be what mints one, or the
       // "did this survive the reload" comparison would always say yes.
       deviceId: this.deviceId,
@@ -2839,6 +2844,25 @@ export class SwarmIdProxy {
       appKey,
       partition: this.coordinator?.currentPartition,
     }
+  }
+
+  /**
+   * Which of the three ways to be upload-less this session hit. Ordered by how
+   * early the path gives up, so the answer names the first thing that stopped
+   * it rather than the last symptom.
+   *
+   * Only meaningful once authenticated — an unconnected session has no reason
+   * to report beyond not being connected.
+   */
+  private uploadUnavailableReason(): UploadUnavailableReason | undefined {
+    if (!this.authenticated || !this.appSecret) return undefined
+    if (this.isDownloadOnlyPartition) return "download-only"
+    if (!this.postageBatchId || !this.signerKey) return "no-stamp"
+    // The stamp resolved and the write path still did not build:
+    // `initializeStamper` logs and returns rather than throwing, so this is the
+    // only place that difference survives to the dApp.
+    if (!this.stamper) return "stamper-failed"
+    return undefined
   }
 
   /**
@@ -2860,6 +2884,7 @@ export class SwarmIdProxy {
       canUpload: info.canUpload,
       storagePartitioned: info.storagePartitioned,
       uploadMode: info.uploadMode,
+      uploadUnavailableReason: info.uploadUnavailableReason,
       deviceId: info.deviceId,
       identity: info.identity,
       appKey: info.appKey,

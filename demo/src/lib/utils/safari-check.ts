@@ -3,16 +3,20 @@
 /**
  * Verdicts for the real-Safari smoke test (#584).
  *
- * The storage-partitioning write path is confirmed on Chromium and Firefox with
- * third-party storage partitioned; it has never run on actual iOS Safari, so
- * the headline claim rests on an emulation of WebKit's behaviour rather than
- * WebKit. Three questions only a real device answers, and none of them can be
- * read off a console — Safari on iOS has no inspector without a Mac and a
- * cable — so the page has to reach its own verdicts and show them.
+ * Questions only a real device answers, none of which can be read off a console
+ * — Safari on iOS has no inspector without a Mac and a cable — so the page has
+ * to reach its own verdicts and show them.
  *
  * The logic lives here, apart from the page, because it is the part worth
- * testing: a wrong verdict on a device we cannot debug is worse than no verdict.
+ * testing: a wrong verdict on a device we cannot debug is worse than no
+ * verdict. The first run proved that the hard way — it reported a failed
+ * `window.opener` handover, a claim about ITP, for an account that simply had
+ * no drive. **The handover and the writer are separate questions**, and this
+ * file keeps them separate: `storagePartitioned` is set in exactly one place in
+ * the proxy (the `setSecret` handler), so a partitioned session reporting it is
+ * proof the popup's postMessage arrived, whatever happens downstream.
  */
+import type { UploadUnavailableReason } from '@snaha/swarm-id'
 
 /** What the page has observed, across this load and the previous one. */
 export interface CheckInput {
@@ -20,6 +24,7 @@ export interface CheckInput {
   connection?: {
     storagePartitioned?: boolean
     uploadMode?: 'user-stamp' | 'subsidised' | 'unavailable'
+    uploadUnavailableReason?: UploadUnavailableReason
     deviceId?: string
   }
   /** The device id this page recorded on an earlier load, if any. */
@@ -28,6 +33,8 @@ export interface CheckInput {
   loadCount: number
   /** Whether an upload attempt in this session round-tripped. */
   uploadRoundTrip?: 'ok' | 'failed'
+  /** What the upload threw, when it failed. The device has no console. */
+  uploadError?: string
 }
 
 export type Verdict = 'pass' | 'fail' | 'unknown'
@@ -71,9 +78,13 @@ function partitioning(input: CheckInput): CheckResult {
 }
 
 /**
- * The popup handover: on the partitioned path the ONLY way the session becomes
- * a writer is the connect popup's `setSecret` reaching the iframe through
- * `window.opener`. So a writing session is proof that survived ITP.
+ * The popup handover, and ONLY the handover: did `setSecret` reach the iframe
+ * through `window.opener` under ITP?
+ *
+ * `storagePartitioned` answers it on its own. The proxy sets that flag in one
+ * place — the `setSecret` handler — so a partitioned session reporting it
+ * cannot have got there any other way. Whether the session then became a
+ * writer is a different question with different causes; see {@link writerPath}.
  */
 function popupHandover(input: CheckInput): CheckResult {
   const connection = input.connection
@@ -93,19 +104,89 @@ function popupHandover(input: CheckInput): CheckResult {
       detail: 'Storage was not partitioned, so the handover was never the path under test.',
     }
   }
-  return connection.uploadMode === 'user-stamp'
-    ? {
-        id: 'handover',
-        title: 'window.opener handover survived',
-        verdict: 'pass',
-        detail: 'Partitioned AND holding its own stamp — the popup’s postMessage landed.',
+  return {
+    id: 'handover',
+    title: 'window.opener handover survived',
+    verdict: 'pass',
+    detail:
+      'Partitioned, and the session is authenticated — only the popup’s postMessage through window.opener can do that here, so it survived ITP.',
+  }
+}
+
+/**
+ * Whether the handed-over session became a first-class writer.
+ *
+ * Split from the handover because the two failed together in the first device
+ * run and only one of them had actually failed. Anything the tester can fix —
+ * an account with no drive above all — is `unknown` rather than `fail`: it
+ * means the writer path was never exercised, which is not the same as a broken
+ * one.
+ */
+function writerPath(input: CheckInput): CheckResult {
+  const id = 'writer'
+  const title = 'Session became a writer'
+  const connection = input.connection
+  if (!connection) {
+    return { id, title, verdict: 'unknown', detail: 'Not connected yet — connect first.' }
+  }
+  if (!connection.storagePartitioned) {
+    return {
+      id,
+      title,
+      verdict: 'unknown',
+      detail: 'Storage was not partitioned, so this is not the path under test.',
+    }
+  }
+  if (connection.uploadMode === 'user-stamp') {
+    return {
+      id,
+      title,
+      verdict: 'pass',
+      detail: 'Holding its own stamp — the hydrated account view built a working write path.',
+    }
+  }
+  if (connection.uploadMode === 'subsidised') {
+    return {
+      id,
+      title,
+      verdict: 'unknown',
+      detail:
+        'Uploading through the dApp’s subsidised gateway, not the account’s own stamp — that path bypasses the one under test.',
+    }
+  }
+  switch (connection.uploadUnavailableReason) {
+    case 'no-stamp':
+      return {
+        id,
+        title,
+        verdict: 'unknown',
+        detail:
+          'This account has no drive, so there was no stamp to hand over and the writer path was never exercised. Buy a drive on the identity site, then reconnect and run this again.',
       }
-    : {
-        id: 'handover',
-        title: 'window.opener handover survived',
+    case 'download-only':
+      return {
+        id,
+        title,
         verdict: 'fail',
-        detail: `Partitioned but upload mode is "${connection.uploadMode ?? 'unknown'}" — the handover did not land.`,
+        detail:
+          'The popup handed over a secret but no account, so the session is download-only. Expected only against an older identity deployment.',
       }
+    case 'stamper-failed':
+      return {
+        id,
+        title,
+        verdict: 'fail',
+        detail:
+          'The stamp resolved and the stamper still would not build — the write path broke inside the partitioned iframe. This is the real failure this test exists to catch.',
+      }
+    default:
+      return {
+        id,
+        title,
+        verdict: 'fail',
+        detail: `Upload mode is "${connection.uploadMode ?? 'unknown'}" and the proxy gave no reason.`,
+      }
+  }
 }
 
 /**
@@ -167,12 +248,21 @@ function uploadPath(input: CheckInput): CheckResult {
         id: 'upload',
         title: 'Upload round-trips',
         verdict: 'fail',
-        detail: 'The upload or the read-back failed — see the log below.',
+        // Carried here rather than left in the log: the log is on another page,
+        // the report does not include it, and the device has no inspector — so
+        // "see the log below" was a reason nobody could paste back.
+        detail: `The upload or the read-back failed${input.uploadError ? ` — ${input.uploadError}` : '.'}`,
       }
 }
 
 export function runChecks(input: CheckInput): CheckResult[] {
-  return [partitioning(input), popupHandover(input), storagePersistence(input), uploadPath(input)]
+  return [
+    partitioning(input),
+    popupHandover(input),
+    writerPath(input),
+    storagePersistence(input),
+    uploadPath(input),
+  ]
 }
 
 /** A paste-able summary — the device has no console to copy from. */

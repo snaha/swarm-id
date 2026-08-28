@@ -38,6 +38,7 @@
   let previousDeviceId = $state<string | undefined>(undefined)
   let loadCount = $state(0)
   let uploadRoundTrip = $state<'ok' | 'failed' | undefined>(undefined)
+  let uploadError = $state<string | undefined>(undefined)
   let uploading = $state(false)
   let reference = $state<string | undefined>(undefined)
   let copied = $state(false)
@@ -47,21 +48,33 @@
       ? {
           storagePartitioned: clientStore.storagePartitioned,
           uploadMode: clientStore.uploadMode,
+          uploadUnavailableReason: clientStore.uploadUnavailableReason,
           deviceId: clientStore.deviceId,
         }
       : undefined,
     previousDeviceId,
     loadCount,
     uploadRoundTrip,
+    uploadError,
   })
   const results = $derived(runChecks(input))
 
+  // Everything the report needs to be read without a follow-up question. The
+  // first run came back missing exactly this: uploadMode and the drive state
+  // were nowhere in it, so "no drive" was indistinguishable from a broken
+  // write path and the run had to be interpreted rather than read.
   const environment = $derived({
     userAgent: typeof navigator === 'undefined' ? 'unknown' : navigator.userAgent,
     dAppOrigin: typeof location === 'undefined' ? 'unknown' : location.origin,
     identityOrigin: resolveProxyOrigin(),
     deviceId: clientStore.deviceId ?? '(none yet)',
     loads: String(loadCount),
+    uploadMode: clientStore.authenticated ? clientStore.uploadMode : '(not connected)',
+    uploadUnavailableReason: clientStore.uploadUnavailableReason ?? '(none)',
+    drive: clientStore.stamp
+      ? `${clientStore.stamp.batchID.slice(0, 12)}… usable=${clientStore.stamp.usable} utilization=${clientStore.stamp.utilization}`
+      : '(no drive on this account)',
+    reference: reference ?? '(nothing uploaded)',
   })
 
   onMount(() => {
@@ -95,6 +108,7 @@
     if (!client) return
     uploading = true
     uploadRoundTrip = undefined
+    uploadError = undefined
     try {
       const result = await client.uploadData(new TextEncoder().encode(TEST_PAYLOAD))
       reference = result.reference
@@ -104,7 +118,8 @@
       logStore.log(`Safari check: round trip ${uploadRoundTrip} (${result.reference})`)
     } catch (error) {
       uploadRoundTrip = 'failed'
-      logStore.log(`Safari check: upload failed — ${String(error)}`)
+      uploadError = error instanceof Error ? error.message : String(error)
+      logStore.log(`Safari check: upload failed — ${uploadError}`)
     } finally {
       uploading = false
     }
@@ -130,8 +145,9 @@
     <h1 class="mb-1 text-2xl font-bold">Safari check</h1>
     <p class="text-sm text-muted-foreground">
       Run this on a real iPhone, on the deployed site (not a preview — GitHub Pages serves both apps
-      from one origin, so nothing partitions there). Connect, upload, then reload a few times and
-      come back tomorrow.
+      from one origin, so nothing partitions there). Connect with an account that
+      <strong>already has a drive</strong>, upload, then reload a few times and come back in a few
+      days.
     </p>
   </div>
 
@@ -196,6 +212,11 @@
   <details class="rounded-lg border border-border p-4 text-sm text-muted-foreground">
     <summary class="cursor-pointer font-semibold text-foreground">How to run it</summary>
     <ol class="mt-2 list-decimal space-y-1 pl-5">
+      <li>
+        <strong>First, make sure the account has a drive.</strong> Buy one on the identity site if it
+        does not — without a postage batch there is no stamp to hand over, the writer check stays grey,
+        and the run says nothing about the part under test.
+      </li>
       <li>Open this page on the iPhone, in normal (non-private) Safari.</li>
       <li>Tap <strong>Connect</strong> and complete the popup on the identity site.</li>
       <li>Tap <strong>Upload &amp; read back</strong>.</li>

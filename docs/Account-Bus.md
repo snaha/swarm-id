@@ -239,8 +239,12 @@ Planned — **not yet written**, do not read the list above as covering these:
 - A second context observing the utilization/lease state, and lease handover — sub-second with
   both peers live, timeout fallback with one peer killed. These extend
   `lib/test/live/multi-device-acquire-upload.test.ts`, not the Playwright rig.
-- Manual Safari (macOS) smoke test against staging, under real ITP — until it lands, Safari
-  upload support is expected-but-unverified (see the README).
+- The **upload** half of the real-Safari check (#584). The handover half is done: measured on iOS
+  18.7 / Safari 26.6 against the DO deployment, ITP partitions the iframe and the connect popup's
+  `window.opener` `postMessage` reaches it, so a partitioned session authenticates. What has not
+  run on a device is an upload from that session — the run used an account with no postage batch,
+  so it stopped before the write path. Until it does, Safari **upload** support is
+  expected-but-unverified (see the README).
 
 ## Known gaps
 

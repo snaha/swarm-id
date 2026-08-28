@@ -21,6 +21,10 @@ export function connectionInfoEqual(
     a.canUpload === b.canUpload &&
     !!a.storagePartitioned === !!b.storagePartitioned &&
     a.uploadMode === b.uploadMode &&
+    // Compared, or a session whose reason changes while `uploadMode` stays
+    // "unavailable" — a drive bought, a stamper that failed on retry — would
+    // compute a new reason and never send it.
+    a.uploadUnavailableReason === b.uploadUnavailableReason &&
     a.identity?.id === b.identity?.id &&
     a.identity?.name === b.identity?.name &&
     a.identity?.address === b.identity?.address &&
