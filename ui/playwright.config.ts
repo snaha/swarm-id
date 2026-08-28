@@ -32,18 +32,42 @@ const MAX_FAILURES = 5
  */
 const SERIAL_SPEC = '**/drive-onchain-serial.test.ts'
 
-/** One browser, two schedules: the projects differ only in what they run. */
+/**
+ * The suite that needs the proxy iframe's storage genuinely partitioned, which
+ * an ordinary chromium project cannot give it — see `PARTITIONING_ARGS`.
+ */
+const PARTITIONED_SPEC = '**/bus-propagation.test.ts'
+
+const CHROMIUM_ARGS = [
+  '--disable-dev-shm-usage',
+  '--no-sandbox',
+  '--disable-setuid-sandbox',
+  '--disable-gpu',
+  '--disable-popup-blocking',
+]
+
+/**
+ * Playwright's own defaults **disable** `ThirdPartyStoragePartitioning`, so a
+ * plain chromium project measures the unpartitioned path even when the origins
+ * are cross-site — a partition test that skips this passes while proving
+ * nothing. Chromium keeps the LAST occurrence of a switch, so re-sending
+ * `--disable-features` without that one entry is what turns it back on.
+ *
+ * The list is Playwright 1.57's defaults, read back over CDP with
+ * `Browser.getBrowserCommandLine`, minus `ThirdPartyStoragePartitioning`. It
+ * will go stale on a Playwright upgrade, and that is survivable only because
+ * `bus-propagation.test.ts` opens by proving the iframe really is partitioned:
+ * a drifted list fails there rather than silently downgrading the suite.
+ */
+const PARTITIONING_ARGS = [
+  '--disable-features=AcceptCHFrame,AvoidUnnecessaryBeforeUnloadCheckSync,DestroyProfileOnBrowserClose,DialMediaRouteProvider,GlobalMediaControls,HttpsUpgrades,LensOverlay,MediaRouter,PaintHolding,Translate,AutoDeElevate,RenderDocument,OptimizationHints',
+  '--enable-features=ThirdPartyStoragePartitioning',
+]
+
+/** One browser, three schedules: the projects differ in what they run. */
 const CHROMIUM = {
   ...devices['Desktop Chrome'],
-  launchOptions: {
-    args: [
-      '--disable-dev-shm-usage',
-      '--no-sandbox',
-      '--disable-setuid-sandbox',
-      '--disable-gpu',
-      '--disable-popup-blocking',
-    ],
-  },
+  launchOptions: { args: CHROMIUM_ARGS },
 }
 
 export default defineConfig({
@@ -72,8 +96,16 @@ export default defineConfig({
   projects: [
     {
       name: 'chromium',
-      testIgnore: SERIAL_SPEC,
+      testIgnore: [SERIAL_SPEC, PARTITIONED_SPEC],
       use: CHROMIUM,
+    },
+    {
+      name: 'chromium-partitioned',
+      testMatch: PARTITIONED_SPEC,
+      use: {
+        ...CHROMIUM,
+        launchOptions: { args: [...CHROMIUM_ARGS, ...PARTITIONING_ARGS] },
+      },
     },
     {
       // `dependencies` holds this back until every test above has finished, so
@@ -98,6 +130,17 @@ export default defineConfig({
     {
       command: 'pnpm -C .. dev:demo',
       port: 3500,
+      reuseExistingServer: !process.env.CI,
+      timeout: 30000,
+      stdout: 'pipe',
+      stderr: 'pipe',
+    },
+    {
+      // The account bus. `busSignalingUrl()` falls back to ws://localhost:5520
+      // in dev, so without this the socket never opens and every delta goes
+      // silently nowhere — which reads exactly like a healthy run.
+      command: 'pnpm -C .. dev:signaling',
+      url: 'http://localhost:5520/healthz',
       reuseExistingServer: !process.env.CI,
       timeout: 30000,
       stdout: 'pipe',
