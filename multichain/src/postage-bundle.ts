@@ -21,15 +21,21 @@
  */
 
 import { RollingValueProvider, System } from "cafe-utility"
-import { encodeFunctionData } from "viem"
+import { encodeFunctionData, keccak256 } from "viem"
 import { privateKeyToAccount } from "viem/accounts"
 import { ACCOUNT_7702_ABI, ERC20_ABI, POSTAGE_STAMP_ABI } from "./abi"
 import { jsonRpc } from "./fetch"
-import { getGasPrice, getTransactionCount, getTransactionReceipt } from "./rpc"
+import {
+  getGasPrice,
+  getMaxPriorityFeePerGas,
+  getTransactionCount,
+  getTransactionReceipt,
+} from "./rpc"
 import type { CreateBatchResult } from "./postage-write"
 import type { MultichainSettings } from "./settings"
 import { walletClientFor } from "./chain"
-import { withFeeTooLowRetry } from "./write-retry"
+import { TransactionAlreadyKnownError, withFeeTooLowRetry } from "./write-retry"
+import { bundleFeeFields } from "./bundle-fees"
 
 /** One call inside the bundle. */
 interface BundledCall {
@@ -103,40 +109,69 @@ async function sendBundle(
   const account = privateKeyToAccount(originPrivateKey)
   const client = walletClientFor(settings, rpcProvider)
 
-  return withFeeTooLowRetry(async () => {
-    const nonce = await getTransactionCount(
-      account.address,
-      settings,
-      rpcProvider,
-    )
-    // The authorization is applied AFTER this transaction's own nonce bump,
-    // so when the sender is also the authority its nonce is one ahead. Signing
-    // it with `nonce` instead silently produces a transaction that executes
-    // against a bare EOA — no code, no revert, no batch.
-    const authorization = await account.signAuthorization({
-      chainId: settings.chainId,
-      address: settings.addresses.eip7702Delegate,
-      nonce: nonce + 1,
-    })
-    const serializedTransaction = await account.signTransaction({
-      type: "eip7702",
-      chainId: settings.chainId,
-      authorizationList: [authorization],
-      // To ITSELF: the delegate's code runs in the EOA's context, which is what
-      // keeps `msg.sender` the batch owner throughout.
-      to: account.address,
-      data: encodeFunctionData({
-        abi: ACCOUNT_7702_ABI,
-        functionName: "executeBatch",
-        args: [calls],
-      }),
-      gas: BUNDLE_GAS,
-      maxFeePerGas: await getGasPrice(settings, rpcProvider),
-      maxPriorityFeePerGas: 0n,
-      nonce,
-    })
-    return client.sendRawTransaction({ serializedTransaction })
-  })
+  // Signed inside the retry, so a resend can raise its offer; captured out
+  // here so `onAlreadyKnown` can name the transaction the node already has.
+  // The hash is the keccak of exactly those bytes, so no round-trip is needed
+  // to learn it — which matters, since the send is what would have told us.
+  let lastSerialized: `0x${string}` | undefined
+  return withFeeTooLowRetry(
+    async (attempt) => {
+      const nonce = await getTransactionCount(
+        account.address,
+        settings,
+        rpcProvider,
+      )
+      // The authorization is applied AFTER this transaction's own nonce bump,
+      // so when the sender is also the authority its nonce is one ahead. Signing
+      // it with `nonce` instead silently produces a transaction that executes
+      // against a bare EOA — no code, no revert, no batch.
+      const authorization = await account.signAuthorization({
+        chainId: settings.chainId,
+        address: settings.addresses.eip7702Delegate,
+        nonce: nonce + 1,
+      })
+      // EIP-1559 fields, because a 7702 transaction has no legacy `gasPrice` to
+      // fall back on the way every other write in this package does. The tip
+      // used to be hardcoded to zero here, which is a transaction no validator
+      // will include (#618).
+      const { maxFeePerGas, maxPriorityFeePerGas } = bundleFeeFields(
+        await getGasPrice(settings, rpcProvider),
+        await getMaxPriorityFeePerGas(settings, rpcProvider),
+        attempt,
+      )
+      const serializedTransaction = await account.signTransaction({
+        type: "eip7702",
+        chainId: settings.chainId,
+        authorizationList: [authorization],
+        // To ITSELF: the delegate's code runs in the EOA's context, which is what
+        // keeps `msg.sender` the batch owner throughout.
+        to: account.address,
+        data: encodeFunctionData({
+          abi: ACCOUNT_7702_ABI,
+          functionName: "executeBatch",
+          args: [calls],
+        }),
+        gas: BUNDLE_GAS,
+        maxFeePerGas,
+        maxPriorityFeePerGas,
+        nonce,
+      })
+      lastSerialized = serializedTransaction
+      return client.sendRawTransaction({ serializedTransaction })
+    },
+    {
+      // The node already has these exact bytes, so the send succeeded and only
+      // its answer was lost. `keccak256` of what we signed IS that
+      // transaction's hash, so the caller can wait for the receipt instead of
+      // being told the operation failed (#620).
+      onAlreadyKnown: () => {
+        if (!lastSerialized) {
+          throw new TransactionAlreadyKnownError()
+        }
+        return keccak256(lastSerialized)
+      },
+    },
+  )
 }
 
 /**

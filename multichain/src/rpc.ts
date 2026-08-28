@@ -62,6 +62,31 @@ export async function getGasPrice(
 }
 
 /**
+ * What the endpoint suggests as a priority fee, or zero where it will not say.
+ *
+ * Zero is a legitimate answer — an idle mempool has nothing to outbid — and an
+ * endpoint may not implement the method at all, so neither case is worth
+ * failing a payment over. `bundleFeeFields` floors whatever comes back, which
+ * is where the guarantee that we never offer nothing actually lives.
+ */
+export async function getMaxPriorityFeePerGas(
+  settings: MultichainSettings,
+  rpcProvider: RollingValueProvider<string>,
+): Promise<bigint> {
+  try {
+    const result = await jsonRpc(
+      rpcProvider,
+      settings,
+      "eth_maxPriorityFeePerGas",
+      [],
+    )
+    return BigInt(Types.asString(result))
+  } catch {
+    return 0n
+  }
+}
+
+/**
  * Gas for a plain native transfer to `to`.
  *
  * NOT the 21 000 a transfer to an EOA costs: once an address has authorised an
