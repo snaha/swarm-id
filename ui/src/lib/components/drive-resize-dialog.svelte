@@ -20,6 +20,7 @@
   import { Select } from '$lib/components/ui/select'
   import { Switch } from '$lib/components/ui/switch'
   import { DRIVE_SIZE_BREAKPOINTS, formatBytes, formatRemaining } from '$lib/drives'
+  import { failureDetail } from '$lib/failure-detail'
   import { createCostEstimate } from '$lib/payment/cost-estimate.svelte'
   import {
     type OperationStep,
@@ -210,7 +211,7 @@
       // lifespan grew, so it gets the benign presentation and its own wording
       // rather than the generic failure surface (#392).
       errorTone = caught instanceof SizeIncreasePendingError ? 'notice' : 'error'
-      errorDetail = caught instanceof Error ? (caught.stack ?? caught.message) : String(caught)
+      errorDetail = failureDetail(caught)
       errorMessage = caught instanceof Error ? caught.message : 'Could not increase the size.'
       phase = 'error'
     }

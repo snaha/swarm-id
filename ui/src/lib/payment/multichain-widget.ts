@@ -347,7 +347,11 @@ export function openStampPurchaseWidget(options: PurchaseStampOptions): StampPur
 
     // Error event
     if (obj?.event === 'error') {
-      const error = new Error(widgetErrorMessage(obj))
+      // The payload as the cause, because `widgetErrorMessage` reduces it to
+      // one sentence for the dialog and the rest is the only account we get of
+      // what happened inside a popup we cannot see into. `failureDetail`
+      // renders it behind "View details".
+      const error = new Error(widgetErrorMessage(obj), { cause: obj })
       // Money in flight: the same rule `cancel()` and `finish` follow — never
       // force a popup shut while the user's funds sit on the temporary wallet,
       // because the pipeline that sweeps them back runs client-side there

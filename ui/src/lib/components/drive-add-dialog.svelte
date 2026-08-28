@@ -26,6 +26,7 @@
     formatBytes,
     lifespanToSeconds,
   } from '$lib/drives'
+  import { failureDetail } from '$lib/failure-detail'
   import { verifyBatchStampable } from '$lib/payment/bee'
   import { currentChainPrice } from '$lib/payment/chain-price'
   import { fetchExistingBatchFromChain } from '$lib/payment/contract'
@@ -265,7 +266,7 @@
         phase = 'form'
         return
       }
-      errorDetail = caught instanceof Error ? (caught.stack ?? caught.message) : String(caught)
+      errorDetail = failureDetail(caught)
       errorMessage = caught instanceof Error ? caught.message : 'Could not buy the drive.'
       phase = 'error'
     }
@@ -323,7 +324,7 @@
           if (!attempt.current) {
             return
           }
-          errorDetail = error.stack ?? error.message
+          errorDetail = failureDetail(error)
           errorMessage = error.message
           phase = 'error'
         },
@@ -342,7 +343,7 @@
       if (!attempt.current) {
         return
       }
-      errorDetail = caught instanceof Error ? (caught.stack ?? caught.message) : String(caught)
+      errorDetail = failureDetail(caught)
       errorMessage = caught instanceof Error ? caught.message : 'Could not start the purchase.'
       phase = 'error'
     }
@@ -389,7 +390,7 @@
       if (!attempt.current) {
         return
       }
-      errorDetail = caught instanceof Error ? (caught.stack ?? caught.message) : String(caught)
+      errorDetail = failureDetail(caught)
       errorMessage = caught instanceof Error ? caught.message : 'Could not add the drive.'
       phase = 'error'
     }
