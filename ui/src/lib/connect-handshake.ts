@@ -16,8 +16,10 @@
 import {
   type ConnectedApp,
   DEFAULT_SESSION_DURATION,
+  type SyncedAccount,
   deriveSecret,
   serializeSyncedAccount,
+  stampsReachableByApp,
 } from '@snaha/swarm-id'
 
 import { strip0x } from '$lib/crypto/hex'
@@ -50,12 +52,52 @@ function saveConnection(account: Account, request: ConnectRequest, appSecret: st
 }
 
 /**
+ * The account view handed to a partitioned proxy iframe: the synced projection
+ * (no vault, no app secrets) with the stamp collection narrowed to the ones
+ * THIS app can spend — its own batch override and the account default it falls
+ * through to (#578).
+ *
+ * The iframe is on the SwarmID origin and an unpartitioned proxy reads the same
+ * material out of shared storage, so this is least privilege rather than a
+ * boundary being fixed. But before #547 a partitioned session held no
+ * credentials at all, and it now holds real ones in a context embedded by an
+ * arbitrary dApp page: anything that gains script execution there gets what it
+ * was handed. It can only ever spend the one stamp resolved for it, so the rest
+ * of the collection's signer keys are pure exposure with no use.
+ *
+ * `derivationKey` stays, and that is the honest trade-off to state rather than
+ * hide: the account bus derives its topic and envelope key from it
+ * (`deriveBusContext`), and the partition lease derives the Swarm encryption
+ * key and the lock-SOC signer from it (`deriveSwarmEncryptionKey` →
+ * `backup-key`). A partitioned session cannot write without it.
+ *
+ * Which means this narrows what the session HOLDS, not what it could learn: the
+ * key that opens the room stays, and an `account-delta` carries the whole
+ * collection (the publisher is unpartitioned and does not know its receivers'
+ * apps), so script execution in that iframe can wait for one message. Bounding
+ * that as well needs per-app deltas in a per-app room — out of scope for #578.
+ */
+export function partitionHandoverAccount(
+  account: SyncedAccount,
+  appOrigin: string,
+): Record<string, unknown> {
+  const app = account.connectedApps.find((entry) => entry.appUrl === appOrigin)
+  return serializeSyncedAccount({
+    ...account,
+    postageStamps: stampsReachableByApp(
+      { postageStampBatchID: app?.postageStampBatchID },
+      account,
+      account.postageStamps,
+    ),
+  })
+}
+
+/**
  * Storage-partitioning fallback: hand the secret straight to the proxy iframe
  * (our window.opener) since it can't see our localStorage. The `identity*`
  * fields carry the account's info (single-level model), and `account` carries
- * the full synced projection (stamps incl. signer keys, `derivationKey` — no
- * vault, no app secrets) so the partitioned iframe becomes a first-class
- * writer instead of download-only (docs/Account-Bus.md, phase 3).
+ * the narrowed synced projection above, so the partitioned iframe becomes a
+ * first-class writer instead of download-only (docs/Account-Bus.md, phase 3).
  */
 function sendSecretToOpener(account: Account, request: ConnectRequest, appSecret: string): void {
   if (!request.partitionChallenge || !window.opener) {
@@ -72,7 +114,7 @@ function sendSecretToOpener(account: Account, request: ConnectRequest, appSecret
       identityName: account.name,
       identityAddress: idHex,
       identityPublicKey: account.publicKey,
-      account: serializeSyncedAccount(account.toSyncedRecord()),
+      account: partitionHandoverAccount(account.toSyncedRecord(), request.appOrigin),
       networkSettings: networkSettingsStore.settings,
     },
   }

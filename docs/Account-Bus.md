@@ -117,11 +117,35 @@ account. Same service, no extra infrastructure; the default posture stays signal
 With the bus in place the partitioned iframe becomes a first-class writer:
 
 - The connect popup sends the full `AuthData` — an `account` field carrying the
-  **synced-account projection** (`serializeSyncedAccount`: `derivationKey`, stamps incl.
-  signer keys; no vault, no app secrets) plus `networkSettings`. (Sending only derived keys
-  was considered and rejected: the encrypted on-Swarm account state contains the
-  `derivationKey` anyway, so holding the derived keys is equivalent — derived-only would be
-  defense-in-depth theater.)
+  **synced-account projection** (`serializeSyncedAccount`: `derivationKey`; no vault, no app
+  secrets) plus `networkSettings`. (Sending only derived keys was considered and rejected: the
+  encrypted on-Swarm account state contains the `derivationKey` anyway, so holding the derived
+  keys is equivalent — derived-only would be defense-in-depth theater.)
+- **What the partitioned session is allowed to hold** (#578). The stamp collection is narrowed
+  to the batches this app's own pointers name — its `postageStampBatchID` override and the
+  account default it falls through to (`stampsReachableByApp`) — at the handover AND after
+  every `account-delta` fold, since the publisher is an unpartitioned context that sends the
+  whole collection. A session can only ever spend the stamp `resolveStampForApp` picks, so
+  every other signer key it held was exposure with no use.
+
+  The `derivationKey` **stays**, and that is the trade-off worth stating rather than leaving
+  implicit: the bus derives its topic and envelope key from it (`deriveBusContext`), and the
+  partition lease derives the Swarm encryption key and the lock-SOC signer from it
+  (`deriveSwarmEncryptionKey` → `backup-key`). A partitioned session cannot write without it.
+  So this is least privilege, not a boundary being closed — the iframe is on the SwarmID
+  origin, and an unpartitioned proxy reads the same material out of shared storage. What
+  changed with #547 is that a partitioned session went from holding no credentials at all to
+  holding real ones, in a context embedded by an arbitrary dApp page; narrowing the collection
+  reduces what it holds at rest.
+
+  It does **not** bound what script execution in that iframe would yield. The session keeps the
+  `derivationKey`, so it can derive the envelope key and read the room — and every
+  `account-delta` a publisher sends carries the whole stamp collection, signer keys included,
+  because the publisher is unpartitioned and does not know which app each receiver is. Anything
+  running there can wait for one message. Narrowing that too means publishing per-app deltas,
+  which needs a per-app room; not in scope here, and worth stating so the next reader does not
+  mistake this for a boundary.
+
 - `handlePopupMessage` hydrates the projection into an **in-memory** account view
   (`partitionAccount`): the stored-account schema deliberately quarantines vault-less
   records, and partitioned sessions already re-handshake per iframe load, so nothing is

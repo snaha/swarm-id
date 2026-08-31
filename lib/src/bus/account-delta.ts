@@ -28,10 +28,12 @@ import type { AccountDeltaInput } from "./messages"
  * meaningless (worse, applying it would extend or truncate someone else's
  * session).
  *
- * Stamp signer keys stay. The handshake already ships the whole stamp list, so
- * including them is not new exposure, and a receiver needs them to keep
- * uploading after a stamp change. Narrowing that — one stamp per app rather
- * than the collection — is #578, for both channels at once.
+ * Stamp signer keys stay, and so does the whole collection: the publisher does
+ * not know which app each receiver is embedded by, so it cannot narrow. The
+ * narrowing happens on receive instead — `applyAccountDelta` keeps only the
+ * stamps the folded pointers name (#578) — which bounds what a partitioned
+ * session HOLDS, not what reaches its room. Per-app deltas in a per-app room
+ * would be the latter.
  */
 export function accountDeltaSnapshot(
   snapshot: AccountStateSnapshot,
