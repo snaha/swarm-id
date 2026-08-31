@@ -254,12 +254,13 @@ export function seedNoChain(page: Page) {
 }
 
 /**
- * Buy a drive through the normal flow, from the home page (Storage tab).
+ * Buy a drive through the normal flow, from the home page (Storage tab), on the
+ * built-in engine.
  *
- * Stops at Proceed, which is where the two payment methods part. A funded
- * signer needs no payment at all and settles from here; an unfunded one opens
- * the payment screens, where choosing fund.bzz.limo is what reaches the /dev
- * mock. Either way a chain is needed — gate with {@link chainReachable}.
+ * Proceed now opens the method chooser — every route parts there, before
+ * anything touches the chain — so this picks the engine explicitly. A suite
+ * that wants fund.bzz.limo passes `method: 'widget'`, which is what reaches the
+ * /dev mock. Either way a chain is needed — gate with {@link chainReachable}.
  *
  * A settled purchase ends on a modal success screen whose Done click this
  * waits for — the page behind it is not interactable until then. Suites whose
@@ -267,7 +268,10 @@ export function seedNoChain(page: Page) {
  * `settle: false` and assert the error/payment state themselves with
  * `DRIVE_SETTLE_TIMEOUT_MS`.
  */
-export async function addDrive(page: Page, { settle = true } = {}) {
+export async function addDrive(
+  page: Page,
+  { settle = true, method = 'built-in' }: { settle?: boolean; method?: 'built-in' | 'widget' } = {},
+) {
   await page.getByRole('tab', { name: 'Storage' }).click()
   await page.getByRole('button', { name: 'Add drive' }).click()
   const dialog = page.getByRole('dialog')
@@ -287,6 +291,15 @@ export async function addDrive(page: Page, { settle = true } = {}) {
   await dialog.getByRole('spinbutton').fill('30')
   await dialog.getByRole('combobox').nth(2).selectOption('days')
   await page.getByRole('button', { name: 'Proceed' }).click()
+  // The chooser, which opens whatever the owner address holds. Index 0 is the
+  // widget, 1 the built-in engine.
+  await dialog
+    .getByRole('combobox')
+    .first()
+    .selectOption({ index: method === 'widget' ? 0 : 1 })
+  await dialog
+    .getByRole('button', { name: method === 'widget' ? 'Continue to fund.bzz.limo' : 'Continue' })
+    .click()
   if (settle) {
     await dialog.getByRole('button', { name: 'Done' }).click({ timeout: DRIVE_SETTLE_TIMEOUT_MS })
   }
@@ -315,7 +328,8 @@ const DRIVE_FUNDING = {
  *
  * What this buys the e2e rig, and what it does not: pre-funding the owner
  * means `quoteFunding` always comes back needing zero, so a suite that calls
- * this never opens the payment screens or exercises a payment rail
+ * this gets the method chooser (which opens either way) but never the pay
+ * screens behind it, and never exercises a payment rail
  * (`gnosis-direct.ts` and friends) — those are covered by
  * `payment-rail.test.ts` and the multichain unit/fork tests, not here.
  */

@@ -7,6 +7,7 @@
   import { onDestroy } from 'svelte'
 
   import { PrivateKey } from '@ethersphere/bee-js'
+  import ArrowLeft from '@lucide/svelte/icons/arrow-left'
   import ArrowRight from '@lucide/svelte/icons/arrow-right'
   import TriangleAlert from '@lucide/svelte/icons/triangle-alert'
   import { BatchIdSchema, PrivateKeySchema } from '@snaha/swarm-id'
@@ -40,6 +41,13 @@
   } from '$lib/payment/funding-request.svelte'
   import { type StampPurchaseHandle, openStampPurchaseWidget } from '$lib/payment/multichain-widget'
   import {
+    BUILT_IN_EXPLAINER,
+    BUILT_IN_LABEL,
+    type PaymentMethod,
+    WIDGET_EXPLAINER,
+    WIDGET_LABEL,
+  } from '$lib/payment/payment-method'
+  import {
     derivePostageSigner,
     stampAmountForSeconds,
     stampFromBatch,
@@ -63,7 +71,12 @@
   let { account, onClose, onAdded }: Props = $props()
 
   type Storage = 'new' | 'existing'
-  type Phase = 'form' | 'pending' | 'success' | 'error' | 'unconfirmed'
+  type Phase = 'form' | 'method' | 'pending' | 'success' | 'error' | 'unconfirmed'
+
+  const METHOD_OPTIONS = [
+    { value: 'widget', label: WIDGET_LABEL },
+    { value: 'built-in', label: BUILT_IN_LABEL },
+  ]
 
   let storage = $state<Storage>('new')
   let name = $state('')
@@ -74,6 +87,16 @@
   let signerKeyInput = $state('')
 
   let phase = $state<Phase>('form')
+  /**
+   * The route the purchase takes, chosen BEFORE anything reads the chain.
+   *
+   * The funding seam used to be the only place this could be asked, and it is
+   * raised only when the owner address is short (#619) — so an account holding
+   * funds from an earlier attempt was committed to the built-in engine with no
+   * way to say otherwise, and a purchase that could not reach the chain at all
+   * failed before the question was ever put. Asking here precedes both.
+   */
+  let method = $state<PaymentMethod>('widget')
   let pendingLabel = $state('')
   let errorMessage = $state('')
   let errorDetail = $state('')
@@ -216,9 +239,22 @@
     // the payment screens are confirmation enough.
     if (storage === 'existing') {
       void attachExisting()
-    } else {
-      void purchaseNew()
+      return
     }
+    // The method first, and before any chain read: `runPurchase` opens with the
+    // contract's constraints and the owner's balance, and each of those can end
+    // the purchase — one by throwing, the other by covering the cost — with the
+    // question still unasked (#619).
+    phase = 'method'
+  }
+
+  /** Start the purchase on the method the chooser is on. */
+  function startPurchase() {
+    if (method === 'widget') {
+      void purchaseWithWidget(attempts.begin())
+      return
+    }
+    void purchaseNew()
   }
 
   async function purchaseNew() {
@@ -413,6 +449,7 @@
     onPaid={funding.resolve}
     onCancel={funding.cancel}
     onUseWidget={() => funding.cancel({ reason: 'use-widget' })}
+    initialMethod="built-in"
   />
 {:else if phase === 'unconfirmed'}
   <Dialog onclose={close} title="Purchase not confirmed">
@@ -424,6 +461,37 @@
       </p>
     </div>
     <Button variant="outline" class="w-full" onclick={close}>Close</Button>
+  </Dialog>
+{:else if phase === 'method'}
+  <Dialog onclose={close} title="Payment">
+    {#snippet leading()}
+      <Button
+        variant="ghost"
+        size="icon"
+        class="-mt-1.5 -ml-1.5 size-6 rounded-md [&_svg]:size-3.5"
+        aria-label="Back"
+        onclick={() => (phase = 'form')}
+      >
+        <ArrowLeft />
+      </Button>
+    {/snippet}
+
+    <div class="flex w-full flex-col gap-2">
+      <span class="text-sm font-medium">Method</span>
+      <Select options={METHOD_OPTIONS} bind:value={method} />
+    </div>
+
+    <p class="bg-muted rounded-md px-3 py-2 text-sm">
+      {method === 'widget' ? WIDGET_EXPLAINER : BUILT_IN_EXPLAINER}
+    </p>
+
+    <!-- The widget's label matches the one on `PaymentDialog`'s own method
+         screen: the same route reached from either place must read as the same
+         route. -->
+    <Button class="w-full" onclick={startPurchase}>
+      {method === 'widget' ? 'Continue to fund.bzz.limo' : 'Continue'}
+      <ArrowRight />
+    </Button>
   </Dialog>
 {:else if phase === 'pending' || phase === 'success' || phase === 'error'}
   <!-- Cancel only while nothing has been paid for. Once a funding request is
