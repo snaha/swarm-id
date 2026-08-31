@@ -164,6 +164,7 @@ export function serializeConnectedApp(
     postageStampBatchID: app.postageStampBatchID?.toString(),
     updatedAt: app.updatedAt,
     revokedAt: app.revokedAt,
+    disconnectedAt: app.disconnectedAt,
   }
 }
 
@@ -172,9 +173,11 @@ export function serializeConnectedApp(
  *
  * `appSecret` is the app's own credential and `connectedUntil` is the deadline
  * of the session that established it — both belong to one context, and neither
- * survives leaving it. Every channel that carries an account to another context
- * uses this: the popup handshake (`serializeSyncedAccount`) and the account bus
- * (`accountDeltaSnapshot`). One rule, one place, so the two cannot drift.
+ * survives leaving it. Every channel that carries an account to another
+ * context strips them here: the popup handshake (`serializeSyncedAccount`)
+ * and the account bus (`accountDeltaSnapshot`). The bus receive schema
+ * (`BusConnectedAppSchema` in `bus/messages.ts`) omits the same two fields
+ * again, so a publisher that forgets this strip is still caught on receive.
  */
 export function portableConnectedApp(
   app: Record<string, unknown>,

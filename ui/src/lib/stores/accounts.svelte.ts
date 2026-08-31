@@ -356,7 +356,9 @@ export class Account {
     const has = this.connectedApps.some((existing) => existing.appUrl === app.appUrl)
     this.connectedApps = has
       ? this.connectedApps.map((existing) =>
-          existing.appUrl === app.appUrl ? { ...existing, ...app, revokedAt: undefined } : existing,
+          existing.appUrl === app.appUrl
+            ? { ...existing, ...app, revokedAt: undefined, disconnectedAt: undefined }
+            : existing,
         )
       : [...this.connectedApps, app]
     this.lastModified = Date.now()
@@ -588,6 +590,13 @@ function revoked(app: ConnectedApp, tombstone: boolean): ConnectedApp {
     appSecret: undefined,
     connectedUntil: undefined,
     updatedAt: now,
+    // Cleared session fields do not survive the trip to another context — the
+    // account bus strips exactly those two — so the END has to be stated on the
+    // entry itself, or a partitioned session puts its own secret back after the
+    // merge and keeps uploading (`restoreLocalSessionFields`). `revokedAt` says
+    // "forget this app"; `disconnectedAt` says "this session is over", which is
+    // true of a plain Disconnect and of a Remove alike.
+    disconnectedAt: now,
     revokedAt: tombstone ? now : app.revokedAt,
   }
 }

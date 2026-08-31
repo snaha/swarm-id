@@ -68,7 +68,6 @@ import {
 import { makeContentAddressedChunk } from "./chunk"
 import { AccountBus, BroadcastChannelTransport } from "./bus/account-bus"
 import { SignalingTransport } from "./bus/signaling-transport"
-import { accountStateSnapshot } from "./utils/account-state-snapshot"
 import { deriveBusContext } from "./bus/bus-context"
 import type { BusContext } from "./bus/bus-context"
 import type { BeeRequestOptions } from "@ethersphere/bee-js"
@@ -93,14 +92,13 @@ import { createFeedManifestDirect } from "./proxy/feed-manifest"
 import { resolveStampForApp } from "./utils/postage-stamp-association"
 import {
   accountStateToDeviceView,
+  foldAccount,
+  foldedToSyncedAccount,
   publishDeviceState,
   readRoster,
 } from "./sync"
-import {
-  mergeConnectedApps,
-  mergeDevicesList,
-  mergePostageStamps,
-} from "./sync/merge-snapshot"
+import type { DeviceStateSnapshot } from "./sync"
+import { mergeDevicesList } from "./sync/merge-snapshot"
 import {
   accountDeltaSnapshot,
   restoreLocalSessionFields,
@@ -147,6 +145,7 @@ import {
   POSTAGE_STAMP_CONTRACT_ADDRESS,
 } from "./utils/postage-contract"
 import { tryCreateTag } from "./utils/tag"
+import { accountToStateSnapshot } from "./utils/account-state-snapshot"
 import {
   DEFAULT_BEE_NODE_URL,
   DEFAULT_GNOSIS_RPC_URL,
@@ -239,6 +238,44 @@ function readPartitionTuningOverride():
 }
 
 /**
+ * A hydrated account as the account-state snapshot the fold consumes.
+ *
+ * The record's OWN `lastModified` is the snapshot clock, never `Date.now()`:
+ * this side of the fold is a record being re-read, not a change being made, and
+ * a fresh clock on it would let this session outrank the peer's genuine edit.
+ * (`accountToStateSnapshot` keeps the same rule per scalar field.)
+ */
+function accountAsStateSnapshot(
+  account: SignedInAccount,
+): AccountStateSnapshot {
+  return accountToStateSnapshot(
+    account,
+    account.id.toHex(),
+    account.lastModified ?? account.createdAt,
+  )
+}
+
+/**
+ * One side of an `account-delta` fold, in the shape `foldAccount` merges.
+ *
+ * Both sides go through it so the bus fold IS the Swarm fold — same collection
+ * tombstone clocks, same per-field scalar clocks, same `BatchId` revival — with
+ * no rule stated twice. `deviceId` and `timestamp` are inert here: `foldAccount`
+ * keys collections by their own natural keys, takes the device list from its
+ * second argument, and reads neither field — `deltaFoldView` pins that in a
+ * test, since it is an assumption about another module's internals.
+ */
+function deltaFoldView(snapshot: AccountStateSnapshot): DeviceStateSnapshot {
+  return {
+    version: 1,
+    accountId: snapshot.accountId,
+    deviceId: "",
+    timestamp: snapshot.timestamp,
+    ...accountStateToDeviceView(snapshot),
+  }
+}
+
+/**
  * Swarm ID Proxy - Runs inside the iframe
  *
  * Responsibilities:
@@ -290,6 +327,10 @@ export class SwarmIdProxy {
   /** Bumped by every bus join and by `clearAuthData`, so a join whose key
    *  derivation is still in flight can tell it has been superseded. */
   private busJoinGeneration = 0
+  /** Account whose room the attached transports currently speak into. A
+   *  transport encrypts with its construction-time key, so this — not whichever
+   *  connection resolves now — is who a publish actually reaches. */
+  private busBoundAccountId: string | undefined
   /** Account the live coordinator serves — routes bus lease messages. */
   private coordinatorAccountId: string | undefined
   /** Scheduled answers to peers' `lease-request`s, by request id, so a peer
@@ -410,26 +451,13 @@ export class SwarmIdProxy {
       return
     }
 
-    // Serialize handler invocations so rapid storage events (or concurrent
-    // events across stores) don't interleave `refreshStampFromStorage` /
-    // `initializeStamper` runs — those mutate shared `stamper`/`postageBatchId`
-    // state and races would produce inconsistent ConnectionInfo emissions.
-    // Rejections are caught and logged so one failure doesn't break the chain.
-    const enqueue = (where: string, work: () => Promise<void>): void => {
-      this.storageWorkQueue = this.storageWorkQueue.then(() =>
-        work().catch((error: unknown) => {
-          console.error(`[Proxy] ${where} failed:`, error)
-        }),
-      )
-    }
-
     // The account is the single nested document of record (it owns its
     // connected apps and postage stamps), so one subscription covers every
     // change that can affect auth or derived ConnectionInfo.
     const accountsManager = createAccountsStorageManager()
     this.unsubscribeStorageListeners.push(
       accountsManager.subscribe(() => {
-        enqueue("handleAccountStorageChange", () =>
+        this.enqueueReconcile("handleAccountStorageChange", () =>
           this.handleAccountStorageChange(),
         )
       }),
@@ -452,6 +480,27 @@ export class SwarmIdProxy {
         window.removeEventListener("storage", onNetworkSettingsChange),
       )
     }
+  }
+
+  /**
+   * Queue a reconcile behind whatever reconcile is already running.
+   *
+   * `refreshStampFromStorage` / `initializeStamper` mutate shared
+   * `stamper` / `postageBatchId` state across awaits, so two of them in flight
+   * at once emit inconsistent ConnectionInfo. ONE queue for every source: a
+   * storage event and an `account-delta` fold are the same work arriving two
+   * ways, and a queue each would serialize neither against the other.
+   *
+   * Rejections are caught and logged here — the chain must survive one failure,
+   * and nothing else catches them (the bus dispatch's try/catch only covers a
+   * synchronous throw).
+   */
+  private enqueueReconcile(where: string, work: () => Promise<void>): void {
+    this.storageWorkQueue = this.storageWorkQueue.then(() =>
+      work().catch((error: unknown) => {
+        console.error(`[Proxy] ${where} failed:`, error)
+      }),
+    )
   }
 
   /**
@@ -538,8 +587,7 @@ export class SwarmIdProxy {
         // folded into is exactly what the refresh reads (the same call
         // `hydratePartitionAccount` makes). Otherwise a rotated signer key or a
         // deleted stamp updates the view and leaves the live stamper stale for
-        // the page's life — which is most of the reason signer keys are on the
-        // wire at all.
+        // the page's life.
         if (!this.storagePartitioned || source === "bus") {
           await this.refreshStampFromStorage()
         }
@@ -551,7 +599,12 @@ export class SwarmIdProxy {
       // collapses into one of each. A delta we folded ourselves is not
       // re-broadcast (`source === "bus"`) — the publisher already reached
       // everyone in the room, and echoing it back is a loop.
-      if (source === "storage" && this.coordinator) {
+      //
+      // No coordinator gate: a session without one (a stamp-less account never
+      // gets past `initializeStamper`) has nothing to write to the feed, but a
+      // bus message needs no lease — and a stamp-less account still has apps to
+      // revoke and partitioned sessions to tell.
+      if (source === "storage") {
         this.schedulePublish("change")
       }
     } else if (
@@ -563,6 +616,16 @@ export class SwarmIdProxy {
       // connected apps, and auth was established via postMessage. A bus delta
       // is not — it IS the channel a revoke reaches a partitioned session by.
       // `clearAuthData` emits the ConnectionInfo update; no need to do so again.
+      if (source === "storage") {
+        // Relay the end of the session to peers that cannot see it. With only
+        // this dApp open, this iframe is the ONLY context that reads the
+        // account document, so its own partitioned sessions hear about the
+        // revoke here or not at all. Storage-sourced only: a bus-sourced
+        // disconnect came from a peer that already told the room, and echoing
+        // it back is a loop. Ahead of `clearAuthData`, which detaches the
+        // transports and rewrites the entry we are reporting.
+        this.publishAccountDelta({ ofEndedConnection: true })
+      }
       this.clearAuthData()
       this.sendToParent({
         type: "disconnectResponse",
@@ -787,6 +850,7 @@ export class SwarmIdProxy {
     const connection = this.findConnectionForParent()
     if (!connection) return
     const { derivationKey } = connection.account
+    const accountId = connection.account.id.toHex()
     // Already joined for this account, with everything it wanted attached.
     // This runs on every accounts storage event, so returning here (rather
     // than after the derivation) saves two HMACs and an `importKey` per event
@@ -794,7 +858,7 @@ export class SwarmIdProxy {
     // flight. A join left incomplete (a transport that threw) does not latch
     // the key, so it retries here instead.
     if (derivationKey === this.busJoinedKey) return
-    void this.ensureAccountBusTransports(derivationKey)
+    void this.ensureAccountBusTransports(derivationKey, accountId)
   }
 
   /**
@@ -825,6 +889,7 @@ export class SwarmIdProxy {
    */
   private async ensureAccountBusTransports(
     derivationKey: string,
+    accountId: string,
   ): Promise<void> {
     const generation = ++this.busJoinGeneration
     let context: BusContext
@@ -865,6 +930,10 @@ export class SwarmIdProxy {
       }
       this.busTopic = context.topic
     }
+    // Reached only with the local transport live for `context.topic`, so this
+    // is the account a publish now actually reaches — whether the room was just
+    // switched or was already the right one.
+    this.busBoundAccountId = accountId
 
     if (this.signalingUrl && !this.removeBusSignaling) {
       try {
@@ -901,6 +970,7 @@ export class SwarmIdProxy {
     this.removeBusLocal = undefined
     this.busTopic = undefined
     this.busJoinedKey = undefined
+    this.busBoundAccountId = undefined
   }
 
   /**
@@ -930,6 +1000,7 @@ export class SwarmIdProxy {
     this.removeBusSignaling = undefined
     this.busTopic = undefined
     this.busJoinedKey = undefined
+    this.busBoundAccountId = undefined
     this.bus.close()
   }
 
@@ -1261,7 +1332,16 @@ export class SwarmIdProxy {
    * invalidates the stored entry if the outcome is a disconnect.
    */
   private applyAccountDelta(snapshot: AccountStateSnapshot): void {
-    const connection = this.findConnectionForParent()
+    // An EXPIRED session consumes deltas too, hence `includeEnded`. Nothing
+    // expires a session live: `connectedUntil` is set once, at connect, and a
+    // partitioned session's is hydrated from the popup — so a page open past
+    // its deadline keeps uploading (`ensureCanUpload` reads the secret, not the
+    // clock) while `findConnectionForParent` already reports nothing. Requiring
+    // a VALID connection here would make the revoke that should end such a
+    // session the one message it cannot hear. Folding into it is safe: the
+    // reconcile below re-resolves under the normal rule, sees no valid
+    // connection, and disconnects — where an expired session belongs anyway.
+    const connection = this.findConnectionForParent({ includeEnded: true })
     // A delta for an account this origin is not connected to says nothing
     // about this session. (The topic is account-derived, so this is a
     // belt-and-braces check rather than the boundary.)
@@ -1274,26 +1354,57 @@ export class SwarmIdProxy {
     // shared storage, which this message did not write, so folding into memory
     // would only diverge the two — it reconciles from storage below instead.
     // (Which means a cross-device revoke does not yet reach an unpartitioned
-    // session: that needs the UI to consume deltas and write them, part 3.)
+    // session: that needs the UI to consume deltas and write them — #608.)
     const { account } = connection
     if (this.partitionAccount) {
-      // The shared LWW primitives, not a second set of rules: per `appUrl` with
-      // a `revokedAt` tombstone, per `batchID` with `deletedAt`. In-memory,
-      // like the roster merge in `refreshKnownDeviceIds`.
+      // The shared fold, not a second set of rules: `foldAccount` merges the
+      // collections per `appUrl` / `batchID` on their tombstone clocks AND
+      // every scalar on its own per-field clock, exactly as the Swarm read
+      // path does. The metadata is not optional here — a moved default stamp
+      // arrives as "old one tombstoned, new one added, pointer moved", so
+      // folding the collections alone leaves the pointer on the tombstone,
+      // `resolveStampForApp` resolves nothing, and the session cannot upload
+      // for the page's life with the replacement key already in hand.
+      // Local view first, so a tie on a collection entry keeps ours.
+      const folded = foldAccount(
+        [
+          deltaFoldView(accountAsStateSnapshot(account)),
+          deltaFoldView(snapshot),
+        ],
+        mergeDevicesList(account.devices, snapshot.metadata.devices),
+      )
       this.partitionAccount = {
         ...this.partitionAccount,
+        ...foldedToSyncedAccount({
+          id: account.id,
+          derivationKey: account.derivationKey,
+          account: folded,
+          // The NEWER of the two inputs, never a fresh `Date.now()` (the
+          // default): a fold states what the two sides already say, it does not
+          // make a change. `accountAsStateSnapshot` reads this back as the
+          // snapshot clock on the next fold, so a fresh one here would let this
+          // session outrank a peer's genuine edit purely by having consumed a
+          // message.
+          lastModified: Math.max(
+            account.lastModified ?? account.createdAt,
+            snapshot.metadata.lastModified,
+          ),
+        }),
         connectedApps: restoreLocalSessionFields(
-          mergeConnectedApps(account.connectedApps, snapshot.connectedApps),
+          folded.connectedApps,
           account.connectedApps,
-        ),
-        postageStamps: mergePostageStamps(
-          account.postageStamps,
-          snapshot.postageStamps,
         ),
       }
     }
 
-    void this.reevaluateConnection("bus")
+    // On the reconcile queue, not beside it: this runs the same stamper rebind
+    // a storage event does, and its rejections need the queue's catch. Only the
+    // RECONCILE is serialized — the fold above is synchronous, so a second delta
+    // can still land between a queued reconcile's awaits. That converges (the
+    // fold is LWW and the reconcile re-reads the view), it is not ordered.
+    this.enqueueReconcile("applyAccountDelta", () =>
+      this.reevaluateConnection("bus"),
+    )
   }
 
   /**
@@ -2136,15 +2247,33 @@ export class SwarmIdProxy {
 
   /**
    * Assemble the current account-state snapshot for the connected app's
-   * account. Split out of `buildAccountStateSnapshotForPublish` so the bus
-   * publish — which needs no feed signing key — doesn't pay two key
-   * derivations to send one message.
+   * account. Needs no feed signing key, so it stays separate from
+   * `buildAccountStateSnapshotForPublish` below — reusing that one would cost
+   * two key derivations to send a bus message.
+   *
+   * `requireDefaultStamp` is the FEED path's precondition, not the snapshot's:
+   * that write is paid for by the default stamp, while a bus message costs
+   * nothing to send and `metadata.defaultPostageStampBatchID` is optional on
+   * the wire. An account with no drives is a supported connected state, and
+   * gating the delta on a stamp is how such an account's revokes never reach
+   * its partitioned sessions at all.
    */
-  private buildAccountStateSnapshot(): AccountStateSnapshot | undefined {
+  private buildAccountStateSnapshot(options: {
+    requireDefaultStamp: boolean
+    includeEndedConnection: boolean
+  }): AccountStateSnapshot | undefined {
     if (!this.parentOrigin || this.isDownloadOnlyPartition) return undefined
-    const connection = this.findConnectionForParent()
+    const connection = this.findConnectionForParent({
+      includeEnded: options.includeEndedConnection,
+    })
     if (!connection) return undefined
-    return accountStateSnapshot(connection.account)
+    const { account } = connection
+
+    if (options.requireDefaultStamp && !account.defaultPostageStampBatchID) {
+      return undefined
+    }
+
+    return accountToStateSnapshot(account, account.id.toHex(), Date.now())
   }
 
   /**
@@ -2152,10 +2281,32 @@ export class SwarmIdProxy {
    * (docs/Account-Bus.md, `account-delta`). Unlike the feed write below it
    * needs no partition and no lock — it is a message, not a write — so a
    * read-only session still relays what it can see to peers that cannot.
+   *
+   * `ofEndedConnection` reports a session that has just ENDED (the revoke a
+   * storage event revealed), where the entry the snapshot is resolved from is
+   * by definition no longer a valid connection.
    */
-  private publishAccountDelta(): void {
-    const snapshot = this.buildAccountStateSnapshot()
+  private publishAccountDelta(options?: { ofEndedConnection: boolean }): void {
+    const snapshot = this.buildAccountStateSnapshot({
+      requireDefaultStamp: false,
+      includeEndedConnection: options?.ofEndedConnection === true,
+    })
     if (!snapshot) return
+    // Same guard the feed write below carries, for the same reason and one
+    // channel earlier: a debounced publish can fire mid account switch, after
+    // the new account resolved but before `ensureAccountBusTransports` has
+    // detached the old room — and these transports encrypt with the key they
+    // were built with. Publishing then hands account B's snapshot, stamp signer
+    // keys included, to account A's peers.
+    if (
+      this.busBoundAccountId !== undefined &&
+      snapshot.accountId !== this.busBoundAccountId
+    ) {
+      console.warn(
+        `[Proxy] Account changed since the bus room was joined (snapshot ${snapshot.accountId} vs bus room ${this.busBoundAccountId}); skipping delta.`,
+      )
+      return
+    }
     this.bus.publish({
       type: "account-delta",
       snapshot: accountDeltaSnapshot(snapshot),
@@ -2183,7 +2334,10 @@ export class SwarmIdProxy {
     try {
       const connection = this.findConnectionForParent()
       if (!connection) return undefined
-      const snapshot = this.buildAccountStateSnapshot()
+      const snapshot = this.buildAccountStateSnapshot({
+        requireDefaultStamp: true,
+        includeEndedConnection: false,
+      })
       if (!snapshot) return undefined
 
       const encryptionKey = await deriveSwarmEncryptionKey(
@@ -2205,9 +2359,12 @@ export class SwarmIdProxy {
    * Schedule a debounced account-state publish. Safe to call from inside the
    * coordinator's lease callbacks: it only arms a timer, so the actual publish
    * runs later, outside any held write lock.
+   *
+   * A coordinator is NOT a precondition — only the feed half of the publish
+   * needs one, and `runAccountStatePublish` checks for it there, after the bus
+   * delta has gone out.
    */
   private schedulePublish(reason: "acquired" | "change"): void {
-    if (!this.coordinator) return
     // "change" dominates: if a real delta is pending in this debounce window,
     // don't let a coalesced "acquired" downgrade it to the announce-gated path.
     if (this.publishReason !== "change") this.publishReason = reason
@@ -2232,9 +2389,9 @@ export class SwarmIdProxy {
   private async runAccountStatePublish(
     reason: "acquired" | "change",
   ): Promise<void> {
-    // Ahead of the partition gate (a message needs no lease) but behind the
-    // in-flight re-arm, which re-runs this whole method — publishing first
-    // would send the same delta twice for one change.
+    // The in-flight guard runs before the delta publish below: a message needs
+    // no lease, but a re-entrant call while a publish is in flight re-arms the
+    // timer instead of sending the delta a second time for one change.
     if (this.publishInFlight) {
       this.schedulePublish(reason)
       return
@@ -2344,19 +2501,27 @@ export class SwarmIdProxy {
    * under multiple accounts) by sorting valid entries by `lastConnectedAt`
    * descending and returning the most recent.
    */
-  private findConnectionForParent():
-    | { account: SignedInAccount; app: ConnectedApp }
-    | undefined {
+  private findConnectionForParent(options?: {
+    /**
+     * Accept an entry whose session has ENDED — a lapsed `connectedUntil`, a
+     * revoke tombstone, a hand disconnect. For CONSUMING authoritative news
+     * about a session (`applyAccountDelta`) or REPORTING its end (the final
+     * `account-delta`), never for serving work with it: such an entry must
+     * still fail the reconcile that follows, or the session would never end.
+     */
+    includeEnded: boolean
+  }): { account: SignedInAccount; app: ConnectedApp } | undefined {
     if (!this.parentOrigin) {
       return undefined
     }
+    const usable = (app: ConnectedApp): boolean =>
+      this.isConnectionValid(app) || options?.includeEnded === true
     // Partitioned session: shared storage is invisible; the popup-handed
     // account view is the (only) source.
     if (this.partitionAccount) {
       const app = this.partitionAccount.connectedApps.find(
         (candidate) =>
-          candidate.appUrl === this.parentOrigin &&
-          this.isConnectionValid(candidate),
+          candidate.appUrl === this.parentOrigin && usable(candidate),
       )
       return app ? { account: this.partitionAccount, app } : undefined
     }
@@ -2367,13 +2532,20 @@ export class SwarmIdProxy {
       // serve them with) — its record is just the vault remnant.
       if (isSignedOutAccount(account)) continue
       for (const app of account.connectedApps) {
-        if (app.appUrl === this.parentOrigin && this.isConnectionValid(app)) {
+        if (app.appUrl === this.parentOrigin && usable(app)) {
           matches.push({ account, app })
         }
       }
     }
+    // Valid first, THEN most-recent: with `includeEnded` every historical entry
+    // for this origin is eligible, across every account, and `lastConnectedAt`
+    // alone would let a long-dead session outrank a live one from another
+    // account purely by having connected later.
     return matches.sort(
-      (a, b) => b.app.lastConnectedAt - a.app.lastConnectedAt,
+      (a, b) =>
+        Number(this.isConnectionValid(b.app)) -
+          Number(this.isConnectionValid(a.app)) ||
+        b.app.lastConnectedAt - a.app.lastConnectedAt,
     )[0]
   }
 

@@ -300,6 +300,50 @@ describe("SwarmIdProxy partitioned write enablement", () => {
       .map(([message]) => message)
       .filter((message) => message?.type === type)
 
+  /**
+   * Seed shared storage with an account already connected to the dApp — the
+   * UNPARTITIONED setup, where the iframe reads the account document itself.
+   *
+   * `account` overrides are spread over the base record, so passing an explicit
+   * `undefined` (a stamp-less account) removes the field rather than keeping
+   * the default. A different `derivationKey` makes it a different account — a
+   * different bus room — while staying connected to the same dApp, which is
+   * what an account switch looks like from in here.
+   */
+  function seedConnectedAccount(overrides?: {
+    account?: Partial<SyncedAccount>
+    connectedApps?: ConnectedApp[]
+  }): SyncedAccount {
+    const synced: SyncedAccount = {
+      ...makeSyncedAccount(),
+      ...overrides?.account,
+    }
+    const stored: SignedInAccount = {
+      ...synced,
+      connectedApps: overrides?.connectedApps ?? [
+        {
+          appUrl: PARENT_ORIGIN,
+          appName: "dApp",
+          appSecret: "44".repeat(32),
+          lastConnectedAt: Date.now(),
+          connectedUntil: Date.now() + 60_000,
+        },
+      ],
+      // Inert but schema-valid: the vault is never opened here.
+      access: {
+        type: "password",
+        kdfSalt: "ab".repeat(16),
+        kdfIterations: 100_000,
+      },
+      encryptedSeed: "00".repeat(48),
+    }
+    localStorageFake.setItem(
+      STORAGE_KEY_ACCOUNTS,
+      JSON.stringify({ version: 1, data: [serializeAccount(stored)] }),
+    )
+    return synced
+  }
+
   /** Run identify → connect → return the partition challenge the popup echoes. */
   async function startPartitionedConnect(): Promise<string> {
     await dispatch(
@@ -754,11 +798,20 @@ describe("SwarmIdProxy partitioned write enablement", () => {
   // hydrated account view, stamp signer keys included, for the life of the
   // page. `account-delta` is the push channel that closes that.
   describe("account-delta from a peer", () => {
+    /** The batch a replacement default stamp lives on. */
+    const OTHER_BATCH_ID_HEX = "dd".repeat(32)
+    /** Long enough that two overlapping reconciles are observably overlapping,
+     *  short enough not to slow the suite. */
+    const SLOW_REFRESH_MS = 30
+
     /** The wire form: what a publisher puts on the bus. */
     function accountDelta(overrides?: {
       accountId?: string
       connectedApps?: ConnectedApp[]
       postageStamps?: PostageStamp[]
+      defaultPostageStampBatchID?: string
+      defaultStampAt?: number
+      lastModified?: number
     }): Record<string, unknown> {
       const account = makeSyncedAccount()
       return {
@@ -767,11 +820,13 @@ describe("SwarmIdProxy partitioned write enablement", () => {
           accountId: overrides?.accountId ?? account.id.toHex(),
           metadata: {
             accountName: account.name,
-            defaultPostageStampBatchID: BATCH_ID_HEX,
+            defaultPostageStampBatchID:
+              overrides?.defaultPostageStampBatchID ?? BATCH_ID_HEX,
+            defaultStampAt: overrides?.defaultStampAt,
             publicKey: account.publicKey,
             settings: undefined,
             createdAt: account.createdAt,
-            lastModified: Date.now(),
+            lastModified: overrides?.lastModified ?? Date.now(),
             devices: [],
             partitionCount: 2,
           },
@@ -816,6 +871,242 @@ describe("SwarmIdProxy partitioned write enablement", () => {
         )
         const infos = messagesOfType("connectionInfoChanged")
         expect(infos[infos.length - 1].canUpload).toBe(false)
+      } finally {
+        busChannel.close()
+      }
+    })
+
+    // Nothing expires a session live: `connectedUntil` is set once, at connect,
+    // and a partitioned session's is hydrated from the popup — so a page open
+    // past its deadline keeps uploading (`ensureCanUpload` reads the secret, not
+    // the clock). If a lapsed deadline also cost it every incoming delta, the
+    // revoke that should end it would be the one message it cannot hear.
+    it("disconnects an expired partitioned session on a revoke", async () => {
+      const busChannel = await hydratedSession()
+      const internals = proxy as unknown as {
+        partitionAccount: SignedInAccount | undefined
+      }
+      const hydrated = internals.partitionAccount!
+      internals.partitionAccount = {
+        ...hydrated,
+        connectedApps: hydrated.connectedApps.map((app) =>
+          app.appUrl === PARENT_ORIGIN
+            ? { ...app, connectedUntil: Date.now() - 1000 }
+            : app,
+        ),
+      }
+      try {
+        busChannel.postMessage(
+          accountDelta({ connectedApps: [revoked(PARENT_ORIGIN)] }),
+        )
+        await vi.waitFor(() =>
+          expect(messagesOfType("disconnectResponse")).toHaveLength(1),
+        )
+      } finally {
+        busChannel.close()
+      }
+    })
+
+    // A default-stamp change is two moves in one delta: the old stamp is
+    // tombstoned and the pointer moves to a new one. Fold the collections
+    // without the metadata and the pointer stays on the tombstone —
+    // `resolveStampForApp` then resolves nothing, the stamper is cleared, and
+    // the session cannot upload for the page's life with the replacement stamp
+    // and its signer key already in hand.
+    it("rebinds the stamper when a delta moves the default stamp", async () => {
+      const busChannel = await hydratedSession()
+      const replacementKey = "ab".repeat(32)
+      try {
+        const stamp = makeSyncedAccount().postageStamps[0]
+        const now = Date.now()
+        busChannel.postMessage(
+          accountDelta({
+            defaultPostageStampBatchID: OTHER_BATCH_ID_HEX,
+            defaultStampAt: now,
+            postageStamps: [
+              { ...stamp, deletedAt: now, updatedAt: now },
+              {
+                ...stamp,
+                batchID: new BatchId(OTHER_BATCH_ID_HEX),
+                signerKey: new PrivateKey(replacementKey),
+                createdAt: now,
+              },
+            ],
+          }),
+        )
+        await vi.waitFor(() =>
+          expect(
+            String(
+              vi.mocked(UtilizationAwareStamper.create).mock.calls.at(-1)![1],
+            ),
+          ).toBe(OTHER_BATCH_ID_HEX),
+        )
+        const lastCall = vi
+          .mocked(UtilizationAwareStamper.create)
+          .mock.calls.at(-1)!
+        expect(String(lastCall[0])).toBe(replacementKey)
+        const infos = messagesOfType("connectionInfoChanged")
+        expect(infos[infos.length - 1].canUpload).toBe(true)
+      } finally {
+        busChannel.close()
+      }
+    })
+
+    // A fold states what the two sides already say; it is not a change made
+    // here. `accountAsStateSnapshot` reads `lastModified` back as the snapshot
+    // clock on the NEXT fold, so restamping it with `Date.now()` would let this
+    // session outrank a peer's genuine edit purely by having consumed a message.
+    it("keeps the newer of the two clocks on a fold, not a fresh one", async () => {
+      const busChannel = await hydratedSession()
+      const internals = proxy as unknown as {
+        partitionAccount: SignedInAccount | undefined
+      }
+      const localAt = internals.partitionAccount!.lastModified!
+      try {
+        const stamp = makeSyncedAccount().postageStamps[0]
+        busChannel.postMessage(
+          accountDelta({
+            lastModified: localAt - 10_000,
+            postageStamps: [
+              stamp,
+              {
+                ...stamp,
+                batchID: new BatchId(OTHER_BATCH_ID_HEX),
+                createdAt: localAt - 10_000,
+              },
+            ],
+          }),
+        )
+        await vi.waitFor(() =>
+          expect(internals.partitionAccount!.postageStamps).toHaveLength(2),
+        )
+        expect(internals.partitionAccount!.lastModified).toBe(localAt)
+      } finally {
+        busChannel.close()
+      }
+    })
+
+    // `includeEnded` makes every historical entry for this origin eligible,
+    // across every account, and `isConnectionValid` is only a deadline check.
+    // Ranking on `lastConnectedAt` alone then lets a long-dead session outrank
+    // a live one from another account — and the delta addressed to the live
+    // account is dropped as "not this session's".
+    it("prefers a valid connection over a more recent ended one", async () => {
+      await unpartitionedSession()
+      const now = Date.now()
+      const stored = (
+        account: Partial<SyncedAccount>,
+        app: Partial<ConnectedApp>,
+      ): Record<string, unknown> =>
+        serializeAccount({
+          ...makeSyncedAccount(),
+          ...account,
+          connectedApps: [
+            {
+              appUrl: PARENT_ORIGIN,
+              appName: "dApp",
+              appSecret: "44".repeat(32),
+              lastConnectedAt: now,
+              connectedUntil: now + 60_000,
+              ...app,
+            },
+          ],
+          access: {
+            type: "password",
+            kdfSalt: "ab".repeat(16),
+            kdfIterations: 100_000,
+          },
+          encryptedSeed: "00".repeat(48),
+        } as SignedInAccount)
+      localStorageFake.setItem(
+        STORAGE_KEY_ACCOUNTS,
+        JSON.stringify({
+          version: 1,
+          data: [
+            // Still connected, but it connected FIRST.
+            stored(
+              { id: new EthAddress("aa".repeat(20)) },
+              {
+                lastConnectedAt: now - 60_000,
+              },
+            ),
+            // Lapsed, and the most recent thing on this origin.
+            stored(
+              {
+                id: new EthAddress("bb".repeat(20)),
+                derivationKey: OTHER_DERIVATION_KEY,
+              },
+              { lastConnectedAt: now, connectedUntil: now - 1000 },
+            ),
+          ],
+        }),
+      )
+
+      const found = (
+        proxy as unknown as {
+          findConnectionForParent(options?: {
+            includeEnded: boolean
+          }): { account: SignedInAccount } | undefined
+        }
+      ).findConnectionForParent({ includeEnded: true })
+      expect(found?.account.id.toHex()).toBe(
+        new EthAddress("aa".repeat(20)).toHex(),
+      )
+    })
+
+    // A fold's reconcile is the same shared-state mutation a storage event's is
+    // (`refreshStampFromStorage` rebinds the stamper across awaits), so it
+    // belongs on the same queue — whose catch is also the only thing between a
+    // failed refresh and an unhandled rejection: the bus dispatch's try/catch
+    // only covers what throws synchronously.
+    it("contains a failing bus reconcile instead of rejecting unhandled", async () => {
+      const busChannel = await hydratedSession()
+      const errors = vi.spyOn(console, "error").mockImplementation(() => {})
+      const unhandled: unknown[] = []
+      const onUnhandled = (reason: unknown): void => void unhandled.push(reason)
+      process.on("unhandledRejection", onUnhandled)
+      const internals = proxy as unknown as {
+        refreshStampFromStorage(): Promise<void>
+      }
+      internals.refreshStampFromStorage = vi.fn(() =>
+        Promise.reject(new Error("refresh failed")),
+      )
+      try {
+        busChannel.postMessage(accountDelta())
+        await flushBus()
+        await flushBus()
+        expect(unhandled).toHaveLength(0)
+        expect(
+          errors.mock.calls.some(([message]) =>
+            String(message).includes("applyAccountDelta"),
+          ),
+        ).toBe(true)
+      } finally {
+        process.off("unhandledRejection", onUnhandled)
+        busChannel.close()
+      }
+    })
+
+    it("serializes the reconciles two folds trigger", async () => {
+      const busChannel = await hydratedSession()
+      let active = 0
+      let peak = 0
+      let calls = 0
+      const internals = proxy as unknown as {
+        refreshStampFromStorage(): Promise<void>
+      }
+      internals.refreshStampFromStorage = vi.fn(async () => {
+        calls += 1
+        active += 1
+        peak = Math.max(peak, active)
+        await new Promise((resolve) => setTimeout(resolve, SLOW_REFRESH_MS))
+        active -= 1
+      })
+      try {
+        busChannel.postMessage(accountDelta())
+        busChannel.postMessage(accountDelta())
+        await vi.waitFor(() => expect(calls).toBe(2))
+        expect(peak).toBe(1)
       } finally {
         busChannel.close()
       }
@@ -1025,6 +1316,130 @@ describe("SwarmIdProxy partitioned write enablement", () => {
         )
         await flushBus()
         expect(messagesOfType("disconnectResponse")).toHaveLength(0)
+      } finally {
+        busChannel.close()
+      }
+    })
+
+    /** Seed storage, identify as the dApp, and wait for the bus room — the
+     *  unpartitioned session that is the only one able to PUBLISH a delta. */
+    async function unpartitionedSession(overrides?: {
+      account?: Partial<SyncedAccount>
+      connectedApps?: ConnectedApp[]
+    }): Promise<BroadcastChannel> {
+      seedConnectedAccount(overrides)
+      await dispatch(
+        { type: "parentIdentify", requestId: "r1", metadata: { name: "dApp" } },
+        PARENT_ORIGIN,
+        parentWindow,
+      )
+      await awaitBusJoin()
+      return new BroadcastChannel(accountChannelName)
+    }
+
+    const listen = (
+      busChannel: BroadcastChannel,
+    ): Record<string, unknown>[] => {
+      const published: Record<string, unknown>[] = []
+      busChannel.onmessage = (event) =>
+        published.push(event.data as Record<string, unknown>)
+      return published
+    }
+
+    // An account with no drives is a supported connected state (the connect
+    // flow completes with zero stamps), and such an account gets no write
+    // coordinator either. Gating the delta on a default stamp — a FEED
+    // precondition, since that write is what the stamp pays for — left the one
+    // account shape whose revokes reach no partitioned session at all.
+    it("publishes a delta for an account with no default stamp", async () => {
+      const busChannel = await unpartitionedSession({
+        account: { defaultPostageStampBatchID: undefined, postageStamps: [] },
+      })
+      const published = listen(busChannel)
+      try {
+        await (
+          proxy as unknown as {
+            handleAccountStorageChange(): Promise<void>
+          }
+        ).handleAccountStorageChange()
+
+        await vi.waitFor(
+          () =>
+            expect(
+              published.filter((m) => m.type === "account-delta"),
+            ).toHaveLength(1),
+          { timeout: 3000 },
+        )
+        const delta = published.find((m) => m.type === "account-delta")
+        expect(() => BusMessageSchema.parse(delta)).not.toThrow()
+        const snapshot = delta!.snapshot as {
+          metadata: Record<string, unknown>
+        }
+        expect(snapshot.metadata.defaultPostageStampBatchID).toBeUndefined()
+      } finally {
+        busChannel.close()
+      }
+    })
+
+    // The transports encrypt with the key they were constructed with, and the
+    // switch to account B derives its room before detaching A's. A publish
+    // landing in that window would drop B's snapshot — stamp signer keys and
+    // all — into A's room, readable by A's peers. The feed write has this guard
+    // already; the bus one is the path that carries the keys.
+    it("does not publish a delta into another account's bus room", async () => {
+      const busChannel = await unpartitionedSession()
+      const published = listen(busChannel)
+      const warn = vi.spyOn(console, "warn").mockImplementation(() => {})
+      const internals = proxy as unknown as {
+        busBoundAccountId: string | undefined
+        publishAccountDelta(): void
+      }
+      try {
+        internals.busBoundAccountId = "bb".repeat(20)
+        internals.publishAccountDelta()
+        await flushBus()
+
+        expect(
+          published.filter((m) => m.type === "account-delta"),
+        ).toHaveLength(0)
+        expect(
+          warn.mock.calls.some(([message]) =>
+            String(message).includes("bus room"),
+          ),
+        ).toBe(true)
+      } finally {
+        busChannel.close()
+      }
+    })
+
+    // The common revoke: the user removes the app in the SwarmID UI while only
+    // this dApp is open. The unpartitioned iframe sees it in storage and
+    // disconnects itself — and used to do so silently, so this dApp's own
+    // partitioned sessions (the ones that cannot read storage) never heard the
+    // revoke that ended them.
+    it("publishes a final delta when storage reveals this app revoked", async () => {
+      const busChannel = await unpartitionedSession()
+      const published = listen(busChannel)
+      try {
+        seedConnectedAccount({ connectedApps: [revoked(PARENT_ORIGIN)] })
+        await (
+          proxy as unknown as {
+            handleAccountStorageChange(): Promise<void>
+          }
+        ).handleAccountStorageChange()
+        await flushBus()
+
+        expect(messagesOfType("disconnectResponse")).toHaveLength(1)
+        const deltas = published.filter((m) => m.type === "account-delta")
+        expect(deltas).toHaveLength(1)
+        expect(() => BusMessageSchema.parse(deltas[0])).not.toThrow()
+        const snapshot = deltas[0].snapshot as {
+          connectedApps: Record<string, unknown>[]
+        }
+        const ours = snapshot.connectedApps.find(
+          (app) => app.appUrl === PARENT_ORIGIN,
+        )
+        expect(ours?.revokedAt).toBeDefined()
       } finally {
         busChannel.close()
       }
@@ -1289,39 +1704,6 @@ describe("SwarmIdProxy partitioned write enablement", () => {
    *  A different `derivationKey` makes it a different account — a different
    *  bus room — while staying connected to the same dApp, which is what an
    *  account switch looks like from in here. */
-  function seedConnectedAccount(
-    derivationKey?: string,
-    devices?: Device[],
-  ): SyncedAccount {
-    const synced = { ...makeSyncedAccount() }
-    if (derivationKey !== undefined) synced.derivationKey = derivationKey
-    if (devices !== undefined) synced.devices = devices
-    const stored: SignedInAccount = {
-      ...synced,
-      connectedApps: [
-        {
-          appUrl: PARENT_ORIGIN,
-          appName: "dApp",
-          appSecret: "44".repeat(32),
-          lastConnectedAt: Date.now(),
-          connectedUntil: Date.now() + 60_000,
-        },
-      ],
-      // Inert but schema-valid: the vault is never opened here.
-      access: {
-        type: "password",
-        kdfSalt: "ab".repeat(16),
-        kdfIterations: 100_000,
-      },
-      encryptedSeed: "00".repeat(48),
-    }
-    localStorageFake.setItem(
-      STORAGE_KEY_ACCOUNTS,
-      JSON.stringify({ version: 1, data: [serializeAccount(stored)] }),
-    )
-    return synced
-  }
-
   // The harm the length check caused: a peer ALREADY in the view, gone stale
   // (`activeDeviceIds` prunes past `KNOWN_DEVICE_MAX_AGE_MS`), is refreshed by
   // the roster — same list length, so the merge was discarded and the peer
@@ -1377,10 +1759,22 @@ describe("SwarmIdProxy partitioned write enablement", () => {
     const peerId = "peer-device-stored"
     const selfId = "self-device-stored"
     localStorageFake.setItem("swarm-id-device-id", selfId)
-    const synced = seedConnectedAccount(undefined, [
-      { deviceId: selfId, createdAt: staleSignIn, lastSignedInAt: Date.now() },
-      { deviceId: peerId, createdAt: staleSignIn, lastSignedInAt: staleSignIn },
-    ])
+    const synced = seedConnectedAccount({
+      account: {
+        devices: [
+          {
+            deviceId: selfId,
+            createdAt: staleSignIn,
+            lastSignedInAt: Date.now(),
+          },
+          {
+            deviceId: peerId,
+            createdAt: staleSignIn,
+            lastSignedInAt: staleSignIn,
+          },
+        ],
+      },
+    })
 
     rosterDevices.length = 0
     rosterDevices.push({
@@ -1697,7 +2091,9 @@ describe("SwarmIdProxy partitioned write enablement", () => {
       await awaitBusJoin()
       const first = busTopicNow()
 
-      const switched = seedConnectedAccount(OTHER_DERIVATION_KEY)
+      const switched = seedConnectedAccount({
+        account: { derivationKey: OTHER_DERIVATION_KEY },
+      })
       rejoinBus()
       await vi.waitFor(() => expect(busTopicNow()).not.toBe(first))
 
@@ -1736,7 +2132,7 @@ describe("SwarmIdProxy partitioned write enablement", () => {
       )
       await awaitBusJoin()
 
-      seedConnectedAccount(OTHER_DERIVATION_KEY)
+      seedConnectedAccount({ account: { derivationKey: OTHER_DERIVATION_KEY } })
       busContextController.failNext = true
       rejoinBus()
       await vi.waitFor(() => expect(busTopicNow()).toBeUndefined())

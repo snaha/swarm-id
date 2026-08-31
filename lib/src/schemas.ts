@@ -144,6 +144,14 @@ export const ConnectedAppSchemaV1 = z.object({
   // Tombstone marker. A revoked app is kept in the snapshot (so the removal
   // propagates to other devices) but hidden from the UI and invalid for auth.
   revokedAt: z.number().optional(),
+  // When the session was ended by hand ("Disconnect", and a revoke on the way
+  // out). Unlike `appSecret`/`connectedUntil` this is NOT session material and
+  // NOT secret: it is the *intent*, and it has to survive the trip to another
+  // context. With the session fields stripped on the wire, an entry that was
+  // disconnected looks exactly like one that was merely renamed, so without
+  // this marker a peer re-installs its own secret after the merge and keeps
+  // uploading (see `restoreLocalSessionFields`). A reconnect clears it.
+  disconnectedAt: z.number().optional(),
 })
 
 // ============================================================================
