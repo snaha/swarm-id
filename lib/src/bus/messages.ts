@@ -24,6 +24,13 @@ import {
  * material. Zod drops unknown keys, so this `.omit` enforces the strip on
  * receive — a publisher that forgets it still has `appSecret` and
  * `connectedUntil` removed here, before any receiver sees them.
+ *
+ * Enforced on receive because one forgetful publisher is expensive on both
+ * counts: every partitioned iframe on the account would learn every dApp's
+ * secret (the leak the strip exists to prevent), and an entry for the receiving
+ * app carrying a live `connectedUntil` with a different secret would drive the
+ * reconcile into `authenticateFromStorage`, which drops the hydrated view a
+ * partitioned session cannot rebuild without a reload.
  */
 const BusConnectedAppSchema = ConnectedAppSchemaV1.omit({
   appSecret: true,

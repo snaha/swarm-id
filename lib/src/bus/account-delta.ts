@@ -59,6 +59,13 @@ export function accountDeltaSnapshot(
  * `lastConnectedAt` (a plain "Disconnect", which is not a tombstone but is
  * newer than the session we hold). Either way the incoming entry's cleared
  * fields stand and the session ends.
+ *
+ * Ours WINS over anything incoming, rather than filling a gap. Under the wire
+ * contract there is nothing to lose — the incoming entry has neither field —
+ * but a session's own credential and deadline are not a peer's to set, so
+ * preferring the incoming value would put a forgetful publisher (or anything
+ * that reached the room) one message away from replacing them. The receive
+ * schema already drops both; this is the same rule stated where it is used.
  */
 export function restoreLocalSessionFields(
   merged: ConnectedApp[],

@@ -811,6 +811,7 @@ describe("SwarmIdProxy partitioned write enablement", () => {
       postageStamps?: PostageStamp[]
       defaultPostageStampBatchID?: string
       defaultStampAt?: number
+      lastModified?: number
     }): Record<string, unknown> {
       const account = makeSyncedAccount()
       return {
@@ -825,7 +826,7 @@ describe("SwarmIdProxy partitioned write enablement", () => {
             publicKey: account.publicKey,
             settings: undefined,
             createdAt: account.createdAt,
-            lastModified: Date.now(),
+            lastModified: overrides?.lastModified ?? Date.now(),
             devices: [],
             partitionCount: 2,
           },
@@ -949,6 +950,108 @@ describe("SwarmIdProxy partitioned write enablement", () => {
       } finally {
         busChannel.close()
       }
+    })
+
+    // A fold states what the two sides already say; it is not a change made
+    // here. `accountAsStateSnapshot` reads `lastModified` back as the snapshot
+    // clock on the NEXT fold, so restamping it with `Date.now()` would let this
+    // session outrank a peer's genuine edit purely by having consumed a message.
+    it("keeps the newer of the two clocks on a fold, not a fresh one", async () => {
+      const busChannel = await hydratedSession()
+      const internals = proxy as unknown as {
+        partitionAccount: SignedInAccount | undefined
+      }
+      const localAt = internals.partitionAccount!.lastModified!
+      try {
+        const stamp = makeSyncedAccount().postageStamps[0]
+        busChannel.postMessage(
+          accountDelta({
+            lastModified: localAt - 10_000,
+            postageStamps: [
+              stamp,
+              {
+                ...stamp,
+                batchID: new BatchId(OTHER_BATCH_ID_HEX),
+                createdAt: localAt - 10_000,
+              },
+            ],
+          }),
+        )
+        await vi.waitFor(() =>
+          expect(internals.partitionAccount!.postageStamps).toHaveLength(2),
+        )
+        expect(internals.partitionAccount!.lastModified).toBe(localAt)
+      } finally {
+        busChannel.close()
+      }
+    })
+
+    // `includeEnded` makes every historical entry for this origin eligible,
+    // across every account, and `isConnectionValid` is only a deadline check.
+    // Ranking on `lastConnectedAt` alone then lets a long-dead session outrank
+    // a live one from another account — and the delta addressed to the live
+    // account is dropped as "not this session's".
+    it("prefers a valid connection over a more recent ended one", async () => {
+      await unpartitionedSession()
+      const now = Date.now()
+      const stored = (
+        account: Partial<SyncedAccount>,
+        app: Partial<ConnectedApp>,
+      ): Record<string, unknown> =>
+        serializeAccount({
+          ...makeSyncedAccount(),
+          ...account,
+          connectedApps: [
+            {
+              appUrl: PARENT_ORIGIN,
+              appName: "dApp",
+              appSecret: "44".repeat(32),
+              lastConnectedAt: now,
+              connectedUntil: now + 60_000,
+              ...app,
+            },
+          ],
+          access: {
+            type: "password",
+            kdfSalt: "ab".repeat(16),
+            kdfIterations: 100_000,
+          },
+          encryptedSeed: "00".repeat(48),
+        } as SignedInAccount)
+      localStorageFake.setItem(
+        STORAGE_KEY_ACCOUNTS,
+        JSON.stringify({
+          version: 1,
+          data: [
+            // Still connected, but it connected FIRST.
+            stored(
+              { id: new EthAddress("aa".repeat(20)) },
+              {
+                lastConnectedAt: now - 60_000,
+              },
+            ),
+            // Lapsed, and the most recent thing on this origin.
+            stored(
+              {
+                id: new EthAddress("bb".repeat(20)),
+                derivationKey: OTHER_DERIVATION_KEY,
+              },
+              { lastConnectedAt: now, connectedUntil: now - 1000 },
+            ),
+          ],
+        }),
+      )
+
+      const found = (
+        proxy as unknown as {
+          findConnectionForParent(options?: {
+            includeEnded: boolean
+          }): { account: SignedInAccount } | undefined
+        }
+      ).findConnectionForParent({ includeEnded: true })
+      expect(found?.account.id.toHex()).toBe(
+        new EthAddress("aa".repeat(20)).toHex(),
+      )
     })
 
     // A fold's reconcile is the same shared-state mutation a storage event's is
@@ -1601,39 +1704,6 @@ describe("SwarmIdProxy partitioned write enablement", () => {
    *  A different `derivationKey` makes it a different account — a different
    *  bus room — while staying connected to the same dApp, which is what an
    *  account switch looks like from in here. */
-  function seedConnectedAccount(
-    derivationKey?: string,
-    devices?: Device[],
-  ): SyncedAccount {
-    const synced = { ...makeSyncedAccount() }
-    if (derivationKey !== undefined) synced.derivationKey = derivationKey
-    if (devices !== undefined) synced.devices = devices
-    const stored: SignedInAccount = {
-      ...synced,
-      connectedApps: [
-        {
-          appUrl: PARENT_ORIGIN,
-          appName: "dApp",
-          appSecret: "44".repeat(32),
-          lastConnectedAt: Date.now(),
-          connectedUntil: Date.now() + 60_000,
-        },
-      ],
-      // Inert but schema-valid: the vault is never opened here.
-      access: {
-        type: "password",
-        kdfSalt: "ab".repeat(16),
-        kdfIterations: 100_000,
-      },
-      encryptedSeed: "00".repeat(48),
-    }
-    localStorageFake.setItem(
-      STORAGE_KEY_ACCOUNTS,
-      JSON.stringify({ version: 1, data: [serializeAccount(stored)] }),
-    )
-    return synced
-  }
-
   // The harm the length check caused: a peer ALREADY in the view, gone stale
   // (`activeDeviceIds` prunes past `KNOWN_DEVICE_MAX_AGE_MS`), is refreshed by
   // the roster — same list length, so the merge was discarded and the peer
@@ -1689,10 +1759,22 @@ describe("SwarmIdProxy partitioned write enablement", () => {
     const peerId = "peer-device-stored"
     const selfId = "self-device-stored"
     localStorageFake.setItem("swarm-id-device-id", selfId)
-    const synced = seedConnectedAccount(undefined, [
-      { deviceId: selfId, createdAt: staleSignIn, lastSignedInAt: Date.now() },
-      { deviceId: peerId, createdAt: staleSignIn, lastSignedInAt: staleSignIn },
-    ])
+    const synced = seedConnectedAccount({
+      account: {
+        devices: [
+          {
+            deviceId: selfId,
+            createdAt: staleSignIn,
+            lastSignedInAt: Date.now(),
+          },
+          {
+            deviceId: peerId,
+            createdAt: staleSignIn,
+            lastSignedInAt: staleSignIn,
+          },
+        ],
+      },
+    })
 
     rosterDevices.length = 0
     rosterDevices.push({

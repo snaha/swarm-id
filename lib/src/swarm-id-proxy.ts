@@ -68,7 +68,6 @@ import {
 import { makeContentAddressedChunk } from "./chunk"
 import { AccountBus, BroadcastChannelTransport } from "./bus/account-bus"
 import { SignalingTransport } from "./bus/signaling-transport"
-import { accountStateSnapshot } from "./utils/account-state-snapshot"
 import { deriveBusContext } from "./bus/bus-context"
 import type { BusContext } from "./bus/bus-context"
 import type { BeeRequestOptions } from "@ethersphere/bee-js"
@@ -261,8 +260,10 @@ function accountAsStateSnapshot(
  *
  * Both sides go through it so the bus fold IS the Swarm fold — same collection
  * tombstone clocks, same per-field scalar clocks, same `BatchId` revival — with
- * no rule stated twice. `deviceId` is inert: the fold keys collections by their
- * own natural keys and takes the device list from its second argument.
+ * no rule stated twice. `deviceId` and `timestamp` are inert here: `foldAccount`
+ * keys collections by their own natural keys, takes the device list from its
+ * second argument, and reads neither field — `deltaFoldView` pins that in a
+ * test, since it is an assumption about another module's internals.
  */
 function deltaFoldView(snapshot: AccountStateSnapshot): DeviceStateSnapshot {
   return {
@@ -1378,6 +1379,16 @@ export class SwarmIdProxy {
           id: account.id,
           derivationKey: account.derivationKey,
           account: folded,
+          // The NEWER of the two inputs, never a fresh `Date.now()` (the
+          // default): a fold states what the two sides already say, it does not
+          // make a change. `accountAsStateSnapshot` reads this back as the
+          // snapshot clock on the next fold, so a fresh one here would let this
+          // session outrank a peer's genuine edit purely by having consumed a
+          // message.
+          lastModified: Math.max(
+            account.lastModified ?? account.createdAt,
+            snapshot.metadata.lastModified,
+          ),
         }),
         connectedApps: restoreLocalSessionFields(
           folded.connectedApps,
@@ -1387,7 +1398,10 @@ export class SwarmIdProxy {
     }
 
     // On the reconcile queue, not beside it: this runs the same stamper rebind
-    // a storage event does, and its rejections need the queue's catch.
+    // a storage event does, and its rejections need the queue's catch. Only the
+    // RECONCILE is serialized — the fold above is synchronous, so a second delta
+    // can still land between a queued reconcile's awaits. That converges (the
+    // fold is LWW and the reconcile re-reads the view), it is not ordered.
     this.enqueueReconcile("applyAccountDelta", () =>
       this.reevaluateConnection("bus"),
     )
@@ -2523,8 +2537,15 @@ export class SwarmIdProxy {
         }
       }
     }
+    // Valid first, THEN most-recent: with `includeEnded` every historical entry
+    // for this origin is eligible, across every account, and `lastConnectedAt`
+    // alone would let a long-dead session outrank a live one from another
+    // account purely by having connected later.
     return matches.sort(
-      (a, b) => b.app.lastConnectedAt - a.app.lastConnectedAt,
+      (a, b) =>
+        Number(this.isConnectionValid(b.app)) -
+          Number(this.isConnectionValid(a.app)) ||
+        b.app.lastConnectedAt - a.app.lastConnectedAt,
     )[0]
   }
 

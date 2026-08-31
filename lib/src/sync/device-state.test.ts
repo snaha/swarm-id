@@ -225,6 +225,27 @@ describe("foldAccount — per-field scalar LWW", () => {
     expect(folded.settingsAt).toBe(1)
   })
 
+  // The bus fold (`deltaFoldView` in `swarm-id-proxy.ts`) reuses `foldAccount`
+  // for a channel that has no device feed behind it, and fills the envelope
+  // fields with placeholders. That is only sound while the fold reads neither.
+  it("reads neither deviceId nor timestamp off a view", () => {
+    const view = makeView({
+      accountName: { value: "renamed", at: 10 },
+      postageStamps: [],
+    })
+    const labelled = { ...view, version: 1, accountId: ACCOUNT_ID }
+    const folded = foldAccount(
+      [
+        { ...labelled, deviceId: "dev-a", timestamp: 1 },
+        { ...labelled, deviceId: "", timestamp: Number.MAX_SAFE_INTEGER },
+      ] as unknown as DeviceStateSnapshot[],
+      [],
+    )
+    expect(folded).toEqual(
+      foldAccount([labelled] as unknown as DeviceStateSnapshot[], []),
+    )
+  })
+
   it("devices come from the registry, not the views", () => {
     const folded = foldAccount(
       [makeView()] as unknown as DeviceStateSnapshot[],
