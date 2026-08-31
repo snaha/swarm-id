@@ -93,7 +93,12 @@ function popupHandover(input: CheckInput): CheckResult {
       id: 'handover',
       title: 'window.opener handover survived',
       verdict: 'unknown',
-      detail: 'Not connected yet — connect first.',
+      // A handover that genuinely failed can only ever land here: no
+      // `setSecret` means never authenticated, which means no ConnectionInfo
+      // and every check grey. Say so, or an all-grey report reads as "did not
+      // get round to it" when it is the failure this page is here to catch.
+      detail:
+        'Not connected yet — connect first. If the popup DID complete and this page still says not connected, that is what a failed handover looks like: report it as such.',
     }
   }
   if (!connection.storagePartitioned) {
@@ -150,8 +155,11 @@ function writerPath(input: CheckInput): CheckResult {
       id,
       title,
       verdict: 'unknown',
+      // The reason is only computed for `unavailable`, so a gateway configured
+      // here also masks a genuine `stamper-failed`: the mode falls back to
+      // `subsidised` and the failure never surfaces. Run without one.
       detail:
-        'Uploading through the dApp’s subsidised gateway, not the account’s own stamp — that path bypasses the one under test.',
+        'Uploading through the dApp’s subsidised gateway, not the account’s own stamp — that path bypasses the one under test, and a stamper failure would fall back to it unnoticed. Run this with no subsidised gateway configured.',
     }
   }
   switch (connection.uploadUnavailableReason) {
@@ -180,11 +188,15 @@ function writerPath(input: CheckInput): CheckResult {
           'The stamp resolved and the stamper still would not build — the write path broke inside the partitioned iframe. This is the real failure this test exists to catch.',
       }
     default:
+      // Not red: `uploadUnavailableReason` is optional on the wire, so an older
+      // identity deployment sends `unavailable` without one and this branch is
+      // reached by version skew, not by a broken write path. Calling that a
+      // failure is exactly the misreading the split above exists to stop.
       return {
         id,
         title,
-        verdict: 'fail',
-        detail: `Upload mode is "${connection.uploadMode ?? 'unknown'}" and the proxy gave no reason.`,
+        verdict: 'unknown',
+        detail: `Upload mode is "${connection.uploadMode ?? 'unknown'}" and the proxy gave no reason — most likely an identity deployment older than this page. Check the identity site's version, then run this again.`,
       }
   }
 }

@@ -70,7 +70,9 @@
     deviceId: clientStore.deviceId ?? '(none yet)',
     loads: String(loadCount),
     uploadMode: clientStore.authenticated ? clientStore.uploadMode : '(not connected)',
-    uploadUnavailableReason: clientStore.uploadUnavailableReason ?? '(none)',
+    uploadUnavailableReason: clientStore.authenticated
+      ? (clientStore.uploadUnavailableReason ?? '(none)')
+      : '(not connected)',
     drive: clientStore.stamp
       ? `${clientStore.stamp.batchID.slice(0, 12)}… usable=${clientStore.stamp.usable} utilization=${clientStore.stamp.utilization}`
       : '(no drive on this account)',
@@ -217,7 +219,11 @@
         does not — without a postage batch there is no stamp to hand over, the writer check stays grey,
         and the run says nothing about the part under test.
       </li>
-      <li>Open this page on the iPhone, in normal (non-private) Safari.</li>
+      <li>
+        Open this page on the iPhone, in normal (non-private) Safari, with <strong
+          >no subsidised gateway configured</strong
+        > — uploads fall back to one when it is, which hides whether the account's own stamp works.
+      </li>
       <li>Tap <strong>Connect</strong> and complete the popup on the identity site.</li>
       <li>Tap <strong>Upload &amp; read back</strong>.</li>
       <li>

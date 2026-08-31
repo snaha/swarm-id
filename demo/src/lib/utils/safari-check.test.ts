@@ -101,6 +101,20 @@ describe('runChecks', () => {
     },
   )
 
+  // `uploadUnavailableReason` is optional on the wire, so this page running
+  // against an older identity deployment reaches the fallback branch. Version
+  // skew is not a broken write path — red there would be the same misreading
+  // this split exists to stop.
+  it('does not fail the writer when the proxy sent no reason at all', () => {
+    const results = runChecks({
+      connection: connected({ uploadMode: 'unavailable' }),
+      loadCount: 0,
+    })
+    expect(verdictOf(results, 'writer')).toBe('unknown')
+    expect(verdictOf(results, 'handover')).toBe('pass')
+    expect(results.find((result) => result.id === 'writer')?.detail).toContain('older')
+  })
+
   // Uploads work, but through the dApp's gateway rather than the account's own
   // stamp — so it says nothing about the handed-over write path either way.
   it('does not judge the writer when uploads run on a subsidised gateway', () => {
