@@ -220,6 +220,30 @@ describe('openStampPurchaseWidget', () => {
     )
   })
 
+  // The cause is rendered behind "View details" and pasted into bug reports,
+  // while the widget's shapes are not a documented contract and its popup runs
+  // a temporary wallet — so an unknown field is dropped by name, never carried
+  // through on the chance that it is diagnostic.
+  it('carries only allowlisted fields of the error payload as the cause', () => {
+    open()
+    post({
+      event: 'error',
+      error: 'Swap failed',
+      code: 'SWAP_REVERTED',
+      privateKey: '0xdeadbeef',
+      wallet: { mnemonic: 'test test test' },
+    })
+    const cause = (callbacks.onError.mock.calls[0][0] as Error).cause as Record<string, unknown>
+    expect(cause).toEqual({
+      event: 'error',
+      error: 'Swap failed',
+      code: 'SWAP_REVERTED',
+      droppedFields: ['privateKey', 'wallet'],
+    })
+    expect(JSON.stringify(cause)).not.toContain('0xdeadbeef')
+    expect(JSON.stringify(cause)).not.toContain('test test test')
+  })
+
   it('unwraps an Error object posted by the widget', () => {
     open()
     post({ event: 'error', error: new Error('Swap reverted') })

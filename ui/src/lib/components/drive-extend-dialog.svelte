@@ -26,6 +26,7 @@
     lifespanToSeconds,
     remainingLifespanSeconds,
   } from '$lib/drives'
+  import { failureDetail } from '$lib/failure-detail'
   import { currentChainPrice } from '$lib/payment/chain-price'
   import { createCostEstimate } from '$lib/payment/cost-estimate.svelte'
   import { type OperationStep, reconciledChainDepth, runExtend } from '$lib/payment/drive-operation'
@@ -128,7 +129,7 @@
     // Back to the first step and a clean error: the run's own `onStep` only
     // arrives after its first await, so a retry would otherwise open on the
     // previous run's last label, and a failure that sets just `errorMessage`
-    // would put the previous stack behind "View details".
+    // would put the previous run's detail behind "View details".
     step = 'checking'
     errorMessage = ''
     errorDetail = ''
@@ -162,7 +163,7 @@
         phase = 'form'
         return
       }
-      errorDetail = caught instanceof Error ? (caught.stack ?? caught.message) : String(caught)
+      errorDetail = failureDetail(caught)
       errorMessage = caught instanceof Error ? caught.message : 'Could not extend the lifespan.'
       phase = 'error'
     }

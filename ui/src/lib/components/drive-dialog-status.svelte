@@ -106,7 +106,11 @@
         {detailsOpen ? 'Hide details' : 'View details'}
       </button>
       {#if detailsOpen}
-        <p class="bg-muted w-full rounded-md px-3 py-2 font-mono text-xs break-all">
+        <!-- `whitespace-pre-line`: `failureDetail` puts one cause-chain link per
+             line, which collapses into a run-on sentence without it. -->
+        <p
+          class="bg-muted w-full rounded-md px-3 py-2 font-mono text-xs break-all whitespace-pre-line"
+        >
           {errorDetails}
         </p>
       {/if}

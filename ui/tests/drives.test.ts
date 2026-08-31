@@ -160,6 +160,10 @@ test('a purchase that cannot reach the chain surfaces the error and adds nothing
   // The REASON has to reach the screen, not just a retry button — a bare
   // "Try again" tells the user nothing about which setting is wrong.
   await expect(page.getByText(/Gnosis RPC could not be reached/)).toBeVisible()
+  // And no "View details" here: `jsonRpcCall` throws a plain Error whose
+  // message is the whole story, so there is nothing behind the button. It used
+  // to offer one and reveal a minified stack frame.
+  await expect(page.getByRole('button', { name: 'View details' })).toHaveCount(0)
   const drives = await storedDrives(page)
   expect(drives.live).toHaveLength(0)
 })
