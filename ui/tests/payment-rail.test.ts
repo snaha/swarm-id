@@ -262,11 +262,17 @@ async function buyPayingFrom(page: Page, chainId: number) {
   await page.getByRole('button', { name: 'Stay local for now' }).click()
 
   // A brand-new account's postage signer holds nothing, so the purchase raises
-  // a funding need and — with a source chain up — the rail carries it.
-  await addDrive(page)
+  // a funding need and — with a source chain up — the rail carries it. No
+  // settle: the payment screens opening IS the state under test.
+  await addDrive(page, { settle: false })
 
-  // 1. Method chooser: proof the rail resolved rather than falling through to
-  //    the faucet, which is what every other suite pins.
+  // 1. Method chooser. Buying leads with the widget, so pick the built-in
+  //    method; the connect prompt appearing is proof the rail resolved rather
+  //    than falling through to the faucet, which is what every other suite pins.
+  await page
+    .getByRole('dialog')
+    .getByRole('combobox')
+    .selectOption('Pay with crypto (built in, experimental)')
   await expect(page.getByText('Connect wallet to proceed')).toBeVisible({
     timeout: PAYMENT_TIMEOUT_MS,
   })
