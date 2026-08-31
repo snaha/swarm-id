@@ -121,6 +121,7 @@ import {
   createNetworkSettingsStorageManager,
   createAccountsStorageManager,
 } from "./utils/storage-managers"
+import { isStorageShared } from "./utils/storage-probe"
 import {
   hexToUint8Array,
   uint8ArrayToHex,
@@ -1892,6 +1893,11 @@ export class SwarmIdProxy {
       type: "proxyReady",
       authenticated: this.authenticated,
       parentOrigin: this.parentOrigin,
+      // Which auth transport can reach this iframe (#613). Read here rather
+      // than at construction because the parent is only known now, and the
+      // client needs it before its first `connect()` — an await between the
+      // user's click and `window.open` is what loses the gesture.
+      storageShared: isStorageShared(),
     })
 
     // Send the initial ConnectionInfo snapshot. The client awaits this before

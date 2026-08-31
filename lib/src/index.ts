@@ -516,6 +516,15 @@ export { buildAuthUrl, isHttpUrl } from "./utils/url"
 // Browser detection utilities
 export { isWebKit } from "./utils/browser"
 
+// Storage-partition probe. The trusted domain's own pages call
+// `markFirstPartyStorage()`; the proxy reads it back to learn which auth
+// transport can reach it (#613).
+export {
+  STORAGE_SHARED_KEY,
+  isStorageShared,
+  markFirstPartyStorage,
+} from "./utils/storage-probe"
+
 // Promise utilities. `TimeoutError` is exported because it is the discriminator
 // for a deadline anywhere in this library, the chain reads included.
 export { sleep, withTimeout, TimeoutError } from "./utils/promise"

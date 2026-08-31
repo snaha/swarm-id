@@ -1201,6 +1201,13 @@ export const ProxyReadyMessageSchema = z.object({
   type: z.literal("proxyReady"),
   authenticated: z.boolean(),
   parentOrigin: z.string(),
+  /**
+   * Whether the iframe can read the trusted domain's first-party store, which
+   * decides which transport `connect()` can use (#613). Optional so an older
+   * deployed proxy stays wire-compatible; absent reads as "not proven shared",
+   * and the client delegates, which works in both modes.
+   */
+  storageShared: z.boolean().optional(),
 })
 
 export const InitErrorMessageSchema = z.object({

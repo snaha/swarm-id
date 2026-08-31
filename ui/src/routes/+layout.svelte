@@ -6,7 +6,7 @@
 <script lang="ts">
   import { onMount, untrack } from 'svelte'
 
-  import { isSignedOutAccount } from '@snaha/swarm-id'
+  import { isSignedOutAccount, markFirstPartyStorage } from '@snaha/swarm-id'
   import type { SyncedAccount } from '@snaha/swarm-id'
 
   import Toast from '$lib/components/toast.svelte'
@@ -34,6 +34,12 @@
 
   onMount(() => {
     themeStore.init()
+    // Leave the marker a proxy iframe reads back to learn whether it shares
+    // this store (#613) — it decides which transport the auth popup can take,
+    // and it has to be known before the click. A no-op when framed, which is
+    // what keeps the /proxy route (same shell, inside the iframe) from writing
+    // it into a partitioned bucket and answering its own question wrong.
+    markFirstPartyStorage()
     // Publish account mutations app-wide (debounced): to Swarm for durability,
     // and to the account bus for the live contexts a storage event cannot
     // reach — a partitioned dApp iframe learns about a revoke no other way

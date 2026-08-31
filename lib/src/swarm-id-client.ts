@@ -86,7 +86,6 @@ import { EthAddress, Identifier, PrivateKey, Topic } from "@ethersphere/bee-js"
 import { generatedAvatar } from "./utils/avatar"
 import { uint8ArrayToHex } from "./utils/hex"
 import { buildAuthUrl } from "./utils/url"
-import { isWebKit } from "./utils/browser"
 import { withTimeout } from "./utils/promise"
 
 const DEFAULT_TIMEOUT_MS = 30000
@@ -139,6 +138,13 @@ export class SwarmIdClient {
   private containerId?: string
   private subsidisedGatewayUrl?: string
   private ready: boolean = false
+  /**
+   * Whether the proxy iframe can read the trusted domain's first-party store,
+   * as reported on `proxyReady`. Decides which transport `connect()` uses
+   * (#613); undefined against a proxy that predates the field, which reads as
+   * "not proven shared".
+   */
+  private storageShared: boolean | undefined
   private readyPromise: Promise<void> | undefined
   private readyResolve?: () => void
   private readyReject?: (error: Error) => void
@@ -428,6 +434,9 @@ export class SwarmIdClient {
     switch (message.type) {
       case "proxyReady":
         this.ready = true
+        // Which transport `connect()` can use, known before the first click
+        // (#613). Undefined against a proxy older than that field.
+        this.storageShared = message.storageShared
         if (this.readyResolve) {
           this.readyResolve()
         }
@@ -864,39 +873,67 @@ export class SwarmIdClient {
   async connect(options: ConnectOptions = {}): Promise<void> {
     this.ensureReady()
 
-    if (isWebKit()) {
-      // Safari/iOS: proxy opens popup with storage partitioning challenge
-      const requestId = this.generateRequestId()
-      const response = await this.sendRequest<{
-        type: "connectResponse"
-        requestId: string
-        success: boolean
-      }>({
-        type: "connect",
-        requestId,
-        popupMode: options.popupMode,
-      })
-      if (!response.success) {
-        throw new Error("Failed to open authentication popup")
-      }
-    } else {
-      // Chrome/Firefox: open window directly to preserve user gesture (avoids popup blocking).
-      // No challenge needed — these browsers don't partition the iframe's storage while it is
-      // same-site with the embedding page, so the iframe picks up auth changes via storage events.
-      const basePath = this.iframePath.replace(/\/proxy$/, "")
-      const authUrl = buildAuthUrl(
-        this.iframeOrigin + basePath,
-        window.location.origin,
-        this.metadata,
-      )
-
-      const effectivePopupMode = options.popupMode ?? this.popupMode
-      if (effectivePopupMode === "popup") {
-        window.open(authUrl, "_blank", "width=500,height=600")
-      } else {
-        window.open(authUrl, "_blank")
-      }
+    // Storage shared: open it here, where the user's click still counts. The
+    // popup writes the connection to the first-party store the iframe reads,
+    // and a `storage` event carries it across.
+    if (this.storageShared === true) {
+      this.openAuthWindow(options)
+      return
     }
+
+    // Otherwise the iframe has to open it, so `window.opener` points back at
+    // the iframe and the popup can hand the session over directly — the only
+    // channel into a partitioned frame. `storageShared` is undefined against a
+    // proxy too old to report it, and that takes this path too: it works in
+    // both storage modes, where the one above works in only one.
+    const requestId = this.generateRequestId()
+    const response = await this.sendRequest<{
+      type: "connectResponse"
+      requestId: string
+      success: boolean
+    }>({
+      type: "connect",
+      requestId,
+      popupMode: options.popupMode,
+    })
+    if (response.success) {
+      return
+    }
+
+    // The proxy's popup was blocked — the click happened out here, and no
+    // activation crosses a postMessage. Opening from the parent is what this
+    // browser did before the storage mode decided anything: on a session that
+    // turns out to be shared it just works, and on a partitioned one it fails
+    // no worse than not having asked.
+    if (!this.openAuthWindow(options)) {
+      throw new Error("Failed to open authentication popup")
+    }
+  }
+
+  /**
+   * Open the auth popup from the dApp page.
+   *
+   * Carries no challenge: a popup opened here has the dApp page as its
+   * `window.opener`, so there is nothing for a handover to attach to, and the
+   * popup falls back to the storage write it does anyway.
+   *
+   * @returns whether the popup opened — a blocked one returns null, which the
+   *   caller must not report as a connect in progress.
+   */
+  private openAuthWindow(options: ConnectOptions): boolean {
+    const basePath = this.iframePath.replace(/\/proxy$/, "")
+    const authUrl = buildAuthUrl(
+      this.iframeOrigin + basePath,
+      window.location.origin,
+      this.metadata,
+    )
+
+    const effectivePopupMode = options.popupMode ?? this.popupMode
+    const popup =
+      effectivePopupMode === "popup"
+        ? window.open(authUrl, "_blank", "width=500,height=600")
+        : window.open(authUrl, "_blank")
+    return popup !== null
   }
 
   /**

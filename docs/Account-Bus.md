@@ -43,6 +43,12 @@ Full option matrix in the appendix; the load-bearing facts:
   ([WebKit/standards-positions#262](https://github.com/WebKit/standards-positions/issues/262)).
   FedCM is unimplemented in Safari; Partitioned Popins was withdrawn (Nov 2025). Not
   plannable.
+- **`document.hasStorageAccess()` does not answer "am I partitioned".** Measured 2026-08-31 in
+  the `chromium-partitioned` rig: it returns **`true`** inside a frame whose `localStorage` is
+  genuinely partitioned. It is cookie-scoped, and Chrome partitions storage separately from
+  cookies, so a frame can hold unpartitioned cookies and a partitioned store at once. Anything
+  that needs the storage answer has to ask about storage — see the marker probe in
+  `lib/src/utils/storage-probe.ts` (#613).
 - **ITP partitions storage, not the network.** A partitioned iframe can open HTTPS/WSS to
   anything — the Bee node, a signaling server, another peer. Every network-based design is
   Safari-safe.

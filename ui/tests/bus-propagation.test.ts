@@ -34,6 +34,7 @@ import {
   expectProxyPartitioned,
   fundPostageSigner,
   goToApp,
+  openConnectPopup,
   openProxyConnectPopup,
   partitionedDemoOrigin,
   seedLocalChain,
@@ -151,6 +152,27 @@ test('a partitioned session with no drive reports the handover, not a failure', 
   await expect(page.getByText('This account has no drive', { exact: false })).toBeVisible()
   // Grey, not red: nothing here is evidence against the feature.
   await expect(page.getByText('❌')).toHaveCount(0)
+})
+
+// #613: the transport used to be picked by user agent, so a partitioned
+// Chromium was put on the storage-event path — which cannot reach it — while
+// only WebKit got the handover. Every test above reaches the popup through the
+// PROXY's own button (`openProxyConnectPopup`), which always delegated; this one
+// goes through the demo's own Connect button, i.e. `client.connect()`, the API a
+// dApp with its own button uses. It fails on the UA gate by construction.
+test('client.connect() authenticates a partitioned session', async ({ page }) => {
+  await page.goto(`${demoOrigin}/account`)
+  await expectProxyPartitioned(page)
+
+  const popup = await openConnectPopup(page)
+  await completeCreateFlow(popup)
+  await expect(popup).toHaveURL(/\/connect\/done$/)
+  await goToApp(popup)
+
+  // The demo renders `ConnectionInfo.identity.name`, so the account card is
+  // proof the session authenticated — and `expectProxyPartitioned` above is
+  // what makes that proof about the partitioned path rather than a shared one.
+  await expect(page.getByRole('heading', { name: 'Identity' })).toBeVisible({ timeout: 15000 })
 })
 
 test('the bus carries an app removal to a partitioned session', async ({ page }) => {
