@@ -177,7 +177,10 @@ export interface PaymentQuote {
   /**
    * Rail-private payload, consumed only by the rail that produced it — Relay
    * keeps its SDK `Execute` here, the dev rail its own record. Opaque so a
-   * second rail can exist at all.
+   * second rail can exist at all — and it must reach `execute` exactly as
+   * produced: hold the quote in `$state.raw`, never deep-reactive state, since
+   * a proxy-wrapped handle cannot be structured-cloned and Relay's SDK clones
+   * its quote before walking the steps.
    */
   handle: unknown
   /**

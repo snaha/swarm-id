@@ -10,8 +10,8 @@
   import ArrowRight from '@lucide/svelte/icons/arrow-right'
   import LoaderCircle from '@lucide/svelte/icons/loader-circle'
   import Wallet from '@lucide/svelte/icons/wallet'
-  import { TimeoutError } from '@snaha/swarm-id'
-  import { formatUnits } from 'viem'
+  import { TimeoutError, jsonRpcCall } from '@snaha/swarm-id'
+  import { encodeFunctionData, erc20Abi, formatUnits } from 'viem'
 
   import { createAttemptTracker } from '$lib/attempt'
   import { Button } from '$lib/components/ui/button'
@@ -34,6 +34,7 @@
   } from '$lib/payment/payment-method'
   import {
     type EthereumProvider,
+    NATIVE_CURRENCY,
     type PaymentQuote,
     type PaymentRail,
     displayAmount,
@@ -101,7 +102,11 @@
   // user's starting selection, not tracked.
   let chainId = $state(untrack(() => String(rail.chains[0].id)))
   let tokenAddress = $state(untrack(() => rail.tokens(rail.chains[0].id)[0].address))
-  let paymentQuote = $state<PaymentQuote | undefined>(undefined)
+  // Raw, not deep-reactive: the rail-private `handle` inside must reach
+  // `execute` as the object the rail produced. Wrapped in a `$state` proxy it
+  // cannot be structured-cloned, and the Relay SDK clones its quote before
+  // walking the steps — every real payment then dies with a DataCloneError.
+  let paymentQuote = $state.raw<PaymentQuote | undefined>(undefined)
   let quoting = $state(false)
   let relayStatus = $state('Sending your payment')
   /**
@@ -129,6 +134,14 @@
    * cannot call the wallet back, so it is not a clean cancel.
    */
   let paying = $state(false)
+  /**
+   * What the connected wallet holds of the selected token, on the selected
+   * chain. Read from that chain's own endpoint, never through the wallet —
+   * which may still be on a different network until Pay switches it — and
+   * undefined until a figure arrives: a dash, not a zero that reads as
+   * "you cannot pay".
+   */
+  let walletBalance = $state<bigint | undefined>(undefined)
   /**
    * Set once an attempt has been made. From then on the Gnosis side is
    * re-priced before every source-side quote: a failed attempt may still have
@@ -165,6 +178,10 @@
   )
   const tokenSymbol = $derived(
     rail.tokens(Number(chainId)).find((token) => token.address === tokenAddress)?.symbol ?? '',
+  )
+  const tokenDecimals = $derived(
+    rail.tokens(Number(chainId)).find((token) => token.address === tokenAddress)?.decimals ??
+      GNOSIS_DECIMALS,
   )
   const shortAddress = $derived(
     walletAddress ? `${walletAddress.slice(0, 6)}…${walletAddress.slice(-4)}` : '',
@@ -310,6 +327,60 @@
     }
   }
 
+  /** Bounded like any other read; the figure is cosmetic, the hang would not be. */
+  const BALANCE_TIMEOUT_MS = 10_000
+
+  /**
+   * Read what the wallet holds of the selected token, from the selected
+   * chain's own endpoint. Fire-and-forget from `refreshQuote`, which already
+   * runs at every point the answer can change; a failed read leaves the dash
+   * rather than an error, because the quote beside it is the load-bearing
+   * figure.
+   */
+  async function readWalletBalance() {
+    const address = walletAddress
+    const chain = rail.chains.find((candidate) => String(candidate.id) === chainId)
+    const token = rail.tokens(Number(chainId)).find((entry) => entry.address === tokenAddress)
+    const rpcUrl = chain?.rpcUrls.default.http[0]
+    walletBalance = undefined
+    if (!address || !rpcUrl || !token) {
+      return
+    }
+    // Selections can change while the read is in flight; a figure landing
+    // under a different token's label would be worse than none.
+    const stale = () =>
+      walletAddress !== address || chainId !== String(chain.id) || tokenAddress !== token.address
+    try {
+      const result =
+        token.address === NATIVE_CURRENCY
+          ? await jsonRpcCall<string>(rpcUrl, 'eth_getBalance', [address, 'latest'], {
+              timeoutMs: BALANCE_TIMEOUT_MS,
+            })
+          : await jsonRpcCall<string>(
+              rpcUrl,
+              'eth_call',
+              [
+                {
+                  to: token.address,
+                  data: encodeFunctionData({
+                    abi: erc20Abi,
+                    functionName: 'balanceOf',
+                    args: [address as `0x${string}`],
+                  }),
+                },
+                'latest',
+              ],
+              { timeoutMs: BALANCE_TIMEOUT_MS },
+            )
+      if (stale() || result === '0x') {
+        return
+      }
+      walletBalance = BigInt(result)
+    } catch {
+      // The dash stands; the quote is what gates Pay.
+    }
+  }
+
   /**
    * Price the payment for the current selection — on connect, whenever the
    * chain or token changes, and after a failed attempt.
@@ -326,6 +397,7 @@
    *   the re-priced cost.
    */
   async function refreshQuote(failure = '') {
+    void readWalletBalance()
     // The Gnosis side in force, kept as a local: it is replaced mid-flight by
     // the re-price below, and every figure handed to the rail must come from
     // the same one.
@@ -571,6 +643,11 @@
       <div class="flex w-full flex-col gap-2">
         <span class="text-sm font-medium">Token</span>
         <Select options={tokenOptions} bind:value={tokenAddress} onchange={() => refreshQuote()} />
+        <p class="text-muted-foreground text-xs">
+          In your wallet: {walletBalance === undefined
+            ? '—'
+            : `${formatAmount(walletBalance, tokenDecimals)} ${tokenSymbol}`}
+        </p>
       </div>
 
       <div class="bg-muted w-full rounded-md px-3 py-2 text-sm">
