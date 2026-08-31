@@ -217,6 +217,13 @@ the endpoint's own. It refuses in words whenever the two are not the same chain:
 Gnosis while the app is pointed at the local one, the reverse, or a wallet simply left on some third
 network. That is what stops a rehearsal spending real xDAI.
 
+**Already have the real Gnosis in MetaMask? Remove it while rehearsing.** MetaMask keys networks by
+chain id, so a switch to 100 lands on whichever RPC is active for it — usually the real one. The app
+detects the mismatch by genesis and offers its own RPC, but MetaMask refuses to adopt an RPC for an
+id it already serves ("network already exists"), so the offer cannot repair it for you: remove the
+real Gnosis network from MetaMask first (or select the local RPC by hand in that network's menu),
+and add it back when you are done. The fake mainnet has no such trap — 31337 collides with nothing.
+
 Then, once: open the UI → **Settings** → **Network settings** → **Use local** → **Save**.
 
 **Where the solver fits.** The browser signs the deposit and then waits for money it does not
