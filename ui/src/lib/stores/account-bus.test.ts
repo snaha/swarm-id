@@ -12,6 +12,11 @@ import { deriveBusContext } from '@snaha/swarm-id'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { PUBLISH_DEBOUNCE_MS, accountBusStore } from './account-bus'
+import { applyAccountDelta } from './account-delta'
+
+// The fold itself is `account-delta.test.ts`; here the question is only whether
+// a peer's message reaches it, and whether folding one publishes anything back.
+vi.mock('./account-delta', () => ({ applyAccountDelta: vi.fn() }))
 
 const SIGNALING_URL = 'ws://signaling.test'
 const signalingUrlStub = vi.hoisted(() => ({ value: undefined as string | undefined }))
@@ -26,6 +31,8 @@ const transports = vi.hoisted(
       options: { url: string; topic: string }
       publish: ReturnType<typeof vi.fn>
       close: ReturnType<typeof vi.fn>
+      /** What the bus subscribed with — the seam a peer's message arrives on. */
+      deliver?: (raw: unknown) => void
     }[],
 )
 /** Holds the topic derivation open, so "a publish during the join" is a real
@@ -45,8 +52,14 @@ vi.mock('@snaha/swarm-id', async (importActual) => {
         options,
         local: false,
         publish: vi.fn(),
-        subscribe: vi.fn(() => () => {}),
+        subscribe: vi.fn((handler: (raw: unknown) => void) => {
+          transport.deliver = handler
+          return () => {
+            transport.deliver = undefined
+          }
+        }),
         close: vi.fn(),
+        deliver: undefined as ((raw: unknown) => void) | undefined,
       }
       transports.push(transport)
       return transport
@@ -111,6 +124,7 @@ const settlePublish = () => new Promise((resolve) => setTimeout(resolve, PUBLISH
 describe('accountBusStore', () => {
   beforeEach(() => {
     accountBusStore.leave()
+    vi.mocked(applyAccountDelta).mockClear()
     transports.length = 0
     signalingUrlStub.value = SIGNALING_URL
     deriveGate.value = undefined
@@ -226,6 +240,82 @@ describe('accountBusStore', () => {
   // A build with no bus server (GitHub Pages, plain `pnpm dev`) has no
   // cross-partition channel to reach at all — publishing must be a quiet no-op,
   // not a crash on every account mutation.
+  // #608: the tab publishes AND consumes. A peer's delta has to reach the fold
+  // — this is the wiring that did not exist while the store was publish-only.
+  it('folds a delta a peer publishes into the room', async () => {
+    accountBusStore.join(makeAccount())
+    await settle()
+
+    transports[0].deliver?.({
+      type: 'account-delta',
+      snapshot: {
+        version: 1,
+        timestamp: 2_000_000,
+        accountId: 'aa'.repeat(20),
+        metadata: {
+          accountName: 'Renamed On Another Device',
+          publicKey: `02${'ab'.repeat(32)}`,
+          accountNameAt: 2_000_000,
+          createdAt: 1_000_000,
+          lastModified: 2_000_000,
+          devices: [],
+          partitionCount: 1,
+        },
+        connectedApps: [],
+        postageStamps: [],
+      },
+    })
+
+    expect(applyAccountDelta).toHaveBeenCalledWith(
+      expect.objectContaining({ accountId: 'aa'.repeat(20) }),
+    )
+    // Folding is not a change of ours: echoing it back is a loop between two
+    // devices that never settles.
+    await settlePublish()
+    expect(transports[0].publish).not.toHaveBeenCalled()
+  })
+
+  // Malformed or unknown traffic is dropped by the bus's own schema — the fold
+  // must never see it, since it writes durable storage.
+  it('does not fold traffic that is not a delta', async () => {
+    accountBusStore.join(makeAccount())
+    await settle()
+
+    transports[0].deliver?.({ type: 'account-delta', snapshot: { nope: true } })
+    transports[0].deliver?.({ type: 'lease-request', accountId: 'aa'.repeat(20) })
+
+    expect(applyAccountDelta).not.toHaveBeenCalled()
+  })
+
+  it('stops folding once the room is left', async () => {
+    accountBusStore.join(makeAccount())
+    await settle()
+    const room = transports[0]
+    accountBusStore.leave()
+
+    room.deliver?.({
+      type: 'account-delta',
+      snapshot: {
+        version: 1,
+        timestamp: 2_000_000,
+        accountId: 'aa'.repeat(20),
+        metadata: {
+          accountName: 'After Leaving',
+          publicKey: `02${'ab'.repeat(32)}`,
+          accountNameAt: 2_000_000,
+          createdAt: 1_000_000,
+          lastModified: 2_000_000,
+          devices: [],
+          partitionCount: 1,
+        },
+        connectedApps: [],
+        postageStamps: [],
+      },
+    })
+
+    expect(applyAccountDelta).not.toHaveBeenCalled()
+  })
+
   it('is inert when no signaling server is configured', async () => {
     signalingUrlStub.value = undefined
     const account = makeAccount()

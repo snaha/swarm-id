@@ -14,6 +14,11 @@
  * through `storage` events. The one context that cannot is the partitioned
  * iframe, which is in another storage partition, and only a server round trip
  * crosses that.
+ *
+ * Both halves live here now: this tab publishes its own changes, and folds a
+ * peer's into shared storage (`$lib/stores/account-delta`), which is how a
+ * change made on ANOTHER DEVICE reaches this device's unpartitioned contexts
+ * at all — they read storage, and no storage event crosses a device boundary.
  */
 import {
   AccountBus,
@@ -25,6 +30,7 @@ import {
 import type { SyncedAccount } from '@snaha/swarm-id'
 
 import { busSignalingUrl } from '$lib/bus-signaling-url'
+import { applyAccountDelta } from '$lib/stores/account-delta'
 
 /**
  * Coalesce a burst of mutations into one publish. Far shorter than the 2 s
@@ -34,6 +40,9 @@ import { busSignalingUrl } from '$lib/bus-signaling-url'
 export const PUBLISH_DEBOUNCE_MS = 300
 
 let bus: AccountBus | undefined
+/** Detaches the delta consumer; the bus outlives no join, but a stale handler
+ *  folding another account's room would. */
+let unsubscribe: (() => void) | undefined
 /** The account this tab is committed to, set the moment `join()` is called
  *  rather than when the transport comes up: a publish landing during the
  *  derivation belongs to this account and must be held, not dropped. */
@@ -48,6 +57,8 @@ let pending: SyncedAccount | undefined
 let generation = 0
 
 function closeBus(): void {
+  unsubscribe?.()
+  unsubscribe = undefined
   bus?.close()
   bus = undefined
   joinedKey = undefined
@@ -71,6 +82,14 @@ async function attach(account: SyncedAccount, forGeneration: number): Promise<vo
       typeof RTCPeerConnection !== 'undefined' ? () => new RTCPeerConnection() : undefined,
   })
   bus = new AccountBus([transport])
+  // The receive half (#608). A peer's delta is folded into shared storage
+  // here, which is the only way a change made on another device reaches this
+  // device's UNpartitioned contexts — they read storage, and no storage event
+  // crosses a device boundary. `applyAccountDelta` commits with `skipSync`, so
+  // this never publishes back.
+  unsubscribe = bus.subscribe((message) => {
+    if (message.type === 'account-delta') applyAccountDelta(message.snapshot)
+  })
 }
 
 function publishNow(account: SyncedAccount): void {

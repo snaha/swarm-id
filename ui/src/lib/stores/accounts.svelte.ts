@@ -69,13 +69,16 @@ type DeviceAuth =
  * Scalar fields each carry a per-field last-writer-wins clock
  * (`accountNameAt` / `defaultStampAt` / `settingsAt`) so concurrent edits to
  * different scalars on different devices converge instead of clobbering. A
- * mutator that changes a scalar MUST stamp the matching clock; the /dev sync
- * subsystem folds them by LWW (`applyRefreshed`).
+ * mutator that changes a scalar MUST stamp the matching clock; the fold folds
+ * them by LWW (`applyRefreshed`).
  *
  * Members split into two groups: the product mutators the shipping app calls
  * (including the postage-stamp / "drive" mutators the storage UI drives), and —
- * below the `DEV-ONLY` banner — the volatile-utilization updater and the Swarm
- * refresh fold used **only** by the local `/dev` tooling and sync engine.
+ * below the `DEV-ONLY` banner — the volatile-utilization updater and
+ * `applyRefreshed`. That banner is now half true: `applyRefreshed` is how BOTH
+ * remote sources land, the Swarm fold and a peer's `account-delta` off the bus
+ * (#608), and the bus one ships. What still holds is the rule it carries —
+ * `skipSync`, so a change folded FROM a peer is never published back at it.
  */
 export class Account {
   readonly id: EthAddress
