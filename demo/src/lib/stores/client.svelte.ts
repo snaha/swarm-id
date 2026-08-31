@@ -7,6 +7,7 @@ import {
   DEFAULT_BEE_NODE_URL,
   type Avatar,
   type ConnectionInfo,
+  type UploadUnavailableReason,
 } from '@snaha/swarm-id'
 import { resolveProxyOrigin } from '$lib/utils/environment'
 import { logStore } from './log.svelte'
@@ -55,6 +56,10 @@ let storagePartitioned = $state(false)
 // the partitioned storage holding it was evicted.
 let deviceId = $state<string | undefined>(undefined)
 let uploadMode = $state<'user-stamp' | 'subsidised' | 'unavailable'>('unavailable')
+// Why uploads are off, when they are. Surfaced for the Safari check (#584):
+// "no drive" and "the write path broke" look identical without it, and the
+// first device run was read as the second when it was the first.
+let uploadUnavailableReason = $state<UploadUnavailableReason | undefined>(undefined)
 let identity = $state<IdentityInfo | undefined>(undefined)
 let appKey = $state<AppKeyInfo | undefined>(undefined)
 let stamp = $state<StampInfo | undefined>(undefined)
@@ -139,6 +144,20 @@ async function updatePostageStampInfo(generation: number) {
   }
 }
 
+/** One line naming why uploads are off, for the log and the Safari report. */
+function uploadUnavailableDescription(info: ConnectionInfo): string {
+  switch (info.uploadUnavailableReason) {
+    case 'no-stamp':
+      return 'this account has no drive, so there is no postage stamp to upload with'
+    case 'download-only':
+      return 'browser storage partitioning left this session without credentials — downloads only'
+    case 'stamper-failed':
+      return 'a postage stamp resolved but the write path would not build'
+    default:
+      return 'no postage stamp available'
+  }
+}
+
 async function onConnectionChange(info: ConnectionInfo) {
   // Bump the generation so any in-flight `getPostageBatch` from the previous
   // snapshot (e.g. a different identity or pre-disconnect state) is dropped
@@ -151,6 +170,7 @@ async function onConnectionChange(info: ConnectionInfo) {
   storagePartitioned = info.storagePartitioned ?? false
   deviceId = info.deviceId
   uploadMode = info.uploadMode ?? 'unavailable'
+  uploadUnavailableReason = info.uploadUnavailableReason
 
   // The avatar is logged by source only — its data URL would swamp the line.
   const loggableIdentity = info.identity
@@ -159,13 +179,11 @@ async function onConnectionChange(info: ConnectionInfo) {
   logStore.log(`Connection info: canUpload=${info.canUpload}, identity=${loggableIdentity}`)
   partition = info.partition
 
-  if (info.storagePartitioned && isAuthenticated && !info.canUpload) {
-    logStore.log(
-      'Read-only mode: browser storage partitioning limits this session to downloads only',
-      'warn',
-    )
-  } else if (isAuthenticated && !info.canUpload) {
-    logStore.log('Upload disabled: no postage stamp available', 'warn')
+  if (isAuthenticated && !info.canUpload) {
+    // Say which of the three it is rather than guessing from `storagePartitioned`:
+    // a partitioned session with no drive was being reported as a partitioning
+    // problem, which sent the Safari investigation (#584) after the wrong thing.
+    logStore.log(`Upload disabled: ${uploadUnavailableDescription(info)}`, 'warn')
   }
 
   if (info.identity) {
@@ -212,6 +230,9 @@ export const clientStore = {
   },
   get uploadMode() {
     return uploadMode
+  },
+  get uploadUnavailableReason() {
+    return uploadUnavailableReason
   },
   get identity() {
     return identity

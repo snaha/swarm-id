@@ -571,6 +571,27 @@ export const UploadModeSchema = z.enum([
 export type UploadMode = z.infer<typeof UploadModeSchema>
 
 /**
+ * Why a session cannot upload, when `uploadMode` is `"unavailable"`.
+ *
+ * - `download-only` — a partitioned session the connect popup handed no
+ *   account, so there was never a stamp to resolve (`isDownloadOnlyPartition`)
+ * - `no-stamp` — no stamp resolved: the account has no drive, or its pointers
+ *   name one that is gone
+ * - `stamper-failed` — the stamp resolved and the stamper still did not build.
+ *   `initializeStamper` logs and returns rather than throwing, so without this
+ *   the symptom is indistinguishable from having no stamp at all.
+ */
+export const UploadUnavailableReasonSchema = z.enum([
+  "download-only",
+  "no-stamp",
+  "stamper-failed",
+])
+
+export type UploadUnavailableReason = z.infer<
+  typeof UploadUnavailableReasonSchema
+>
+
+/**
  * Where an avatar image came from. Only `generated` — derived from the
  * identity id — exists today; a union so another kind of image could be
  * added without reshaping the value.
@@ -610,6 +631,20 @@ export const ConnectionInfoSchema = z.object({
   storagePartitioned: z.boolean().optional(),
   /** Current upload mode: "user-stamp" (user has postage stamp), "subsidised" (using dApp gateway), "unavailable" (no upload capability) */
   uploadMode: UploadModeSchema.optional(),
+  /**
+   * Why `uploadMode` is `"unavailable"`; absent whenever uploads work.
+   *
+   * The three causes look identical from the dApp side without it, and they
+   * call for opposite responses: `"no-stamp"` is the user's to fix (buy a
+   * drive), `"download-only"` means the connect popup handed over no account
+   * and a reconnect may fix it, `"stamper-failed"` is ours — the stamp
+   * resolved and the write path still would not build.
+   *
+   * Reporting it is what made the real-Safari run (#584) readable: an account
+   * with no drive had been reported as a failed `window.opener` handover,
+   * which is a claim about ITP rather than about the account.
+   */
+  uploadUnavailableReason: UploadUnavailableReasonSchema.optional(),
   /**
    * Partition number this device currently holds in the postage batch's
    * partition-lease. `undefined` when no lease is held (sign-in only,
@@ -1255,6 +1290,7 @@ export const ConnectionInfoChangedMessageSchema = z.object({
   canUpload: z.boolean(),
   storagePartitioned: z.boolean().optional(),
   uploadMode: UploadModeSchema.optional(),
+  uploadUnavailableReason: UploadUnavailableReasonSchema.optional(),
   deviceId: z.string().optional(),
   identity: ConnectionIdentitySchema.optional(),
   appKey: z

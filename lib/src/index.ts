@@ -314,6 +314,7 @@ export type {
   ButtonConfig,
   ConnectionInfo,
   ConnectionIdentity,
+  UploadUnavailableReason,
   Avatar,
   AvatarSource,
   // ACT message types

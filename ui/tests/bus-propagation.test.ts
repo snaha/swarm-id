@@ -101,6 +101,15 @@ async function connectPartitioned(page: Page, path: string) {
   await goToApp(popup)
 }
 
+/** The same, but creating the account inside the popup — so it has no drive. */
+async function connectPartitionedNewAccount(page: Page, path: string) {
+  await page.goto(`${demoOrigin}${path}`)
+  const popup = await openProxyConnectPopup(page)
+  await completeCreateFlow(popup)
+  await expect(popup).toHaveURL(/\/connect\/done$/)
+  await goToApp(popup)
+}
+
 /** The identity tab, in the same context, already in the account's bus room. */
 async function openIdentityTab(page: Page, tab: 'apps' | 'account') {
   const idPage = await page.context().newPage()
@@ -119,6 +128,29 @@ async function openIdentityTab(page: Page, tab: 'apps' | 'account') {
 test('the proxy iframe is in its own storage partition', async ({ page }) => {
   await page.goto(`${demoOrigin}/`)
   await expectProxyPartitioned(page)
+})
+
+// The situation the first real-Safari run (#584) actually hit: a partitioned
+// session whose account has no drive. The handover landed — that is what
+// `storagePartitioned` means, and the proxy sets it in one place — while the
+// writer path was never exercised. The harness reported the second as a failure
+// of the first, which is a claim about ITP, so it is worth a test that needs
+// neither a chain nor a Bee node and therefore runs on every PR.
+test('a partitioned session with no drive reports the handover, not a failure', async ({
+  page,
+}) => {
+  await seedLocalChain(page.context())
+  await connectPartitionedNewAccount(page, '/safari-check')
+
+  await expect(
+    page.getByText(
+      'Partitioned, and the session is authenticated — only the popup’s postMessage through window.opener can do that here, so it survived ITP.',
+    ),
+  ).toBeVisible({ timeout: 15000 })
+  await expectProxyPartitioned(page)
+  await expect(page.getByText('This account has no drive', { exact: false })).toBeVisible()
+  // Grey, not red: nothing here is evidence against the feature.
+  await expect(page.getByText('❌')).toHaveCount(0)
 })
 
 test('the bus carries an app removal to a partitioned session', async ({ page }) => {
@@ -181,7 +213,7 @@ test('a partitioned session uploads with its own stamp and reads it back', async
   await connectPartitioned(page, '/safari-check')
 
   await expect(
-    page.getByText('Partitioned AND holding its own stamp — the popup’s postMessage landed.'),
+    page.getByText('Holding its own stamp — the hydrated account view built a working write path.'),
   ).toBeVisible({ timeout: 15000 })
 
   await page.getByRole('button', { name: 'Upload & read back' }).click()

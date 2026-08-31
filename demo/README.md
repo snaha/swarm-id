@@ -59,7 +59,7 @@ Then open http://localhost:3500
 
 No HTTPS or certificates required - `localhost` is a secure context.
 
-**Note:** Safari operates in download-only mode — authentication and downloads work, but uploads are disabled due to ITP storage partitioning. See [#167](https://github.com/snaha/swarm-id/issues/167) for details.
+**Note:** On Safari, ITP partitions the proxy iframe's storage, so the connect popup hands it the account's stamps directly ([#277](https://github.com/snaha/swarm-id/issues/277)) instead of the session being download-only ([#167](https://github.com/snaha/swarm-id/issues/167), superseded). Credentials live only in memory there, so every page load re-runs the handshake.
 
 ## How It Works
 

@@ -6,7 +6,7 @@ Web-based identity and key management for decentralized applications on the Swar
 
 Where the two are genuinely cross-site, or the browser partitions regardless (Safari ITP, strict privacy settings), the iframe gets its own partitioned store and the connect popup hands it the account's synced projection (stamps incl. signer keys) instead — uploads keep working, but credentials live only in memory and are re-seeded on every page load ([#277](https://github.com/snaha/swarm-id/issues/277), [docs/Account-Bus.md](docs/Account-Bus.md)). That handover needs the popup to be opened **by the iframe**, so `window.opener` points back at it: the proxy's own auth button always does this, while `SwarmIdClient.connect()` only does it on WebKit ([#613](https://github.com/snaha/swarm-id/issues/613)).
 
-**Unverified on real Safari** — the path is confirmed on Chromium and Firefox with third-party storage partitioned; do not state Safari upload support as fact until that check lands. Safari private mode: sessions are ephemeral (lost when the private window closes).
+**Half-verified on real Safari** ([#584](https://github.com/snaha/swarm-id/issues/584)): measured on iOS 18.7 / Safari 26.6 against the DO deployment, ITP partitions the iframe and the `window.opener` handover survives — the session authenticates on the partitioned path. The **upload** after it has still only run on Chromium and Firefox with third-party storage partitioned, so do not state Safari upload support as fact yet. Safari private mode: sessions are ephemeral (lost when the private window closes).
 
 ## Architecture
 

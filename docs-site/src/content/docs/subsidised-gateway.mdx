@@ -19,7 +19,7 @@ This is useful for:
 
 - **Onboarding new users** who don't have BZZ tokens yet
 - **Free-tier applications** where the operator covers storage costs
-- **Safari users** who can't access their stamps due to storage partitioning
+- **Users whose browser partitions storage** and whose session was handed no stamp of its own
 
 ## Configuration
 
@@ -55,12 +55,9 @@ Upload availability depends on several factors. The `uploadMode` field in `clien
 
 **Storage Partitioned (Yes)**
 
-When the browser partitions storage (Safari ITP), the proxy iframe cannot access:
+When the browser partitions storage (Safari ITP), the proxy iframe cannot **read** the user's postage stamps or Bee node setting out of the trusted domain's localStorage. Since [#277](https://github.com/snaha/swarm-id/issues/277) it does not have to: the connect popup hands both over directly, so a partitioned session normally uploads with the account's own stamp.
 
-- The user's postage stamps from localStorage
-- The custom Bee node URL setting
-
-In this case, only the `subsidisedGatewayUrl` (passed by the dApp at initialization) determines upload capability. This is why subsidised gateways are especially important for Safari support.
+A subsidised gateway is the fallback for the sessions that handover does not cover — an account with no postage batch, or an older identity deployment that sends no account at all. `ConnectionInfo.uploadUnavailableReason` distinguishes them.
 
 **Has User Stamp**
 
