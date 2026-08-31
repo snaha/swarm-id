@@ -55,6 +55,9 @@ export interface PaymentToken {
 
 export interface EthereumProvider {
   request(args: { method: string; params?: unknown[] }): Promise<unknown>
+  /** EIP-1193 events — optional, since a minimal provider may not emit any. */
+  on?(event: string, listener: (payload: unknown) => void): void
+  removeListener?(event: string, listener: (payload: unknown) => void): void
 }
 
 export interface QuoteRequest {
