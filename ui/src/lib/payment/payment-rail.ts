@@ -382,12 +382,16 @@ export async function switchWalletChain(
   if (reported === undefined || reported.toLowerCase() === expected.toLowerCase()) {
     return
   }
-  await offerChain(chain)
+  // The offer itself can be refused — MetaMask rejects an id it already
+  // serves with "network already exists" rather than adopting the RPC — and
+  // that refusal must land as the worded verdict below, not as a wallet's
+  // internals quoted at the user.
+  await offerChain(chain).catch(() => undefined)
   const repaired = await walletGenesisHash(provider)
   if (repaired !== undefined && repaired.toLowerCase() === expected.toLowerCase()) {
     return
   }
   throw new Error(
-    `The wallet stayed on a different network that also answers as chain ${chainId}. Pick the ${chain.name} network (${chain.rpcUrls.default.http[0]}) in the wallet's own network list and try again.`,
+    `The wallet stayed on a different network that also answers as chain ${chainId} and would not adopt ${chain.rpcUrls.default.http[0]} for it. Remove that network from the wallet — or select this RPC in its network menu — and try again.`,
   )
 }

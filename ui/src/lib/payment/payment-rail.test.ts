@@ -293,7 +293,25 @@ describe('switchWalletChain — two networks, one chain id', () => {
   it('refuses in words when the wallet stays put after the offer', async () => {
     const { provider } = walletOn({ genesis: OTHER_GENESIS })
     await expect(switchWalletChain(provider, fakeGnosis.id, [fakeGnosis])).rejects.toThrow(
-      /network list/,
+      /Remove that network/,
+    )
+  })
+
+  /**
+   * MetaMask does not adopt an RPC for an id it already serves — the offer
+   * fails with "network already exists". That failure is part of the verdict,
+   * not an error of ours: the user must hear what to do about it, not a
+   * wallet's internals.
+   */
+  it('turns a refused offer into the same worded verdict', async () => {
+    const { provider } = walletOn({ genesis: OTHER_GENESIS })
+    const request = provider.request.bind(provider)
+    provider.request = (args: { method: string; params?: unknown[] }) =>
+      args.method === 'wallet_addEthereumChain'
+        ? Promise.reject(new Error('May not specify a chain that already exists'))
+        : request(args)
+    await expect(switchWalletChain(provider, fakeGnosis.id, [fakeGnosis])).rejects.toThrow(
+      /Remove that network/,
     )
   })
 

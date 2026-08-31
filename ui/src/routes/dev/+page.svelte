@@ -1743,9 +1743,12 @@ Check console logs for details:
       <h3 class="text-lg font-semibold">Wallet networks</h3>
       <p class="text-muted-foreground text-sm">
         Adds these chains to MetaMask, so a balance shows before you reach the payment screens.
-        <strong>Gnosis Chain (fake)</strong> is the one to add first — paying from it is a plain transfer
-        to the batch owner, with no bridge and no solver in the way. The other is only needed to rehearse
-        a bridged payment.
+        <strong>Gnosis Chain (fake)</strong> is the one to add first — paying from it is a plain
+        transfer to the batch owner, with no bridge and no solver in the way. The other is only
+        needed to rehearse a bridged payment. Already have the <em>real</em> Gnosis in MetaMask? Remove
+        it while rehearsing: both answer as chain 100, MetaMask keys networks by id and refuses to adopt
+        a second RPC for one ("network already exists") — so a switch keeps landing on the real chain
+        and every payment is refused at the genesis check.
       </p>
       {#if walletChains.length === 0}
         <p class="text-muted-foreground text-sm">
