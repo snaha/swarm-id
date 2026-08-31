@@ -52,6 +52,7 @@ with this file.
 ```bash
 pnpm install          # Install dependencies
 pnpm dev              # Start the identity UI (:5500) + demo (:3500) against it
+pnpm dev:local        # …plus the Bee cluster, both chains and the payment solver
 pnpm build            # Build everything
 pnpm check:all        # All CI checks (format, lint, typecheck, knip)
 pnpm clean            # Clean build outputs
@@ -64,8 +65,13 @@ pnpm clean            # Clean build outputs
 Before committing, you MUST pass `pnpm check:all` which runs filtered checks across packages:
 
 - **`@snaha/swarm-id`**: `format:check`, `lint`, `typecheck`, `test`
-- **`@swarm-id/ui`**: `lint` (includes license headers), `check`, `knip`
+- **`@swarm-id/multichain`**: `format:check`, `lint`, `typecheck`, `test`
+- **`@swarm-id/ui`**: `lint` (includes license headers), `check`, `knip`, `test`
 - **`@swarm-id/demo`**: `lint`, `check`, `knip`
+
+Chain-backed suites are NOT in `check:all` — they need a chain running, and are skipped
+automatically without one: `pnpm test:fork` (needs `pnpm dev:chain:detach`) and
+`pnpm --filter @swarm-id/ui test:e2e` (needs `pnpm dev:local`).
 
 ## Code Style
 
@@ -98,7 +104,6 @@ Before committing, you MUST pass `pnpm check:all` which runs filtered checks acr
 ## Testing
 
 - Unit tests (`*.test.ts`): Vitest
-- Component tests (`*.ct.spec.ts`): Playwright
 - E2E tests (`tests/*.test.ts`): Playwright
 
 ## Version control conventions

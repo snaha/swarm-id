@@ -50,9 +50,10 @@ network-readable by peers.
 **Fixed in bee-compose ≥ 0.1.4** ([#11](https://github.com/snaha/bee-compose/issues/11)):
 `bee/Dockerfile` recompiles Bee from source at `v${BEE_VERSION}` with
 `make binary REACHABILITY_OVERRIDE_PUBLIC=true`, so non-deferred uploads replicate out of the box — no
-manual override-image build needed. Cost: the **first** `bee-compose start` compiles Bee from source (a
-few minutes; cached and shared across node images afterward). (On a real public gateway the override
-is irrelevant — reachability is genuine there.)
+manual override-image build needed. 0.2.0 is well past the release that added it. Cost: the
+**first** `dev:local` or `dev:cluster:start` compiles Bee from source (a few minutes; cached and
+shared across node images afterward). (On a real public gateway the override is irrelevant —
+reachability is genuine there.)
 
 Verify after start (read-only): every node `bee_kademlia_reachability_status{...="Public"}` (NOT
 `Unknown`); queen `/topology` `connected ≥ 3`; a non-deferred upload returns in <1 s and queen

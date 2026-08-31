@@ -10,13 +10,78 @@ The identity UI is a SvelteKit SPA.
 - **License headers**: enforced by eslint (`eslint-plugin-notice` + shared svelte rule);
   `pnpm --filter @swarm-id/ui format` auto-inserts them
 - **`BASE_PATH`** env var sets the SvelteKit base path at build time (`/id` in deployments)
-- **Dev mock stamp purchase** (`/dev` → Chain tab, backed by `src/lib/stores/dev-settings.svelte.ts`):
-  toggles that make the product **Add drive** flow settle a mocked postage batch instead of a real
-  cross-chain payment. "Open widget popup" **off** simulates locally with **no `window.open`** — the
-  only mode that works where popups are blocked (headless previews) or the widget origin is offline;
-  **on** also opens the `swarmbucks.eth.limo?mocked=true` popup. "Outcome" picks success vs. a failed
-  purchase. Settings persist in localStorage (`dev-mock-stamp-*`) and are read by
-  `drive-add-dialog.svelte`; production leaves them off.
+- **Buying a drive is a real on-chain purchase.** **Add drive** runs
+  `runPurchase` (`payment/drive-operation.ts`) through the same funding seam as extend and resize,
+  so it inherits the payment screens, the rail below and the 7702 bundle rather than having a second
+  way to pay. The derived postage signer buys the batch it will own — no throwaway creator wallet,
+  no ownership handover, no dust. The consequence is that **a purchase needs a reachable chain**,
+  so the e2e suites seed one and skip without it.
+- **Dev mock stamp purchase — the one deliberate exception** (`/dev` → Chain tab, backed by
+  `src/lib/stores/dev-settings.svelte.ts`): toggles that make **Add drive** settle a mocked postage
+  batch through the `fund.bzz.limo` widget path — the one flow no local chain can carry. "Open
+  widget popup" **off** simulates locally with **no `window.open`** — the only mode that works where
+  popups are blocked (headless previews) or the widget origin is offline; **on** also opens the
+  `fund.bzz.limo?mocked=true` popup. "Outcome" picks success vs. a failed purchase. Settings persist
+  in localStorage (`dev-mock-stamp-*`) and are read by `drive-add-dialog.svelte`; production leaves
+  them off.
+- **The payment leg is a swappable rail** (`payment/payment-rail.ts`) — what carries money from
+  whatever chain the user holds funds on to xDAI at the batch-owner address. Production has one,
+  Relay Protocol, and it cannot run locally at all: Relay is an intent/solver network, so the quote
+  comes from a hosted API and the delivery is an off-chain solver paying out on real Gnosis.
+  `resolvePaymentRail()` (`payment/resolve-rail.ts`) picks; the contract module is a leaf so the
+  rails can import from it without an initialisation cycle. Off mainnet it returns the **dev rail**
+  (`dev/local-payment-rail.ts`) when the local source chain is up (`pnpm dev:local`, chain 31337):
+  the wallet signs a genuine deposit there and the baked faucet plays solver, delivering the xDAI.
+  The chain reaches the wallet through the flow's own `wallet_addEthereumChain` path; fund the
+  wallet itself from the `/dev` faucet, which sends any asset to any address on either chain.
+  **A missing source chain is NOT the same as no rail**: paying from Gnosis needs no source chain by
+  design, so that rail resolves for any endpoint answering as chain 100 — which every drive suite
+  deliberately provides. Treating the two as the same silently reopens the payment screens across
+  the drive suites. A suite needing a purchase to succeed funds the postage signer out of band first
+  (`fundPostageSigner` in `tests/helpers.ts`), so `ensureFunded` short-circuits and no screen opens.
+  The dev rail rehearses the payment UX and nothing more; Relay's pricing, routing, step model and
+  refund semantics stay untested by it. Everything downstream of a rail is the same production code
+  either way.
+- **Everything dev-only in that arrangement sits behind one seam**, `payment/dev-funding.ts`, which
+  `vite build` swaps for `dev-funding.production.ts` (a `pre` plugin in `vite.config.ts`, not a
+  `resolve.alias` — SvelteKit's `$lib` alias resolves first). Without the swap the local rail, the
+  faucet, and the anvil cheat codes and dev private key behind `@swarm-id/multichain/dev` ship in
+  the entry bundle: `import.meta.env.DEV` kills the _branch_, but the imports are static and those
+  modules have top-level side effects, so Rollup keeps them anyway. **Production code must reach
+  dev helpers only through this seam** — importing `$lib/dev/*` directly puts them back in the
+  bundle, and one such import in a component five ordinary routes pull in ships the whole dev tree
+  in their shared chunk. The `/dev` route imports them directly on purpose and keeps its own
+  lazily-loaded chunk. Verify with a build, never by reading: CI greps the built assets after every
+  `pnpm build` for three canaries (`anvil_setBalance`, `localhost:31337`, and the dev key's
+  address), and the only file allowed to match is the single `/dev` route chunk, located by its
+  `swarm-id-dev-source-rpc` marker rather than by whitelisting route filenames. One canary is not
+  enough: `anvil_setBalance` reaches the bundle only through `mintSourceEth`, which the rail never
+  calls, so it tree-shakes away while the rail itself ships. Reaching a dev-only value through the
+  seam also keeps the _behaviour_ out: `devSourceChain` is `undefined` in a shipped build, so the
+  settings dialog has nothing to probe, where an `import.meta.env.DEV` branch would still have hit
+  `localhost` on open.
+- **Paid drive operations are node-less**: extend and resize go straight to the PostageStamp
+  contract signed by the derived postage signer (`payment/postage-onchain.ts`,
+  `payment/drive-operation.ts`), with funding injected as a seam — always the payment rail above,
+  never a faucet standing in for it. See `docs/Postage-On-Chain-Engine.md` and
+  `docs/Drive-Payment-Flow.md`.
+- **…and atomic**: where the chain has the EIP-7702 delegate — which includes Gnosis mainnet —
+  extend runs as one transaction (approve + topUp) and resize as one (approve + topUp +
+  increaseDepth), via `bundledExtend`/`bundledResize`. **The order is load-bearing and atomicity
+  does NOT relax it**: `increaseDepth` checks the floor before any compensation, so diluting first
+  reverts the whole bundle. `supportsBundling()` gates it, so a chain without the delegate falls
+  back to the sequential path — which is also where `SizeIncreasePendingError` and its #392 copy
+  still apply, and which `drive-onchain.test.ts` covers by clearing the delegate. The delegation
+  is **permanent**: the postage signer reads as a contract afterwards.
+- **There is one chain and one settings preset** (`postageChain()` in `payment/chain.ts`, which
+  answers "which chain is this endpoint" by genesis hash — the operations built on it live in
+  `payment/postage-onchain.ts`): the **baked hybrid chain** (chain 100 — a real BZZ market from a
+  mainnet fork with the Swarm contracts deployed on top, shipped inside
+  `@snaha/bee-compose`, no internet needed) is driven with the production addresses, which is what
+  makes it worth testing on. It is always `:9545` — with the Bee cluster (`pnpm dev:local`) or
+  without it (`pnpm dev:chain`, which is bee-compose `--without-bees`); point the drive e2e at it
+  with `CHAIN_RPC_URL`. An endpoint that is not mainnet never falls back to the public RPCs, so a failed
+  call cannot silently read or write real mainnet.
 - **Hex helpers**: byte⇄hex conversion comes from the lib — `uint8ArrayToHex`/`hexToUint8Array`
   from `@snaha/swarm-id` (0x-tolerant, throws on malformed input); `src/lib/crypto/hex.ts` keeps
   only `strip0x`/`prefix0x` to move between bare hex (how the lib and shared records store it)

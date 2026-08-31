@@ -37,10 +37,9 @@ Deliberate changes from upstream:
   authorises `Simple7702Account` and sends to itself, so `msg.sender` stays the
   batch owner. Order is load-bearing regardless of atomicity; see
   `docs/Postage-On-Chain-Engine.md` §4.4.
-- **A solver wire format** (`local-solver-protocol.ts`): the calldata a
-  cross-chain deposit carries its own delivery instruction in, so the off-chain
-  half that fills it can stay stateless. The process that reads it lands with
-  the local payment rail in `ui/`.
+- **A local solver** (`local-solver.ts`): the off-chain half of a cross-chain
+  payment, which is the one part a local chain can host honestly. Run by
+  `pnpm dev:local`.
 - **Selector pinning**: unit tests assert every ABI entry against selectors
   verified on the deployed contract, so an ABI typo cannot reach a wallet.
 - The duplicated FeeTooLow retry loops are extracted (`write-retry.ts`), the
@@ -89,7 +88,9 @@ The one leg this cannot reproduce is the cross-chain bridge — Relay is an
 intent/solver network, so its quote comes from a hosted API and its delivery is
 an off-chain solver paying out on real Gnosis, none of which can see a local
 chain. Here the initial xDAI is simply minted with anvil's `setBalance`;
-everything downstream is genuine.
+everything downstream is genuine. `ui/` goes one step further for hand-testing:
+a second local chain takes a real signature from the user's wallet and the
+chain's faucet plays solver — see its `dev/local-payment-rail.ts`.
 
 Two things to know about the baked chain:
 
@@ -121,6 +122,6 @@ trading, since only the purchase is worth spending a real pool on. Never import
 `src/dev.ts` in production code.
 
 ```bash
-pnpm dev:cluster:start                       # repo root — cluster and its chain
+pnpm dev:local                               # repo root — cluster + chains + solver
 pnpm --filter @swarm-id/multichain test      # unit tests, no chain needed
 ```
