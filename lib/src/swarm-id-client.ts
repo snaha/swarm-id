@@ -846,17 +846,21 @@ export class SwarmIdClient {
    * with their Swarm ID, and the resulting authentication will be available
    * to the client when they return.
    *
-   * **Browser Compatibility:**
-   * - Chrome/Firefox: Opens window directly from parent context (preserves user gesture,
-   *   no popup blocking). Auth is communicated via localStorage storage events.
-   * - Safari/iOS: Delegates to proxy iframe, so the popup's `window.opener` points back at the
-   *   iframe and the popup can hand it the account's stamp projection when the iframe's storage
-   *   is partitioned. Uploads keep working, but those credentials live only in memory and are
-   *   re-seeded on every page load. Unverified on real Safari; if the handover fails the session
-   *   degrades to download-only. Private mode sessions are ephemeral (lost when the private
-   *   window closes).
+   * **Which window opens it** is decided by the iframe's STORAGE, not by the
+   * user agent (#613):
+   * - Shared storage: opened here, from the parent, so the click's activation is
+   *   still unspent. The popup writes the connection to the first-party store
+   *   the iframe reads, and a `storage` event carries it across.
+   * - Partitioned, or not proven shared: the proxy opens it, so the popup's
+   *   `window.opener` points back at the iframe and the session can be handed
+   *   over directly — the only channel into a partitioned frame. Those
+   *   credentials then live only in memory and are re-seeded on every page
+   *   load; if the handover fails the session degrades to download-only. A
+   *   popup blocked on this path falls back to opening from the parent.
    *
-   * For Safari details, see https://github.com/snaha/swarm-id/issues/167
+   * Safari private mode sessions are ephemeral (lost when the private window
+   * closes). For Safari details, see
+   * https://github.com/snaha/swarm-id/issues/167
    *
    * @param options - Configuration options for the connect flow
    * @throws {Error} If the client is not initialized or the popup fails to open
@@ -877,7 +881,12 @@ export class SwarmIdClient {
     // popup writes the connection to the first-party store the iframe reads,
     // and a `storage` event carries it across.
     if (this.storageShared === true) {
-      this.openAuthWindow(options)
+      // Checked, not discarded: a blocked popup here opens nothing, and a
+      // `connect()` that resolved anyway would report a connect in progress
+      // that no window is running.
+      if (!this.openAuthWindow(options)) {
+        throw new Error("Failed to open authentication popup")
+      }
       return
     }
 
@@ -933,7 +942,7 @@ export class SwarmIdClient {
       effectivePopupMode === "popup"
         ? window.open(authUrl, "_blank", "width=500,height=600")
         : window.open(authUrl, "_blank")
-    return popup !== null
+    return Boolean(popup)
   }
 
   /**

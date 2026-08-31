@@ -518,12 +518,11 @@ export { isWebKit } from "./utils/browser"
 
 // Storage-partition probe. The trusted domain's own pages call
 // `markFirstPartyStorage()`; the proxy reads it back to learn which auth
-// transport can reach it (#613).
-export {
-  STORAGE_SHARED_KEY,
-  isStorageShared,
-  markFirstPartyStorage,
-} from "./utils/storage-probe"
+// transport can reach it (#613). `STORAGE_SHARED_KEY` is deliberately NOT
+// exported: the marker is only trustworthy because the guarded writer is the
+// only thing that sets it, and handing out the raw key invites a write that
+// makes a partitioned frame answer "shared".
+export { isStorageShared, markFirstPartyStorage } from "./utils/storage-probe"
 
 // Promise utilities. `TimeoutError` is exported because it is the discriminator
 // for a deadline anywhere in this library, the chain reads included.

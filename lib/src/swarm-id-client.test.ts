@@ -12,13 +12,16 @@ describe("SwarmIdClient connect()", () => {
   beforeEach(() => {
     vi.restoreAllMocks()
 
-    // Mock window object and its properties
+    // Mock window object and its properties. `open` returns a stand-in window
+    // explicitly: the callers read its result to tell an opened popup from a
+    // blocked one, so a mock returning `undefined` would mean "blocked" and
+    // every happy path would take the failure branch.
     const mockWindow = {
       addEventListener: vi.fn(),
       removeEventListener: vi.fn(),
       parent: { postMessage: vi.fn() },
       location: { origin: "https://localhost" },
-      open: vi.fn(),
+      open: vi.fn().mockReturnValue({ closed: false }),
     }
 
     vi.stubGlobal("window", mockWindow)
@@ -68,6 +71,18 @@ describe("SwarmIdClient connect()", () => {
       )
       // Even on WebKit: the user agent no longer decides this.
       expect(sendRequestSpy).not.toHaveBeenCalled()
+    })
+
+    // Nothing opened, so there is no connect in progress to report. This
+    // branch used to discard `window.open`'s result and resolve regardless.
+    it("throws when that popup is blocked", async () => {
+      vi.spyOn(client, "ensureReady").mockImplementation(() => {})
+      setStorageShared(true)
+      vi.mocked(window.open).mockReturnValue(null)
+
+      await expect(client.connect()).rejects.toThrow(
+        "Failed to open authentication popup",
+      )
     })
   })
 
