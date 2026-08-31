@@ -201,8 +201,11 @@ jobs:
         run: pnpm dev:chain:stop
 
   # Talks to Relay's real quote API — the only thing that can catch our request
-  # or response mapping drifting from theirs. A read, no wallet, no money. It
-  # skips itself if Relay cannot be reached, so an outage is not a red build.
+  # or response mapping drifting from theirs, and it quotes every (chain, token)
+  # pair the payment screen offers. A read, no wallet, no money. Offline it
+  # skips; here it does not — an unreachable Relay fails this job on purpose,
+  # because that is worth knowing about. The job is not required, so it reports
+  # the outage without blocking a merge.
   live-tests:
     name: Live service contracts
     runs-on: ubuntu-latest

@@ -64,6 +64,10 @@ export const devSourceChain: DevSourceChain | undefined = {
  * Extra chains to declare to web3-onboard, so it recognises the wallet's
  * network while a payment is rehearsed against the local source chain instead
  * of reporting an unsupported one. Empty in a production build.
+ *
+ * The endpoint is read at module load, so an override saved in Network settings
+ * reaches the wallet declaration on the next reload — which is as good as it
+ * gets: web3-onboard reads its chain list once, when it is initialised.
  */
 export const devWalletChains = [
   {

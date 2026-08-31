@@ -13,20 +13,34 @@
  * `getQuote` prices a route, it does not move money, needs no wallet and no
  * key. The addresses below are anvil's public dev accounts.
  *
+ * Two layers. The wire shape is pinned on ONE canonical pair (Base ETH), in
+ * enough depth to catch a field being renamed or its precision changing. Then
+ * every pair the picker actually offers is quoted, so a chain or token added to
+ * the table is contract-tested against Relay by that alone — the pairs are
+ * derived from `PAYMENT_TOKENS`, not listed again here.
+ *
  * Kept out of `pnpm test` because it needs the internet. It SKIPS when the API
  * cannot be reached — an outage is not our bug — and FAILS when the API answers
- * with a shape we do not handle, which is.
+ * with a shape we do not handle, or refuses a route we offer, which is.
  */
 import { beforeAll, describe, expect, it } from 'vitest'
 
-import { displayAmount, displayUsd } from './payment-rail'
+import { WALLET_CHAINS, displayAmount, displayUsd } from './payment-rail'
+import { PAYMENT_TOKENS } from './relay'
 
 const RELAY_QUOTE_URL = 'https://api.relay.link/quote'
 const GNOSIS_CHAIN_ID = 100
 const BASE_CHAIN_ID = 8453
 const NATIVE = '0x0000000000000000000000000000000000000000'
-/** Anvil's first dev account. Public, and only ever a quote parameter here. */
-const ANY_ADDRESS = '0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266'
+/**
+ * Anvil's first two dev accounts, standing in for the payer's wallet and the
+ * batch-owner address. Public, and only ever quote parameters here.
+ *
+ * Two of them, not one: in the app these are never the same address, and Relay
+ * refuses a same-chain native quote that would be a self-send outright.
+ */
+const PAYER_ADDRESS = '0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266'
+const OWNER_ADDRESS = '0x70997970C51812dc3A010C7d01b50e0d17dc79C8'
 /** 0.06 xDAI — the magnitude a real extend actually delivers. */
 const XDAI_OUT_WEI = '60000000000000000'
 const REQUEST_TIMEOUT_MS = 25_000
@@ -39,43 +53,92 @@ interface RelayQuote {
       amountUsd?: string
       currency?: { symbol?: string; chainId?: number }
     }
-    currencyOut?: { amountFormatted?: string; currency?: { chainId?: number } }
+    currencyOut?: {
+      amountFormatted?: string
+      minimumAmount?: string
+      currency?: { chainId?: number }
+    }
   }
 }
+
+/**
+ * What one quote attempt came back as. A union rather than an optional quote,
+ * because the two failures mean opposite things: unreachable is the internet
+ * and skips, refused is a route we offer that Relay will not serve — the defect
+ * this suite exists to find.
+ */
+type QuoteOutcome =
+  | { status: 'quoted'; quote: RelayQuote }
+  | { status: 'unreachable' }
+  | { status: 'refused'; detail: string }
+
+/** One (chain, token) the payment screen offers, as this suite quotes it. */
+interface Pair {
+  key: string
+  label: string
+  chainId: number
+  currency: string
+}
+
+/**
+ * Every pair the picker offers, read from the rail's own table. Gnosis is in
+ * here too: the combined rail normally hands its native token to the direct
+ * rail, but Relay is asked for it whenever the direct rail does not resolve.
+ */
+const PAIRS: Pair[] = WALLET_CHAINS.flatMap((chain) =>
+  (PAYMENT_TOKENS[chain.id] ?? []).map((token) => ({
+    key: `${chain.id}:${token.address}`,
+    label: `${chain.name} ${token.symbol}`,
+    chainId: chain.id,
+    currency: token.address,
+  })),
+)
 
 /**
  * The same request `quotePayment` builds — EXACT_OUTPUT so the delivered amount
  * is the one the operation needs. Kept in the test rather than imported because
  * `relay.ts` goes through the SDK, and pinning the wire shape is the point.
  */
-async function quote(): Promise<RelayQuote | undefined> {
+async function quote(chainId: number, currency: string): Promise<QuoteOutcome> {
+  let response: Response
   try {
-    const response = await fetch(RELAY_QUOTE_URL, {
+    response = await fetch(RELAY_QUOTE_URL, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
       body: JSON.stringify({
-        user: ANY_ADDRESS,
-        recipient: ANY_ADDRESS,
-        originChainId: BASE_CHAIN_ID,
-        originCurrency: NATIVE,
+        user: PAYER_ADDRESS,
+        recipient: OWNER_ADDRESS,
+        originChainId: chainId,
+        originCurrency: currency,
         destinationChainId: GNOSIS_CHAIN_ID,
         destinationCurrency: NATIVE,
         tradeType: 'EXACT_OUTPUT',
         amount: XDAI_OUT_WEI,
       }),
     })
-    return response.ok ? ((await response.json()) as RelayQuote) : undefined
   } catch {
-    return undefined
+    return { status: 'unreachable' }
   }
+  if (!response.ok) {
+    return { status: 'refused', detail: `HTTP ${response.status} ${await response.text()}` }
+  }
+  return { status: 'quoted', quote: (await response.json()) as RelayQuote }
 }
 
 describe('Relay quote contract', () => {
+  /** Keyed by `Pair.key`, filled once — one quote per pair, not per assertion. */
+  const outcomes = new Map<string, QuoteOutcome>()
   let quoted: RelayQuote | undefined
 
   beforeAll(async () => {
-    quoted = await quote()
+    // Sequential on purpose: a dozen simultaneous POSTs to a public API with no
+    // key is how a contract test turns into a rate-limited one.
+    for (const pair of PAIRS) {
+      outcomes.set(pair.key, await quote(pair.chainId, pair.currency))
+    }
+    const canonical = outcomes.get(`${BASE_CHAIN_ID}:${NATIVE}`)
+    quoted = canonical?.status === 'quoted' ? canonical.quote : undefined
   })
 
   it.skipIf(!process.env.CI)('is reachable, or the rest of this suite is moot', () => {
@@ -141,5 +204,36 @@ describe('Relay quote contract', () => {
     // No steps means nothing for the user to sign and a payment that silently
     // never happens.
     expect(quoted.steps?.length).toBeGreaterThan(0)
+  })
+
+  describe('every pair the picker offers still routes to Gnosis', () => {
+    for (const pair of PAIRS) {
+      it(pair.label, () => {
+        const outcome = outcomes.get(pair.key)
+        if (!outcome || outcome.status === 'unreachable') {
+          return
+        }
+        if (outcome.status === 'refused') {
+          throw new Error(`Relay would not quote ${pair.label}: ${outcome.detail}`)
+        }
+        const details = outcome.quote.details
+        expect(details?.currencyOut?.currency?.chainId, 'delivers on Gnosis').toBe(GNOSIS_CHAIN_ID)
+        // The guaranteed floor, and the figure the funding maths is sized to.
+        // Not `amountFormatted`: a same-chain swap can overshoot and deliver
+        // more than was asked for, and only the minimum is promised.
+        expect(details?.currencyOut?.minimumAmount, 'delivers the exact amount asked for').toBe(
+          XDAI_OUT_WEI,
+        )
+        expect(
+          Number(details?.currencyIn?.amountFormatted),
+          'priced in the source token',
+        ).toBeGreaterThan(0)
+        expect(Number(details?.currencyIn?.amountUsd), 'priced in USD').toBeGreaterThan(0)
+        // An ERC-20 source quotes two steps (approve, then deposit) and a
+        // native one just the deposit — the count is Relay's business, having
+        // something to sign is ours.
+        expect(outcome.quote.steps?.length, 'something for the wallet to sign').toBeGreaterThan(0)
+      })
+    }
   })
 })

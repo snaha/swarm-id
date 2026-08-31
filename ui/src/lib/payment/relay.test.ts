@@ -14,14 +14,17 @@ import { relayRail } from './relay'
 
 /** An `execute` that accepts the payment and then goes quiet forever. */
 const execute = vi.fn(() => new Promise<void>(() => undefined))
+/** A `getQuote` that never prices anything. */
+const getQuote = vi.fn(() => new Promise<never>(() => undefined))
 
 vi.mock('@relayprotocol/relay-sdk', () => ({
   MAINNET_RELAY_API: 'https://api.relay.link',
   createClient: () => undefined,
-  getClient: () => ({ actions: { execute } }),
+  getClient: () => ({ actions: { execute, getQuote } }),
 }))
 
 const TEN_MINUTES_MS = 600_000
+const THIRTY_SECONDS_MS = 30_000
 
 describe('relay execute', () => {
   afterEach(() => {
@@ -48,5 +51,30 @@ describe('relay execute', () => {
     // The user is told it may have landed — the retry re-prices against the
     // owner address rather than assuming the money stayed put.
     await expect(payment).rejects.toThrow(/may still land/)
+  })
+})
+
+describe('relay quote', () => {
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+
+  it('gives up on a price rather than leaving the pay screen spinning', async () => {
+    vi.useFakeTimers()
+    const priced = relayRail.quote({
+      chainId: 8453,
+      currency: NATIVE_CURRENCY,
+      user: '0xpayer',
+      recipient: '0xowner',
+      xdaiWei: 60_000_000_000_000_000n,
+      bzzPlur: 1_000_000_000n,
+      gasXdaiWei: 1_000_000_000_000_000n,
+    })
+    const rejected = expect(priced).rejects.toBeInstanceOf(TimeoutError)
+    await vi.advanceTimersByTimeAsync(THIRTY_SECONDS_MS)
+    await rejected
+    // Nothing has been signed at this point, so the user is simply asked to try
+    // again rather than warned about money in flight.
+    await expect(priced).rejects.toThrow(/try again/)
   })
 })

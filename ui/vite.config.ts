@@ -63,8 +63,9 @@ export default defineConfig(({ command }) => ({
   },
   test: {
     include: ['src/**/*.{test,spec}.{js,ts}'],
-    // `*.live.test.ts` talks to a hosted service; it runs from
-    // `vitest.live.config.ts` so `check:all` stays offline-clean.
-    exclude: ['src/**/*.live.test.ts'],
+    // Component tests are Playwright's, not vitest's. And `*.live.test.ts`
+    // talks to a hosted service; it runs from `vitest.live.config.ts` so
+    // `check:all` stays offline-clean.
+    exclude: ['src/**/*.ct.{test,spec}.{js,ts}', 'src/**/*.live.test.ts'],
   },
 }))
