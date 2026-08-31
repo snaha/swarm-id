@@ -291,6 +291,7 @@ export { devRpc }
 export {
   type DeliveryInstruction,
   LOCAL_SOLVER_ADDRESS,
+  LOCAL_SOURCE_USDC_ADDRESS,
   decodeDeliveryInstruction,
   encodeDeliveryInstruction,
 } from "./local-solver-protocol"

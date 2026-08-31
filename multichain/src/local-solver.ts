@@ -24,13 +24,17 @@
  */
 
 import { RollingValueProvider } from "cafe-utility"
+import { encodeFunctionData } from "viem"
+import { ERC20_ABI } from "./abi"
 import { ensureBundlingDelegate, fundLocalAccount } from "./dev"
 import { devRpc } from "./dev-rpc"
 import {
   type DeliveryInstruction,
   LOCAL_SOLVER_ADDRESS,
+  LOCAL_SOURCE_USDC_ADDRESS,
   decodeDeliveryInstruction,
 } from "./local-solver-protocol"
+import { MOCK_USDC_RUNTIME_BYTECODE } from "./mock-usdc-bytecode"
 import { getChainId } from "./rpc"
 import { type MultichainSettings, gnosisMainnetSettings } from "./settings"
 
@@ -48,6 +52,7 @@ const FILL_DELAY_MS = 3_000
 
 interface SourceTransaction {
   hash: string
+  from: string
   to: string | null
   input?: string
 }
@@ -69,9 +74,13 @@ async function sourceBlockNumber(): Promise<number> {
 }
 
 /** Deposits addressed to the solver in one block, oldest first. */
-async function depositsIn(
-  blockNumber: number,
-): Promise<Array<{ hash: string; instruction: DeliveryInstruction }>> {
+async function depositsIn(blockNumber: number): Promise<
+  Array<{
+    hash: string
+    payer: string
+    instruction: DeliveryInstruction
+  }>
+> {
   const block = (await sourceRpc("eth_getBlockByNumber", [
     `0x${blockNumber.toString(16)}`,
     true,
@@ -84,18 +93,96 @@ async function depositsIn(
       return []
     }
     const instruction = decodeDeliveryInstruction(transaction.input)
-    return instruction ? [{ hash: transaction.hash, instruction }] : []
+    return instruction
+      ? [{ hash: transaction.hash, payer: transaction.from, instruction }]
+      : []
   })
 }
 
+const RECEIPT_POLL_MS = 200
+const RECEIPT_TIMEOUT_MS = 30_000
+
+/** Wait out a source-chain transaction; throws on a revert or a timeout. */
+async function sourceReceipt(hash: string): Promise<void> {
+  const deadline = Date.now() + RECEIPT_TIMEOUT_MS
+  while (Date.now() < deadline) {
+    const receipt = (await sourceRpc("eth_getTransactionReceipt", [hash])) as
+      | { status?: string }
+      | null
+      | undefined
+    if (receipt) {
+      if (receipt.status !== "0x1") {
+        throw new Error(`source transaction ${hash} reverted`)
+      }
+      return
+    }
+    await sleep(RECEIPT_POLL_MS)
+  }
+  throw new Error(`source transaction ${hash} was never mined`)
+}
+
+/**
+ * Collect an ERC-20 payment from the payer, against the allowance their
+ * approve granted this account. The solver address is anvil's own account #9,
+ * so the chain signs the pull for us — no key handling here.
+ *
+ * Before the fill and NOT retried past failure: a pull that reverts (allowance
+ * missing, balance short) means the payment was never made, and delivering
+ * anyway would be the faked payment the whole rig exists to avoid.
+ */
+async function pullTokens(
+  payer: string,
+  pull: NonNullable<DeliveryInstruction["pull"]>,
+): Promise<void> {
+  const hash = (await sourceRpc("eth_sendTransaction", [
+    {
+      from: LOCAL_SOLVER_ADDRESS,
+      to: pull.token,
+      data: encodeFunctionData({
+        abi: ERC20_ABI,
+        functionName: "transferFrom",
+        args: [payer as `0x${string}`, LOCAL_SOLVER_ADDRESS, pull.amountWei],
+      }),
+    },
+  ])) as string
+  await sourceReceipt(hash)
+}
+
 async function fill(
+  payer: string,
   instruction: DeliveryInstruction,
   settings: MultichainSettings,
 ): Promise<void> {
   await sleep(FILL_DELAY_MS)
+  if (instruction.pull) {
+    await pullTokens(payer, instruction.pull)
+  }
   await fundLocalAccount(
     { to: instruction.recipient, xdai: instruction.xdaiWei, bzzPlur: 0n },
     settings,
+  )
+}
+
+/**
+ * Put the mock USDC on the source chain, at mainnet USDC's own address, so a
+ * rehearsed ERC-20 payment has a token to approve and this process something
+ * to pull. Same splice as the 7702 delegate on the Gnosis side: the chain is
+ * a bare anvil, and code it should carry has to be installed onto it.
+ */
+async function ensureSourceUsdc(): Promise<void> {
+  const existing = await sourceRpc("eth_getCode", [
+    LOCAL_SOURCE_USDC_ADDRESS,
+    "latest",
+  ])
+  if (typeof existing === "string" && existing !== "0x") {
+    return
+  }
+  await sourceRpc("anvil_setCode", [
+    LOCAL_SOURCE_USDC_ADDRESS,
+    MOCK_USDC_RUNTIME_BYTECODE,
+  ])
+  console.log(
+    `local solver: installed mock USDC at ${LOCAL_SOURCE_USDC_ADDRESS}`,
   )
 }
 
@@ -114,6 +201,7 @@ async function main(): Promise<void> {
   // The chain is up and ours, so make sure the postage bundle can run on it —
   // the baked snapshot cannot carry the 7702 delegate.
   await ensureBundlingDelegate(settings)
+  await ensureSourceUsdc()
 
   console.log(`local solver: watching for deposits to ${LOCAL_SOLVER_ADDRESS}`)
 
@@ -143,7 +231,7 @@ async function main(): Promise<void> {
             `local solver: deposit ${deposit.hash} -> delivering ${xdaiWei} wei xDAI to ${recipient}`,
           )
           try {
-            await fill(deposit.instruction, settings)
+            await fill(deposit.payer, deposit.instruction, settings)
             console.log(`local solver: delivered to ${recipient}`)
           } catch (error) {
             // Keep watching: one failed fill must not take the solver down and

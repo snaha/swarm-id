@@ -36,6 +36,7 @@ export const ACCOUNT_7702_ABI = parseAbi([
 export const ERC20_ABI = parseAbi([
   "function approve(address spender, uint256 value) returns (bool)",
   "function transfer(address to, uint256 value) returns (bool)",
+  "function transferFrom(address from, address to, uint256 value) returns (bool)",
   "function balanceOf(address owner) view returns (uint256)",
   "function allowance(address owner, address spender) view returns (uint256)",
 ])

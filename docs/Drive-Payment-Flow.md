@@ -479,8 +479,9 @@ step model and delivery and refunds, is not covered here at all; a production ca
 [#542](https://github.com/snaha/swarm-id/issues/542).
 
 A green local run must never be read as "the payment path works". The local rail rehearses the UX
-only — Relay's pricing, routing, real step model (an ERC-20 source needs an approve before the
-deposit) and refund semantics stay untested.
+only — Relay's pricing, routing and refund semantics stay untested. The step shape is mirrored,
+though: paying in the mock USDC takes an approve before the deposit and the solver pulls the token,
+the way an ERC-20 source behaves on Relay.
 
 Tests that do not need a payment fund the postage signer **out of band** first (`fundPostageSigner` in
 `ui/tests/helpers.ts`, the same chain faucet a developer uses by hand). The operation then finds the

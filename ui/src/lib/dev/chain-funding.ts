@@ -26,7 +26,7 @@ import {
 } from '@swarm-id/multichain/dev'
 import { generatePrivateKey } from 'viem/accounts'
 
-import { mintSourceEth } from '$lib/dev/local-payment-rail'
+import { mintSourceEth, mintSourceUsdc } from '$lib/dev/local-payment-rail'
 import { chainIdentity, postageChain } from '$lib/payment/chain'
 import { fetchExistingBatchFromChain } from '$lib/payment/contract'
 import { type PostageSigner, derivePostageSigner } from '$lib/payment/purchase'
@@ -115,6 +115,8 @@ async function assertDevChain(tool: string, rpcUrl: string): Promise<void> {
 export interface FaucetAmounts {
   /** Source-chain ETH, in wei — the fake mainnet the payment rail signs on. */
   eth: bigint
+  /** Source-chain mock USDC, in its six-decimal base units. */
+  sourceUsdc: bigint
   /** Gnosis-side native xDAI, in wei. */
   xdai: bigint
   /** Gnosis-side BZZ, in PLUR. */
@@ -152,6 +154,7 @@ export async function sendFromFaucet(address: string, amounts: FaucetAmounts): P
   // a zero send never starts a chain it did not need.
   if (
     amounts.eth <= 0n &&
+    amounts.sourceUsdc <= 0n &&
     amounts.xdai <= 0n &&
     amounts.bzzPlur <= 0n &&
     amounts.tokens.every((entry) => entry.amount <= 0n)
@@ -160,6 +163,9 @@ export async function sendFromFaucet(address: string, amounts: FaucetAmounts): P
   }
   if (amounts.eth > 0n) {
     await mintSourceEth(to, amounts.eth)
+  }
+  if (amounts.sourceUsdc > 0n) {
+    await mintSourceUsdc(to, amounts.sourceUsdc)
   }
   // The Gnosis legs only: the guard probes the Gnosis endpoint, and an ETH-only
   // send has to work with no Gnosis chain running at all.
