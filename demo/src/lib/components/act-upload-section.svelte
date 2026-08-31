@@ -132,19 +132,25 @@
       bind:value={granteesInput}
       placeholder="Grantee public keys (comma-separated, 66 hex chars each)"
     />
-    <p class="text-xs text-muted-foreground">
-      Get Bee node's public key:
-      <code class="bg-muted px-1 rounded"
-        >curl -s http://localhost:1633/addresses | jq -r '.publicKey'</code
-      >
-    </p>
-
     <div class="flex items-start gap-2">
       <Checkbox bind:checked={beeCompatible} id="bee-compat" />
       <Label for="bee-compat" class="cursor-pointer text-sm text-muted-foreground">
         Bee-compatible ACT (enable Bee node /bzz download with ACT headers)
       </Label>
     </div>
+
+    {#if beeCompatible}
+      <p class="text-xs text-muted-foreground">
+        Get Bee node's public key:
+        <code class="bg-muted px-1 rounded"
+          >curl -s http://localhost:1633/addresses | jq -r '.publicKey'</code
+        >
+      </p>
+    {:else}
+      <p class="text-xs text-muted-foreground">
+        Grantees are SwarmID users — copy a public key from the Account tab.
+      </p>
+    {/if}
 
     <AsyncButton onclick={handleUpload} disabled={!clientStore.canUpload} loadingText="Uploading…">
       Upload with ACT
