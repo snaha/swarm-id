@@ -11,9 +11,9 @@
  */
 import { BatchId, EthAddress } from '@ethersphere/bee-js'
 import {
-  type Account as AccountRecord,
   type AccountStateSnapshot,
   type ConnectedApp,
+  type SignedInAccount,
   createAccountsStorageManager,
 } from '@snaha/swarm-id'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
@@ -65,7 +65,13 @@ function localApp(overrides?: Partial<ConnectedApp>): ConnectedApp {
   }
 }
 
-function record(overrides?: Partial<AccountRecord>): AccountRecord {
+/**
+ * A held, signed-in account. Typed as that member rather than the `Account`
+ * union: every case here starts from one, and the union needs a cast that
+ * would turn a schema change into runtime test noise instead of a type error.
+ * The signed-out case reaches its state through `signOut()`, as the app does.
+ */
+function record(overrides?: Partial<SignedInAccount>): SignedInAccount {
   return {
     id: new EthAddress(ID_HEX),
     name: 'Local Name',
@@ -78,7 +84,7 @@ function record(overrides?: Partial<AccountRecord>): AccountRecord {
     connectedApps: [localApp()],
     postageStamps: [],
     ...overrides,
-  } as AccountRecord
+  }
 }
 
 /**
@@ -115,7 +121,7 @@ function delta(overrides?: {
       { appUrl: APP_URL, appName: 'dApp', lastConnectedAt: CREATED_AT },
     ],
     postageStamps: [],
-  } as AccountStateSnapshot
+  }
 }
 
 /** Read what is actually persisted, through an independent manager instance. */

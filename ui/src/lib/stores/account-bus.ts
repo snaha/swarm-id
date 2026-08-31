@@ -82,13 +82,25 @@ async function attach(account: SyncedAccount, forGeneration: number): Promise<vo
       typeof RTCPeerConnection !== 'undefined' ? () => new RTCPeerConnection() : undefined,
   })
   bus = new AccountBus([transport])
+  // The account this room belongs to, captured rather than read back: the fold
+  // below must be scoped to the join it was attached for, not to whatever this
+  // tab has selected by the time a message lands.
+  const joinedAccountId = account.id.toHex()
   // The receive half (#608). A peer's delta is folded into shared storage
   // here, which is the only way a change made on another device reaches this
   // device's UNpartitioned contexts — they read storage, and no storage event
   // crosses a device boundary. `applyAccountDelta` commits with `skipSync`, so
   // this never publishes back.
   unsubscribe = bus.subscribe((message) => {
-    if (message.type === 'account-delta') applyAccountDelta(message.snapshot)
+    if (message.type !== 'account-delta') return
+    // A delta naming a different account did not come from this room's scope.
+    // The topic is derived from THIS account's key, so this is belt and braces
+    // — the same check, and the same reasoning, as the proxy's. Without it a
+    // peer holding only this account's room keys could rename, tombstone or
+    // add stamps to a DIFFERENT account co-resident on this device, which is
+    // the one thing the room encryption is there to prevent.
+    if (message.snapshot.accountId !== joinedAccountId) return
+    applyAccountDelta(message.snapshot)
   })
 }
 

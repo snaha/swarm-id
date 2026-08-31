@@ -72,6 +72,29 @@ const OTHER_DERIVATION_KEY = '99'.repeat(32)
 const BATCH_ID_HEX = 'cc'.repeat(32)
 const APP_SECRET = '44'.repeat(32)
 
+/** A well-formed `account-delta` for `accountId`, as a peer would publish it. */
+function makeDelta(accountId: string, accountName: string) {
+  return {
+    type: 'account-delta',
+    snapshot: {
+      version: 1,
+      timestamp: 2_000_000,
+      accountId,
+      metadata: {
+        accountName,
+        publicKey: `02${'ab'.repeat(32)}`,
+        accountNameAt: 2_000_000,
+        createdAt: 1_000_000,
+        lastModified: 2_000_000,
+        devices: [],
+        partitionCount: 1,
+      },
+      connectedApps: [],
+      postageStamps: [],
+    },
+  }
+}
+
 function makeAccount(overrides?: Partial<SignedInAccount>): SignedInAccount {
   return {
     id: new EthAddress('aa'.repeat(20)),
@@ -246,25 +269,7 @@ describe('accountBusStore', () => {
     accountBusStore.join(makeAccount())
     await settle()
 
-    transports[0].deliver?.({
-      type: 'account-delta',
-      snapshot: {
-        version: 1,
-        timestamp: 2_000_000,
-        accountId: 'aa'.repeat(20),
-        metadata: {
-          accountName: 'Renamed On Another Device',
-          publicKey: `02${'ab'.repeat(32)}`,
-          accountNameAt: 2_000_000,
-          createdAt: 1_000_000,
-          lastModified: 2_000_000,
-          devices: [],
-          partitionCount: 1,
-        },
-        connectedApps: [],
-        postageStamps: [],
-      },
-    })
+    transports[0].deliver?.(makeDelta('aa'.repeat(20), 'Renamed On Another Device'))
 
     expect(applyAccountDelta).toHaveBeenCalledWith(
       expect.objectContaining({ accountId: 'aa'.repeat(20) }),
@@ -287,31 +292,26 @@ describe('accountBusStore', () => {
     expect(applyAccountDelta).not.toHaveBeenCalled()
   })
 
+  // The room's keys scope it to ONE account. A peer holding them that names a
+  // different account is writing outside that scope — and the account it names
+  // may well be co-resident on this device, where the fold would rename it,
+  // tombstone its apps or add stamps to it. The proxy drops the same mismatch.
+  it('does not fold a delta that names a different account', async () => {
+    accountBusStore.join(makeAccount())
+    await settle()
+
+    transports[0].deliver?.(makeDelta('bb'.repeat(20), 'Another Account Entirely'))
+
+    expect(applyAccountDelta).not.toHaveBeenCalled()
+  })
+
   it('stops folding once the room is left', async () => {
     accountBusStore.join(makeAccount())
     await settle()
     const room = transports[0]
     accountBusStore.leave()
 
-    room.deliver?.({
-      type: 'account-delta',
-      snapshot: {
-        version: 1,
-        timestamp: 2_000_000,
-        accountId: 'aa'.repeat(20),
-        metadata: {
-          accountName: 'After Leaving',
-          publicKey: `02${'ab'.repeat(32)}`,
-          accountNameAt: 2_000_000,
-          createdAt: 1_000_000,
-          lastModified: 2_000_000,
-          devices: [],
-          partitionCount: 1,
-        },
-        connectedApps: [],
-        postageStamps: [],
-      },
-    })
+    room.deliver?.(makeDelta('aa'.repeat(20), 'After Leaving'))
 
     expect(applyAccountDelta).not.toHaveBeenCalled()
   })

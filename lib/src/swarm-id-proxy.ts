@@ -1358,8 +1358,9 @@ export class SwarmIdProxy {
     // has no other way to learn this. An unpartitioned session's record is
     // shared storage, which this message did not write, so folding into memory
     // would only diverge the two — it reconciles from storage below instead.
-    // (Which means a cross-device revoke does not yet reach an unpartitioned
-    // session: that needs the UI to consume deltas and write them — #608.)
+    // (A cross-device revoke still reaches an unpartitioned session — the
+    // SwarmID tab folds the same delta into shared storage, and the storage
+    // event carries it here; #608, docs/Account-Bus.md.)
     const { account } = connection
     if (this.partitionAccount) {
       // The shared fold, not a second set of rules: `foldAccount` merges the

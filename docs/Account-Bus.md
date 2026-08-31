@@ -230,6 +230,17 @@ Each phase is an independent PR chain:
    FROM a peer is never published back at it (the proxy states the same rule as
    `source === "bus"`).
 
+   The fold is scoped to the room's own account: a delta naming a different one is dropped,
+   as it is in the proxy. The topic is derived from the account key, so this is belt and
+   braces — but without it a peer holding one account's room keys could write into another
+   account co-resident on the device.
+
+   One echo does survive, bounded: with a dApp tab open, the fold's storage write reaches an
+   _unpartitioned_ proxy iframe as a `storage` event, and that iframe republishes the merged
+   snapshot (`schedulePublish("change")`). It terminates after that one round trip — LWW
+   converges, and an identical-bytes `setItem` fires no further storage event — so it is a
+   trailing confirmation of the merge, not a loop.
+
 6. **SWIP-60 transport adapter** once bee/bee-js release it.
 
 ## Verification
