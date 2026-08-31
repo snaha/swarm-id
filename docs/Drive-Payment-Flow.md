@@ -474,8 +474,9 @@ with trading for the token, on the very pools the test is about.
 
 A green local run therefore says nothing about the bridged rail. `relay.live.test.ts` contract-tests
 Relay's **quote** against the live API (`pnpm test:live` in CI) — the only thing that catches our
-request or response mapping drifting from theirs. Everything downstream of it, routing and the real
-step model and delivery and refunds, is not covered here at all; a production canary is tracked in
+request or response mapping drifting from theirs. Everything downstream of it — routing, the real
+step model, delivery, refunds — has no automated coverage; it has been verified by hand, with a real
+cross-chain payment carried end to end on the production rail. An automated canary is tracked in
 [#542](https://github.com/snaha/swarm-id/issues/542).
 
 A green local run must never be read as "the payment path works". The local rail rehearses the UX
@@ -491,11 +492,6 @@ because nothing needs paying for, not because a rail was suppressed.
 and the rail runs end to end: method → connect → configure → pay, then a real deposit on the source
 chain, the solver's delivery, the real Sushi swap and the real `createBatch`. Isolated component
 tests would re-cover those same screens with nothing behind them, so that tier is not planned.
-
-`relay.live.test.ts` contract-tests Relay's **quote** against the live API (`pnpm test:live` in CI).
-Everything downstream of it — routing, the real step model, delivery, refunds — is proven only
-against the dev rail, so Relay's **delivery** leg has never actually run; a production canary is
-tracked in [#542](https://github.com/snaha/swarm-id/issues/542).
 
 One delivery hazard is worth knowing while reading this: a native transfer to an address that has
 authorised an EIP-7702 delegate executes that delegate's fallback, so the 21 000 gas a transfer to a
