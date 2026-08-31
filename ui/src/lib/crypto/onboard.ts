@@ -18,16 +18,11 @@ const wallets = [injected]
 // unsupported. That covers two different callers: `eth-wallet.ts`'s
 // wallet-secured unlock, which only signs a plain message and stays on
 // whichever network the wallet already happens to be on — Ethereum mainnet,
-// the common default — and the payment flow (`payment-rail.ts`), which
-// switches the wallet to WALLET_CHAINS to sign there.
+// the common default, which WALLET_CHAINS carries — and the payment flow
+// (`payment-rail.ts`), which switches the wallet to WALLET_CHAINS to sign
+// there. Each id exactly once: onboard rejects a duplicate outright, and it
+// throws while this module initialises, which takes every page down with it.
 const chains = [
-  {
-    id: '0x1',
-    token: 'ETH',
-    label: 'Ethereum Mainnet',
-    // We don't need RPC here — unlock only signs a message, no transaction.
-    rpcUrl: 'https://swarm-id.snaha.net',
-  },
   ...WALLET_CHAINS.map((chain) => ({
     id: `0x${chain.id.toString(16)}`,
     token: chain.nativeCurrency.symbol,
