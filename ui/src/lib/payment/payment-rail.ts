@@ -26,6 +26,7 @@
  * rail importing a value from here while this imported it back would be a
  * genuine initialisation cycle, and the type checker cannot see one.
  */
+import { withTimeout } from '@snaha/swarm-id'
 import type { SwapInput } from '@swarm-id/multichain'
 import type { Chain } from 'viem'
 import { arbitrum, base, gnosis, mainnet, optimism, polygon } from 'viem/chains'
@@ -284,10 +285,41 @@ export function isUnrecognizedChainError(error: unknown): boolean {
   )
 }
 
+const GENESIS_PROBE_TIMEOUT_MS = 10_000
+
+/**
+ * The genesis block as the WALLET reports it. Asked through the wallet's own
+ * provider deliberately: it answers for whatever chain the wallet is really
+ * on, which is the only thing that can contradict the chain it was asked to
+ * switch to.
+ *
+ * @returns undefined when the wallet will not or cannot say — a refusal to
+ *   answer is not evidence of anything, and each caller decides what that
+ *   silence costs.
+ */
+export async function walletGenesisHash(provider: EthereumProvider): Promise<string | undefined> {
+  const block = await withTimeout(
+    provider.request({ method: 'eth_getBlockByNumber', params: ['0x0', false] }),
+    GENESIS_PROBE_TIMEOUT_MS,
+    'The wallet did not say which chain it is on.',
+  ).catch(() => undefined)
+  const hash = (block as { hash?: unknown } | undefined)?.hash
+  return typeof hash === 'string' ? hash : undefined
+}
+
 /**
  * Ask the wallet to switch to `chainId`, adding the chain when the wallet does
  * not know it. Rejects if the user declines — the caller shows the design's
  * "unconfirmed chain change" state while this is pending.
+ *
+ * A chain carrying `custom.genesisHash` — the fake Gnosis, wearing mainnet's
+ * chain id on purpose — is verified after the switch, because the id alone
+ * cannot land the wallet on the right network: a wallet that has REAL Gnosis
+ * configured satisfies a switch to 100 without ever seeing the local RPC. On a
+ * proven mismatch the chain is offered again through `wallet_addEthereumChain`,
+ * which is the one request that makes a wallet adopt OUR endpoint for an id it
+ * already serves — MetaMask prompts to update the network and flips its active
+ * RPC. A wallet that stays put after that is refused in words.
  */
 export async function switchWalletChain(
   provider: EthereumProvider,
@@ -295,47 +327,67 @@ export async function switchWalletChain(
   chains: Chain[],
 ): Promise<void> {
   const hexChainId = `0x${chainId.toString(16)}`
-  try {
-    await provider.request({
-      method: 'wallet_switchEthereumChain',
-      params: [{ chainId: hexChainId }],
-    })
-  } catch (error) {
-    if (!isUnrecognizedChainError(error)) {
-      throw error
-    }
-    const chain = chains.find((candidate) => candidate.id === chainId)
-    if (!chain) {
-      throw error
-    }
-    // Rebuilt field by field rather than passed through. A wallet's arguments
-    // cross a postMessage bridge and are structured-cloned, so handing over a
-    // reference to someone else's object means whatever it happens to be —
-    // a framework proxy, a class instance — decides whether the payment works.
-    // Copying the primitives out makes that impossible to get wrong.
-    await provider.request({
+  const chain = chains.find((candidate) => candidate.id === chainId)
+
+  // Rebuilt field by field rather than passed through. A wallet's arguments
+  // cross a postMessage bridge and are structured-cloned, so handing over a
+  // reference to someone else's object means whatever it happens to be —
+  // a framework proxy, a class instance — decides whether the payment works.
+  // Copying the primitives out makes that impossible to get wrong.
+  const offerChain = (target: Chain) =>
+    provider.request({
       method: 'wallet_addEthereumChain',
       params: [
         {
           chainId: hexChainId,
-          chainName: chain.name,
+          chainName: target.name,
           nativeCurrency: {
-            name: chain.nativeCurrency.name,
-            symbol: chain.nativeCurrency.symbol,
-            decimals: chain.nativeCurrency.decimals,
+            name: target.nativeCurrency.name,
+            symbol: target.nativeCurrency.symbol,
+            decimals: target.nativeCurrency.decimals,
           },
-          rpcUrls: [...chain.rpcUrls.default.http],
+          rpcUrls: [...target.rpcUrls.default.http],
         },
       ],
     })
+
+  const switchChain = () =>
+    provider.request({
+      method: 'wallet_switchEthereumChain',
+      params: [{ chainId: hexChainId }],
+    })
+
+  try {
+    await switchChain()
+  } catch (error) {
+    if (!isUnrecognizedChainError(error) || !chain) {
+      throw error
+    }
+    await offerChain(chain)
     // Adding is not switching. Some wallets bundle the two into one prompt,
     // several do not — and there the payment would be signed on whatever network
     // the wallet was on before, which the local and the real Gnosis both answer
     // to as chain id 100. Ask again; a refusal fails the same way a refused
     // switch does.
-    await provider.request({
-      method: 'wallet_switchEthereumChain',
-      params: [{ chainId: hexChainId }],
-    })
+    await switchChain()
   }
+
+  const expected = chain?.custom?.genesisHash
+  if (typeof expected !== 'string' || !chain) {
+    return
+  }
+  const reported = await walletGenesisHash(provider)
+  // Silence is not a mismatch: a wallet that will not answer is judged at pay
+  // time (`walletChainRefusal`), where mainnet and dev earn different verdicts.
+  if (reported === undefined || reported.toLowerCase() === expected.toLowerCase()) {
+    return
+  }
+  await offerChain(chain)
+  const repaired = await walletGenesisHash(provider)
+  if (repaired !== undefined && repaired.toLowerCase() === expected.toLowerCase()) {
+    return
+  }
+  throw new Error(
+    `The wallet stayed on a different network that also answers as chain ${chainId}. Pick the ${chain.name} network (${chain.rpcUrls.default.http[0]}) in the wallet's own network list and try again.`,
+  )
 }
