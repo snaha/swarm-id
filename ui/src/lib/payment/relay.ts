@@ -45,6 +45,13 @@ const GNOSIS_CHAIN_ID = 100
  */
 const EXECUTE_TIMEOUT_MS = 600_000
 
+/**
+ * Ceiling on pricing one route. Nothing is signed and nothing moves yet, so a
+ * quote that has not come back in half a minute is not slow, it is gone — and
+ * the pay screen is sitting on a spinner with no price and no way out.
+ */
+const QUOTE_TIMEOUT_MS = 30_000
+
 /** Source chains offered in the payment screen (mirrors the widget's set).
  * The same list `onboard.ts` declares to the wallet — one list, so a chain
  * cannot be offered here and be unknown there. */
@@ -62,8 +69,12 @@ function relayClient() {
 }
 
 /** Every chain offers its native token; stablecoins are listed where they are
- * the obvious alternative (matching the designs' Base/USDC example). */
-const PAYMENT_TOKENS: Record<number, PaymentToken[]> = {
+ * the obvious alternative (matching the designs' Base/USDC example).
+ *
+ * Exported so the live contract suite derives its pairs from this table rather
+ * than keeping a second copy: a token added to the picker is then contract-
+ * tested against Relay by that alone. */
+export const PAYMENT_TOKENS: Record<number, PaymentToken[]> = {
   [mainnet.id]: [
     { address: NATIVE_CURRENCY, symbol: 'ETH', name: 'Ether', decimals: 18 },
     {
@@ -126,16 +137,20 @@ const PAYMENT_TOKENS: Record<number, PaymentToken[]> = {
  * source-side price movement is absorbed by the amount the user pays.
  */
 async function quotePayment(request: QuoteRequest): Promise<PaymentQuote> {
-  const quote = await relayClient().actions.getQuote({
-    chainId: request.chainId,
-    currency: request.currency,
-    toChainId: GNOSIS_CHAIN_ID,
-    toCurrency: NATIVE_CURRENCY,
-    tradeType: 'EXACT_OUTPUT',
-    amount: request.xdaiWei.toString(),
-    user: request.user,
-    recipient: request.recipient,
-  })
+  const quote = await withTimeout(
+    relayClient().actions.getQuote({
+      chainId: request.chainId,
+      currency: request.currency,
+      toChainId: GNOSIS_CHAIN_ID,
+      toCurrency: NATIVE_CURRENCY,
+      tradeType: 'EXACT_OUTPUT',
+      amount: request.xdaiWei.toString(),
+      user: request.user,
+      recipient: request.recipient,
+    }),
+    QUOTE_TIMEOUT_MS,
+    'Relay did not answer with a price. Check your connection and try again.',
+  )
   const currencyIn = quote.details?.currencyIn
   // Relay's own figures are raw, not display-ready: `amountFormatted` is the
   // full wei expansion and `amountUsd` carries six decimals. Rendered as-is

@@ -159,8 +159,8 @@ See the [Local Development guide](https://swarm.snaha.net/docs/local-development
 
 ### Paying for storage locally
 
-Extending and resizing a drive costs money, and the payment is cross-chain: the user pays on
-whatever chain they hold funds on, and xDAI arrives on Gnosis. That leg runs on
+Buying, extending and resizing a drive all cost money, and the payment is cross-chain: the user
+pays on whatever chain they hold funds on, and xDAI arrives on Gnosis. That leg runs on
 [Relay Protocol](https://relay.link), an intent/solver network — its quotes come from a hosted API
 and its deliveries from off-chain solvers paying out on real Gnosis, so **no local chain can make a
 real payment complete**. What can be rehearsed is everything around it, against a second local

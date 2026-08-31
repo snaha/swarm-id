@@ -94,7 +94,7 @@
   let tokenAddress = $state(untrack(() => rail.tokens(rail.chains[0].id)[0].address))
   let paymentQuote = $state<PaymentQuote | undefined>(undefined)
   let quoting = $state(false)
-  let relayStatus = $state('Cross-swap xDAI on Relay')
+  let relayStatus = $state('Sending your payment')
   /**
    * The Gnosis-side quote in force, once the built-in method has priced one.
    * Undefined until then — the default method needs no quote of ours, so the
