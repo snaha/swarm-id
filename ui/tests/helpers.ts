@@ -178,7 +178,14 @@ export function busRoomJoined(page: Page): Promise<void> {
       socket.waitForEvent('framereceived', {
         predicate: ({ payload }) => {
           if (typeof payload !== 'string') return false
-          const frame = JSON.parse(payload) as { type?: string; peers?: unknown[] }
+          // The socket carries whatever the server sends; a frame that is not
+          // the JSON we are looking for is simply not a match, not an error.
+          let frame: { type?: string; peers?: unknown[] }
+          try {
+            frame = JSON.parse(payload) as { type?: string; peers?: unknown[] }
+          } catch {
+            return false
+          }
           return frame.type === 'peer-joined' || (frame.type === 'welcome' && !!frame.peers?.length)
         },
         timeout: BUS_JOIN_TIMEOUT_MS,

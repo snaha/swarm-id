@@ -41,10 +41,16 @@ import {
 } from './helpers'
 
 const demoOrigin = await partitionedDemoOrigin()
-test.skip(
-  !demoOrigin,
-  'the demo dev server answered on neither loopback literal — nothing to browse cross-site',
-)
+const NO_LOOPBACK_LITERAL =
+  'the demo dev server answered on neither loopback literal — nothing to browse cross-site'
+// Locally a missing demo server is a reason to skip; in CI it is the rig
+// breaking. A `--host` change that stops the literals answering would otherwise
+// leave `chromium-partitioned` green-skipping forever, which is the one outcome
+// this suite exists to prevent.
+if (!demoOrigin && process.env.CI) {
+  throw new Error(NO_LOOPBACK_LITERAL)
+}
+test.skip(!demoOrigin, NO_LOOPBACK_LITERAL)
 
 /** An upload needs a real node; CI runs a chain but no cluster. */
 const beeUp = await beeReachable()
@@ -55,6 +61,9 @@ const chainUp = await chainReachable()
  * cold cluster), plus the round trip.
  */
 const UPLOAD_TEST_TIMEOUT_MS = 360_000
+
+/** The name the identity tab renames the account to, mid-test. */
+const RENAMED = 'Renamed On Another Device'
 
 /**
  * An account with a drive, created standalone on the identity origin.
@@ -98,6 +107,10 @@ async function openIdentityTab(page: Page, tab: 'apps' | 'account') {
   // Armed before the navigation that joins: the room has no mailbox, so a delta
   // published before this tab is in it is lost with nothing to re-send it.
   const joined = busRoomJoined(idPage)
+  // Handled here so a join timeout does not surface as an unhandled rejection
+  // while the `goto` is still running — the `await` below still throws it, so a
+  // genuine failure of either is reported, whichever happens first.
+  joined.catch(() => undefined)
   await idPage.goto(`${ID_ORIGIN}/?tab=${tab}`)
   await joined
   return idPage
@@ -125,16 +138,18 @@ test('the bus carries an app removal to a partitioned session', async ({ page })
 
   const idPage = await openIdentityTab(page, 'account')
 
-  // A rename does NOT reach the session: `applyAccountDelta` folds the
-  // collections only, never the metadata scalars, so `identity.name` stays as
-  // the handover left it (#608, and #610 adds the scalar fold). Asserted rather
-  // than skipped so the fold that fixes it has to come back and change this —
-  // and the removal below is what proves the channel was live meanwhile.
+  // A rename DOES reach the session: since #610 the fold merges the metadata
+  // scalars on their own per-field clocks, not just the collections, so
+  // `identity.name` follows a rename made on another device with no reconnect
+  // and no reload. (It did not before — this suite asserted the old behaviour
+  // and #610 flipped the line, which is what it was there for.)
   await idPage.getByRole('button', { name: /^Identity/ }).click()
-  await idPage.getByRole('textbox').fill('Renamed On Another Device')
+  await idPage.getByRole('textbox').fill(RENAMED)
   await idPage.getByRole('textbox').press('Enter')
-  await expect(idPage.getByRole('textbox')).toHaveValue('Renamed On Another Device')
-  await expect(shownName).toHaveText(connectedName)
+  await expect(idPage.getByRole('textbox')).toHaveValue(RENAMED)
+  // Or the assertion below would pass on the handover's own name.
+  expect(connectedName).not.toBe(RENAMED)
+  await expect(shownName).toHaveText(RENAMED, { timeout: 15000 })
 
   // Removal, not Disconnect: only a TOMBSTONED entry ends a partitioned
   // session. `restoreLocalSessionFields` keeps this context's own `appSecret`
