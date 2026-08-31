@@ -220,7 +220,28 @@ Each phase is an independent PR chain:
    and it skips at most one sleep per wait (each round re-broadcasts, so an unconditional
    skip would be one acquire per bus round-trip).
 
-5. **SWIP-60 transport adapter** once bee/bee-js release it.
+5. **The SwarmID tab as a bus peer** (#608): it publishes a delta on every account mutation,
+   and — since the consumer landed — folds a peer's into **shared storage**
+   (`ui/src/lib/stores/account-delta.ts`). The second half is what reaches a device's
+   _unpartitioned_ contexts at all: they converge through `storage` events, and no storage
+   event crosses a device boundary, so before this a revoke on device A never reached device
+   B's proxy iframe. The fold is the one beside it for the Swarm read path — the shared LWW
+   primitives, then `applyRefreshed`, whose `skipSync` is also the echo guard: a change folded
+   FROM a peer is never published back at it (the proxy states the same rule as
+   `source === "bus"`).
+
+   The fold is scoped to the room's own account: a delta naming a different one is dropped,
+   as it is in the proxy. The topic is derived from the account key, so this is belt and
+   braces — but without it a peer holding one account's room keys could write into another
+   account co-resident on the device.
+
+   One echo does survive, bounded: with a dApp tab open, the fold's storage write reaches an
+   _unpartitioned_ proxy iframe as a `storage` event, and that iframe republishes the merged
+   snapshot (`schedulePublish("change")`). It terminates after that one round trip — LWW
+   converges, and an identical-bytes `setItem` fires no further storage event — so it is a
+   trailing confirmation of the merge, not a loop.
+
+6. **SWIP-60 transport adapter** once bee/bee-js release it.
 
 ## Verification
 

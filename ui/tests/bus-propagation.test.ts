@@ -218,6 +218,75 @@ test('the bus carries an app removal to a partitioned session', async ({ page })
   })
 })
 
+// #608: the SwarmID tab now CONSUMES deltas as well as publishing them, which
+// is the only way a change made on another device reaches a device's
+// unpartitioned contexts — they read shared storage, and no storage event
+// crosses a device boundary.
+//
+// Two `BrowserContext`s are two devices: separate storage, separate device ids,
+// one signaling server. Device B is seeded with A's account document rather
+// than importing it through the UI, which keeps the test off the chain and off
+// Swarm entirely — the bus publisher has no default-stamp gate, so an account
+// with no drive still publishes.
+test('a change on one device reaches another device’s stored account', async ({
+  page,
+  browser,
+}) => {
+  // Device A: an account with one connected app, made the ordinary way.
+  await page.goto(`${ID_ORIGIN}/`)
+  await page.getByRole('link', { name: 'Get started' }).first().click()
+  await completeCreateFlow(page)
+  await page.getByRole('button', { name: 'Stay local for now' }).click()
+  // Through the proxy's own button, which reaches the popup in either storage
+  // mode — this test is about the bus, not about the transport (#613).
+  const demo = await page.context().newPage()
+  await connectPartitioned(demo, '/')
+  await demo.close()
+
+  const seeded = await page.evaluate(() => ({
+    accounts: localStorage.getItem('swarm-id-accounts'),
+    current: localStorage.getItem('swarm-id-current-account-v2'),
+  }))
+  expect(seeded.accounts).toContain('connectedApps')
+
+  // Device B: the same account, its own storage.
+  const deviceB = await browser.newContext()
+  try {
+    await deviceB.addInitScript((state: { accounts: string | null; current: string | null }) => {
+      if (state.accounts) localStorage.setItem('swarm-id-accounts', state.accounts)
+      if (state.current) localStorage.setItem('swarm-id-current-account-v2', state.current)
+    }, seeded)
+    const pageB = await deviceB.newPage()
+    const joined = busRoomJoined(pageB)
+    joined.catch(() => undefined)
+    await pageB.goto(`${ID_ORIGIN}/?tab=apps`)
+    await joined
+
+    // A revokes on device A...
+    await page.getByRole('tab', { name: 'Apps' }).click()
+    await page.getByRole('button', { name: 'App actions' }).click()
+    await page.getByRole('menuitem', { name: 'Remove' }).click()
+
+    // ...and B's DURABLE truth follows, which is what an unpartitioned proxy on
+    // B reads. Asserted on storage rather than the DOM for exactly that reason.
+    await expect
+      .poll(
+        () =>
+          pageB.evaluate(() => {
+            const doc = JSON.parse(localStorage.getItem('swarm-id-accounts') ?? '{}') as {
+              data?: { connectedApps?: { revokedAt?: number; appSecret?: string }[] }[]
+            }
+            const app = doc.data?.[0]?.connectedApps?.[0]
+            return { revoked: app?.revokedAt !== undefined, secret: app?.appSecret }
+          }),
+        { timeout: 15000 },
+      )
+      .toEqual({ revoked: true, secret: undefined })
+  } finally {
+    await deviceB.close()
+  }
+})
+
 test('a partitioned session uploads with its own stamp and reads it back', async ({ page }) => {
   test.skip(!chainUp || !beeUp, 'requires a local chain and bee cluster (pnpm dev:local)')
   test.setTimeout(UPLOAD_TEST_TIMEOUT_MS)

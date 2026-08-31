@@ -179,7 +179,14 @@ export type { BusTransport, PublishOptions } from "./bus/account-bus"
 export { SignalingTransport } from "./bus/signaling-transport"
 export { deriveBusContext } from "./bus/bus-context"
 export type { BusContext } from "./bus/bus-context"
-export { accountDeltaSnapshot } from "./bus/account-delta"
+// `restoreLocalSessionFields` is half of the same rule as `accountDeltaSnapshot`
+// — the publisher strips the per-context session fields, so every receiver puts
+// its own back after the merge. The receive schema strips them independently,
+// so a consumer that skips this blanks its own app sessions.
+export {
+  accountDeltaSnapshot,
+  restoreLocalSessionFields,
+} from "./bus/account-delta"
 export type { BusMessage, BusMessageInput } from "./bus/messages"
 
 // Encrypted backup (.swarmid) support
