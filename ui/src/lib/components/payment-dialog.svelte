@@ -27,6 +27,12 @@
   } from '$lib/payment/funding'
   import type { CancelOptions } from '$lib/payment/funding-request.svelte'
   import {
+    BUILT_IN_LABEL,
+    type PaymentMethod,
+    WIDGET_EXPLAINER,
+    WIDGET_LABEL,
+  } from '$lib/payment/payment-method'
+  import {
     type EthereumProvider,
     type PaymentQuote,
     type PaymentRail,
@@ -70,18 +76,21 @@
      * Absent, the built-in engine is the only method listed.
      */
     onUseWidget?: () => void
+    /**
+     * Which method the chooser opens on. Passed by a caller that has already
+     * asked — buying a drive chooses before it touches the chain, and finding
+     * the choice flipped back here would read as the answer not having landed.
+     * Defaults to the widget wherever it is on offer.
+     */
+    initialMethod?: PaymentMethod
   }
 
-  let { need, rail, onPaid, onCancel, onUseWidget }: Props = $props()
+  let { need, rail, onPaid, onCancel, onUseWidget, initialMethod }: Props = $props()
 
   type Screen = 'method' | 'connecting' | 'configure' | 'switching' | 'approving' | 'relaying'
-  type Method = 'widget' | 'built-in'
 
   const GNOSIS_DECIMALS = 18
   const BZZ_DECIMALS = 16
-
-  const WIDGET_LABEL = 'Pay with crypto (fund.bzz.limo)'
-  const BUILT_IN_LABEL = 'Pay with crypto (built in, experimental)'
 
   let screen = $state<Screen>('method')
   let errorMessage = $state('')
@@ -109,7 +118,9 @@
   /** Which method the chooser is on. Which methods exist is fixed for the life
    * of one payment — the dialog is created fresh per pending request — so this
    * is read ONCE, as the user's starting selection, not tracked. */
-  let method = $state<Method>(untrack(() => (onUseWidget ? 'widget' : 'built-in')))
+  let method = $state<PaymentMethod>(
+    untrack(() => initialMethod ?? (onUseWidget ? 'widget' : 'built-in')),
+  )
   /** True while `quoteFunding` is pricing the built-in method's side. */
   let pricing = $state(false)
   /** Why the built-in method cannot be used, in the quoter's own words. */
@@ -454,11 +465,13 @@
     cancel()
   }
 
-  // Extend and resize list no widget, so the built-in method is the selection
-  // from the outset — price it now rather than wait for a choice there is no
-  // way to make. Buying a drive starts on the widget and prices nothing. Read
-  // once, at setup: a later switch to the built-in method prices through
-  // `chooseMethod`, not here.
+  // Price whatever the dialog opens on. Extend and resize list no widget, so
+  // the built-in method is the selection from the outset — price it now rather
+  // than wait for a choice there is no way to make. Buying a drive reaches here
+  // having already chosen the engine (`initialMethod`), so it prices now too;
+  // only a chooser sitting on the widget prices nothing. Read once, at setup: a
+  // later switch to the built-in method prices through `chooseMethod`, not
+  // here.
   if (untrack(() => method) === 'built-in') {
     void priceBuiltIn()
   }
@@ -514,8 +527,7 @@
       </div>
       {#if method === 'widget'}
         <p class="bg-muted rounded-md px-3 py-2 text-sm">
-          {builtInRefusal ||
-            'fund.bzz.limo opens in a popup and picks the drive’s size and lifespan itself, so the ones on the form are only an estimate of what you will pay.'}
+          {builtInRefusal || WIDGET_EXPLAINER}
         </p>
         <Button class="w-full" onclick={() => onUseWidget?.()}>
           Continue to fund.bzz.limo
