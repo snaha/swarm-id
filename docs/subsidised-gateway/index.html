@@ -83,7 +83,7 @@
 <ul>
 <li><strong>Onboarding new users</strong> who don’t have BZZ tokens yet</li>
 <li><strong>Free-tier applications</strong> where the operator covers storage costs</li>
-<li><strong>Safari users</strong> who can’t access their stamps due to storage partitioning</li>
+<li><strong>Users whose browser partitions storage</strong> and whose session was handed no stamp of its own</li>
 </ul>
 <div class="sl-heading-wrapper level-h2"><h2 id="configuration">Configuration</h2><a class="sl-anchor-link" href="#configuration"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 1 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 0 0-1.42-1.42m8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 1 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 0 0 0 1.42 1 1 0 0 0 1.42 0l3.88-3.89a4.49 4.49 0 0 0 0-6.33M8.83 15.17a1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.92-4.92a1 1 0 1 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42"></path></svg></span><span class="sr-only" data-pagefind-ignore>Section titled “Configuration”</span></a></div>
 <p>Pass the <code dir="auto">subsidisedGatewayUrl</code> option when creating the client:</p>
@@ -155,12 +155,8 @@
 </table>
 <div class="sl-heading-wrapper level-h3"><h3 id="understanding-the-table">Understanding the Table</h3><a class="sl-anchor-link" href="#understanding-the-table"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 1 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 0 0-1.42-1.42m8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 1 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 0 0 0 1.42 1 1 0 0 0 1.42 0l3.88-3.89a4.49 4.49 0 0 0 0-6.33M8.83 15.17a1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.92-4.92a1 1 0 1 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42"></path></svg></span><span class="sr-only" data-pagefind-ignore>Section titled “Understanding the Table”</span></a></div>
 <p><strong>Storage Partitioned (Yes)</strong></p>
-<p>When the browser partitions storage (Safari ITP), the proxy iframe cannot access:</p>
-<ul>
-<li>The user’s postage stamps from localStorage</li>
-<li>The custom Bee node URL setting</li>
-</ul>
-<p>In this case, only the <code dir="auto">subsidisedGatewayUrl</code> (passed by the dApp at initialization) determines upload capability. This is why subsidised gateways are especially important for Safari support.</p>
+<p>When the browser partitions storage (Safari ITP), the proxy iframe cannot <strong>read</strong> the user’s postage stamps or Bee node setting out of the trusted domain’s localStorage. Since <a href="https://github.com/snaha/swarm-id/issues/277">#277</a> it does not have to: the connect popup hands both over directly, so a partitioned session normally uploads with the account’s own stamp.</p>
+<p>A subsidised gateway is the fallback for the sessions that handover does not cover — an account with no postage batch, or an older identity deployment that sends no account at all. <code dir="auto">ConnectionInfo.uploadUnavailableReason</code> distinguishes them.</p>
 <p><strong>Has User Stamp</strong></p>
 <p>The user has configured a postage stamp in the identity provider. User stamps always take priority over subsidised gateways when available.</p>
 <p><strong>Custom Node</strong></p>
