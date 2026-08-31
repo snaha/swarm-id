@@ -86,9 +86,9 @@ test.skip(!chainUp || !sourceUp, 'requires both chains and the solver (pnpm dev:
  * source chain, so `pay()` has to negotiate a network switch first, and that
  * is a state the designs draw and the code has a branch for.
  */
-async function injectPayingWallet(page: Page) {
+async function injectPayingWallet(page: Page, { misroutedGnosis = false } = {}) {
   await page.addInitScript(
-    ([sourceRpc, gnosisRpc, address, sourceChainId, gnosisChainId]) => {
+    ([sourceRpc, gnosisRpc, address, sourceChainId, gnosisChainId, misrouted]) => {
       const sourceHex = `0x${Number(sourceChainId).toString(16)}`
       const gnosisHex = `0x${Number(gnosisChainId).toString(16)}`
       // Both chains a wallet can be asked to pay from: the destination itself
@@ -96,14 +96,18 @@ async function injectPayingWallet(page: Page) {
       // asks to switch to, so the deposit lands on the chain it names.
       const endpoints: Record<string, string> = {
         [sourceHex]: sourceRpc as string,
-        [gnosisHex]: gnosisRpc as string,
+        // Misrouted plays the wallet a user actually has: chain 100 already
+        // configured, but its ACTIVE endpoint is another network entirely —
+        // what having the real Gnosis selected looks like to this app.
+        [gnosisHex]: misrouted ? (sourceRpc as string) : (gnosisRpc as string),
       }
       let chainId = '0x1'
       // A wallet that has never seen these chains, which is every wallet the
       // first time. Until one is added, switching to it fails with 4902 — the
       // branch that drives `wallet_addEthereumChain`, and the one a fake that
-      // silently accepts the switch never reaches.
-      const added = new Set<string>()
+      // silently accepts the switch never reaches. A misrouted wallet already
+      // knows chain 100 — that is the whole trap.
+      const added = new Set<string>(misrouted ? [gnosisHex] : [])
       const listeners: Array<(value: unknown) => void> = []
       // Signature count, for asserting HOW MANY times the flow asked the user
       // to sign — one deposit for a native payment, approve + deposit for a
@@ -150,10 +154,14 @@ async function injectPayingWallet(page: Page) {
               return [{ parentCapability: 'eth_accounts' }]
             case 'wallet_addEthereumChain': {
               const chain = params[0] as { chainId?: string; rpcUrls?: string[] } | undefined
-              if (!chain?.chainId || !endpoints[chain.chainId] || !chain.rpcUrls?.length) {
+              const offered = chain?.rpcUrls?.[0]
+              if (!chain?.chainId || !offered) {
                 throw new Error(`refusing to add a chain described as ${JSON.stringify(chain)}`)
               }
-              // MetaMask adds and switches in one prompt.
+              // MetaMask adds and switches in one prompt — and for a chain id
+              // it already serves, adopts the offered RPC as the active one,
+              // which is the only door out of the two-networks-one-id trap.
+              endpoints[chain.chainId] = offered
               added.add(chain.chainId)
               chainId = chain.chainId
               for (const listener of listeners) {
@@ -190,7 +198,14 @@ async function injectPayingWallet(page: Page) {
       }
       Object.defineProperty(window, 'ethereum', { value: provider, writable: true })
     },
-    [SOURCE_RPC_URL, CHAIN_RPC_URL, WALLET_ADDRESS, SOURCE_CHAIN_ID, GNOSIS_CHAIN_ID] as const,
+    [
+      SOURCE_RPC_URL,
+      CHAIN_RPC_URL,
+      WALLET_ADDRESS,
+      SOURCE_CHAIN_ID,
+      GNOSIS_CHAIN_ID,
+      misroutedGnosis,
+    ] as const,
   )
 }
 
@@ -312,8 +327,12 @@ async function mintUsdcTo(address: string, units: bigint): Promise<void> {
  * with no bridge, anything else goes through the rail and its solver — but the
  * screens are identical, which is the point of the seam.
  */
-async function buyPayingFrom(page: Page, chainId: number, tokenAddress?: string) {
-  await injectPayingWallet(page)
+async function buyPayingFrom(
+  page: Page,
+  chainId: number,
+  { tokenAddress, misroutedGnosis }: { tokenAddress?: string; misroutedGnosis?: boolean } = {},
+) {
+  await injectPayingWallet(page, { misroutedGnosis })
   await seedPaidEnvironment(page)
 
   await page.goto('/')
@@ -404,13 +423,23 @@ test('paying from another chain goes through the rail and its solver', async ({ 
   await expectDriveOwnedBySigner(page)
 })
 
+test('a wallet parked on the wrong chain 100 is walked to ours', async ({ page }) => {
+  test.setTimeout(PAYMENT_TIMEOUT_MS * 2)
+  // The user's own trap: chain 100 already in the wallet, its active endpoint
+  // another network. A bare switch satisfies the id and every payment then
+  // dies at the payer check — unless the switch verifies genesis and offers
+  // the chain again, which is what this proves end to end.
+  await buyPayingFrom(page, GNOSIS_CHAIN_ID, { misroutedGnosis: true })
+  await expectDriveOwnedBySigner(page)
+})
+
 test('paying in a token takes an approve first, and the solver pulls it', async ({ page }) => {
   test.setTimeout(PAYMENT_TIMEOUT_MS * 2)
   // 100 USDC — comfortably above any quote, so the approve is what gates the
   // pull, not the balance.
   await mintUsdcTo(WALLET_ADDRESS, 100_000_000n)
   const pulledBefore = await sourceUsdc(LOCAL_SOLVER_ADDRESS)
-  await buyPayingFrom(page, SOURCE_CHAIN_ID, SOURCE_USDC_ADDRESS)
+  await buyPayingFrom(page, SOURCE_CHAIN_ID, { tokenAddress: SOURCE_USDC_ADDRESS })
   // Two signatures, the way Relay's own ERC-20 step model reads: the approve
   // granting the solver its pull, then the value-less deposit.
   expect(await page.evaluate(() => (window as { __walletSends?: number }).__walletSends)).toBe(2)
