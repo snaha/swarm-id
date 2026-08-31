@@ -44,6 +44,12 @@ function describe(value: unknown): string {
  * "View details" never promises detail it does not have.
  */
 export function failureDetail(caught: unknown): string {
+  // A thrown `undefined`/`null` has nothing behind it: rendering the literal
+  // word would be the button promising detail it does not have, which is the
+  // whole point of the empty string.
+  if (caught === undefined || caught === null) {
+    return ''
+  }
   if (!(caught instanceof Error)) {
     return describe(caught)
   }

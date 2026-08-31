@@ -208,7 +208,7 @@
   function proceed() {
     errorMessage = ''
     // Cleared with the message it belongs to: a later failure that sets only
-    // `errorMessage` would otherwise put the previous run's stack behind "View
+    // `errorMessage` would otherwise put the previous run's detail behind "View
     // details".
     errorDetail = ''
     // The batch owner is a deterministic function of the account's (plaintext)

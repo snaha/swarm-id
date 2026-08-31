@@ -76,6 +76,13 @@ describe('failureDetail', () => {
   it('describes a non-Error throw', () => {
     expect(failureDetail('just a string')).toBe('just a string')
     expect(failureDetail({ code: 42 })).toBe('{"code":42}')
-    expect(failureDetail(undefined)).toBe('undefined')
+  })
+
+  // The empty-string contract, at the one input that used to break it: the
+  // panel said `undefined`, which is the button promising detail it has not
+  // got.
+  it('offers no details for a thrown undefined or null', () => {
+    expect(failureDetail(undefined)).toBe('')
+    expect(failureDetail(null)).toBe('')
   })
 })

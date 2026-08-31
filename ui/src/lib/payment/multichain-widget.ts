@@ -148,6 +148,57 @@ function widgetErrorMessage(obj: Record<string, unknown>): string {
 }
 
 /**
+ * The fields of a widget error payload that may be shown behind "View details".
+ *
+ * An allowlist, not a denylist, because the widget's message shapes are not a
+ * documented contract and the popup manages a **temporary wallet**: a field
+ * added upstream could carry key material, and the string this feeds is written
+ * to be pasted into a bug report. An unknown key is dropped rather than
+ * guessed at.
+ */
+const WIDGET_ERROR_REPORT_FIELDS = [
+  'event',
+  'error',
+  'message',
+  'code',
+  'reason',
+  'step',
+  'status',
+  'chainId',
+  'txHash',
+  'batchId',
+] as const
+
+/** Primitives as they are; anything else reduced to its `message`, if it has a
+ *  string one. An allowlisted field can still hold a whole object. */
+function reportableValue(value: unknown): unknown {
+  if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') {
+    return value
+  }
+  const nested = (value as { message?: unknown } | undefined)?.message
+  return typeof nested === 'string' ? nested : undefined
+}
+
+/** The payload, reduced to what is safe to paste. Dropped keys are reported by
+ *  NAME only, so a report says what it is not showing. */
+function reportableWidgetError(obj: Record<string, unknown>): Record<string, unknown> {
+  const reportable: Record<string, unknown> = {}
+  for (const field of WIDGET_ERROR_REPORT_FIELDS) {
+    const value = reportableValue(obj[field])
+    if (value !== undefined) {
+      reportable[field] = value
+    }
+  }
+  const dropped = Object.keys(obj).filter(
+    (key) => !(WIDGET_ERROR_REPORT_FIELDS as readonly string[]).includes(key),
+  )
+  if (dropped.length > 0) {
+    reportable.droppedFields = dropped
+  }
+  return reportable
+}
+
+/**
  * Coerce a value that may arrive as a number or a numeric string into a finite
  * number, else `undefined`. The widget's message-field types are not
  * contractually guaranteed, so we accept either form.
@@ -350,8 +401,10 @@ export function openStampPurchaseWidget(options: PurchaseStampOptions): StampPur
       // The payload as the cause, because `widgetErrorMessage` reduces it to
       // one sentence for the dialog and the rest is the only account we get of
       // what happened inside a popup we cannot see into. `failureDetail`
-      // renders it behind "View details".
-      const error = new Error(widgetErrorMessage(obj), { cause: obj })
+      // renders it behind "View details" — hence the allowlist: that string is
+      // written to be pasted into a bug report, and this popup holds a
+      // temporary wallet.
+      const error = new Error(widgetErrorMessage(obj), { cause: reportableWidgetError(obj) })
       // Money in flight: the same rule `cancel()` and `finish` follow — never
       // force a popup shut while the user's funds sit on the temporary wallet,
       // because the pipeline that sweeps them back runs client-side there
