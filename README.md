@@ -268,7 +268,7 @@ Safari's Intelligent Tracking Prevention (ITP) partitions storage for third-part
 
 What remains regardless:
 
-- **Credentials are per page load.** Nothing is persisted in the partition, so a reload re-runs the popup handshake.
+- **The session outlives the page.** The handover is kept in the partition's own store until the user disconnects or the 30-day session expires, so a reload does not re-run the popup ([#635](https://github.com/snaha/swarm-id/issues/635)). A restored session checks the account's own Swarm state in the background, since a revoke made while the tab was closed reaches it no other way.
 - **Live propagation needs a signaling server.** Without one configured, a partitioned iframe only talks to contexts in its own partition.
 - **Safari private mode**: Sessions are ephemeral (lost when the private window closes).
 

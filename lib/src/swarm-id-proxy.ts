@@ -46,6 +46,8 @@ import type {
   ConnectionIdentity,
   ConnectionInfo,
   UploadUnavailableReason,
+  AuthData,
+  PartitionSession,
 } from "./types"
 import {
   ParentToIframeMessageSchema,
@@ -53,6 +55,8 @@ import {
   PopupToIframeMessageSchema,
   STORAGE_CHALLENGE_KEY,
   STORAGE_KEY_NETWORK_SETTINGS,
+  STORAGE_KEY_PARTITION_SESSION,
+  PartitionSessionSchemaV1,
   leaseCacheStorageKey,
 } from "./types"
 import type { PopupToIframeMessage } from "./types"
@@ -103,6 +107,7 @@ import {
 } from "./sync"
 import type { DeviceStateSnapshot } from "./sync"
 import { mergeDevicesList } from "./sync/merge-snapshot"
+import { foldAccountFromSwarm } from "./sync/fold-account-from-swarm"
 import {
   accountDeltaSnapshot,
   restoreLocalSessionFields,
@@ -120,6 +125,7 @@ import {
 import {
   createNetworkSettingsStorageManager,
   createAccountsStorageManager,
+  serializeSyncedAccount,
 } from "./utils/storage-managers"
 import { isStorageShared } from "./utils/storage-probe"
 import {
@@ -285,7 +291,7 @@ function deltaFoldView(snapshot: AccountStateSnapshot): DeviceStateSnapshot {
  *
  * Responsibilities:
  * - Receive app-specific secrets from auth popup
- * - Store secrets in partitioned localStorage
+ * - Keep a partitioned session in this partition's own localStorage (#635)
  * - Proxy Bee API calls from parent dApp
  * - Augment requests with authentication
  * - Return responses to parent dApp
@@ -793,6 +799,11 @@ export class SwarmIdProxy {
         this.signerKey = undefined
       }
 
+      // Keep it, so a reload does not log the user out of the dApp (#635).
+      // On Safari the partitioned path is the ordinary one, and re-running the
+      // popup per page load is not a session — the deadline below is.
+      this.savePartitionSession(message.data)
+
       this.showAuthButton()
       this.sendToParent({
         type: "authSuccess",
@@ -800,6 +811,98 @@ export class SwarmIdProxy {
       })
       this.emitConnectionInfoIfChanged()
     }
+  }
+
+  /**
+   * Write the handed-over session to this partition's own store.
+   *
+   * The wire form, not the parsed one: `AuthDataSchema` revives `BatchId` and
+   * `PrivateKey` instances, which do not survive `JSON.stringify`, so what goes
+   * in is what the popup sent and what comes back out is parsed the same way it
+   * was on arrival.
+   *
+   * The deadline is the one `hydratePartitionAccount` just computed, read back
+   * off the connection rather than recomputed, so the session at rest and the
+   * session in memory cannot disagree about when it ends.
+   */
+  private savePartitionSession(data: AuthData): void {
+    if (!this.parentOrigin) return
+    const connection = this.partitionAccount?.connectedApps.find(
+      (app) => app.appUrl === this.parentOrigin,
+    )
+    const record: unknown = {
+      version: 1,
+      parentOrigin: this.parentOrigin,
+      accountId: this.partitionAccount?.id.toHex(),
+      connectedUntil:
+        connection?.connectedUntil ?? Date.now() + DEFAULT_SESSION_DURATION,
+      data: {
+        ...data,
+        // The projection carries `BatchId`/`PrivateKey`/`EthAddress`; this is
+        // the same serializer the popup used to build it.
+        account: this.partitionAccount
+          ? serializeSyncedAccount(data.account ?? this.partitionAccount)
+          : undefined,
+        // Both are already hex on this schema, unlike the account's fields.
+        postageBatchId: data.postageBatchId,
+        signerKey: data.signerKey,
+      },
+    }
+    try {
+      localStorage.setItem(
+        STORAGE_KEY_PARTITION_SESSION,
+        JSON.stringify(record),
+      )
+    } catch (error) {
+      // A session that cannot be stored still works for this page load.
+      console.warn("[Proxy] Could not persist the partitioned session:", error)
+    }
+  }
+
+  /** Forget the stored session. Every path that ends one calls this. */
+  private clearPartitionSession(): void {
+    try {
+      localStorage.removeItem(STORAGE_KEY_PARTITION_SESSION)
+    } catch {
+      // Nothing to do: an unreadable store cannot hold a session either.
+    }
+  }
+
+  /**
+   * The stored session for THIS parent, if it is still within its deadline.
+   *
+   * A record for another origin is refused rather than trusted on the strength
+   * of where it was found — the partition already scopes the store, and this is
+   * the belt to that pair of braces. An expired or malformed one is removed on
+   * the way past: it will never become valid again.
+   */
+  private readPartitionSession(): PartitionSession | undefined {
+    let raw: string | null = null
+    try {
+      raw = localStorage.getItem(STORAGE_KEY_PARTITION_SESSION)
+    } catch {
+      return undefined
+    }
+    if (!raw) return undefined
+
+    let parsed: unknown
+    try {
+      parsed = JSON.parse(raw)
+    } catch {
+      this.clearPartitionSession()
+      return undefined
+    }
+    const result = PartitionSessionSchemaV1.safeParse(parsed)
+    if (!result.success) {
+      this.clearPartitionSession()
+      return undefined
+    }
+    if (result.data.parentOrigin !== this.parentOrigin) return undefined
+    if (result.data.connectedUntil <= Date.now()) {
+      this.clearPartitionSession()
+      return undefined
+    }
+    return result.data
   }
 
   /**
@@ -2082,9 +2185,103 @@ export class SwarmIdProxy {
         this.postageBatchId = undefined
         this.signerKey = undefined
       }
-    } else {
-      this.authLoading = false
-      this.showAuthButton()
+      return
+    }
+
+    // No shared storage to read: either nobody has connected, or this iframe is
+    // partitioned. A session kept from a previous load answers that (#635) —
+    // the same 30-day deadline the unpartitioned branch above enforces out of
+    // shared storage, enforced here out of this partition's own.
+    const session = this.readPartitionSession()
+    if (session) {
+      await this.restorePartitionSession(session)
+      return
+    }
+
+    this.authLoading = false
+    this.showAuthButton()
+  }
+
+  /**
+   * Bring a stored session back up, exactly as the popup handover does.
+   *
+   * Through the same `hydratePartitionAccount`, so there is one function that
+   * builds a partitioned session rather than two that drift.
+   *
+   * The deadline cannot see a revoke made while the tab was closed — the
+   * re-handshake used to be what caught that. So the session comes up now and
+   * is checked against the account's own Swarm state in the background
+   * (`verifyRestoredSession`), which is the posture the unpartitioned path
+   * already has: trust local storage first, learn of a remote revoke after.
+   */
+  private async restorePartitionSession(
+    session: PartitionSession,
+  ): Promise<void> {
+    const { data } = session
+    this.appSecret = data.secret
+    this.authenticated = true
+    this.storagePartitioned = true
+    this.authLoading = false
+    this.deviceId = getOrCreateDeviceId()
+
+    if (data.identityId && data.identityName && data.identityAddress) {
+      this.storagePartitionedIdentity = {
+        id: data.identityId,
+        name: data.identityName,
+        address: data.identityAddress,
+        publicKey: data.identityPublicKey,
+        avatar: generatedAvatar(data.identityId),
+      }
+    }
+
+    if (data.account) {
+      await this.hydratePartitionAccount(
+        data.account,
+        data.secret,
+        data.networkSettings,
+      )
+    }
+
+    this.showAuthButton()
+    this.emitConnectionInfoIfChanged()
+    void this.verifyRestoredSession()
+  }
+
+  /**
+   * Check a restored session against the account's own state on Swarm, and end
+   * it if this origin has been revoked or disconnected since.
+   *
+   * Background, and deliberately fail-open: a gateway that cannot be reached is
+   * not evidence of a revoke, and refusing the session for it would make every
+   * offline load a logout. A revoke that is missed here still arrives over the
+   * bus the moment the SwarmID tab and this iframe are live together.
+   */
+  private async verifyRestoredSession(): Promise<void> {
+    const account = this.partitionAccount
+    if (!account) return
+    try {
+      const folded = await foldAccountFromSwarm({
+        bee: this.bee,
+        derivationKey: account.derivationKey,
+        accountId: account.id.toHex(),
+      })
+      if (!folded) return
+      const app = folded.account.connectedApps.find(
+        (entry) => entry.appUrl === this.parentOrigin,
+      )
+      const ended =
+        app === undefined ||
+        app.revokedAt !== undefined ||
+        (app.connectedUntil !== undefined && app.connectedUntil <= Date.now())
+      if (!ended) return
+      console.info(
+        "[Proxy] The restored session was revoked while this page was closed",
+      )
+      this.clearAuthData()
+      this.emitConnectionInfoIfChanged()
+    } catch (error) {
+      // Fail open, as above — an unreachable gateway says nothing.
+      console.warn("[Proxy] Could not verify the restored session:", error)
     }
   }
 
@@ -2613,6 +2810,11 @@ export class SwarmIdProxy {
     if (!this.parentOrigin) {
       return
     }
+
+    // The session ends here whichever way it ended — disconnect, revoke, or an
+    // expiry the reconcile noticed — so the stored copy goes with it, or the
+    // next load would bring it back (#635).
+    this.clearPartitionSession()
 
     // Clear stamper state from localStorage
     const stamperKey = `swarm-stamper-${this.parentOrigin}-${this.postageBatchId}`

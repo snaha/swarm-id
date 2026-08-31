@@ -48,6 +48,23 @@ vi.mock("./utils/batch-utilization", async (importActual) => {
     },
   }
 })
+/**
+ * The background verify a restored session runs (#635). Left answering
+ * `undefined` — "nothing published" — so the tests that do not care about it
+ * are not steered by it; the one that does sets a folded account.
+ */
+const foldedFromSwarm = vi.hoisted(
+  () => ({ value: undefined }) as { value: unknown },
+)
+vi.mock("./sync/fold-account-from-swarm", async (importActual) => {
+  const actual =
+    await importActual<typeof import("./sync/fold-account-from-swarm")>()
+  return {
+    ...actual,
+    foldAccountFromSwarm: vi.fn(() => Promise.resolve(foldedFromSwarm.value)),
+  }
+})
+
 vi.mock("./storage/utilization-store", () => ({
   UtilizationStoreDB: vi.fn(function () {
     return {}
@@ -138,7 +155,11 @@ import {
   serializeSyncedAccount,
 } from "./utils/storage-managers"
 import { serializeAccountStateSnapshot } from "./utils/account-state-snapshot"
-import { STORAGE_CHALLENGE_KEY, STORAGE_KEY_ACCOUNTS } from "./types"
+import {
+  STORAGE_CHALLENGE_KEY,
+  STORAGE_KEY_ACCOUNTS,
+  STORAGE_KEY_PARTITION_SESSION,
+} from "./types"
 import { KNOWN_DEVICE_MAX_AGE_MS } from "./utils/active-devices"
 import { DEFAULT_BEE_NODE_URL } from "./schemas"
 import type {
@@ -832,6 +853,134 @@ describe("SwarmIdProxy partitioned write enablement", () => {
     } finally {
       busChannel.close()
     }
+  })
+
+  // #635: the handed-over session used to live only in memory, so a plain
+  // reload logged the user out of the dApp — on Safari, where partitioned is
+  // the ordinary mode, that is every reload. It is kept now, under the same
+  // 30-day deadline the unpartitioned path enforces out of shared storage.
+  describe("a session that survives a reload", () => {
+    /** Reconnect the way a page load does: a new proxy over the same store. */
+    async function reload(): Promise<void> {
+      proxy.destroy()
+      mountProxy()
+      await dispatch(
+        { type: "parentIdentify", requestId: "r1", metadata: { name: "dApp" } },
+        PARENT_ORIGIN,
+        parentWindow,
+      )
+    }
+
+    async function connectPartitioned(): Promise<void> {
+      const challenge = await startPartitionedConnect()
+      await sendSetSecret(challenge, {
+        account: serializeSyncedAccount(makeSyncedAccount()),
+        identityId: "aa".repeat(20),
+        identityName: "Partition Test Account",
+        identityAddress: "aa".repeat(20),
+      })
+    }
+
+    function storedSession(): Record<string, unknown> | undefined {
+      const raw = localStorageFake.getItem(STORAGE_KEY_PARTITION_SESSION)
+      return raw ? (JSON.parse(raw) as Record<string, unknown>) : undefined
+    }
+
+    it("comes back as a writer, without a second popup", async () => {
+      await connectPartitioned()
+      expect(storedSession()).toBeTruthy()
+
+      await reload()
+
+      const infos = messagesOfType("connectionInfoChanged")
+      const last = infos[infos.length - 1]
+      expect(last.storagePartitioned).toBe(true)
+      expect(last.uploadMode).toBe("user-stamp")
+      expect(last.canUpload).toBe(true)
+      expect(last.identity?.name).toBe("Partition Test Account")
+      // The popup is what a reload used to require; nothing opened one here.
+      expect(window.open).not.toHaveBeenCalled()
+    })
+
+    it("keeps the deadline the session was given, not a fresh one", async () => {
+      await connectPartitioned()
+      const record = storedSession()!
+      // 30 days, give or take the test's own runtime.
+      const remaining = (record.connectedUntil as number) - Date.now()
+      expect(remaining).toBeGreaterThan(29 * 24 * 60 * 60 * 1000)
+      expect(remaining).toBeLessThanOrEqual(30 * 24 * 60 * 60 * 1000)
+    })
+
+    it("refuses a session stored for another parent origin", async () => {
+      await connectPartitioned()
+      const record = storedSession()!
+      localStorageFake.setItem(
+        STORAGE_KEY_PARTITION_SESSION,
+        JSON.stringify({ ...record, parentOrigin: "https://evil.example.com" }),
+      )
+
+      await reload()
+
+      const infos = messagesOfType("connectionInfoChanged")
+      expect(infos[infos.length - 1]?.canUpload).toBe(false)
+    })
+
+    it("refuses an expired session, and forgets it", async () => {
+      await connectPartitioned()
+      const record = storedSession()!
+      localStorageFake.setItem(
+        STORAGE_KEY_PARTITION_SESSION,
+        JSON.stringify({ ...record, connectedUntil: Date.now() - 1 }),
+      )
+
+      await reload()
+
+      expect(storedSession()).toBeUndefined()
+      const infos = messagesOfType("connectionInfoChanged")
+      expect(infos[infos.length - 1]?.canUpload).toBe(false)
+    })
+
+    it("forgets the session when the connection ends", async () => {
+      await connectPartitioned()
+      await dispatch(
+        { type: "disconnect", requestId: "r9" },
+        PARENT_ORIGIN,
+        parentWindow,
+      )
+      expect(storedSession()).toBeUndefined()
+    })
+
+    // The deadline cannot see a revoke made while the tab was closed — the
+    // re-handshake used to be what caught that, and persisting removes it. So
+    // a restored session checks the account's own Swarm state in the
+    // background and tears itself down on a tombstone.
+    it("ends a restored session the account has since revoked", async () => {
+      await connectPartitioned()
+      const revoked = makeSyncedAccount()
+      foldedFromSwarm.value = {
+        account: {
+          ...revoked,
+          connectedApps: [
+            {
+              appUrl: PARENT_ORIGIN,
+              appName: "dApp",
+              lastConnectedAt: Date.now(),
+              revokedAt: Date.now(),
+            },
+          ],
+        },
+        devices: [],
+      }
+
+      await reload()
+
+      await vi.waitFor(() => {
+        const infos = messagesOfType("connectionInfoChanged")
+        expect(infos[infos.length - 1]?.canUpload).toBe(false)
+      })
+      expect(storedSession()).toBeUndefined()
+      foldedFromSwarm.value = undefined
+    })
   })
 
   // A revoke reaches a live proxy only through the browser `storage` event, and

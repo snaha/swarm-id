@@ -54,6 +54,22 @@ export const STORAGE_CHALLENGE_KEY = "swarm-storage-challenge"
 export const STORAGE_KEY_LEASE_CACHE_PREFIX = "swarm-id-lease-v2"
 
 /**
+ * The handed-over session a PARTITIONED proxy keeps, so a reload does not log
+ * the user out of the dApp (#635).
+ *
+ * Its own key rather than the accounts document, and not by preference:
+ * `LocalAccountSchemaV1` quarantines vault-less records, and the hydrated
+ * partition account carries inert vault placeholders by design — it would fail
+ * to parse on load. This is a session, and takes a session's shape.
+ *
+ * Written only from a partitioned context, where the store is already scoped to
+ * (this origin, the embedding page's origin) by the browser. `parentOrigin` is
+ * recorded anyway so a record can be refused rather than trusted on the strength
+ * of where it was found.
+ */
+export const STORAGE_KEY_PARTITION_SESSION = "swarm-id-partition-session"
+
+/**
  * localStorage key for the proxy's per-account partition-lease cache (a
  * `PartitionLeaseStateSnapshot`). Same-origin tabs share this, so the
  * SwarmID UI reads it to render the *self* device's active partition
@@ -1718,6 +1734,32 @@ export const AuthDataSchema = z.object({
 })
 
 export type AuthData = z.infer<typeof AuthDataSchema>
+
+/**
+ * A partitioned session at rest (#635), under
+ * {@link STORAGE_KEY_PARTITION_SESSION}.
+ *
+ * It holds the payload the connect popup handed over — including the app secret
+ * and, for a writer session, the NARROWED stamp projection (#578 limits it to
+ * the stamps this app can spend) — plus the deadline the session was given.
+ * The popup hands the same material over on every load today; keeping it
+ * changes the window from the life of the page to the life of the session, in a
+ * store only this (SwarmID origin, dApp origin) pair can read.
+ *
+ * `connectedUntil` is the same clock the unpartitioned path enforces from
+ * shared storage, so both modes end a session on the same rule. What the
+ * deadline cannot see is a revoke made while the tab was closed; a restored
+ * session verifies against the account's own Swarm state for that.
+ */
+export const PartitionSessionSchemaV1 = z.object({
+  version: z.literal(1),
+  parentOrigin: z.string(),
+  accountId: z.string().optional(),
+  connectedUntil: z.number(),
+  data: AuthDataSchema,
+})
+
+export type PartitionSession = z.infer<typeof PartitionSessionSchemaV1>
 
 export const SetSecretMessageSchema = z.object({
   type: z.literal("setSecret"),
