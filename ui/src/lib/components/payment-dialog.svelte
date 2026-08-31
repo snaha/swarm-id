@@ -465,11 +465,13 @@
     cancel()
   }
 
-  // Extend and resize list no widget, so the built-in method is the selection
-  // from the outset — price it now rather than wait for a choice there is no
-  // way to make. Buying a drive starts on the widget and prices nothing. Read
-  // once, at setup: a later switch to the built-in method prices through
-  // `chooseMethod`, not here.
+  // Price whatever the dialog opens on. Extend and resize list no widget, so
+  // the built-in method is the selection from the outset — price it now rather
+  // than wait for a choice there is no way to make. Buying a drive reaches here
+  // having already chosen the engine (`initialMethod`), so it prices now too;
+  // only a chooser sitting on the widget prices nothing. Read once, at setup: a
+  // later switch to the built-in method prices through `chooseMethod`, not
+  // here.
   if (untrack(() => method) === 'built-in') {
     void priceBuiltIn()
   }

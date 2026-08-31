@@ -11,9 +11,12 @@
  * the payment screens never open. `payment-rail.test.ts` is where paying is the
  * subject.
  *
- * The two failure cases are the exception, one per method: an unreachable chain
- * for the built-in engine, and the /dev mock's error outcome for fund.bzz.limo,
- * which settles on mainnet and can be reached here no other way.
+ * The exceptions are the cases about the route itself: the two failures, one per
+ * method — an unreachable chain for the built-in engine, and the /dev mock's
+ * error outcome for fund.bzz.limo, which settles on mainnet and can be reached
+ * here no other way — and the two about choosing, which check that the question
+ * is put whatever the owner address holds (#619) and that the seam's own screen
+ * opens on the answer.
  */
 import { expect, test } from '@playwright/test'
 
@@ -169,7 +172,7 @@ test('a funded account is still asked which payment method to use', async ({ pag
   expect((await storedDrives(page)).live).toHaveLength(0)
 
   // And the engine still settles from the parked funds, with no pay screen.
-  await dialog.getByRole('combobox').first().selectOption({ index: 1 })
+  await dialog.getByRole('combobox').first().selectOption('built-in')
   await dialog.getByRole('button', { name: 'Continue' }).click()
   await dialog.getByRole('button', { name: 'Done' }).click({ timeout: DRIVE_SETTLE_TIMEOUT_MS })
   expect((await storedDrives(page)).live).toHaveLength(1)
@@ -218,6 +221,44 @@ test('a failed mock purchase surfaces the error and adds nothing', async ({ page
   })
   const drives = await storedDrives(page)
   expect(drives.live).toHaveLength(0)
+})
+
+// The chooser answering up front (#619) took the payment screens out of the buy
+// flow's only e2e path, leaving the seam, `initialMethod` and the in-dialog
+// widget fallback uncovered. This walks the whole built-in leg an unfunded
+// account takes.
+test('an unfunded built-in purchase opens the payment screens on the method already chosen', async ({
+  page,
+}) => {
+  test.setTimeout(CHAIN_TEST_TIMEOUT_MS)
+  // The /dev mock is what the widget fallback lands on at the end — mainnet is
+  // reachable here no other way. Planted before any load: the dev-settings
+  // store reads these at app init.
+  await page.addInitScript(() => {
+    localStorage.setItem('dev-mock-stamp-enabled', 'true')
+    localStorage.setItem('dev-mock-stamp-popup', 'false')
+    localStorage.setItem('dev-mock-stamp-result', 'error')
+  })
+  // Deliberately NOT funded: the owner address is short, so `runPurchase`
+  // raises the funding seam and the payment screens open.
+  await createLocalAccount(page)
+
+  await addDrive(page, { settle: false })
+
+  // The seam's own screen, opened on the engine the chooser was left on. It
+  // used to flip back to the widget here, reading as the answer not landing.
+  const method = page.getByRole('dialog').getByRole('combobox').first()
+  await expect(method).toHaveValue('built-in', { timeout: DRIVE_SETTLE_TIMEOUT_MS })
+
+  // And the way out of a built-in leg that cannot price or pay: switch here,
+  // and the purchase carries on through the widget rather than ending.
+  await method.selectOption('widget')
+  await page.getByRole('button', { name: 'Continue to fund.bzz.limo' }).click()
+
+  await expect(page.getByText('Mock error: Purchase failed')).toBeVisible({
+    timeout: DRIVE_SETTLE_TIMEOUT_MS,
+  })
+  expect((await storedDrives(page)).live).toHaveLength(0)
 })
 
 test('an expired drive offers no extend or resize, only removal', async ({ page }) => {

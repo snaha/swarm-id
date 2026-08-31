@@ -291,12 +291,8 @@ export async function addDrive(
   await dialog.getByRole('spinbutton').fill('30')
   await dialog.getByRole('combobox').nth(2).selectOption('days')
   await page.getByRole('button', { name: 'Proceed' }).click()
-  // The chooser, which opens whatever the owner address holds. Index 0 is the
-  // widget, 1 the built-in engine.
-  await dialog
-    .getByRole('combobox')
-    .first()
-    .selectOption({ index: method === 'widget' ? 0 : 1 })
+  // The chooser, which opens whatever the owner address holds.
+  await dialog.getByRole('combobox').first().selectOption(method)
   await dialog
     .getByRole('button', { name: method === 'widget' ? 'Continue to fund.bzz.limo' : 'Continue' })
     .click()

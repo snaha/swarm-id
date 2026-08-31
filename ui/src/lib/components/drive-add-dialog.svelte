@@ -204,6 +204,19 @@
     abandonPurchase()
   }
 
+  /**
+   * Back to the form for another go, letting go of the failed run first. A
+   * funding request stays armed once its payment lands — a cancel from there
+   * would cost the user money — and nothing lowers it when the operation ends,
+   * so without this the retry inherits `armed` from the run that already
+   * failed. The next attempt then renders with no Cancel whichever route it
+   * takes, including the widget, which never goes near the rail at all.
+   */
+  function retry() {
+    release()
+    phase = 'form'
+  }
+
   function close() {
     release()
     // Whichever way the success screen is dismissed — Done, Esc, the backdrop —
@@ -509,7 +522,7 @@
     successTitle="Purchase completed!"
     successBody="Your drive is ready to use."
     cancellable={!funding.armed}
-    onRetry={() => (phase = 'form')}
+    onRetry={retry}
     onClose={close}
   />
 {:else}
