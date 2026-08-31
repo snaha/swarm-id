@@ -144,6 +144,37 @@ test('drive management: add, rename, set default, remove', async ({ page }) => {
   expect(afterRemove.default).toBe(afterRemove.live[0].batchID)
 })
 
+// #619: the funding seam used to be the only place the method could be chosen,
+// and it is raised only when the owner address is short — so an account holding
+// funds from an earlier attempt was committed to the built-in engine, with the
+// widget reachable from nowhere. The chooser now precedes the balance read.
+test('a funded account is still asked which payment method to use', async ({ page }) => {
+  test.setTimeout(CHAIN_TEST_TIMEOUT_MS)
+  await createLocalAccount(page)
+  // Enough that `quoteFunding` comes back needing zero: the exact state that
+  // used to skip the question.
+  await fundPostageSigner(page)
+
+  await page.getByRole('tab', { name: 'Storage' }).click()
+  await page.getByRole('button', { name: 'Add drive' }).click()
+  const dialog = page.getByRole('dialog')
+  await dialog.getByRole('combobox').nth(1).selectOption({ index: 1 })
+  await dialog.getByRole('spinbutton').fill('30')
+  await dialog.getByRole('combobox').nth(2).selectOption('days')
+  await page.getByRole('button', { name: 'Proceed' }).click()
+
+  // Both routes on offer, and the purchase not yet started.
+  await expect(dialog.getByRole('button', { name: 'Continue to fund.bzz.limo' })).toBeVisible()
+  await expect(dialog.locator('option', { hasText: 'built in' })).toHaveCount(1)
+  expect((await storedDrives(page)).live).toHaveLength(0)
+
+  // And the engine still settles from the parked funds, with no pay screen.
+  await dialog.getByRole('combobox').first().selectOption({ index: 1 })
+  await dialog.getByRole('button', { name: 'Continue' }).click()
+  await dialog.getByRole('button', { name: 'Done' }).click({ timeout: DRIVE_SETTLE_TIMEOUT_MS })
+  expect((await storedDrives(page)).live).toHaveLength(1)
+})
+
 test('a purchase that cannot reach the chain surfaces the error and adds nothing', async ({
   page,
 }) => {
@@ -180,10 +211,7 @@ test('a failed mock purchase surfaces the error and adds nothing', async ({ page
   })
   await createLocalAccount(page)
 
-  // Deliberately unfunded: the payment screen is the only way to hand a
-  // purchase to fund.bzz.limo, and that method is what the mock stands in for.
-  await addDrive(page, { settle: false })
-  await page.getByRole('button', { name: 'Continue to fund.bzz.limo' }).click()
+  await addDrive(page, { settle: false, method: 'widget' })
 
   await expect(page.getByText('Mock error: Purchase failed')).toBeVisible({
     timeout: DRIVE_SETTLE_TIMEOUT_MS,
