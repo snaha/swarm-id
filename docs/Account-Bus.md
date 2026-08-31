@@ -223,13 +223,22 @@ Done:
 - Unit (Vitest, TDD): envelope encryption/schema, "delta merged over bus ≡ delta merged from
   feed payload", lease fast-path state machine, lane-scoped utilization deltas, partitioned
   hydration. The relay tests run the real signaling server; WebRTC is faked.
+- Playwright e2e over the real signaling server (`ui/tests/bus-propagation.test.ts`, #569): a
+  genuinely partitioned proxy iframe — the demo browsed under a loopback literal while the proxy
+  origin stays `localhost`, so the two are cross-site — reached by an app removal published from
+  the SwarmID tab, and a partitioned connect whose upload round-trips. The partition itself is
+  asserted first, because Playwright's default chromium args turn third-party storage
+  partitioning off and a suite that skips that check proves nothing.
 
 Planned — **not yet written**, do not read the list above as covering these:
 
-- Playwright e2e against the local bee cluster plus a dev signaling server (#569):
-  two isolated contexts propagating a rename/revocation over the bus; partitioned-mode
-  connect → upload succeeds → a second context observes the utilization/lease state; lease
-  handover sub-second with both peers live, timeout fallback with one peer killed.
+- The **rename** half of the propagation pair (#569): a cross-device rename does not reach a
+  partitioned session at all today — `applyAccountDelta` folds the collections, never the
+  metadata scalars — so the e2e above asserts the current behaviour and #610's scalar fold is
+  what changes it.
+- A second context observing the utilization/lease state, and lease handover — sub-second with
+  both peers live, timeout fallback with one peer killed. These extend
+  `lib/test/live/multi-device-acquire-upload.test.ts`, not the Playwright rig.
 - Manual Safari (macOS) smoke test against staging, under real ITP — until it lands, Safari
   upload support is expected-but-unverified (see the README).
 

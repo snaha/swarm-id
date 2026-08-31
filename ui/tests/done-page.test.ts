@@ -10,6 +10,7 @@ import {
   chainReachable,
   completeCreateFlow,
   fundPostageSigner,
+  goToApp,
   openConnectPopup,
   seedLocalChain,
 } from './helpers'
@@ -22,19 +23,6 @@ test.skip(!chainUp, 'requires a local chain (pnpm dev:local)')
 
 const DEMO_URL = 'http://localhost:3500'
 const APP_NAME = 'Swarm ID Demo'
-
-/**
- * "Go to app" closes the popup from its click handler — under load the window
- * can be gone before the click roundtrip returns, so tolerate that error and
- * assert the closure itself.
- */
-async function goToApp(popup: Page) {
-  await popup
-    .getByRole('button', { name: 'Go to app' })
-    .click()
-    .catch(() => undefined)
-  await expect.poll(() => popup.isClosed()).toBe(true)
-}
 
 /** Asserts the shared done view's drive pitch (the no-drive branch). */
 async function expectDrivePitch(page: Page) {
