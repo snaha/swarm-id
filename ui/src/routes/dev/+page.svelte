@@ -49,7 +49,11 @@
     devChainFunds,
     sendFromFaucet,
   } from '$lib/dev/chain-funding'
-  import { localSourceRpcUrl, sourceEthBalance } from '$lib/dev/local-payment-rail'
+  import {
+    localSourceRpcUrl,
+    sourceEthBalance,
+    sourceUsdcBalance,
+  } from '$lib/dev/local-payment-rail'
   import { postageStampsStore } from '$lib/dev/postage-stamps.svelte'
   import { syncStore } from '$lib/dev/sync.svelte'
   import { chainIdentity, evictChainCaches, probeChainId } from '$lib/payment/chain'
@@ -287,6 +291,13 @@
     },
     { value: 'usdc', chain: 'gnosis', label: 'USDC', decimals: USDC_DECIMALS, placeholder: '10' },
     { value: 'eth', chain: 'source', label: 'ETH', decimals: ETH_DECIMALS, placeholder: '1' },
+    {
+      value: 'usdc-source',
+      chain: 'source',
+      label: 'USDC',
+      decimals: USDC_DECIMALS,
+      placeholder: '10',
+    },
   ]
   /** Contract addresses for the ERC20 rows above, from the chain's own preset. */
   const FAUCET_TOKEN_ADDRESSES: Record<string, `0x${string}`> = {
@@ -313,6 +324,8 @@
   let walletFunds = $state<FundsRow | undefined>(undefined)
   /** Undefined means the source chain never answered — NOT a zero balance. */
   let sourceEth = $state<bigint | undefined>(undefined)
+  /** Same rule; additionally undefined while the mock is not installed yet. */
+  let sourceUsdc = $state<bigint | undefined>(undefined)
   let fundsError = $state('')
 
   // The typed recipient, normalized. Undefined while it is not an address,
@@ -422,6 +435,7 @@
       funds = undefined
       walletFunds = undefined
       sourceEth = undefined
+      sourceUsdc = undefined
       fundsError = ''
       return
     }
@@ -437,9 +451,11 @@
     // is what stops the old numbers sitting under the new label meanwhile.
     if (untrack(() => funds)?.recipient.address !== requested) {
       funds = undefined
-      // The ETH figure carries no address of its own, so it follows the one
-      // that does — otherwise it is the same stale-number trap, one column over.
+      // The fake-mainnet figures carry no address of their own, so they follow
+      // the one that does — otherwise it is the same stale-number trap, one
+      // column over.
       sourceEth = undefined
+      sourceUsdc = undefined
     }
     if (untrack(() => walletFunds)?.address !== wallet) {
       walletFunds = undefined
@@ -448,17 +464,18 @@
       faucetRecipient !== requested ||
       connectedWallet !== wallet ||
       networkSettingsStore.gnosisRpcUrl !== rpcUrl
-    // Settled rather than raced to a first failure: the three reads cover two
+    // Settled rather than raced to a first failure: the reads cover two
     // chains and three addresses, and each is missing under ordinary
     // conditions — no source chain running, no wallet connected. One losing
     // may not cost the figures the others did return.
-    const [gnosis, walletRead, eth] = await Promise.allSettled([
+    const [gnosis, walletRead, eth, usdcRead] = await Promise.allSettled([
       devChainFunds(requested, rpcUrl),
       wallet ? devAddressFunds(wallet, rpcUrl) : undefined,
       sourceEthBalance(requested),
+      sourceUsdcBalance(requested),
     ])
     // Typing an address fires this per keystroke and the reads can land out of
-    // order, so one staleness decision governs all three: a column kept past a
+    // order, so one staleness decision governs them all: a column kept past a
     // check the others failed would be figures from an address, or a chain,
     // the table is no longer about.
     if (stale()) return
@@ -479,6 +496,7 @@
     // start one — so it reads as a dash in the table, not an error over the
     // Gnosis figures that did arrive.
     sourceEth = eth.status === 'fulfilled' ? eth.value : undefined
+    sourceUsdc = usdcRead.status === 'fulfilled' ? usdcRead.value : undefined
   }
 
   // Re-read whenever the recipient changes; the Chain tab is the only consumer,
@@ -500,11 +518,12 @@
     /** The Gnosis-side read made FOR this column's address, if it landed. */
     gnosis: FundsRow | undefined
     /**
-     * Undefined means there is no ETH figure for this address — either the
-     * source chain never answered, or it is an address nothing reads there.
-     * Never a zero balance.
+     * Undefined means there is no figure for this address on the fake mainnet
+     * — the source chain never answered, the mock USDC is not installed, or it
+     * is an address nothing reads there. Never a zero balance.
      */
     sourceEth: bigint | undefined
+    sourceUsdc: bigint | undefined
   }
 
   /**
@@ -518,6 +537,11 @@
    */
   const BALANCE_ASSETS = [
     { label: 'ETH', decimals: ETH_DECIMALS, held: (held: ColumnHoldings) => held.sourceEth },
+    {
+      label: 'USDC (fake mainnet)',
+      decimals: USDC_DECIMALS,
+      held: (held: ColumnHoldings) => held.sourceUsdc,
+    },
     { label: 'xDAI', decimals: XDAI_DECIMALS, held: (held: ColumnHoldings) => held.gnosis?.xdai },
     { label: 'BZZ', decimals: BZZ_DECIMALS, held: (held: ColumnHoldings) => held.gnosis?.bzz },
     { label: 'WXDAI', decimals: XDAI_DECIMALS, held: (held: ColumnHoldings) => held.gnosis?.wxdai },
@@ -575,17 +599,26 @@
       balanceColumn('Faucet', DEV_FAUCET_ADDRESS, {
         gnosis: shown?.faucet,
         sourceEth: undefined,
+        sourceUsdc: undefined,
       }),
     ]
     // A wallet that is already the recipient would be the same column twice.
     if (connectedWallet && connectedWallet !== faucetRecipient) {
       const held = walletFunds?.address === connectedWallet ? walletFunds : undefined
       columns.push(
-        balanceColumn('Connected wallet', connectedWallet, { gnosis: held, sourceEth: undefined }),
+        balanceColumn('Connected wallet', connectedWallet, {
+          gnosis: held,
+          sourceEth: undefined,
+          sourceUsdc: undefined,
+        }),
       )
     }
     columns.push(
-      balanceColumn('Recipient', faucetRecipient, { gnosis: shown?.recipient, sourceEth }),
+      balanceColumn('Recipient', faucetRecipient, {
+        gnosis: shown?.recipient,
+        sourceEth,
+        sourceUsdc,
+      }),
     )
     return columns
   })
@@ -606,6 +639,7 @@
       const erc20 = FAUCET_TOKEN_ADDRESSES[faucetToken]
       await sendFromFaucet(to, {
         eth: faucetToken === 'eth' ? faucetValue : 0n,
+        sourceUsdc: faucetToken === 'usdc-source' ? faucetValue : 0n,
         xdai: faucetToken === 'xdai' ? faucetValue : 0n,
         bzzPlur: faucetToken === 'bzz' ? faucetValue : 0n,
         tokens: erc20 ? [{ token: erc20, amount: faucetValue }] : [],
@@ -1573,9 +1607,9 @@ Check console logs for details:
           <p class="text-muted-foreground text-sm">
             On Gnosis a send is a plain transfer from the faucet the bake stocked — the BZZ pool
             here is real and thin, and only a purchase is worth spending it on. The fake mainnet has
-            no faucet to transfer from, so ETH is minted there instead; that is the chain a
-            rehearsed payment is signed on, so it is the wallet account you connect with that needs
-            it.
+            no faucet to transfer from, so ETH and its mock USDC are minted there instead; that is
+            the chain a rehearsed payment is signed on, so it is the wallet account you connect with
+            that needs them.
           </p>
           <p class="text-muted-foreground text-sm">
             <strong>Anvil account 0</strong> starts with 10 000 native on each chain — 10 000 ETH on the
@@ -1642,9 +1676,15 @@ Check console logs for details:
       {/if}
       {#if faucetRecipient && sourceEth === undefined}
         <p class="text-muted-foreground text-xs">
-          No ETH figure — nothing is answering at
+          No fake-mainnet figures — nothing is answering at
           <span class="font-mono">{localSourceRpcUrl()}</span>. Start it with
           <span class="font-mono">pnpm dev:source-chain</span>.
+        </p>
+      {:else if faucetRecipient && sourceUsdc === undefined}
+        <p class="text-muted-foreground text-xs">
+          No USDC figure — the mock is not installed yet. The solver installs it at startup (<span
+            class="font-mono">pnpm dev:local</span
+          >).
         </p>
       {/if}
 

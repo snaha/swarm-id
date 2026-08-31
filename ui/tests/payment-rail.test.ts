@@ -16,10 +16,10 @@
  * it — so the money the wallet paid really did become storage.
  *
  * What is NOT covered, and must not be read as covered: Relay itself. Its
- * pricing, routing, step model (an ERC-20 source needs an approve before the
- * deposit — one native transfer collapses that) and refund semantics are a
- * hosted service this cannot reach. A green run here means the orchestration is
- * right, not that the production rail works.
+ * pricing, routing and refund semantics are a hosted service this cannot
+ * reach — the local rail mirrors only the step shape, one signature for a
+ * native payment and approve-then-deposit for a token one. A green run here
+ * means the orchestration is right, not that the production rail works.
  *
  * Needs `pnpm dev:local` — both chains AND the solver. The chains are probed
  * and the suite skips without them; a stopped solver cannot be probed, so it
@@ -105,6 +105,11 @@ async function injectPayingWallet(page: Page) {
       // silently accepts the switch never reaches.
       const added = new Set<string>()
       const listeners: Array<(value: unknown) => void> = []
+      // Signature count, for asserting HOW MANY times the flow asked the user
+      // to sign — one deposit for a native payment, approve + deposit for a
+      // token one.
+      let sends = 0
+      Object.defineProperty(window, '__walletSends', { get: () => sends })
 
       async function rpc(method: string, params: unknown[]) {
         const response = await fetch(endpoints[chainId] ?? (sourceRpc as string), {
@@ -170,6 +175,9 @@ async function injectPayingWallet(page: Page) {
               return null
             }
             default:
+              if (method === 'eth_sendTransaction') {
+                sends += 1
+              }
               return rpc(method, params)
           }
         },
@@ -245,6 +253,58 @@ async function sourceBalance(address: string): Promise<bigint> {
   return BigInt(((await response.json()) as { result?: string }).result ?? '0x0')
 }
 
+/** `local-solver-protocol.ts` — the mock USDC the solver installs at startup. */
+const SOURCE_USDC_ADDRESS = '0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48'
+/** `balanceOf(address)` / `mint(address,uint256)` on the mock. */
+const BALANCE_OF_SELECTOR = '0x70a08231'
+const MINT_SELECTOR = '0x40c10f19'
+/** Anvil account #8 signs the mint, keeping the wallet's and the solver's own
+ * nonce streams (accounts #0 and #9) out of it. */
+const MINTER_ADDRESS = '0x23618e81e3f5cdf7f54c3d65f7fbc0abf5b21e8f'
+
+const abiAddress = (value: string): string =>
+  value.replace(/^0x/, '').toLowerCase().padStart(64, '0')
+const abiAmount = (value: bigint): string => value.toString(16).padStart(64, '0')
+
+async function sourceRpc(method: string, params: unknown[]): Promise<unknown> {
+  const response = await fetch(SOURCE_RPC_URL, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ jsonrpc: '2.0', id: 1, method, params }),
+  })
+  const body = (await response.json()) as { result?: unknown; error?: { message: string } }
+  if (body.error) {
+    throw new Error(`${method}: ${body.error.message}`)
+  }
+  return body.result
+}
+
+/** Mock-USDC balance on the source chain, in base units. */
+async function sourceUsdc(address: string): Promise<bigint> {
+  const result = (await sourceRpc('eth_call', [
+    { to: SOURCE_USDC_ADDRESS, data: `${BALANCE_OF_SELECTOR}${abiAddress(address)}` },
+    'latest',
+  ])) as string
+  if (result === '0x') {
+    throw new Error('no mock USDC on the source chain — is the solver running? (pnpm dev:local)')
+  }
+  return BigInt(result)
+}
+
+/** Stock the paying wallet with mock USDC, through the token's open mint. */
+async function mintUsdcTo(address: string, units: bigint): Promise<void> {
+  // Probes the balance first: it fails loudly where a transaction to a
+  // codeless address would succeed as a no-op.
+  await sourceUsdc(address)
+  await sourceRpc('eth_sendTransaction', [
+    {
+      from: MINTER_ADDRESS,
+      to: SOURCE_USDC_ADDRESS,
+      data: `${MINT_SELECTOR}${abiAddress(address)}${abiAmount(units)}`,
+    },
+  ])
+}
+
 /**
  * Buy a drive, paying from `chainId`, and return once the drive exists.
  *
@@ -252,7 +312,7 @@ async function sourceBalance(address: string): Promise<bigint> {
  * with no bridge, anything else goes through the rail and its solver — but the
  * screens are identical, which is the point of the seam.
  */
-async function buyPayingFrom(page: Page, chainId: number) {
+async function buyPayingFrom(page: Page, chainId: number, tokenAddress?: string) {
   await injectPayingWallet(page)
   await seedPaidEnvironment(page)
 
@@ -284,11 +344,14 @@ async function buyPayingFrom(page: Page, chainId: number) {
   await page.getByRole('button', { name: 'MetaMask' }).click()
   await expect(page.getByText('Connected wallet')).toBeVisible({ timeout: PAYMENT_TIMEOUT_MS })
 
-  // 3. Pick the chain to pay from, rather than relying on which one leads the
-  //    list — the ordering is a product decision and should not silently
-  //    decide which route this test covers.
+  // 3. Pick the chain — and token — to pay from, rather than relying on what
+  //    leads the list: the ordering is a product decision and should not
+  //    silently decide which route this test covers.
   const dialog = page.getByRole('dialog')
   await dialog.getByRole('combobox').first().selectOption(String(chainId))
+  if (tokenAddress) {
+    await dialog.getByRole('combobox').nth(1).selectOption(tokenAddress)
+  }
 
   // 4. A quote has to arrive before Pay is live — the button is disabled until
   //    the rail prices the delivery.
@@ -336,5 +399,22 @@ test('paying from another chain goes through the rail and its solver', async ({ 
   // The deposit was real: the wallet's money actually reached the solver on
   // the source chain, rather than the flow completing on a faucet transfer.
   expect(await sourceBalance(LOCAL_SOLVER_ADDRESS)).toBeGreaterThan(depositedBefore)
+  // One signature: the deposit is the payment, nothing to approve first.
+  expect(await page.evaluate(() => (window as { __walletSends?: number }).__walletSends)).toBe(1)
+  await expectDriveOwnedBySigner(page)
+})
+
+test('paying in a token takes an approve first, and the solver pulls it', async ({ page }) => {
+  test.setTimeout(PAYMENT_TIMEOUT_MS * 2)
+  // 100 USDC — comfortably above any quote, so the approve is what gates the
+  // pull, not the balance.
+  await mintUsdcTo(WALLET_ADDRESS, 100_000_000n)
+  const pulledBefore = await sourceUsdc(LOCAL_SOLVER_ADDRESS)
+  await buyPayingFrom(page, SOURCE_CHAIN_ID, SOURCE_USDC_ADDRESS)
+  // Two signatures, the way Relay's own ERC-20 step model reads: the approve
+  // granting the solver its pull, then the value-less deposit.
+  expect(await page.evaluate(() => (window as { __walletSends?: number }).__walletSends)).toBe(2)
+  // The pull was real: the solver collected the token before it filled.
+  expect(await sourceUsdc(LOCAL_SOLVER_ADDRESS)).toBeGreaterThan(pulledBefore)
   await expectDriveOwnedBySigner(page)
 })

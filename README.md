@@ -228,10 +228,11 @@ which is what a solver outage looks like.
 **What this does and does not prove.** The Gnosis side is genuine — the delivered xDAI is swapped
 for BZZ through a real SushiSwap pool and spent against the real PostageStamp contract, as a single
 atomic EIP-7702 transaction using the same delegate contract mainnet uses. The rail
-itself is not: its prices are invented, its step list is shorter than Relay's (an ERC-20 source
-would need an approval first), and its failure and refund behaviour is nothing like the real one.
-It rehearses the payment **experience** — connect, switch chain, quote, approve, progress, cancel,
-resume — which is otherwise untestable outside production.
+itself is not: its prices are invented, and its failure and refund behaviour is nothing like the
+real one. The step shape is mirrored — paying in ETH is one signature, paying in the mock USDC is
+approve-then-deposit with the solver pulling the token, as on Relay. It rehearses the payment
+**experience** — connect, switch chain, quote, approve, progress, cancel, resume — which is
+otherwise untestable outside production.
 
 With no source chain running the bridged route simply is not offered; paying from Gnosis
 still is, and it needs no solver. Funding never falls back to a free transfer. See

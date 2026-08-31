@@ -27,15 +27,21 @@
  * real Sushi pool and spent by the postage engine, exactly as in production.
  *
  * What it does NOT cover, and must not be read as covering: Relay's pricing,
- * routing and error surface (the numbers here are invented); its real step
- * model (an ERC-20 source needs an approve before the deposit — one native
- * transfer collapses that); and its failure/refund semantics.
+ * routing and error surface (the numbers here are invented, the step names
+ * are its wording rather than its steps) and its failure/refund semantics.
+ * The step SHAPE is mirrored, though: a native payment is one signature, and
+ * a token one is approve-then-deposit, as on the real rail.
  *
  * Production code must never import this module.
  */
 import { sleep, withTimeout } from '@snaha/swarm-id'
-import { LOCAL_SOLVER_ADDRESS, devRpc, encodeDeliveryInstruction } from '@swarm-id/multichain/dev'
-import { type Chain, defineChain, formatUnits } from 'viem'
+import {
+  LOCAL_SOLVER_ADDRESS,
+  LOCAL_SOURCE_USDC_ADDRESS,
+  devRpc,
+  encodeDeliveryInstruction,
+} from '@swarm-id/multichain/dev'
+import { type Chain, defineChain, encodeFunctionData, erc20Abi, formatUnits, parseAbi } from 'viem'
 
 import { postageChain, probeChainId } from '$lib/payment/chain'
 import {
@@ -85,6 +91,15 @@ const XDAI_PER_SOURCE_UNIT = 4000n
 /** Native-currency decimals, on both the source chain and Gnosis. */
 const WEI_DECIMALS = 18
 
+/** The mock USDC mirrors the real thing, six decimals included. */
+const USDC_DECIMALS = 6
+
+/**
+ * xDAI wei per USDC base unit: both are dollars, so the rate is 1, and the
+ * factor is purely the 18→6 decimals gap.
+ */
+const XDAI_WEI_PER_USDC_UNIT = 10n ** BigInt(WEI_DECIMALS - USDC_DECIMALS)
+
 const RECEIPT_POLL_MS = 500
 const RECEIPT_TIMEOUT_MS = 60_000
 
@@ -105,8 +120,16 @@ function localSourceChain(): Chain {
   })
 }
 
+/** The pair the real mainnet offers, mirrored: ETH plus USDC, and USDC at
+ * mainnet's own address, since the solver installs the mock there. */
 const LOCAL_TOKENS: PaymentToken[] = [
   { address: NATIVE_CURRENCY, symbol: 'ETH', name: 'Ether', decimals: WEI_DECIMALS },
+  {
+    address: LOCAL_SOURCE_USDC_ADDRESS,
+    symbol: 'USDC',
+    name: 'USD Coin',
+    decimals: USDC_DECIMALS,
+  },
 ]
 
 /** What `quoteLocalPayment` hands to `execute` — this rail's private payload. */
@@ -116,8 +139,11 @@ interface LocalPaymentHandle {
   recipient: `0x${string}`
   /** Exact xDAI (wei) the faucet must deliver there. */
   xdaiWei: bigint
-  /** Source-chain native amount (wei) the user signs away. */
+  /** Source-chain amount the user signs away — native wei, or the token's own
+   * base units when `token` is set. */
   amountSourceWei: bigint
+  /** The ERC-20 being paid with; absent for a native payment. */
+  token?: `0x${string}`
 }
 
 function isLocalHandle(handle: unknown): handle is LocalPaymentHandle {
@@ -125,25 +151,35 @@ function isLocalHandle(handle: unknown): handle is LocalPaymentHandle {
   return (
     typeof candidate?.recipient === 'string' &&
     typeof candidate.xdaiWei === 'bigint' &&
-    typeof candidate.amountSourceWei === 'bigint'
+    typeof candidate.amountSourceWei === 'bigint' &&
+    (candidate.token === undefined || typeof candidate.token === 'string')
   )
 }
 
 /**
  * Price a local payment. Pure and synchronous — there is no quoting service to
- * ask, only the fixed rate. xDAI is a dollar stablecoin, so the USD figure is
+ * ask, only the fixed rates. xDAI is a dollar stablecoin, so the USD figure is
  * the xDAI amount itself.
  */
 export function quoteLocalPayment(request: QuoteRequest): PaymentQuote {
-  const amountSourceWei = request.xdaiWei / XDAI_PER_SOURCE_UNIT
+  const usdc = request.currency === LOCAL_SOURCE_USDC_ADDRESS
+  // The USDC leg rounds UP: truncation could price a nonzero delivery at zero
+  // token units, which encodes as a pull of nothing and a payment the solver
+  // rightly refuses to fill — and a real rail never charges under cost either.
+  const amountSourceWei = usdc
+    ? (request.xdaiWei + XDAI_WEI_PER_USDC_UNIT - 1n) / XDAI_WEI_PER_USDC_UNIT
+    : request.xdaiWei / XDAI_PER_SOURCE_UNIT
   const handle: LocalPaymentHandle = {
     recipient: request.recipient as `0x${string}`,
     xdaiWei: request.xdaiWei,
     amountSourceWei,
+    ...(usdc ? { token: LOCAL_SOURCE_USDC_ADDRESS } : {}),
   }
   return {
     handle,
-    amountFormatted: displayAmount(formatUnits(amountSourceWei, WEI_DECIMALS)),
+    amountFormatted: displayAmount(
+      formatUnits(amountSourceWei, usdc ? USDC_DECIMALS : WEI_DECIMALS),
+    ),
     // xDAI is a dollar stablecoin, so the USD figure is the xDAI amount itself.
     amountUsd: displayUsd(formatUnits(request.xdaiWei, WEI_DECIMALS)),
     // A bridged rail delivers native xDAI and nothing else — carrying the
@@ -236,6 +272,69 @@ export async function mintSourceEth(address: string, wei: bigint): Promise<void>
 }
 
 /**
+ * Mock-USDC balance on the local source chain, in the token's base units.
+ * Rejects while the mock is not installed — a call to a codeless address
+ * answers `0x`, and reporting that as a zero balance would hide that the
+ * token does not exist yet.
+ */
+export async function sourceUsdcBalance(address: string): Promise<bigint> {
+  const result = (await sourceRpc('eth_call', [
+    {
+      to: LOCAL_SOURCE_USDC_ADDRESS,
+      data: encodeFunctionData({
+        abi: erc20Abi,
+        functionName: 'balanceOf',
+        args: [address as `0x${string}`],
+      }),
+    },
+    'latest',
+  ])) as string
+  if (result === '0x') {
+    throw new Error(
+      'No mock USDC on the source chain yet — the solver installs it at startup (pnpm dev:local).',
+    )
+  }
+  return BigInt(result)
+}
+
+/** The mock's own open mint — see `MockUsdc.sol` for why it is ungated. */
+const MOCK_USDC_MINT_ABI = parseAbi(['function mint(address to, uint256 value)'])
+
+/** Anvil's first default account signs the mint; any unlocked account would do. */
+const SOURCE_MINTER = '0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266'
+
+/**
+ * Hand an address mock USDC, through the token's own open mint.
+ *
+ * The code check first is what turns "sent, but nothing arrived" into an
+ * actionable message: a transaction to a codeless address succeeds as a no-op,
+ * and the mock is only installed by the solver at ITS startup.
+ */
+export async function mintSourceUsdc(address: string, units: bigint): Promise<void> {
+  const code = await sourceRpc('eth_getCode', [LOCAL_SOURCE_USDC_ADDRESS, 'latest']).catch(() => {
+    throw new Error(
+      `No source chain answering at ${localSourceRpcUrl()} — start it with \`pnpm dev:source-chain\` (or the whole stack with \`pnpm dev:local\`).`,
+    )
+  })
+  if (typeof code !== 'string' || code === '0x') {
+    throw new Error(
+      'No mock USDC on the source chain yet — the solver installs it at startup (pnpm dev:local).',
+    )
+  }
+  await sourceRpc('eth_sendTransaction', [
+    {
+      from: SOURCE_MINTER,
+      to: LOCAL_SOURCE_USDC_ADDRESS,
+      data: encodeFunctionData({
+        abi: MOCK_USDC_MINT_ABI,
+        functionName: 'mint',
+        args: [address as `0x${string}`, units],
+      }),
+    },
+  ])
+}
+
+/**
  * Wait for the solver to pay out, by watching the recipient's xDAI on the
  * Gnosis-side chain. This is the whole point of the rail being split: the app
  * signs, then waits on money it does not control, exactly as it waits on Relay.
@@ -251,11 +350,19 @@ async function waitForDelivery(recipient: `0x${string}`, before: bigint): Promis
 }
 
 /**
- * Take the deposit from the user's wallet, then wait for the solver to deliver.
+ * Take the payment from the user's wallet, then wait for the solver to deliver.
  *
- * No status is reported until the wallet has returned a hash: the dialog swaps
- * its "approve the payment in your wallet" screen for the progress card on the
- * first status, so reporting one earlier would talk over the wallet prompt.
+ * A native payment is one signature: the deposit itself, its value the payment
+ * and its calldata the instruction. A token payment is two, the way Relay's
+ * ERC-20 step model is: an approve granting the solver its pull, then a
+ * value-less deposit whose instruction names what to pull — the solver
+ * collects with `transferFrom` before filling.
+ *
+ * No status is reported until the wallet has returned the first hash: the
+ * dialog swaps its "approve the payment in your wallet" screen for the
+ * progress card on the first status, so reporting one earlier would talk over
+ * the wallet prompt. The second prompt is announced through the card instead,
+ * which is also how Relay's own step reports read.
  */
 async function executeLocalPayment(options: ExecutePaymentOptions): Promise<void> {
   const handle = options.quote.handle
@@ -267,14 +374,42 @@ async function executeLocalPayment(options: ExecutePaymentOptions): Promise<void
   const chain = await postageChain()
   const before = await chain.getNativeBalance(handle.recipient)
 
+  if (handle.token) {
+    const approveHash = (await options.provider.request({
+      method: 'eth_sendTransaction',
+      params: [
+        {
+          from: options.address,
+          to: handle.token,
+          data: encodeFunctionData({
+            abi: erc20Abi,
+            functionName: 'approve',
+            args: [LOCAL_SOLVER_ADDRESS, handle.amountSourceWei],
+          }),
+        },
+      ],
+    })) as string
+    options.onStatus?.('Confirming the approval')
+    await waitForDeposit(approveHash)
+    options.onStatus?.('Confirm the payment in your wallet')
+  }
+
+  const instruction = handle.token
+    ? {
+        recipient: handle.recipient,
+        xdaiWei: handle.xdaiWei,
+        pull: { token: handle.token, amountWei: handle.amountSourceWei },
+      }
+    : { recipient: handle.recipient, xdaiWei: handle.xdaiWei }
+
   const transactionHash = (await options.provider.request({
     method: 'eth_sendTransaction',
     params: [
       {
         from: options.address,
         to: LOCAL_SOLVER_ADDRESS,
-        value: `0x${handle.amountSourceWei.toString(16)}`,
-        data: encodeDeliveryInstruction(handle),
+        value: `0x${(handle.token ? 0n : handle.amountSourceWei).toString(16)}`,
+        data: encodeDeliveryInstruction(instruction),
       },
     ],
   })) as string

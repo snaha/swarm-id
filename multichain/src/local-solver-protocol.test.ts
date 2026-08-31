@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import { describe, expect, it } from "vitest"
 import {
+  type DeliveryInstruction,
   decodeDeliveryInstruction,
   encodeDeliveryInstruction,
 } from "./local-solver-protocol"
@@ -46,6 +47,28 @@ describe("delivery instruction round trip", () => {
       )?.recipient,
     ).toBe(checksummed.toLowerCase())
   })
+
+  it("survives with a token pull attached", () => {
+    const instruction: DeliveryInstruction = {
+      recipient: RECIPIENT,
+      xdaiWei: 60000000000000000n,
+      pull: {
+        token: "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48" as const,
+        amountWei: 60852n,
+      },
+    }
+    expect(
+      decodeDeliveryInstruction(encodeDeliveryInstruction(instruction)),
+    ).toEqual(instruction)
+  })
+
+  it("keeps the pull-free layout unchanged, so old deposits still decode", () => {
+    // The native form is the wire format deposits already on a chain carry;
+    // growing it in place would strand them behind a length check.
+    expect(
+      encodeDeliveryInstruction({ recipient: RECIPIENT, xdaiWei: 1n }),
+    ).toHaveLength(2 + 40 + 64)
+  })
 })
 
 describe("decodeDeliveryInstruction rejects", () => {
@@ -67,6 +90,21 @@ describe("decodeDeliveryInstruction rejects", () => {
     expect(
       decodeDeliveryInstruction(
         encodeDeliveryInstruction({ recipient: RECIPIENT, xdaiWei: 0n }),
+      ),
+    ).toBeUndefined()
+  })
+
+  it("a zero token pull", () => {
+    expect(
+      decodeDeliveryInstruction(
+        encodeDeliveryInstruction({
+          recipient: RECIPIENT,
+          xdaiWei: 1n,
+          pull: {
+            token: "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48",
+            amountWei: 0n,
+          },
+        }),
       ),
     ).toBeUndefined()
   })

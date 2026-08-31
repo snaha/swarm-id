@@ -1,15 +1,18 @@
 // Copyright 2026 The Swarm Authors. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
+import { LOCAL_SOURCE_USDC_ADDRESS } from '@swarm-id/multichain/dev'
 import { parseEther } from 'viem'
 import { describe, expect, it } from 'vitest'
 
 import { quoteLocalPayment } from './local-payment-rail'
 
-/** A canonical request; override the xDAI target per test. */
-function request(xdaiWei: bigint) {
+const NATIVE = '0x0000000000000000000000000000000000000000'
+
+/** A canonical request; override the xDAI target and token per test. */
+function request(xdaiWei: bigint, currency: string = NATIVE) {
   return {
     chainId: 31337,
-    currency: '0x0000000000000000000000000000000000000000',
+    currency,
     user: '0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266',
     recipient: '0x1111111111111111111111111111111111111111',
     xdaiWei,
@@ -61,5 +64,30 @@ describe('quoteLocalPayment', () => {
     const { amountFormatted } = quoteLocalPayment(request(parseEther('0.06')))
     expect(Number.isFinite(Number(amountFormatted))).toBe(true)
     expect(Number(amountFormatted)).toBeGreaterThan(0)
+  })
+})
+
+describe('quoteLocalPayment in USDC', () => {
+  it('prices dollar for dollar, in the token’s six decimals', () => {
+    const quote = quoteLocalPayment(request(parseEther('0.06'), LOCAL_SOURCE_USDC_ADDRESS))
+    expect(quote.amountFormatted).toBe('0.06')
+    expect(quote.amountUsd).toBe('0.06')
+  })
+
+  it('carries the token and its base-unit amount in the handle for the pull', () => {
+    const quote = quoteLocalPayment(request(parseEther('0.06'), LOCAL_SOURCE_USDC_ADDRESS))
+    expect(quote.handle).toEqual({
+      recipient: '0x1111111111111111111111111111111111111111',
+      xdaiWei: parseEther('0.06'),
+      amountSourceWei: 60_000n,
+      token: LOCAL_SOURCE_USDC_ADDRESS,
+    })
+  })
+
+  it('rounds a sub-unit remainder up rather than pricing a delivery at zero', () => {
+    // Truncation would quote 0 units for anything under 1e12 wei — a pull of
+    // nothing, which the solver protocol rejects as a payment.
+    const quote = quoteLocalPayment(request(1n, LOCAL_SOURCE_USDC_ADDRESS))
+    expect((quote.handle as { amountSourceWei: bigint }).amountSourceWei).toBe(1n)
   })
 })
