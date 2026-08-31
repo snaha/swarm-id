@@ -26,6 +26,6 @@ export default defineConfig((env) => ({
     testTimeout: 60_000,
     // The Relay suite quotes every picker pair sequentially in `beforeAll`,
     // which is a dozen round-trips to a hosted API before the first assertion.
-    hookTimeout: 180_000,
+    hookTimeout: 300_000,
   },
 }))

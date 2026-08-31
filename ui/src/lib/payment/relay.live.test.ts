@@ -44,6 +44,15 @@ const OWNER_ADDRESS = '0x70997970C51812dc3A010C7d01b50e0d17dc79C8'
 /** 0.06 xDAI — the magnitude a real extend actually delivers. */
 const XDAI_OUT_WEI = '60000000000000000'
 const REQUEST_TIMEOUT_MS = 25_000
+/**
+ * A refused route gets this many further attempts, spaced out. Route
+ * availability is solver inventory, not a registry: Polygon POL has refused
+ * with NO_SWAP_ROUTES_FOUND twice in one afternoon and quoted fine minutes
+ * later both times. The retries make the job go red for a route that is GONE,
+ * not for one mid-dip; a genuinely dropped pair still fails.
+ */
+const REFUSED_RETRIES = 2
+const REFUSED_RETRY_DELAY_MS = 15_000
 
 interface RelayQuote {
   steps?: { id?: string }[]
@@ -135,7 +144,12 @@ describe('Relay quote contract', () => {
     // Sequential on purpose: a dozen simultaneous POSTs to a public API with no
     // key is how a contract test turns into a rate-limited one.
     for (const pair of PAIRS) {
-      outcomes.set(pair.key, await quote(pair.chainId, pair.currency))
+      let outcome = await quote(pair.chainId, pair.currency)
+      for (let retry = 0; retry < REFUSED_RETRIES && outcome.status === 'refused'; retry += 1) {
+        await new Promise((resolve) => setTimeout(resolve, REFUSED_RETRY_DELAY_MS))
+        outcome = await quote(pair.chainId, pair.currency)
+      }
+      outcomes.set(pair.key, outcome)
     }
     const canonical = outcomes.get(`${BASE_CHAIN_ID}:${NATIVE}`)
     quoted = canonical?.status === 'quoted' ? canonical.quote : undefined
