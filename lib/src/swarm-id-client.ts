@@ -839,9 +839,12 @@ export class SwarmIdClient {
    * **Browser Compatibility:**
    * - Chrome/Firefox: Opens window directly from parent context (preserves user gesture,
    *   no popup blocking). Auth is communicated via localStorage storage events.
-   * - Safari/iOS: Delegates to proxy iframe which opens popup with storage partitioning
-   *   detection. Download-only mode — auth works, uploads disabled (ITP storage partitioning).
-   *   Private mode sessions are ephemeral (lost when the private window closes).
+   * - Safari/iOS: Delegates to proxy iframe, so the popup's `window.opener` points back at the
+   *   iframe and the popup can hand it the account's stamp projection when the iframe's storage
+   *   is partitioned. Uploads keep working, but those credentials live only in memory and are
+   *   re-seeded on every page load. Unverified on real Safari; if the handover fails the session
+   *   degrades to download-only. Private mode sessions are ephemeral (lost when the private
+   *   window closes).
    *
    * For Safari details, see https://github.com/snaha/swarm-id/issues/167
    *
@@ -877,8 +880,8 @@ export class SwarmIdClient {
       }
     } else {
       // Chrome/Firefox: open window directly to preserve user gesture (avoids popup blocking).
-      // No challenge needed — these browsers don't partition same-origin localStorage,
-      // so the proxy iframe picks up auth changes via storage events.
+      // No challenge needed — these browsers don't partition the iframe's storage while it is
+      // same-site with the embedding page, so the iframe picks up auth changes via storage events.
       const basePath = this.iframePath.replace(/\/proxy$/, "")
       const authUrl = buildAuthUrl(
         this.iframeOrigin + basePath,
