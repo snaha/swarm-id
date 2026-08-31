@@ -95,11 +95,13 @@ export const ID_ORIGIN = 'http://localhost:5500'
  * inside `#swarm-id-button`'s iframe, beside the demo's own Connect.
  *
  * The difference is the whole partitioned path. `SwarmIdClient.connect()` opens
- * the popup from the dApp page unless `isWebKit()`, so `window.opener` points at
- * the dApp and the handover has nowhere to post; the iframe's button always
- * opens it itself, which is what sets the partition challenge and makes
- * `sendSecretToOpener` reach a proxy that cannot read shared storage (#613,
- * docs/Account-Bus.md).
+ * the popup from the dApp page whenever the proxy reports shared storage, and
+ * `window.opener` then points at the dApp with nowhere for the handover to
+ * post; the iframe's button always opens it itself, which is what sets the
+ * partition challenge and makes `sendSecretToOpener` reach a proxy that cannot
+ * read shared storage (#613, docs/Account-Bus.md). Both routes are covered:
+ * this helper drives the iframe's button, and `bus-propagation.test.ts` drives
+ * `client.connect()` under a real partition.
  */
 export async function openProxyConnectPopup(page: Page) {
   await page.getByRole('button', { name: 'Connect Swarm ID' }).click()

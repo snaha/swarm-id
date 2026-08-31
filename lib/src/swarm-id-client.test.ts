@@ -12,13 +12,16 @@ describe("SwarmIdClient connect()", () => {
   beforeEach(() => {
     vi.restoreAllMocks()
 
-    // Mock window object and its properties
+    // Mock window object and its properties. `open` returns a stand-in window
+    // explicitly: the callers read its result to tell an opened popup from a
+    // blocked one, so a mock returning `undefined` would mean "blocked" and
+    // every happy path would take the failure branch.
     const mockWindow = {
       addEventListener: vi.fn(),
       removeEventListener: vi.fn(),
       parent: { postMessage: vi.fn() },
       location: { origin: "https://localhost" },
-      open: vi.fn(),
+      open: vi.fn().mockReturnValue({ closed: false }),
     }
 
     vi.stubGlobal("window", mockWindow)
@@ -45,13 +48,82 @@ describe("SwarmIdClient connect()", () => {
     })
   })
 
-  describe("non-WebKit (Chrome/Firefox)", () => {
-    beforeEach(() => {
-      vi.spyOn(browser, "isWebKit").mockReturnValue(false)
+  /** What the proxy reported about its own storage on `proxyReady`. */
+  function setStorageShared(shared: boolean | undefined) {
+    ;(client as unknown as { storageShared?: boolean }).storageShared = shared
+  }
+
+  // The transport is a property of the iframe's STORAGE, not of the browser
+  // (#613). A partitioned iframe can only be reached by the popup it opened
+  // itself, and no user agent tells you which mode you are in.
+  describe("shared storage", () => {
+    it("opens the popup from the parent, keeping the user gesture", async () => {
+      vi.spyOn(client, "ensureReady").mockImplementation(() => {})
+      vi.spyOn(browser, "isWebKit").mockReturnValue(true)
+      setStorageShared(true)
+      const sendRequestSpy = vi.spyOn(client as never, "sendRequest")
+
+      await client.connect()
+
+      expect(window.open).toHaveBeenCalledWith(
+        expect.stringContaining("https://swarm-id.example.com/connect#origin="),
+        "_blank",
+      )
+      // Even on WebKit: the user agent no longer decides this.
+      expect(sendRequestSpy).not.toHaveBeenCalled()
     })
 
-    it("should open window directly with auth URL", async () => {
+    // Nothing opened, so there is no connect in progress to report. This
+    // branch used to discard `window.open`'s result and resolve regardless.
+    it("throws when that popup is blocked", async () => {
       vi.spyOn(client, "ensureReady").mockImplementation(() => {})
+      setStorageShared(true)
+      vi.mocked(window.open).mockReturnValue(null)
+
+      await expect(client.connect()).rejects.toThrow(
+        "Failed to open authentication popup",
+      )
+    })
+  })
+
+  describe("partitioned or unproven storage", () => {
+    it.each([false, undefined])(
+      "delegates to the proxy when storageShared is %s",
+      async (storageShared) => {
+        vi.spyOn(client, "ensureReady").mockImplementation(() => {})
+        vi.spyOn(browser, "isWebKit").mockReturnValue(false)
+        setStorageShared(storageShared)
+        const sendRequestSpy = vi
+          .spyOn(client as never, "sendRequest")
+          .mockResolvedValue({
+            type: "connectResponse",
+            requestId: "test",
+            success: true,
+          })
+
+        await client.connect()
+
+        expect(sendRequestSpy).toHaveBeenCalledWith(
+          expect.objectContaining({ type: "connect" }),
+        )
+        // The proxy opened it; opening a second one from here would be two
+        // popups for one click.
+        expect(window.open).not.toHaveBeenCalled()
+      },
+    )
+
+    // A delegated popup can be blocked — the click was in the parent, and no
+    // activation crosses the postMessage. Falling back to the parent is what
+    // this branch had before the storage mode decided it, so it can never be
+    // worse than not asking at all.
+    it("falls back to opening from the parent when the proxy's popup is blocked", async () => {
+      vi.spyOn(client, "ensureReady").mockImplementation(() => {})
+      setStorageShared(false)
+      vi.spyOn(client as never, "sendRequest").mockResolvedValue({
+        type: "connectResponse",
+        requestId: "test",
+        success: false,
+      })
 
       await client.connect()
 
@@ -60,39 +132,16 @@ describe("SwarmIdClient connect()", () => {
         "_blank",
       )
     })
-  })
 
-  describe("WebKit (Safari/iOS)", () => {
-    beforeEach(() => {
-      vi.spyOn(browser, "isWebKit").mockReturnValue(true)
-    })
-
-    it("should send connect message to proxy", async () => {
+    it("throws when the fallback popup is blocked too", async () => {
       vi.spyOn(client, "ensureReady").mockImplementation(() => {})
-      const sendRequestSpy = vi
-        .spyOn(client as never, "sendRequest")
-        .mockResolvedValue({
-          type: "connectResponse",
-          requestId: "test",
-          success: true,
-        })
-
-      await client.connect()
-
-      expect(sendRequestSpy).toHaveBeenCalledWith(
-        expect.objectContaining({
-          type: "connect",
-        }),
-      )
-    })
-
-    it("should throw when popup fails to open", async () => {
-      vi.spyOn(client, "ensureReady").mockImplementation(() => {})
+      setStorageShared(false)
       vi.spyOn(client as never, "sendRequest").mockResolvedValue({
         type: "connectResponse",
         requestId: "test",
         success: false,
       })
+      vi.mocked(window.open).mockReturnValue(null)
 
       await expect(client.connect()).rejects.toThrow(
         "Failed to open authentication popup",
