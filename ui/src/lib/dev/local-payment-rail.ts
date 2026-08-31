@@ -369,6 +369,11 @@ async function executeLocalPayment(options: ExecutePaymentOptions): Promise<void
   if (!isLocalHandle(handle)) {
     throw new Error('This payment was quoted by a different rail.')
   }
+  // The production rail's SDK structured-clones the quote it executes, so a
+  // quote that cannot be cloned — above all one wrapped in a deep-reactive
+  // `$state` proxy on its way through the dialog — breaks only there, in
+  // production. Cloning here too makes the rehearsal fail the same way.
+  structuredClone(options.quote)
 
   // Read before signing: delivery is judged by this balance rising.
   const chain = await postageChain()
