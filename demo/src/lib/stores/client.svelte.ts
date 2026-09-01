@@ -188,8 +188,6 @@ function uploadUnavailableDescription(info: ConnectionInfo): string {
   switch (info.uploadUnavailableReason) {
     case 'no-stamp':
       return 'this account has no drive, so there is no postage stamp to upload with'
-    case 'download-only':
-      return 'browser storage partitioning left this session without credentials — downloads only'
     case 'stamper-failed':
       return 'a postage stamp resolved but the write path would not build'
     default:

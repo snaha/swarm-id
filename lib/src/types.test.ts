@@ -64,6 +64,42 @@ describe("download messages with plain options (#420)", () => {
   })
 })
 
+describe("connectionInfoChanged forward compatibility (#642)", () => {
+  const MESSAGE = {
+    type: "connectionInfoChanged" as const,
+    canUpload: false,
+    uploadMode: "unavailable" as const,
+  }
+
+  it("drops an unknown uploadUnavailableReason rather than the whole snapshot", () => {
+    // A proxy deployed between #616 and #642 still emits `"download-only"`.
+    // Hard-parsing the enum would fail the message, and the client drops a
+    // message it cannot parse — if it is the first one after `proxyReady`,
+    // `initialize()` then rejects on its timeout and the dApp never starts.
+    const parsed = IframeToParentMessageSchema.parse({
+      ...MESSAGE,
+      uploadUnavailableReason: "download-only",
+    })
+
+    expect(parsed).toMatchObject({
+      type: "connectionInfoChanged",
+      canUpload: false,
+    })
+    expect(
+      (parsed as { uploadUnavailableReason?: string }).uploadUnavailableReason,
+    ).toBeUndefined()
+  })
+
+  it("still carries a reason it knows", () => {
+    const parsed = IframeToParentMessageSchema.parse({
+      ...MESSAGE,
+      uploadUnavailableReason: "stamper-failed",
+    })
+
+    expect(parsed).toMatchObject({ uploadUnavailableReason: "stamper-failed" })
+  })
+})
+
 describe("connectionInfoChanged identity (#230)", () => {
   // Wire-valid shapes: bare hex, no 0x prefix.
   const IDENTITY = {

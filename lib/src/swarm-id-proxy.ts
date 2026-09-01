@@ -43,7 +43,6 @@ import type {
   PostageStamp,
   PostageBatch,
   ConnectedApp,
-  ConnectionIdentity,
   ConnectionInfo,
   UploadUnavailableReason,
   AuthData,
@@ -316,7 +315,6 @@ export class SwarmIdProxy {
   private stampWorkerPool: StampWorkerPool | undefined
   private storagePartitioned: boolean = false
   private pendingChallenge: string | undefined
-  private storagePartitionedIdentity: ConnectionIdentity | undefined
   /**
    * Hydrated account view for the storage-partitioning fallback: the synced
    * projection handed over by the connect popup (`AuthData.account`), held in
@@ -655,10 +653,6 @@ export class SwarmIdProxy {
    * postage stamp is unchanged but the underlying account isn't.
    */
   private async refreshStampFromStorage(): Promise<void> {
-    if (this.isDownloadOnlyPartition) {
-      return
-    }
-
     // A rebound account is a different bus topic.
     this.joinAccountBus()
 
@@ -697,7 +691,6 @@ export class SwarmIdProxy {
     this.appSecret = connectedApp.appSecret
     this.authenticated = true
     this.storagePartitioned = false
-    this.storagePartitionedIdentity = undefined
     this.partitionAccount = undefined
     this.authLoading = false
     this.isConnecting = false
@@ -771,34 +764,15 @@ export class SwarmIdProxy {
       this.isConnecting = false
       this.deviceId = getOrCreateDeviceId()
 
-      // Store identity info from message (can't read from partitioned localStorage)
-      if (
-        message.data.identityId &&
-        message.data.identityName &&
-        message.data.identityAddress
-      ) {
-        this.storagePartitionedIdentity = {
-          id: message.data.identityId,
-          name: message.data.identityName,
-          address: message.data.identityAddress,
-          publicKey: message.data.identityPublicKey,
-          avatar: generatedAvatar(message.data.identityId),
-        }
-      }
-
-      if (message.data.account) {
-        // Full synced projection received — hydrate a first-class writer view
-        // (stamps incl. signer keys, derivationKey) instead of download-only.
-        await this.hydratePartitionAccount(
-          message.data.account,
-          message.data.secret,
-          message.data.networkSettings,
-        )
-      } else {
-        // Legacy secret-only payload — download-only mode, no stamp lookup.
-        this.postageBatchId = undefined
-        this.signerKey = undefined
-      }
+      // The projection is required by `AuthDataSchema`, so by here it is
+      // present: a payload without one never parses. The identity the dApp is
+      // shown comes off the same account, which is why nothing separate is
+      // carried for it.
+      await this.hydratePartitionAccount(
+        message.data.account,
+        message.data.secret,
+        message.data.networkSettings,
+      )
 
       // Keep it, so a reload does not log the user out of the dApp (#635).
       // On Safari the partitioned path is the ordinary one, and re-running the
@@ -840,9 +814,7 @@ export class SwarmIdProxy {
         ...data,
         // The projection carries `BatchId`/`PrivateKey`/`EthAddress`; this is
         // the same serializer the popup used to build it.
-        account: this.partitionAccount
-          ? serializeSyncedAccount(data.account ?? this.partitionAccount)
-          : undefined,
+        account: serializeSyncedAccount(data.account),
         // Both are already hex on this schema, unlike the account's fields.
         postageBatchId: data.postageBatchId,
         signerKey: data.signerKey,
@@ -1934,10 +1906,19 @@ export class SwarmIdProxy {
       // Handle same-origin popup messages (storage partitioning postMessage fallback)
       if (event.origin === window.location.origin && type === "setSecret") {
         const popupResult = PopupToIframeMessageSchema.safeParse(event.data)
-        if (popupResult.success) {
-          await this.handlePopupMessage(popupResult.data)
+        if (!popupResult.success) {
+          // Say what actually happened. Falling through from here reaches the
+          // parent-origin check below, which rejects this message as coming
+          // from an "unauthorized origin" — it came from the right one and
+          // failed the schema (#587). That was a rare diagnostic while any
+          // payload shape produced SOME session; now that the projection is
+          // required, a refused handover is the ordinary way a version-skewed
+          // identity deployment fails, and it must not read as an origin bug.
+          console.warn("[Proxy] Invalid setSecret payload:", popupResult.error)
           return
         }
+        await this.handlePopupMessage(popupResult.data)
+        return
       }
 
       // Validate origin - only accept messages from parent
@@ -2262,23 +2243,11 @@ export class SwarmIdProxy {
     this.authLoading = false
     this.deviceId = getOrCreateDeviceId()
 
-    if (data.identityId && data.identityName && data.identityAddress) {
-      this.storagePartitionedIdentity = {
-        id: data.identityId,
-        name: data.identityName,
-        address: data.identityAddress,
-        publicKey: data.identityPublicKey,
-        avatar: generatedAvatar(data.identityId),
-      }
-    }
-
-    if (data.account) {
-      await this.hydratePartitionAccount(
-        data.account,
-        data.secret,
-        data.networkSettings,
-      )
-    }
+    await this.hydratePartitionAccount(
+      data.account,
+      data.secret,
+      data.networkSettings,
+    )
 
     this.showAuthButton()
     this.emitConnectionInfoIfChanged()
@@ -2536,7 +2505,7 @@ export class SwarmIdProxy {
     requireDefaultStamp: boolean
     includeEndedConnection: boolean
   }): AccountStateSnapshot | undefined {
-    if (!this.parentOrigin || this.isDownloadOnlyPartition) return undefined
+    if (!this.parentOrigin) return undefined
     const connection = this.findConnectionForParent({
       includeEnded: options.includeEndedConnection,
     })
@@ -2602,7 +2571,7 @@ export class SwarmIdProxy {
       }
     | undefined
   > {
-    if (!this.parentOrigin || this.isDownloadOnlyPartition) {
+    if (!this.parentOrigin) {
       return undefined
     }
     try {
@@ -2762,14 +2731,6 @@ export class SwarmIdProxy {
   }
 
   /**
-   * True while the session is partitioned WITHOUT a hydrated account view —
-   * the legacy download-only mode. A hydrated partition is a full writer.
-   */
-  private get isDownloadOnlyPartition(): boolean {
-    return this.storagePartitioned && !this.partitionAccount
-  }
-
-  /**
    * Find the account + connected-app pair for the current parent origin, reading
    * the nested account documents. Resolves ambiguity (the same app connected
    * under multiple accounts) by sorting valid entries by `lastConnectedAt`
@@ -2907,7 +2868,6 @@ export class SwarmIdProxy {
     this.stamperAccountFingerprint = undefined
     this.pendingLaneUpdates.clear()
     this.storagePartitioned = false
-    this.storagePartitionedIdentity = undefined
     this.partitionAccount = undefined
     this.detachBusTransports()
     // Retire any join still deriving its key, or it would re-attach behind us.
@@ -2945,11 +2905,6 @@ export class SwarmIdProxy {
     if (this.isSubsidisedModeActive()) {
       return
     }
-    if (this.isDownloadOnlyPartition) {
-      throw new Error(
-        "Uploads are unavailable in download-only mode due to browser storage partitioning.",
-      )
-    }
     // NB: the multi-device "all partitions held" case is NOT checked here.
     // It's deferred to the coordinator's `withWrite`, which runs a fresh
     // acquisition attempt (with slot-wait) under the write lock and then throws
@@ -2960,16 +2915,14 @@ export class SwarmIdProxy {
   /**
    * Check if subsidised upload mode is active.
    * Subsidised mode is active when:
-   * - User has no postage stamp OR no signer key, OR storage is partitioned
-   *   (can't access stamp when partitioned)
+   * - User has no postage stamp OR no signer key — partitioning is not one of
+   *   the causes: the connect popup hands the stamps over, so a partitioned
+   *   session resolves its own like any other
    * - AND a subsidised gateway URL is configured
    */
   private isSubsidisedModeActive(): boolean {
     return (
-      (!this.postageBatchId ||
-        !this.signerKey ||
-        this.isDownloadOnlyPartition) &&
-      !!this.subsidisedGatewayUrl
+      (!this.postageBatchId || !this.signerKey) && !!this.subsidisedGatewayUrl
     )
   }
 
@@ -3028,25 +2981,24 @@ export class SwarmIdProxy {
     let identity: ConnectionInfo["identity"] = undefined
 
     if (this.authenticated && this.parentOrigin) {
-      if (this.isDownloadOnlyPartition && this.storagePartitionedIdentity) {
-        identity = this.storagePartitionedIdentity
-      } else {
-        try {
-          const connection = this.findConnectionForParent()
-          if (connection) {
-            // The account IS the app-facing identity (single-level model).
-            const { account } = connection
-            identity = {
-              id: account.id.toHex(),
-              name: account.name,
-              address: account.id.toHex(),
-              publicKey: account.publicKey,
-              avatar: generatedAvatar(account.id.toHex()),
-            }
+      try {
+        // One lookup for both modes: a partitioned session resolves this out
+        // of the handed-over account view, an unpartitioned one out of shared
+        // storage, and `findConnectionForParent` already knows the difference.
+        const connection = this.findConnectionForParent()
+        if (connection) {
+          // The account IS the app-facing identity (single-level model).
+          const { account } = connection
+          identity = {
+            id: account.id.toHex(),
+            name: account.name,
+            address: account.id.toHex(),
+            publicKey: account.publicKey,
+            avatar: generatedAvatar(account.id.toHex()),
           }
-        } catch (error) {
-          console.error("[Proxy] Error looking up identity:", error)
         }
+      } catch (error) {
+        console.error("[Proxy] Error looking up identity:", error)
       }
     }
 
@@ -3071,12 +3023,7 @@ export class SwarmIdProxy {
     // - Subsidised mode is the fallback when no user stamp is usable.
     let uploadMode: "user-stamp" | "subsidised" | "unavailable" = "unavailable"
     if (this.authenticated && this.appSecret) {
-      if (
-        this.postageBatchId &&
-        this.signerKey &&
-        this.stamper &&
-        !this.isDownloadOnlyPartition
-      ) {
+      if (this.postageBatchId && this.signerKey && this.stamper) {
         uploadMode = "user-stamp"
       } else if (this.subsidisedGatewayUrl) {
         uploadMode = "subsidised"
@@ -3101,7 +3048,7 @@ export class SwarmIdProxy {
   }
 
   /**
-   * Which of the three ways to be upload-less this session hit. Ordered by how
+   * Which of the two ways to be upload-less this session hit. Ordered by how
    * early the path gives up, so the answer names the first thing that stopped
    * it rather than the last symptom.
    *
@@ -3110,7 +3057,6 @@ export class SwarmIdProxy {
    */
   private uploadUnavailableReason(): UploadUnavailableReason | undefined {
     if (!this.authenticated || !this.appSecret) return undefined
-    if (this.isDownloadOnlyPartition) return "download-only"
     if (!this.postageBatchId || !this.signerKey) return "no-stamp"
     // The stamp resolved and the write path still did not build:
     // `initializeStamper` logs and returns rather than throwing, so this is the

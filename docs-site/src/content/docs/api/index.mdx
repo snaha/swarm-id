@@ -369,20 +369,21 @@ Synchronous accessor for the current connection state. Populated by the proxy as
 
 **Throws:** `Error` if `initialize()` has not been called yet.
 
-| Property             | Type                                            | Description                                                                                                 |
-| -------------------- | ----------------------------------------------- | ----------------------------------------------------------------------------------------------------------- |
-| `canUpload`          | `boolean`                                       | Whether the user can upload data                                                                            |
-| `uploadMode`         | `"user-stamp" \| "subsidised" \| "unavailable"` | How uploads will be handled. See [Upload Availability](/subsidised-gateway#upload-availability-truth-table) |
-| `storagePartitioned` | `boolean \| undefined`                          | `true` when browser storage partitioning prevents access to stamps/signer keys                              |
-| `identity`           | `object \| undefined`                           | The connected identity details (if authenticated)                                                           |
-| `identity.id`        | `string`                                        | Unique identifier for the identity                                                                          |
-| `identity.name`      | `string`                                        | Display name of the identity                                                                                |
-| `identity.address`   | `string`                                        | Ethereum address associated with the identity                                                               |
-| `identity.publicKey` | `string \| undefined`                           | Public key of the identity                                                                                  |
-| `identity.avatar`    | `Avatar`                                        | Ready-to-render account avatar. See [Avatars](#avatars)                                                     |
-| `appKey`             | `object \| undefined`                           | The app-specific key details                                                                                |
-| `appKey.address`     | `string`                                        | Ethereum address of the app key                                                                             |
-| `appKey.publicKey`   | `string`                                        | Public key of the app key                                                                                   |
+| Property                  | Type                                            | Description                                                                                                                                                                             |
+| ------------------------- | ----------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `canUpload`               | `boolean`                                       | Whether the user can upload data                                                                                                                                                        |
+| `uploadMode`              | `"user-stamp" \| "subsidised" \| "unavailable"` | How uploads will be handled. See [Upload Availability](/subsidised-gateway#upload-availability-truth-table)                                                                             |
+| `uploadUnavailableReason` | `"no-stamp" \| "stamper-failed" \| undefined`   | Why `uploadMode` is `"unavailable"`; absent whenever uploads work. See [Why Uploads Are Unavailable](/subsidised-gateway#why-uploads-are-unavailable)                                   |
+| `storagePartitioned`      | `boolean \| undefined`                          | `true` when the browser gave the proxy iframe its own partitioned store (Safari ITP, strict privacy settings). Reported for UI messaging; it does **not** decide whether you can upload |
+| `identity`                | `object \| undefined`                           | The connected identity details (if authenticated)                                                                                                                                       |
+| `identity.id`             | `string`                                        | Unique identifier for the identity                                                                                                                                                      |
+| `identity.name`           | `string`                                        | Display name of the identity                                                                                                                                                            |
+| `identity.address`        | `string`                                        | Ethereum address associated with the identity                                                                                                                                           |
+| `identity.publicKey`      | `string \| undefined`                           | Public key of the identity                                                                                                                                                              |
+| `identity.avatar`         | `Avatar`                                        | Ready-to-render account avatar. See [Avatars](#avatars)                                                                                                                                 |
+| `appKey`                  | `object \| undefined`                           | The app-specific key details                                                                                                                                                            |
+| `appKey.address`          | `string`                                        | Ethereum address of the app key                                                                                                                                                         |
+| `appKey.publicKey`        | `string`                                        | Public key of the app key                                                                                                                                                               |
 
 **Example:**
 
@@ -394,10 +395,12 @@ if (info.canUpload) {
   } else {
     console.log('Uploads will use your postage stamp')
   }
-} else if (info.storagePartitioned) {
-  console.log('Storage partitioned — downloads only')
+} else if (info.uploadUnavailableReason === 'no-stamp') {
+  console.log('No drive yet — buy one to upload')
+} else if (info.uploadUnavailableReason === 'stamper-failed') {
+  console.log('A drive is attached, but the write path did not build')
 } else {
-  console.log('No upload capability available')
+  console.log('Not connected yet')
 }
 ```
 

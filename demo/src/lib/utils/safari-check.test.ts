@@ -88,18 +88,18 @@ describe('runChecks', () => {
     expect(verdictOf(results, 'writer')).toBe('pass')
   })
 
-  // Ours to fix, unlike a missing drive — so these are the two that go red.
-  it.each(['download-only', 'stamper-failed'] as const)(
-    'fails the writer when the reason is %s',
-    (uploadUnavailableReason) => {
-      const results = runChecks({
-        connection: connected({ uploadMode: 'unavailable', uploadUnavailableReason }),
-        loadCount: 0,
-      })
-      expect(verdictOf(results, 'writer')).toBe('fail')
-      expect(verdictOf(results, 'handover')).toBe('pass')
-    },
-  )
+  // Ours to fix, unlike a missing drive — so this is the one that goes red.
+  it('fails the writer when the stamper would not build', () => {
+    const results = runChecks({
+      connection: connected({
+        uploadMode: 'unavailable',
+        uploadUnavailableReason: 'stamper-failed',
+      }),
+      loadCount: 0,
+    })
+    expect(verdictOf(results, 'writer')).toBe('fail')
+    expect(verdictOf(results, 'handover')).toBe('pass')
+  })
 
   // `uploadUnavailableReason` is optional on the wire, so this page running
   // against an older identity deployment reaches the fallback branch. Version

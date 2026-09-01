@@ -589,8 +589,6 @@ export type UploadMode = z.infer<typeof UploadModeSchema>
 /**
  * Why a session cannot upload, when `uploadMode` is `"unavailable"`.
  *
- * - `download-only` — a partitioned session the connect popup handed no
- *   account, so there was never a stamp to resolve (`isDownloadOnlyPartition`)
  * - `no-stamp` — no stamp resolved: the account has no drive, or its pointers
  *   name one that is gone
  * - `stamper-failed` — the stamp resolved and the stamper still did not build.
@@ -598,7 +596,6 @@ export type UploadMode = z.infer<typeof UploadModeSchema>
  *   the symptom is indistinguishable from having no stamp at all.
  */
 export const UploadUnavailableReasonSchema = z.enum([
-  "download-only",
   "no-stamp",
   "stamper-failed",
 ])
@@ -641,20 +638,24 @@ export const ConnectionIdentitySchema = z.object({
 export type ConnectionIdentity = z.infer<typeof ConnectionIdentitySchema>
 
 export const ConnectionInfoSchema = z.object({
-  /** Whether uploads are available (has postage stamp + signer key + not storage-partitioned, or subsidised gateway configured) */
+  /** Whether uploads are available (postage batch + signer key + a built stamper, or a subsidised gateway configured) */
   canUpload: z.boolean(),
-  /** Whether browser storage partitioning prevents access to stamps/signer keys (e.g. Safari ITP, strict privacy settings) */
+  /**
+   * Whether the browser gave this proxy iframe its own partitioned store
+   * (Safari ITP, strict privacy settings). Reported for UI messaging only —
+   * since #277 the connect popup hands the stamps and signer keys over
+   * directly, so partitioning does not decide whether uploads work.
+   */
   storagePartitioned: z.boolean().optional(),
   /** Current upload mode: "user-stamp" (user has postage stamp), "subsidised" (using dApp gateway), "unavailable" (no upload capability) */
   uploadMode: UploadModeSchema.optional(),
   /**
    * Why `uploadMode` is `"unavailable"`; absent whenever uploads work.
    *
-   * The three causes look identical from the dApp side without it, and they
+   * The two causes look identical from the dApp side without it, and they
    * call for opposite responses: `"no-stamp"` is the user's to fix (buy a
-   * drive), `"download-only"` means the connect popup handed over no account
-   * and a reconnect may fix it, `"stamper-failed"` is ours — the stamp
-   * resolved and the write path still would not build.
+   * drive), `"stamper-failed"` is ours — the stamp resolved and the write path
+   * still would not build.
    *
    * Reporting it is what made the real-Safari run (#584) readable: an account
    * with no drive had been reported as a failed `window.opener` handover,
@@ -1313,7 +1314,17 @@ export const ConnectionInfoChangedMessageSchema = z.object({
   canUpload: z.boolean(),
   storagePartitioned: z.boolean().optional(),
   uploadMode: UploadModeSchema.optional(),
-  uploadUnavailableReason: UploadUnavailableReasonSchema.optional(),
+  /**
+   * Tolerant on purpose: a reason this lib does not know degrades to
+   * `undefined` instead of failing the message. The client drops a
+   * `connectionInfoChanged` it cannot parse, and if that is the first one
+   * after `proxyReady`, `initialize()` rejects on its timeout — so one
+   * unrecognised enum member would stop the dApp starting at all. Reachable
+   * through deploy-cache skew alone: a proxy from the #616–#642 window still
+   * emits the `"download-only"` this lib removed.
+   */
+  uploadUnavailableReason:
+    UploadUnavailableReasonSchema.optional().catch(undefined),
   deviceId: z.string().optional(),
   identity: ConnectionIdentitySchema.optional(),
   appKey: z
@@ -1721,16 +1732,19 @@ export const AuthDataSchema = z.object({
   networkSettings: NetworkSettingsSchemaV1.optional(),
   /**
    * Full synced-account projection (the `serializeSyncedAccount` wire shape:
-   * no vault, no app secrets) for the storage-partitioning fallback. With it
-   * the partitioned iframe hydrates a full account view — stamps incl. signer
-   * keys and the `derivationKey` — and becomes a first-class writer instead
-   * of download-only (docs/Account-Bus.md, phase 3).
+   * no vault, no app secrets) — stamps incl. signer keys, and the
+   * `derivationKey` (docs/Account-Bus.md, phase 3).
+   *
+   * **Required**, and that requirement is the whole of the check: a handover
+   * without it produces a session that cannot upload, cannot derive a bus
+   * topic, and therefore cannot be told it was revoked. Refusing it here means
+   * the parse fails and the `setSecret` is ignored, so no such session is ever
+   * built — no mode to carry, no branch to keep in step.
+   *
+   * The account also carries the identity the dApp is shown, which is why
+   * there are no separate `identity*` fields.
    */
-  account: SyncedAccountSchemaV1.optional(),
-  identityId: z.string().optional(),
-  identityName: z.string().optional(),
-  identityAddress: AddressSchema.optional(),
-  identityPublicKey: CompressedPublicKeySchema.optional(),
+  account: SyncedAccountSchemaV1,
 })
 
 export type AuthData = z.infer<typeof AuthDataSchema>
@@ -1743,8 +1757,8 @@ export type AuthData = z.infer<typeof AuthDataSchema>
  * session was given. In full, what is now at rest for the life of the session:
  *
  * - the **app secret**, this origin's own credential;
- * - for a writer session, the **narrowed stamp projection** — #578 limits it to
- *   the stamps this app can spend, signer keys included;
+ * - the **narrowed stamp projection** — #578 limits it to the stamps this app
+ *   can spend, signer keys included;
  * - the account's **`derivationKey`**, which `serializeSyncedAccount` carries.
  *   This one is NOT app-narrowed: it derives the bus topic and envelope keys
  *   and the Swarm encryption/backup keys, so it is the most sensitive field

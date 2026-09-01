@@ -69,17 +69,16 @@ The dApp passed a `subsidisedGatewayUrl` when creating the SwarmIdClient.
 
 **Storage partitioning is not one of the axes.** When the browser partitions storage (Safari ITP), the proxy iframe cannot **read** the user's postage stamps or Bee node setting out of the trusted domain's localStorage. Since [#277](https://github.com/snaha/swarm-id/issues/277) it does not have to: the connect popup hands both over directly. A partitioned session with a drive is therefore an ordinary `user-stamp` session — confirmed on real Safari, iOS 18.7 / Safari 26.6 ([#584](https://github.com/snaha/swarm-id/issues/584)). `ConnectionInfo.storagePartitioned` is still reported, for UI messaging; it does not decide whether you can upload.
 
-The one partition-specific case is a session the popup handed **no account at all** — an identity deployment older than the handover. It holds no stamps and cannot resolve one, so it uploads through the subsidised gateway if one is configured, and not at all otherwise.
+A handover that arrives **without** the account view is refused outright, so there is no half-session to account for here: the session either has the account's own stamps to fall back from, or it was never established.
 
 ### Why Uploads Are Unavailable
 
 When `uploadMode` is `unavailable`, `ConnectionInfo.uploadUnavailableReason` names the **first** thing that stopped the session, not the last symptom:
 
-| Reason           | Meaning                                                                                                                  |
-| ---------------- | ------------------------------------------------------------------------------------------------------------------------ |
-| `download-only`  | Storage is partitioned and the connect popup handed over no account. Expected only against an older identity deployment. |
-| `no-stamp`       | No postage batch or no signer key resolved — most often an account with no drive yet.                                    |
-| `stamper-failed` | The stamp resolved, but the write path did not build. The only place that difference reaches the dApp.                   |
+| Reason           | Meaning                                                                                                |
+| ---------------- | ------------------------------------------------------------------------------------------------------ |
+| `no-stamp`       | No postage batch or no signer key resolved — most often an account with no drive yet.                  |
+| `stamper-failed` | The stamp resolved, but the write path did not build. The only place that difference reaches the dApp. |
 
 The reason is `undefined` while the session is unauthenticated, and while `canUpload` is `true`.
 

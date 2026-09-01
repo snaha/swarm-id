@@ -4,8 +4,7 @@
 /**
  * Storage-partitioning write enablement (docs/Account-Bus.md, phase 3): a
  * `setSecret` popup payload carrying the synced-account projection hydrates
- * the proxy into a first-class writer; the legacy secret-only payload stays
- * download-only.
+ * the proxy into a first-class writer; a payload without one is refused.
  */
 
 import {
@@ -397,24 +396,22 @@ describe("SwarmIdProxy partitioned write enablement", () => {
     )
   }
 
-  it("stays download-only on the legacy secret-only payload", async () => {
+  // A payload with no account used to build a "download-only" session: no
+  // stamps, and — the part that made it untenable — no `derivationKey`, so it
+  // derived no bus topic, joined no room, and could never be told it had been
+  // revoked. `AuthDataSchema` now requires the projection, so the parse fails
+  // and the message is ignored. No session beats a session nothing can reach.
+  it("refuses a handover that carries no account", async () => {
     const challenge = await startPartitionedConnect()
-    await sendSetSecret(challenge, {
-      identityId: "aa".repeat(20),
-      identityName: "Legacy",
-      identityAddress: "aa".repeat(20),
-    })
+    await sendSetSecret(challenge, {})
 
-    expect(messagesOfType("authSuccess")).toHaveLength(1)
+    expect(messagesOfType("authSuccess")).toHaveLength(0)
     const infos = messagesOfType("connectionInfoChanged")
-    const last = infos[infos.length - 1]
-    expect(last.storagePartitioned).toBe(true)
-    expect(last.uploadMode).toBe("unavailable")
-    expect(last.canUpload).toBe(false)
-    expect(last.uploadUnavailableReason).toBe("download-only")
+    expect(infos[infos.length - 1]?.identity).toBeUndefined()
+    expect(localStorageFake.getItem(STORAGE_KEY_PARTITION_SESSION)).toBeNull()
   })
 
-  // Three ways a partitioned session ends up unable to upload, and from the
+  // Two ways a partitioned session ends up unable to upload, and from the
   // dApp side they were indistinguishable — every one of them just said
   // "unavailable". That cost a real-Safari run (#584): an account with no drive
   // read as a failed `window.opener` handover, which is a claim about ITP.
@@ -876,9 +873,6 @@ describe("SwarmIdProxy partitioned write enablement", () => {
       const challenge = await startPartitionedConnect()
       await sendSetSecret(challenge, {
         account: serializeSyncedAccount(makeSyncedAccount()),
-        identityId: "aa".repeat(20),
-        identityName: "Partition Test Account",
-        identityAddress: "aa".repeat(20),
       })
     }
 

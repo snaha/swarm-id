@@ -94,7 +94,7 @@ Open http://localhost:3500 - that's it!
 - Identity UI runs on port 5500
 - No HTTPS, certificates, or custom domains required (`localhost` is a secure context)
 
-**Note:** On Safari the proxy iframe's storage is partitioned, so it is re-seeded by the connect popup on every load. A session that was handed no credentials (an older identity deployment) or whose account has no usable postage batch stays download-only; `ConnectionInfo.uploadUnavailableReason` says which. See [Safari limitations](#safari-limitations).
+**Note:** On Safari the proxy iframe's storage is partitioned, so the connect popup hands the session over directly. A handover carrying no account view is refused; a session whose account has no usable postage batch connects but cannot upload, and `ConnectionInfo.uploadUnavailableReason` says why. See [Safari limitations](#safari-limitations).
 
 ### Development Mode (with hot reload)
 
