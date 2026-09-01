@@ -1906,10 +1906,19 @@ export class SwarmIdProxy {
       // Handle same-origin popup messages (storage partitioning postMessage fallback)
       if (event.origin === window.location.origin && type === "setSecret") {
         const popupResult = PopupToIframeMessageSchema.safeParse(event.data)
-        if (popupResult.success) {
-          await this.handlePopupMessage(popupResult.data)
+        if (!popupResult.success) {
+          // Say what actually happened. Falling through from here reaches the
+          // parent-origin check below, which rejects this message as coming
+          // from an "unauthorized origin" — it came from the right one and
+          // failed the schema (#587). That was a rare diagnostic while any
+          // payload shape produced SOME session; now that the projection is
+          // required, a refused handover is the ordinary way a version-skewed
+          // identity deployment fails, and it must not read as an origin bug.
+          console.warn("[Proxy] Invalid setSecret payload:", popupResult.error)
           return
         }
+        await this.handlePopupMessage(popupResult.data)
+        return
       }
 
       // Validate origin - only accept messages from parent
