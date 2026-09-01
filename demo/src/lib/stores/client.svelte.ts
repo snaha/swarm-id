@@ -20,6 +20,18 @@ const STAMP_USABLE_POLL_INTERVAL = 10000 // fresh batches become usable after ~3
 // would otherwise be polled forever.
 const STAMP_USABLE_POLL_MAX_ATTEMPTS = 30
 
+// The subsidised-gateway choice is persisted: the client is built once, on
+// mount, so a reload that forgot the choice left an authenticated session
+// reporting `canUpload=false` until the user disconnected and reconnected
+// with the box re-ticked.
+const SUBSIDISED_GATEWAY_STORAGE_KEY = 'swarm-id-demo-subsidised-gateway'
+// The default the checkbox shipped with, kept deliberately. Subsidised uploads
+// are stamped by the public gateway rather than by the user's own postage, so
+// switching it on stays an explicit choice; persisting only changes how long
+// that choice survives. (`connect()` did default the flag to on when a caller
+// omitted it, but the sidebar never omitted it — it passed `false`.)
+const SUBSIDISED_GATEWAY_DEFAULT = false
+
 const BEE_ICON =
   'data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iNTYiIGhlaWdodD0iNTYiIHZpZXdCb3g9IjAgMCA1NiA1NiIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj4KICA8cmVjdCB3aWR0aD0iNTYiIGhlaWdodD0iNTYiIGZpbGw9IndoaXRlIiByeD0iOCIvPgogIDx0ZXh0IHg9IjUwJSIgeT0iNTAlIiBmb250LXNpemU9IjMyIiBkb21pbmFudC1iYXNlbGluZT0ibWlkZGxlIiB0ZXh0LWFuY2hvcj0ibWlkZGxlIj7wn5CdPC90ZXh0Pgo8L3N2Zz4='
 
@@ -68,10 +80,37 @@ let deferred = $state(false)
 let initializing = $state(false)
 let beeApiUrl = $state<string | undefined>(undefined)
 
+function loadSubsidisedGatewayPreference(): boolean {
+  try {
+    const stored = localStorage.getItem(SUBSIDISED_GATEWAY_STORAGE_KEY)
+    if (stored === 'true') return true
+    if (stored === 'false') return false
+  } catch {
+    return SUBSIDISED_GATEWAY_DEFAULT
+  }
+  return SUBSIDISED_GATEWAY_DEFAULT
+}
+
+let subsidisedGatewayEnabled = $state(loadSubsidisedGatewayPreference())
+
 let currentIdentityId: string | undefined
 let currentIdentityName: string | undefined
 let socWriterInstance: ReturnType<SwarmIdClient['makeSOCWriter']> | undefined
+// The gateway the live client was built with — compared against the current
+// preference to decide whether `connect()` has to rebuild it.
 let currentSubsidisedGatewayUrl: string | undefined = undefined
+
+// The `initialize()` run in flight, handed to every caller that arrives while
+// it is still going, and the generation of the client it is setting up.
+// `teardownClient()` bumps the generation so a run whose client was dropped
+// mid-flight stops instead of dereferencing it.
+let initializePromise: Promise<void> | undefined
+let initializeGeneration = 0
+
+// The `connect()` press in flight. `SwarmIdClient.connect` opens the auth popup
+// with `window.open`, and the button is not disabled while a press is running,
+// so a second press that ran on its own would open a second popup.
+let connectPromise: Promise<void> | undefined
 
 // Monotonic generation counter for connection-change handler runs. Used to
 // drop stale results from in-flight `getPostageBatch()` calls when the user
@@ -212,6 +251,162 @@ async function onConnectionChange(info: ConnectionInfo) {
   }
 }
 
+/**
+ * Drop the live client and invalidate any `initialize()` run still in flight.
+ *
+ * That run's tail (`getNodeInfo` → `checkAuthStatus`) is two gateway
+ * round-trips long, so it is routinely still going when the user presses
+ * Connect. Bumping the generation makes it stop at its next checkpoint instead
+ * of dereferencing the client this just cleared.
+ */
+function teardownClient() {
+  connectionGeneration++
+  initializeGeneration++
+  initializePromise = undefined
+  initializing = false
+  clearStampPollTimer()
+  client?.destroy()
+  client = undefined
+  socWriterInstance = undefined
+  // Belonged to the client just dropped. Left behind, a custom node's URL
+  // outlived it and kept the subsidised-gateway checkbox disabled.
+  beeApiUrl = undefined
+}
+
+async function runInitialize(generation: number) {
+  initializing = true
+
+  try {
+    const proxyOrigin = resolveProxyOrigin()
+    logStore.log('Initializing Swarm ID client...')
+    logStore.log(`PROXY_ORIGIN: ${proxyOrigin}`)
+    logStore.log(`PROXY_PATH: ${PROXY_PATH}`)
+    logStore.log(`Full Proxy URL: ${proxyOrigin}${PROXY_PATH}`)
+    logStore.log(`User Agent: ${navigator.userAgent}`)
+
+    currentSubsidisedGatewayUrl = subsidisedGatewayEnabled ? DEFAULT_BEE_NODE_URL : undefined
+
+    // Held locally as well: everything below runs across awaits, and `client`
+    // can be cleared under us by a teardown in between.
+    const instance = new SwarmIdClient({
+      iframeOrigin: proxyOrigin,
+      iframePath: PROXY_PATH,
+      timeout: CLIENT_TIMEOUT,
+      subsidisedGatewayUrl: currentSubsidisedGatewayUrl,
+      onConnectionChange,
+      metadata: {
+        name: 'Swarm ID Demo',
+        description: 'Demo application showcasing Swarm ID authentication and Bee API operations',
+        icon: BEE_ICON,
+      },
+      buttonConfig: {
+        connectText: 'Connect to Swarm',
+        disconnectText: 'Disconnect',
+        loadingText: 'Loading...',
+        backgroundColor: '#667eea',
+        color: 'white',
+        borderRadius: '6px',
+      },
+      containerId: 'swarm-id-button',
+    })
+    client = instance
+
+    logStore.log('Starting client initialization...')
+    await instance.initialize()
+    if (generation !== initializeGeneration) return
+    socWriterInstance = instance.makeSOCWriter()
+    logStore.log('Client initialized successfully')
+
+    try {
+      const nodeInfo = await instance.getNodeInfo()
+      if (generation !== initializeGeneration) return
+      const isDevMode = nodeInfo.beeMode === 'dev'
+      deferred = isDevMode
+      logStore.log(`Bee mode: ${nodeInfo.beeMode}, deferred default: ${isDevMode}`)
+    } catch (error) {
+      if (generation !== initializeGeneration) return
+      logStore.log(
+        `Could not determine beeMode, keeping default: ${error instanceof Error ? error.message : String(error)}`,
+        'warn',
+      )
+    }
+
+    logStore.log('Checking auth status...')
+    const status = await instance.checkAuthStatus()
+    if (generation !== initializeGeneration) return
+    beeApiUrl = status.beeApiUrl
+    logStore.log(`Auth status: ${status.authenticated ? 'authenticated' : 'not authenticated'}`)
+    // Connection state (identity/stamp/canUpload) flows in via onConnectionChange.
+  } catch (error) {
+    if (generation !== initializeGeneration) return
+    logStore.log(
+      `Initialization failed: ${error instanceof Error ? error.message : String(error)}`,
+      'error',
+    )
+    // Drop the half-built client rather than leaving it where `initialize()`
+    // finds it: a `SwarmIdClient` that failed cannot be reused — its
+    // `initialize()` throws "already initialized" — so keeping it made every
+    // later run return early and every Connect run against a client that never
+    // came up. Tearing down also rejects its pending init deferreds, clearing
+    // the timers that would otherwise linger the full `CLIENT_TIMEOUT`.
+    teardownClient()
+  } finally {
+    // A newer run owns the flag once this one has been superseded.
+    if (generation === initializeGeneration) initializing = false
+  }
+}
+
+/**
+ * Bring the client up, or hand back the run that is already doing so.
+ *
+ * The run in flight wins over `client`: `runInitialize` publishes the client
+ * before its awaits, so a caller that checked `client` first would sail past a
+ * run that is still two round-trips from finished.
+ */
+function ensureInitialized(): Promise<void> {
+  if (initializePromise) return initializePromise
+  if (client) return Promise.resolve()
+
+  const generation = ++initializeGeneration
+  const pending = runInitialize(generation).finally(() => {
+    // Only clear our own run: a teardown may already have replaced it.
+    if (initializePromise === pending) initializePromise = undefined
+  })
+  initializePromise = pending
+  return pending
+}
+
+async function runConnect(): Promise<void> {
+  // Let a run that is already in flight finish first. Pressing Connect while
+  // the initial `initialize()` was still in its tail used to drop the connect
+  // (the old re-entrancy guard bailed out) and crash that tail on the client it
+  // had just destroyed, leaving the demo dead until a page reload.
+  await ensureInitialized()
+
+  const subsidisedUrl = subsidisedGatewayEnabled ? DEFAULT_BEE_NODE_URL : undefined
+  if (client && currentSubsidisedGatewayUrl !== subsidisedUrl) {
+    logStore.log(
+      `Subsidised gateway changed to ${subsidisedGatewayEnabled ? 'enabled' : 'disabled'}, reinitializing client...`,
+    )
+    teardownClient()
+    await ensureInitialized()
+  }
+
+  const instance = client
+  if (!instance) {
+    // `initialize()` has already logged why.
+    logStore.log('Connect ignored: the client is not initialized', 'warn')
+    return
+  }
+
+  const status = await instance.checkAuthStatus()
+  if (status.authenticated) {
+    await instance.disconnect()
+  } else {
+    await instance.connect()
+  }
+}
+
 export const clientStore = {
   get client() {
     return client
@@ -265,105 +460,50 @@ export const clientStore = {
     return beeApiUrl !== undefined && beeApiUrl !== DEFAULT_BEE_NODE_URL
   },
 
-  async initialize() {
-    if (client || initializing) return
-    initializing = true
-
-    const proxyOrigin = resolveProxyOrigin()
-    logStore.log('Initializing Swarm ID client...')
-    logStore.log(`PROXY_ORIGIN: ${proxyOrigin}`)
-    logStore.log(`PROXY_PATH: ${PROXY_PATH}`)
-    logStore.log(`Full Proxy URL: ${proxyOrigin}${PROXY_PATH}`)
-    logStore.log(`User Agent: ${navigator.userAgent}`)
-
-    client = new SwarmIdClient({
-      iframeOrigin: proxyOrigin,
-      iframePath: PROXY_PATH,
-      timeout: CLIENT_TIMEOUT,
-      subsidisedGatewayUrl: currentSubsidisedGatewayUrl,
-      onConnectionChange,
-      metadata: {
-        name: 'Swarm ID Demo',
-        description: 'Demo application showcasing Swarm ID authentication and Bee API operations',
-        icon: BEE_ICON,
-      },
-      buttonConfig: {
-        connectText: 'Connect to Swarm',
-        disconnectText: 'Disconnect',
-        loadingText: 'Loading...',
-        backgroundColor: '#667eea',
-        color: 'white',
-        borderRadius: '6px',
-      },
-      containerId: 'swarm-id-button',
-    })
-
+  get subsidisedGatewayEnabled() {
+    return subsidisedGatewayEnabled
+  },
+  set subsidisedGatewayEnabled(value: boolean) {
+    subsidisedGatewayEnabled = value
     try {
-      logStore.log('Starting client initialization...')
-      await client.initialize()
-      socWriterInstance = client.makeSOCWriter()
-      logStore.log('Client initialized successfully')
-
-      try {
-        const nodeInfo = await client.getNodeInfo()
-        const isDevMode = nodeInfo.beeMode === 'dev'
-        deferred = isDevMode
-        logStore.log(`Bee mode: ${nodeInfo.beeMode}, deferred default: ${isDevMode}`)
-      } catch (error) {
-        logStore.log(
-          `Could not determine beeMode, keeping default: ${error instanceof Error ? error.message : String(error)}`,
-          'warn',
-        )
-      }
-
-      logStore.log('Checking auth status...')
-      const status = await client.checkAuthStatus()
-      beeApiUrl = status.beeApiUrl
-      logStore.log(`Auth status: ${status.authenticated ? 'authenticated' : 'not authenticated'}`)
-      // Connection state (identity/stamp/canUpload) flows in via onConnectionChange.
-    } catch (error) {
-      logStore.log(
-        `Initialization failed: ${error instanceof Error ? error.message : String(error)}`,
-        'error',
-      )
-    } finally {
-      initializing = false
+      localStorage.setItem(SUBSIDISED_GATEWAY_STORAGE_KEY, String(value))
+    } catch {
+      logStore.log('Could not persist the subsidised gateway choice', 'warn')
     }
   },
 
-  async connect(options?: { useSubsidisedGateway?: boolean }) {
-    const useSubsidised = options?.useSubsidisedGateway ?? true
-    const subsidisedUrl = useSubsidised ? DEFAULT_BEE_NODE_URL : undefined
+  /**
+   * Bring the client up, or hand back the run that is already doing so.
+   *
+   * Always await it. A caller that fires and forgets can tear the client down
+   * under a run still in its tail, which is what used to wedge the store.
+   */
+  initialize(): Promise<void> {
+    return ensureInitialized()
+  },
 
-    // If subsidised gateway setting changed, reinitialize the client
-    if (client && currentSubsidisedGatewayUrl !== subsidisedUrl) {
-      logStore.log(
-        `Subsidised gateway changed to ${useSubsidised ? 'enabled' : 'disabled'}, reinitializing client...`,
-      )
-      connectionGeneration++
-      clearStampPollTimer()
-      client.destroy()
-      client = undefined
-      currentSubsidisedGatewayUrl = subsidisedUrl
-      await this.initialize()
-    }
+  /**
+   * Connect or disconnect, or hand back the press that is already doing so.
+   *
+   * Deduped for the same reason `initialize()` is: the Connect button stays
+   * live while a press is running, and a second press reaching
+   * `SwarmIdClient.connect` would open a second auth popup.
+   */
+  connect(): Promise<void> {
+    if (connectPromise) return connectPromise
 
-    if (!client) return
-    const status = await client.checkAuthStatus()
-    if (status.authenticated) {
-      await client.disconnect()
-    } else {
-      await client.connect()
-    }
+    const pending = runConnect().finally(() => {
+      if (connectPromise === pending) connectPromise = undefined
+    })
+    connectPromise = pending
+    return pending
   },
 
   destroy() {
-    // Bump the generation so an in-flight `getPostageBatch` resolving after
-    // destroy can't write `stamp` back, and stop any pending re-poll.
-    connectionGeneration++
-    clearStampPollTimer()
-    client?.destroy()
-    client = undefined
+    // Bumps the generations so an in-flight `getPostageBatch` resolving after
+    // destroy can't write `stamp` back and an in-flight `initialize()` stops,
+    // and stops any pending re-poll.
+    teardownClient()
     authenticated = false
     canUpload = false
     storagePartitioned = false
@@ -373,6 +513,5 @@ export const clientStore = {
     appKey = undefined
     stamp = undefined
     partition = undefined
-    socWriterInstance = undefined
   },
 }

@@ -69,7 +69,7 @@ Before committing, you MUST pass `pnpm check:all` which runs filtered checks acr
 
 - **`@snaha/swarm-id`**: `format:check`, `lint`, `typecheck`, `test`
 - **`@swarm-id/ui`**: `lint` (includes license headers), `check`, `knip`
-- **`@swarm-id/demo`**: `lint`, `check`, `knip`
+- **`@swarm-id/demo`**: `lint`, `check`, `knip`, `test`
 
 ## Code Style
 

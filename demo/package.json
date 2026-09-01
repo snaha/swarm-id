@@ -14,7 +14,7 @@
     "format": "prettier --write . && eslint . --fix",
     "knip": "knip",
     "clean": "rm -rf build .svelte-kit",
-    "test": "vitest run --passWithNoTests"
+    "test": "vitest run"
   },
   "devDependencies": {
     "@eslint/js": "9.39.1",

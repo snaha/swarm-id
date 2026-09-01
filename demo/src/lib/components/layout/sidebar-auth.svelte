@@ -12,7 +12,6 @@
   import InfoButton from '$lib/components/ui/tooltip/info-button.svelte'
   import { clientStore } from '$lib/stores/client.svelte'
 
-  let useSubsidisedGateway = $state(false)
   let popoverOpen = $state(false)
 
   // Derive whether custom Bee API URL is set
@@ -109,7 +108,7 @@
       </div>
       <Button
         onclick={() => {
-          clientStore.connect({ useSubsidisedGateway })
+          clientStore.connect()
           popoverOpen = false
         }}
         size="sm"
@@ -143,7 +142,7 @@
       <!-- Subsidised gateway -->
       <div class="flex items-center gap-2">
         <Checkbox
-          bind:checked={useSubsidisedGateway}
+          bind:checked={clientStore.subsidisedGatewayEnabled}
           id="popover-subsidised-gateway"
           disabled={hasCustomBeeApiUrl}
         />
