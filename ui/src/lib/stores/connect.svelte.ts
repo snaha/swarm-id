@@ -25,7 +25,8 @@ export interface ConnectRequest {
  * Remembers (per popup tab) a challenge we already matched in localStorage.
  * The challenge key is consumed on first match, so without this marker a
  * reload or back-navigation re-running initFromHash would misread the missing
- * key as partitioned storage and force the dApp into download-only mode.
+ * key as partitioned storage and hand the session over on a channel the dApp
+ * is not listening on.
  */
 const CHALLENGE_MATCHED_KEY = 'swarm-id-challenge-matched'
 

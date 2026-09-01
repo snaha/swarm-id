@@ -171,14 +171,6 @@ function writerPath(input: CheckInput): CheckResult {
         detail:
           'This account has no drive, so there was no stamp to hand over and the writer path was never exercised. Buy a drive on the identity site, then reconnect and run this again.',
       }
-    case 'download-only':
-      return {
-        id,
-        title,
-        verdict: 'fail',
-        detail:
-          'The popup handed over a secret but no account, so the session is download-only. Expected only against an older identity deployment.',
-      }
     case 'stamper-failed':
       return {
         id,

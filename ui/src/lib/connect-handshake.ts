@@ -94,26 +94,24 @@ export function partitionHandoverAccount(
 
 /**
  * Storage-partitioning fallback: hand the secret straight to the proxy iframe
- * (our window.opener) since it can't see our localStorage. The `identity*`
- * fields carry the account's info (single-level model), and `account` carries
- * the narrowed synced projection above, so the partitioned iframe becomes a
- * first-class writer instead of download-only (docs/Account-Bus.md, phase 3).
+ * (our window.opener) since it can't see our localStorage. `account` carries
+ * the narrowed synced projection above — the identity the dApp is shown comes
+ * off it, so nothing separate is sent for that (docs/Account-Bus.md, phase 3).
+ *
+ * The projection is not optional: `AuthDataSchema` requires it, and a payload
+ * without one is refused rather than producing a session that cannot upload
+ * and cannot be told it was revoked.
  */
 function sendSecretToOpener(account: Account, request: ConnectRequest, appSecret: string): void {
   if (!request.partitionChallenge || !window.opener) {
     return
   }
-  const idHex = account.id.toHex()
   const message = {
     type: 'setSecret',
     appOrigin: request.appOrigin,
     challenge: request.partitionChallenge,
     data: {
       secret: appSecret,
-      identityId: idHex,
-      identityName: account.name,
-      identityAddress: idHex,
-      identityPublicKey: account.publicKey,
       account: partitionHandoverAccount(account.toSyncedRecord(), request.appOrigin),
       networkSettings: networkSettingsStore.settings,
     },

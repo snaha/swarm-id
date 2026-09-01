@@ -9,7 +9,7 @@
  * (#578).
  */
 import { BatchId, EthAddress, PrivateKey } from '@ethersphere/bee-js'
-import type { SyncedAccount } from '@snaha/swarm-id'
+import { AuthDataSchema, type SyncedAccount } from '@snaha/swarm-id'
 import { describe, expect, it } from 'vitest'
 
 import { partitionHandoverAccount } from '$lib/connect-handshake'
@@ -98,5 +98,21 @@ describe('partitionHandoverAccount', () => {
     for (const app of payload.connectedApps as Record<string, unknown>[]) {
       expect(app.appSecret).toBeUndefined()
     }
+  })
+
+  // The proxy REFUSES a handover whose account does not parse, so a narrowing
+  // that quietly drops a required field no longer degrades the session — it
+  // ends it. Nothing else checks this sender against that receiver, and the
+  // JSON round-trip in `sendSecretToOpener` is part of the wire shape, so the
+  // assertion runs on what actually crosses the boundary.
+  it('produces an account the proxy will accept', () => {
+    const wire = JSON.parse(
+      JSON.stringify({
+        secret: '33'.repeat(32),
+        account: partitionHandoverAccount(makeAccount(new BatchId(APP_BATCH)), APP_ORIGIN),
+      }),
+    )
+
+    expect(AuthDataSchema.safeParse(wire).success).toBe(true)
   })
 })
