@@ -34,9 +34,12 @@ export function getDeviceId(): string | undefined {
 /**
  * Merge a device list with the current device.
  *
- * Upserts the current device (updates lastSignedInAt if present,
- * creates a new entry if not). The `name` set at first registration is
- * intentionally preserved on subsequent sign-ins so the label is stable.
+ * Upserts the current device (updates lastSignedInAt if present, creates a new
+ * entry if not). A `deviceName` we are given REPLACES the stored one, so a
+ * caller that learns a better label — the partition naming of #570 — corrects
+ * the row already in the registry instead of only the next one created. A
+ * caller with nothing to say passes nothing and the stored label stands: the
+ * name must not be blanked by a context that does not know it.
  *
  * Signing in clears any `removedAt` tombstone on the current device: a genuine
  * sign-in re-activates a device that was removed elsewhere (#337).
@@ -52,7 +55,12 @@ export function mergeDevices(
   if (found) {
     return existing.map((d) =>
       d.deviceId === currentDeviceId
-        ? { ...d, lastSignedInAt: now, removedAt: undefined }
+        ? {
+            ...d,
+            lastSignedInAt: now,
+            removedAt: undefined,
+            name: deviceName ?? d.name,
+          }
         : d,
     )
   }
@@ -128,6 +136,33 @@ export function detectDeviceName(): string {
   else browser = "Unknown Browser"
 
   return `${browser} on ${device}`
+}
+
+/**
+ * The device name a STORAGE-PARTITIONED proxy iframe announces itself under.
+ *
+ * A partitioned iframe keeps its own `swarm-id-device-id` in the partition, and
+ * a partition is one (top-level site, iframe origin) pair — so two tabs of one
+ * dApp are one device, while two different dApps on the same browser are two.
+ * `detectDeviceName()` alone therefore hands a Safari user with three connected
+ * dApps three indistinguishable "Safari on Mac" rows (#570). The dApp host is
+ * what tells them apart, and the port comes with it: locally the dApps differ
+ * by port alone.
+ *
+ * Only for the partitioned case. An UNPARTITIONED proxy reads the trusted
+ * domain's first-party store, so it shares `swarm-id-device-id` with the
+ * identity UI — it is the same device, and naming that after whichever dApp
+ * happened to load it would be wrong.
+ */
+export function partitionDeviceName(appOrigin: string): string {
+  const deviceName = detectDeviceName()
+  try {
+    // Never worth failing a device announce over: this name is decoration on a
+    // roster write, so an origin we cannot parse falls back to the plain name.
+    return `${deviceName} · ${new URL(appOrigin).host}`
+  } catch {
+    return deviceName
+  }
 }
 
 /**

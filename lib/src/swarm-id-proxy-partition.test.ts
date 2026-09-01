@@ -2162,6 +2162,104 @@ describe("SwarmIdProxy partitioned write enablement", () => {
     expect(savedPeer?.lastSignedInAt).toBe(refreshedSignIn)
   })
 
+  // A partition is one (top-level site, iframe origin) pair, so this iframe is
+  // a device per dApp — and three connected dApps on one Safari announced three
+  // identical "Safari on Mac" rows (#570). The dApp host is what tells them
+  // apart. Asserted on the row ALREADY in the registry, because correcting only
+  // newly-created rows would leave the existing ones ambiguous until they
+  // expire.
+  it("names a partition device after the dApp it belongs to", async () => {
+    const selfId = "self-device-partitioned"
+    localStorageFake.setItem("swarm-id-device-id", selfId)
+    const account = makeSyncedAccount()
+    account.devices = [
+      {
+        deviceId: selfId,
+        createdAt: Date.now(),
+        lastSignedInAt: Date.now(),
+        name: "Safari on Mac",
+      },
+    ]
+    // `refreshDeviceRegistryFromSwarm` returns early on an empty roster, so the
+    // merge that renames us only runs when there is something to read.
+    rosterDevices.length = 0
+    rosterDevices.push({
+      deviceId: selfId,
+      createdAt: Date.now(),
+      lastSignedInAt: Date.now(),
+      name: "Safari on Mac",
+    })
+
+    const challenge = await startPartitionedConnect()
+    await sendSetSecret(challenge, {
+      account: serializeSyncedAccount(account),
+    })
+
+    const { deps } = vi.mocked(BatchWriteCoordinator).mock.results.at(-1)!
+      .value as { deps: { refreshKnownDeviceIds: () => Promise<void> } }
+    await deps.refreshKnownDeviceIds()
+
+    const internals = proxy as unknown as {
+      partitionAccount: { devices: Device[] }
+    }
+    const self = internals.partitionAccount.devices.find(
+      (d) => d.deviceId === selfId,
+    )
+    // The browser half is the environment's (`detectDeviceName`, covered with
+    // stubbed user agents in `device-id.test.ts`); what this pins is the dApp
+    // suffix, and that the row seeded as a bare "Safari on Mac" was corrected.
+    expect(self?.name).toMatch(/ · dapp\.example\.com$/)
+  })
+
+  // The other half of the same rule, and the reason it is a rule rather than a
+  // format: an UNPARTITIONED proxy reads the trusted domain's first-party
+  // store, so it shares `swarm-id-device-id` with the identity UI. Naming that
+  // device after whichever dApp happened to embed it would relabel the user's
+  // browser as a dApp.
+  it("leaves an unpartitioned device's name free of the dApp", async () => {
+    const selfId = "self-device-shared"
+    localStorageFake.setItem("swarm-id-device-id", selfId)
+    const synced = seedConnectedAccount({
+      account: {
+        devices: [
+          {
+            deviceId: selfId,
+            createdAt: Date.now(),
+            lastSignedInAt: Date.now(),
+            name: "Safari on Mac",
+          },
+        ],
+      },
+    })
+    rosterDevices.length = 0
+    rosterDevices.push({
+      deviceId: selfId,
+      createdAt: Date.now(),
+      lastSignedInAt: Date.now(),
+      name: "Safari on Mac",
+    })
+
+    proxy.destroy()
+    mountProxy()
+    await dispatch(
+      { type: "parentIdentify", requestId: "r1", metadata: { name: "dApp" } },
+      PARENT_ORIGIN,
+      parentWindow,
+    )
+
+    const { deps } = vi.mocked(BatchWriteCoordinator).mock.results.at(-1)!
+      .value as { deps: { refreshKnownDeviceIds: () => Promise<void> } }
+    await deps.refreshKnownDeviceIds()
+
+    const stored = JSON.parse(
+      localStorageFake.getItem(STORAGE_KEY_ACCOUNTS)!,
+    ) as { data: { id: string; devices: Device[] }[] }
+    const self = stored.data
+      .find((a) => a.id === synced.id.toHex())!
+      .devices.find((d) => d.deviceId === selfId)
+    expect(self?.name).not.toContain("dapp.example.com")
+  })
+
   // Hydration must go through the same network-settings path as the storage-
   // backed one: an RPC-only difference is invisible to a `beeNodeUrl` guard,
   // and a partitioned session that keeps the default RPC reads stamp TTLs and

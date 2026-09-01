@@ -120,6 +120,7 @@ import {
   deviceRegistryChanged,
   mergeDevices,
   detectDeviceName,
+  partitionDeviceName,
 } from "./utils/device-id"
 import {
   createNetworkSettingsStorageManager,
@@ -2453,7 +2454,7 @@ export class SwarmIdProxy {
       const mergedDevices = mergeDevices(
         mergeDevicesList(account.devices, rosterDevices),
         this.requireDeviceId(),
-        detectDeviceName(),
+        this.announcedDeviceName(),
       )
       // Persist when anything the rival set reads actually moved — a peer
       // appearing, a refreshed sign-in, a tombstone — not merely when the list
@@ -2692,7 +2693,7 @@ export class SwarmIdProxy {
         (d) => d.deviceId === deviceId,
       ) ?? {
         deviceId,
-        name: detectDeviceName(),
+        name: this.announcedDeviceName(),
         createdAt: Date.now(),
         lastSignedInAt: Date.now(),
       }
@@ -2720,6 +2721,21 @@ export class SwarmIdProxy {
     } finally {
       this.publishInFlight = false
     }
+  }
+
+  /**
+   * The name this context announces itself under in the device registry.
+   *
+   * A PARTITIONED proxy keeps its own `swarm-id-device-id` in the partition, so
+   * it is a per-dApp device and says which dApp (#570). An UNPARTITIONED one
+   * reads the trusted domain's first-party store and therefore shares the
+   * device id with the identity UI — it is the same device, and naming it after
+   * whichever dApp happened to embed it would be wrong.
+   */
+  private announcedDeviceName(): string {
+    return this.storagePartitioned && this.parentOrigin
+      ? partitionDeviceName(this.parentOrigin)
+      : detectDeviceName()
   }
 
   /**
