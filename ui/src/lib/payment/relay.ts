@@ -16,7 +16,7 @@
  */
 import { type Execute, MAINNET_RELAY_API, createClient, getClient } from '@relayprotocol/relay-sdk'
 import { withIdleTimeout, withTimeout } from '@snaha/swarm-id'
-import { createWalletClient, custom, defineChain } from 'viem'
+import { createWalletClient, custom } from 'viem'
 import { arbitrum, base, gnosis, mainnet, optimism, polygon } from 'viem/chains'
 
 import {
@@ -169,16 +169,21 @@ async function quotePayment(request: QuoteRequest): Promise<PaymentQuote> {
   }
 }
 
-/** Wrap an EIP-1193 provider as the viem wallet client the SDK executes with. */
+/**
+ * Wrap an EIP-1193 provider as the viem wallet client the SDK executes with.
+ *
+ * Unknown ids are refused rather than described. `chainId` reaches here from
+ * the picker, which is built from these same chains, so this cannot fire today
+ * — it is here so that a chain added to one list and not the other says so.
+ * The alternative is worse than a throw: the fallback this replaces invented
+ * `nativeCurrency: Ether` and no RPCs for whatever id it was handed, which is a
+ * guess the wallet would then sign a real payment against.
+ */
 function walletClientFor(provider: EthereumProvider, chainId: number, address: string) {
-  const chain =
-    PAYMENT_CHAINS.find((candidate) => candidate.id === chainId) ??
-    defineChain({
-      id: chainId,
-      name: `Chain ${chainId}`,
-      nativeCurrency: { name: 'Ether', symbol: 'ETH', decimals: 18 },
-      rpcUrls: { default: { http: [] } },
-    })
+  const chain = PAYMENT_CHAINS.find((candidate) => candidate.id === chainId)
+  if (!chain) {
+    throw new Error(`No payment route available for chain ${chainId}.`)
+  }
   return createWalletClient({
     account: address as `0x${string}`,
     chain,

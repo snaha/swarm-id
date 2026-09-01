@@ -309,15 +309,15 @@
       }
       provider = wallet.provider as unknown as EthereumProvider
       walletAddress = address
+      // A wallet that has just arrived has been put on nothing.
+      switchedChainId = undefined
 
       // Adding a network is what makes the wallet show a balance for it at all,
       // so it is offered here rather than at Pay. A refusal is not fatal — they
       // may mean to pay from somewhere else, and `pay()` asks again for
       // whichever chain they land on.
       screen = 'switching'
-      await attempt.guard(
-        switchWalletChain(provider, Number(chainId), rail.chains).catch(() => undefined),
-      )
+      await attempt.guard(followChain())
 
       screen = 'configure'
       void refreshQuote()
@@ -409,17 +409,54 @@
   }
 
   /**
+   * The chain the wallet has been put on and — where that chain carries a
+   * genesis hash — proven to be on. Undefined when it is not settled.
+   *
+   * `switchWalletChain` costs a genesis read on the Gnosis chain, which is the
+   * selection this dialog opens on whenever the direct rail resolves. Connect,
+   * chain selection and Pay would otherwise each buy one in turn, back to back
+   * on the same provider with nothing between them that can change the answer.
+   *
+   * This is not the guarantee, and is not load-bearing: the direct rail reads
+   * genesis again before it signs anything (`executeDirectPayment`), and must,
+   * because nothing here can promise the wallet has not moved since. Cleared by
+   * the two things that move it — the wallet arriving, and the wallet saying it
+   * changed chain — so a stale record costs a skipped prompt, never a payment
+   * signed on the wrong network.
+   */
+  let switchedChainId: number | undefined
+
+  /**
+   * Put the wallet on the selected chain unless it is already known to be
+   * there. Rejects the way `switchWalletChain` does: a refusal is the caller's
+   * to interpret.
+   */
+  async function ensureWalletChain() {
+    const walletProvider = provider
+    const target = Number(chainId)
+    if (!walletProvider || switchedChainId === target) {
+      return
+    }
+    await switchWalletChain(walletProvider, target, rail.chains)
+    switchedChainId = target
+  }
+
+  /**
    * Walk the wallet to the newly selected chain right away rather than only at
    * Pay: the network prompt then happens while the user is still weighing the
    * choice, and the balances can come from the wallet's own RPC. A refusal is
    * not fatal — `pay()` asks again — so the switch is offered, not enforced.
+   *
+   * The one balance read a chain change gets, deliberately this one: it runs
+   * after the wallet has moved, so it reads through the wallet's own RPC rather
+   * than the chain's endpoint. A second read from `refreshQuote` would race it
+   * for the same figures with no rule about which won.
    */
   async function followChain() {
-    const walletProvider = provider
-    if (!walletProvider) {
+    if (!provider) {
       return
     }
-    await switchWalletChain(walletProvider, Number(chainId), rail.chains).catch(() => undefined)
+    await ensureWalletChain().catch(() => undefined)
     void readBalances()
   }
 
@@ -441,9 +478,16 @@
       }
       walletAddress = first
       balances = {}
+      void readBalances()
       void refreshQuote()
     }
-    const onChain = () => void readBalances()
+    const onChain = () => {
+      // The wallet moved itself, or moved because we asked and the event
+      // arrived after the record was written. Either way what it is on is no
+      // longer settled, and the next switch pays for the proof again.
+      switchedChainId = undefined
+      void readBalances()
+    }
     on.call(walletProvider, 'accountsChanged', onAccounts)
     on.call(walletProvider, 'chainChanged', onChain)
     return () => {
@@ -464,11 +508,15 @@
    * operation in full, there is nothing left to charge for and the payment is
    * settled rather than taken again.
    *
+   * Reads no balances of its own. They move when the wallet moves — a new
+   * account, a new chain, a payment that spent some — not when a price is asked
+   * for again, and `readBalances` covers every token on the chain at once, so a
+   * token change already has its figures.
+   *
    * @param failure - message from the attempt that led here, kept visible under
    *   the re-priced cost.
    */
   async function refreshQuote(failure = '') {
-    void readBalances()
     // The Gnosis side in force, kept as a local: it is replaced mid-flight by
     // the re-price below, and every figure handed to the rail must come from
     // the same one.
@@ -542,7 +590,7 @@
     errorMessage = ''
     try {
       screen = 'switching'
-      await attempt.guard(switchWalletChain(provider, Number(chainId), rail.chains))
+      await attempt.guard(ensureWalletChain())
       screen = 'approving'
       attempted = true
       paying = true
@@ -589,6 +637,9 @@
         return
       }
       screen = 'configure'
+      // A failed attempt can still have moved money — a broadcast whose
+      // confirmation timed out is the ordinary case — so the figures are stale.
+      void readBalances()
       await refreshQuote(failure)
     }
   }
