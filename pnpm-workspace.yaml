@@ -5,6 +5,7 @@ packages:
   - 'demo'
   - 'ui'
   - 'docs-site'
+  - 'eslint-rules'
 
 # pnpm 11 reads non-auth settings from this file, not .npmrc.
 autoInstallPeers: false

@@ -1,12 +1,14 @@
 // Copyright 2026 The Swarm Authors. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import type { Rule } from 'eslint'
+import type { AST } from 'svelte-eslint-parser'
+
 const EXPECTED_SPDX = 'SPDX-License-Identifier: Apache-2.0'
 const EXPECTED_COPYRIGHT = 'Copyright 2026 The Swarm Authors. All rights reserved.'
 const HEADER_TEMPLATE = `<!--\n  Copyright 2026 The Swarm Authors. All rights reserved.\n  SPDX-License-Identifier: Apache-2.0\n-->\n\n`
 
-/** @type {import('eslint').Rule.RuleModule} */
-const rule = {
+const rule: Rule.RuleModule = {
   meta: {
     type: 'suggestion',
     docs: {
@@ -22,12 +24,16 @@ const rule = {
   },
   create(context) {
     return {
-      Program(node) {
-        const firstNode = node.body[0]
+      // On a .svelte file the parser hands us a SvelteProgram, whose body holds template
+      // nodes rather than statements. eslint's ESTree types cannot express that, so this
+      // narrows to the parser's own published shape and reports by `loc` — the Svelte
+      // nodes are not ESTree nodes and cannot be passed as `node`.
+      Program(program) {
+        const [firstNode] = (program as unknown as AST.SvelteProgram).body
 
-        if (!firstNode || firstNode.type !== 'SvelteHTMLComment') {
+        if (firstNode?.type !== 'SvelteHTMLComment') {
           context.report({
-            node: firstNode || node,
+            loc: firstNode?.loc ?? program.loc,
             messageId: 'missingHeader',
             fix(fixer) {
               return fixer.insertTextBeforeRange([0, 0], HEADER_TEMPLATE)
@@ -39,7 +45,7 @@ const rule = {
         const commentText = firstNode.value
         if (!commentText.includes(EXPECTED_SPDX) || !commentText.includes(EXPECTED_COPYRIGHT)) {
           context.report({
-            node: firstNode,
+            loc: firstNode.loc,
             messageId: 'wrongHeader',
           })
         }

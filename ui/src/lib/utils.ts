@@ -28,7 +28,7 @@ export async function copyToClipboard(text: string): Promise<boolean> {
     textarea.style.opacity = '0'
     document.body.appendChild(textarea)
     textarea.select()
-    let copied = false
+    let copied: boolean
     try {
       copied = document.execCommand('copy')
     } catch {
