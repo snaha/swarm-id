@@ -190,9 +190,9 @@ After buying a postage stamp, wait ~30 seconds before using it. The stamp needs 
 
 ### Safari Storage Partitioning
 
-Safari's Intelligent Tracking Prevention (ITP) partitions storage for third-party iframes, so the proxy cannot read the trusted domain's localStorage. Uploads are designed to keep working — the connect popup hands the iframe the account's stamps and signer keys — but nothing is persisted in the partition, so every page load re-runs the handshake. See [issue #277](https://github.com/snaha/swarm-id/issues/277) for the background.
+Safari's Intelligent Tracking Prevention (ITP) partitions storage for third-party iframes, so the proxy cannot read the trusted domain's localStorage. Uploads are designed to keep working — the connect popup hands the iframe the account's stamps and signer keys — and the session is kept in that partition's own store, so a reload does not re-run the handshake ([#635](https://github.com/snaha/swarm-id/issues/635)). See [issue #277](https://github.com/snaha/swarm-id/issues/277) for the background.
 
-The handover half is confirmed on real Safari (iOS 18.7 / Safari 26.6); the upload after it is still verified only on Chromium and Firefox with third-party storage partitioned. A plain `pnpm dev` cannot reproduce either — the identity UI and demo are served from the same site, and ports do not make them cross-site. Browsing the demo under a **different hostname for the same machine** does: `http://127.0.0.1:3500` or `http://[::1]:3500` while the proxy origin stays `http://localhost:5500`. That is the rig `ui/tests/bus-propagation.test.ts` uses.
+The whole path — handover, stamper, upload — is confirmed on real Safari (iOS 18.7 / Safari 26.6), in a normal and a private window alike. A plain `pnpm dev` cannot reproduce it — the identity UI and demo are served from the same site, and ports do not make them cross-site. Browsing the demo under a **different hostname for the same machine** does: `http://127.0.0.1:3500` or `http://[::1]:3500` while the proxy origin stays `http://localhost:5500`. That is the rig `ui/tests/bus-propagation.test.ts` uses.
 
 Locally, `pnpm dev` also starts the account-bus signaling server on port 5520; without it a partitioned iframe can only reach contexts in its own partition.
 

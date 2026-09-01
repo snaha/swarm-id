@@ -13,7 +13,7 @@ Cross-browser compatible authentication and identity management for Swarm dApps.
 
 ## Architecture
 
-The project uses an OAuth-style popup authentication flow over shared localStorage — no Storage Access API and no browser extension. The proxy iframe reads the trusted domain's first-party store while the embedding page is same-site, which covers the local rig and both deployments; where the two are cross-site, or the browser partitions regardless (Safari's ITP, strict privacy settings elsewhere), the connect popup hands the iframe the account's upload credentials directly instead, so uploads keep working ([Account bus](./docs/Account-Bus.md)). The credential handover is confirmed on real Safari (iOS 18.7 / Safari 26.6); the upload that follows it is still verified only on Chromium and Firefox with third-party storage partitioned, see [Safari limitations](#safari-limitations).
+The project uses an OAuth-style popup authentication flow over shared localStorage — no Storage Access API and no browser extension. The proxy iframe reads the trusted domain's first-party store while the embedding page is same-site, which covers the local rig and both deployments; where the two are cross-site, or the browser partitions regardless (Safari's ITP, strict privacy settings elsewhere), the connect popup hands the iframe the account's upload credentials directly instead, so uploads keep working ([Account bus](./docs/Account-Bus.md)). That path is confirmed on real Safari, upload included (iOS 18.7 / Safari 26.6), see [Safari limitations](#safari-limitations).
 
 **Key Innovation**: The popup-based authentication allows dApps to securely derive app-specific secrets from a master identity, with browser-enforced storage partitioning providing cross-app isolation.
 
@@ -262,9 +262,11 @@ tools would be spending real money.
 
 Safari's Intelligent Tracking Prevention (ITP) partitions storage for third-party iframes, so the proxy cannot read the trusted domain's localStorage. Uploads are designed to keep working regardless: the connect popup hands the iframe the account's synced projection (postage stamps including their signer keys), and cross-context coordination rides the [account bus](./docs/Account-Bus.md) instead of storage events.
 
-> **Status: the handover is confirmed on real Safari; the upload is not yet.** Measured on iOS 18.7 / Safari 26.6 against the deployed sites (`swarm-demo.snaha.net` → `swarm-id.snaha.net`): ITP partitions the proxy iframe, and the connect popup's `postMessage` through `window.opener` reaches it. That was the one thing only real WebKit could settle, and it holds — the session authenticates on the partitioned path.
+> **Status: confirmed on real Safari, upload included.** Measured on iOS 18.7 / Safari 26.6 against the deployed sites (`swarm-demo.snaha.net` → `swarm-id.snaha.net`): ITP partitions the proxy iframe; the connect popup's `postMessage` through `window.opener` reaches it; the hydrated account view builds a working stamper (`uploadMode: user-stamp`); and a chunk uploads and reads back byte-identical. The device id also held across a reload, so the partitioned store survived the session ending and being re-seeded ([#584](https://github.com/snaha/swarm-id/issues/584) has the report).
 >
-> Still open: an upload from that session, end to end on the device. The run that settled the handover used an account with no postage batch, so it never reached the write path. Everything below the handover — hydrating the account view, building the stamper, stamping and pushing chunks — remains verified only on Chromium and Firefox with third-party storage partitioned. Treat Safari **upload** support as expected-but-unverified until this section says otherwise.
+> A **private window** was measured separately and passes the same five checks, upload included — a fresh device id each time, as expected, since the private partition is discarded when the window closes.
+>
+> One thing no run has settled, and it is not claimed here: the **eviction horizon** — two loads in one sitting says nothing about whether a dormant account's partitioned storage survives ITP's ~30-day window ([#570](https://github.com/snaha/swarm-id/issues/570)).
 
 What remains regardless:
 

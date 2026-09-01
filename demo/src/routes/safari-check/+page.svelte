@@ -227,9 +227,11 @@
       <li>Tap <strong>Connect</strong> and complete the popup on the identity site.</li>
       <li>Tap <strong>Upload &amp; read back</strong>.</li>
       <li>
-        Reload this page and tap <strong>Connect</strong> again — credentials live only in memory on the
-        partitioned path, so nothing reports a device id until the session is back. The device-id check
-        turns green or red then.
+        Reload this page. Nothing to tap: since <a
+          href="https://github.com/snaha/swarm-id/issues/635"
+          class="underline">#635</a
+        > the session comes back from the partition's own store, and a connect popup here would itself
+        be the regression. The device-id check turns green or red then.
       </li>
       <li>
         Repeat in a <strong>Private</strong> tab — the session is expected to be ephemeral there, so a

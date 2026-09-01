@@ -478,10 +478,11 @@ describe("SwarmIdProxy partitioned write enablement", () => {
   })
 
   // A partitioned session keeps its device id in the iframe's OWN (partitioned)
-  // storage, which nothing outside the iframe can read. Whether that storage
-  // survives a reload is the open question about real Safari (#584) — and if it
-  // does not, every session is a new device in the roster (#570). Surfacing the
-  // id is what lets a page answer that by comparing across loads.
+  // storage, which nothing outside the iframe can read. Surfacing the id is what
+  // let a page answer whether that storage survives a reload — on real Safari it
+  // does (#584, measured on iOS 18.7 / Safari 26.6). What is still unmeasured is
+  // ITP's ~30-day eviction of a dormant account, which would make every session
+  // a new device in the roster (#570).
   it("reports the proxy's device id in the connection info", async () => {
     const challenge = await startPartitionedConnect()
     await sendSetSecret(challenge, {

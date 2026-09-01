@@ -853,14 +853,16 @@ export class SwarmIdClient {
    *   the iframe reads, and a `storage` event carries it across.
    * - Partitioned, or not proven shared: the proxy opens it, so the popup's
    *   `window.opener` points back at the iframe and the session can be handed
-   *   over directly — the only channel into a partitioned frame. Those
-   *   credentials then live only in memory and are re-seeded on every page
-   *   load; if the handover fails the session degrades to download-only. A
-   *   popup blocked on this path falls back to opening from the parent.
+   *   over directly — the only channel into a partitioned frame. The session
+   *   is then kept in that partition's own store until it is disconnected or
+   *   its 30 days are up (#635), so a reload does not re-run this; if the
+   *   handover fails the session degrades to download-only. A popup blocked on
+   *   this path falls back to opening from the parent.
    *
    * Safari private mode sessions are ephemeral (lost when the private window
-   * closes). For Safari details, see
-   * https://github.com/snaha/swarm-id/issues/167
+   * closes). The whole partitioned path — handover, stamper, upload — is
+   * confirmed on real Safari; see
+   * https://github.com/snaha/swarm-id/issues/584
    *
    * @param options - Configuration options for the connect flow
    * @throws {Error} If the client is not initialized or the popup fails to open

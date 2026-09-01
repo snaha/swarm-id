@@ -273,12 +273,13 @@ Planned — **not yet written**, do not read the list above as covering these:
 - A second context observing the utilization/lease state, and lease handover — sub-second with
   both peers live, timeout fallback with one peer killed. These extend
   `lib/test/live/multi-device-acquire-upload.test.ts`, not the Playwright rig.
-- The **upload** half of the real-Safari check (#584). The handover half is done: measured on iOS
-  18.7 / Safari 26.6 against the DO deployment, ITP partitions the iframe and the connect popup's
-  `window.opener` `postMessage` reaches it, so a partitioned session authenticates. What has not
-  run on a device is an upload from that session — the run used an account with no postage batch,
-  so it stopped before the write path. Until it does, Safari **upload** support is
-  expected-but-unverified (see the README).
+- The eviction horizon on real Safari — the rest of #584 is **done**: measured on iOS 18.7 /
+  Safari 26.6 against the DO deployment, ITP partitions the iframe, the connect popup's
+  `window.opener` `postMessage` reaches it, the hydrated view builds a working stamper, a chunk
+  uploads and reads back byte-identical, and the device id holds across a reload. A private window
+  passes the same five checks (with its own device id, discarded when the window closes). What no
+  run has touched is whether a dormant account's partitioned storage survives ITP's ~30-day
+  window (#570).
 
 ## Known gaps
 

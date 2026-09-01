@@ -320,8 +320,9 @@ export class SwarmIdProxy {
   /**
    * Hydrated account view for the storage-partitioning fallback: the synced
    * projection handed over by the connect popup (`AuthData.account`), held in
-   * memory only — the stored-account schema requires a vault, and partitioned
-   * sessions already re-handshake per iframe load. When set, the proxy is a
+   * memory only — the stored-account schema requires a vault. What survives a
+   * reload is the handover itself, under its own key (#635), which this view
+   * is then rebuilt from. When set, the proxy is a
    * first-class writer despite the partition (docs/Account-Bus.md, phase 3).
    */
   private partitionAccount: SignedInAccount | undefined
@@ -2499,7 +2500,8 @@ export class SwarmIdProxy {
       ) {
         if (partitioned) {
           // In-memory only, like the rest of the hydrated view: the stored
-          // schema requires a vault, and the session re-handshakes per load.
+          // schema requires a vault. Not worth persisting either — the roster
+          // is re-read from Swarm on the next load anyway.
           this.partitionAccount = { ...account, devices: mergedDevices }
         } else {
           manager!.save(
