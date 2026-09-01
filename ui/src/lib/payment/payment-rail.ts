@@ -285,6 +285,11 @@ export function isUnrecognizedChainError(error: unknown): boolean {
   )
 }
 
+/**
+ * Long enough for a wallet to fetch one block, short enough that a wallet which
+ * is never going to answer is treated as silent rather than left to hold the
+ * Pay button. No prompt is involved — nobody is being waited on.
+ */
 const GENESIS_PROBE_TIMEOUT_MS = 10_000
 
 /**

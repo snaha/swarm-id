@@ -39,11 +39,13 @@ const GNOSIS_CHAIN_ID = 100
  * progress report, so it fires only once Relay has stopped saying anything at
  * all for this long.
  *
- * Bounding the whole `execute` instead would count the time a person spends in
- * their wallet — an app switch, a biometric prompt, a second device, a network
- * prompt in between — and report a payment that is progressing normally as
- * failed, with money in flight. What is genuinely worth catching is an SDK that
- * has gone quiet, and that is what silence measures.
+ * It still counts the time a person spends in their wallet — the SDK reports a
+ * step once and then says nothing until they come back, so a slow signature is
+ * silence like any other. What changes is that the clock is re-based PER STEP
+ * rather than run once across the whole payment: an approve-then-deposit route
+ * gets this long for each prompt instead of both sharing one budget, and a
+ * payment that is progressing normally cannot be reported as failed with money
+ * in flight just because it has taken a while overall.
  *
  * Deliberately far past the gap between two reports on a healthy delivery
  * (seconds), because this is a backstop against a spinner with no way out and
@@ -223,10 +225,28 @@ const STEP_STATUS: Record<string, string> = {
 }
 const DELIVERY_STATUS = 'Cross-swap xDAI on Relay'
 const SIGNING_STATUS = 'Confirm the payment in your wallet'
+/**
+ * A wallet that can batch atomically (EIP-5792) collapses `approve` + the
+ * terminal step into ONE prompt, and the SDK renames the step accordingly —
+ * `approve-and-deposit`. That single signature IS the payment, so it is worded
+ * as the step it ends in; unprefixed, `approve-and-deposit` matched nothing
+ * here and the card announced the delivery leg while the wallet was still
+ * asking.
+ */
+const BATCHED_PREFIX = 'approve-and-'
 /** The signature-step state in which the wallet is holding the request. */
 const SIGNING_STATE = 'signing'
 /** Item states that mean the source side is done and Relay is delivering. */
 const DELIVERING_STATES = new Set(['validating', 'posting'])
+
+function wordingFor(stepId: string | undefined): string | undefined {
+  if (stepId === undefined) {
+    return undefined
+  }
+  return STEP_STATUS[
+    stepId.startsWith(BATCHED_PREFIX) ? stepId.slice(BATCHED_PREFIX.length) : stepId
+  ]
+}
 
 function stepStatus(stepId: string | undefined, progressState: string | undefined): string {
   if (progressState === SIGNING_STATE) {
@@ -235,7 +255,7 @@ function stepStatus(stepId: string | undefined, progressState: string | undefine
   if (progressState !== undefined && DELIVERING_STATES.has(progressState)) {
     return DELIVERY_STATUS
   }
-  return (stepId === undefined ? undefined : STEP_STATUS[stepId]) ?? DELIVERY_STATUS
+  return wordingFor(stepId) ?? DELIVERY_STATUS
 }
 
 /** Execute a quoted payment, reporting what it is doing in our own words. */

@@ -428,8 +428,10 @@ async function executeLocalPayment(options: ExecutePaymentOptions): Promise<void
 
 const localPaymentRail: PaymentRail = {
   get chains() {
-    // Read per access, so editing the endpoint in Network settings takes effect
-    // without a reload — and so this module has no top-level side effect.
+    // A getter so this module has no top-level side effect: built eagerly, the
+    // chain would read `localStorage` at import time. `combineRails` snapshots
+    // the array, so an endpoint edited in Network settings reaches the screens
+    // on the next `resolvePaymentRail()` — once per payment — not live.
     return [localSourceChain()]
   },
   tokens: (chainId) => (chainId === LOCAL_SOURCE_CHAIN_ID ? LOCAL_TOKENS : []),

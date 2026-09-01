@@ -43,12 +43,6 @@ const XDAI_DECIMALS = 18
 const TRANSFER_TIMEOUT_MS = 120_000
 
 /**
- * Long enough for a wallet to fetch one block, short enough that a wallet
- * which is never going to answer is treated as silent rather than left to hold
- * the Pay button. No prompt is involved — nobody is being waited on.
- */
-
-/**
  * The two networks a wallet can be asked to switch to here, by the names it
  * shows them under. Shared with the refusals below on purpose: a message
  * telling someone to pick a network has to name the one they were offered.

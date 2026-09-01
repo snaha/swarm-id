@@ -222,9 +222,15 @@ describe('Relay quote contract', () => {
 
   describe('every pair the picker offers still routes to Gnosis', () => {
     for (const pair of PAIRS) {
-      it(pair.label, () => {
+      it(pair.label, (context) => {
         const outcome = outcomes.get(pair.key)
+        // Skipped, not passed. `unreachable` covers a route that HUNG past the
+        // request deadline as well as one that could not be dialled at all, and
+        // a green tick on a pair nothing was asserted about reads as coverage
+        // this suite does not have — only Base ETH is held up by the CI
+        // reachability check above.
         if (!outcome || outcome.status === 'unreachable') {
+          context.skip()
           return
         }
         if (outcome.status === 'refused') {

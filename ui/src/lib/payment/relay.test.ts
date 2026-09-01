@@ -145,6 +145,14 @@ describe('relay execute', () => {
         currentStep: { id: 'deposit' },
         currentStepItem: { progressState: 'validating' },
       })
+      // A wallet that batches atomically (EIP-5792) signs the approve and the
+      // deposit together, and the SDK renames the step for it. One prompt, and
+      // it is the payment — announcing the delivery leg here would be talking
+      // about the far side of a transaction the wallet is still holding.
+      options.onProgress({
+        currentStep: { id: 'approve-and-deposit' },
+        currentStepItem: { progressState: 'confirming' },
+      })
       // A signature step the app has never heard of still knows the one thing
       // that matters while `signing`: the wallet is holding the request.
       options.onProgress({
@@ -160,6 +168,7 @@ describe('relay execute', () => {
       'Confirming the approval',
       'Confirming your payment',
       'Cross-swap xDAI on Relay',
+      'Confirming your payment',
       'Confirm the payment in your wallet',
       'Cross-swap xDAI on Relay',
     ])

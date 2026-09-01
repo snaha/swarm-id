@@ -32,9 +32,16 @@
   // here also survives the next load (a scheme-less `localhost:1633` fails both).
   const beeNodeUrlValid = $derived(isHttpUrl(beeNodeUrl.trim()))
   const gnosisRpcUrlValid = $derived(isHttpUrl(gnosisRpcUrl.trim()))
-  const canSave = $derived(beeNodeUrlValid && gnosisRpcUrlValid)
+  // Held to the same rule as the other two, for the same reason: a scheme-less
+  // `localhost:31337` saves happily and then fails every probe, which the
+  // screens report as the bridged rail simply not existing — no source chain
+  // offered, no error, nothing to tell the developer they mistyped a URL.
+  // Vacuously true when there is no dev source chain to configure.
+  const sourceRpcUrlValid = $derived(!source || isHttpUrl(sourceRpcUrl.trim()))
+  const canSave = $derived(beeNodeUrlValid && gnosisRpcUrlValid && sourceRpcUrlValid)
   const beeNodeUrlError = $derived(beeNodeUrl.trim().length > 0 && !beeNodeUrlValid)
   const gnosisRpcUrlError = $derived(gnosisRpcUrl.trim().length > 0 && !gnosisRpcUrlValid)
+  const sourceRpcUrlError = $derived(sourceRpcUrl.trim().length > 0 && !sourceRpcUrlValid)
   /** Whether the field has been edited away from what `connected` describes. */
   const gnosisRpcUrlEdited = $derived(gnosisRpcUrl.trim() !== networkSettingsStore.gnosisRpcUrl)
 
@@ -156,12 +163,17 @@
         bind:value={sourceRpcUrl}
         placeholder={source.defaultRpcUrl}
         class="font-mono"
+        aria-invalid={sourceRpcUrlError}
       />
-      {#await sourceConnected then chain}
-        {#if chain}
-          <p class="text-xs {chain.tone}">Connected to: {chain.label}</p>
-        {/if}
-      {/await}
+      {#if sourceRpcUrlError}
+        <p class="text-destructive text-xs">Please enter a valid URL</p>
+      {:else}
+        {#await sourceConnected then chain}
+          {#if chain}
+            <p class="text-xs {chain.tone}">Connected to: {chain.label}</p>
+          {/if}
+        {/await}
+      {/if}
       <p class="text-muted-foreground text-xs">
         Only for rehearsing a bridged payment. Paying from Gnosis needs no source chain at all.
       </p>
