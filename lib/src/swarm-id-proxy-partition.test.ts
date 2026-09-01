@@ -982,6 +982,29 @@ describe("SwarmIdProxy partitioned write enablement", () => {
       expect(storedSession()).toBeUndefined()
       foldedFromSwarm.value = undefined
     })
+
+    // A session handed no account has no `derivationKey`, so `joinAccountBus`
+    // resolves no connection and attaches no transport: no delta reaches it,
+    // and `verifyRestoredSession` has no account to check either. Persisting
+    // one would keep a session with NO revoke channel alive for the full 30
+    // days, where before #635 the re-handshake ended it on the next load.
+    it("does not persist a session nothing can reach", async () => {
+      const challenge = await startPartitionedConnect()
+      await sendSetSecret(challenge, {
+        identityId: "aa".repeat(20),
+        identityName: "Legacy",
+        identityAddress: "aa".repeat(20),
+      })
+      // Authenticated for this page load — it is the RECORD that is refused.
+      expect(messagesOfType("authSuccess")).toHaveLength(1)
+      expect(storedSession()).toBeUndefined()
+
+      await reload()
+
+      const infos = messagesOfType("connectionInfoChanged")
+      expect(infos[infos.length - 1]?.identity).toBeUndefined()
+      expect(window.open).not.toHaveBeenCalled()
+    })
   })
 
   // A revoke reaches a live proxy only through the browser `storage` event, and

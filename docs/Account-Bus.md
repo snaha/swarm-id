@@ -290,6 +290,14 @@ Planned — **not yet written**, do not read the list above as covering these:
   logout): a session restored while the gateway is **unreachable** stays up, and an account
   that has **never published** — no drive, so no feed to read — has nothing to check against.
   Either way the revoke waits for the next live overlap on the bus.
+- A partitioned session the popup handed **no account** — an identity deployment older than #547,
+  reported as `uploadUnavailableReason: "download-only"` — has no `derivationKey`, so it derives no
+  topic and joins no room. No delta reaches it, and it has no published state to check either. It is
+  therefore **not persisted** (#599): it re-handshakes on every load, which is the only revoke check
+  it has, and #635 would otherwise have kept a session with no channel at all alive for 30 days.
+  Within a single page load a revoke still does not reach it, and with a subsidised gateway
+  configured it can keep uploading through it. Closing that needs a topic it can derive, which is
+  the field the handover does not give it.
 - That check is revocation only. A **rotated signer key or moved default stamp** made while the
   tab was closed is not adopted on restore; the session comes up on the handed-over view and
   corrects at the next live overlap. Changes that arrive while it IS live are folded and

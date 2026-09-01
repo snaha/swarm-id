@@ -828,21 +828,30 @@ export class SwarmIdProxy {
    */
   private savePartitionSession(data: AuthData): void {
     if (!this.parentOrigin) return
-    const connection = this.partitionAccount?.connectedApps.find(
+    // A session handed no account is not persistable, because nothing can
+    // reach it: no `derivationKey` means `joinAccountBus` resolves no
+    // connection and attaches no transport, so no delta arrives, and
+    // `verifyRestoredSession` has no account to check against Swarm either.
+    // Keeping it would hold a session with NO revoke channel open for 30 days;
+    // the popup re-handshake is the only check it has, so let it re-handshake
+    // (docs/Account-Bus.md, Known gaps).
+    if (!this.partitionAccount) return
+    const connection = this.partitionAccount.connectedApps.find(
       (app) => app.appUrl === this.parentOrigin,
     )
     const record: unknown = {
       version: 1,
       parentOrigin: this.parentOrigin,
+      // `hydratePartitionAccount` puts this origin's entry at the head of the
+      // collection with a deadline on it, and it is what got us here, so the
+      // lookup above cannot miss.
       connectedUntil:
         connection?.connectedUntil ?? Date.now() + DEFAULT_SESSION_DURATION,
       data: {
         ...data,
         // The projection carries `BatchId`/`PrivateKey`/`EthAddress`; this is
         // the same serializer the popup used to build it.
-        account: this.partitionAccount
-          ? serializeSyncedAccount(data.account ?? this.partitionAccount)
-          : undefined,
+        account: serializeSyncedAccount(data.account ?? this.partitionAccount),
         // Both are already hex on this schema, unlike the account's fields.
         postageBatchId: data.postageBatchId,
         signerKey: data.signerKey,

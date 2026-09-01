@@ -1740,11 +1740,14 @@ export type AuthData = z.infer<typeof AuthDataSchema>
  * {@link STORAGE_KEY_PARTITION_SESSION}.
  *
  * It holds the payload the connect popup handed over — plus the deadline the
- * session was given. In full, what is now at rest for the life of the session:
+ * session was given. Only a session handed an **account** is stored: without
+ * one there is no `derivationKey`, so nothing can reach it to end it, and the
+ * re-handshake is the only revoke check it has (#599). In full, what is at rest
+ * for the life of the session:
  *
  * - the **app secret**, this origin's own credential;
- * - for a writer session, the **narrowed stamp projection** — #578 limits it to
- *   the stamps this app can spend, signer keys included;
+ * - the **narrowed stamp projection** — #578 limits it to the stamps this app
+ *   can spend, signer keys included;
  * - the account's **`derivationKey`**, which `serializeSyncedAccount` carries.
  *   This one is NOT app-narrowed: it derives the bus topic and envelope keys
  *   and the Swarm encryption/backup keys, so it is the most sensitive field
