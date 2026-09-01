@@ -147,7 +147,7 @@
 <p><strong>Subsidised Configured</strong></p>
 <p>The dApp passed a <code dir="auto">subsidisedGatewayUrl</code> when creating the SwarmIdClient.</p>
 <p><strong>Storage partitioning is not one of the axes.</strong> When the browser partitions storage (Safari ITP), the proxy iframe cannot <strong>read</strong> the user’s postage stamps or Bee node setting out of the trusted domain’s localStorage. Since <a href="https://github.com/snaha/swarm-id/issues/277">#277</a> it does not have to: the connect popup hands both over directly. A partitioned session with a drive is therefore an ordinary <code dir="auto">user-stamp</code> session — confirmed on real Safari, iOS 18.7 / Safari 26.6 (<a href="https://github.com/snaha/swarm-id/issues/584">#584</a>). <code dir="auto">ConnectionInfo.storagePartitioned</code> is still reported, for UI messaging; it does not decide whether you can upload.</p>
-<p>The one partition-specific case is a session the popup handed <strong>no account at all</strong> — an identity deployment older than the handover. It holds no stamps and cannot resolve one, so it uploads through the subsidised gateway if one is configured, and not at all otherwise.</p>
+<p>A handover that arrives <strong>without</strong> the account view is refused outright, so there is no half-session to account for here: the session either has the account’s own stamps to fall back from, or it was never established.</p>
 <div class="sl-heading-wrapper level-h3"><h3 id="why-uploads-are-unavailable">Why Uploads Are Unavailable</h3><a class="sl-anchor-link" href="#why-uploads-are-unavailable"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 1 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 0 0-1.42-1.42m8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 1 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 0 0 0 1.42 1 1 0 0 0 1.42 0l3.88-3.89a4.49 4.49 0 0 0 0-6.33M8.83 15.17a1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.92-4.92a1 1 0 1 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42"></path></svg></span><span class="sr-only" data-pagefind-ignore>Section titled “Why Uploads Are Unavailable”</span></a></div>
 <p>When <code dir="auto">uploadMode</code> is <code dir="auto">unavailable</code>, <code dir="auto">ConnectionInfo.uploadUnavailableReason</code> names the <strong>first</strong> thing that stopped the session, not the last symptom:</p>
 <table>
@@ -158,10 +158,6 @@
 </tr>
 </thead>
 <tbody>
-<tr>
-<td><code dir="auto">download-only</code></td>
-<td>Storage is partitioned and the connect popup handed over no account. Expected only against an older identity deployment.</td>
-</tr>
 <tr>
 <td><code dir="auto">no-stamp</code></td>
 <td>No postage batch or no signer key resolved — most often an account with no drive yet.</td>
