@@ -152,12 +152,19 @@ With the bus in place the partitioned iframe becomes a first-class writer:
   which needs a per-app room; not in scope here, and worth stating so the next reader does not
   mistake this for a boundary.
 
-- `handlePopupMessage` hydrates the projection into an **in-memory** account view
-  (`partitionAccount`): the stored-account schema deliberately quarantines vault-less
-  records, and partitioned sessions already re-handshake per iframe load, so nothing is
-  persisted. The popup hands over a freshly-loaded view, so no extra on-hydrate fold is
-  needed; the iframe keeps its own `swarm-id-device-id` and lease cache — it _is_ a device.
-  (Roster naming/expiry policy for per-dApp partition devices: follow-up.)
+- `handlePopupMessage` hydrates the projection into an in-memory account view
+  (`partitionAccount`) **and keeps the handover itself** under
+  `swarm-id-partition-session`, so a reload restores the session instead of re-running the
+  popup (#635). Its own record, not the accounts document: `LocalAccountSchemaV1`
+  quarantines vault-less records and the hydrated view carries inert vault placeholders, so
+  it could not be stored as an account. The deadline is the same `connectedUntil` the
+  unpartitioned path enforces out of shared storage — 30 days by default — and a restored
+  session reads the account's published state once, in the background, to catch a revoke made
+  while the tab was closed, which reaches it no other way. That read is a revocation check,
+  not a fold: everything else still arrives over the bus, and a fold that lands re-persists
+  the record so the next reload does not undo it. The iframe keeps its own
+  `swarm-id-device-id` and lease cache — it _is_ a device. (Roster naming/expiry policy for
+  per-dApp partition devices: follow-up.)
 - On successful hydration `uploadMode` flips to `user-stamp` and `ensureCanUpload` passes;
   `storagePartitioned` stays surfaced in `ConnectionInfo` for UI messaging.
 
@@ -275,8 +282,17 @@ Planned — **not yet written**, do not read the list above as covering these:
 
 ## Known gaps
 
-- A revocation reaches a **closed** dApp partition only at the next live overlap or popup
-  re-handshake, unless the signaling-mailbox option is enabled.
+- A revocation made while a dApp partition is **closed** is not pushed to it: the room has no
+  mailbox. Since #635 the popup re-handshake is no longer what catches it either — a restored
+  session reads the account's published state once instead, and ends itself on a tombstone.
+  Two holes remain, both fail-open by choice (failing closed would make every offline load a
+  logout): a session restored while the gateway is **unreachable** stays up, and an account
+  that has **never published** — no drive, so no feed to read — has nothing to check against.
+  Either way the revoke waits for the next live overlap on the bus.
+- That check is revocation only. A **rotated signer key or moved default stamp** made while the
+  tab was closed is not adopted on restore; the session comes up on the handed-over view and
+  corrects at the next live overlap. Changes that arrive while it IS live are folded and
+  re-persisted, so they survive a reload.
 - Without TURN, WebRTC will not connect across restrictive NATs; those pairs fall back to the
   signaling-server relay.
 - Safari (ITP) deletes script-writable storage for sites without first-party user

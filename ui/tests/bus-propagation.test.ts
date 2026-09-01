@@ -90,8 +90,9 @@ async function createAccountWithDrive(page: Page) {
  * Connect an existing account to the demo through the proxy's own iframe
  * button, and leave the partitioned session live.
  *
- * Do not navigate the demo afterwards: a partitioned session's credentials live
- * only in memory (the popup re-seeds them on every load), so a reload ends it.
+ * Since #635 the session survives a reload — it is kept in the partition's own
+ * store until it is disconnected or its 30 days are up — so navigating the demo
+ * afterwards no longer ends it.
  */
 async function connectPartitioned(page: Page, path: string) {
   await page.goto(`${demoOrigin}${path}`)
@@ -173,6 +174,32 @@ test('client.connect() authenticates a partitioned session', async ({ page }) =>
   // proof the session authenticated — and `expectProxyPartitioned` above is
   // what makes that proof about the partitioned path rather than a shared one.
   await expect(page.getByRole('heading', { name: 'Identity' })).toBeVisible({ timeout: 15000 })
+})
+
+// #635: the handed-over session used to live in memory only, so every page
+// load re-ran the connect popup — on Safari, where partitioned is the ordinary
+// mode, that made a plain reload a logout. Found on the device run for #584.
+test('a partitioned session survives a reload', async ({ page }) => {
+  await page.goto(`${demoOrigin}/account`)
+  await expectProxyPartitioned(page)
+
+  const popup = await openProxyConnectPopup(page)
+  await completeCreateFlow(popup)
+  await expect(popup).toHaveURL(/\/connect\/done$/)
+  await goToApp(popup)
+  await expect(page.getByRole('heading', { name: 'Identity' })).toBeVisible({ timeout: 15000 })
+
+  // A connect popup opening here would be the regression: the session must come
+  // back from the partition's own store, not from a second handshake. (Pages
+  // are collected rather than counted — `expectProxyPartitioned` opens one of
+  // its own to read first-party storage.)
+  const opened: Page[] = []
+  page.context().on('page', (created) => opened.push(created))
+  await page.reload()
+
+  await expect(page.getByRole('heading', { name: 'Identity' })).toBeVisible({ timeout: 15000 })
+  await expectProxyPartitioned(page)
+  expect(opened.filter((created) => created.url().includes('/connect'))).toHaveLength(0)
 })
 
 test('the bus carries an app removal to a partitioned session', async ({ page }) => {
