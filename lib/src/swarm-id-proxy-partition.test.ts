@@ -1143,6 +1143,52 @@ describe("SwarmIdProxy partitioned write enablement", () => {
       }
     })
 
+    // The stored session (#635) is written at the handover, so without a
+    // re-save the fold above lives only in memory: the next reload comes back
+    // on the tombstoned stamp and its superseded signer key, and uploads with
+    // it until some later delta happens to arrive while the page is open.
+    it("re-persists the stored session after a delta moves the default stamp", async () => {
+      const busChannel = await hydratedSession()
+      const before = JSON.parse(
+        localStorageFake.getItem(STORAGE_KEY_PARTITION_SESSION)!,
+      ) as { connectedUntil: number }
+      try {
+        const stamp = makeSyncedAccount().postageStamps[0]
+        const now = Date.now()
+        busChannel.postMessage(
+          accountDelta({
+            defaultPostageStampBatchID: OTHER_BATCH_ID_HEX,
+            defaultStampAt: now,
+            postageStamps: [
+              { ...stamp, deletedAt: now, updatedAt: now },
+              {
+                ...stamp,
+                batchID: new BatchId(OTHER_BATCH_ID_HEX),
+                signerKey: new PrivateKey("ab".repeat(32)),
+                createdAt: now,
+              },
+            ],
+          }),
+        )
+        await vi.waitFor(() => {
+          const stored = JSON.parse(
+            localStorageFake.getItem(STORAGE_KEY_PARTITION_SESSION)!,
+          ) as {
+            connectedUntil: number
+            data: { account: { defaultPostageStampBatchID: string } }
+          }
+          expect(stored.data.account.defaultPostageStampBatchID).toBe(
+            OTHER_BATCH_ID_HEX,
+          )
+          // The deadline is the handover's, not a fresh one: re-persisting on
+          // every delta must not let a session extend itself indefinitely.
+          expect(stored.connectedUntil).toBe(before.connectedUntil)
+        })
+      } finally {
+        busChannel.close()
+      }
+    })
+
     // A fold states what the two sides already say; it is not a change made
     // here. `accountAsStateSnapshot` reads `lastModified` back as the snapshot
     // clock on the NEXT fold, so restamping it with `Date.now()` would let this

@@ -1739,12 +1739,21 @@ export type AuthData = z.infer<typeof AuthDataSchema>
  * A partitioned session at rest (#635), under
  * {@link STORAGE_KEY_PARTITION_SESSION}.
  *
- * It holds the payload the connect popup handed over — including the app secret
- * and, for a writer session, the NARROWED stamp projection (#578 limits it to
- * the stamps this app can spend) — plus the deadline the session was given.
- * The popup hands the same material over on every load today; keeping it
- * changes the window from the life of the page to the life of the session, in a
- * store only this (SwarmID origin, dApp origin) pair can read.
+ * It holds the payload the connect popup handed over — plus the deadline the
+ * session was given. In full, what is now at rest for the life of the session:
+ *
+ * - the **app secret**, this origin's own credential;
+ * - for a writer session, the **narrowed stamp projection** — #578 limits it to
+ *   the stamps this app can spend, signer keys included;
+ * - the account's **`derivationKey`**, which `serializeSyncedAccount` carries.
+ *   This one is NOT app-narrowed: it derives the bus topic and envelope keys
+ *   and the Swarm encryption/backup keys, so it is the most sensitive field
+ *   here. `connect-handshake.ts` names the same trade-off for the in-memory
+ *   handover; persisting it widens the window, not the exposure.
+ *
+ * The popup hands all of it over on every load today; keeping it changes the
+ * window from the life of the page to the life of the session, in a store only
+ * this (SwarmID origin, dApp origin) pair can read.
  *
  * `connectedUntil` is the same clock the unpartitioned path enforces from
  * shared storage, so both modes end a session on the same rule. What the
@@ -1754,7 +1763,6 @@ export type AuthData = z.infer<typeof AuthDataSchema>
 export const PartitionSessionSchemaV1 = z.object({
   version: z.literal(1),
   parentOrigin: z.string(),
-  accountId: z.string().optional(),
   connectedUntil: z.number(),
   data: AuthDataSchema,
 })

@@ -833,7 +833,6 @@ export class SwarmIdProxy {
     const record: unknown = {
       version: 1,
       parentOrigin: this.parentOrigin,
-      accountId: this.partitionAccount?.id.toHex(),
       connectedUntil:
         connection?.connectedUntil ?? Date.now() + DEFAULT_SESSION_DURATION,
       data: {
@@ -856,6 +855,41 @@ export class SwarmIdProxy {
     } catch (error) {
       // A session that cannot be stored still works for this page load.
       console.warn("[Proxy] Could not persist the partitioned session:", error)
+    }
+  }
+
+  /**
+   * Re-persist the stored session's account view after a live fold moved it.
+   *
+   * Without this the record is frozen at the handover: a rotated signer key or
+   * a moved default stamp arrives over the bus, updates `partitionAccount`, and
+   * then a reload resurrects the pre-fold copy and uploads with it until the
+   * next live overlap.
+   *
+   * Only the account. The deadline stays the one the handover recorded, because
+   * `hydratePartitionAccount` recomputes `connectedUntil` on every call — write
+   * the in-memory one back and a session extends itself for as long as deltas
+   * keep arriving. And the record is edited in the shape it was WRITTEN in
+   * (raw JSON), not the parsed one: `AuthDataSchema` revives byte classes that
+   * do not survive a second `JSON.stringify`.
+   *
+   * Never creates a record — a session that failed to persist stays unpersisted.
+   */
+  private refreshStoredPartitionAccount(): void {
+    if (!this.partitionAccount) return
+    try {
+      const raw = localStorage.getItem(STORAGE_KEY_PARTITION_SESSION)
+      if (!raw) return
+      const record = JSON.parse(raw) as { data?: Record<string, unknown> }
+      if (!record.data) return
+      record.data.account = serializeSyncedAccount(this.partitionAccount)
+      localStorage.setItem(
+        STORAGE_KEY_PARTITION_SESSION,
+        JSON.stringify(record),
+      )
+    } catch (error) {
+      // As on write: a session that cannot be stored still works for this load.
+      console.warn("[Proxy] Could not persist the folded session:", error)
     }
   }
 
@@ -1525,6 +1559,9 @@ export class SwarmIdProxy {
           foldedAccount.postageStamps,
         ),
       }
+      // The stored session goes with it, or the next reload undoes this fold
+      // (#636 review).
+      this.refreshStoredPartitionAccount()
     }
 
     // On the reconcile queue, not beside it: this runs the same stamper rebind
@@ -2248,13 +2285,18 @@ export class SwarmIdProxy {
   }
 
   /**
-   * Check a restored session against the account's own state on Swarm, and end
-   * it if this origin has been revoked or disconnected since.
+   * Read the account's PUBLISHED state once, on restore, and end the session if
+   * this origin has been revoked or dropped since. A check, not a fold — the
+   * view keeps what was handed over, and any other change (a rotated signer
+   * key, a moved default stamp) is adopted from the bus at the next live
+   * overlap, as it was before #635.
    *
    * Background, and deliberately fail-open: a gateway that cannot be reached is
    * not evidence of a revoke, and refusing the session for it would make every
-   * offline load a logout. A revoke that is missed here still arrives over the
-   * bus the moment the SwarmID tab and this iframe are live together.
+   * offline load a logout. An account that has never published has nothing to
+   * read either (`foldAccountFromSwarm` returns undefined), so its closed-tab
+   * revoke also waits for a live overlap. Both holes are in
+   * `docs/Account-Bus.md`'s Known gaps.
    */
   private async verifyRestoredSession(): Promise<void> {
     const account = this.partitionAccount
@@ -2269,10 +2311,11 @@ export class SwarmIdProxy {
       const app = folded.account.connectedApps.find(
         (entry) => entry.appUrl === this.parentOrigin,
       )
-      const ended =
-        app === undefined ||
-        app.revokedAt !== undefined ||
-        (app.connectedUntil !== undefined && app.connectedUntil <= Date.now())
+      // Revocation only. The published form is `portableConnectedApp`, which
+      // strips `connectedUntil` along with `appSecret` — the deadline belongs
+      // to the context that issued it, and this session's copy is the record's
+      // own, already enforced on read.
+      const ended = app === undefined || app.revokedAt !== undefined
       if (!ended) return
       console.info(
         "[Proxy] The restored session was revoked while this page was closed",
