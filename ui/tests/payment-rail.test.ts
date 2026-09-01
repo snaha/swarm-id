@@ -345,13 +345,13 @@ async function buyPayingFrom(
   // settle: the payment screens opening IS the state under test.
   await addDrive(page, { settle: false })
 
-  // 1. Method chooser. Buying leads with the widget, so pick the built-in
-  //    method; the connect prompt appearing is proof the rail resolved rather
-  //    than falling through to the faucet, which is what every other suite pins.
-  await page
-    .getByRole('dialog')
-    .getByRole('combobox')
-    .selectOption('Pay with crypto (built in, experimental)')
+  // 1. The pay screens open on the method already chosen up front (#629), so
+  //    this asserts the choice carried rather than making it again — picking
+  //    the built-in method twice would hide an `initialMethod` that stopped
+  //    reaching here. The connect prompt appearing behind it is proof the rail
+  //    resolved rather than falling through to the faucet, which is what every
+  //    other suite pins.
+  await expect(page.getByRole('dialog').getByRole('combobox')).toHaveValue('built-in')
   await expect(page.getByText('Connect wallet to proceed')).toBeVisible({
     timeout: PAYMENT_TIMEOUT_MS,
   })

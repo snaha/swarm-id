@@ -101,14 +101,14 @@ jobs:
       # no longer see.
       #
       # Existence is proven against the SOURCE, not against the built bundle,
-      # because two of the three legitimately reach no chunk at all: `/dev`
+      # because the solver address legitimately reaches no chunk at all: `/dev`
       # imports the faucet half of the rail module and nothing else, so the
-      # rail's own strings — the solver address it deposits to above all — are
-      # tree-shaken out of the dev chunk as well as out of every other. Absent
-      # from the bundle is the correct state for those; misspelled is not, and
-      # only the declaration can tell the two apart. Anchored on the
-      # declaration rather than on any mention, since a comment naming a
-      # renamed helper would otherwise keep the canary looking alive.
+      # rail's own strings are tree-shaken out of the dev chunk as much as out
+      # of every other one. Absent from the bundle is the correct state for it —
+      # the whole point — while misspelled is not, and only the declaration can
+      # tell those two apart. Anchored on the declaration rather than on any
+      # mention, since a comment naming a renamed helper would otherwise keep a
+      # canary looking alive.
       - name: Check the dev tree stayed out of the bundle (ui)
         working-directory: ./ui
         run: |
