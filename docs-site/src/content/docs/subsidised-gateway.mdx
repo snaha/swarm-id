@@ -40,36 +40,48 @@ The subsidised gateway URL should point to a Bee node that has a postage stamp c
 
 ## Upload Availability Truth Table
 
-Upload availability depends on several factors. The `uploadMode` field in `client.connectionInfo` indicates which mode is active:
+Upload availability depends on three things. The `uploadMode` field in `client.connectionInfo` indicates which mode is active:
 
-| Storage Partitioned | Has User Stamp | Custom Node | Subsidised Configured | Can Upload | Upload Mode   |
-| ------------------- | -------------- | ----------- | --------------------- | ---------- | ------------- |
-| Yes                 | —              | —           | Yes                   | Yes        | `subsidised`  |
-| Yes                 | —              | —           | No                    | No         | `unavailable` |
-| No                  | Yes            | —           | —                     | Yes        | `user-stamp`  |
-| No                  | No             | Yes         | —                     | No         | `unavailable` |
-| No                  | No             | No          | Yes                   | Yes        | `subsidised`  |
-| No                  | No             | No          | No                    | No         | `unavailable` |
+| Usable User Stamp | Custom Node | Subsidised Configured | Can Upload | Upload Mode   | Unavailable Reason |
+| ----------------- | ----------- | --------------------- | ---------- | ------------- | ------------------ |
+| Yes               | —           | —                     | Yes        | `user-stamp`  | —                  |
+| No                | Yes         | (disabled)            | No         | `unavailable` | see below          |
+| No                | No          | Yes                   | Yes        | `subsidised`  | —                  |
+| No                | No          | No                    | No         | `unavailable` | see below          |
+
+All four rows require an authenticated session. Without one `uploadMode` is `unavailable` with no reason given, even where a gateway is configured — uploads still need the app secret.
 
 ### Understanding the Table
 
-**Storage Partitioned (Yes)**
+**Usable User Stamp**
 
-When the browser partitions storage (Safari ITP), the proxy iframe cannot **read** the user's postage stamps or Bee node setting out of the trusted domain's localStorage. Since [#277](https://github.com/snaha/swarm-id/issues/277) it does not have to: the connect popup hands both over directly, so a partitioned session normally uploads with the account's own stamp.
-
-A subsidised gateway is the fallback for the sessions that handover does not cover — an account with no postage batch, or an older identity deployment that sends no account at all. `ConnectionInfo.uploadUnavailableReason` distinguishes them.
-
-**Has User Stamp**
-
-The user has configured a postage stamp in the identity provider. User stamps always take priority over subsidised gateways when available.
+The session resolved a postage batch **and** its signer key **and** built a working stamper from them. All three, because the stamper is constructed asynchronously and a failure there is logged rather than thrown — a resolved batch is not on its own enough to upload with. User stamps always take priority over a subsidised gateway.
 
 **Custom Node**
 
-The user has configured a custom Bee node URL in the identity provider's network settings. When a custom node is set, the subsidised gateway is automatically disabled to ensure uploads go to the user's chosen node. That node must allow the identity UI's origin — see [Using Your Own Bee Node](/own-bee-node).
+The user has configured a custom Bee node URL in the identity provider's network settings. When a custom node is set, the subsidised gateway is **silently disabled**, so that uploads go to the user's chosen node. That node must allow the identity UI's origin — see [Using Your Own Bee Node](/own-bee-node).
+
+The check is an exact inequality against the default gateway URL, and it runs in two places: once when the dApp identifies itself to the proxy, and again whenever network settings arrive or change. The second matters for a storage-partitioned session, whose settings are handed over by the connect popup _after_ the dApp has identified itself. Reverting to the default URL does not re-enable a gateway already dropped — that takes a dApp reload.
 
 **Subsidised Configured**
 
 The dApp passed a `subsidisedGatewayUrl` when creating the SwarmIdClient.
+
+**Storage partitioning is not one of the axes.** When the browser partitions storage (Safari ITP), the proxy iframe cannot **read** the user's postage stamps or Bee node setting out of the trusted domain's localStorage. Since [#277](https://github.com/snaha/swarm-id/issues/277) it does not have to: the connect popup hands both over directly. A partitioned session with a drive is therefore an ordinary `user-stamp` session — confirmed on real Safari, iOS 18.7 / Safari 26.6 ([#584](https://github.com/snaha/swarm-id/issues/584)). `ConnectionInfo.storagePartitioned` is still reported, for UI messaging; it does not decide whether you can upload.
+
+The one partition-specific case is a session the popup handed **no account at all** — an identity deployment older than the handover. It holds no stamps and cannot resolve one, so it uploads through the subsidised gateway if one is configured, and not at all otherwise.
+
+### Why Uploads Are Unavailable
+
+When `uploadMode` is `unavailable`, `ConnectionInfo.uploadUnavailableReason` names the **first** thing that stopped the session, not the last symptom:
+
+| Reason           | Meaning                                                                                                                  |
+| ---------------- | ------------------------------------------------------------------------------------------------------------------------ |
+| `download-only`  | Storage is partitioned and the connect popup handed over no account. Expected only against an older identity deployment. |
+| `no-stamp`       | No postage batch or no signer key resolved — most often an account with no drive yet.                                    |
+| `stamper-failed` | The stamp resolved, but the write path did not build. The only place that difference reaches the dApp.                   |
+
+The reason is `undefined` while the session is unauthenticated, and while `canUpload` is `true`.
 
 ## Checking Upload Mode
 
@@ -83,16 +95,14 @@ if (info.canUpload) {
   } else {
     console.log('Uploads will use your postage stamp')
   }
-} else if (info.storagePartitioned) {
-  console.log('Storage partitioned — downloads only')
 } else {
-  console.log('No upload capability available')
+  console.log(`No upload capability available: ${info.uploadUnavailableReason ?? 'not connected'}`)
 }
 ```
 
 ## Priority Rules
 
-1. **User's own stamp** — When available and storage is not partitioned, the user's configured stamp is always used
+1. **User's own stamp** — Whenever the session resolved one, partitioned or not, it is the stamp that is used
 2. **Custom Bee node** — If the user has configured a custom Bee node, the subsidised gateway is disabled (even if configured)
 3. **Subsidised gateway** — Used as a fallback when no user stamp is available
 
