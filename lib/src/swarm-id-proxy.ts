@@ -3048,7 +3048,7 @@ export class SwarmIdProxy {
   }
 
   /**
-   * Which of the three ways to be upload-less this session hit. Ordered by how
+   * Which of the two ways to be upload-less this session hit. Ordered by how
    * early the path gives up, so the answer names the first thing that stopped
    * it rather than the last symptom.
    *
