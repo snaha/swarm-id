@@ -638,9 +638,14 @@ export const ConnectionIdentitySchema = z.object({
 export type ConnectionIdentity = z.infer<typeof ConnectionIdentitySchema>
 
 export const ConnectionInfoSchema = z.object({
-  /** Whether uploads are available (has postage stamp + signer key + not storage-partitioned, or subsidised gateway configured) */
+  /** Whether uploads are available (postage batch + signer key + a built stamper, or a subsidised gateway configured) */
   canUpload: z.boolean(),
-  /** Whether browser storage partitioning prevents access to stamps/signer keys (e.g. Safari ITP, strict privacy settings) */
+  /**
+   * Whether the browser gave this proxy iframe its own partitioned store
+   * (Safari ITP, strict privacy settings). Reported for UI messaging only —
+   * since #277 the connect popup hands the stamps and signer keys over
+   * directly, so partitioning does not decide whether uploads work.
+   */
   storagePartitioned: z.boolean().optional(),
   /** Current upload mode: "user-stamp" (user has postage stamp), "subsidised" (using dApp gateway), "unavailable" (no upload capability) */
   uploadMode: UploadModeSchema.optional(),
@@ -1309,7 +1314,17 @@ export const ConnectionInfoChangedMessageSchema = z.object({
   canUpload: z.boolean(),
   storagePartitioned: z.boolean().optional(),
   uploadMode: UploadModeSchema.optional(),
-  uploadUnavailableReason: UploadUnavailableReasonSchema.optional(),
+  /**
+   * Tolerant on purpose: a reason this lib does not know degrades to
+   * `undefined` instead of failing the message. The client drops a
+   * `connectionInfoChanged` it cannot parse, and if that is the first one
+   * after `proxyReady`, `initialize()` rejects on its timeout — so one
+   * unrecognised enum member would stop the dApp starting at all. Reachable
+   * through deploy-cache skew alone: a proxy from the #616–#642 window still
+   * emits the `"download-only"` this lib removed.
+   */
+  uploadUnavailableReason:
+    UploadUnavailableReasonSchema.optional().catch(undefined),
   deviceId: z.string().optional(),
   identity: ConnectionIdentitySchema.optional(),
   appKey: z
