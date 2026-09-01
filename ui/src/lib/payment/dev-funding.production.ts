@@ -6,8 +6,9 @@
  * Nothing here imports anything at runtime: being importless is the whole
  * point, since it is what lets Rollup leave the dev tree out of the shipped
  * bundle. Both answers are "there is no dev arrangement here", which is also
- * true: a production build resolves the Relay rail whatever chain it is pointed
- * at, so neither of these is ever reached.
+ * true: a shipped build has no local chain to rehearse against, so it pays over
+ * Relay when the endpoint is proven Gnosis mainnet and offers nothing at all
+ * when it is not (`resolve-rail.ts`).
  */
 import type { PaymentRail } from '$lib/payment/payment-rail'
 

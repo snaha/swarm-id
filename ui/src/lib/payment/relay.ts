@@ -15,7 +15,7 @@
  * inventory on real Gnosis. See `payment-rail.ts` for what stands in locally.
  */
 import { type Execute, MAINNET_RELAY_API, createClient, getClient } from '@relayprotocol/relay-sdk'
-import { withTimeout } from '@snaha/swarm-id'
+import { withIdleTimeout, withTimeout } from '@snaha/swarm-id'
 import { createWalletClient, custom, defineChain } from 'viem'
 import { arbitrum, base, gnosis, mainnet, optimism, polygon } from 'viem/chains'
 
@@ -35,15 +35,23 @@ import {
 const GNOSIS_CHAIN_ID = 100
 
 /**
- * Ceiling on one delivery, counted from the wallet prompt: signing, the source
- * transaction's confirmations and the solver's payout on Gnosis. Deliberately
- * far past a slow cross-chain delivery (seconds to a couple of minutes) — it
- * exists only so an SDK that stops reporting altogether surfaces as a failed
- * payment instead of a spinner with no way out. A timeout here is not proof the
- * money stayed put, so the retry re-prices against the owner address before
- * asking for anything again (`payment-dialog.svelte`).
+ * Ceiling on the SDK's SILENCE, not on the payment: the clock restarts on every
+ * progress report, so it fires only once Relay has stopped saying anything at
+ * all for this long.
+ *
+ * Bounding the whole `execute` instead would count the time a person spends in
+ * their wallet — an app switch, a biometric prompt, a second device, a network
+ * prompt in between — and report a payment that is progressing normally as
+ * failed, with money in flight. What is genuinely worth catching is an SDK that
+ * has gone quiet, and that is what silence measures.
+ *
+ * Deliberately far past the gap between two reports on a healthy delivery
+ * (seconds), because this is a backstop against a spinner with no way out and
+ * not a pace-setter. A timeout here is still not proof the money stayed put, so
+ * the retry re-prices against the owner address before asking for anything
+ * again (`payment-dialog.svelte`).
  */
-const EXECUTE_TIMEOUT_MS = 600_000
+const EXECUTE_STALL_TIMEOUT_MS = 600_000
 
 /**
  * Ceiling on pricing one route. Nothing is signed and nothing moves yet, so a
@@ -120,12 +128,20 @@ export const PAYMENT_TOKENS: Record<number, PaymentToken[]> = {
       decimals: 6,
     },
   ],
+  // Gnosis carries TWO dollar tokens that both call themselves USDC, and the
+  // picker shows this rail's row next to the direct rail's: `0x2a22…` is
+  // USDC.e, Circle's bridged token, which only Relay serves; `0xDDAf…` is the
+  // older Omnibridge one the swap side transacts in (`gnosis-direct.ts`).
+  // Different contracts, so `combineRails` — which dedups by address — keeps
+  // both, and two rows reading "USDC (USD Coin)" would send a holder of either
+  // down the rail that cannot see their balance. Named here as a wallet names
+  // this contract.
   [gnosis.id]: [
     { address: NATIVE_CURRENCY, symbol: 'xDAI', name: 'xDAI', decimals: 18 },
     {
       address: '0x2a22f9c3b484c3629090feed35f17ff8f88f76f0',
-      symbol: 'USDC',
-      name: 'USD Coin',
+      symbol: 'USDC.e',
+      name: 'Bridged USD Coin',
       decimals: 6,
     },
   ],
@@ -183,19 +199,60 @@ function walletClientFor(provider: EthereumProvider, chainId: number, address: s
   })
 }
 
-/** Execute a quoted payment, reporting the SDK's current step description. */
+/**
+ * What the progress card says while Relay works, in this app's words.
+ *
+ * Keyed on the step's `id`, which is the stable half of an SDK progress report.
+ * `currentStep.action` — what this used to pass straight through — is Relay's
+ * own call-to-action copy: written for their widget, in their voice, in
+ * English, and theirs to reword at any time. It is not ours to put on our
+ * screen, and a step we do not recognise is described by what is true of all of
+ * them rather than quoted.
+ *
+ * One phrase per TRANSACTION step rather than two, because Relay marks one
+ * `confirming` BEFORE the wallet is prompted: there is no moment here to point
+ * at and call "now it is signed", so the direct rail's prompt-then-confirm
+ * wording has no equivalent. A SIGNATURE step does say so — `signing` is
+ * exactly the window in which the wallet holds the request — and once the
+ * source side is done and the solver is filling, either kind turns
+ * `validating`/`posting`, which is the delivery leg the design names.
+ */
+const STEP_STATUS: Record<string, string> = {
+  approve: 'Confirming the approval',
+  deposit: 'Confirming your payment',
+}
+const DELIVERY_STATUS = 'Cross-swap xDAI on Relay'
+const SIGNING_STATUS = 'Confirm the payment in your wallet'
+/** The signature-step state in which the wallet is holding the request. */
+const SIGNING_STATE = 'signing'
+/** Item states that mean the source side is done and Relay is delivering. */
+const DELIVERING_STATES = new Set(['validating', 'posting'])
+
+function stepStatus(stepId: string | undefined, progressState: string | undefined): string {
+  if (progressState === SIGNING_STATE) {
+    return SIGNING_STATUS
+  }
+  if (progressState !== undefined && DELIVERING_STATES.has(progressState)) {
+    return DELIVERY_STATUS
+  }
+  return (stepId === undefined ? undefined : STEP_STATUS[stepId]) ?? DELIVERY_STATUS
+}
+
+/** Execute a quoted payment, reporting what it is doing in our own words. */
 async function executePayment(options: ExecutePaymentOptions): Promise<void> {
-  await withTimeout(
-    relayClient().actions.execute({
-      quote: options.quote.handle as Execute,
-      wallet: walletClientFor(options.provider, options.chainId, options.address),
-      onProgress: ({ currentStep }) => {
-        if (currentStep?.action) {
-          options.onStatus?.(currentStep.action)
-        }
-      },
-    }),
-    EXECUTE_TIMEOUT_MS,
+  await withIdleTimeout(
+    (keepAlive) =>
+      relayClient().actions.execute({
+        quote: options.quote.handle as Execute,
+        wallet: walletClientFor(options.provider, options.chainId, options.address),
+        onProgress: ({ currentStep, currentStepItem }) => {
+          // Every report, whether or not it changes what the card says: the
+          // deadline measures silence, and a repeated step is not silence.
+          keepAlive()
+          options.onStatus?.(stepStatus(currentStep?.id, currentStepItem?.progressState))
+        },
+      }),
+    EXECUTE_STALL_TIMEOUT_MS,
     'The payment is taking longer than Relay usually needs. It may still land — reopen the drive to check.',
   )
 }

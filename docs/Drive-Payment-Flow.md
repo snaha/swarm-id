@@ -88,7 +88,8 @@ implementation exist. The module is deliberately a **leaf** — it imports no ra
 values from it with no initialisation cycle.
 
 `resolve-rail.ts` picks and composes, dispatching **per token, not per chain** (a chain-level claim
-silently removed Gnosis USDC from the picker):
+silently removed Gnosis USDC.e from the picker — the direct rail carries four of Gnosis's assets, not
+all of them):
 
 - **Gnosis direct** (`gnosis-direct.ts`) — resolved for any endpoint answering as chain 100. The destination is the source,
   so the wallet simply sends xDAI to the batch-owner address and the operation continues into the
@@ -98,17 +99,25 @@ silently removed Gnosis USDC from the picker):
 
 - **Relay** (`relay.ts`) — the bridged rail, a thin wrapper over `@relayprotocol/relay-sdk` (plain TS
   core, no React, public mainnet API, no API key). It is the same rail the widget uses, proven for
-  Gnosis with xDAI output. SDK progress callbacks map onto the step model; on failure the SDK error
-  surfaces verbatim, and Relay-level refund semantics are the SDK's own. One delivery is bounded at
-  ten minutes (`EXECUTE_TIMEOUT_MS`, far past a slow cross-chain fill) — an SDK that stops reporting
-  altogether has to surface as a failed payment, which is a state the flow can recover from, rather
-  than a spinner whose only exit is a reload.
+  Gnosis with xDAI output. **Offered only for an endpoint proven to be Gnosis mainnet**, in a shipped
+  build as much as a dev one: Relay's delivery chain is fixed, so pointing the app at a fork or a
+  testnet and paying over Relay would land real money on a chain the app never reads. SDK progress
+  reports map onto the step model by their step `id`, and the card says what this app says about that
+  step — Relay's `action` is its own widget copy and is not passed through. On failure the SDK error
+  surfaces verbatim, and Relay-level refund semantics are the SDK's own. Ten minutes of **silence**
+  ends a delivery (`EXECUTE_STALL_TIMEOUT_MS`, restarted on every progress report) — the bound is on
+  an SDK that has stopped reporting, not on the payment, which would otherwise count the time a
+  person spends in their wallet and fail one that is going fine.
 - **The dev rail** (`ui/src/lib/dev/local-payment-rail.ts`) — only off mainnet, in a dev build, with
   a local source chain answering. See [Dev and testing](#dev-and-testing).
 
 Source chains mirror the widget's: Ethereum, Polygon, Optimism, Arbitrum, Base, Gnosis. Token lists
 are a static table per chain (native plus the obvious stablecoin); Relay's chain/currency metadata
-call buys nothing for a six-chain, two-token picker.
+call buys nothing for a six-chain, two-token picker. Gnosis is the one chain where the two tables
+meet, and its dollar tokens are two different contracts: Relay carries **USDC.e** (`0x2a22…`,
+Circle's bridged token), the direct rail the older Omnibridge **USDC** (`0xDDAf…`) that the swap side
+transacts in. Both rows reach the picker, so they are named apart — one label for two contracts sends
+a holder of either to the rail that cannot see their balance.
 
 ### What it accepts, and the second leg
 

@@ -10,7 +10,7 @@
   import ArrowRight from '@lucide/svelte/icons/arrow-right'
   import LoaderCircle from '@lucide/svelte/icons/loader-circle'
   import Wallet from '@lucide/svelte/icons/wallet'
-  import { TimeoutError, jsonRpcCall } from '@snaha/swarm-id'
+  import { TimeoutError, jsonRpcCall, withTimeout } from '@snaha/swarm-id'
   import { encodeFunctionData, erc20Abi, formatUnits } from 'viem'
 
   import { createAttemptTracker } from '$lib/attempt'
@@ -384,9 +384,17 @@
                 ],
               }
         try {
+          // Both paths bounded by the same deadline. A wallet that never
+          // answers is not rarer than an RPC that never answers — it is the
+          // likelier of the two — and an unbounded read here leaves a pending
+          // promise behind on every chain change.
           const result =
             viaWallet && walletProvider
-              ? await walletProvider.request(call)
+              ? await withTimeout(
+                  walletProvider.request(call),
+                  BALANCE_TIMEOUT_MS,
+                  'The wallet did not report a balance.',
+                )
               : await jsonRpcCall<string>(rpcUrl, call.method, call.params, {
                   timeoutMs: BALANCE_TIMEOUT_MS,
                 })
@@ -422,9 +430,13 @@
   // change re-reads so the numbers come from wherever the wallet now is.
   $effect(() => {
     const walletProvider = provider
-    if (!walletProvider?.on) {
+    // Both halves required: EIP-1193 makes each optional, and subscribing to a
+    // provider that cannot be unsubscribed from leaks a handler — and a stale
+    // `walletAddress` closure with it — on every provider change.
+    if (!walletProvider?.on || !walletProvider.removeListener) {
       return
     }
+    const { on, removeListener } = walletProvider
     const onAccounts = (payload: unknown) => {
       const [first] = Array.isArray(payload) ? (payload as string[]) : []
       if (!first || first === walletAddress) {
@@ -435,11 +447,11 @@
       void refreshQuote()
     }
     const onChain = () => void readBalances()
-    walletProvider.on('accountsChanged', onAccounts)
-    walletProvider.on('chainChanged', onChain)
+    on.call(walletProvider, 'accountsChanged', onAccounts)
+    on.call(walletProvider, 'chainChanged', onChain)
     return () => {
-      walletProvider.removeListener?.('accountsChanged', onAccounts)
-      walletProvider.removeListener?.('chainChanged', onChain)
+      removeListener.call(walletProvider, 'accountsChanged', onAccounts)
+      removeListener.call(walletProvider, 'chainChanged', onChain)
     }
   })
 

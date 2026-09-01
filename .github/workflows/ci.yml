@@ -92,9 +92,40 @@ jobs:
       # built out of them. None of the three collides with anything else in the
       # bundle (viem's chain registry does carry a bare `31337`, hence the port
       # being matched as part of the URL).
+      #
+      # Each is checked to still EXIST before it is searched for, because the
+      # search is a NEGATIVE assertion and a negative assertion about a string
+      # nothing spells any more is green forever while guarding nothing. Rename
+      # the helper, move the port, rotate the solver key — and without this the
+      # guard goes quietly vacuous, which is how it would report a leak it can
+      # no longer see.
+      #
+      # Existence is proven against the SOURCE, not against the built bundle,
+      # because two of the three legitimately reach no chunk at all: `/dev`
+      # imports the faucet half of the rail module and nothing else, so the
+      # rail's own strings — the solver address it deposits to above all — are
+      # tree-shaken out of the dev chunk as well as out of every other. Absent
+      # from the bundle is the correct state for those; misspelled is not, and
+      # only the declaration can tell the two apart. Anchored on the
+      # declaration rather than on any mention, since a comment naming a
+      # renamed helper would otherwise keep the canary looking alive.
       - name: Check the dev tree stayed out of the bundle (ui)
         working-directory: ./ui
         run: |
+          stale=0
+          # $1 the canary, $2 the file, $3 the declaration that must spell it.
+          require_canary() {
+            if ! grep -qF -- "$3" "$2"; then
+              echo "::error::Bundle-guard canary '$1' is no longer spelled that way in $2 (looked for: $3). The leak search below would pass without ever being able to fail — update the canary and the declaration together."
+              stale=1
+            fi
+          }
+          require_canary 'anvil_setBalance' 'src/lib/dev/local-payment-rail.ts' "sourceRpc('anvil_setBalance'"
+          require_canary 'localhost:31337' 'src/lib/dev/local-payment-rail.ts' "DEFAULT_SOURCE_RPC_URL = 'http://localhost:31337'"
+          require_canary 'a0ee7a142d267c1f36714e4a8f75612f20a79720' '../multichain/src/local-solver-protocol.ts' 'LOCAL_SOLVER_ADDRESS = "0xa0ee7a142d267c1f36714e4a8f75612f20a79720"'
+          if [ "$stale" -ne 0 ]; then
+            exit 1
+          fi
           canaries='anvil_setBalance|localhost:31337|a0ee7a142d267c1f36714e4a8f75612f20a79720'
           dev_chunk=$(grep -rlF 'swarm-id-dev-source-rpc' build/_app/immutable/nodes || true)
           found=$(printf '%s' "$dev_chunk" | grep -c . || true)

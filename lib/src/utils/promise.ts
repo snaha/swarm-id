@@ -44,3 +44,48 @@ export function withTimeout<T>(
 export function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms))
 }
+
+/**
+ * Time-bound `work` by SILENCE rather than by total elapsed time: the deadline
+ * is `ms` from the last `keepAlive()` the work reported, or from the start if
+ * it has reported nothing. Rejects with a {@link TimeoutError}, like
+ * {@link withTimeout}, and clears its timer whichever way the race settles.
+ *
+ * For work whose total duration is legitimately unbounded but whose *progress*
+ * is observable — a payment the user signs in a wallet on another device, a
+ * long upload reporting chunks. A total deadline there fails work that is
+ * proceeding normally; this one fires only when the reports stop, which is the
+ * failure actually worth catching.
+ *
+ * `work` is a function rather than a promise because it has to be handed the
+ * `keepAlive` callback to report through. A synchronous throw from it becomes a
+ * rejection, so the timer is cleared on that path too; a `keepAlive` called
+ * after the work settles is ignored rather than arming a timer nobody will
+ * clear.
+ */
+export function withIdleTimeout<T>(
+  work: (keepAlive: () => void) => Promise<T>,
+  ms: number,
+  message: string,
+): Promise<T> {
+  let timer: ReturnType<typeof setTimeout>
+  let settled = false
+  let keepAlive: () => void = () => undefined
+  const timeout = new Promise<never>((_, reject) => {
+    keepAlive = () => {
+      if (settled) {
+        return
+      }
+      clearTimeout(timer)
+      timer = setTimeout(() => reject(new TimeoutError(message)), ms)
+    }
+    keepAlive()
+  })
+  // Wrapped so that a `work` that throws before its first await rejects rather
+  // than escaping past the `finally` that clears the timer.
+  const started = (async () => work(keepAlive))()
+  return Promise.race([started, timeout]).finally(() => {
+    settled = true
+    clearTimeout(timer)
+  })
+}

@@ -53,7 +53,12 @@ function stubRail(chains: PaymentRail['chains'], tokens: Record<number, PaymentT
   }
 }
 
-/** The direct rail: Gnosis only, and only its native token — it is a transfer. */
+/**
+ * The direct rail, stubbed down to the one token this file needs to see it
+ * claim. The real one takes every Gnosis asset with a route to BZZ (xDAI,
+ * WXDAI, USDC, BZZ); what matters here is only that it claims SOME of the
+ * chain and not the chain itself.
+ */
 const direct = stubRail([gnosis], { [gnosis.id]: [XDAI] })
 /** The bridged rail: every chain, native + a stablecoin. */
 const bridged = stubRail([mainnet, gnosis], {
@@ -82,9 +87,9 @@ describe('combineRails', () => {
   /**
    * Dispatch is per TOKEN, not per chain. Were it per chain, the direct rail —
    * offered first because paying from Gnosis needs no bridge — would claim all
-   * of Gnosis; it moves native xDAI only, so Gnosis USDC would silently vanish
-   * from the picker and anyone holding it there could not pay from Gnosis at
-   * all. Invisible locally, where nobody has USDC.
+   * of Gnosis, including the tokens it has no route for. Gnosis USDC.e would
+   * then silently vanish from the picker and anyone holding it there could not
+   * pay from Gnosis at all. Invisible locally, where nobody has USDC.
    */
   it('keeps a chain’s other tokens with the rail that can carry them', () => {
     const combined = combineRails([direct, bridged])
@@ -110,8 +115,8 @@ describe('combineRails', () => {
 /**
  * Which bridged rail — if any — each answer about the configured endpoint
  * earns. A test run is a dev build, so this is the branch that decides between
- * Relay and the local stand-in; a production build returns Relay before asking
- * at all.
+ * Relay and the local stand-in; a production build shares the mainnet arm and
+ * has no local one to fall to.
  *
  * The direct rail is stubbed present throughout, so what changes between these
  * cases is only the bridged half.
@@ -147,6 +152,27 @@ describe('resolvePaymentRail', () => {
   it('sends real Gnosis to Relay, not to a local stand-in', async () => {
     expect(await resolvedChains(identity('mainnet'))).toEqual([gnosis.id, mainnet.id])
     expect(resolveLocalRail).not.toHaveBeenCalled()
+  })
+
+  /**
+   * Relay delivers to the real Gnosis and to nowhere else — `toChainId` is
+   * fixed in `relay.ts` and no quote can redirect it. So proving the endpoint
+   * IS that chain gates the bridged rail in every build, not only in a dev one:
+   * the Gnosis endpoint is user-editable in network settings, and a shipped
+   * build pointed at a fork or a testnet would otherwise take a real payment on
+   * the source chain and deliver it where the app never looks — a shortfall it
+   * can never see clear, after the user has paid.
+   *
+   * A shipped build reaching either of these loses the local rail too, so it is
+   * left with the direct rail alone — the honest answer for an endpoint Relay
+   * does not deliver to. An endpoint that could not be identified at all is the
+   * separate test below.
+   */
+  it('never offers Relay for an endpoint that is not the chain Relay delivers to', async () => {
+    for (const endpoint of ['dev', 'unsupported'] as const) {
+      vi.clearAllMocks()
+      expect(await resolvedChains(identity(endpoint))).not.toContain(mainnet.id)
+    }
   })
 
   it('offers the local rail on a chain proven to be a dev one', async () => {

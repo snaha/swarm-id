@@ -533,7 +533,12 @@ export { isStorageShared, markFirstPartyStorage } from "./utils/storage-probe"
 
 // Promise utilities. `TimeoutError` is exported because it is the discriminator
 // for a deadline anywhere in this library, the chain reads included.
-export { sleep, withTimeout, TimeoutError } from "./utils/promise"
+export {
+  sleep,
+  withTimeout,
+  withIdleTimeout,
+  TimeoutError,
+} from "./utils/promise"
 
 // Manifest builder utilities for /bzz/ feed compatibility
 export {
