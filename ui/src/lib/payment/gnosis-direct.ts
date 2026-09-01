@@ -24,7 +24,6 @@ import {
 } from '$lib/payment/chain'
 import { ownerGasCredit, withSwapBuffer } from '$lib/payment/funding'
 import {
-  type EthereumProvider,
   type ExecutePaymentOptions,
   NATIVE_CURRENCY,
   type PaymentQuote,
@@ -33,6 +32,7 @@ import {
   type QuoteRequest,
   displayAmount,
   displayUsd,
+  walletGenesisHash,
 } from '$lib/payment/payment-rail'
 import { networkSettingsStore } from '$lib/stores/network-settings.svelte'
 
@@ -41,13 +41,6 @@ const XDAI_DECIMALS = 18
 
 /** Confirming a transfer on a 5s-block chain; generous, but finite. */
 const TRANSFER_TIMEOUT_MS = 120_000
-
-/**
- * Long enough for a wallet to fetch one block, short enough that a wallet
- * which is never going to answer is treated as silent rather than left to hold
- * the Pay button. No prompt is involved — nobody is being waited on.
- */
-const GENESIS_PROBE_TIMEOUT_MS = 10_000
 
 /**
  * The two networks a wallet can be asked to switch to here, by the names it
@@ -138,12 +131,16 @@ function acceptedFor(currency: string): (typeof ACCEPTED)[number] | undefined {
  * answers as 100 on purpose. Naming it says which one a wallet is being sent
  * to, since the chain id cannot.
  */
-function gnosisChain(isMainnet: boolean): Chain {
+function gnosisChain(identity: ChainIdentity): Chain {
   return defineChain({
     id: GNOSIS_CHAIN_ID,
-    name: isMainnet ? GNOSIS_NAME : FAKE_GNOSIS_NAME,
+    name: identity.kind === 'mainnet' ? GNOSIS_NAME : FAKE_GNOSIS_NAME,
     nativeCurrency: { name: 'xDAI', symbol: 'xDAI', decimals: XDAI_DECIMALS },
     rpcUrls: { default: { http: [networkSettingsStore.gnosisRpcUrl] } },
+    // What `switchWalletChain` verifies the wallet against: two networks share
+    // this chain id — the real Gnosis and the local chain wearing its id on
+    // purpose — and only genesis says which one the wallet actually landed on.
+    custom: { genesisHash: identity.genesisHash },
   })
 }
 
@@ -324,26 +321,6 @@ export function walletChainRefusal(
     : `Your wallet is on a different chain from the test chain this app is pointed at (${rpcUrl}). The payment would land where this app never looks, so nothing was sent — switch your wallet to the ${FAKE_GNOSIS_NAME} network and try again.`
 }
 
-/**
- * The genesis block as the WALLET reports it. Asked through the wallet's own
- * provider deliberately: it answers for whatever chain the wallet is really
- * on, which is the only thing that can contradict the chain it was asked to
- * switch to.
- *
- * @returns undefined when the wallet will not or cannot say — a refusal to
- *   answer is not evidence of anything, and {@link walletChainRefusal} decides
- *   what that silence costs.
- */
-async function walletGenesisHash(provider: EthereumProvider): Promise<string | undefined> {
-  const block = await withTimeout(
-    provider.request({ method: 'eth_getBlockByNumber', params: ['0x0', false] }),
-    GENESIS_PROBE_TIMEOUT_MS,
-    'The wallet did not say which chain it is on.',
-  ).catch(() => undefined)
-  const hash = (block as { hash?: unknown } | undefined)?.hash
-  return typeof hash === 'string' ? hash : undefined
-}
-
 /** Send the xDAI, and wait for it to confirm. */
 async function executeDirectPayment(options: ExecutePaymentOptions): Promise<void> {
   const handle = options.quote.handle
@@ -444,7 +421,7 @@ export async function resolveGnosisDirectRail(): Promise<PaymentRail | undefined
   if (identity === undefined || identity.kind === 'unsupported') {
     return undefined
   }
-  const chain = gnosisChain(identity.kind === 'mainnet')
+  const chain = gnosisChain(identity)
   return {
     chains: [chain],
     tokens: (chainId) => (chainId === GNOSIS_CHAIN_ID ? ACCEPTED.map((entry) => entry.token) : []),

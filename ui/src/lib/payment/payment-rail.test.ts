@@ -1,5 +1,6 @@
 // Copyright 2026 The Swarm Authors. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
+import { defineChain } from 'viem'
 import { gnosis } from 'viem/chains'
 import { describe, expect, it, vi } from 'vitest'
 
@@ -17,7 +18,7 @@ import {
  */
 describe('displayAmount', () => {
   it('cuts a rail’s raw precision down to significant digits', () => {
-    // A native-token amount as a rail hands it over: the full wei expansion.
+    // Relay's `amountFormatted` for a native token, verbatim.
     expect(displayAmount('0.000043465998997394')).toBe('0.00004347')
   })
 
@@ -78,9 +79,9 @@ describe('displayUsd', () => {
 
   /**
    * A rail whose source could not price the payment passes `''` rather than
-   * inventing a figure. Formatted as '0.00' it would read as "~0.00 USD total"
-   * under a blank cost line; empty is what every caller renders behind a
-   * truthiness test.
+   * inventing a figure — Relay's `currencyIn` is optional, so `relay.ts` does.
+   * Formatted as '0.00' it would read as "~0.00 USD total" under a blank cost
+   * line; empty is what every caller renders behind a truthiness test.
    */
   it('has nothing to show for a missing or non-positive figure', () => {
     expect(displayUsd('')).toBe('')
@@ -233,5 +234,96 @@ describe('switchWalletChain', () => {
       .mockResolvedValueOnce(undefined)
       .mockRejectedValueOnce(declined)
     await expect(switchWalletChain({ request }, gnosis.id, [gnosis])).rejects.toBe(declined)
+  })
+})
+
+/**
+ * The switch's genesis verification. Two networks can share a chain id — the
+ * real Gnosis and the local chain wearing its id on purpose — and the id is
+ * all `wallet_switchEthereumChain` can name: a wallet with the other one
+ * configured satisfies the switch without ever seeing our RPC. A chain
+ * carrying an expected genesis is therefore checked through the wallet, and a
+ * proven mismatch is repaired by offering the chain again — the one request
+ * that makes a wallet adopt OUR endpoint for an id it already serves.
+ */
+describe('switchWalletChain — two networks, one chain id', () => {
+  const OUR_GENESIS = '0x4f1dd23188aab3a76b463e4af801b52b1248ef073c648cbdc4c9333d3da79756'
+  const OTHER_GENESIS = `0x${'ab'.repeat(32)}`
+
+  const fakeGnosis = defineChain({
+    id: 100,
+    name: 'Gnosis Chain (fake)',
+    nativeCurrency: { name: 'xDAI', symbol: 'xDAI', decimals: 18 },
+    rpcUrls: { default: { http: ['http://localhost:9545'] } },
+    custom: { genesisHash: OUR_GENESIS },
+  })
+
+  /** A wallet already serving chain 100, on the network `genesis` names. */
+  function walletOn(behaviour: { genesis: string | undefined; adoptOnAdd?: boolean }) {
+    const calls: string[] = []
+    const provider = {
+      request({ method }: { method: string; params?: unknown[] }) {
+        calls.push(method)
+        if (method === 'eth_getBlockByNumber') {
+          return Promise.resolve(
+            behaviour.genesis === undefined ? undefined : { hash: behaviour.genesis },
+          )
+        }
+        if (method === 'wallet_addEthereumChain' && behaviour.adoptOnAdd) {
+          behaviour.genesis = OUR_GENESIS
+        }
+        return Promise.resolve(undefined)
+      },
+    }
+    return { provider, calls }
+  }
+
+  it('accepts a wallet whose genesis matches, without offering the chain', async () => {
+    const { provider, calls } = walletOn({ genesis: OUR_GENESIS })
+    await switchWalletChain(provider, fakeGnosis.id, [fakeGnosis])
+    expect(calls).toEqual(['wallet_switchEthereumChain', 'eth_getBlockByNumber'])
+  })
+
+  it('repairs a wallet that landed on the other network wearing the id', async () => {
+    const { provider, calls } = walletOn({ genesis: OTHER_GENESIS, adoptOnAdd: true })
+    await switchWalletChain(provider, fakeGnosis.id, [fakeGnosis])
+    expect(calls).toContain('wallet_addEthereumChain')
+  })
+
+  it('refuses in words when the wallet stays put after the offer', async () => {
+    const { provider } = walletOn({ genesis: OTHER_GENESIS })
+    await expect(switchWalletChain(provider, fakeGnosis.id, [fakeGnosis])).rejects.toThrow(
+      /Remove that network/,
+    )
+  })
+
+  /**
+   * MetaMask does not adopt an RPC for an id it already serves — the offer
+   * fails with "network already exists". That failure is part of the verdict,
+   * not an error of ours: the user must hear what to do about it, not a
+   * wallet's internals.
+   */
+  it('turns a refused offer into the same worded verdict', async () => {
+    const { provider } = walletOn({ genesis: OTHER_GENESIS })
+    const request = provider.request.bind(provider)
+    provider.request = (args: { method: string; params?: unknown[] }) =>
+      args.method === 'wallet_addEthereumChain'
+        ? Promise.reject(new Error('May not specify a chain that already exists'))
+        : request(args)
+    await expect(switchWalletChain(provider, fakeGnosis.id, [fakeGnosis])).rejects.toThrow(
+      /Remove that network/,
+    )
+  })
+
+  it('leaves a silent wallet to the payer check rather than repairing blind', async () => {
+    const { provider, calls } = walletOn({ genesis: undefined })
+    await switchWalletChain(provider, fakeGnosis.id, [fakeGnosis])
+    expect(calls).not.toContain('wallet_addEthereumChain')
+  })
+
+  it('never probes a chain that carries no expected genesis', async () => {
+    const { provider, calls } = walletOn({ genesis: OTHER_GENESIS })
+    await switchWalletChain(provider, gnosis.id, [gnosis])
+    expect(calls).toEqual(['wallet_switchEthereumChain'])
   })
 })

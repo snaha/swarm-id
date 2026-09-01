@@ -77,6 +77,65 @@ jobs:
         working-directory: ./ui
         run: pnpm build
 
+      # The dev funding seam is only worth anything if the swap actually holds,
+      # and reading the source cannot tell you: a static import survives a dead
+      # `import.meta.env.DEV` branch. Only the built assets know. `/dev` keeps
+      # its own copy on purpose, so its route chunk is the one allowed match —
+      # that ONE chunk, found here by a marker rather than whitelisting every
+      # route chunk, because a leak into a production route lands in exactly
+      # such a chunk too.
+      #
+      # Three markers, because `anvil_setBalance` alone is not on the leak path:
+      # it reaches the bundle through `mintSourceEth`, which `resolveLocalRail`
+      # never calls, so it tree-shakes away while the rail itself ships. The
+      # source chain's URL and the local solver's address cannot — the rail is
+      # built out of them. None of the three collides with anything else in the
+      # bundle (viem's chain registry does carry a bare `31337`, hence the port
+      # being matched as part of the URL).
+      #
+      # Each canary is checked to still exist before it is searched for: the
+      # search is a negative assertion, so a renamed helper or a rotated key
+      # would leave it green forever while guarding nothing.
+      #
+      # Checked against the SOURCE, not the bundle — the solver address reaches
+      # no chunk at all (`/dev` imports only the faucet half of the rail), and
+      # absent is its correct state while misspelled is not. Anchored on the
+      # declaration, so a comment naming a renamed helper cannot keep a canary
+      # looking alive.
+      - name: Check the dev tree stayed out of the bundle (ui)
+        working-directory: ./ui
+        run: |
+          stale=0
+          # $1 canary, $2 file, $3 the declaration that must still spell it.
+          require_canary() {
+            if ! grep -qF -- "$3" "$2"; then
+              echo "::error::Bundle-guard canary '$1' is no longer spelled that way in $2 (looked for: $3). The leak search below would pass without ever being able to fail — update the canary and the declaration together."
+              stale=1
+            fi
+          }
+          require_canary 'anvil_setBalance' 'src/lib/dev/local-payment-rail.ts' "sourceRpc('anvil_setBalance'"
+          require_canary 'localhost:31337' 'src/lib/dev/local-payment-rail.ts' "DEFAULT_SOURCE_RPC_URL = 'http://localhost:31337'"
+          require_canary 'a0ee7a142d267c1f36714e4a8f75612f20a79720' '../multichain/src/local-solver-protocol.ts' 'LOCAL_SOLVER_ADDRESS = "0xa0ee7a142d267c1f36714e4a8f75612f20a79720"'
+          if [ "$stale" -ne 0 ]; then
+            exit 1
+          fi
+          canaries='anvil_setBalance|localhost:31337|a0ee7a142d267c1f36714e4a8f75612f20a79720'
+          dev_chunk=$(grep -rlF 'swarm-id-dev-source-rpc' build/_app/immutable/nodes || true)
+          found=$(printf '%s' "$dev_chunk" | grep -c . || true)
+          if [ "$found" -ne 1 ]; then
+            echo "::error::Expected exactly one /dev route chunk carrying the marker swarm-id-dev-source-rpc under build/_app/immutable/nodes, found $found:"
+            echo "${dev_chunk:-(none)}"
+            echo "None means the dev tree was hoisted into a shared chunk because a production route now imports it — which is the leak this check exists for. More than one means the marker is no longer /dev-only; pick a new one from the /dev page."
+            exit 1
+          fi
+          leaked=$(grep -rlE "$canaries" build | grep -vxF "$dev_chunk" || true)
+          if [ -n "$leaked" ]; then
+            echo "::error::Dev-only code reached the shipped bundle:"
+            echo "$leaked"
+            echo "Production code must reach dev helpers only through \$lib/payment/dev-funding, which the build swaps for its inert stub."
+            exit 1
+          fi
+
       - name: Check the build (ui)
         working-directory: ./ui
         run: pnpm run check
@@ -164,3 +223,36 @@ jobs:
       - name: Stop the local chain
         if: always()
         run: pnpm dev:chain:stop
+
+  # Talks to Relay's real quote API — the only thing that can catch our request
+  # or response mapping drifting from theirs, and it quotes every (chain, token)
+  # pair the payment screen offers. A read, no wallet, no money. Offline it
+  # skips; here it does not — an unreachable Relay fails this job on purpose,
+  # because that is worth knowing about. The job is not required, so it reports
+  # the outage without blocking a merge.
+  live-tests:
+    name: Live service contracts
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          run_install: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: 'pnpm'
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Run the live contract suite
+        working-directory: ./ui
+        run: pnpm test:live

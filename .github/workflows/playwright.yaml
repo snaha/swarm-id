@@ -60,15 +60,38 @@ jobs:
           pnpm -s dev:cluster logs blockchain --tail 100 || true
           exit 1
 
+      # The payment-rail suite needs somewhere to take a wallet signature, and
+      # something to fill the deposit. Without both it skips, and the payment
+      # screens go back to being hand-tested only.
+      - name: Start the payment source chain
+        run: pnpm dev:source-chain:detach
+
+      - name: Start the local solver
+        run: |
+          GNOSIS_RPC_URL=http://localhost:9545 nohup pnpm dev:solver > /tmp/solver.log 2>&1 &
+          for _ in $(seq 1 30); do
+            if grep -q "watching for deposits" /tmp/solver.log; then
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "::error::The local solver never started — the payment-rail suite would time out."
+          cat /tmp/solver.log || true
+          exit 1
+
       - name: Run Playwright tests
         working-directory: ./ui
         run: pnpm test:e2e
         env:
           CHAIN_RPC_URL: http://localhost:9545
 
-      - name: Stop the local chain
+      - name: Solver log
+        if: failure()
+        run: cat /tmp/solver.log || true
+
+      - name: Stop the local chains
         if: always()
-        run: pnpm dev:chain:stop
+        run: pnpm dev:chain:stop; pnpm dev:source-chain:stop
 
       - name: Upload test report
         uses: actions/upload-artifact@v4

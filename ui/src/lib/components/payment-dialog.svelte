@@ -10,8 +10,8 @@
   import ArrowRight from '@lucide/svelte/icons/arrow-right'
   import LoaderCircle from '@lucide/svelte/icons/loader-circle'
   import Wallet from '@lucide/svelte/icons/wallet'
-  import { TimeoutError } from '@snaha/swarm-id'
-  import { formatUnits } from 'viem'
+  import { TimeoutError, jsonRpcCall, withTimeout } from '@snaha/swarm-id'
+  import { encodeFunctionData, erc20Abi, formatUnits } from 'viem'
 
   import { createAttemptTracker } from '$lib/attempt'
   import { Button } from '$lib/components/ui/button'
@@ -34,6 +34,7 @@
   } from '$lib/payment/payment-method'
   import {
     type EthereumProvider,
+    NATIVE_CURRENCY,
     type PaymentQuote,
     type PaymentRail,
     displayAmount,
@@ -53,8 +54,8 @@
    * rather than continuing through these screens.
    *
    * Which rail carries the money is the caller's choice (`resolve-rail.ts`),
-   * and nothing here depends on which one it is: the screens are driven by the
-   * rail's `chains`, `tokens` and quote, never by knowing which rail it is.
+   * and nothing here depends on which one it is — the screens are identical
+   * against Relay and against the local dev rail.
    *
    * The connected wallet only ever signs on the source chain — it never sees
    * the owner key, so passkey and password accounts use this unchanged.
@@ -101,10 +102,12 @@
   // user's starting selection, not tracked.
   let chainId = $state(untrack(() => String(rail.chains[0].id)))
   let tokenAddress = $state(untrack(() => rail.tokens(rail.chains[0].id)[0].address))
-  let paymentQuote = $state<PaymentQuote | undefined>(undefined)
+  // Raw, not deep-reactive: the rail-private `handle` inside must reach
+  // `execute` as the object the rail produced. Wrapped in a `$state` proxy it
+  // cannot be structured-cloned, and the Relay SDK clones its quote before
+  // walking the steps — every real payment then dies with a DataCloneError.
+  let paymentQuote = $state.raw<PaymentQuote | undefined>(undefined)
   let quoting = $state(false)
-  // Replaced by whatever the rail reports through `onStatus`; this is only what
-  // the wait screen says before the first report arrives.
   let relayStatus = $state('Sending your payment')
   /**
    * The Gnosis-side quote in force, once the built-in method has priced one.
@@ -131,6 +134,15 @@
    * cannot call the wallet back, so it is not a clean cancel.
    */
   let paying = $state(false)
+  /**
+   * What the connected wallet holds, keyed `chainId:tokenAddress`, so the
+   * token selector can label every option on the selected chain. Keyed rather
+   * than one figure per screen: a read landing late still lands in its own
+   * slot, and switching back to a chain shows its last figures immediately.
+   * A missing key means no figure yet — no label, never a zero that reads as
+   * "you cannot pay".
+   */
+  let balances = $state<Record<string, bigint>>({})
   /**
    * Set once an attempt has been made. From then on the Gnosis side is
    * re-priced before every source-side quote: a failed attempt may still have
@@ -160,10 +172,16 @@
     })),
   )
   const tokenOptions = $derived(
-    rail.tokens(Number(chainId)).map((token) => ({
-      value: token.address,
-      label: `${token.symbol} (${token.name})`,
-    })),
+    rail.tokens(Number(chainId)).map((token) => {
+      const held = balances[balanceKey(chainId, token.address)]
+      return {
+        value: token.address,
+        label:
+          held === undefined
+            ? `${token.symbol} (${token.name})`
+            : `${token.symbol} (${token.name}) — ${formatAmount(held, token.decimals)}`,
+      }
+    }),
   )
   const tokenSymbol = $derived(
     rail.tokens(Number(chainId)).find((token) => token.address === tokenAddress)?.symbol ?? '',
@@ -312,6 +330,128 @@
     }
   }
 
+  /** Bounded like any other read; the figures are cosmetic, a hang would not be. */
+  const BALANCE_TIMEOUT_MS = 10_000
+
+  const balanceKey = (chain: number | string, token: string) => `${chain}:${token}`
+
+  /** The chain the wallet itself is on, or undefined for one that cannot say. */
+  async function walletChainId(): Promise<number | undefined> {
+    try {
+      const hex = await provider?.request({ method: 'eth_chainId' })
+      return typeof hex === 'string' ? Number(BigInt(hex)) : undefined
+    } catch {
+      return undefined
+    }
+  }
+
+  /**
+   * Read what the wallet holds of every token on the selected chain, one slot
+   * per token, fire-and-forget from `refreshQuote` and the wallet's own
+   * chain-change events.
+   *
+   * Through the wallet's RPC when the wallet is on that chain — the figures
+   * MetaMask itself would show — and through the chain's own endpoint
+   * otherwise, so a refused network switch still shows correct numbers rather
+   * than ones from whatever chain the wallet is parked on.
+   */
+  async function readBalances() {
+    const address = walletAddress
+    const walletProvider = provider
+    const chain = rail.chains.find((candidate) => String(candidate.id) === chainId)
+    if (!address || !chain) {
+      return
+    }
+    const rpcUrl = chain.rpcUrls.default.http[0]
+    const viaWallet = walletProvider !== undefined && (await walletChainId()) === chain.id
+    await Promise.all(
+      rail.tokens(chain.id).map(async (token) => {
+        const call =
+          token.address === NATIVE_CURRENCY
+            ? { method: 'eth_getBalance', params: [address, 'latest'] }
+            : {
+                method: 'eth_call',
+                params: [
+                  {
+                    to: token.address,
+                    data: encodeFunctionData({
+                      abi: erc20Abi,
+                      functionName: 'balanceOf',
+                      args: [address as `0x${string}`],
+                    }),
+                  },
+                  'latest',
+                ],
+              }
+        try {
+          // Both paths on the same deadline: an unbounded wallet read leaves a
+          // pending promise behind on every chain change.
+          const result =
+            viaWallet && walletProvider
+              ? await withTimeout(
+                  walletProvider.request(call),
+                  BALANCE_TIMEOUT_MS,
+                  'The wallet did not report a balance.',
+                )
+              : await jsonRpcCall<string>(rpcUrl, call.method, call.params, {
+                  timeoutMs: BALANCE_TIMEOUT_MS,
+                })
+          // The account can change while the read is in flight; a figure filed
+          // under another account's key would be worse than none.
+          if (typeof result === 'string' && result !== '0x' && walletAddress === address) {
+            balances[balanceKey(chain.id, token.address)] = BigInt(result)
+          }
+        } catch {
+          // The label stays absent; the quote is what gates Pay.
+        }
+      }),
+    )
+  }
+
+  /**
+   * Walk the wallet to the newly selected chain right away rather than only at
+   * Pay: the network prompt then happens while the user is still weighing the
+   * choice, and the balances can come from the wallet's own RPC. A refusal is
+   * not fatal — `pay()` asks again — so the switch is offered, not enforced.
+   */
+  async function followChain() {
+    const walletProvider = provider
+    if (!walletProvider) {
+      return
+    }
+    await switchWalletChain(walletProvider, Number(chainId), rail.chains).catch(() => undefined)
+    void readBalances()
+  }
+
+  // Follow the wallet itself: another account picked in MetaMask re-prices
+  // (the quote names the payer) with the old figures dropped, and a chain
+  // change re-reads so the numbers come from wherever the wallet now is.
+  $effect(() => {
+    const walletProvider = provider
+    // Both halves required — EIP-1193 makes each optional, and a subscription
+    // that cannot be torn down leaks a handler on every provider change.
+    if (!walletProvider?.on || !walletProvider.removeListener) {
+      return
+    }
+    const { on, removeListener } = walletProvider
+    const onAccounts = (payload: unknown) => {
+      const [first] = Array.isArray(payload) ? (payload as string[]) : []
+      if (!first || first === walletAddress) {
+        return
+      }
+      walletAddress = first
+      balances = {}
+      void refreshQuote()
+    }
+    const onChain = () => void readBalances()
+    on.call(walletProvider, 'accountsChanged', onAccounts)
+    on.call(walletProvider, 'chainChanged', onChain)
+    return () => {
+      removeListener.call(walletProvider, 'accountsChanged', onAccounts)
+      removeListener.call(walletProvider, 'chainChanged', onChain)
+    }
+  })
+
   /**
    * Price the payment for the current selection — on connect, whenever the
    * chain or token changes, and after a failed attempt.
@@ -328,6 +468,7 @@
    *   the re-priced cost.
    */
   async function refreshQuote(failure = '') {
+    void readBalances()
     // The Gnosis side in force, kept as a local: it is replaced mid-flight by
     // the re-price below, and every figure handed to the rail must come from
     // the same one.
@@ -565,6 +706,7 @@
           bind:value={chainId}
           onchange={() => {
             tokenAddress = rail.tokens(Number(chainId))[0]?.address ?? ''
+            void followChain()
             void refreshQuote()
           }}
         />

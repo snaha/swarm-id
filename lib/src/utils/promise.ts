@@ -44,3 +44,39 @@ export function withTimeout<T>(
 export function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms))
 }
+
+/**
+ * Like {@link withTimeout}, but the deadline is `ms` from the last
+ * `keepAlive()` the work reported (or from the start, if it reported nothing) —
+ * so it bounds silence, not total elapsed time. For work of unbounded duration
+ * whose progress is observable: a payment signed in a wallet, a long upload.
+ *
+ * `work` is a function so it can be handed the `keepAlive` callback. A
+ * synchronous throw from it becomes a rejection, and a `keepAlive` after the
+ * work settles is ignored — both so the timer is always cleared.
+ */
+export function withIdleTimeout<T>(
+  work: (keepAlive: () => void) => Promise<T>,
+  ms: number,
+  message: string,
+): Promise<T> {
+  let timer: ReturnType<typeof setTimeout>
+  let settled = false
+  let keepAlive: () => void = () => undefined
+  const timeout = new Promise<never>((_, reject) => {
+    keepAlive = () => {
+      if (settled) {
+        return
+      }
+      clearTimeout(timer)
+      timer = setTimeout(() => reject(new TimeoutError(message)), ms)
+    }
+    keepAlive()
+  })
+  // Wrapped so a synchronous throw rejects rather than escaping the `finally`.
+  const started = (async () => work(keepAlive))()
+  return Promise.race([started, timeout]).finally(() => {
+    settled = true
+    clearTimeout(timer)
+  })
+}
