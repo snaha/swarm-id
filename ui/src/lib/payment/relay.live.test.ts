@@ -224,11 +224,9 @@ describe('Relay quote contract', () => {
     for (const pair of PAIRS) {
       it(pair.label, (context) => {
         const outcome = outcomes.get(pair.key)
-        // Skipped, not passed. `unreachable` covers a route that HUNG past the
-        // request deadline as well as one that could not be dialled at all, and
-        // a green tick on a pair nothing was asserted about reads as coverage
-        // this suite does not have — only Base ETH is held up by the CI
-        // reachability check above.
+        // Skipped, not passed: `unreachable` covers a route that hung past the
+        // deadline as well as one that could not be dialled, and a green tick
+        // on an unasserted pair reads as coverage this suite does not have.
         if (!outcome || outcome.status === 'unreachable') {
           context.skip()
           return

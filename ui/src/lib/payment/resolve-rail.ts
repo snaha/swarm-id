@@ -25,12 +25,10 @@ import { relayRail } from '$lib/payment/relay'
  * transfer and everything else by a bridge.
  *
  * Dispatch is per TOKEN, not per chain, because two rails can each serve part
- * of the same chain. The direct rail serves the Gnosis assets it has a route to
- * BZZ in and no others (`ACCEPTED` in `gnosis-direct.ts`: xDAI, WXDAI, USDC and
- * BZZ), so a chain-level claim on Gnosis silently took the rest with it —
- * Relay's Gnosis USDC.e among them — and stranded anyone holding one. Now each
- * rail wins exactly the tokens it offers, and the earlier one wins those both
- * do.
+ * of the same chain. The direct rail serves the Gnosis assets with a route to
+ * BZZ and no others (`ACCEPTED` in `gnosis-direct.ts`: xDAI, WXDAI, USDC, BZZ),
+ * so a chain-level claim took the rest — Relay's USDC.e among them — off the
+ * picker. Each rail now wins the tokens it offers; the earlier one wins ties.
  *
  * Exported for its test: the composition rule is the subtle part of this
  * module, and `resolvePaymentRail` cannot be asked about it without a chain.
@@ -77,25 +75,21 @@ export function combineRails(rails: PaymentRail[]): PaymentRail {
  *
  * **Gnosis first, always, when the endpoint is Gnosis.** Paying from the
  * destination chain needs no bridge at all: the wallet sends the asset to the
- * batch owner and the swap takes it from there. It is cheaper and has fewer
- * moving parts than any bridged route, so it leads the list and takes every
- * Gnosis asset it can carry — xDAI, WXDAI, USDC and BZZ — away from whatever
- * else would have claimed them. Only those: anything else Gnosis offers has no
- * route to BZZ from here, so it stays with the bridged rail.
+ * batch owner and the swap takes it from there. Cheaper and with fewer moving
+ * parts than any bridged route, so it leads the list and wins every Gnosis
+ * asset it can carry — xDAI, WXDAI, USDC, BZZ. The rest of Gnosis has no route
+ * to BZZ from here and stays with the bridged rail.
  *
  * Then, for the other chains:
  *
  * - **Gnosis mainnet gets Relay**, judged by genesis hash, since a dev chain
- *   reports mainnet's chain id on purpose. That is the whole of the rule in a
- *   production build: Relay delivers to the real Gnosis and to nowhere else, so
- *   an endpoint that is not the real Gnosis would be handed a rail whose money
- *   lands on a chain this app never reads — a shortfall it can never see clear,
- *   after the user has paid. The endpoint is user-editable in network settings,
- *   so this is reachable from a shipped build and not only from a dev one.
+ *   reports mainnet's chain id on purpose. That is the whole rule in a
+ *   production build: Relay delivers to the real Gnosis only, so any other
+ *   endpoint would be paid on a chain the app never reads. The endpoint is
+ *   user-editable, so a shipped build can reach this.
  * - **A production build never fakes a payment.** What keeps the dev rail out
- *   of the shipped bundle is not this check — a dead branch does not remove a
- *   static import — but the build-time swap behind `$lib/payment/dev-funding`,
- *   which leaves `resolveLocalRail` returning nothing there.
+ *   of the bundle is not this check — a dead branch does not remove a static
+ *   import — but the build-time swap behind `$lib/payment/dev-funding`.
  * - **On a PROVEN dev chain, a bridged rail exists only if the local source
  *   chain is up.** Without one there is still the direct path, which needs
  *   nothing but the chain the app is already talking to.
@@ -119,11 +113,9 @@ export async function resolvePaymentRail(): Promise<PaymentRail | undefined> {
 /** The rail for chains other than the destination itself. */
 async function resolveBridgedRail(): Promise<PaymentRail | undefined> {
   const identity = await chainIdentity().catch(() => undefined)
-  // Relay's delivery leg is hardcoded to the real Gnosis (`toChainId` in
-  // `relay.ts`) and nothing about a quote can redirect it, so it is offered
-  // only where the app is watching that same chain — in a shipped build as much
-  // as in a dev one. Pointed at a fork or a testnet, it would take a real
-  // payment on the source chain and deliver where this app never looks.
+  // Relay's delivery chain is fixed (`toChainId` in `relay.ts`) and no quote can
+  // redirect it, so it is offered only where the app watches that same chain —
+  // in a shipped build as much as a dev one.
   if (identity?.kind === 'mainnet') {
     return relayRail
   }

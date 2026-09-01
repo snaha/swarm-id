@@ -35,23 +35,12 @@ import {
 const GNOSIS_CHAIN_ID = 100
 
 /**
- * Ceiling on the SDK's SILENCE, not on the payment: the clock restarts on every
- * progress report, so it fires only once Relay has stopped saying anything at
- * all for this long.
+ * Ceiling on the SDK's silence, restarted on every progress report — so it
+ * bounds one step, not the whole payment. Wallet time still counts, but each
+ * prompt gets its own budget rather than sharing one across the route.
  *
- * It still counts the time a person spends in their wallet — the SDK reports a
- * step once and then says nothing until they come back, so a slow signature is
- * silence like any other. What changes is that the clock is re-based PER STEP
- * rather than run once across the whole payment: an approve-then-deposit route
- * gets this long for each prompt instead of both sharing one budget, and a
- * payment that is progressing normally cannot be reported as failed with money
- * in flight just because it has taken a while overall.
- *
- * Deliberately far past the gap between two reports on a healthy delivery
- * (seconds), because this is a backstop against a spinner with no way out and
- * not a pace-setter. A timeout here is still not proof the money stayed put, so
- * the retry re-prices against the owner address before asking for anything
- * again (`payment-dialog.svelte`).
+ * A timeout is not proof the money stayed put: the retry re-prices against the
+ * owner address before asking again (`payment-dialog.svelte`).
  */
 const EXECUTE_STALL_TIMEOUT_MS = 600_000
 
@@ -130,14 +119,10 @@ export const PAYMENT_TOKENS: Record<number, PaymentToken[]> = {
       decimals: 6,
     },
   ],
-  // Gnosis carries TWO dollar tokens that both call themselves USDC, and the
-  // picker shows this rail's row next to the direct rail's: `0x2a22…` is
-  // USDC.e, Circle's bridged token, which only Relay serves; `0xDDAf…` is the
-  // older Omnibridge one the swap side transacts in (`gnosis-direct.ts`).
-  // Different contracts, so `combineRails` — which dedups by address — keeps
-  // both, and two rows reading "USDC (USD Coin)" would send a holder of either
-  // down the rail that cannot see their balance. Named here as a wallet names
-  // this contract.
+  // Two dollar tokens on Gnosis, and `combineRails` dedups by address, so both
+  // reach the picker: `0x2a22…` is USDC.e (Relay only), `0xDDAf…` the Omnibridge
+  // USDC the direct rail transacts in (`gnosis-direct.ts`). Named apart so a
+  // holder cannot pick the rail that shows them no balance.
   [gnosis.id]: [
     { address: NATIVE_CURRENCY, symbol: 'xDAI', name: 'xDAI', decimals: 18 },
     {
@@ -202,22 +187,12 @@ function walletClientFor(provider: EthereumProvider, chainId: number, address: s
 }
 
 /**
- * What the progress card says while Relay works, in this app's words.
+ * What the progress card says, keyed on the step id. Relay's `currentStep.action`
+ * is its own widget copy and is not passed through.
  *
- * Keyed on the step's `id`, which is the stable half of an SDK progress report.
- * `currentStep.action` — what this used to pass straight through — is Relay's
- * own call-to-action copy: written for their widget, in their voice, in
- * English, and theirs to reword at any time. It is not ours to put on our
- * screen, and a step we do not recognise is described by what is true of all of
- * them rather than quoted.
- *
- * One phrase per TRANSACTION step rather than two, because Relay marks one
- * `confirming` BEFORE the wallet is prompted: there is no moment here to point
- * at and call "now it is signed", so the direct rail's prompt-then-confirm
- * wording has no equivalent. A SIGNATURE step does say so — `signing` is
- * exactly the window in which the wallet holds the request — and once the
- * source side is done and the solver is filling, either kind turns
- * `validating`/`posting`, which is the delivery leg the design names.
+ * One phrase per transaction step: the SDK marks those `confirming` before the
+ * wallet is prompted, so there is no "now it is signed" moment to split on.
+ * Signature steps have one (`signing`).
  */
 const STEP_STATUS: Record<string, string> = {
   approve: 'Confirming the approval',
@@ -226,12 +201,9 @@ const STEP_STATUS: Record<string, string> = {
 const DELIVERY_STATUS = 'Cross-swap xDAI on Relay'
 const SIGNING_STATUS = 'Confirm the payment in your wallet'
 /**
- * A wallet that can batch atomically (EIP-5792) collapses `approve` + the
- * terminal step into ONE prompt, and the SDK renames the step accordingly —
- * `approve-and-deposit`. That single signature IS the payment, so it is worded
- * as the step it ends in; unprefixed, `approve-and-deposit` matched nothing
- * here and the card announced the delivery leg while the wallet was still
- * asking.
+ * An EIP-5792 wallet signs approve + terminal as one step, which the SDK renames
+ * `approve-and-deposit`. That signature is the payment, so it takes the wording
+ * of the step it ends in.
  */
 const BATCHED_PREFIX = 'approve-and-'
 /** The signature-step state in which the wallet is holding the request. */

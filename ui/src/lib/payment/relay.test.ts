@@ -72,12 +72,8 @@ describe('relay execute', () => {
     await expect(payment).rejects.toThrow(/may still land/)
   })
 
-  /**
-   * The deadline bounds SILENCE, not the payment. Signing is a person's own
-   * pace — an app switch, a biometric, a wallet on a second device, a network
-   * prompt in between — and a total deadline would report a payment that is
-   * progressing normally as failed, with money already in flight.
-   */
+  /** The deadline bounds silence, not the payment: signing runs at a person's
+   * own pace, and a total deadline would fail a payment already in flight. */
   it('does not give up on a payment that keeps reporting, however long it takes', async () => {
     vi.useFakeTimers()
     let finish = () => undefined as void
@@ -125,10 +121,7 @@ describe('relay execute', () => {
     await rejected
   })
 
-  /**
-   * Relay's `action` is its own call-to-action copy, for its own widget. It
-   * used to reach our progress card verbatim; what the card says is ours.
-   */
+  /** Relay's `action` is its own widget copy; what the card says is ours. */
   it('reports its own wording for a step, never the SDK’s', async () => {
     const reported: string[] = []
     execute.mockImplementation((options) => {
@@ -145,16 +138,13 @@ describe('relay execute', () => {
         currentStep: { id: 'deposit' },
         currentStepItem: { progressState: 'validating' },
       })
-      // A wallet that batches atomically (EIP-5792) signs the approve and the
-      // deposit together, and the SDK renames the step for it. One prompt, and
-      // it is the payment — announcing the delivery leg here would be talking
-      // about the far side of a transaction the wallet is still holding.
+      // An EIP-5792 wallet signs approve and deposit together under a renamed
+      // step. One prompt, and it is the payment — not the delivery leg.
       options.onProgress({
         currentStep: { id: 'approve-and-deposit' },
         currentStepItem: { progressState: 'confirming' },
       })
-      // A signature step the app has never heard of still knows the one thing
-      // that matters while `signing`: the wallet is holding the request.
+      // An unknown signature step still knows what `signing` means.
       options.onProgress({
         currentStep: { id: 'some-future-step' },
         currentStepItem: { progressState: 'signing' },
@@ -201,9 +191,8 @@ describe('relay quote', () => {
 })
 
 /**
- * Gnosis is served by two rails at once (`resolve-rail.ts`), and both offer a
- * dollar token there — different contracts, so `combineRails` dedups neither
- * away and the picker shows both rows.
+ * Two rails serve Gnosis (`resolve-rail.ts`) and both offer a dollar token
+ * there, on different contracts — so the picker shows both rows.
  */
 describe('the Gnosis token table', () => {
   const stablecoin = PAYMENT_TOKENS[gnosis.id].find((token) => token.address !== NATIVE_CURRENCY)
@@ -212,15 +201,8 @@ describe('the Gnosis token table', () => {
     expect(stablecoin?.address).not.toBe(gnosisMainnetSettings().addresses.usdc.toLowerCase())
   })
 
-  /**
-   * So the two rows can be told apart. Both reading "USDC (USD Coin)" sent a
-   * holder of either down the rail that cannot see their balance: the USDC.e
-   * holder to the direct rail, which cannot serve them, and the holder of the
-   * Omnibridge token to Relay, which shows them no balance at all.
-   *
-   * Pinned against the symbol `gnosis-direct.ts` gives its own USDC; the two
-   * are only ever wrong together.
-   */
+  /** Pinned against the symbol `gnosis-direct.ts` gives its own USDC: both
+   * rows reading "USDC" sends a holder to the rail that shows no balance. */
   it('is named apart from it', () => {
     expect(stablecoin?.symbol).not.toBe('USDC')
   })

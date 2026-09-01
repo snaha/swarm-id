@@ -150,8 +150,7 @@ describe("withIdleTimeout", () => {
     await expect(racing).rejects.toThrow("stalled")
   })
 
-  // The point of the helper: total elapsed time is not the bound, silence is.
-  // Work that keeps reporting runs as long as it likes.
+  // Total elapsed time is not the bound, silence is.
   it("outlives the limit many times over while it keeps reporting", async () => {
     let settle = (value: string) => {
       void value

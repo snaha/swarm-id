@@ -46,22 +46,14 @@ export function sleep(ms: number): Promise<void> {
 }
 
 /**
- * Time-bound `work` by SILENCE rather than by total elapsed time: the deadline
- * is `ms` from the last `keepAlive()` the work reported, or from the start if
- * it has reported nothing. Rejects with a {@link TimeoutError}, like
- * {@link withTimeout}, and clears its timer whichever way the race settles.
+ * Like {@link withTimeout}, but the deadline is `ms` from the last
+ * `keepAlive()` the work reported (or from the start, if it reported nothing) —
+ * so it bounds silence, not total elapsed time. For work of unbounded duration
+ * whose progress is observable: a payment signed in a wallet, a long upload.
  *
- * For work whose total duration is legitimately unbounded but whose *progress*
- * is observable — a payment the user signs in a wallet on another device, a
- * long upload reporting chunks. A total deadline there fails work that is
- * proceeding normally; this one fires only when the reports stop, which is the
- * failure actually worth catching.
- *
- * `work` is a function rather than a promise because it has to be handed the
- * `keepAlive` callback to report through. A synchronous throw from it becomes a
- * rejection, so the timer is cleared on that path too; a `keepAlive` called
- * after the work settles is ignored rather than arming a timer nobody will
- * clear.
+ * `work` is a function so it can be handed the `keepAlive` callback. A
+ * synchronous throw from it becomes a rejection, and a `keepAlive` after the
+ * work settles is ignored — both so the timer is always cleared.
  */
 export function withIdleTimeout<T>(
   work: (keepAlive: () => void) => Promise<T>,
@@ -81,8 +73,7 @@ export function withIdleTimeout<T>(
     }
     keepAlive()
   })
-  // Wrapped so that a `work` that throws before its first await rejects rather
-  // than escaping past the `finally` that clears the timer.
+  // Wrapped so a synchronous throw rejects rather than escaping the `finally`.
   const started = (async () => work(keepAlive))()
   return Promise.race([started, timeout]).finally(() => {
     settled = true

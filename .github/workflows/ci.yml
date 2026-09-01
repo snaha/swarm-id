@@ -93,27 +93,20 @@ jobs:
       # bundle (viem's chain registry does carry a bare `31337`, hence the port
       # being matched as part of the URL).
       #
-      # Each is checked to still EXIST before it is searched for, because the
-      # search is a NEGATIVE assertion and a negative assertion about a string
-      # nothing spells any more is green forever while guarding nothing. Rename
-      # the helper, move the port, rotate the solver key — and without this the
-      # guard goes quietly vacuous, which is how it would report a leak it can
-      # no longer see.
+      # Each canary is checked to still exist before it is searched for: the
+      # search is a negative assertion, so a renamed helper or a rotated key
+      # would leave it green forever while guarding nothing.
       #
-      # Existence is proven against the SOURCE, not against the built bundle,
-      # because the solver address legitimately reaches no chunk at all: `/dev`
-      # imports the faucet half of the rail module and nothing else, so the
-      # rail's own strings are tree-shaken out of the dev chunk as much as out
-      # of every other one. Absent from the bundle is the correct state for it —
-      # the whole point — while misspelled is not, and only the declaration can
-      # tell those two apart. Anchored on the declaration rather than on any
-      # mention, since a comment naming a renamed helper would otherwise keep a
-      # canary looking alive.
+      # Checked against the SOURCE, not the bundle — the solver address reaches
+      # no chunk at all (`/dev` imports only the faucet half of the rail), and
+      # absent is its correct state while misspelled is not. Anchored on the
+      # declaration, so a comment naming a renamed helper cannot keep a canary
+      # looking alive.
       - name: Check the dev tree stayed out of the bundle (ui)
         working-directory: ./ui
         run: |
           stale=0
-          # $1 the canary, $2 the file, $3 the declaration that must spell it.
+          # $1 canary, $2 file, $3 the declaration that must still spell it.
           require_canary() {
             if ! grep -qF -- "$3" "$2"; then
               echo "::error::Bundle-guard canary '$1' is no longer spelled that way in $2 (looked for: $3). The leak search below would pass without ever being able to fail — update the canary and the declaration together."

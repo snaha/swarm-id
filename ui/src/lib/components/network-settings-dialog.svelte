@@ -32,11 +32,9 @@
   // here also survives the next load (a scheme-less `localhost:1633` fails both).
   const beeNodeUrlValid = $derived(isHttpUrl(beeNodeUrl.trim()))
   const gnosisRpcUrlValid = $derived(isHttpUrl(gnosisRpcUrl.trim()))
-  // Held to the same rule as the other two, for the same reason: a scheme-less
-  // `localhost:31337` saves happily and then fails every probe, which the
-  // screens report as the bridged rail simply not existing — no source chain
-  // offered, no error, nothing to tell the developer they mistyped a URL.
-  // Vacuously true when there is no dev source chain to configure.
+  // Same rule as the other two: a scheme-less `localhost:31337` saves but fails
+  // every probe, which the screens report as the bridged rail not existing
+  // rather than as a bad URL. True when there is no dev source chain at all.
   const sourceRpcUrlValid = $derived(!source || isHttpUrl(sourceRpcUrl.trim()))
   const canSave = $derived(beeNodeUrlValid && gnosisRpcUrlValid && sourceRpcUrlValid)
   const beeNodeUrlError = $derived(beeNodeUrl.trim().length > 0 && !beeNodeUrlValid)

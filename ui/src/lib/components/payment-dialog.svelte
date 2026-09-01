@@ -384,10 +384,8 @@
                 ],
               }
         try {
-          // Both paths bounded by the same deadline. A wallet that never
-          // answers is not rarer than an RPC that never answers — it is the
-          // likelier of the two — and an unbounded read here leaves a pending
-          // promise behind on every chain change.
+          // Both paths on the same deadline: an unbounded wallet read leaves a
+          // pending promise behind on every chain change.
           const result =
             viaWallet && walletProvider
               ? await withTimeout(
@@ -430,9 +428,8 @@
   // change re-reads so the numbers come from wherever the wallet now is.
   $effect(() => {
     const walletProvider = provider
-    // Both halves required: EIP-1193 makes each optional, and subscribing to a
-    // provider that cannot be unsubscribed from leaks a handler — and a stale
-    // `walletAddress` closure with it — on every provider change.
+    // Both halves required — EIP-1193 makes each optional, and a subscription
+    // that cannot be torn down leaks a handler on every provider change.
     if (!walletProvider?.on || !walletProvider.removeListener) {
       return
     }
