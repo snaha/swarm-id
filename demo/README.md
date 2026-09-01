@@ -59,7 +59,7 @@ Then open http://localhost:3500
 
 No HTTPS or certificates required - `localhost` is a secure context.
 
-**Note:** On Safari, ITP partitions the proxy iframe's storage, so the connect popup hands it the account's stamps directly ([#277](https://github.com/snaha/swarm-id/issues/277)) instead of the session being download-only ([#167](https://github.com/snaha/swarm-id/issues/167), superseded). Credentials live only in memory there, so every page load re-runs the handshake.
+**Note:** On Safari, ITP partitions the proxy iframe's storage, so the connect popup hands it the account's stamps directly ([#277](https://github.com/snaha/swarm-id/issues/277)) instead of the session being download-only ([#167](https://github.com/snaha/swarm-id/issues/167), superseded). The session is kept in that partition's own store until it is disconnected or its 30 days are up ([#635](https://github.com/snaha/swarm-id/issues/635)), so a reload does not re-run the handshake. The whole path is confirmed on real Safari ([#584](https://github.com/snaha/swarm-id/issues/584)).
 
 ## How It Works
 
