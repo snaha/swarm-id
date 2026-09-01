@@ -329,6 +329,18 @@
    * `fund.bzz.limo`, which is the older deployment of the same widget.)
    */
   async function purchaseWithWidget(attempt: Attempt) {
+    // Release whatever is still open before taking a new handle. Nothing
+    // arrives here holding one today — every exit from the error screen goes
+    // through `retry()`/`close()` → `release()` (#629), and the widget's cancel
+    // and unconfirmed-close callbacks only fire once the handle has finished
+    // itself. The guard sits at the assignment, not on each caller, so a new
+    // entry point can't silently orphan the popup left alive after a
+    // post-payment failure (#550): the method screen's Back already returns to
+    // the form without releasing. `abandonPurchase()` and not `release()` — the
+    // `UseWidgetError` route carries its attempt in here. If a route ever does
+    // arrive live, its toast lands as the next popup opens; suppress it there,
+    // when there is something that reaches it.
+    abandonPurchase()
     phase = 'pending'
     // The popup-less /dev mock settles locally — telling the user to look for a
     // popup window there is wrong.
