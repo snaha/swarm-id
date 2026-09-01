@@ -114,6 +114,10 @@ export const DeviceSchemaV1 = z.object({
   // propagates to other devices) but hidden from the UI. A later sign-in with a
   // larger `lastSignedInAt` re-activates it (the merge clock is the max of the
   // two), mirroring app reconnect-after-revoke.
+  //
+  // "Sign-in" means a user unlocking the account — a device REPUBLISHING itself
+  // without the tombstone. A background poll is not one, and reading it as one
+  // is what made every removal undo itself on the next round (#611).
   removedAt: z.number().optional(),
 })
 

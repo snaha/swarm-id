@@ -2260,6 +2260,107 @@ describe("SwarmIdProxy partitioned write enablement", () => {
     expect(self?.name).not.toContain("dapp.example.com")
   })
 
+  // The roster half of #611, and the half that PROPAGATES. `alreadyAnnounced`
+  // read a tombstoned self as "not yet announced" and republished us without
+  // the tombstone, resurrecting the device on every peer. A removal or an
+  // expiry is news to obey, not a gap to fill.
+  describe("a device tombstoned in the roster", () => {
+    const selfId = "self-device-tombstoned"
+
+    /** Connect partitioned with a stamp, then hand back the publish seam. */
+    async function connectAndArm(): Promise<{
+      publish: (reason: "acquired" | "change") => Promise<void>
+      withWrite: ReturnType<typeof vi.fn>
+    }> {
+      localStorageFake.setItem("swarm-id-device-id", selfId)
+      const challenge = await startPartitionedConnect()
+      await sendSetSecret(challenge, {
+        account: serializeSyncedAccount(makeSyncedAccount()),
+      })
+      const coordinator = vi.mocked(BatchWriteCoordinator).mock.results.at(-1)!
+        .value as {
+        currentPartition?: number
+        accountId?: string
+        withWrite: ReturnType<typeof vi.fn>
+        deps: { accountId: string }
+      }
+      // A publish needs a held partition, and it re-checks that the snapshot's
+      // account still matches the coordinator's before writing — the mock
+      // carries the id on `deps` only, so mirror it where the guard reads it.
+      coordinator.currentPartition = 0
+      coordinator.accountId = coordinator.deps.accountId
+      const internals = proxy as unknown as {
+        runAccountStatePublish(reason: "acquired" | "change"): Promise<void>
+      }
+      return {
+        publish: (reason) => internals.runAccountStatePublish(reason),
+        withWrite: coordinator.withWrite,
+      }
+    }
+
+    it("does not re-announce itself into the roster", async () => {
+      rosterDevices.length = 0
+      rosterDevices.push({
+        deviceId: selfId,
+        createdAt: Date.now(),
+        lastSignedInAt: Date.now(),
+        removedAt: Date.now(),
+      })
+
+      const { publish, withWrite } = await connectAndArm()
+      await publish("acquired")
+
+      expect(withWrite).not.toHaveBeenCalled()
+    })
+
+    // The counter-case, so the assertion above is not passing because nothing
+    // ever announces: a device the roster does not list still announces.
+    it("still announces a device the roster does not list", async () => {
+      rosterDevices.length = 0
+      rosterDevices.push({
+        deviceId: "somebody-else",
+        createdAt: Date.now(),
+        lastSignedInAt: Date.now(),
+      })
+
+      const { publish, withWrite } = await connectAndArm()
+      await publish("acquired")
+
+      expect(withWrite).toHaveBeenCalled()
+    })
+  })
+
+  // #337's rule, at the one seam that can tell a user unlocking their account
+  // from a timer firing. `mergeDevices` used to do this on every refresh, which
+  // is why no removal stuck (#611). A handover is a real sign-in: the user
+  // clicked connect and unlocked in the popup.
+  it("lifts this device's tombstone on a fresh handover", async () => {
+    const selfId = "self-device-returning"
+    localStorageFake.setItem("swarm-id-device-id", selfId)
+    const account = makeSyncedAccount()
+    account.devices = [
+      {
+        deviceId: selfId,
+        createdAt: Date.now(),
+        lastSignedInAt: Date.now(),
+        removedAt: Date.now(),
+      },
+    ]
+
+    const challenge = await startPartitionedConnect()
+    await sendSetSecret(challenge, {
+      account: serializeSyncedAccount(account),
+    })
+
+    const internals = proxy as unknown as {
+      partitionAccount: { devices: Device[] }
+    }
+    expect(
+      internals.partitionAccount.devices.find((d) => d.deviceId === selfId)
+        ?.removedAt,
+    ).toBeUndefined()
+  })
+
   // Hydration must go through the same network-settings path as the storage-
   // backed one: an RPC-only difference is invisible to a `beeNodeUrl` guard,
   // and a partitioned session that keeps the default RPC reads stamp TTLs and

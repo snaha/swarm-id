@@ -41,8 +41,12 @@ export function getDeviceId(): string | undefined {
  * caller with nothing to say passes nothing and the stored label stands: the
  * name must not be blanked by a context that does not know it.
  *
- * Signing in clears any `removedAt` tombstone on the current device: a genuine
- * sign-in re-activates a device that was removed elsewhere (#337).
+ * Does NOT touch `removedAt`. Both callers are refresh paths — the proxy's
+ * throttled roster poll and the UI's fold — and a poll is not a sign-in, so
+ * clearing our own tombstone here undid every removal on the next round (#611).
+ * #337's "a genuine sign-in re-activates a device removed elsewhere" still
+ * holds; it lives at the sign-in seams instead, which is the only place that
+ * can tell a user unlocking their account from a timer firing.
  */
 export function mergeDevices(
   existing: Device[],
@@ -58,7 +62,6 @@ export function mergeDevices(
         ? {
             ...d,
             lastSignedInAt: now,
-            removedAt: undefined,
             name: deviceName ?? d.name,
           }
         : d,
