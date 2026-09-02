@@ -18,6 +18,9 @@ export default defineConfig({
     // per-test perf regression could hide. If a test starts routinely taking
     // seconds in ISOLATION (not just under parallel contention), fix the test —
     // don't lean on this headroom. Revisit lowering it if CI CPU improves.
+    // And do not undercut it with a per-test `{ timeout }`: a 10 s cap on a
+    // 2 s signing loop flaked under the full suite while every neighbour had
+    // 30 s (#585). A test that needs a bound needs it above this one.
     testTimeout: 30000,
     coverage: {
       provider: "v8",
