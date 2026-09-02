@@ -160,6 +160,7 @@ import {
   STORAGE_KEY_PARTITION_SESSION,
 } from "./types"
 import { KNOWN_DEVICE_MAX_AGE_MS } from "./utils/active-devices"
+import { mergeDevicesList } from "./sync/merge-snapshot"
 import { DEFAULT_BEE_NODE_URL } from "./schemas"
 import type {
   ConnectedApp,
@@ -2258,6 +2259,152 @@ describe("SwarmIdProxy partitioned write enablement", () => {
       .find((a) => a.id === synced.id.toHex())!
       .devices.find((d) => d.deviceId === selfId)
     expect(self?.name).not.toContain("dapp.example.com")
+  })
+
+  // The roster half of #611, and the half that PROPAGATES. `alreadyAnnounced`
+  // read a tombstoned self as "not yet announced" and republished us without
+  // the tombstone, resurrecting the device on every peer. A removal or an
+  // expiry is news to obey, not a gap to fill.
+  describe("a device tombstoned in the roster", () => {
+    const selfId = "self-device-tombstoned"
+    /** Well in the past, so a reactivation's fresh stamp must outrank it. */
+    const TOMBSTONED_AT = 2_000_000
+
+    /**
+     * Connect partitioned with a stamp, then hand back the publish seam.
+     * `handOverTombstoned` makes the popup's payload list this device as
+     * removed, which is what `reactivateThisDevice` acts on.
+     */
+    async function connectAndArm(handOverTombstoned = false): Promise<{
+      publish: (reason: "acquired" | "change") => Promise<void>
+      withWrite: ReturnType<typeof vi.fn>
+    }> {
+      localStorageFake.setItem("swarm-id-device-id", selfId)
+      const account = makeSyncedAccount()
+      if (handOverTombstoned) {
+        account.devices = [
+          {
+            deviceId: selfId,
+            createdAt: 1_000_000,
+            lastSignedInAt: 1_000_000,
+            removedAt: TOMBSTONED_AT,
+          },
+        ]
+      }
+      const challenge = await startPartitionedConnect()
+      await sendSetSecret(challenge, {
+        account: serializeSyncedAccount(account),
+      })
+      const coordinator = vi.mocked(BatchWriteCoordinator).mock.results.at(-1)!
+        .value as {
+        currentPartition?: number
+        accountId?: string
+        withWrite: ReturnType<typeof vi.fn>
+        deps: { accountId: string }
+      }
+      // A publish needs a held partition, and it re-checks that the snapshot's
+      // account still matches the coordinator's before writing — the mock
+      // carries the id on `deps` only, so mirror it where the guard reads it.
+      coordinator.currentPartition = 0
+      coordinator.accountId = coordinator.deps.accountId
+      const internals = proxy as unknown as {
+        runAccountStatePublish(reason: "acquired" | "change"): Promise<void>
+      }
+      return {
+        publish: (reason) => internals.runAccountStatePublish(reason),
+        withWrite: coordinator.withWrite,
+      }
+    }
+
+    it("does not re-announce itself into the roster", async () => {
+      rosterDevices.length = 0
+      rosterDevices.push({
+        deviceId: selfId,
+        createdAt: Date.now(),
+        lastSignedInAt: Date.now(),
+        removedAt: Date.now(),
+      })
+
+      const { publish, withWrite } = await connectAndArm()
+      await publish("acquired")
+
+      expect(withWrite).not.toHaveBeenCalled()
+    })
+
+    // The other side of the stand-down: it must not swallow the re-announce a
+    // genuine sign-in earns. `reactivateThisDevice` lifts our tombstone on the
+    // handover, and the roster only learns of it when we publish — so a guard
+    // that keys on the roster entry alone silences the very reactivation it
+    // defers to, and the removal never lifts anywhere.
+    it("re-announces after a handover lifted its tombstone", async () => {
+      rosterDevices.length = 0
+      rosterDevices.push({
+        deviceId: selfId,
+        createdAt: 1_000_000,
+        lastSignedInAt: 1_000_000,
+        removedAt: TOMBSTONED_AT,
+      })
+
+      const { publish, withWrite } = await connectAndArm(true)
+      await publish("acquired")
+
+      expect(withWrite).toHaveBeenCalled()
+    })
+
+    // The counter-case, so the assertion above is not passing because nothing
+    // ever announces: a device the roster does not list still announces.
+    it("still announces a device the roster does not list", async () => {
+      rosterDevices.length = 0
+      rosterDevices.push({
+        deviceId: "somebody-else",
+        createdAt: Date.now(),
+        lastSignedInAt: Date.now(),
+      })
+
+      const { publish, withWrite } = await connectAndArm()
+      await publish("acquired")
+
+      expect(withWrite).toHaveBeenCalled()
+    })
+  })
+
+  // #337's rule, at the one seam that can tell a user unlocking their account
+  // from a timer firing. `mergeDevices` used to do this on every refresh, which
+  // is why no removal stuck (#611). A handover is a real sign-in: the user
+  // clicked connect and unlocked in the popup.
+  it("lifts this device's tombstone on a fresh handover", async () => {
+    const selfId = "self-device-returning"
+    const removedAt = 2_000_000
+    localStorageFake.setItem("swarm-id-device-id", selfId)
+    const account = makeSyncedAccount()
+    const tombstone = {
+      deviceId: selfId,
+      createdAt: 1_000_000,
+      lastSignedInAt: 1_000_000,
+      removedAt,
+    }
+    account.devices = [tombstone]
+
+    const challenge = await startPartitionedConnect()
+    await sendSetSecret(challenge, {
+      account: serializeSyncedAccount(account),
+    })
+
+    const internals = proxy as unknown as {
+      partitionAccount: { devices: Device[] }
+    }
+    const self = internals.partitionAccount.devices.find(
+      (d) => d.deviceId === selfId,
+    )
+    expect(self?.removedAt).toBeUndefined()
+
+    // Clearing `removedAt` is only half a reactivation. `mergeDevicesList`
+    // ranks on `max(removedAt, lastSignedInAt)`, so a lift that leaves the old
+    // sign-in stamp in place loses to the very tombstone it is undoing — the
+    // next poll folds the removal straight back in. A handover IS a sign-in, so
+    // it must stamp one recent enough to outrank the removal.
+    expect(self?.lastSignedInAt).toBeGreaterThan(removedAt)
+    expect(mergeDevicesList([self!], [tombstone])).toEqual([self])
   })
 
   // Hydration must go through the same network-settings path as the storage-

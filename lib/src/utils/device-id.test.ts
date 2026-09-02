@@ -67,6 +67,19 @@ describe("mergeDevices", () => {
     expect(result[0].name).toBe("Safari on Mac · a.example")
   })
 
+  // A background poll is not a sign-in. `mergeDevices` runs on refresh paths
+  // ONLY — the proxy's throttled roster poll and the UI's fold — so clearing
+  // our own tombstone here undid every removal on the next poll (#611). An
+  // expiry that undoes itself is not an expiry. Reactivation moves to the
+  // genuine sign-in seams, which is where #337 always meant it to be.
+  it("keeps our own tombstone — a poll is not a sign-in", () => {
+    const existing = [createDevice({ removedAt: 5000 })]
+
+    const result = mergeDevices(existing, TEST_DEVICE_ID)
+
+    expect(result[0].removedAt).toBe(5000)
+  })
+
   it("should preserve other devices when updating an existing one", () => {
     const existing = [
       createDevice({ deviceId: "device-a" }),

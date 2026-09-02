@@ -44,6 +44,10 @@ import {
 } from "./batch-write-coordinator"
 import { accountStateToDeviceView, publishDeviceState } from "./device-state"
 import { getOrCreateDeviceId, detectDeviceName } from "../utils/device-id"
+import {
+  activeDeviceIds,
+  KNOWN_DEVICE_MAX_AGE_MS,
+} from "../utils/active-devices"
 
 // Re-exported from its new home so existing importers of `./sync-account`
 // (the legacy shared-feed topic, retained for the cutover invariant test) keep
@@ -330,10 +334,17 @@ export function createSyncAccount(
       // Read fresh so the presence/intent rounds see the current device
       // registry — without this the background-sync acquire has no rivals to
       // check and can collide with a live holder on another device.
+      //
+      // Bounded the same way the proxy bounds it (`knownDeviceIdsForAccount`).
+      // This path listed every device the account had ever seen, tombstoned and
+      // long-dead alike, so the two coordinators disagreed about who the rivals
+      // were — and each dead entry costs an absent intent read on every acquire.
       knownDeviceIds: () =>
-        accountsStore
-          .getAccount(new EthAddress(accountId))
-          ?.devices.map((d) => d.deviceId) ?? [],
+        activeDeviceIds(
+          accountsStore.getAccount(new EthAddress(accountId))?.devices ?? [],
+          Date.now(),
+          KNOWN_DEVICE_MAX_AGE_MS,
+        ),
       backupSigner: accountKey,
       swarmEncryptionKey: hexToUint8Array(encryptionKey),
       partitionCount,

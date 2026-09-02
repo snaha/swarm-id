@@ -41,8 +41,12 @@ export function getDeviceId(): string | undefined {
  * caller with nothing to say passes nothing and the stored label stands: the
  * name must not be blanked by a context that does not know it.
  *
- * Signing in clears any `removedAt` tombstone on the current device: a genuine
- * sign-in re-activates a device that was removed elsewhere (#337).
+ * Does NOT touch `removedAt`. Both callers are refresh paths — the proxy's
+ * throttled roster poll and the UI's fold — and a poll is not a sign-in, so
+ * clearing our own tombstone here undid every removal on the next round (#611).
+ * #337's "a genuine sign-in re-activates a device removed elsewhere" still
+ * holds; it lives at the sign-in seams instead, which is the only place that
+ * can tell a user unlocking their account from a timer firing.
  */
 export function mergeDevices(
   existing: Device[],
@@ -58,7 +62,6 @@ export function mergeDevices(
         ? {
             ...d,
             lastSignedInAt: now,
-            removedAt: undefined,
             name: deviceName ?? d.name,
           }
         : d,
@@ -153,6 +156,15 @@ export function detectDeviceName(): string {
  * domain's first-party store, so it shares `swarm-id-device-id` with the
  * identity UI — it is the same device, and naming that after whichever dApp
  * happened to load it would be wrong.
+ *
+ * The host is deliberately finer-grained than the partition key, which is
+ * schemeful site (eTLD+1) and may drop the port. Two same-site dApps —
+ * `app1.foo.com` and `app2.foo.com`, or two localhost ports — therefore share
+ * ONE partition and one device row, whose name flips to whichever announced
+ * last, each flip counting as a registry change. Cosmetic churn in a rare
+ * config, and the alternative (naming by site) would label the common case
+ * uselessly, so the finer name wins. If it ever matters, the fix is to key the
+ * name on the partition rather than the origin.
  */
 export function partitionDeviceName(appOrigin: string): string {
   const deviceName = detectDeviceName()
