@@ -1,0 +1,17 @@
+{
+  "name": "swarm-id-scripts",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "mutable-batch-test": "tsx mutable-batch-test.ts",
+    "multi-device-joined-batch": "tsx multi-device-joined-batch.ts",
+    "bus-handover-latency": "tsx bus-handover-latency.ts"
+  },
+  "dependencies": {
+    "@ethersphere/bee-js": "^11.1.1"
+  },
+  "devDependencies": {
+    "fake-indexeddb": "^6.2.5",
+    "tsx": "^4.20.0"
+  }
+}
