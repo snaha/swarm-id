@@ -6,6 +6,7 @@ import {
   detectDeviceName,
   deviceRegistryChanged,
   mergeDevices,
+  partitionDeviceName,
 } from "./device-id"
 import { createDevice, TEST_DEVICE_ID } from "../test-fixtures"
 
@@ -38,6 +39,32 @@ describe("mergeDevices", () => {
     expect(result).toHaveLength(2)
     expect(result[0].deviceId).toBe(TEST_DEVICE_ID)
     expect(result[1].deviceId).toBe("second-device")
+  })
+
+  // Three dApps on one Safari are three partition devices, and until #570 they
+  // all announced the bare browser name. Correcting that has to reach the rows
+  // already in the registry, not just the next one created — otherwise a user
+  // stares at three identical "Safari on Mac" until they expire.
+  it("refreshes our own name when it changed", () => {
+    const existing = [createDevice({ name: "Safari on Mac" })]
+
+    const result = mergeDevices(
+      existing,
+      TEST_DEVICE_ID,
+      "Safari on Mac · a.example",
+    )
+
+    expect(result[0].name).toBe("Safari on Mac · a.example")
+  })
+
+  // The label is stable by design: a caller with nothing to say must not blank
+  // a name that another context took care to set.
+  it("keeps the existing name when no name is supplied", () => {
+    const existing = [createDevice({ name: "Safari on Mac · a.example" })]
+
+    const result = mergeDevices(existing, TEST_DEVICE_ID)
+
+    expect(result[0].name).toBe("Safari on Mac · a.example")
   })
 
   it("should preserve other devices when updating an existing one", () => {
@@ -272,5 +299,39 @@ describe("deviceRegistryChanged", () => {
   it("is false when only our own heartbeat moved", () => {
     const merged = [{ ...self, lastSignedInAt: 9000 }, peer]
     expect(deviceRegistryChanged([self, peer], merged, SELF)).toBe(false)
+  })
+})
+
+// ============================================================================
+// partitionDeviceName
+// ============================================================================
+
+describe("partitionDeviceName", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals()
+  })
+
+  // A partitioned iframe keeps its own device id per storage partition, so one
+  // browser with three connected dApps is three devices. The browser name alone
+  // cannot tell them apart (#570).
+  it("names the dApp the partition belongs to", () => {
+    stubNavigator({ userAgent: SAFARI_MAC_UA })
+    expect(partitionDeviceName("https://demo.snaha.net")).toBe(
+      "Safari on Mac · demo.snaha.net",
+    )
+  })
+
+  it("keeps the port, which is what distinguishes local dApps", () => {
+    stubNavigator({ userAgent: SAFARI_MAC_UA })
+    expect(partitionDeviceName("http://localhost:3500")).toBe(
+      "Safari on Mac · localhost:3500",
+    )
+  })
+
+  // Never worth failing a device announce over: an unparseable origin falls
+  // back to the plain browser name rather than throwing inside the roster write.
+  it("falls back to the bare device name on an unparseable origin", () => {
+    stubNavigator({ userAgent: SAFARI_MAC_UA })
+    expect(partitionDeviceName("not a url")).toBe("Safari on Mac")
   })
 })
