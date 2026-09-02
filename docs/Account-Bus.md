@@ -1,22 +1,25 @@
 # Account bus — live state propagation across tabs, partitions, and devices
 
-Status: **proposed** (design accepted 2026-08-18, not yet implemented). Resolves
-[#277](https://github.com/snaha/swarm-id/issues/277) (Safari is download-only) by making the
+Status: **implemented** ([#547](https://github.com/snaha/swarm-id/pull/547) through
+[#655](https://github.com/snaha/swarm-id/pull/655); the SWIP-60 transport adapter is the one
+part still pending). Resolves [#277](https://github.com/snaha/swarm-id/issues/277) by making the
 Safari iframe a full participant, and unifies cross-tab/cross-device propagation on every
 browser. Builds on the account model in [`Account-State.md`](./Account-State.md) and the write
 coordination in [`BatchWriteCoordinator.md`](./BatchWriteCoordinator.md) /
-[`Postage-Batch-Partitioning.md`](./Postage-Batch-Partitioning.md).
+[`Postage-Batch-Partitioning.md`](./Postage-Batch-Partitioning.md). The porter-facing
+walkthrough is on the docs site (`docs-site/src/content/docs/account-bus.mdx`); this file is
+the design record and the place for the reasoning.
 
-## Problem
+## Problem (as designed, 2026-08)
 
-Safari's Intelligent Tracking Prevention partitions all client-side storage of a third-party
-iframe by top-level site. The SwarmID proxy iframe embedded in a dApp therefore cannot see the
-trusted domain's first-party localStorage; today the connect popup hands over only the
-`appSecret` via postMessage (`ui/src/lib/connect-handshake.ts`, `sendSecretToOpener`), and all
-state-mutating operations are disabled (`ensureCanUpload`, `lib/src/swarm-id-proxy.ts`) because
-changes made in the partitioned iframe could never be synchronized back.
+This is the state the bus replaced. Safari's Intelligent Tracking Prevention partitions all
+client-side storage of a third-party iframe by top-level site. The SwarmID proxy iframe embedded
+in a dApp therefore cannot see the trusted domain's first-party localStorage. Before the bus,
+the connect popup handed over only the `appSecret` via postMessage, and every state-mutating
+operation was disabled in a partitioned iframe (`ensureCanUpload`) because a change made there
+could never be synchronized back.
 
-Two distinct problems hide in "synchronized back":
+Two distinct problems hid in "synchronized back":
 
 - **P1 — account-data propagation.** Changes to account data (app secrets and revocations,
   account name, settings, the postage stamp list — never the private key/seed) must propagate
@@ -26,8 +29,8 @@ Two distinct problems hide in "synchronized back":
 - **P2 — batch-utilization coordination.** Uploads consume stamp slots; the partition-lease
   protocol coordinates writers that cannot talk to each other, so its timeouts are
   conservative (~10 s for a late device to acquire a partition). Treating every Safari dApp
-  partition as a separate device would multiply that contention. The lease protocol must stay
-  (it is the offline-safe fallback) but live contexts deserve a fast path.
+  partition as a separate device would multiply that contention. The lease protocol had to stay
+  (it is the offline-safe fallback) but live contexts deserved a fast path.
 
 Constraint carried through the whole design: Swarm's upcoming pub-sub
 ([SWIP-60](https://github.com/ethersphere/SWIPs/pull/104)) must be able to plug in later
@@ -54,10 +57,8 @@ Full option matrix in the appendix; the load-bearing facts:
   Safari-safe.
 - **The key material is the actual blocker, not the partition.** The per-device-feed sync of
   [`Account-State.md`](./Account-State.md) already handles "another storage area that folds in
-  later". The partitioned iframe cannot join only because the popup handshake never sends the
-  `derivationKey`, so it cannot derive the backup key that owns the sync feeds. The
-  `AuthDataSchema` (`lib/src/types.ts`) already has unused `postageBatchId` / `signerKey` /
-  `networkSettings` slots.
+  later". The partitioned iframe could not join only because the popup handshake never sent the
+  `derivationKey`, so it could not derive the backup key that owns the sync feeds.
 - **WebRTC works between the contexts we have, but only while both are alive.** DataChannels
   are available in Safari cross-origin iframes (only `getUserMedia` is permission-gated), and
   same-device loopback needs no STUN/TURN. There is no store-and-forward — which is acceptable
@@ -88,26 +89,85 @@ feeds of [`Account-State.md`](./Account-State.md)) remain the stores of record. 
 only _deltas and coordination between live peers_ — which is why WebRTC's
 "both-peers-online-or-nothing" property is acceptable by design rather than a flaw.
 
-One interface, three transports:
+One interface (`BusTransport`, `lib/src/bus/account-bus.ts`), three transports:
 
-| Transport                                       | Scope                                                                 | Status                                                                                      |
-| ----------------------------------------------- | --------------------------------------------------------------------- | ------------------------------------------------------------------------------------------- |
-| `BroadcastChannel`                              | same origin + same partition (SwarmID tab↔tab, same-dApp Safari tabs) | works today; generalizes the existing `BroadcastChannel("swarm-id-utilization")` channel    |
-| WebRTC DataChannel mesh, self-hosted signaling  | across partitions, dApps, and devices                                 | new; signaling is a tiny WebSocket service we deploy next to the existing DigitalOcean apps |
-| SWIP-60 (`pubsubConnect`, `FEED_TOPIC` binding) | synced accounts, once bee/bee-js release it                           | future adapter behind the same interface                                                    |
+| Transport                                       | Scope                                                                 | Status                                                                                 |
+| ----------------------------------------------- | --------------------------------------------------------------------- | -------------------------------------------------------------------------------------- |
+| `BroadcastChannel`                              | same origin + same partition (SwarmID tab↔tab, same-dApp Safari tabs) | shipped; generalizes the old `BroadcastChannel("swarm-id-utilization")` channel        |
+| WebRTC DataChannel mesh, self-hosted signaling  | across partitions, dApps, and devices                                 | shipped and deployed: `signaling/`, reached at `wss://swarm-id.snaha.net/bus` (`.do/`) |
+| SWIP-60 (`pubsubConnect`, `FEED_TOPIC` binding) | synced accounts, once bee/bee-js release it                           | future adapter behind the same interface                                               |
 
-The signaling WebSocket **doubles as an encrypted-blob relay fallback** for peer pairs WebRTC
-cannot connect (restrictive NATs — we start without TURN), and optionally as a small
-retained-message mailbox so a change can reach a currently-closed dApp partition of a local
-account. Same service, no extra infrastructure; the default posture stays signaling-only.
+The signaling WebSocket **doubles as an encrypted-blob relay** for peer pairs WebRTC cannot
+connect (restrictive NATs — there is no TURN). Same service, no extra infrastructure; the
+server forwards to exactly one named peer, never to a room, and stores nothing.
+
+Who attaches what: a **proxy iframe** attaches both the local transport and (when a signaling
+URL is configured) the signaling transport, a few ticks after an auth event, because the
+topic is derived from the account's key (`ensureAccountBusTransports`, `swarm-id-proxy.ts`).
+The **SwarmID tab** attaches the signaling transport alone (`ui/src/lib/stores/account-bus.ts`):
+everything a `BroadcastChannel` would reach from there already converges through storage
+events, and the partitioned iframe — the one context that cannot — is only reachable through a
+server round trip.
+
+### How a message travels
+
+Both the topic and the envelope key come from the account's `derivationKey` through separate
+HMAC contexts (`deriveBusContext`, `lib/src/bus/bus-context.ts`), so they are derivable by
+exactly the contexts that hold the account, and the topic is unlinkable to the account id.
+
+```text
+newcomer                         signaling server                       existing peer
+   │ ── WSS connect ───────────────────▶ │                                    │
+   │ ── {join, topic} ─────────────────▶ │  (topic in the first frame,        │
+   │ ◀── {welcome, peerId, peers[]} ──── │   never in the URL: #577)          │
+   │                                     │ ── {peer-joined, peerId} ────────▶ │
+   │ ── {signal, to, offer} ───────────▶ │ ──────────────────────────────────▶ │
+   │ ◀────────────────────────────────── │ ◀── {signal, to, answer} ────────── │
+   │ ◀──── ICE candidates both ways, relayed the same way ────────────────────▶ │
+   │                                                                          │
+   │ ═══════════ RTCDataChannel "bus": encrypted envelopes, direct ══════════ │
+   │                                                                          │
+   │ ── {relay, to, ciphertext} ───────▶ │ ── {relay, from, ciphertext} ────▶ │
+   │         (fallback per peer, whenever no channel is open to that peer)    │
+```
+
+- **Join.** The socket names its room in the first frame; the server answers `welcome` with
+  the ids of the peers already there and tells them `peer-joined`. A room is a `Map` of
+  sockets and nothing else; it is dropped when the last peer leaves.
+- **Upgrade.** The newcomer initiates WebRTC toward every peer in `welcome` (so there is no
+  offer glare); SDP and ICE travel as `signal` frames addressed to one peer. No STUN/TURN is
+  configured: same-device loopback and LAN peers connect via host candidates, everything else
+  stays on the relay.
+- **Publish.** `SignalingTransport.publish` encrypts the message **once** (AES-GCM, the bus
+  key) and then delivers per peer: over that peer's DataChannel if it is open, else as a
+  `relay` frame the server forwards as-is. A context alone in its room sends nothing. The
+  server sees a room name, connection timing, and ciphertext.
+- **Receive.** Every transport hands raw messages to the one `AccountBus`, which validates
+  them against `BusMessageSchema` (`lib/src/bus/messages.ts`) and drops what does not parse —
+  so a peer on an older bundle simply never sees a message kind it predates.
+- **Leave.** The server pings every 30 s and terminates a socket that has not answered by the
+  next tick, so a half-open peer (backgrounded mobile Safari, a laptop lid) is announced as
+  `peer-left` within about a minute. The client's `close()` drains in-flight publishes first,
+  so a teardown announcement made in the closing tick still reaches the wire.
+- **No mailbox.** A message reaches the peers that are in the room right now. That is the
+  whole design: the bus makes live peers converge fast; it does not carry anything to a
+  context that is closed (see Known gaps).
+
+Server limits (`signaling/src/server.ts`, all deliberately global rather than per-IP because
+the service sits behind the platform ingress): 500 connections, 200 rooms, 24 peers per room, a
+per-socket message budget sized from the WebRTC negotiation cost, a 64 KiB payload cap, and a
+join timeout for a socket that never names a room. `1008` closes are permanent for a topic;
+everything transient closes `1013` and the client backs off with jitter.
 
 ### Message kinds
 
 - **Account deltas (P1).** The wire shape is the existing portable projection
-  (`serializeSyncedAccount`, `lib/src/utils/storage-managers.ts`) and merging reuses the LWW
-  fold rules of `lib/src/sync/merge-snapshot.ts` — a delta received over the bus merges
-  exactly like a device-state feed payload. Revocation notices ride the same channel so a live
-  iframe drops its session immediately.
+  (`serializeSyncedAccount`, `lib/src/utils/storage-managers.ts`) minus the per-context session
+  material (`appSecret`, `connectedUntil` — stripped on send _and_ on receive), and merging
+  reuses the LWW fold rules of `lib/src/sync/merge-snapshot.ts` — a delta received over the bus
+  merges exactly like a device-state feed payload, metadata scalars included on their per-field
+  clocks (#610). Revocation notices ride the same channel so a live iframe drops its session
+  immediately.
 - **Presence.** Every context beats `{ presence, accountId, fromDeviceId }` on joining the room
   and every 20 s (`lib/src/bus/presence.ts`); a receiver stamps its own clock and forgets a
   device unheard for three minutes — three beats at the once-a-minute cadence a hidden tab's
@@ -127,11 +187,13 @@ account. Same service, no extra infrastructure; the default posture stays signal
   (`slot = partitionCount + partition + partitionCount·j`), so the message names its lane and
   a receiver folds it in only when the lane matches. Since leases are exclusive, this means a
   delta is shared between contexts of the same holder and dropped everywhere else — the bus
-  widens its reach, not the set of contexts a counter is comparable across.
+  widens its reach, not the set of contexts a counter is comparable across. They are published
+  `localOnly`: every remote peer is a different device on a different lane, so a remote copy
+  would be dropped at the receive guard after paying for encryption and a frame.
 
 ### Safari write enablement
 
-With the bus in place the partitioned iframe becomes a first-class writer:
+With the bus in place the partitioned iframe is a first-class writer:
 
 - The connect popup sends the full `AuthData` — an `account` field carrying the
   **synced-account projection** (`serializeSyncedAccount`: `derivationKey`; no vault, no app
@@ -174,10 +236,13 @@ With the bus in place the partitioned iframe becomes a first-class writer:
   while the tab was closed, which reaches it no other way. That read is a revocation check,
   not a fold: everything else still arrives over the bus, and a fold that lands re-persists
   the record so the next reload does not undo it. The iframe keeps its own
-  `swarm-id-device-id` and lease cache — it _is_ a device. (Roster naming/expiry policy for
-  per-dApp partition devices: follow-up.)
+  `swarm-id-device-id` and lease cache — it _is_ a device, named after the dApp it belongs to
+  in the roster (#643), and its liveness comes from presence like every other device's; nothing
+  expires a device (see Message kinds).
 - On successful hydration `uploadMode` flips to `user-stamp` and `ensureCanUpload` passes;
-  `storagePartitioned` stays surfaced in `ConnectionInfo` for UI messaging.
+  `storagePartitioned` stays surfaced in `ConnectionInfo` for UI messaging. The download-only
+  session that used to exist for a handover without an account projection is gone (#642): the
+  projection is required, and that requirement is the check.
 
 ### Why this shape
 
@@ -191,32 +256,37 @@ With the bus in place the partitioned iframe becomes a first-class writer:
 - One code path everywhere: Chrome/Firefox cross-tab propagation moves onto the same bus
   (BroadcastChannel transport) instead of bespoke storage-event plumbing, and cross-device
   propagation gets faster on every browser. Safari stops being a special case.
+- The socket buys something even for a lone dApp tab: presence is what makes this device a
+  rival to every other context of the account, and what tells it who its own rivals are. Any
+  gating of the signaling attach ([#581](https://github.com/snaha/swarm-id/issues/581)) has to
+  be weighed against that.
 - The bus interface is the SWIP-60 seam. Its brokered per-topic model maps 1:1; adopting it
   is a transport adapter, not a redesign.
 
-## Implementation phases
+## What shipped
 
-Each phase is an independent PR chain:
+Each landed as its own PR chain, in this order:
 
-1. **Bus core + BroadcastChannel transport** (`lib/src/bus/`): interface, encrypted envelope
-   schema, account-topic derivation; wire account-delta messages into the existing
-   storage-event plumbing (`handleAccountStorageChange`, `swarm-id-storage-write`). Zero new
-   infrastructure.
-2. **Signaling service + WebRTC transport**: minimal self-hosted WebSocket signaling
-   (a bespoke ~180-line `ws` server was chosen over Trystero's `ws-relay` — the relay
-   fallback and per-peer targeting are not in Trystero's protocol, and the bespoke server
-   stays dependency-light), the DataChannel mesh transport, and the signaling-WS
-   blob-relay fallback. Deployed as a `services:` entry in `.do/swarm-id-app.yaml`
-   (`wss://swarm-id.snaha.net/bus`).
-3. **Safari write enablement**: widen `AuthData` and `sendSecretToOpener`, hydration in
-   `handlePopupMessage`, roster naming/expiry for partition devices, flip the upload gate.
-4. **Bus-accelerated leases**: a slot-waiting acquire broadcasts `lease-request` each poll
-   round (`onSlotWait` dep) with a fresh 8-hex `requestId`; an idle live holder yields via
-   the normal idle-yield release path (`yieldForPeer`, guarded by `PEER_YIELD_MIN_IDLE_MS`
-   and the in-flight upload count, under the write lock) and answers `lease-released`,
-   which wakes the waiter's poll sleep (`notifySlotMaybeFree`) — handover in ~one bus
-   round-trip instead of the 10 s `LEASE_REFRESH_MS` poll. The Swarm lock-SOC protocol is
-   untouched as the authority and offline fallback.
+1. **Bus core + BroadcastChannel transport** (`lib/src/bus/`, #547): the `BusTransport`
+   interface, the encrypted envelope, account-topic derivation, and `account-delta` wired into
+   the existing storage-event plumbing (`handleAccountStorageChange`). Zero new infrastructure.
+2. **Signaling service + WebRTC transport** (#547, hardened in #573/#575/#577): a bespoke
+   `ws` server (`signaling/`, chosen over Trystero's `ws-relay` because the per-peer relay
+   fallback is not in Trystero's protocol and the bespoke server stays dependency-light), the
+   DataChannel mesh transport, and the relay fallback. Deployed as the `bus-signaling`
+   service in `.do/swarm-id-app.yaml` at `wss://swarm-id.snaha.net/bus`, with the URL baked
+   into the UI build as `PUBLIC_BUS_SIGNALING_URL`; `pnpm dev` runs it on port 5520.
+3. **Safari write enablement** (#547, #578, #635, #642, #643, #644): the widened `AuthData`
+   and `sendSecretToOpener`, hydration in `handlePopupMessage`, the persisted partition
+   session, roster naming for partition devices, the tombstone that survives a poll, and the
+   removal of the download-only session.
+4. **Bus-accelerated leases** (#547, #576, #582, #593): a slot-waiting acquire broadcasts
+   `lease-request` each poll round (`onSlotWait` dep) with a fresh 8-hex `requestId`; an idle
+   live holder yields via the normal idle-yield release path (`yieldForPeer`, guarded by
+   `PEER_YIELD_MIN_IDLE_MS` and the in-flight upload count, under the write lock) and answers
+   `lease-released`, which wakes the waiter's poll sleep (`notifySlotMaybeFree`) — handover in
+   ~one bus round-trip instead of the 10 s `LEASE_REFRESH_MS` poll. The Swarm lock-SOC protocol
+   is untouched as the authority and offline fallback.
 
    **Exactly one holder answers** (#576). A waiter needs one slot, but the request names no
    partition, so every idle holder used to release at once and whoever lost the re-race got
@@ -242,8 +312,8 @@ Each phase is an independent PR chain:
    and it skips at most one sleep per wait (each round re-broadcasts, so an unconditional
    skip would be one acquire per bus round-trip).
 
-5. **The SwarmID tab as a bus peer** (#608): it publishes a delta on every account mutation,
-   and — since the consumer landed — folds a peer's into **shared storage**
+5. **The SwarmID tab as a bus peer** (#608, #610, #631): it publishes a delta on every account
+   mutation, and folds a peer's into **shared storage**
    (`ui/src/lib/stores/account-delta.ts`). The second half is what reaches a device's
    _unpartitioned_ contexts at all: they converge through `storage` events, and no storage
    event crosses a device boundary, so before this a revoke on device A never reached device
@@ -261,40 +331,61 @@ Each phase is an independent PR chain:
    _unpartitioned_ proxy iframe as a `storage` event, and that iframe republishes the merged
    snapshot (`schedulePublish("change")`). It terminates after that one round trip — LWW
    converges, and an identical-bytes `setItem` fires no further storage event — so it is a
-   trailing confirmation of the merge, not a loop.
+   trailing confirmation of the merge, not a loop. This is also why nothing on the bus may
+   stamp a fresh clock into the snapshot on every publish: it would turn that one round trip
+   into a loop (see Presence).
 
-6. **SWIP-60 transport adapter** once bee/bee-js release it.
+6. **Presence** (#655): the heartbeat above, in the proxy and the SwarmID tab, feeding the
+   rival set and the dev device list's Online badge.
+
+### Not yet
+
+- **SWIP-60 transport adapter**, once bee/bee-js release it
+  ([#571](https://github.com/snaha/swarm-id/issues/571)).
+- **Replay protection** ([#604](https://github.com/snaha/swarm-id/issues/604)): envelopes carry
+  no nonce or timestamp. The lease paths are bounded by their own guards; a replayed delta or
+  presence is inert or merely refreshes what was already true.
+- **Gating the signaling attach** ([#581](https://github.com/snaha/swarm-id/issues/581)) — see
+  Why this shape.
 
 ## Verification
 
 Done:
 
 - Unit (Vitest, TDD): envelope encryption/schema, "delta merged over bus ≡ delta merged from
-  feed payload", lease fast-path state machine, lane-scoped utilization deltas, partitioned
-  hydration. The relay tests run the real signaling server; WebRTC is faked.
+  feed payload", lease fast-path state machine and rank election, lane-scoped utilization
+  deltas, partitioned hydration and the persisted session, presence (the tracker; the proxy
+  beats on join and per interval and stops on destroy; a peer's beat enters the rival set and
+  ages out; the SwarmID tab beats and lists a peer). The relay tests run the real signaling
+  server; WebRTC is faked.
 - Playwright e2e over the real signaling server (`ui/tests/bus-propagation.test.ts`, #569): a
   genuinely partitioned proxy iframe — the demo browsed under a loopback literal while the proxy
   origin stays `localhost`, so the two are cross-site — reached by an app removal published from
-  the SwarmID tab, and a partitioned connect whose upload round-trips. The partition itself is
+  the SwarmID tab, by a **rename** made on another device (the metadata scalars fold on their
+  per-field clocks since #610), and by a partitioned connect whose upload round-trips; and a
+  change on one device landing in another device's stored account. The partition itself is
   asserted first, because Playwright's default chromium args turn third-party storage
   partitioning off and a suite that skips that check proves nothing.
+- Presence on the local rig (2026-09-02, two browser contexts on one account): each device
+  shows the other online 25 s after it joins (the first interval beat plus the dev list's 5 s
+  tick) and drops it when the presence window lapses after its tab closes — 60 s when this was
+  measured, three minutes since the window widened to survive a throttled background tab.
+- Real Safari (iOS 18.7 / Safari 26.6, against the DO deployment, #584): ITP partitions the
+  iframe, the connect popup's `window.opener` `postMessage` reaches it, the hydrated view
+  builds a working stamper, a chunk uploads and reads back byte-identical, and the device id
+  holds across a reload. A private window passes the same five checks, with its own device id,
+  discarded when the window closes.
 
-Planned — **not yet written**, do not read the list above as covering these:
+Not yet written:
 
-- The **rename** half of the propagation pair (#569): a cross-device rename does not reach a
-  partitioned session at all today — `applyAccountDelta` folds the collections, never the
-  metadata scalars — so the e2e above asserts the current behaviour and #610's scalar fold is
-  what changes it.
-- A second context observing the utilization/lease state, and lease handover — sub-second with
-  both peers live, timeout fallback with one peer killed. These extend
-  `lib/test/live/multi-device-acquire-upload.test.ts`, not the Playwright rig.
-- The eviction horizon on real Safari — the rest of #584 is **done**: measured on iOS 18.7 /
-  Safari 26.6 against the DO deployment, ITP partitions the iframe, the connect popup's
-  `window.opener` `postMessage` reaches it, the hydrated view builds a working stamper, a chunk
-  uploads and reads back byte-identical, and the device id holds across a reload. A private window
-  passes the same five checks (with its own device id, discarded when the window closes). What no
-  run has touched is whether a dormant account's partitioned storage survives ITP's ~30-day
-  window (#570).
+- Lease handover with a signaling server in the live suite — sub-second with both peers live,
+  timeout fallback with one peer killed. Extends
+  `lib/test/live/multi-device-acquire-upload.test.ts` and
+  `three-device-acquire-handoff.test.ts`, not the Playwright rig.
+- Whether a dormant account's partitioned storage survives ITP's ~30-day window
+  ([#664](https://github.com/snaha/swarm-id/issues/664)) — two loads in one sitting say
+  nothing about it. Nothing in the bus depends on the answer now that stale devices are
+  ignored rather than removed.
 
 ## Known gaps
 
@@ -311,6 +402,10 @@ Planned — **not yet written**, do not read the list above as covering these:
   re-persisted, so they survive a reload.
 - Without TURN, WebRTC will not connect across restrictive NATs; those pairs fall back to the
   signaling-server relay.
+- A newcomer's join-time presence beat is dropped (its socket has no peers yet), so remote
+  peers first count it at its first interval beat, up to 20 s later. Its own view of the room
+  fills in the same way. The registry's 30-minute sign-in window covers the gap for the rival
+  set.
 - Safari (ITP) deletes script-writable storage for sites without first-party user
   interaction. The window is **30 operational days** by default since a Feb 2024 WebKit
   change ([`DataRemovalFrequency`](https://github.com/WebKit/WebKit/commit/45061230013728ec9c4900b01b12af26dc592b4b));
@@ -341,3 +436,4 @@ Planned — **not yet written**, do not read the list above as covering these:
 | Popup performs all writes (Coinbase keys.coinbase.com model)           | Keeps keys first-party but costs a visible popup per upload session, fights popup blockers/gesture rules, and iOS popup lifetimes are fragile.                               |
 | PSS / GSOC subscribe in the browser                                    | Receiving requires operating a full node in the mined neighborhood; GSOC is a doorbell (last message only), not a mailbox. Revisit as a doorbell once we run infrastructure. |
 | WebRTC as the _primary_ channel                                        | No store-and-forward, so unusable alone; adopted instead as the live fast path over durable stores — which is this design.                                                   |
+| A retained-message mailbox on the signaling server                     | Considered in the original design so a change could reach a closed partition; never built. The restore-time revocation read (#635) covers the case that mattered.            |

@@ -3,7 +3,9 @@
 Status: **implemented.** This describes the current account-state model and its multi-device sync. The
 _write coordination_ it rides on (the cross-tab lock + partition lease) is documented separately in
 [`BatchWriteCoordinator.md`](./BatchWriteCoordinator.md); the postage partitioning scheme it shares a
-batch with is in [`Postage-Batch-Partitioning.md`](./Postage-Batch-Partitioning.md).
+batch with is in [`Postage-Batch-Partitioning.md`](./Postage-Batch-Partitioning.md); the live channel
+that carries the same snapshot between the account's open contexts ahead of the feeds is in
+[`Account-Bus.md`](./Account-Bus.md).
 
 ## What it is
 
@@ -21,6 +23,12 @@ Sync is **per-device feeds folded on read**, not a single shared document:
   last-writer-wins (LWW) merges with tombstones.
 
 There is no central authority and no Byzantine tolerance — see [Assumptions](#assumptions).
+
+The feeds are the durable path, not the only one. Every live context of the account is also a peer on
+the **account bus** ([`Account-Bus.md`](./Account-Bus.md)): the SwarmID tab publishes an `account-delta`
+on every mutation and the proxy iframe on every storage change, and a receiver folds it with the same
+LWW primitives a feed payload gets. The bus makes live peers converge in a round trip; the feeds are what
+a device that was closed reads when it comes back.
 
 ## The account document
 
@@ -110,6 +118,10 @@ device's latest view **in parallel** (`Promise.all`) → `foldAccount(views, ros
   into the local account (`mergeConnectedApps` / `mergePostageStamps` / `mergeDevicesList` + `mergeDevices`
   to keep self first-class) → `accountsStore.applyRefreshed(...)` with `skipSync`; the three scalars are
   applied by per-field LWW (folded `at` > local `*At`).
+- **A peer's bus delta** — the same fold, fed from the bus instead of Swarm: `applyAccountDelta`
+  (`ui/src/lib/stores/account-delta.ts` for the SwarmID tab and shared storage; `swarm-id-proxy.ts` for
+  a partitioned iframe's in-memory view). `skipSync` is also the echo guard there: a change folded from a
+  peer is never published back at it.
 
 `foldAccount` (`device-state.ts`) merges the collections with the primitives below and resolves each scalar
 by `pickLatest` (per-field LWW), exposing the winning `*At`; `devices` come from the roster; account
@@ -151,18 +163,21 @@ That is **gone** — replaced by the per-device feeds above. `publish-account-st
 
 ## Files & tests
 
-| File                                           | Role                                                                         |
-| ---------------------------------------------- | ---------------------------------------------------------------------------- |
-| `lib/src/sync/device-state.ts`                 | Per-device state feed: write/read, `accountStateToDeviceView`, `foldAccount` |
-| `lib/src/sync/device-roster.ts`                | Append-only roster: `readRoster`, `ensureInRoster`                           |
-| `lib/src/sync/fold-account-from-swarm.ts`      | `foldAccountFromSwarm` (roster + parallel device-feed reads)                 |
-| `lib/src/sync/merge-snapshot.ts`               | LWW + tombstone merge primitives                                             |
-| `lib/src/sync/restore-account.ts`              | `restoreAccountFromSwarm` (new device)                                       |
-| `lib/src/sync/sync-account.ts`                 | Oneshot publish (SwarmID UI)                                                 |
-| `lib/src/swarm-id-proxy.ts`                    | Persistent publish (`runAccountStatePublish`) + triggers                     |
-| `lib/src/utils/storage-managers.ts`            | `serializeAccount` (local persistence)                                       |
-| `ui/src/lib/dev/refresh-account-from-swarm.ts` | Refresh an existing device → `applyRefreshed`                                |
-| `ui/src/lib/stores/accounts.svelte.ts`         | `applyRefreshed`, per-field scalar setters/clocks                            |
+| File                                           | Role                                                                             |
+| ---------------------------------------------- | -------------------------------------------------------------------------------- |
+| `lib/src/sync/device-state.ts`                 | Per-device state feed: write/read, `accountStateToDeviceView`, `foldAccount`     |
+| `lib/src/sync/device-roster.ts`                | Append-only roster: `readRoster`, `ensureInRoster`                               |
+| `lib/src/sync/fold-account-from-swarm.ts`      | `foldAccountFromSwarm` (roster + parallel device-feed reads)                     |
+| `lib/src/sync/merge-snapshot.ts`               | LWW + tombstone merge primitives                                                 |
+| `lib/src/sync/restore-account.ts`              | `restoreAccountFromSwarm` (new device)                                           |
+| `lib/src/sync/sync-account.ts`                 | Oneshot publish (SwarmID UI)                                                     |
+| `lib/src/swarm-id-proxy.ts`                    | Persistent publish (`runAccountStatePublish`) + triggers                         |
+| `lib/src/utils/storage-managers.ts`            | `serializeAccount` (local persistence)                                           |
+| `lib/src/bus/account-delta.ts`                 | The wire form of a snapshot on the bus (session fields stripped) and its restore |
+| `ui/src/lib/stores/account-bus.ts`             | The SwarmID tab as a bus peer: publishes on mutation, folds a peer's delta       |
+| `ui/src/lib/stores/account-delta.ts`           | `applyAccountDelta` → `applyRefreshed` with `skipSync`                           |
+| `ui/src/lib/dev/refresh-account-from-swarm.ts` | Refresh an existing device → `applyRefreshed`                                    |
+| `ui/src/lib/stores/accounts.svelte.ts`         | `applyRefreshed`, per-field scalar setters/clocks                                |
 
 Tests: `merge-snapshot.test.ts`, `device-state.test.ts`, `device-roster.test.ts`, `sync-account.test.ts`
 (unit/CI), and the opt-in live suite `lib/test/multi-device/` (`per-device-sync`, `per-device-sync-3`:

@@ -10,8 +10,11 @@ re-implemented on another platform (native mobile, desktop, a different language
 **interoperate** with the reference TypeScript implementation in `@snaha/swarm-id`.
 
 Everything here is derived purely from Swarm primitives (chunks, single-owner chunks,
-epoch feeds) and a handful of deterministic key derivations. There is **no server, no
-coordinator, and no shared mutable state other than what lives on Swarm itself**.
+epoch feeds) and a handful of deterministic key derivations. This layer is the source of
+truth and needs **no server, no coordinator, and no shared mutable state other than what
+lives on Swarm itself**. The contexts of one account that are open at the same time also
+share the [account bus](/account-bus), which shortens every wait described below to about
+one round trip; it never replaces the protocol here, and a port can leave it out.
 
 ## Two independent systems
 
@@ -30,7 +33,9 @@ independent mechanisms:
 They are orthogonal: account-state sync would be needed even with one batch per device,
 and the partition lease would be needed even if account state never changed. A device
 that holds a partition lease is also the device permitted to publish account state (the
-"partition gate", below).
+"partition gate", below). The [account bus](/account-bus) cuts across both: it carries a
+snapshot to live peers ahead of the feed, and lets a waiting device ask a live holder for
+its partition instead of polling for it.
 
 ## Key derivation (the interop root)
 
@@ -353,13 +358,17 @@ acquisition path; a fresh port does not need it.
 
 The reference orchestrator is `PartitionLease`. Constants:
 
-| Constant                  | Value     | Meaning                                                             |
-| ------------------------- | --------- | ------------------------------------------------------------------- |
-| `LEASE_TTL_MS`            | 30 000 ms | A lease is valid this long; a crashed holder is reclaimable after.  |
-| `LEASE_REFRESH_MS`        | 10 000 ms | Holder re-writes the lock SOC this often (3 refreshes per TTL).     |
-| `IDLE_YIELD_MS`           | 30 000 ms | Holder voluntarily releases after this long with no upload.         |
-| `PARTITION_LOCK_GUARD_MS` | 2 000 ms  | Guard window between claim-write and verify-read.                   |
-| `SLOT_WAIT_TIMEOUT_MS`    | 30 000 ms | A device with no free partition polls this long for one to free up. |
+| Constant                  | Value      | Meaning                                                                  |
+| ------------------------- | ---------- | ------------------------------------------------------------------------ |
+| `LEASE_TTL_MS`            | 30 000 ms  | A lease is valid this long; a crashed holder is reclaimable after.       |
+| `LEASE_REFRESH_MS`        | 10 000 ms  | Holder re-writes the lock SOC this often (3 refreshes per TTL).          |
+| `IDLE_YIELD_MS`           | 30 000 ms  | Holder voluntarily releases after this long with no upload.              |
+| `PARTITION_LOCK_GUARD_MS` | 2 000 ms   | Guard window between claim-write and verify-read.                        |
+| `SLOT_WAIT_TIMEOUT_MS`    | 30 000 ms  | A device with no free partition polls this long for one to free up.      |
+| `INTENT_EPOCH_MS`         | 30 000 ms  | Epoch of the per-device intent beacon read in a contended fresh claim.   |
+| `SYNC_READ_TIMEOUT_MS`    | 2 500 ms   | Bound on every lock, beacon, and roster read on the acquire path.        |
+| `PRESENCE_INTERVAL_MS`    | 20 000 ms  | Account-bus liveness beat; feeds the rival set, not the lock.            |
+| `PRESENCE_MAX_AGE_MS`     | 180 000 ms | A device unheard this long leaves the rival set (three throttled beats). |
 
 `acquire(partitionCount)`:
 
@@ -389,9 +398,11 @@ refresh).
 - **Case B — second device.** Partition 0 is live-held; take partition 1, seed its counter
   from its partition-state feed (zero if never published).
 - **Case C — third+ device, turn-taking.** All `PARTITION_COUNT` partitions are held. The
-  new device waits (`SLOT_WAIT_TIMEOUT_MS`, polling every `LEASE_REFRESH_MS`) for a holder
-  to go idle (`IDLE_YIELD_MS` → it releases) or for a lease to lapse, then claims the freed
-  partition resuming from the published counter.
+  new device asks the live holders for a slot over the [account bus](/account-bus) each
+  round; exactly one idle holder answers, releases, and the waiter claims the freed
+  partition in about one round trip, resuming from the published counter. Without a live
+  answer it waits (`SLOT_WAIT_TIMEOUT_MS`, polling every `LEASE_REFRESH_MS`) for a holder
+  to go idle (`IDLE_YIELD_MS` → it releases) or for a lease to lapse.
 - **Case D — crash recovery.** A holder dies without releasing. Its `leasedUntil` expires
   after `LEASE_TTL_MS`; a peer then reclaims the partition. Resume is from the last
   _published_ counter (plus the +1 feed-entry compensation above) — an unclean crash that
@@ -467,9 +478,11 @@ converge. Publishing is serialized within an origin by a cross-tab Web Lock
 
 A device may publish account state **only if it holds a partition** (or can claim a
 free/expired one), because publishing writes chunks to the shared batch. The lock SOC is
-the single source of truth for this — there is no separate "active devices" mirror. If
-every partition is held by a live foreign device, the publish is skipped and a peer
-publishes instead.
+the source of truth for who holds what. Which devices are worth checking for a
+competing claim — the rival set — is advisory and comes from the account bus's presence
+beats unioned with recent sign-ins; a live peer that set misses is still caught by the
+device-independent occupancy beacon. If every partition is held by a live foreign device,
+the publish is skipped and a peer publishes instead.
 
 ## Porting checklist
 
@@ -510,18 +523,8 @@ backup signer.
 Tracked under the multi-device umbrella
 ([#217](https://github.com/snaha/swarm-id/issues/217)):
 
-- **`BatchWriteCoordinator` refactor + proxy-side publish.** Extract the partition-lease /
-  stamp / write-lock orchestration the proxy and the sync path currently duplicate into one
-  shared unit, then have the proxy iframe (the only guaranteed-persistent context on a dApp
-  page) publish account state — including announcing a device when it first acquires its
-  lease. Also folds in clearer contention logging (distinguish "all partitions held" from
-  stamp/SOC errors). Tracked in
-  [#336](https://github.com/snaha/swarm-id/issues/336).
-- **Restore / refresh coverage.** Give agent (seed-phrase) accounts a restore-from-Swarm
-  path (today they start fresh on a new device), and broaden refresh triggers to app load /
-  account switch instead of only the Devices view. Tracked in
-  [#338](https://github.com/snaha/swarm-id/issues/338).
-- **Merge consolidation + deletion tombstones.** Make the snapshot-merge rules a single
-  shared implementation (lib vs the UI refresh path), and extend the connectedApps tombstone
-  pattern to identities and stamps so deletions propagate across devices. Tracked in
-  [#337](https://github.com/snaha/swarm-id/issues/337).
+- **SWIP-60 transport for the account bus**, so synced accounts get broker push through the
+  Bee node instead of a separate signaling server. Waits on bee and bee-js releasing it;
+  tracked in [#571](https://github.com/snaha/swarm-id/issues/571).
+- **Live-suite coverage of the bus handover** — sub-second with both peers live, timeout
+  fallback with one peer killed — in `lib/test/live/`.

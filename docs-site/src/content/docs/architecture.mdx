@@ -113,6 +113,8 @@ Modern browsers partition storage by `(iframe-origin, parent-origin)`. This mean
 - This provides browser-enforced isolation between apps
 - Even if an app is compromised, it can't access other apps' secrets
 
+Where the browser also partitions the iframe away from the trusted domain's own storage (Safari's ITP, or any cross-site embedding), the connect popup hands the iframe the account's synced projection directly and the iframe keeps it under its own partition. It is a full writer there, and a peer on the [account bus](/account-bus), which is how a revoke or a rename made anywhere else still reaches it while it is open.
+
 ## Message Protocol
 
 All cross-origin communication uses postMessage with Zod validation:
@@ -144,9 +146,11 @@ All cross-origin communication uses postMessage with Zod validation:
 | ----------- | -------------------------------- |
 | `setSecret` | Send derived app-specific secret |
 
+The [account bus](/account-bus) has its own message kinds — account snapshots, partition handover, presence — that travel between the account's live contexts rather than between a page and its iframe.
+
 ## Backup & Recovery
 
-Swarm ID supports account backup via encrypted `.swarmid` files and automatic Swarm-based sync.
+Swarm ID supports account backup via encrypted `.swarmid` files, automatic Swarm-based sync, and live propagation between open contexts over the [account bus](/account-bus).
 
 ### .swarmid File Format
 

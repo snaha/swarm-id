@@ -1,0 +1,132 @@
+---
+title: Account Bus
+description: How the live contexts of one account — dApp iframes, the Swarm ID tab, other devices — hear about each other's changes in a round trip, over an encrypted WebRTC/relay mesh, without moving durable truth off Swarm and local storage.
+---
+
+Swarm ID keeps an account's durable state in two places: the trusted domain's local storage
+on each device, and — for accounts with a drive — the per-device feeds on Swarm described in
+[Postage Batch Sharing](/multi-device-postage-batches). Neither is fast. A storage event never
+crosses a device or a storage partition, and a Swarm feed is read on a timer.
+
+The **account bus** is the third thing: a real-time message channel between every context of
+one account that is open right now. It carries small messages between live peers so that a
+revoke, a rename, or a partition handover lands in about one round trip instead of on the next
+poll. It carries nothing durable, and nothing depends on it for correctness — only for latency.
+
+## Who is a peer
+
+- Every proxy iframe of the account, in every dApp and every storage partition (a Safari
+  iframe with its own partitioned storage is a full peer, which is what makes it a full writer;
+  see [Storage Partitioning](/architecture#storage-partitioning)).
+- The Swarm ID tab itself, where revokes and renames happen.
+- All of the above on the user's other devices.
+
+## Topic and key
+
+Both come from the account's `derivationKey` through two separate HMAC contexts
+(`deriveBusContext`): a 64-hex **topic** that names the room, and an AES-GCM **key** that
+encrypts every message. Only contexts that hold the account can derive either. The topic is not
+linkable to the account id, so the server learns a room name, connection timing, and ciphertext.
+
+## Transports
+
+One interface, three transports:
+
+| Transport                                  | Reaches                                                       | Status                                                                |
+| ------------------------------------------ | ------------------------------------------------------------- | --------------------------------------------------------------------- |
+| `BroadcastChannel`                         | contexts in the same origin and the same storage partition    | shipped                                                               |
+| Signaling server + WebRTC `RTCDataChannel` | everything else: other partitions, other dApps, other devices | shipped; `wss://swarm-id.snaha.net/bus` in production, `:5520` in dev |
+| SWIP-60 pub-sub                            | synced accounts, through the Bee node                         | future adapter, once bee and bee-js ship it                           |
+
+The Swarm ID tab uses the signaling transport only — anything a `BroadcastChannel` would
+reach from there already converges through storage events.
+
+## How a message travels
+
+```text
+newcomer                         signaling server                       existing peer
+   │ ── WSS connect ───────────────────▶ │                                    │
+   │ ── {join, topic} ─────────────────▶ │                                    │
+   │ ◀── {welcome, peerId, peers[]} ──── │ ── {peer-joined, peerId} ────────▶ │
+   │ ── {signal, to, offer} ───────────▶ │ ──────────────────────────────────▶ │
+   │ ◀────────────────────────────────── │ ◀── {signal, to, answer} ────────── │
+   │ ◀──── ICE candidates both ways, forwarded the same way ─────────────────▶ │
+   │                                                                          │
+   │ ═══════════ RTCDataChannel: encrypted messages, direct ════════════════ │
+   │                                                                          │
+   │ ── {relay, to, ciphertext} ───────▶ │ ── {relay, from, ciphertext} ────▶ │
+   │         (fallback per peer, whenever no channel is open to that peer)    │
+```
+
+1. **Join.** The context opens a WebSocket and names its room in the first frame. The server
+   answers with the ids of the peers already there and tells them a peer joined.
+2. **Upgrade.** The newcomer starts a WebRTC negotiation with each existing peer; offers,
+   answers, and ICE candidates are forwarded by the server, addressed to one peer each. When
+   it succeeds, that pair talks directly. No STUN or TURN is configured, so this works on the
+   same machine and the same LAN.
+3. **Publish.** A message is encrypted once and delivered per peer: over the DataChannel if one
+   is open to that peer, otherwise as a relay frame the server forwards untouched. A context
+   alone in its room sends nothing.
+4. **Receive.** Every message is validated against a schema before anything acts on it; an
+   unknown kind is dropped, which is how older and newer bundles coexist.
+5. **Leave.** The server pings every 30 seconds and drops a socket that stops answering, so a
+   half-open peer is announced as gone within about a minute.
+
+The server does only the two forwards above, to one peer at a time. It never sees plaintext
+and stores nothing: a room is a set of open sockets, and it disappears with the last one.
+
+## Message kinds
+
+| Message                                          | What a receiver does                                                                                                                                                                                                                                                     |
+| ------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `account-delta`                                  | Folds the snapshot with the same last-writer-wins rules as a Swarm feed payload — collections on their tombstone clocks, scalars on per-field clocks. App secrets and session deadlines are stripped on send and again on receive. A revoke ends a live session at once. |
+| `lease-request`, `lease-claim`, `lease-released` | The partition handover fast path: a waiter asks, exactly one idle holder claims and releases, the waiter wakes — about one round trip instead of the 10 s poll. The lock chunks on Swarm stay authoritative.                                                             |
+| `presence`                                       | Records that the sending device is live (below).                                                                                                                                                                                                                         |
+| `utilization-updated`                            | Same-partition stamp counters between tabs of one device. Never leaves the `BroadcastChannel` transport: every other device is on another lane.                                                                                                                          |
+
+A receiver only ever applies a message from its own room, and a message that names a different
+account is dropped even there.
+
+## Presence and liveness
+
+Every context beats a `presence` message on joining and every 20 seconds. A receiver notes the
+time it heard each device and forgets one it has not heard for three minutes — three beats at
+the once-a-minute cadence a browser throttles a hidden tab's timers to, so a backgrounded but
+live device does not flap out of the set. That in-memory set is the liveness signal:
+
+- The partition **rival set** — who might be acquiring a partition right now — is the live set,
+  unioned with devices that signed in within the last 30 minutes as a bootstrap for a context
+  with no bus.
+- The Devices tab of the [developer tools](/local-development#devices-tab) shows an **Online**
+  badge from it.
+
+Nothing about liveness is written to Swarm or to storage, and a device that stops beating is
+ignored, never removed: the durable device list only grows when a device signs in. A stored
+"last seen" timestamp was deliberately not added, because every publish that stamped a fresh
+clock would be a byte change for every peer to fold, re-persist, and republish — a loop that
+never settles, even on a single device.
+
+## What the bus is not
+
+- **Not a mailbox.** A message reaches the peers that are in the room now. A dApp partition that
+  is closed when an app is revoked learns about it when it next overlaps with a live peer, or
+  from the one-time read of the account's published state it does on restore.
+- **Not the source of truth.** Every message either shortcuts a wait the durable protocol would
+  have resolved anyway, or carries state the durable stores already hold.
+- **Not replay-protected yet** ([#604](https://github.com/snaha/swarm-id/issues/604)). The lease
+  messages are bounded by their own guards; a replayed delta or presence is inert.
+- **Not NAT-traversing.** Pairs WebRTC cannot connect stay on the relay through the server.
+
+## Running it locally
+
+`pnpm dev` starts the signaling server on port 5520 next to the identity UI and the demo; the
+UI reaches it through `PUBLIC_BUS_SIGNALING_URL`, which falls back to `ws://localhost:5520` in
+dev. A build with no URL configured runs the bus over `BroadcastChannel` only, so a partitioned
+iframe then reaches nothing outside its own partition. The rig that exercises a genuinely
+partitioned iframe over the real server is described in
+[Local Development](/local-development#safari-storage-partitioning).
+
+The design record, with the alternatives that were rejected and the reasoning behind each
+decision, is
+[docs/Account-Bus.md](https://github.com/snaha/swarm-id/blob/main/docs/Account-Bus.md); the
+server is [signaling/](https://github.com/snaha/swarm-id/tree/main/signaling).
