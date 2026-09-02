@@ -156,6 +156,15 @@ export function detectDeviceName(): string {
  * domain's first-party store, so it shares `swarm-id-device-id` with the
  * identity UI — it is the same device, and naming that after whichever dApp
  * happened to load it would be wrong.
+ *
+ * The host is deliberately finer-grained than the partition key, which is
+ * schemeful site (eTLD+1) and may drop the port. Two same-site dApps —
+ * `app1.foo.com` and `app2.foo.com`, or two localhost ports — therefore share
+ * ONE partition and one device row, whose name flips to whichever announced
+ * last, each flip counting as a registry change. Cosmetic churn in a rare
+ * config, and the alternative (naming by site) would label the common case
+ * uselessly, so the finer name wins. If it ever matters, the fix is to key the
+ * name on the partition rather than the origin.
  */
 export function partitionDeviceName(appOrigin: string): string {
   const deviceName = detectDeviceName()

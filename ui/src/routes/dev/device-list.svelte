@@ -281,8 +281,10 @@
             <div class="flex items-center gap-2">
               <Laptop class="size-4 shrink-0" />
               {#if row.name}
-                <div class="flex flex-col items-start">
-                  <p class="text-sm">{row.name}</p>
+                <!-- min-w-0 so the name can shrink: a partition device is named
+                     after its dApp host (#570), which can be long. -->
+                <div class="flex min-w-0 flex-col items-start">
+                  <p class="w-full truncate text-sm" title={row.name}>{row.name}</p>
                   <p class="text-muted-foreground font-mono text-xs">{truncate(row.deviceId)}</p>
                 </div>
               {:else}

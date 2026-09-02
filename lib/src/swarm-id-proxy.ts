@@ -2686,18 +2686,40 @@ export class SwarmIdProxy {
           owner,
         }).catch(() => [])
         const rosterEntry = rosterDevices.find((d) => d.deviceId === deviceId)
-        // A tombstoned self is NOT "not yet announced". Reading it that way
-        // republished us without the tombstone, which resurrected the device on
-        // every peer — the roster half of #611, and the half that propagates.
-        // A removal or an expiry is news to obey, not a gap to fill: stand
-        // down, and let a genuine sign-in put us back (`reactivateThisDevice`).
         if (rosterEntry?.removedAt) {
-          console.info(
-            `[Proxy] This device is tombstoned in the roster for ${snapshot.accountId}; not re-announcing.`,
+          // A tombstoned self is NOT "not yet announced". Reading it that way
+          // republished us without the tombstone, which resurrected the device
+          // on every peer — the roster half of #611, and the half that
+          // propagates. A removal or an expiry is news to obey, not a gap to
+          // fill: stand down, and let a genuine sign-in put us back
+          // (`reactivateThisDevice`).
+          //
+          // Unless that sign-in has already happened, in which case this is the
+          // publish that carries it: the roster is the only way a reactivation
+          // reaches peers, so skipping here — on either guard — would silence
+          // the very seam this defers to and the removal would never lift
+          // anywhere. Our own view says which case it is, on the same clock
+          // `mergeDevicesList` ranks by: a handover clears `removedAt` AND
+          // stamps a `lastSignedInAt` that outranks the removal. A poll or a
+          // reload does neither.
+          const localSelf = snapshot.metadata.devices.find(
+            (d) => d.deviceId === deviceId,
           )
-          return
-        }
-        if (rosterEntry) {
+          const signedInSinceRemoval =
+            !!localSelf &&
+            !localSelf.removedAt &&
+            (localSelf.lastSignedInAt ?? 0) > rosterEntry.removedAt
+          if (!signedInSinceRemoval) {
+            console.info(
+              `[Proxy] This device is tombstoned in the roster for ${snapshot.accountId}; not re-announcing.`,
+            )
+            return
+          }
+          console.info(
+            `[Proxy] This device signed in since its removal from ${snapshot.accountId}; announcing the reactivation.`,
+          )
+        } else if (rosterEntry) {
+          // Announce-once proper: the roster already says what we would say.
           console.info(
             `[Proxy] Device already in roster for ${snapshot.accountId}; skipping announce publish.`,
           )
@@ -2749,6 +2771,12 @@ export class SwarmIdProxy {
    * `ensureInRoster` appends when the removed-state differs, so the roster
    * carries the reactivation to peers without any extra write of our own.
    *
+   * Clearing `removedAt` is only half of it: `mergeDevicesList` ranks devices
+   * on `max(removedAt, lastSignedInAt)`, so a lift that left the old sign-in
+   * stamp in place would lose to the very tombstone it is undoing and the next
+   * fold would put it straight back. A handover IS a sign-in — the user
+   * clicked connect and unlocked in the popup — so it stamps one.
+   *
    * Partitioned only: an unpartitioned proxy has no business editing the
    * shared account document behind the identity UI's back, and the UI owns its
    * own sign-in seam.
@@ -2760,10 +2788,13 @@ export class SwarmIdProxy {
     if (!account.devices.some((d) => d.deviceId === deviceId && d.removedAt)) {
       return
     }
+    const now = Date.now()
     this.partitionAccount = {
       ...account,
       devices: account.devices.map((d) =>
-        d.deviceId === deviceId ? { ...d, removedAt: undefined } : d,
+        d.deviceId === deviceId
+          ? { ...d, removedAt: undefined, lastSignedInAt: now }
+          : d,
       ),
     }
   }
