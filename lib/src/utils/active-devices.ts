@@ -2,8 +2,13 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Bound the partition-contention rival set to devices that could plausibly be
- * acquiring RIGHT NOW.
+ * The registry half of the partition-contention rival set: devices that
+ * signed in recently enough to plausibly be acquiring RIGHT NOW.
+ *
+ * The other half is the account bus. A device beating `presence` in the room
+ * (`bus/presence.ts`) is alive by construction, and every caller unions that
+ * set with this one; this filter is the bootstrap for a context with no bus,
+ * and for a device that signed in moments ago and has not beaten yet.
  *
  * The intent round reads every known device's per-device intent address to
  * deconflict simultaneous fresh claims. If that set is "all devices the account
@@ -20,21 +25,22 @@
  *     that already HOLDS a partition; and
  *   - `PartitionLease.occupancyBeaconBeatsUs` (in `refresh`) resolves a symmetric
  *     fresh-claim dual-acquire with such a peer.
- * Note `lastSignedInAt` advances only on an actual SIGN-IN, not on a device's
- * ongoing publish/lease-refresh — so a long-running device IS eventually pruned
- * here; the occupancy channel (not this set) is what keeps that safe. Pruning
- * only removes the per-acquire absent-read cost of dead ghosts.
+ * `lastSignedInAt` advances only on an actual SIGN-IN (a creation or a
+ * reactivation), never on a poll (#652) — so a long-running device IS pruned
+ * from THIS half after the window; the bus half is what keeps it a rival, and
+ * the occupancy channel is what keeps that safe. Pruning only removes the
+ * per-acquire absent-read cost of dead ghosts.
  */
 
 import type { Device } from "../schemas"
 
 /**
- * How recently a device must have signed in to count as a contention rival.
- * The stamp is frozen at sign-in (#652), so this bounds the age of the SESSION,
- * not any publish cadence: a live device drops out once its sign-in is this
- * old. Safe for the reason above — the occupancy beacon, not this set, is the
- * dual-acquire backstop — and the bus presence union (#655) is what puts a
- * live long-running peer back in.
+ * How recently a device must have signed in to count as a contention rival
+ * without a bus beat. The stamp is frozen at sign-in (#652), so this bounds the
+ * age of the SESSION, not any publish cadence: long enough that a device which
+ * just signed in is a rival through its first acquires, far below a prior
+ * session, so stale ghosts are dropped. A live device past the window stays a
+ * rival through the bus half, not this one.
  */
 export const KNOWN_DEVICE_MAX_AGE_MS = 30 * 60 * 1000 // 30 minutes
 

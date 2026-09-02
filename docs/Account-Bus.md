@@ -108,6 +108,16 @@ account. Same service, no extra infrastructure; the default posture stays signal
   fold rules of `lib/src/sync/merge-snapshot.ts` — a delta received over the bus merges
   exactly like a device-state feed payload. Revocation notices ride the same channel so a live
   iframe drops its session immediately.
+- **Presence.** Every context beats `{ presence, accountId, fromDeviceId }` on joining the room
+  and every 20 s (`lib/src/bus/presence.ts`); a receiver stamps its own clock and forgets a
+  device unheard for 60 s. This is the liveness signal: a peer beating in the room is alive by
+  construction, at no Swarm cost, so the partition rival set (`knownDeviceIds`) is the live set
+  unioned with the registry's recent sign-ins — the latter only as a bootstrap for a context with
+  no bus. Nothing durable is written. A `lastSeenAt` riding the account snapshot was
+  considered and rejected: every publish would be a byte change to fold and re-persist, and an
+  unpartitioned proxy answers every storage event with a delta and a stamped feed write, so it
+  loops without settling, even on one device. Stale devices are therefore _ignored_ at read,
+  never tombstoned; the roster grows per device, not per time, and needs no prune.
 - **Coordination (P2).** Lease negotiation/handover requests and utilization deltas. Live
   peers release or transfer a partition sub-second; if nobody answers, the existing
   conservative Swarm lease protocol ([`BatchWriteCoordinator.md`](./BatchWriteCoordinator.md))
@@ -170,6 +180,10 @@ With the bus in place the partitioned iframe becomes a first-class writer:
 
 ### Why this shape
 
+- The socket now buys something even for a lone dApp tab: presence is what makes this device a
+  rival to every other context of the account, and what tells it who its own rivals are. Any
+  gating of the signaling attach ([#581](https://github.com/snaha/swarm-id/issues/581)) has to
+  be weighed against that.
 - On Safari, during normal dApp use the iframe is often the **only** live context — so
   correctness must never depend on the bus, only latency does. That is exactly the split
   between durable stores (unchanged) and bus (fast path).

@@ -108,12 +108,26 @@ export const LeaseReleasedMessageSchema = z.object({
   requestId: LeaseRequestIdSchema.optional(),
 })
 
+/**
+ * "This device is live." Published on joining the room and every
+ * `PRESENCE_INTERVAL_MS` (`presence.ts`); a receiver stamps its own clock, so
+ * there is no timestamp to skew and a replay (#604) only refreshes a device it
+ * has already heard. A peer on an older bundle drops it at the schema — a new
+ * kind, not an envelope change, so nothing to deploy in step.
+ */
+export const PresenceMessageSchema = z.object({
+  type: z.literal("presence"),
+  accountId: z.string().length(40),
+  fromDeviceId: z.string(),
+})
+
 export const BusMessageSchema = z.discriminatedUnion("type", [
   UtilizationUpdateMessageSchema,
   AccountDeltaMessageSchema,
   LeaseRequestMessageSchema,
   LeaseClaimMessageSchema,
   LeaseReleasedMessageSchema,
+  PresenceMessageSchema,
 ])
 
 export type AccountDeltaMessage = z.infer<typeof AccountDeltaMessageSchema>

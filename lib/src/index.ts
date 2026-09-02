@@ -188,6 +188,11 @@ export {
   restoreLocalSessionFields,
 } from "./bus/account-delta"
 export type { BusMessage, BusMessageInput } from "./bus/messages"
+export {
+  PresenceTracker,
+  PRESENCE_INTERVAL_MS,
+  PRESENCE_MAX_AGE_MS,
+} from "./bus/presence"
 
 // Encrypted backup (.swarmid) support
 export {
