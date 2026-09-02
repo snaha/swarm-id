@@ -20,7 +20,7 @@ describe("mergeDevices", () => {
     expect(result[0].lastSignedInAt).toBe(result[0].createdAt)
   })
 
-  it("should update lastSignedInAt for an existing device", () => {
+  it("keeps lastSignedInAt for an existing device — a poll is not a sign-in", () => {
     const existing = [createDevice({ lastSignedInAt: 1000 })]
 
     const result = mergeDevices(existing, TEST_DEVICE_ID)
@@ -28,7 +28,7 @@ describe("mergeDevices", () => {
     expect(result).toHaveLength(1)
     expect(result[0].deviceId).toBe(TEST_DEVICE_ID)
     expect(result[0].createdAt).toBe(1700000000000) // preserved
-    expect(result[0].lastSignedInAt).toBeGreaterThan(1000)
+    expect(result[0].lastSignedInAt).toBe(1000)
   })
 
   it("should preserve other devices when adding a new one", () => {
@@ -92,7 +92,7 @@ describe("mergeDevices", () => {
     expect(result[0].deviceId).toBe("device-a")
     expect(result[0].lastSignedInAt).toBe(1700000000000) // unchanged
     expect(result[1].deviceId).toBe("device-b")
-    expect(result[1].lastSignedInAt).toBeGreaterThan(1000)
+    expect(result[1].lastSignedInAt).toBe(1000) // unchanged too
   })
 })
 
@@ -305,13 +305,11 @@ describe("deviceRegistryChanged", () => {
     expect(deviceRegistryChanged([self, peer], [self, peer], SELF)).toBe(false)
   })
 
-  // `mergeDevices` stamps our own `lastSignedInAt` on every call, so counting
-  // it would persist on every refresh — a storage event in every other tab,
-  // every poll round. Our heartbeat reaches peers through the roster publish,
-  // not through this local save.
-  it("is false when only our own heartbeat moved", () => {
+  // Our own stamp moves only on a genuine sign-in (a reactivation), never on
+  // a poll (#652) — so when it moves, it is worth persisting.
+  it("is true when our own sign-in stamp moved", () => {
     const merged = [{ ...self, lastSignedInAt: 9000 }, peer]
-    expect(deviceRegistryChanged([self, peer], merged, SELF)).toBe(false)
+    expect(deviceRegistryChanged([self, peer], merged, SELF)).toBe(true)
   })
 })
 
