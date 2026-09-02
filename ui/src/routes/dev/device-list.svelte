@@ -156,7 +156,9 @@
   $effect(() => {
     if (!browser) return
     // Re-render the relative timestamp every 30 s.
-    const timer = setInterval(() => (tick = tick + 1), 30_000)
+    // Quick enough that an Online badge follows a presence beat (every 20 s,
+    // gone after 60 s) without a visible lag.
+    const timer = setInterval(() => (tick = tick + 1), 5_000)
     return () => clearInterval(timer)
   })
 
