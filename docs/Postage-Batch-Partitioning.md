@@ -10,7 +10,10 @@ the release fencing. This is the current-state reference for the multi-device wr
 > commit-ordered (ack-after-publish) and resumes at the exact published counter via a
 > rotating state-pointer SOC. The user-facing overview lives in
 > `docs-site/src/content/docs/multi-device-postage-batches.mdx`; the write-path lifecycle
-> layer is documented in [`BatchWriteCoordinator.md`](./BatchWriteCoordinator.md).
+> layer is documented in [`BatchWriteCoordinator.md`](./BatchWriteCoordinator.md); the live
+> fast path that lets peers hand a partition over in one round trip, and the presence
+> heartbeat that feeds the rival set, are in [`Account-Bus.md`](./Account-Bus.md). Everything
+> below works with no server at all — the bus only shortens the waits.
 
 Source of truth in code:
 `lib/src/utils/batch-utilization.ts` (the stamper + slot routing),
@@ -186,8 +189,11 @@ lease (`LEASE_TTL_MS`) refreshed every 10 s (`LEASE_REFRESH_MS`). `PartitionLeas
 - **Idle yield.** After `IDLE_YIELD_MS` (30 s) with no upload and none in flight, the holder
   voluntarily releases so a waiting peer takes the slot without waiting out the TTL. Gated on
   a **known rival**: a solo device keeps its lease (renewed each tick) so later uploads hit
-  the TTL-optimism fast path instead of re-paying the cold acquire after every pause; a
-  newly-joined peer regains the yield once the roster syncs it into `knownDeviceIds`.
+  the TTL-optimism fast path instead of re-paying the cold acquire after every pause. A
+  peer counts as a rival the moment its presence beat is heard on the account bus; the
+  roster's recent sign-ins are the bootstrap for a context with no bus. A waiting peer can
+  also ask for the slot outright (`lease-request`) and an idle holder yields on request —
+  [`Account-Bus.md`](./Account-Bus.md).
 - **Self-demote.** The refresh tick extends the local lease only on a _confirmed_ hold
   (write-verified renewal, or a read-verified lock SOC still naming us). An unconfirmable
   renewal tolerates a short blip but, once the lease lapses past skew, fences in-flight
@@ -289,14 +295,21 @@ and previous epoch:
 so a randomly-keyed chunk can't evict the pointer or a live beacon (or be evicted by them).
 A peer's _intent_ beacon uses its own deviceId and can't be computed here — see §12.
 
-## 11. Utilisation reporting and cross-tab broadcast
+## 11. Utilisation reporting over the account bus
 
 - **Reporting**: utilisation % is the fill of the fullest bucket, computed by aggregating
   the partitions' per-bucket usage.
-- **Cross-tab broadcast**: same-origin tabs share counter updates over a `BroadcastChannel`
-  and merge them **monotonically (max)** so concurrent tabs converge. Updates are keyed per
-  partition; the monotonic-max merge applies **within** a partition, so one partition's
-  progress never clobbers another's.
+- **Counter updates between contexts**: `utilization-updated` messages on the account bus
+  ([`Account-Bus.md`](./Account-Bus.md)) — carried by its `BroadcastChannel` transport, and
+  deliberately not by the signaling one, since every remote peer is another device on another
+  lane. Receivers merge them **monotonically (max)** so concurrent tabs converge. Updates are
+  keyed per partition and folded only by a receiver bound to that partition of that batch, so
+  one partition's progress never clobbers another's.
+
+Two unrelated things in this repository are called "presence". The **intent/presence beacon**
+of §7 is a per-epoch Swarm chunk a claimant writes so disjoint-gateway contenders can see each
+other; the **presence heartbeat** of the account bus is a 20 s message between live contexts
+that feeds the rival set. The beacon is a correctness mechanism; the heartbeat is advisory.
 
 ## 12. Remaining issues / accepted residuals
 

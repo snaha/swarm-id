@@ -10,6 +10,7 @@ Cross-browser compatible authentication and identity management for Swarm dApps.
 - **[ui/](./ui/README.md)** — `@swarm-id/ui` SvelteKit identity UI (trusted domain)
 - **[demo/](./demo/)** — Demo dApp with library integration examples
 - **[docs-site/](./docs-site/)** — Starlight (Astro) documentation website
+- **[signaling/](./signaling/README.md)** — `@swarm-id/signaling` account-bus signaling and relay server
 
 ## Architecture
 
@@ -80,6 +81,10 @@ Deployed on every push to `main` (workflow: `deploy-do.yml`):
 
 - SvelteKit demo app showcasing SwarmIdClient integration, run against swarm-id.snaha.net
 - Built with `@sveltejs/adapter-static`
+
+**swarm-id.snaha.net/bus** (`signaling/`)
+
+- The account-bus signaling and relay server, as the `bus-signaling` service of the same app; the UI build points at it through `PUBLIC_BUS_SIGNALING_URL`
 
 ## Local Development
 
@@ -266,6 +271,7 @@ tools would be spending real money.
 ├── lib/                  # @snaha/swarm-id TypeScript library
 ├── ui/                   # Identity UI (SvelteKit + Tailwind v4 + shadcn-svelte style)
 ├── demo/                 # Demo app (SvelteKit)
+├── signaling/            # Account-bus signaling and relay server (ws)
 └── docs-site/            # Documentation website (Starlight/Astro)
 ```
 
@@ -299,7 +305,7 @@ Safari's Intelligent Tracking Prevention (ITP) partitions storage for third-part
 What remains regardless:
 
 - **The session outlives the page.** The handover is kept in the partition's own store until the user disconnects or the 30-day session expires, so a reload does not re-run the popup ([#635](https://github.com/snaha/swarm-id/issues/635)). A restored session reads the account's published state once in the background and ends itself if this app was revoked while the tab was closed — that reaches it no other way. An account with no drive has published nothing to check against, so there the revoke waits for the next time both contexts are open.
-- **Live propagation needs a signaling server.** Without one configured, a partitioned iframe only talks to contexts in its own partition.
+- **Live propagation needs a signaling server.** The DigitalOcean build has one (`wss://swarm-id.snaha.net/bus`) and `pnpm dev` starts one locally; a build without one configured (GitHub Pages) leaves a partitioned iframe talking only to contexts in its own partition. How the bus works: [docs/Account-Bus.md](./docs/Account-Bus.md).
 - **Safari private mode**: Sessions are ephemeral (lost when the private window closes).
 
 See [#277](https://github.com/snaha/swarm-id/issues/277) for the background.

@@ -38,6 +38,7 @@ export default defineConfig({
         {
           label: 'Multi-Device',
           items: [
+            { label: 'Account Bus', slug: 'account-bus' },
             {
               label: 'Postage Batch Sharing',
               slug: 'multi-device-postage-batches',

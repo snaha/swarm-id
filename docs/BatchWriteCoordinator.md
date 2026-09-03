@@ -60,6 +60,8 @@ Dependencies are injected — no global storage-manager reach-in:
 | `getWorkerPool`                      | Build/reuse a parallel-signing worker pool for `useWorkers` uploads                                                                   |
 | `onLeaseChange`                      | Fired on every partition / read-only transition (proxy → `emitConnectionInfoIfChanged`)                                               |
 | `onLeaseAcquired`                    | Fired when a partition is (re)acquired (proxy → schedule an account-state publish)                                                    |
+| `onSlotWait`                         | Fired each round of a slot wait (proxy → broadcast a `lease-request` on the account bus, see below)                                   |
+| `knownDeviceIds`                     | The rival set for the intent round and the idle yield: devices heard live on the account bus ∪ the registry's recent sign-ins         |
 
 Methods and getters:
 
@@ -85,13 +87,13 @@ Methods and getters:
 
 ## The two modes
 
-|                          | `persistent` (proxy)                                                                                                     | `oneshot` (sync-account)                                           |
-| ------------------------ | ------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------ |
-| Lease warm-up            | `startLease()` acquires eagerly in the background                                                                        | none                                                               |
-| Refresh timer            | yes (`LEASE_REFRESH_MS`)                                                                                                 | never armed                                                        |
-| `withWrite` default wait | `"block"`                                                                                                                | `"skip"`                                                           |
-| No slot available        | poll for a freed slot every `LEASE_REFRESH_MS` up to 30 s, inside a 45 s overall acquire timeout; then the upload errors | single claim attempt; throws `PartitionContendedError` immediately |
-| Lease end-of-life        | released on `teardown()` (sign-out / disconnect), or idle-yielded                                                        | lapses by TTL                                                      |
+|                          | `persistent` (proxy)                                                                                                                                                                                           | `oneshot` (sync-account)                                           |
+| ------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------ |
+| Lease warm-up            | `startLease()` acquires eagerly in the background                                                                                                                                                              | none                                                               |
+| Refresh timer            | yes (`LEASE_REFRESH_MS`)                                                                                                                                                                                       | never armed                                                        |
+| `withWrite` default wait | `"block"`                                                                                                                                                                                                      | `"skip"`                                                           |
+| No slot available        | ask live holders over the account bus each round and wake on their answer (~one round trip); otherwise poll every `LEASE_REFRESH_MS` up to 30 s, inside a 45 s overall acquire timeout; then the upload errors | single claim attempt; throws `PartitionContendedError` immediately |
+| Lease end-of-life        | released on `teardown()` (sign-out / disconnect), or idle-yielded                                                                                                                                              | lapses by TTL                                                      |
 
 ## Lease lifecycle
 
@@ -115,6 +117,15 @@ Methods and getters:
   `activeUploadCount` / idle window), because releasing the slot and unbinding the stamper
   off-lock underneath an upload that just entered `withWrite` would be the same corruption class
   as the displacement race below.
+- **Yield on request.** A waiting peer does not have to wait for the idle tick: its slot wait
+  broadcasts a `lease-request` on the account bus each round (`onSlotWait`), a holder that
+  would presently yield (`canYieldForPeer`: idle for `PEER_YIELD_MIN_IDLE_MS`, nothing in
+  flight) releases through the same under-lock path (`yieldForPeer`) and answers
+  `lease-released`, and the waiter's sleep is woken (`notifySlotMaybeFree`). Exactly one
+  holder answers a given request, by a rank derived from the request id and the holder's
+  partition. The poll above is the
+  fallback when no live holder answers. Protocol and message shapes:
+  [`Account-Bus.md`](./Account-Bus.md).
 - **Disposed guard.** `teardown()` sets `disposed`; from then on the coordinator never re-acquires
   a partition or arms a timer. This matters because an in-flight `withWrite` (a deferred publish,
   or a normal upload) can outlive a disconnect/sign-out — without the guard its `ensureLease`
@@ -231,6 +242,13 @@ Lock** discipline: `withWrite` flushes stamper state in the lock's `finally` (`f
 and the stamper reads the latest counters from the shared IndexedDB utilisation cache. The proxy
 and SwarmUI share one `deviceId`, so a lock SOC written by either is recognised as self-held by
 the other — they cooperate on the same partition rather than contend.
+
+That holds for contexts in the same storage partition. A **partitioned** proxy iframe (Safari,
+or any cross-site embedding) has its own `swarm-id-device-id`, its own utilisation cache, and
+its own lease — it is a separate device to this protocol and contends like one. Counter updates
+between contexts travel as lane-scoped `utilization-updated` messages on the account bus, folded
+only by a receiver on the same partition of the same batch, which is why a delta from a
+different device can never move this lane's counter ([`Account-Bus.md`](./Account-Bus.md)).
 
 ## Files and tests
 

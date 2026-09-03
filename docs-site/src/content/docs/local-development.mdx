@@ -102,7 +102,7 @@ Everything that talks to the Bee node:
 
 ### Devices Tab
 
-The devices registered to the selected account, and which partitions each currently holds.
+The devices registered to the selected account, which partitions each currently holds, and an **Online** badge for every device heard on the [account bus](/account-bus) within the last minute. The rows re-derive every 5 s, so a peer shows up about one presence beat (20 s) after it joins.
 
 ## Getting a Postage Batch
 
@@ -194,7 +194,7 @@ Safari's Intelligent Tracking Prevention (ITP) partitions storage for third-part
 
 The whole path — handover, stamper, upload — is confirmed on real Safari (iOS 18.7 / Safari 26.6), in a normal and a private window alike. A plain `pnpm dev` cannot reproduce it — the identity UI and demo are served from the same site, and ports do not make them cross-site. Browsing the demo under a **different hostname for the same machine** does: `http://127.0.0.1:3500` or `http://[::1]:3500` while the proxy origin stays `http://localhost:5500`. That is the rig `ui/tests/bus-propagation.test.ts` uses.
 
-Locally, `pnpm dev` also starts the account-bus signaling server on port 5520; without it a partitioned iframe can only reach contexts in its own partition.
+Locally, `pnpm dev` also starts the [account-bus](/account-bus) signaling server on port 5520; without it a partitioned iframe can only reach contexts in its own partition.
 
 Safari private browsing sessions are also ephemeral — data is lost when the window closes.
 
