@@ -30,9 +30,11 @@ import type { Device } from "../schemas"
 
 /**
  * How recently a device must have signed in to count as a contention rival.
- * Comfortably above a live session's publish/refresh cadence (lease refresh is
- * ~10s; a device republishes on acquire/change) yet far below a prior session,
- * so current devices are always kept and stale ghosts are dropped.
+ * The stamp is frozen at sign-in (#652), so this bounds the age of the SESSION,
+ * not any publish cadence: a live device drops out once its sign-in is this
+ * old. Safe for the reason above — the occupancy beacon, not this set, is the
+ * dual-acquire backstop — and the bus presence union (#655) is what puts a
+ * live long-running peer back in.
  */
 export const KNOWN_DEVICE_MAX_AGE_MS = 30 * 60 * 1000 // 30 minutes
 

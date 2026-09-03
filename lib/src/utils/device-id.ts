@@ -34,40 +34,38 @@ export function getDeviceId(): string | undefined {
 /**
  * Merge a device list with the current device.
  *
- * Upserts the current device (updates lastSignedInAt if present, creates a new
- * entry if not). A `deviceName` we are given REPLACES the stored one, so a
- * caller that learns a better label — the partition naming of #570 — corrects
- * the row already in the registry instead of only the next one created. A
- * caller with nothing to say passes nothing and the stored label stands: the
- * name must not be blanked by a context that does not know it.
+ * Upserts the current device: creates the entry if absent, otherwise leaves it
+ * as it is apart from the name. A `deviceName` we are given REPLACES the stored
+ * one, so a caller that learns a better label — the partition naming of #570 —
+ * corrects the row already in the registry instead of only the next one
+ * created. A caller with nothing to say passes nothing and the stored label
+ * stands: the name must not be blanked by a context that does not know it.
  *
- * Does NOT touch `removedAt`. Both callers are refresh paths — the proxy's
- * throttled roster poll and the UI's fold — and a poll is not a sign-in, so
- * clearing our own tombstone here undid every removal on the next round (#611).
- * #337's "a genuine sign-in re-activates a device removed elsewhere" still
- * holds; it lives at the sign-in seams instead, which is the only place that
- * can tell a user unlocking their account from a timer firing.
+ * Touches neither `removedAt` nor `lastSignedInAt` on an existing entry. Both
+ * callers are refresh paths — the proxy's throttled roster poll and the UI's
+ * periodic fold — and a poll is not a sign-in: clearing our own tombstone here
+ * undid every removal on the next round (#611), and stamping `lastSignedInAt`
+ * here (#652) made every fold a byte change to persist, which a proxy holding
+ * a partition answered with a bus delta and a stamped feed write. #337's "a
+ * genuine sign-in re-activates a device removed elsewhere" still holds; it
+ * lives at the sign-in seams instead (`reactivateThisDevice`), which is the
+ * only place that can tell a user unlocking their account from a timer firing.
+ * Liveness is not this field's job either — the bus carries it.
  */
 export function mergeDevices(
   existing: Device[],
   currentDeviceId: string,
   deviceName?: string,
 ): Device[] {
-  const now = Date.now()
   const found = existing.some((d) => d.deviceId === currentDeviceId)
 
   if (found) {
     return existing.map((d) =>
-      d.deviceId === currentDeviceId
-        ? {
-            ...d,
-            lastSignedInAt: now,
-            name: deviceName ?? d.name,
-          }
-        : d,
+      d.deviceId === currentDeviceId ? { ...d, name: deviceName ?? d.name } : d,
     )
   }
 
+  const now = Date.now()
   return [
     ...existing,
     {
@@ -187,11 +185,11 @@ export function partitionDeviceName(appOrigin: string): string {
  * of the rival set, and never get an intent read: the dual-acquire the registry
  * refresh exists to prevent (#586).
  *
- * Our OWN `lastSignedInAt` is deliberately excluded. `mergeDevices` stamps it on
- * every call, so counting it would report a change on every refresh — a save, and
- * a storage event in every other tab, every poll round. That churn is what the
- * length check was really avoiding, and our heartbeat reaches peers through the
- * roster publish, not through this local save.
+ * Every field counts, our own included. `mergeDevices` no longer stamps our
+ * `lastSignedInAt` on a poll (#652), so when it moves it is a genuine sign-in
+ * (a reactivation) and worth a save. Until then this excluded it, because
+ * counting a stamp that moved on every call meant a save and a storage event in
+ * every other tab, every poll round.
  */
 export function deviceRegistryChanged(
   stored: Device[],
@@ -221,15 +219,15 @@ export function deviceRegistryChanged(
  * what is lost is a registry write nobody is watching for.
  *
  * `deviceId` is in the list though it is the map key: keeping the record total
- * is what makes the compiler the check.
+ * is what makes the compiler the check. The `"peers-only"` scope is kept for
+ * the next field a poll has to write on ourselves; nothing uses it today.
  */
 const DEVICE_COMPARED_FIELDS = Object.entries({
   deviceId: "all",
   createdAt: "all",
   name: "all",
   removedAt: "all",
-  // Ours is stamped by `mergeDevices` on every call — see the note above.
-  lastSignedInAt: "peers-only",
+  lastSignedInAt: "all",
 } satisfies Record<keyof Device, "all" | "peers-only">) as [
   keyof Device,
   "all" | "peers-only",

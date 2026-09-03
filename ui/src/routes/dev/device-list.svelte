@@ -312,7 +312,7 @@
                 <span>Added {formatDateTime(row.createdAt)}</span>
               {/if}
               {#if row.lastSignedInAt}
-                <span>Last seen {formatDateTime(row.lastSignedInAt)}</span>
+                <span>Signed in {formatDateTime(row.lastSignedInAt)}</span>
               {/if}
             </div>
           </div>

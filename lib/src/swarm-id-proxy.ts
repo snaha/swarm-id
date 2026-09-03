@@ -2466,8 +2466,9 @@ export class SwarmIdProxy {
       // Persist when anything the rival set reads actually moved — a peer
       // appearing, a refreshed sign-in, a tombstone — not merely when the list
       // got longer, which discarded the timestamp-only merges `activeDeviceIds`
-      // prunes on (#586). Our own heartbeat is excluded, so this still avoids
-      // the cross-tab storage-event churn the length check was really for.
+      // prunes on (#586). A poll no longer stamps our own entry (#652), so a
+      // quiet round compares equal and the cross-tab storage-event churn the
+      // length check was really for does not come back.
       if (
         deviceRegistryChanged(
           account.devices,
