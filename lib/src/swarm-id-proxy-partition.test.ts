@@ -169,7 +169,7 @@ import { serializeAccountStateSnapshot } from "./utils/account-state-snapshot"
 import {
   STORAGE_CHALLENGE_KEY,
   STORAGE_KEY_ACCOUNTS,
-  STORAGE_KEY_PARTITION_SESSION,
+  partitionSessionStorageKey,
 } from "./types"
 import { KNOWN_DEVICE_MAX_AGE_MS } from "./utils/active-devices"
 import { PRESENCE_INTERVAL_MS, PRESENCE_MAX_AGE_MS } from "./bus/presence"
@@ -185,6 +185,10 @@ import type {
 } from "./schemas"
 
 const PARENT_ORIGIN = "https://dapp.example.com"
+/** A second dApp on the SAME SITE as `PARENT_ORIGIN`. The browser partitions
+ *  the iframe's storage by (iframe origin, top-level SITE), so these two share
+ *  one store — which is what makes them able to overwrite each other. */
+const SIBLING_ORIGIN = "https://other.example.com"
 const ID_ORIGIN = "https://id.example.com"
 const BATCH_ID_HEX = "cc".repeat(32)
 /** A second account: same dApp connection, different bus room. */
@@ -380,15 +384,17 @@ describe("SwarmIdProxy partitioned write enablement", () => {
   }
 
   /** Run identify → connect → return the partition challenge the popup echoes. */
-  async function startPartitionedConnect(): Promise<string> {
+  async function startPartitionedConnect(
+    appOrigin: string = PARENT_ORIGIN,
+  ): Promise<string> {
     await dispatch(
       { type: "parentIdentify", requestId: "r1", metadata: { name: "dApp" } },
-      PARENT_ORIGIN,
+      appOrigin,
       parentWindow,
     )
     await dispatch(
       { type: "connect", requestId: "r2" },
-      PARENT_ORIGIN,
+      appOrigin,
       parentWindow,
     )
     const challenge = localStorageFake.getItem(STORAGE_CHALLENGE_KEY)
@@ -399,11 +405,12 @@ describe("SwarmIdProxy partitioned write enablement", () => {
   async function sendSetSecret(
     challenge: string,
     data: Record<string, unknown>,
+    appOrigin: string = PARENT_ORIGIN,
   ): Promise<void> {
     await dispatch(
       {
         type: "setSecret",
-        appOrigin: PARENT_ORIGIN,
+        appOrigin,
         challenge,
         data: { secret: "33".repeat(32), ...data },
       },
@@ -423,7 +430,9 @@ describe("SwarmIdProxy partitioned write enablement", () => {
     expect(messagesOfType("authSuccess")).toHaveLength(0)
     const infos = messagesOfType("connectionInfoChanged")
     expect(infos[infos.length - 1]?.identity).toBeUndefined()
-    expect(localStorageFake.getItem(STORAGE_KEY_PARTITION_SESSION)).toBeNull()
+    expect(
+      localStorageFake.getItem(partitionSessionStorageKey(PARENT_ORIGIN)),
+    ).toBeNull()
   })
 
   // Two ways a partitioned session ends up unable to upload, and from the
@@ -892,7 +901,9 @@ describe("SwarmIdProxy partitioned write enablement", () => {
     }
 
     function storedSession(): Record<string, unknown> | undefined {
-      const raw = localStorageFake.getItem(STORAGE_KEY_PARTITION_SESSION)
+      const raw = localStorageFake.getItem(
+        partitionSessionStorageKey(PARENT_ORIGIN),
+      )
       return raw ? (JSON.parse(raw) as Record<string, unknown>) : undefined
     }
 
@@ -925,7 +936,7 @@ describe("SwarmIdProxy partitioned write enablement", () => {
       await connectPartitioned()
       const record = storedSession()!
       localStorageFake.setItem(
-        STORAGE_KEY_PARTITION_SESSION,
+        partitionSessionStorageKey(PARENT_ORIGIN),
         JSON.stringify({ ...record, parentOrigin: "https://evil.example.com" }),
       )
 
@@ -939,7 +950,7 @@ describe("SwarmIdProxy partitioned write enablement", () => {
       await connectPartitioned()
       const record = storedSession()!
       localStorageFake.setItem(
-        STORAGE_KEY_PARTITION_SESSION,
+        partitionSessionStorageKey(PARENT_ORIGIN),
         JSON.stringify({ ...record, connectedUntil: Date.now() - 1 }),
       )
 
@@ -948,6 +959,41 @@ describe("SwarmIdProxy partitioned write enablement", () => {
       expect(storedSession()).toBeUndefined()
       const infos = messagesOfType("connectionInfoChanged")
       expect(infos[infos.length - 1]?.canUpload).toBe(false)
+    })
+
+    // Storage is partitioned by (iframe origin, top-level SITE), and a site
+    // ignores the subdomain — so two dApps under example.com share one store.
+    // The saved session used to live under a single fixed key there, so the
+    // second dApp to connect overwrote the first one's, and the first came back
+    // to a record belonging to somebody else, read it as "no session", and
+    // needed the popup again. Both of them, on every reload (#671).
+    it("keeps its session when a same-site dApp connects too", async () => {
+      await connectPartitioned()
+      expect(storedSession()).toBeTruthy()
+
+      // The sibling dApp, in its own iframe but the same partitioned store.
+      proxy.destroy()
+      mountProxy()
+      const siblingChallenge = await startPartitionedConnect(SIBLING_ORIGIN)
+      await sendSetSecret(
+        siblingChallenge,
+        { account: serializeSyncedAccount(makeSyncedAccount()) },
+        SIBLING_ORIGIN,
+      )
+
+      // Back to the first dApp: it must still come up as a writer.
+      proxy.destroy()
+      mountProxy()
+      await dispatch(
+        { type: "parentIdentify", requestId: "r1", metadata: { name: "dApp" } },
+        PARENT_ORIGIN,
+        parentWindow,
+      )
+
+      const infos = messagesOfType("connectionInfoChanged")
+      const last = infos[infos.length - 1]
+      expect(last.storagePartitioned).toBe(true)
+      expect(last.canUpload).toBe(true)
     })
 
     it("forgets the session when the connection ends", async () => {
@@ -1253,7 +1299,7 @@ describe("SwarmIdProxy partitioned write enablement", () => {
     it("re-persists the stored session after a delta moves the default stamp", async () => {
       const busChannel = await hydratedSession()
       const before = JSON.parse(
-        localStorageFake.getItem(STORAGE_KEY_PARTITION_SESSION)!,
+        localStorageFake.getItem(partitionSessionStorageKey(PARENT_ORIGIN))!,
       ) as { connectedUntil: number }
       try {
         const stamp = makeSyncedAccount().postageStamps[0]
@@ -1275,7 +1321,9 @@ describe("SwarmIdProxy partitioned write enablement", () => {
         )
         await vi.waitFor(() => {
           const stored = JSON.parse(
-            localStorageFake.getItem(STORAGE_KEY_PARTITION_SESSION)!,
+            localStorageFake.getItem(
+              partitionSessionStorageKey(PARENT_ORIGIN),
+            )!,
           ) as {
             connectedUntil: number
             data: { account: { defaultPostageStampBatchID: string } }

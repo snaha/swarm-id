@@ -234,7 +234,8 @@ With the bus in place the partitioned iframe is a first-class writer:
 
 - `handlePopupMessage` hydrates the projection into an in-memory account view
   (`partitionAccount`) **and keeps the handover itself** under
-  `swarm-id-partition-session`, so a reload restores the session instead of re-running the
+  `partitionSessionStorageKey(parentOrigin)` — one per dApp origin, since every same-site dApp
+  shares the store (#671) — so a reload restores the session instead of re-running the
   popup (#635). Its own record, not the accounts document: `LocalAccountSchemaV1`
   quarantines vault-less records and the hydrated view carries inert vault placeholders, so
   it could not be stored as an account. The deadline is the same `connectedUntil` the

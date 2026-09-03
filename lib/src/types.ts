@@ -54,8 +54,10 @@ export const STORAGE_CHALLENGE_KEY = "swarm-storage-challenge"
 export const STORAGE_KEY_LEASE_CACHE_PREFIX = "swarm-id-lease-v2"
 
 /**
- * The handed-over session a PARTITIONED proxy keeps, so a reload does not log
- * the user out of the dApp (#635).
+ * Key PREFIX for the handed-over session a PARTITIONED proxy keeps, so a reload
+ * does not log the user out of the dApp (#635). The key itself is per dApp
+ * origin — see {@link partitionSessionStorageKey}, which is what every reader
+ * and writer calls.
  *
  * Its own key rather than the accounts document, and not by preference:
  * `LocalAccountSchemaV1` quarantines vault-less records, and the hydrated
@@ -77,6 +79,21 @@ export const STORAGE_KEY_PARTITION_SESSION = "swarm-id-partition-session"
  */
 export function leaseCacheStorageKey(accountId: string): string {
   return `${STORAGE_KEY_LEASE_CACHE_PREFIX}:${accountId.toLowerCase()}`
+}
+
+/**
+ * Where a partitioned session is stored, per dApp origin.
+ *
+ * The store this lands in is partitioned by (iframe origin, top-level SITE),
+ * and a site ignores subdomains and ports — so `app1.foo.com` and
+ * `app2.foo.com`, or two localhost ports, share it. Under one fixed name the
+ * second dApp to connect overwrote the first one's session, and the first came
+ * back to a record belonging to somebody else, read it as "no session", and
+ * needed the popup again — both of them, on every reload (#671). The origin
+ * belongs in the key, as it already does in the stamper's.
+ */
+export function partitionSessionStorageKey(parentOrigin: string): string {
+  return `${STORAGE_KEY_PARTITION_SESSION}:${parentOrigin}`
 }
 
 // ============================================================================
@@ -1751,7 +1768,7 @@ export type AuthData = z.infer<typeof AuthDataSchema>
 
 /**
  * A partitioned session at rest (#635), under
- * {@link STORAGE_KEY_PARTITION_SESSION}.
+ * {@link partitionSessionStorageKey}.
  *
  * It holds the payload the connect popup handed over — plus the deadline the
  * session was given. In full, what is now at rest for the life of the session:

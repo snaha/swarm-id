@@ -13,7 +13,7 @@ All cross-origin communication via `postMessage` with Zod validation:
 Two authentication paths, decided by the storage probe (`utils/storage-probe.ts`):
 
 - **Unpartitioned**: popup writes to localStorage → storage event fires in the iframe → the iframe authenticates from shared storage.
-- **Partitioned**: popup → `window.opener.postMessage(setSecret)` with the account's synced projection → `handlePopupMessage` hydrates an in-memory account view and keeps the handover under `swarm-id-partition-session`, so a reload restores it. No storage event ever fires on this path.
+- **Partitioned**: popup → `window.opener.postMessage(setSecret)` with the account's synced projection → `handlePopupMessage` hydrates an in-memory account view and keeps the handover under `partitionSessionStorageKey(parentOrigin)` — one session per dApp origin, since the store is shared by every same-site dApp (#671) — so a reload restores it. No storage event ever fires on this path.
 
 ## Account bus (`bus/`)
 
