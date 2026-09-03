@@ -404,10 +404,11 @@ Not yet written:
   logout): a session restored while the gateway is **unreachable** stays up, and an account
   that has **never published** — no drive, so no feed to read — has nothing to check against.
   Either way the revoke waits for the next live overlap on the bus.
-- That check is revocation only. A **rotated signer key or moved default stamp** made while the
-  tab was closed is not adopted on restore; the session comes up on the handed-over view and
-  corrects at the next live overlap. Changes that arrive while it IS live are folded and
-  re-persisted, so they survive a reload.
+- That check asks only whether the connection ENDED — a missing entry, a `revokedAt` (Remove), or
+  a `disconnectedAt` newer than the connection the session came from (Disconnect). A **rotated
+  signer key or moved default stamp** made while the tab was closed is not adopted on restore;
+  the session comes up on the handed-over view and corrects at the next live overlap. Changes
+  that arrive while it IS live are folded and re-persisted, so they survive a reload.
 - Without TURN, WebRTC will not connect across restrictive NATs; those pairs fall back to the
   signaling-server relay.
 - A newcomer's join-time presence beat is dropped (its socket has no peers yet), so remote
