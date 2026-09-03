@@ -8,6 +8,14 @@ Where the two are genuinely cross-site, or the browser partitions regardless (Sa
 
 **Verified on real Safari** ([#584](https://github.com/snaha/swarm-id/issues/584)): measured on iOS 18.7 / Safari 26.6 against the DO deployment, ITP partitions the iframe, the `window.opener` handover reaches it, the hydrated view builds a working stamper (`uploadMode: user-stamp`), and a chunk uploads and reads back byte-identical. The device id also held across a reload. A **Safari private window** passes the same five checks, upload included; its partitioned store is still discarded when the window closes, which is by design. Still unrun on a device: the ~30-day eviction horizon ([#570](https://github.com/snaha/swarm-id/issues/570)) — two loads in one sitting says nothing about it.
 
+## Project status
+
+**Pre-production.** While the version is `0.x` we consider the project pre-production: there are no
+users to keep and no data to migrate, so backwards compatibility and migration are not required — a
+schema, wire format, storage key, or protocol may change in place, and the old path is deleted
+rather than kept beside the new one. `0.x` says the same thing to anyone consuming
+`@snaha/swarm-id` from npm. That changes at `1.0`, and this note with it.
+
 ## Architecture
 
 1. **Trusted Domain Model**: A trusted domain (e.g., `id.ethswarm.org`) hosts keystore UI and management
