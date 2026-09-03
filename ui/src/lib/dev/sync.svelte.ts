@@ -11,6 +11,7 @@ import {
 import { browser } from '$app/environment'
 
 import { getUtilizationStore, postageStampsStore } from '$lib/dev/postage-stamps.svelte'
+import { accountBusStore } from '$lib/stores/account-bus'
 import { accountsStore } from '$lib/stores/accounts.svelte'
 import { networkSettingsStore } from '$lib/stores/network-settings.svelte'
 
@@ -53,6 +54,7 @@ const getSyncAccount = () => {
       postageStampsStore,
       utilizationStore: utilStore,
       utilizationUploader: utilUploader,
+      liveDeviceIds: () => accountBusStore.liveDeviceIds(),
     })
   }
 

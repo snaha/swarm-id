@@ -80,6 +80,14 @@ export interface SyncAccountOptions {
 
   /** Debounced uploader for batch utilization state */
   utilizationUploader: DebouncedUtilizationUploader
+
+  /**
+   * Devices heard live on the account bus (`PresenceTracker`), unioned into
+   * the partition rival set so this one-shot coordinator and the proxy's agree
+   * about who the rivals are. Optional: a caller with no bus has only the
+   * registry's recent sign-ins to go on.
+   */
+  liveDeviceIds?: () => string[]
 }
 
 /**
@@ -126,6 +134,7 @@ export function createSyncAccount(
     postageStampsStore,
     utilizationStore,
     utilizationUploader,
+    liveDeviceIds,
   } = options
 
   /**
@@ -339,12 +348,16 @@ export function createSyncAccount(
       // This path listed every device the account had ever seen, tombstoned and
       // long-dead alike, so the two coordinators disagreed about who the rivals
       // were — and each dead entry costs an absent intent read on every acquire.
-      knownDeviceIds: () =>
-        activeDeviceIds(
-          accountsStore.getAccount(new EthAddress(accountId))?.devices ?? [],
-          Date.now(),
-          KNOWN_DEVICE_MAX_AGE_MS,
-        ),
+      knownDeviceIds: () => [
+        ...new Set([
+          ...activeDeviceIds(
+            accountsStore.getAccount(new EthAddress(accountId))?.devices ?? [],
+            Date.now(),
+            KNOWN_DEVICE_MAX_AGE_MS,
+          ),
+          ...(liveDeviceIds?.() ?? []),
+        ]),
+      ],
       backupSigner: accountKey,
       swarmEncryptionKey: hexToUint8Array(encryptionKey),
       partitionCount,

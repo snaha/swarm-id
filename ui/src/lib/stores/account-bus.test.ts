@@ -137,6 +137,13 @@ function makeAccount(overrides?: Partial<SignedInAccount>): SignedInAccount {
   } as SignedInAccount
 }
 
+/** What a transport was asked to send, minus the presence beats: most tests
+ *  ask "did the delta go out", and the beat on join would count as one. */
+const deltasPublished = (transport: (typeof transports)[number]) =>
+  transport.publish.mock.calls
+    .map(([message]) => message)
+    .filter((message) => message.type !== 'presence')
+
 /** The join derives a topic (two HMACs + importKey), so it is not synchronous. */
 const settle = () => new Promise((resolve) => setTimeout(resolve, 60))
 /** Past the publish debounce — a "did not publish" assertion that resolves
@@ -145,6 +152,14 @@ const settle = () => new Promise((resolve) => setTimeout(resolve, 60))
 const settlePublish = () => new Promise((resolve) => setTimeout(resolve, PUBLISH_DEBOUNCE_MS + 100))
 
 describe('accountBusStore', () => {
+  // Node has no `localStorage`; the beat names this device by
+  // `getOrCreateDeviceId()`, which keeps it there.
+  const localStorageFake = new Map<string, string>()
+  vi.stubGlobal('localStorage', {
+    getItem: (key: string) => localStorageFake.get(key) ?? null,
+    setItem: (key: string, value: string) => void localStorageFake.set(key, value),
+  })
+
   beforeEach(() => {
     accountBusStore.leave()
     vi.mocked(applyAccountDelta).mockClear()
@@ -174,7 +189,7 @@ describe('accountBusStore', () => {
     accountBusStore.publish(account)
     await settlePublish()
 
-    const published = transports[0].publish.mock.calls.map(([message]) => message)
+    const published = deltasPublished(transports[0])
     expect(published).toHaveLength(1)
     expect(published[0].type).toBe('account-delta')
     for (const app of published[0].snapshot.connectedApps) {
@@ -197,7 +212,7 @@ describe('accountBusStore', () => {
     )
     await settlePublish()
 
-    expect(transports[0].publish).not.toHaveBeenCalled()
+    expect(deltasPublished(transports[0])).toHaveLength(0)
   })
 
   // The debounce holds ONE pending account. A commit for another account
@@ -218,7 +233,7 @@ describe('accountBusStore', () => {
     )
     await settlePublish()
 
-    const published = transports[0].publish.mock.calls.map(([message]) => message)
+    const published = deltasPublished(transports[0])
     expect(published).toHaveLength(1)
     expect(published[0].snapshot.accountId).toBe(account.id.toHex())
   })
@@ -240,7 +255,7 @@ describe('accountBusStore', () => {
     await settle()
 
     expect(transports).toHaveLength(1)
-    expect(transports[0].publish).toHaveBeenCalledTimes(1)
+    expect(deltasPublished(transports[0])).toHaveLength(1)
   })
 
   it('closes the previous room when the account switches', async () => {
@@ -277,7 +292,47 @@ describe('accountBusStore', () => {
     // Folding is not a change of ours: echoing it back is a loop between two
     // devices that never settles.
     await settlePublish()
-    expect(transports[0].publish).not.toHaveBeenCalled()
+    expect(deltasPublished(transports[0])).toHaveLength(0)
+  })
+
+  // Liveness rides the bus (docs/Account-Bus.md, presence): this tab beats so
+  // the account's other contexts count this device, and listens so the dev
+  // device list can say who is online without a Swarm read.
+  it('announces this device on join', async () => {
+    accountBusStore.join(makeAccount())
+    await settle()
+
+    expect(transports[0].publish).toHaveBeenCalledWith({
+      type: 'presence',
+      accountId: 'aa'.repeat(20),
+      fromDeviceId: localStorageFake.get('swarm-id-device-id'),
+    })
+  })
+
+  it("lists a peer's beat as live, but not this device's own", async () => {
+    accountBusStore.join(makeAccount())
+    await settle()
+
+    transports[0].deliver?.({
+      type: 'presence',
+      accountId: 'aa'.repeat(20),
+      fromDeviceId: 'peer-device',
+    })
+    transports[0].deliver?.({
+      type: 'presence',
+      accountId: 'aa'.repeat(20),
+      fromDeviceId: localStorageFake.get('swarm-id-device-id'),
+    })
+    transports[0].deliver?.({
+      type: 'presence',
+      accountId: 'bb'.repeat(20),
+      fromDeviceId: 'peer-in-another-room',
+    })
+
+    expect(accountBusStore.liveDeviceIds()).toEqual(['peer-device'])
+
+    accountBusStore.leave()
+    expect(accountBusStore.liveDeviceIds()).toEqual([])
   })
 
   // Malformed or unknown traffic is dropped by the bus's own schema — the fold

@@ -26,6 +26,7 @@
   import { Button } from '$lib/components/ui/button'
   import { refreshAccountFromSwarm } from '$lib/dev/refresh-account-from-swarm'
   import { syncStore } from '$lib/dev/sync.svelte'
+  import { accountBusStore } from '$lib/stores/account-bus'
   import { networkSettingsStore } from '$lib/stores/network-settings.svelte'
 
   const { account }: { account: SyncedAccount } = $props()
@@ -34,6 +35,9 @@
   // proxy's per-tick `leasedUntil` advances even when `storage` events don't
   // cross the iframe/tab boundary.
   const LEASE_CACHE_POLL_MS = 3_000
+  /** Quick enough that an Online badge follows a presence beat without a
+   *  visible lag, and it re-renders the relative timestamps for free. */
+  const RERENDER_MS = 5_000
 
   const thisDeviceId = browser ? getOrCreateDeviceId() : undefined
 
@@ -154,8 +158,7 @@
   let tick = $state(0)
   $effect(() => {
     if (!browser) return
-    // Re-render the relative timestamp every 30 s.
-    const timer = setInterval(() => (tick = tick + 1), 30_000)
+    const timer = setInterval(() => (tick = tick + 1), RERENDER_MS)
     return () => clearInterval(timer)
   })
 
@@ -181,8 +184,12 @@
     // `tick` so the self lease-expiry check re-evaluates over time.
     void tick
     const now = Date.now()
+    // Liveness comes from the account bus (presence beats), not from any
+    // stored timestamp: `lastSignedInAt` is a sign-in, not a heartbeat.
+    const live = accountBusStore.liveDeviceIds()
     return (account.devices ?? []).map((d) => {
       const isThis = d.deviceId === thisDeviceId
+      const isOnline = isThis || live.includes(d.deviceId)
       if (isThis) {
         // Self: read from the shared localStorage lease cache (proxy is the
         // sole writer). The cache key is per-account and machine-local, so a
@@ -195,6 +202,7 @@
         return {
           ...d,
           isThis: true,
+          isOnline,
           isActive: active,
           partition: active ? self!.partition : undefined,
         }
@@ -204,6 +212,7 @@
       return {
         ...d,
         isThis: false,
+        isOnline,
         isActive: holderEntry !== undefined,
         partition: holderEntry?.partition,
       }
@@ -296,6 +305,9 @@
             <div class="flex gap-2 pl-6">
               {#if row.isThis}
                 <span class={`${BADGE_CLASS} bg-primary text-primary-foreground`}>This device</span>
+              {/if}
+              {#if row.isOnline}
+                <span class={`${BADGE_CLASS} bg-success text-success-foreground`}>Online</span>
               {/if}
               {#if row.isActive}
                 <span class={`${BADGE_CLASS} bg-success text-success-foreground`}>

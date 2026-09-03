@@ -74,6 +74,7 @@ import { AccountBus, BroadcastChannelTransport } from "./bus/account-bus"
 import { SignalingTransport } from "./bus/signaling-transport"
 import { deriveBusContext } from "./bus/bus-context"
 import type { BusContext } from "./bus/bus-context"
+import { PresenceTracker, PRESENCE_INTERVAL_MS } from "./bus/presence"
 import type { BeeRequestOptions } from "@ethersphere/bee-js"
 import {
   uploadData,
@@ -377,6 +378,9 @@ export class SwarmIdProxy {
   private isConnecting: boolean = false
   private parentWindow: WindowProxy | undefined
   private bus: AccountBus
+  /** Who else is live in the account's room, from their `presence` beats. */
+  private presence = new PresenceTracker()
+  private presenceTimer: ReturnType<typeof setInterval> | undefined
   private subsidisedGatewayUrl: string | undefined
   /**
    * The write path (lock + partition lease + stamp flush) for the current
@@ -1031,7 +1035,8 @@ export class SwarmIdProxy {
     // no longer belongs to, and overwrite a remover that a live join owns.
     if (generation !== this.busJoinGeneration) return
 
-    if (this.busTopic !== context.topic) {
+    const joiningRoom = this.busTopic !== context.topic
+    if (joiningRoom) {
       // Leave the old room BEFORE anything can throw. A switch that fails
       // otherwise leaves this session publishing the new account's traffic
       // into the previous account's channel — the leak the account-derived
@@ -1052,11 +1057,23 @@ export class SwarmIdProxy {
         return
       }
       this.busTopic = context.topic
+      // One beat per room, started here rather than below: the lines below
+      // run again on every storage event while the signaling attach keeps
+      // failing (`busJoinedKey` stays unset), and a second interval would
+      // double the beat for the life of the page.
+      this.presenceTimer = setInterval(
+        () => this.publishPresence(),
+        PRESENCE_INTERVAL_MS,
+      )
     }
     // Reached only with the local transport live for `context.topic`, so this
     // is the account a publish now actually reaches — whether the room was just
     // switched or was already the right one.
     this.busBoundAccountId = accountId
+    // Announce at once, so a sibling context does not wait a whole interval to
+    // count us. Remote peers hear the first interval beat: the signaling
+    // socket below has not opened yet, and a publish with no peers is dropped.
+    if (joiningRoom) this.publishPresence()
 
     if (this.signalingUrl && !this.removeBusSignaling) {
       try {
@@ -1084,9 +1101,32 @@ export class SwarmIdProxy {
     this.busJoinedKey = derivationKey
   }
 
+  /**
+   * "This device is live", to the account's room. Reads the room and the
+   * device id at fire time — the same guard `publishAccountDelta` carries —
+   * so a beat scheduled for one account can never name it into another's
+   * room during a switch, and one that fires before auth finished says nothing.
+   */
+  private publishPresence(): void {
+    const accountId = this.busBoundAccountId
+    const deviceId = this.deviceId
+    if (!accountId || !deviceId) return
+    this.bus.publish({ type: "presence", accountId, fromDeviceId: deviceId })
+  }
+
+  /** Stop beating and forget who was live: the next room starts from nothing. */
+  private stopPresence(): void {
+    if (this.presenceTimer !== undefined) {
+      clearInterval(this.presenceTimer)
+      this.presenceTimer = undefined
+    }
+    this.presence.clear()
+  }
+
   /** Leave the account's bus room: both transports detached and closed, and
    *  every latch cleared so the next join is a fresh one. */
   private detachBusTransports(): void {
+    this.stopPresence()
     this.removeBusSignaling?.()
     this.removeBusSignaling = undefined
     this.removeBusLocal?.()
@@ -1119,6 +1159,7 @@ export class SwarmIdProxy {
     // with no handle left to close it. (`AccountBus.addTransport` also
     // refuses once closed; this just avoids opening the socket at all.)
     this.busJoinGeneration += 1
+    this.stopPresence()
     this.removeBusLocal = undefined
     this.removeBusSignaling = undefined
     this.busTopic = undefined
@@ -1436,6 +1477,19 @@ export class SwarmIdProxy {
         }
         case "account-delta": {
           this.applyAccountDelta(message.snapshot)
+          return
+        }
+        case "presence": {
+          // A sibling tab of this device shares the id over the local
+          // transport; it is not a rival. A beat naming another account did
+          // not come from this room's scope (belt and braces, as elsewhere).
+          if (
+            message.accountId !== this.busBoundAccountId ||
+            message.fromDeviceId === this.deviceId
+          ) {
+            return
+          }
+          this.presence.observe(message.fromDeviceId, Date.now())
           return
         }
       }
@@ -2376,12 +2430,31 @@ export class SwarmIdProxy {
   }
 
   /**
-   * Current device IDs registered for `accountId`, read fresh from shared
-   * storage so the partition-intent round (Phase 2) reflects devices that
-   * announced after the coordinator was built. Returns [] on any error — the
-   * lease then falls back to the guard+TTL acquire path.
+   * The partition rival set for `accountId`: every device heard live on the
+   * account bus, plus the recently signed-in devices of the stored registry
+   * (read fresh, so the intent round reflects a device that announced after
+   * the coordinator was built).
+   *
+   * The bus half is the liveness signal — a peer beating in the room is alive
+   * by construction, whether or not its roster append ever landed. The
+   * registry half is the bootstrap for contexts with no bus (no signaling
+   * server configured) and for a device that just signed in and has not
+   * beaten yet; it is bounded to `KNOWN_DEVICE_MAX_AGE_MS` because removed
+   * (tombstoned) devices won't write, and long-dead ghosts (the device list is
+   * append-only) would each add an absent intent read to every acquire — on a
+   * flaky gateway that can push a single acquire past its timeout, so a live
+   * device can't claim even a FREE partition. A genuinely-live holder this
+   * prune drops is still caught by the deviceId-independent occupancy beacon.
+   *
+   * On any storage error the bus half alone is returned — the lease then falls
+   * back to the guard+TTL acquire path against whoever is live.
    */
   private knownDeviceIdsForAccount(accountId: string): string[] {
+    const now = Date.now()
+    const live =
+      this.busBoundAccountId === accountId
+        ? this.presence.liveDeviceIds(now)
+        : []
     try {
       const account =
         this.partitionAccount?.id.toHex() === accountId
@@ -2389,21 +2462,15 @@ export class SwarmIdProxy {
           : createAccountsStorageManager()
               .load()
               .find((a) => a.id.toHex() === accountId)
-      if (!account || isSignedOutAccount(account)) return []
-      // Bound the partition rival set to recently-active devices: removed
-      // (tombstoned) devices won't write, and long-dead ghosts from old sessions
-      // (the device list is append-only) would each add an absent intent read to
-      // every acquire — on a flaky gateway that can push a single acquire past
-      // its timeout, so a live device can't claim even a FREE partition. A
-      // genuinely-live holder is still caught by the deviceId-independent
-      // occupancy beacon, so pruning here only removes dead-device cost.
-      return activeDeviceIds(
-        account.devices,
-        Date.now(),
-        KNOWN_DEVICE_MAX_AGE_MS,
-      )
+      if (!account || isSignedOutAccount(account)) return live
+      return [
+        ...new Set([
+          ...activeDeviceIds(account.devices, now, KNOWN_DEVICE_MAX_AGE_MS),
+          ...live,
+        ]),
+      ]
     } catch {
-      return []
+      return live
     }
   }
 

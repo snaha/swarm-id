@@ -22,10 +22,13 @@
  */
 import {
   AccountBus,
+  PRESENCE_INTERVAL_MS,
+  PresenceTracker,
   SignalingTransport,
   accountDeltaSnapshot,
   accountToStateSnapshot,
   deriveBusContext,
+  getOrCreateDeviceId,
 } from '@snaha/swarm-id'
 import type { SyncedAccount } from '@snaha/swarm-id'
 
@@ -40,6 +43,11 @@ import { applyAccountDelta } from '$lib/stores/account-delta'
 export const PUBLISH_DEBOUNCE_MS = 300
 
 let bus: AccountBus | undefined
+/** Who else is live in the room, from their `presence` beats — the same
+ *  tracker the proxy keeps, so the dev device list can say "online" without
+ *  any Swarm read. Rebuilt per room; never persisted. */
+const presence = new PresenceTracker()
+let presenceTimer: ReturnType<typeof setInterval> | undefined
 /** Detaches the delta consumer; the bus outlives no join, but a stale handler
  *  folding another account's room would. */
 let unsubscribe: (() => void) | undefined
@@ -57,6 +65,11 @@ let pending: SyncedAccount | undefined
 let generation = 0
 
 function closeBus(): void {
+  if (presenceTimer !== undefined) {
+    clearInterval(presenceTimer)
+    presenceTimer = undefined
+  }
+  presence.clear()
   unsubscribe?.()
   unsubscribe = undefined
   bus?.close()
@@ -91,7 +104,14 @@ async function attach(account: SyncedAccount, forGeneration: number): Promise<vo
   // device's UNpartitioned contexts — they read storage, and no storage event
   // crosses a device boundary. `applyAccountDelta` commits with `skipSync`, so
   // this never publishes back.
+  const deviceId = getOrCreateDeviceId()
   unsubscribe = bus.subscribe((message) => {
+    if (message.type === 'presence') {
+      // Our own id is this device's unpartitioned proxy, not a peer.
+      if (message.accountId !== joinedAccountId || message.fromDeviceId === deviceId) return
+      presence.observe(message.fromDeviceId, Date.now())
+      return
+    }
     if (message.type !== 'account-delta') return
     // A delta naming a different account did not come from this room's scope.
     // The topic is derived from THIS account's key, so this is belt and braces
@@ -102,6 +122,14 @@ async function attach(account: SyncedAccount, forGeneration: number): Promise<vo
     if (message.snapshot.accountId !== joinedAccountId) return
     applyAccountDelta(message.snapshot)
   })
+  // "This device is live", now and every interval. Captured, not read back:
+  // a beat belongs to the room it was armed for, and `closeBus` clears the
+  // timer before any other room is joined.
+  const room = bus
+  const beat = () =>
+    room.publish({ type: 'presence', accountId: joinedAccountId, fromDeviceId: deviceId })
+  beat()
+  presenceTimer = setInterval(beat, PRESENCE_INTERVAL_MS)
 }
 
 function publishNow(account: SyncedAccount): void {
@@ -135,6 +163,15 @@ export const accountBusStore = {
     attaching = attach(account, forGeneration).catch((error: unknown) => {
       console.error('[AccountBus] Failed to join the account room:', error)
     })
+  },
+
+  /**
+   * Device ids heard live in the joined room within the presence window. Not
+   * reactive — this is a plain module, not a rune store — so a view reads it
+   * on its own clock (the dev device list already re-derives on a tick).
+   */
+  liveDeviceIds(): string[] {
+    return presence.liveDeviceIds(Date.now())
   },
 
   /** Leave the room (sign-out, account cleared, page teardown). */

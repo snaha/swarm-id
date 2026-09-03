@@ -160,6 +160,7 @@ import {
   STORAGE_KEY_PARTITION_SESSION,
 } from "./types"
 import { KNOWN_DEVICE_MAX_AGE_MS } from "./utils/active-devices"
+import { PRESENCE_INTERVAL_MS, PRESENCE_MAX_AGE_MS } from "./bus/presence"
 import { mergeDevicesList } from "./sync/merge-snapshot"
 import { DEFAULT_BEE_NODE_URL } from "./schemas"
 import type {
@@ -2439,6 +2440,146 @@ describe("SwarmIdProxy partitioned write enablement", () => {
   // a same-partition BroadcastChannel. Every path that resolves a connection
   // must attach it — the unpartitioned ones too, or the bus only ever exists
   // on Safari (docs/Account-Bus.md, phase 2).
+  // Liveness rides the bus (docs/Account-Bus.md, presence): a device beating
+  // in the room is alive by construction, so the rival set reads it instead of
+  // a stored timestamp nothing refreshes.
+  describe("presence", () => {
+    const ACCOUNT_ID = "aa".repeat(20)
+
+    type Deps = { deps: { knownDeviceIds: () => string[] } }
+    const knownDeviceIds = () =>
+      (
+        vi.mocked(BatchWriteCoordinator).mock.results.at(-1)!.value as Deps
+      ).deps.knownDeviceIds()
+
+    async function connect(): Promise<void> {
+      const challenge = await startPartitionedConnect()
+      await sendSetSecret(challenge, {
+        account: serializeSyncedAccount(makeSyncedAccount()),
+      })
+      await awaitBusJoin()
+    }
+
+    /** Every beat this proxy publishes on the bus, in order. */
+    function recordBeats(channel: BroadcastChannel): { type: string }[] {
+      const seen: { type: string }[] = []
+      channel.addEventListener("message", (event) => {
+        const message = (event as MessageEvent).data as { type: string }
+        if (message.type === "presence") seen.push(message)
+      })
+      return seen
+    }
+
+    it("announces this device on joining the room, and every interval", async () => {
+      // Only the interval is faked: BroadcastChannel delivery and `flushBus`
+      // ride the real event loop.
+      vi.useFakeTimers({ toFake: ["setInterval", "clearInterval"] })
+      const busChannel = new BroadcastChannel(accountChannelName)
+      const beats = recordBeats(busChannel)
+      try {
+        await connect()
+        await flushBus()
+        expect(beats).toHaveLength(1)
+        const beat = BusMessageSchema.parse(beats[0])
+        expect(beat).toEqual({
+          type: "presence",
+          accountId: ACCOUNT_ID,
+          fromDeviceId: localStorageFake.getItem("swarm-id-device-id"),
+        })
+
+        vi.advanceTimersByTime(PRESENCE_INTERVAL_MS)
+        await flushBus()
+        expect(beats).toHaveLength(2)
+
+        proxy.destroy()
+        vi.advanceTimersByTime(PRESENCE_INTERVAL_MS)
+        await flushBus()
+        expect(beats).toHaveLength(2)
+      } finally {
+        vi.useRealTimers()
+        busChannel.close()
+      }
+    })
+
+    it("counts a beating peer as a rival until its beats stop", async () => {
+      const busChannel = new BroadcastChannel(accountChannelName)
+      try {
+        await connect()
+        expect(knownDeviceIds()).not.toContain("peer-live")
+
+        busChannel.postMessage({
+          type: "presence",
+          accountId: ACCOUNT_ID,
+          fromDeviceId: "peer-live",
+        })
+        // Not rivals: a beat for another account's room, and this device's
+        // own id from a sibling tab.
+        busChannel.postMessage({
+          type: "presence",
+          accountId: "bb".repeat(20),
+          fromDeviceId: "peer-elsewhere",
+        })
+        busChannel.postMessage({
+          type: "presence",
+          accountId: ACCOUNT_ID,
+          fromDeviceId: localStorageFake.getItem("swarm-id-device-id"),
+        })
+        await flushBus()
+
+        const rivals = knownDeviceIds()
+        expect(rivals).toContain("peer-live")
+        expect(rivals).not.toContain("peer-elsewhere")
+        expect(rivals).not.toContain(
+          localStorageFake.getItem("swarm-id-device-id"),
+        )
+
+        // Only the clock moves; timers and channel delivery stay real.
+        const later = Date.now() + PRESENCE_MAX_AGE_MS + 1
+        vi.spyOn(Date, "now").mockReturnValue(later)
+        expect(knownDeviceIds()).not.toContain("peer-live")
+      } finally {
+        vi.restoreAllMocks()
+        busChannel.close()
+      }
+    })
+
+    // A rival set is per account, so a switch must FORGET the old room's live
+    // peers, not just stop hearing them: they are another account's devices,
+    // and nothing would ever age them out of a tracker that survives the
+    // switch. `destroy` clears the same tracker; this is the other caller.
+    it("forgets the previous room's live peers on a switch", async () => {
+      seedConnectedAccount()
+      await dispatch(
+        { type: "parentIdentify", requestId: "r1", metadata: { name: "dApp" } },
+        PARENT_ORIGIN,
+        parentWindow,
+      )
+      await awaitBusJoin()
+      const first = busTopicNow()
+
+      const previous = new BroadcastChannel(accountChannelName)
+      try {
+        previous.postMessage({
+          type: "presence",
+          accountId: ACCOUNT_ID,
+          fromDeviceId: "peer-live",
+        })
+        await flushBus()
+        expect(knownDeviceIds()).toContain("peer-live")
+
+        seedConnectedAccount({
+          account: { derivationKey: OTHER_DERIVATION_KEY },
+        })
+        rejoinBus()
+        await vi.waitFor(() => expect(busTopicNow()).not.toBe(first))
+
+        expect(knownDeviceIds()).not.toContain("peer-live")
+      } finally {
+        previous.close()
+      }
+    })
+  })
+
   describe("account-bus signaling transport", () => {
     const SIGNALING_URL = "ws://signaling.test"
 
