@@ -46,6 +46,7 @@ Master Key (from Passkey/SIWE challenge)
 - **demo/**: Demo dApp showing library integration
 - **docs-site/** ([AGENTS.md](docs-site/AGENTS.md)): Starlight (Astro) documentation website
 - **signaling/**: `@swarm-id/signaling` — account-bus signaling and relay server
+- **eslint-rules/**: `@swarm-id/eslint-rules` — the license-header lint rules every package shares
 
 Each package's own `AGENTS.md` holds what applies inside it, and is deliberately not repeated
 here: two copies of a rule is one copy that goes stale. `CLAUDE.md` imports them so they load
@@ -83,7 +84,7 @@ Before committing, you MUST pass `pnpm check:all` which runs filtered checks acr
 - **kebab-case** for all file and directory names
 - **Conventional commits**: `feat:`, `fix:`, `docs:`, etc.
 - **TypeScript execution**: Use `pnpx tsx` (not `npx ts-node`)
-- **Monorepo version pinning**: toolchain versions are pinned across the monorepo (eslint 9,
+- **Monorepo version pinning**: toolchain versions are pinned across the monorepo (eslint 10,
   vite 7, svelte 5.48, vite-plugin-svelte 6) — do NOT bump these in one package independently
   of the rest of the monorepo
 - **Recursive scripts: `pnpm -r run <script>`** — a bare `pnpm -r <script>` resolves to a

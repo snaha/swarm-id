@@ -1,0 +1,23 @@
+{
+  "name": "@swarm-id/eslint-rules",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Swarm Identity Management - shared eslint rules",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "check:all": "pnpm typecheck"
+  },
+  "devDependencies": {
+    "eslint": "10.9.1",
+    "svelte-eslint-parser": "1.8.1",
+    "typescript": "5.8.3"
+  },
+  "engines": {
+    "node": ">=22",
+    "pnpm": "11.x"
+  }
+}

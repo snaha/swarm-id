@@ -7,7 +7,8 @@ The identity UI is a SvelteKit SPA.
 - **Components**: shadcn-style primitives live in `src/lib/components/ui/`; app-level components
   in `src/lib/components/`; stores in `src/lib/stores/` (e.g. theming: `auto`/`light`/`dark`
   preference persisted in localStorage, applied as a `dark` class on `<html>`)
-- **License headers**: enforced by eslint (`eslint-plugin-notice` + shared svelte rule);
+- **License headers**: enforced by eslint via `@swarm-id/eslint-rules` (`license/header` for
+  TS/JS, `license/svelte-header` for Svelte — no third-party plugin);
   `pnpm --filter @swarm-id/ui format` auto-inserts them
 - **`BASE_PATH`** env var sets the SvelteKit base path at build time (`/id` in deployments)
 - **Dev mock stamp purchase** (`/dev` → Chain tab, backed by `src/lib/stores/dev-settings.svelte.ts`):

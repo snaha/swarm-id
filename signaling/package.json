@@ -29,12 +29,12 @@
     "zod": "4.1.13"
   },
   "devDependencies": {
+    "@swarm-id/eslint-rules": "workspace:*",
     "@types/node": "24.10.1",
     "@types/ws": "^8.18.1",
-    "@typescript-eslint/eslint-plugin": "8.48.1",
-    "@typescript-eslint/parser": "8.48.1",
-    "eslint": "9.39.1",
-    "eslint-plugin-notice": "^1.0.0",
+    "@typescript-eslint/eslint-plugin": "8.69.0",
+    "@typescript-eslint/parser": "8.69.0",
+    "eslint": "10.9.1",
     "prettier": "3.7.3",
     "typescript": "5.8.3",
     "vitest": "4.0.14"
