@@ -6,9 +6,9 @@
  *
  * Every context in the room publishes a `presence` on join and every
  * `PRESENCE_INTERVAL_MS`; a receiver notes the time it heard each device. A
- * device unheard for `PRESENCE_MAX_AGE_MS` — three missed beats — is no longer
- * live. That is the whole mechanism: the bus already knows who is in the room,
- * this only ties room membership to a `deviceId`.
+ * device unheard for `PRESENCE_MAX_AGE_MS` is no longer live. That is the whole
+ * mechanism: the bus already knows who is in the room, this only ties room
+ * membership to a `deviceId`.
  *
  * In memory only, and deliberately never persisted or published as state. A
  * `lastSeenAt` that rode the account snapshot would make every publish a byte
@@ -19,10 +19,21 @@
  */
 
 export const PRESENCE_INTERVAL_MS = 20_000
-/** Three missed beats. Well inside `KNOWN_DEVICE_MAX_AGE_MS` and past
- *  `LEASE_TTL_MS`, so a closed tab leaves the rival set about when its lease
- *  would have lapsed anyway. */
-export const PRESENCE_MAX_AGE_MS = 3 * PRESENCE_INTERVAL_MS
+
+/** What a hidden tab's interval decays to: Chrome clamps a backgrounded page's
+ *  timers to about once a minute (intensive throttling). */
+const THROTTLED_INTERVAL_MS = 60_000
+
+/**
+ * Three missed beats — of the THROTTLED interval, not ours. A window of three
+ * of our own beats sits exactly at a hidden tab's clamped cadence, so a
+ * backgrounded-but-live device would flap in and out of its peers' live sets:
+ * a blinking badge, and a coordinator repeatedly re-including the same peer in
+ * an idle-yield round. Being slow to drop a device that really left costs only
+ * an absent intent read, which is why the window errs long. Still well past
+ * `LEASE_TTL_MS` and far inside `KNOWN_DEVICE_MAX_AGE_MS`.
+ */
+export const PRESENCE_MAX_AGE_MS = 3 * THROTTLED_INTERVAL_MS
 
 // ponytail: no leave message; absence ages out in PRESENCE_MAX_AGE_MS (#572).
 export class PresenceTracker {

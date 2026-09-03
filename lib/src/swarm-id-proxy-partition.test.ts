@@ -2542,6 +2542,42 @@ describe("SwarmIdProxy partitioned write enablement", () => {
         busChannel.close()
       }
     })
+
+    // A rival set is per account, so a switch must FORGET the old room's live
+    // peers, not just stop hearing them: they are another account's devices,
+    // and nothing would ever age them out of a tracker that survives the
+    // switch. `destroy` clears the same tracker; this is the other caller.
+    it("forgets the previous room's live peers on a switch", async () => {
+      seedConnectedAccount()
+      await dispatch(
+        { type: "parentIdentify", requestId: "r1", metadata: { name: "dApp" } },
+        PARENT_ORIGIN,
+        parentWindow,
+      )
+      await awaitBusJoin()
+      const first = busTopicNow()
+
+      const previous = new BroadcastChannel(accountChannelName)
+      try {
+        previous.postMessage({
+          type: "presence",
+          accountId: ACCOUNT_ID,
+          fromDeviceId: "peer-live",
+        })
+        await flushBus()
+        expect(knownDeviceIds()).toContain("peer-live")
+
+        seedConnectedAccount({
+          account: { derivationKey: OTHER_DERIVATION_KEY },
+        })
+        rejoinBus()
+        await vi.waitFor(() => expect(busTopicNow()).not.toBe(first))
+
+        expect(knownDeviceIds()).not.toContain("peer-live")
+      } finally {
+        previous.close()
+      }
+    })
   })
 
   describe("account-bus signaling transport", () => {

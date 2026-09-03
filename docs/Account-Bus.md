@@ -110,7 +110,8 @@ account. Same service, no extra infrastructure; the default posture stays signal
   iframe drops its session immediately.
 - **Presence.** Every context beats `{ presence, accountId, fromDeviceId }` on joining the room
   and every 20 s (`lib/src/bus/presence.ts`); a receiver stamps its own clock and forgets a
-  device unheard for 60 s. This is the liveness signal: a peer beating in the room is alive by
+  device unheard for three minutes — three beats at the once-a-minute cadence a hidden tab's
+  timers are throttled to, so a backgrounded device does not flap out of the live set. This is the liveness signal: a peer beating in the room is alive by
   construction, at no Swarm cost, so the partition rival set (`knownDeviceIds`) is the live set
   unioned with the registry's recent sign-ins — the latter only as a bootstrap for a context with
   no bus. Nothing durable is written. A `lastSeenAt` riding the account snapshot was

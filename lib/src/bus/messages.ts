@@ -49,6 +49,11 @@ export const AccountDeltaMessageSchema = z.object({
   }),
 })
 
+/** The publishing device. Bounded like every other field on the wire: a
+ *  room-mate already holds the account keys and can do far worse, so this is
+ *  defense in depth, not a trust boundary. */
+const DeviceIdSchema = z.string().min(1).max(100)
+
 /** One slot-wait round, as every holder must read it: lower-case hex of a
  *  fixed width, so `parseInt(_, 16)` is a number for all of them or the
  *  message never reaches a handler. */
@@ -72,7 +77,7 @@ const LeaseRequestIdSchema = z.string().regex(/^[0-9a-f]{8}$/)
 export const LeaseRequestMessageSchema = z.object({
   type: z.literal("lease-request"),
   accountId: z.string().length(40),
-  fromDeviceId: z.string(),
+  fromDeviceId: DeviceIdSchema,
   requestId: LeaseRequestIdSchema.optional(),
 })
 
@@ -87,7 +92,7 @@ export const LeaseRequestMessageSchema = z.object({
 export const LeaseClaimMessageSchema = z.object({
   type: z.literal("lease-claim"),
   accountId: z.string().length(40),
-  fromDeviceId: z.string(),
+  fromDeviceId: DeviceIdSchema,
   requestId: LeaseRequestIdSchema,
 })
 
@@ -104,7 +109,7 @@ export const LeaseReleasedMessageSchema = z.object({
   type: z.literal("lease-released"),
   accountId: z.string().length(40),
   partition: z.number().int().min(0),
-  fromDeviceId: z.string(),
+  fromDeviceId: DeviceIdSchema,
   requestId: LeaseRequestIdSchema.optional(),
 })
 
@@ -118,7 +123,7 @@ export const LeaseReleasedMessageSchema = z.object({
 export const PresenceMessageSchema = z.object({
   type: z.literal("presence"),
   accountId: z.string().length(40),
-  fromDeviceId: z.string(),
+  fromDeviceId: DeviceIdSchema,
 })
 
 export const BusMessageSchema = z.discriminatedUnion("type", [
