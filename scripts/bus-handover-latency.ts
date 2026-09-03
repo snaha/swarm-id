@@ -31,7 +31,9 @@
  *
  *   # amount ≥ currentPrice (GET /chainstate) × 17280 blocks × days; the queen must hold the BZZ
  *   curl -X POST localhost:1633/stamps/1244160000/20   # → batchID; "batch not usable" for ~75 s
- *   pnpm --dir scripts install   # once: tsx + bee-js for the scripts folder (not a workspace member)
+ *   # once. --ignore-workspace or pnpm walks up, finds the workspace root and
+ *   # installs THAT instead, leaving this folder's deps unresolved.
+ *   pnpm --dir scripts install --ignore-workspace
  *   BATCH_ID=<batchID> SIGNER_KEY=<queen private key> pnpm --dir scripts bus-handover-latency [free] [bus] [idle] [dead]
  *
  * Optional: BEE_URL (default http://localhost:1633), SIGNALING_URL (default
@@ -196,16 +198,23 @@ function attachBus(
         requestId,
       })
     }
-    void device.coordinator.yieldForPeer().then((partition) => {
-      if (partition === undefined) return
-      bus.publish({
-        type: 'lease-released',
-        accountId,
-        partition,
-        fromDeviceId: device.id,
-        requestId,
+    device.coordinator
+      .yieldForPeer()
+      .then((partition) => {
+        if (partition === undefined) return
+        bus.publish({
+          type: 'lease-released',
+          accountId,
+          partition,
+          fromDeviceId: device.id,
+          requestId,
+        })
       })
-    })
+      // As in the proxy: a failed release write must not become an unhandled
+      // rejection that kills the run mid-row, past the per-row teardown.
+      .catch((error) => {
+        console.error('[handover] peer lease yield failed:', error)
+      })
   }
 
   bus.subscribe((message) => {
@@ -388,7 +397,8 @@ async function main(): Promise<void> {
   }
   console.log(
     "\nacquired = C's write call to its lease binding (intent round included); " +
-      "written = to the call's return; answer = C's first lease-request to the lease-released it woke on.",
+      "written = to the call's return; answer = C's write call to the lease-released it woke on, " +
+      "so it carries C's initial scan too.",
   )
   process.exit(0)
 }

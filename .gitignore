@@ -7,7 +7,9 @@ node_modules/
 demo/node_modules/
 popup/node_modules/
 
-# Lock files from non-root packages (root pnpm-lock.yaml is kept for workspace)
+# Lock files from non-root packages (root pnpm-lock.yaml is kept for workspace).
+# `scripts/` is deliberately NOT here: it is outside the workspace, so nothing
+# else pins its bee-js — its own lockfile is committed with it.
 demo/pnpm-lock.yaml
 popup/pnpm-lock.yaml
 
@@ -23,4 +25,3 @@ lib/test/live/.env
 # OS files
 .DS_Store
 Thumbs.db
-scripts/pnpm-lock.yaml
