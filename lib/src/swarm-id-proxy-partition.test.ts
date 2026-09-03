@@ -162,6 +162,7 @@ import {
 import { KNOWN_DEVICE_MAX_AGE_MS } from "./utils/active-devices"
 import { PRESENCE_INTERVAL_MS, PRESENCE_MAX_AGE_MS } from "./bus/presence"
 import { mergeDevicesList } from "./sync/merge-snapshot"
+import { foldAccountFromSwarm } from "./sync/fold-account-from-swarm"
 import { DEFAULT_BEE_NODE_URL } from "./schemas"
 import type {
   ConnectedApp,
@@ -976,6 +977,99 @@ describe("SwarmIdProxy partitioned write enablement", () => {
         expect(infos[infos.length - 1]?.canUpload).toBe(false)
       })
       expect(storedSession()).toBeUndefined()
+      foldedFromSwarm.value = undefined
+    })
+
+    /** Connect with the handover the popup really sends: the account's own
+     *  entry for this origin, whose `lastConnectedAt` is the instant being
+     *  connected (`saveConnection` runs before `sendSecretToOpener`). */
+    async function connectPartitionedAt(connectedAt: number): Promise<void> {
+      const challenge = await startPartitionedConnect()
+      await sendSetSecret(challenge, {
+        account: serializeSyncedAccount({
+          ...makeSyncedAccount(),
+          connectedApps: [
+            {
+              appUrl: PARENT_ORIGIN,
+              appName: "dApp",
+              lastConnectedAt: connectedAt,
+            },
+          ],
+        }),
+      })
+    }
+
+    // Disconnect and Remove both end a session, and both state it on the entry
+    // — but only Remove wrote the marker this check looked at. So a Disconnect
+    // made while the tab was closed came back still connected and still able to
+    // upload, for the rest of the session's 30 days (#667).
+    it("ends a restored session the account has since disconnected", async () => {
+      const connectedAt = Date.now()
+      await connectPartitionedAt(connectedAt)
+      foldedFromSwarm.value = {
+        account: {
+          ...makeSyncedAccount(),
+          connectedApps: [
+            {
+              appUrl: PARENT_ORIGIN,
+              appName: "dApp",
+              lastConnectedAt: connectedAt,
+              disconnectedAt: connectedAt + 1,
+            },
+          ],
+        },
+        devices: [],
+      }
+
+      await reload()
+
+      await vi.waitFor(() => {
+        const infos = messagesOfType("connectionInfoChanged")
+        expect(infos[infos.length - 1]?.canUpload).toBe(false)
+      })
+      expect(storedSession()).toBeUndefined()
+      foldedFromSwarm.value = undefined
+    })
+
+    // The other half of the rule, and the reason the comparison exists: a
+    // disconnect this session already reconnected past says nothing about it.
+    // Waiting on the fold first, so this proves the check RAN and declined
+    // rather than that it never happened.
+    it("keeps a restored session it reconnected after the disconnect", async () => {
+      const connectedAt = Date.now()
+      await connectPartitionedAt(connectedAt)
+      foldedFromSwarm.value = {
+        account: {
+          ...makeSyncedAccount(),
+          connectedApps: [
+            {
+              appUrl: PARENT_ORIGIN,
+              appName: "dApp",
+              lastConnectedAt: connectedAt,
+              disconnectedAt: connectedAt - 1000,
+            },
+          ],
+        },
+        devices: [],
+      }
+      vi.mocked(foldAccountFromSwarm).mockClear()
+
+      await reload()
+
+      await vi.waitFor(() =>
+        expect(vi.mocked(foldAccountFromSwarm)).toHaveBeenCalled(),
+      )
+      // The CALL is recorded before the continuation that would tear the
+      // session down, so waiting on it alone would also pass if the check had
+      // simply not got there yet. Settle the read and drain the microtasks
+      // behind it, and a surviving session means the check ran and declined.
+      await vi.mocked(foldAccountFromSwarm).mock.results.at(-1)?.value
+      await Promise.resolve()
+      await Promise.resolve()
+
+      const infos = messagesOfType("connectionInfoChanged")
+      expect(infos[infos.length - 1]?.canUpload).toBe(true)
+      expect(storedSession()).toBeTruthy()
       foldedFromSwarm.value = undefined
     })
   })

@@ -2318,15 +2318,31 @@ export class SwarmIdProxy {
 
     this.showAuthButton()
     this.emitConnectionInfoIfChanged()
-    void this.verifyRestoredSession()
+    // The handover's own record of when this connection began — read from the
+    // stored projection, not from the view just hydrated, which stamps
+    // `lastConnectedAt` afresh on every restore.
+    void this.verifyRestoredSession(
+      data.account.connectedApps.find((app) => app.appUrl === this.parentOrigin)
+        ?.lastConnectedAt,
+    )
   }
 
   /**
    * Read the account's PUBLISHED state once, on restore, and end the session if
-   * this origin has been revoked or dropped since. A check, not a fold — the
-   * view keeps what was handed over, and any other change (a rotated signer
-   * key, a moved default stamp) is adopted from the bus at the next live
-   * overlap, as it was before #635.
+   * this origin's connection has ended since. A check, not a fold — the view
+   * keeps what was handed over, and any other change (a rotated signer key, a
+   * moved default stamp) is adopted from the bus at the next live overlap, as
+   * it was before #635.
+   *
+   * Ended means what it means everywhere else: the entry is gone, `revokedAt`
+   * (Remove), or a `disconnectedAt` newer than the connection this session came
+   * from (Disconnect). Both buttons state the end on the entry — the bus strips
+   * `appSecret`/`connectedUntil`, so the entry is the only place it can be
+   * said — and testing only the Remove marker let a Disconnect made while the
+   * tab was closed come back still connected and still able to upload, for the
+   * rest of the session's 30 days (#667). The comparison is `connectedAt`, the
+   * same guard `restoreLocalSessionFields` uses live: a disconnect older than
+   * our connection was answered by that connection.
    *
    * Background, and deliberately fail-open: a gateway that cannot be reached is
    * not evidence of a revoke, and refusing the session for it would make every
@@ -2335,7 +2351,9 @@ export class SwarmIdProxy {
    * revoke also waits for a live overlap. Both holes are in
    * `docs/Account-Bus.md`'s Known gaps.
    */
-  private async verifyRestoredSession(): Promise<void> {
+  private async verifyRestoredSession(
+    connectedAt: number | undefined,
+  ): Promise<void> {
     const account = this.partitionAccount
     if (!account) return
     try {
@@ -2348,14 +2366,22 @@ export class SwarmIdProxy {
       const app = folded.account.connectedApps.find(
         (entry) => entry.appUrl === this.parentOrigin,
       )
-      // Revocation only. The published form is `portableConnectedApp`, which
-      // strips `connectedUntil` along with `appSecret` — the deadline belongs
-      // to the context that issued it, and this session's copy is the record's
-      // own, already enforced on read.
-      const ended = app === undefined || app.revokedAt !== undefined
+      // `connectedUntil` is deliberately not read: the published form is
+      // `portableConnectedApp`, which strips it along with `appSecret` — the
+      // deadline belongs to the context that issued it, and this session's copy
+      // is the record's own, already enforced on read.
+      //
+      // A missing `connectedAt` is not evidence that we connected after the
+      // disconnect, so it reads as 0 and the disconnect stands. That is not the
+      // offline case the fail-open below protects: the answer arrived.
+      const ended =
+        app === undefined ||
+        app.revokedAt !== undefined ||
+        (app.disconnectedAt !== undefined &&
+          app.disconnectedAt > (connectedAt ?? 0))
       if (!ended) return
       console.info(
-        "[Proxy] The restored session was revoked while this page was closed",
+        "[Proxy] The restored session was ended while this page was closed",
       )
       this.clearAuthData()
       this.emitConnectionInfoIfChanged()
