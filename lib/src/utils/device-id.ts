@@ -41,6 +41,14 @@ export function getDeviceId(): string | undefined {
  * created. A caller with nothing to say passes nothing and the stored label
  * stands: the name must not be blanked by a context that does not know it.
  *
+ * A replacement carries `nameUpdatedAt`, the name's own merge clock, without
+ * which the correction never left this device: `mergeDevicesList` ranks records
+ * on sign-in recency, a rename moves none of it, and a tie favours the local
+ * copy — so every other context kept its stale label forever (#663). Only an
+ * ACTUAL change stamps it. Both callers are polls, and a clock that moved every
+ * time a caller passed the name it already stored would make every quiet round
+ * a byte change to persist, which is the churn #652 removed.
+ *
  * Touches neither `removedAt` nor `lastSignedInAt` on an existing entry. Both
  * callers are refresh paths — the proxy's throttled roster poll and the UI's
  * periodic fold — and a poll is not a sign-in: clearing our own tombstone here
@@ -61,7 +69,11 @@ export function mergeDevices(
 
   if (found) {
     return existing.map((d) =>
-      d.deviceId === currentDeviceId ? { ...d, name: deviceName ?? d.name } : d,
+      d.deviceId === currentDeviceId &&
+      deviceName !== undefined &&
+      deviceName !== d.name
+        ? { ...d, name: deviceName, nameUpdatedAt: Date.now() }
+        : d,
     )
   }
 
@@ -159,10 +171,17 @@ export function detectDeviceName(): string {
  * schemeful site (eTLD+1) and may drop the port. Two same-site dApps —
  * `app1.foo.com` and `app2.foo.com`, or two localhost ports — therefore share
  * ONE partition and one device row, whose name flips to whichever announced
- * last, each flip counting as a registry change. Cosmetic churn in a rare
- * config, and the alternative (naming by site) would label the common case
- * uselessly, so the finer name wins. If it ever matters, the fix is to key the
- * name on the partition rather than the origin.
+ * last.
+ *
+ * Each flip now costs more than it did. While the name carried no clock of its
+ * own the flip lost every remote tie and stayed local (a save and a storage
+ * event); with `nameUpdatedAt` (#663) it wins the overlay everywhere, so an
+ * alternation is a registry save, a feed publish, and a fold-and-persist on
+ * every peer — the churn class #652 went hunting for, in a config rare enough
+ * that it has never been observed. Still cosmetic, and the alternative (naming
+ * by site) would label the common case uselessly, so the finer name wins. If
+ * it ever matters, the fix is to key the name on the partition rather than the
+ * origin, which makes the two announcers agree instead of alternating.
  */
 export function partitionDeviceName(appOrigin: string): string {
   const deviceName = detectDeviceName()
@@ -226,6 +245,10 @@ const DEVICE_COMPARED_FIELDS = Object.entries({
   deviceId: "all",
   createdAt: "all",
   name: "all",
+  // Cannot move without `name` moving (`mergeDevices` stamps it only on an
+  // actual change), so counting it changes nothing today. Listed as "all"
+  // because a rename IS worth a save, and because the record must stay total.
+  nameUpdatedAt: "all",
   removedAt: "all",
   lastSignedInAt: "all",
 } satisfies Record<keyof Device, "all" | "peers-only">) as [

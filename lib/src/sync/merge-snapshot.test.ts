@@ -132,6 +132,57 @@ describe("mergeSnapshotWithRemote — devices union", () => {
     expect(entry?.removedAt).toBe(5_000_000)
   })
 
+  // #643 corrects a partition device's label — three identical "Safari on Mac"
+  // rows become one per dApp — on whichever context learned the better name.
+  // A rename moves no clock this merge ranks on, and a tie favours local, so
+  // until the name had a clock of its own every OTHER context kept its stale
+  // copy forever (#663). #643's own test pins only the local view, so nothing
+  // went red.
+  it("a rename propagates though it carries no sign-in recency", () => {
+    const stale = {
+      ...makeDevice(OTHER_DEVICE_ID, 1_000_000),
+      name: "Safari on Mac",
+    }
+    const renamed = {
+      ...makeDevice(OTHER_DEVICE_ID, 1_000_000),
+      name: "Safari on Mac · a.example",
+      nameUpdatedAt: 7_000_000,
+    }
+    const result = mergeSnapshotWithRemote(
+      makeSnapshot({ devices: [stale] }), // local: wins the recency tie
+      makeSnapshot({ devices: [renamed] }), // remote: the correction
+    )
+    const entry = result.metadata.devices.find(
+      (d) => d.deviceId === OTHER_DEVICE_ID,
+    )
+    expect(entry?.name).toBe("Safari on Mac · a.example")
+    expect(entry?.nameUpdatedAt).toBe(7_000_000)
+  })
+
+  // The name rides its own clock and nothing else rides with it: a rename made
+  // over a stale copy must not drag that copy's sign-in state along, or it
+  // would resurrect a device somebody removed meanwhile.
+  it("a rename does not carry the rest of its stale record", () => {
+    const removed = {
+      ...makeDevice(OTHER_DEVICE_ID, 1_000_000),
+      removedAt: 5_000_000,
+    }
+    const renamed = {
+      ...makeDevice(OTHER_DEVICE_ID, 1_000_000),
+      name: "Safari on Mac · a.example",
+      nameUpdatedAt: 7_000_000,
+    }
+    const result = mergeSnapshotWithRemote(
+      makeSnapshot({ devices: [removed] }), // local: tombstoned, newer record
+      makeSnapshot({ devices: [renamed] }), // remote: renamed, still active
+    )
+    const entry = result.metadata.devices.find(
+      (d) => d.deviceId === OTHER_DEVICE_ID,
+    )
+    expect(entry?.removedAt).toBe(5_000_000) // tombstone stands
+    expect(entry?.name).toBe("Safari on Mac · a.example") // name still lands
+  })
+
   it("a newer sign-in resurrects a removed device", () => {
     // device 2 was removed (removedAt 5M) but has since signed in again
     // (lastSignedInAt 9M). The fresh sign-in re-activates it.
