@@ -2851,8 +2851,11 @@ export class SwarmIdProxy {
    * clicked connect and unlocked in the popup — so it stamps one.
    *
    * Partitioned only: an unpartitioned proxy has no business editing the
-   * shared account document behind the identity UI's back, and the UI owns its
-   * own sign-in seam.
+   * shared account document behind the identity UI's back. The identity UI has
+   * no reactivation seam of its own, and needs none — nothing writes a device
+   * tombstone today, and a device that stops beating on the bus is ignored at
+   * read rather than tombstoned (#655). If manual removal is ever built, its
+   * seam has to do what this one does, both halves included.
    */
   private reactivateThisDevice(): void {
     const account = this.partitionAccount
