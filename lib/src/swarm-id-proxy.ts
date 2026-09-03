@@ -1314,6 +1314,11 @@ export class SwarmIdProxy {
    * so a holder mid-burst does not sit at the front of the order and decline
    * in silence; the next eligible rank answers a step later, which still beats
    * waiting out a poll interval.
+   *
+   * `scripts/bus-handover-latency.ts` reimplements this election (these
+   * handlers are private) to measure the handover against a real cluster.
+   * Change the formula here and change it there, or the script starts
+   * measuring a race the product does not have.
    */
   private yieldRankDelayMs(requestId: string): number {
     const coordinator = this.coordinator

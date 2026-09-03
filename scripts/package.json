@@ -1,0 +1,14 @@
+{
+  "name": "swarm-id-scripts",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "bus-handover-latency": "tsx bus-handover-latency.ts"
+  },
+  "dependencies": {
+    "@ethersphere/bee-js": "^11.1.1"
+  },
+  "devDependencies": {
+    "tsx": "^4.20.0"
+  }
+}
