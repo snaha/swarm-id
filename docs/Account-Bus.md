@@ -370,6 +370,14 @@ Done:
   shows the other online 25 s after it joins (the first interval beat plus the dev list's 5 s
   tick) and drops it when the presence window lapses after its tab closes — 60 s when this was
   measured, three minutes since the window widened to survive a throttled background tab.
+- Handover latency against the local cluster and the dev signaling server
+  (`scripts/bus-handover-latency.ts`, #660; 2026-09-02, K=2, 2 s intent window). Three simulated
+  devices on a two-partition batch, a fresh account per row: a free partition costs C 5.3 s (the
+  floor, intent round included), a bus handover 9.0 s, a holder's idle tick 39.4 s, and a lapsed
+  lock with nobody refreshing 48.5 s. The bus itself is the 1.4 s from C's call to the holder's
+  `lease-released` — two stamped release writes, over the relay, since Node has no
+  `RTCPeerConnection`; the remaining ~7.5 s is the ordinary cold claim. A one-off script, not
+  suite coverage: it runs on demand, never on commit.
 - Real Safari (iOS 18.7 / Safari 26.6, against the DO deployment, #584): ITP partitions the
   iframe, the connect popup's `window.opener` `postMessage` reaches it, the hydrated view
   builds a working stamper, a chunk uploads and reads back byte-identical, and the device id
