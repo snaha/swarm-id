@@ -168,21 +168,33 @@ export function detectDeviceName(): string {
  * identity UI — it is the same device, and naming that after whichever dApp
  * happened to load it would be wrong.
  *
- * The host is deliberately finer-grained than the partition key, which is
- * schemeful site (eTLD+1) and may drop the port. Two same-site dApps —
- * `app1.foo.com` and `app2.foo.com`, or two localhost ports — therefore share
- * ONE partition and one device row, whose name flips to whichever announced
- * last.
+ * The host is finer-grained than the partition key, which is schemeful site
+ * (eTLD+1) and may drop the port. Two same-site dApps — `app1.foo.com` and
+ * `app2.foo.com`, or two localhost ports — therefore share ONE partition and
+ * one device row, and each announces that row under its own host, so the
+ * stored name alternates between them on their polls.
  *
- * Each flip now costs more than it did. While the name carried no clock of its
- * own the flip lost every remote tie and stayed local (a save and a storage
- * event); with `nameUpdatedAt` (#663) it wins the overlay everywhere, so an
- * alternation is a registry save, a feed publish, and a fold-and-persist on
- * every peer — the churn class #652 went hunting for, in a config rare enough
- * that it has never been observed. Still cosmetic, and the alternative (naming
- * by site) would label the common case uselessly, so the finer name wins. If
- * it ever matters, the fix is to key the name on the partition rather than the
- * origin, which makes the two announcers agree instead of alternating.
+ * The label is per-origin and the thing it labels is per-site, and both are
+ * right for their own job. The name is per-origin because the origin is what a
+ * user recognises. The row is per-site because it stands for a WRITER, not for
+ * a security boundary: nothing reads the device registry to decide whether a
+ * write is allowed (`knownDeviceIds` only feeds the lease rival set), and two
+ * contexts in one partition cannot write at the same time anyway — they share
+ * `withBatchWriteLock`, a Web Lock scoped to the store they share. Giving them
+ * a row each would spend two of a finite `partitionCount` on writers that are
+ * already serialised. Where per-origin state really is per-origin, the storage
+ * key says so: the stored session (#671), and the stamper's.
+ *
+ * What the alternation costs: nothing on the refresh itself. A partitioned
+ * proxy keeps the merged registry in memory, and the refresh that produces it
+ * is a pre-acquire hook rather than a publish, so a flip writes nothing and
+ * sends nothing. It does not stay in memory, though — the next bus-delta fold
+ * persists it, since `refreshStoredPartitionAccount` serialises the whole
+ * in-memory account, merged devices included, into the session record. And a
+ * flipped row that travels for any other reason (a delta, a feed publish)
+ * carries a newer name clock, so it wins the name wherever it lands rather
+ * than tying and losing: the alternation reaches the account, not just the two
+ * iframes.
  */
 export function partitionDeviceName(appOrigin: string): string {
   const deviceName = detectDeviceName()
