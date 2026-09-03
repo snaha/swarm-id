@@ -268,26 +268,22 @@ describe("Sequential Feeds Integration", () => {
       expect(result.next).toBe(10n)
     })
 
-    it(
-      "should write and read 50 sequential updates",
-      { timeout: 10000 },
-      async () => {
-        const beeClient = bee as unknown as Bee
-        const updater = new BasicSequentialUpdater(beeClient, topic, signer)
-        const owner = updater.getOwner()
-        const finder = new SyncSequentialFinder(beeClient, topic, owner)
+    it("should write and read 50 sequential updates", async () => {
+      const beeClient = bee as unknown as Bee
+      const updater = new BasicSequentialUpdater(beeClient, topic, signer)
+      const owner = updater.getOwner()
+      const finder = new SyncSequentialFinder(beeClient, topic, owner)
 
-        // Larger scale test
-        const count = 50
-        for (let i = 0; i < count; i++) {
-          await updater.update(createTestReference(i), stamper)
-        }
+      // Larger scale test
+      const count = 50
+      for (let i = 0; i < count; i++) {
+        await updater.update(createTestReference(i), stamper)
+      }
 
-        const result = await finder.findAt(0n, 0n)
-        expect(result.current).toBe(BigInt(count - 1))
-        expect(result.next).toBe(BigInt(count))
-      },
-    )
+      const result = await finder.findAt(0n, 0n)
+      expect(result.current).toBe(BigInt(count - 1))
+      expect(result.next).toBe(BigInt(count))
+    })
 
     it("should maintain correct ordering across updates", async () => {
       const beeClient = bee as unknown as Bee
@@ -394,7 +390,7 @@ describe("Sequential Feeds Integration", () => {
       expect(result.next).toBe(1n)
     })
 
-    it("should handle large index counts", { timeout: 15000 }, async () => {
+    it("should handle large index counts", async () => {
       const beeClient = bee as unknown as Bee
       const updater = new BasicSequentialUpdater(beeClient, topic, signer)
       const owner = updater.getOwner()
@@ -774,62 +770,54 @@ describe("Sequential Feeds Integration", () => {
   })
 
   describe("Performance", () => {
-    it(
-      "should complete linear scan within reasonable bounds",
-      { timeout: 30000 },
-      async () => {
-        const countingStore = new MockChunkStore()
-        const countingBee = new CountingMockBee(countingStore)
-        const beeClient = countingBee as unknown as Bee
+    it("should complete linear scan within reasonable bounds", async () => {
+      const countingStore = new MockChunkStore()
+      const countingBee = new CountingMockBee(countingStore)
+      const beeClient = countingBee as unknown as Bee
 
-        const updater = new BasicSequentialUpdater(beeClient, topic, signer)
+      const updater = new BasicSequentialUpdater(beeClient, topic, signer)
 
-        // Write 100 updates
-        const updateCount = 100
-        for (let i = 0; i < updateCount; i++) {
-          await updater.update(createTestReference(i), stamper)
-        }
+      // Write 100 updates
+      const updateCount = 100
+      for (let i = 0; i < updateCount; i++) {
+        await updater.update(createTestReference(i), stamper)
+      }
 
-        // Reset counter before find
-        countingBee.downloadCalls = 0
+      // Reset counter before find
+      countingBee.downloadCalls = 0
 
-        const finder = new SyncSequentialFinder(
-          beeClient,
-          topic,
-          updater.getOwner(),
-        )
-        const result = await finder.findAt(0n, 0n)
+      const finder = new SyncSequentialFinder(
+        beeClient,
+        topic,
+        updater.getOwner(),
+      )
+      const result = await finder.findAt(0n, 0n)
 
-        expect(result.current).toBe(BigInt(updateCount - 1))
-        // Probes 0..99 (present) then 100 twice (miss + one retry) = updateCount + 2.
-        expect(countingBee.downloadCalls).toBe(updateCount + 2)
-      },
-    )
+      expect(result.current).toBe(BigInt(updateCount - 1))
+      // Probes 0..99 (present) then 100 twice (miss + one retry) = updateCount + 2.
+      expect(countingBee.downloadCalls).toBe(updateCount + 2)
+    })
 
-    it(
-      "sync and async finders should match for large datasets",
-      { timeout: 10000 },
-      async () => {
-        const beeClient = bee as unknown as Bee
-        const updater = new BasicSequentialUpdater(beeClient, topic, signer)
-        const owner = updater.getOwner()
+    it("sync and async finders should match for large datasets", async () => {
+      const beeClient = bee as unknown as Bee
+      const updater = new BasicSequentialUpdater(beeClient, topic, signer)
+      const owner = updater.getOwner()
 
-        // Write 50 updates
-        for (let i = 0; i < 50; i++) {
-          await updater.update(createTestReference(i), stamper)
-        }
+      // Write 50 updates
+      for (let i = 0; i < 50; i++) {
+        await updater.update(createTestReference(i), stamper)
+      }
 
-        const syncFinder = new SyncSequentialFinder(beeClient, topic, owner)
-        const asyncFinder = new AsyncSequentialFinder(beeClient, topic, owner)
+      const syncFinder = new SyncSequentialFinder(beeClient, topic, owner)
+      const asyncFinder = new AsyncSequentialFinder(beeClient, topic, owner)
 
-        const syncResult = await syncFinder.findAt(0n, 0n)
-        const asyncResult = await asyncFinder.findAt(0n, 0n)
+      const syncResult = await syncFinder.findAt(0n, 0n)
+      const asyncResult = await asyncFinder.findAt(0n, 0n)
 
-        expect(asyncResult.current).toBe(syncResult.current)
-        expect(asyncResult.next).toBe(syncResult.next)
-        expect(syncResult.current).toBe(49n)
-      },
-    )
+      expect(asyncResult.current).toBe(syncResult.current)
+      expect(asyncResult.next).toBe(syncResult.next)
+      expect(syncResult.current).toBe(49n)
+    })
   })
 
   describe("Edge Cases", () => {
