@@ -56,8 +56,9 @@ export function getDeviceId(): string | undefined {
  * here (#652) made every fold a byte change to persist, which a proxy holding
  * a partition answered with a bus delta and a stamped feed write. #337's "a
  * genuine sign-in re-activates a device removed elsewhere" still holds; it
- * lives at the sign-in seams instead (`reactivateThisDevice`), which is the
- * only place that can tell a user unlocking their account from a timer firing.
+ * lives at the sign-in seam instead (`reactivateThisDevice`, the only one there
+ * is), which is the only place that can tell a user unlocking their account
+ * from a timer firing.
  * Liveness is not this field's job either — the bus carries it.
  */
 export function mergeDevices(
