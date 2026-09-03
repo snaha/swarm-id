@@ -13,7 +13,8 @@
  *
  * - `devices`: last-writer-wins per `deviceId` with a `removedAt` tombstone.
  *   The recency clock is `max(removedAt, lastSignedInAt)`, so a removal beats an
- *   older sign-in and a newer sign-in re-activates a removed device.
+ *   older sign-in and a newer sign-in re-activates a removed device. The name
+ *   overlays on its own `nameUpdatedAt` clock, since a rename moves neither.
  * - `connectedApps`: last-writer-wins per `appUrl` (with `revokedAt` tombstone).
  * - `postageStamps`: last-writer-wins per `batchID` with a `deletedAt`
  *   tombstone (recency `max(deletedAt, createdAt)`), so deletions propagate and
@@ -66,20 +67,38 @@ export function mergeSnapshotWithRemote(
 }
 
 export function mergeDevicesList(local: Device[], remote: Device[]): Device[] {
-  // Last-writer-wins per device so removals propagate: a removal is a tombstone
-  // (`removedAt`) and the recency clock is `max(removedAt, lastSignedInAt)`. A
-  // removal therefore beats an older sign-in, while a newer sign-in beats an
-  // older removal (re-activating the device). With nothing removed this reduces
-  // to the old "larger lastSignedInAt wins". Removed devices are kept (the
-  // tombstone keeps propagating).
+  // Last-writer-wins per device on TWO clocks, exactly as stamps merge below:
+  //
+  // - Membership (the whole record) merges on `max(removedAt, lastSignedInAt)`,
+  //   so a removal beats an older sign-in and a newer sign-in beats an older
+  //   removal (re-activating the device). With nothing removed this reduces to
+  //   the old "larger lastSignedInAt wins". Removed devices are kept (the
+  //   tombstone keeps propagating).
+  // - The name overlays on its own `nameUpdatedAt` clock. A rename moves
+  //   neither of the membership fields, so without this it tied with every
+  //   stale copy of itself and lost — #643's correction never left the device
+  //   that made it (#663). Riding its own clock also means it cannot drag a
+  //   stale record's sign-in state along or resurrect a tombstone.
   const recency = (d: Device) =>
     Math.max(d.removedAt ?? 0, d.lastSignedInAt ?? 0)
+  const nameRecency = (d: Device) => d.nameUpdatedAt ?? 0
   const merged = new Map<string, Device>()
   // Process remote first, then local, so a tie favours local (most recent
   // observation here); a strictly-newer entry on either side wins.
   for (const d of [...remote, ...local]) {
     const existing = merged.get(d.deviceId)
-    if (!existing || recency(d) >= recency(existing)) merged.set(d.deviceId, d)
+    if (!existing) {
+      merged.set(d.deviceId, d)
+      continue
+    }
+    const winner = recency(d) >= recency(existing) ? d : existing
+    const loser = winner === d ? existing : d
+    merged.set(
+      d.deviceId,
+      nameRecency(loser) > nameRecency(winner)
+        ? { ...winner, name: loser.name, nameUpdatedAt: loser.nameUpdatedAt }
+        : winner,
+    )
   }
   return Array.from(merged.values())
 }

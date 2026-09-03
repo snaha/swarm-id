@@ -57,14 +57,51 @@ describe("mergeDevices", () => {
     expect(result[0].name).toBe("Safari on Mac · a.example")
   })
 
+  // Correcting the label locally is half the job: every other context folds the
+  // registry through `mergeDevicesList`, which ranks on sign-in recency, and a
+  // rename moves none of it. The name carries its own clock so the correction
+  // outranks a stale copy without pretending to be a sign-in (#663).
+  it("stamps the rename clock when the name changed", () => {
+    const existing = [createDevice({ name: "Safari on Mac" })]
+
+    const result = mergeDevices(
+      existing,
+      TEST_DEVICE_ID,
+      "Safari on Mac · a.example",
+    )
+
+    expect(result[0].nameUpdatedAt).toBeGreaterThan(0)
+  })
+
+  // Both callers are polls. A clock that moved every time a caller passed the
+  // name it already stored would make every quiet round a byte change to
+  // persist — the churn #652 removed, straight back.
+  it("leaves the rename clock alone when the name is unchanged", () => {
+    const existing = [
+      createDevice({ name: "Safari on Mac · a.example", nameUpdatedAt: 1000 }),
+    ]
+
+    const result = mergeDevices(
+      existing,
+      TEST_DEVICE_ID,
+      "Safari on Mac · a.example",
+    )
+
+    expect(result[0].nameUpdatedAt).toBe(1000)
+    expect(result[0]).toEqual(existing[0])
+  })
+
   // The label is stable by design: a caller with nothing to say must not blank
   // a name that another context took care to set.
   it("keeps the existing name when no name is supplied", () => {
-    const existing = [createDevice({ name: "Safari on Mac · a.example" })]
+    const existing = [
+      createDevice({ name: "Safari on Mac · a.example", nameUpdatedAt: 1000 }),
+    ]
 
     const result = mergeDevices(existing, TEST_DEVICE_ID)
 
     expect(result[0].name).toBe("Safari on Mac · a.example")
+    expect(result[0].nameUpdatedAt).toBe(1000)
   })
 
   // A background poll is not a sign-in. `mergeDevices` runs on refresh paths

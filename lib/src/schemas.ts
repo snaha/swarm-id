@@ -110,6 +110,15 @@ export const DeviceSchemaV1 = z.object({
   createdAt: z.number(),
   lastSignedInAt: z.number(),
   name: z.string().optional(),
+  // Rename clock, on the same pattern as a stamp's `nameUpdatedAt`. The name
+  // merges on its own last-writer-wins clock because the record clock below
+  // cannot rank a rename at all: correcting a label — the partition naming of
+  // #570 — moves neither `lastSignedInAt` nor `removedAt`, so a corrected row
+  // tied with every stale copy of itself and lost the tie, forever (#663).
+  // Optional: a row nobody has renamed since it was created has none, and a
+  // name born WITH the record needs no clock — it already outranks every stale
+  // copy on `lastSignedInAt`.
+  nameUpdatedAt: z.number().optional(),
   // Tombstone marker. A removed device is kept in the snapshot (so the removal
   // propagates to other devices) but hidden from the UI. A later sign-in with a
   // larger `lastSignedInAt` re-activates it (the merge clock is the max of the
