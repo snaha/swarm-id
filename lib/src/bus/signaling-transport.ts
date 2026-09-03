@@ -110,7 +110,8 @@ export class SignalingTransport implements BusTransport {
   private options: SignalingTransportOptions
   private socket: WebSocket | undefined
   private peers = new Map<string, PeerState>()
-  private handlers = new Set<(raw: unknown) => void>()
+  private handlers = new Set<(raw: unknown, from?: string) => void>()
+  private peerLeftHandlers = new Set<(peerId: string) => void>()
   private closed = false
   /** Set after a server refuses the join frame — one that predates it reads the
    *  topic from the URL only. Sticky for the transport's life: having learned
@@ -140,9 +141,14 @@ export class SignalingTransport implements BusTransport {
     void delivery.finally(() => this.pendingDeliveries.delete(delivery))
   }
 
-  subscribe(handler: (raw: unknown) => void): () => void {
+  subscribe(handler: (raw: unknown, from?: string) => void): () => void {
     this.handlers.add(handler)
     return () => this.handlers.delete(handler)
+  }
+
+  onPeerLeft(handler: (peerId: string) => void): () => void {
+    this.peerLeftHandlers.add(handler)
+    return () => this.peerLeftHandlers.delete(handler)
   }
 
   /**
@@ -169,6 +175,10 @@ export class SignalingTransport implements BusTransport {
 
   private shutdown(): void {
     this.handlers.clear()
+    // Our own socket going is not a report that anyone else left, so these are
+    // dropped rather than fired: the tracker ages the room out, and a
+    // reconnect relearns it from the peers' own beats.
+    this.peerLeftHandlers.clear()
     for (const peer of this.peers.values()) {
       peer.connection?.close()
     }
@@ -326,10 +336,18 @@ export class SignalingTransport implements BusTransport {
         const peer = this.peers.get(message.peerId)
         peer?.connection?.close()
         this.peers.delete(message.peerId)
+        // Reported, not just cleaned up. This is the only departure signal a
+        // closing tab produces — its own leave would have to encrypt first,
+        // and a page being torn down never gets back to the send (#572). The
+        // server's reaper closes a dead socket too, so a crash and a dropped
+        // network arrive here as well.
+        for (const handler of this.peerLeftHandlers) {
+          handler(message.peerId)
+        }
         return
       }
       case "relay":
-        await this.receiveEnvelope(message.payload)
+        await this.receiveEnvelope(message.payload, message.from)
         return
       case "signal":
         await this.handleSignal(message.from, message.payload)
@@ -337,7 +355,10 @@ export class SignalingTransport implements BusTransport {
     }
   }
 
-  private async receiveEnvelope(ciphertext: string): Promise<void> {
+  private async receiveEnvelope(
+    ciphertext: string,
+    from: string,
+  ): Promise<void> {
     let plaintext: string
     try {
       plaintext = await decryptBackupPayload(
@@ -355,7 +376,7 @@ export class SignalingTransport implements BusTransport {
       return
     }
     for (const handler of this.handlers) {
-      handler(raw)
+      handler(raw, from)
     }
   }
 
@@ -374,6 +395,7 @@ export class SignalingTransport implements BusTransport {
       this.adoptDataChannel(
         connection.createDataChannel(DATA_CHANNEL_LABEL),
         peer,
+        peerId,
       )
       this.forwardIceCandidates(connection, peerId)
       const offer = await connection.createOffer()
@@ -398,7 +420,7 @@ export class SignalingTransport implements BusTransport {
         const connection = create()
         this.adoptConnection(peer, connection)
         connection.ondatachannel = (event) => {
-          this.adoptDataChannel(event.channel, peer)
+          this.adoptDataChannel(event.channel, peer, from)
         }
         this.forwardIceCandidates(connection, from)
         await connection.setRemoteDescription({
@@ -485,10 +507,16 @@ export class SignalingTransport implements BusTransport {
     }
   }
 
-  private adoptDataChannel(channel: RTCDataChannel, peer: PeerState): void {
+  private adoptDataChannel(
+    channel: RTCDataChannel,
+    peer: PeerState,
+    peerId: string,
+  ): void {
     peer.dataChannel = channel
     channel.onmessage = (event) => {
-      void this.receiveEnvelope(String(event.data))
+      // One channel per peer, so who sent it is settled by which channel it
+      // arrived on — the relay path is told by the server instead.
+      void this.receiveEnvelope(String(event.data), peerId)
     }
   }
 

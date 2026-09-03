@@ -31,7 +31,18 @@ export interface BusTransport {
    */
   readonly local: boolean
   publish(message: BusMessageInput): void
-  subscribe(handler: (raw: unknown) => void): () => void
+  /**
+   * `from` is the transport's own name for whoever sent the message — a peer
+   * id on the signaling transport, absent on a transport that has no peers.
+   * It is what lets `onPeerLeft` be attributed to the devices that peer spoke
+   * for (#572).
+   */
+  subscribe(handler: (raw: unknown, from?: string) => void): () => void
+  /**
+   * A peer left the room. Optional: a transport without peers has no
+   * departures to report, which is a truthful answer rather than a gap.
+   */
+  onPeerLeft?(handler: (peerId: string) => void): () => void
   close(): void
 }
 
@@ -63,6 +74,8 @@ export class BroadcastChannelTransport implements BusTransport {
   readonly local = true
   readonly channelName: string
   private channel: BroadcastChannel
+  // No `from`: every context on this channel is this browser profile, and the
+  // channel names none of them. Nothing here can leave the room separately.
   private handlers = new Set<(raw: unknown) => void>()
 
   constructor(topic: string) {
@@ -97,15 +110,34 @@ export class BroadcastChannelTransport implements BusTransport {
  */
 export class AccountBus {
   private transports: BusTransport[]
-  private handlers = new Set<(message: BusMessage) => void>()
+  private handlers = new Set<(message: BusMessage, from?: string) => void>()
+  private peerLeftHandlers = new Set<(peerId: string) => void>()
   private transportUnsubscribers: (() => void)[]
   private closed = false
 
   constructor(transports: BusTransport[]) {
     this.transports = transports
-    this.transportUnsubscribers = transports.map((transport) =>
-      transport.subscribe((raw) => this.dispatch(raw)),
+    this.transportUnsubscribers = transports.flatMap((transport) =>
+      this.listenTo(transport),
     )
+  }
+
+  /** Both subscriptions a transport offers, as one list of removers. */
+  private listenTo(transport: BusTransport): (() => void)[] {
+    const removers = [
+      transport.subscribe((raw, from) => this.dispatch(raw, from)),
+    ]
+    const onPeerLeft = transport.onPeerLeft?.((peerId) => {
+      for (const handler of this.peerLeftHandlers) {
+        try {
+          handler(peerId)
+        } catch (error) {
+          console.error("[AccountBus] Peer-left handler error:", error)
+        }
+      }
+    })
+    if (onPeerLeft) removers.push(onPeerLeft)
+    return removers
   }
 
   /**
@@ -143,21 +175,34 @@ export class AccountBus {
       return () => {}
     }
     this.transports.push(transport)
-    const unsubscribe = transport.subscribe((raw) => this.dispatch(raw))
-    this.transportUnsubscribers.push(unsubscribe)
+    // Through the same path as a constructor-time transport: the signaling one
+    // is always attached here, so a departure hook wired only in the
+    // constructor would never see the transport that has peers.
+    const removers = this.listenTo(transport)
+    this.transportUnsubscribers.push(...removers)
     return () => {
-      unsubscribe()
+      for (const remove of removers) remove()
       transport.close()
       this.transports = this.transports.filter((t) => t !== transport)
       this.transportUnsubscribers = this.transportUnsubscribers.filter(
-        (u) => u !== unsubscribe,
+        (u) => !removers.includes(u),
       )
     }
   }
 
-  subscribe(handler: (message: BusMessage) => void): () => void {
+  subscribe(handler: (message: BusMessage, from?: string) => void): () => void {
     this.handlers.add(handler)
     return () => this.handlers.delete(handler)
+  }
+
+  /**
+   * A peer left the room, by the name the delivering transport uses for it.
+   * The signaling server sends this on socket close, its reaper included, so
+   * it is the one departure signal that survives a tab being closed.
+   */
+  onPeerLeft(handler: (peerId: string) => void): () => void {
+    this.peerLeftHandlers.add(handler)
+    return () => this.peerLeftHandlers.delete(handler)
   }
 
   /** Idempotent, and terminal: a closed bus neither publishes nor attaches. */
@@ -168,18 +213,19 @@ export class AccountBus {
     }
     this.transportUnsubscribers = []
     this.handlers.clear()
+    this.peerLeftHandlers.clear()
     for (const transport of this.transports) {
       transport.close()
     }
     this.transports = []
   }
 
-  private dispatch(raw: unknown): void {
+  private dispatch(raw: unknown, from?: string): void {
     const result = BusMessageSchema.safeParse(raw)
     if (!result.success) return
     for (const handler of this.handlers) {
       try {
-        handler(result.data)
+        handler(result.data, from)
       } catch (error) {
         console.error("[AccountBus] Handler error:", error)
       }

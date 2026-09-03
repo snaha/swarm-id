@@ -1374,7 +1374,8 @@ export class SwarmIdProxy {
    * timers.
    */
   private setupBusListeners(): void {
-    this.bus.subscribe((message) => {
+    this.bus.onPeerLeft((peerId) => this.presence.forgetPeer(peerId))
+    this.bus.subscribe((message, from) => {
       switch (message.type) {
         case "utilization-updated": {
           // Same batch AND same slot lane. The counters are per-partition
@@ -1494,7 +1495,7 @@ export class SwarmIdProxy {
           ) {
             return
           }
-          this.presence.observe(message.fromDeviceId, Date.now())
+          this.presence.observe(message.fromDeviceId, Date.now(), from)
           return
         }
       }

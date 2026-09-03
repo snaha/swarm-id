@@ -32,7 +32,9 @@ const transports = vi.hoisted(
       publish: ReturnType<typeof vi.fn>
       close: ReturnType<typeof vi.fn>
       /** What the bus subscribed with — the seam a peer's message arrives on. */
-      deliver?: (raw: unknown) => void
+      deliver?: (raw: unknown, from?: string) => void
+      /** The seam the room's departures arrive on. */
+      peerLeft?: (peerId: string) => void
     }[],
 )
 /** Holds the topic derivation open, so "a publish during the join" is a real
@@ -52,14 +54,21 @@ vi.mock('@snaha/swarm-id', async (importActual) => {
         options,
         local: false,
         publish: vi.fn(),
-        subscribe: vi.fn((handler: (raw: unknown) => void) => {
+        subscribe: vi.fn((handler: (raw: unknown, from?: string) => void) => {
           transport.deliver = handler
           return () => {
             transport.deliver = undefined
           }
         }),
+        onPeerLeft: vi.fn((handler: (peerId: string) => void) => {
+          transport.peerLeft = handler
+          return () => {
+            transport.peerLeft = undefined
+          }
+        }),
         close: vi.fn(),
-        deliver: undefined as ((raw: unknown) => void) | undefined,
+        deliver: undefined as ((raw: unknown, from?: string) => void) | undefined,
+        peerLeft: undefined as ((peerId: string) => void) | undefined,
       }
       transports.push(transport)
       return transport
@@ -332,6 +341,24 @@ describe('accountBusStore', () => {
     expect(accountBusStore.liveDeviceIds()).toEqual(['peer-device'])
 
     accountBusStore.leave()
+    expect(accountBusStore.liveDeviceIds()).toEqual([])
+  })
+
+  // A closed tab announces nothing of its own — a leave would have to encrypt
+  // first, and a page being torn down never gets back to the send. The room
+  // reports it instead, and the device goes with the socket it was heard on
+  // rather than waiting out PRESENCE_MAX_AGE_MS (#572).
+  it('drops a peer when the room says its socket left', async () => {
+    accountBusStore.join(makeAccount())
+    await settle()
+
+    transports[0].deliver?.(
+      { type: 'presence', accountId: 'aa'.repeat(20), fromDeviceId: 'peer-device' },
+      'socket-1',
+    )
+    expect(accountBusStore.liveDeviceIds()).toEqual(['peer-device'])
+
+    transports[0].peerLeft?.('socket-1')
     expect(accountBusStore.liveDeviceIds()).toEqual([])
   })
 

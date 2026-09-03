@@ -10,6 +10,15 @@
  * mechanism: the bus already knows who is in the room, this only ties room
  * membership to a `deviceId`.
  *
+ * A clean departure does not wait for the window. The signaling server sends
+ * `peer-left` when a socket closes — including one its own reaper terminated,
+ * so a crash and a dropped network count too — and `forgetPeer` drops the
+ * device that socket carried (#572). Ageing is the backstop for what that
+ * cannot see: a peer the server has not yet reaped, and a device heard only
+ * over the local transport. A leave message of our own is not an option — a
+ * publish encrypts before it sends, and a page being torn down never gets
+ * back to the send.
+ *
  * In memory only, and deliberately never persisted or published as state. A
  * `lastSeenAt` that rode the account snapshot would make every publish a byte
  * change to fold and re-persist, and the unpartitioned proxy answers every
@@ -35,18 +44,49 @@ const THROTTLED_INTERVAL_MS = 60_000
  */
 export const PRESENCE_MAX_AGE_MS = 3 * THROTTLED_INTERVAL_MS
 
-// ponytail: no leave message; absence ages out in PRESENCE_MAX_AGE_MS (#572).
-export class PresenceTracker {
-  private seen = new Map<string, number>()
+/** When a device was last heard, and over which of the room's sockets. */
+interface Seen {
+  at: number
+  peers: Set<string>
+}
 
-  observe(deviceId: string, nowMs: number): void {
-    this.seen.set(deviceId, nowMs)
+export class PresenceTracker {
+  private seen = new Map<string, Seen>()
+
+  /**
+   * Note a beat. `peerId` is the transport's own name for whoever sent it —
+   * present on the signaling transport, absent on the local one, which has no
+   * peers. It is what lets a departure be attributed to a device (#572).
+   */
+  observe(deviceId: string, nowMs: number, peerId?: string): void {
+    const entry = this.seen.get(deviceId) ?? { at: nowMs, peers: new Set() }
+    entry.at = nowMs
+    if (peerId !== undefined) entry.peers.add(peerId)
+    this.seen.set(deviceId, entry)
+  }
+
+  /**
+   * A socket left the room, so whatever it carried is gone with it.
+   *
+   * Only when it was the device's LAST socket: two tabs of one dApp share a
+   * partition, and therefore a `deviceId`, while holding a socket each — one
+   * of them closing is not the device leaving. A device heard only over the
+   * local transport has no socket to lose and is left to age out.
+   */
+  forgetPeer(peerId: string): void {
+    for (const [deviceId, entry] of this.seen) {
+      if (!entry.peers.delete(peerId)) continue
+      if (entry.peers.size === 0) this.seen.delete(deviceId)
+      return
+    }
   }
 
   /** Devices heard within `PRESENCE_MAX_AGE_MS` of `nowMs`. */
   liveDeviceIds(nowMs: number): string[] {
     const cutoff = nowMs - PRESENCE_MAX_AGE_MS
-    return [...this.seen].filter(([, at]) => at >= cutoff).map(([id]) => id)
+    return [...this.seen]
+      .filter(([, entry]) => entry.at >= cutoff)
+      .map(([deviceId]) => deviceId)
   }
 
   clear(): void {

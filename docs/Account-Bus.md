@@ -171,7 +171,14 @@ everything transient closes `1013` and the client backs off with jitter.
 - **Presence.** Every context beats `{ presence, accountId, fromDeviceId }` on joining the room
   and every 20 s (`lib/src/bus/presence.ts`); a receiver stamps its own clock and forgets a
   device unheard for three minutes — three beats at the once-a-minute cadence a hidden tab's
-  timers are throttled to, so a backgrounded device does not flap out of the live set. This is the liveness signal: a peer beating in the room is alive by
+  timers are throttled to, so a backgrounded device does not flap out of the live set. A clean
+  departure does not wait for that window: the server sends `peer-left` when a socket closes,
+  its reaper included, and the device that socket carried is dropped at once
+  ([#572](https://github.com/snaha/swarm-id/issues/572)). `peer-left` is a **transport** signal,
+  not a bus message kind — nothing publishes it, and nothing may. A leave message of our own is
+  not an option: a publish encrypts before it sends, and a page being torn down never gets back
+  to the send. Ageing is the backstop for what the room cannot see — a peer the server has not
+  yet reaped, and a device heard only over the local transport. This is the liveness signal: a peer beating in the room is alive by
   construction, at no Swarm cost, so the partition rival set (`knownDeviceIds`) is the live set
   unioned with the registry's recent sign-ins — the latter only as a bootstrap for a context with
   no bus. Nothing durable is written. A `lastSeenAt` riding the account snapshot was
@@ -415,6 +422,11 @@ Not yet written:
   peers first count it at its first interval beat, up to 20 s later. Its own view of the room
   fills in the same way. The registry's 30-minute sign-in window covers the gap for the rival
   set.
+- A departure is only as prompt as the socket's close. A tab closed normally produces one at
+  once; a crashed peer or a dropped network waits for the server's ping cycle to reap the
+  socket, and the presence window covers it until then. **The lock is not reclaimed any
+  faster either way**: releasing it is a stamped SOC write the dying page cannot finish, so
+  `LEASE_TTL_MS` remains the mechanism for a partition a closed tab was holding.
 - Safari (ITP) deletes script-writable storage for sites without first-party user
   interaction. The window is **30 operational days** by default since a Feb 2024 WebKit
   change ([`DataRemovalFrequency`](https://github.com/WebKit/WebKit/commit/45061230013728ec9c4900b01b12af26dc592b4b));

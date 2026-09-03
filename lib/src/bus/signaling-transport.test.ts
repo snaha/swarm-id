@@ -167,6 +167,36 @@ describe("SignalingTransport — relay path", () => {
   })
 })
 
+// The two halves of #572's departure signal, and the only thing that makes it
+// usable is that they name the peer the SAME way: attribution says which peer a
+// beat came from, `peer-left` says that peer is gone. If the ids differed,
+// `PresenceTracker.forgetPeer` would silently never match.
+describe("SignalingTransport — who sent it, and who left", () => {
+  it("attributes a delivery and the sender's departure to one peer id", async () => {
+    const sender = makeTransport()
+    const receiver = makeTransport()
+    const senders: (string | undefined)[] = []
+    const departed: string[] = []
+    try {
+      receiver.subscribe((_raw, from) => senders.push(from))
+      receiver.onPeerLeft((peerId) => departed.push(peerId))
+      await waitForPeers(sender, 1)
+      await waitForPeers(receiver, 1)
+
+      sender.publish(UTILIZATION_MESSAGE)
+      await vi.waitFor(() => expect(senders.length).toBe(1))
+      expect(senders[0]).toBeTypeOf("string")
+
+      sender.close()
+      await vi.waitFor(() => expect(departed.length).toBe(1))
+      expect(departed[0]).toBe(senders[0])
+    } finally {
+      sender.close()
+      receiver.close()
+    }
+  })
+})
+
 describe("SignalingTransport — reconnect backoff", () => {
   // Every client connected when the service restarts schedules its retry from
   // the same instant, so an undithered delay brings them all back together at
