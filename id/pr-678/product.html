@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta
+      name="description"
+      content="Create and manage your decentralized identity with Ethereum or Passkey. Sync across devices with Swarm network."
+    />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black" />
+    <meta name="apple-mobile-web-app-title" content="Swarm Identity" />
+    <link rel="icon" href="./favicon.png" type="image/png" />
+    <link rel="manifest" href="./manifest.json" />
+    
+		<link rel="modulepreload" href="./_app/immutable/entry/start.DN8XsMRi.js">
+		<link rel="modulepreload" href="./_app/immutable/chunks/D9q9Fm2y.js">
+		<link rel="modulepreload" href="./_app/immutable/chunks/DmGcAGuo.js">
+		<link rel="modulepreload" href="./_app/immutable/chunks/BS59zWFL.js">
+		<link rel="modulepreload" href="./_app/immutable/chunks/DIxu0NMH.js">
+		<link rel="modulepreload" href="./_app/immutable/chunks/9GDZqJUz.js">
+		<link rel="modulepreload" href="./_app/immutable/entry/app.DkNCHgL9.js">
+		<link rel="modulepreload" href="./_app/immutable/chunks/PPVm8Dsz.js">
+		<link rel="modulepreload" href="./_app/immutable/chunks/CXs5rqPD.js">
+		<link rel="modulepreload" href="./_app/immutable/chunks/DPf3ivis.js">
+		<link rel="modulepreload" href="./_app/immutable/chunks/B7uI69H3.js">
+		<link rel="modulepreload" href="./_app/immutable/chunks/BKtwW8cw.js">
+		<link rel="modulepreload" href="./_app/immutable/chunks/C8REuTfF.js">
+		<link rel="modulepreload" href="./_app/immutable/chunks/C1V1EXGK.js">
+		<link rel="modulepreload" href="./_app/env.js">
+  </head>
+  <body data-sveltekit-preload-data="hover">
+    <div style="display: contents">
+			<script>
+				{
+					__sveltekit_8qy4uo = {
+						base: new URL(".", location).pathname.slice(0, -1),
+						assets: "/id/pr-678",
+						env: null
+					};
+
+					const element = document.currentScript.parentElement;
+
+					import("./_app/env.js").then(({ env }) => {
+						__sveltekit_8qy4uo.env = env;
+
+						Promise.all([
+							import("./_app/immutable/entry/start.DN8XsMRi.js"),
+							import("./_app/immutable/entry/app.DkNCHgL9.js")
+						]).then(([kit, app]) => {
+							kit.start(app, element);
+						});
+					});
+				}
+			</script>
+		</div>
+  </body>
+</html>
