@@ -17,7 +17,7 @@ Two authentication paths, decided by the storage probe (`utils/storage-probe.ts`
 
 ## Account bus (`bus/`)
 
-Live contexts of one account (proxy iframes across partitions and devices, the SwarmID tab) also talk over the account bus — `BroadcastChannel` inside a partition, an encrypted WebRTC/relay mesh via the signaling server across them. Message kinds (`bus/messages.ts`, Zod-validated on receive): `account-delta` (a snapshot, LWW-folded like a feed payload), `lease-request` / `lease-claim` / `lease-released` (partition handover fast path), `presence` (20 s liveness beat feeding the rival set), and `utilization-updated` (local transport only). Durable truth stays in storage and the Swarm feeds; the bus only makes live peers converge fast. Design: `docs/Account-Bus.md`.
+Live contexts of one account (proxy iframes across partitions and devices, the SwarmID tab) also talk over the account bus — `BroadcastChannel` inside a partition, an encrypted WebRTC/relay mesh via the signaling server across them. Message kinds (`bus/messages.ts`, Zod-validated on receive): `account-delta` (a snapshot, LWW-folded like a feed payload), `lease-request` / `lease-claim` / `lease-released` (partition handover fast path, scoped to one batch — a lane is `(batchId, partition)`), `presence` (20 s liveness beat feeding the rival set), and `utilization-updated` (local transport only). Durable truth stays in storage and the Swarm feeds; the bus only makes live peers converge fast. Design: `docs/Account-Bus.md`.
 
 ## Testing
 

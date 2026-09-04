@@ -9,7 +9,12 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
-import { PrivateKey, type Bee, type Stamper } from "@ethersphere/bee-js"
+import {
+  BatchId,
+  PrivateKey,
+  type Bee,
+  type Stamper,
+} from "@ethersphere/bee-js"
 import {
   INTENT_EPOCH_MS,
   INTENT_LIVENESS_GRACE_MS,
@@ -27,6 +32,9 @@ import {
   createTestSigner,
   mockFetch,
 } from "../proxy/feeds/epochs/test-utils"
+
+/** The batch whose lanes these locks are about (#589). */
+const TEST_BATCH_ID = new BatchId("ab".repeat(32))
 
 const DEVICE_A = "device-alpha-111"
 const DEVICE_B = "device-beta-222"
@@ -67,16 +75,27 @@ describe("intentEpochBucket", () => {
 
 describe("makePartitionIntentIdentifier", () => {
   it("is deterministic for the same (partition, device, epoch)", () => {
-    expect(makePartitionIntentIdentifier(0, DEVICE_A, 5).toHex()).toBe(
-      makePartitionIntentIdentifier(0, DEVICE_A, 5).toHex(),
-    )
+    expect(
+      makePartitionIntentIdentifier(TEST_BATCH_ID, 0, DEVICE_A, 5).toHex(),
+    ).toBe(makePartitionIntentIdentifier(TEST_BATCH_ID, 0, DEVICE_A, 5).toHex())
   })
 
   it("rotates across epoch buckets, devices, and partitions", () => {
-    const base = makePartitionIntentIdentifier(0, DEVICE_A, 5).toHex()
-    expect(makePartitionIntentIdentifier(0, DEVICE_A, 6).toHex()).not.toBe(base)
-    expect(makePartitionIntentIdentifier(0, DEVICE_B, 5).toHex()).not.toBe(base)
-    expect(makePartitionIntentIdentifier(1, DEVICE_A, 5).toHex()).not.toBe(base)
+    const base = makePartitionIntentIdentifier(
+      TEST_BATCH_ID,
+      0,
+      DEVICE_A,
+      5,
+    ).toHex()
+    expect(
+      makePartitionIntentIdentifier(TEST_BATCH_ID, 0, DEVICE_A, 6).toHex(),
+    ).not.toBe(base)
+    expect(
+      makePartitionIntentIdentifier(TEST_BATCH_ID, 0, DEVICE_B, 5).toHex(),
+    ).not.toBe(base)
+    expect(
+      makePartitionIntentIdentifier(TEST_BATCH_ID, 1, DEVICE_A, 5).toHex(),
+    ).not.toBe(base)
   })
 })
 
@@ -86,6 +105,7 @@ describe("readPartitionIntent / writePartitionIntent round-trip", () => {
       bee: bee as unknown as Bee,
       backupSigner: BACKUP_SIGNER,
       swarmEncryptionKey: TEST_ENC_KEY,
+      batchId: TEST_BATCH_ID,
       partition: PARTITION,
       deviceId: DEVICE_A,
       epochBucket: intentEpochBucket(NOW),
@@ -99,6 +119,7 @@ describe("readPartitionIntent / writePartitionIntent round-trip", () => {
       stamper,
       backupSigner: BACKUP_SIGNER,
       swarmEncryptionKey: TEST_ENC_KEY,
+      batchId: TEST_BATCH_ID,
       partition: PARTITION,
       deviceId: DEVICE_A,
       epochBucket: intentEpochBucket(NOW),
@@ -108,6 +129,7 @@ describe("readPartitionIntent / writePartitionIntent round-trip", () => {
       bee: bee as unknown as Bee,
       backupSigner: BACKUP_SIGNER,
       swarmEncryptionKey: TEST_ENC_KEY,
+      batchId: TEST_BATCH_ID,
       partition: PARTITION,
       deviceId: DEVICE_A,
       epochBucket: intentEpochBucket(NOW),
@@ -127,6 +149,7 @@ describe("readPartitionIntent / writePartitionIntent round-trip", () => {
       bee: bee as unknown as Bee,
       backupSigner: BACKUP_SIGNER,
       swarmEncryptionKey: TEST_ENC_KEY,
+      batchId: TEST_BATCH_ID,
       partition: PARTITION,
       deviceId: DEVICE_A,
       epochBucket: intentEpochBucket(NOW),
@@ -150,6 +173,7 @@ describe("readPartitionIntent — a transient 5xx is not 'no intent'", () => {
       stamper,
       backupSigner: BACKUP_SIGNER,
       swarmEncryptionKey: TEST_ENC_KEY,
+      batchId: TEST_BATCH_ID,
       partition: PARTITION,
       deviceId: DEVICE_A,
       epochBucket: intentEpochBucket(NOW),
@@ -172,6 +196,7 @@ describe("readPartitionIntent — a transient 5xx is not 'no intent'", () => {
       bee: bee as unknown as Bee,
       backupSigner: BACKUP_SIGNER,
       swarmEncryptionKey: TEST_ENC_KEY,
+      batchId: TEST_BATCH_ID,
       partition: PARTITION,
       deviceId: DEVICE_A,
       epochBucket: intentEpochBucket(NOW),
@@ -197,6 +222,7 @@ describe("readPartitionIntent — a transient 5xx is not 'no intent'", () => {
       bee: bee as unknown as Bee,
       backupSigner: BACKUP_SIGNER,
       swarmEncryptionKey: TEST_ENC_KEY,
+      batchId: TEST_BATCH_ID,
       partition: PARTITION,
       deviceId: DEVICE_A,
       epochBucket: intentEpochBucket(NOW),
@@ -213,6 +239,7 @@ describe("resolveIntentRound", () => {
     stamper,
     backupSigner: BACKUP_SIGNER,
     swarmEncryptionKey: TEST_ENC_KEY,
+    batchId: TEST_BATCH_ID,
     partition: PARTITION,
     now: NOW,
     timeoutMs: 50,
@@ -278,6 +305,7 @@ describe("resolveIntentRound", () => {
       stamper,
       backupSigner: BACKUP_SIGNER,
       swarmEncryptionKey: TEST_ENC_KEY,
+      batchId: TEST_BATCH_ID,
       partition: PARTITION,
       deviceId: DEVICE_A,
       epochBucket: intentEpochBucket(NOW),
@@ -299,6 +327,7 @@ describe("resolveIntentRound", () => {
       stamper,
       backupSigner: BACKUP_SIGNER,
       swarmEncryptionKey: TEST_ENC_KEY,
+      batchId: TEST_BATCH_ID,
       partition: PARTITION,
       deviceId: DEVICE_A,
       epochBucket: intentEpochBucket(NOW),
@@ -321,6 +350,7 @@ describe("resolveIntentRound", () => {
       stamper,
       backupSigner: BACKUP_SIGNER,
       swarmEncryptionKey: TEST_ENC_KEY,
+      batchId: TEST_BATCH_ID,
       partition: PARTITION,
       deviceId: DEVICE_A,
       epochBucket: intentEpochBucket(NOW) - 1,
@@ -364,6 +394,7 @@ describe("resolveIntentRound", () => {
       stamper,
       backupSigner: BACKUP_SIGNER,
       swarmEncryptionKey: TEST_ENC_KEY,
+      batchId: TEST_BATCH_ID,
       partition: PARTITION,
       deviceId: DEVICE_A,
       epochBucket: intentEpochBucket(NOW),
@@ -390,6 +421,7 @@ describe("resolveIntentRound", () => {
       stamper,
       backupSigner: BACKUP_SIGNER,
       swarmEncryptionKey: TEST_ENC_KEY,
+      batchId: TEST_BATCH_ID,
       partition: PARTITION,
       deviceId: DEVICE_A,
       epochBucket: intentEpochBucket(NOW),
@@ -413,6 +445,7 @@ describe("resolveIntentRound", () => {
       stamper,
       backupSigner: BACKUP_SIGNER,
       swarmEncryptionKey: TEST_ENC_KEY,
+      batchId: TEST_BATCH_ID,
       partition: PARTITION,
       deviceId: DEVICE_A,
       epochBucket: intentEpochBucket(NOW),
@@ -453,6 +486,7 @@ describe("resolveIntentRound", () => {
       stamper,
       backupSigner: BACKUP_SIGNER,
       swarmEncryptionKey: TEST_ENC_KEY,
+      batchId: TEST_BATCH_ID,
       partition: PARTITION,
       deviceId: DEVICE_A,
       epochBucket: intentEpochBucket(NOW),
@@ -479,6 +513,7 @@ describe("resolveIntentRound", () => {
       stamper,
       backupSigner: BACKUP_SIGNER,
       swarmEncryptionKey: TEST_ENC_KEY,
+      batchId: TEST_BATCH_ID,
       partition: PARTITION,
       deviceId: DEVICE_A,
       epochBucket: intentEpochBucket(NOW),

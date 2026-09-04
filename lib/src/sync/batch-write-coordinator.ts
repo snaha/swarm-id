@@ -784,6 +784,7 @@ export class BatchWriteCoordinator {
         bee: this.deps.bee,
         backupSigner: this.deps.backupSigner,
         swarmEncryptionKey: this.deps.swarmEncryptionKey,
+        batchId: new BatchId(this.deps.batchId),
         partition,
       })
     } catch (err) {
@@ -1000,6 +1001,7 @@ export class BatchWriteCoordinator {
           bee: this.deps.bee,
           backupSigner: this.deps.backupSigner,
           swarmEncryptionKey: this.deps.swarmEncryptionKey,
+          batchId: new BatchId(this.deps.batchId),
           partition,
         })
         confirmedDisplaced = isDisplaced(

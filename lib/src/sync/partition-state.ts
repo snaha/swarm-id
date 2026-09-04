@@ -858,7 +858,7 @@ export async function writePartitionState(opts: {
   // utilisation chunks, and (incremental) the buckets of the REAL chunks we
   // retain (sentinel/zero chunks occupy no bucket).
   const claimedBuckets = new Set<number>([
-    lockSocBucket(partition, owner),
+    lockSocBucket(batchId, partition, owner),
     ...(reserve?.getCleanChunkBuckets() ?? []),
   ])
   if (incremental) {
@@ -904,11 +904,15 @@ export async function writePartitionState(opts: {
   const epoch = intentEpochBucket(now)
   for (const beaconBucket of [epoch, epoch - 1]) {
     claimedBuckets.add(
-      toBucket(partitionOccupancyAddress(partition, beaconBucket, owner)),
+      toBucket(
+        partitionOccupancyAddress(batchId, partition, beaconBucket, owner),
+      ),
     )
     if (deviceId !== undefined) {
       claimedBuckets.add(
-        toBucket(intentSocAddress(partition, deviceId, beaconBucket, owner)),
+        toBucket(
+          intentSocAddress(batchId, partition, deviceId, beaconBucket, owner),
+        ),
       )
     }
   }

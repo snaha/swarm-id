@@ -28,7 +28,12 @@
  * See the "Multi-Device Postage Batches" page in docs-site for the full design.
  */
 
-import { Bee, PrivateKey, type Stamper } from "@ethersphere/bee-js"
+import {
+  Bee,
+  PrivateKey,
+  type BatchId,
+  type Stamper,
+} from "@ethersphere/bee-js"
 import { Binary } from "cafe-utility"
 import { downloadEncryptedSOC } from "../proxy/download-data"
 import { uploadSOC, type UploadTarget } from "../proxy/upload"
@@ -151,10 +156,11 @@ export async function readPartitionLock(opts: {
   bee: Bee
   backupSigner: PrivateKey
   swarmEncryptionKey: Uint8Array
+  batchId: BatchId
   partition: number
 }): Promise<PartitionLockPayload | undefined> {
-  const { bee, backupSigner, swarmEncryptionKey, partition } = opts
-  const identifier = makePartitionLockIdentifier(partition)
+  const { bee, backupSigner, swarmEncryptionKey, batchId, partition } = opts
+  const identifier = makePartitionLockIdentifier(batchId, partition)
   const owner = backupSigner.publicKey().address()
   try {
     const soc = await downloadEncryptedSOC(
@@ -199,12 +205,20 @@ export async function writePartitionLock(opts: {
   stamper: Stamper
   backupSigner: PrivateKey
   swarmEncryptionKey: Uint8Array
+  batchId: BatchId
   partition: number
   payload: PartitionLockPayload
 }): Promise<void> {
-  const { bee, stamper, backupSigner, swarmEncryptionKey, partition, payload } =
-    opts
-  const identifier = makePartitionLockIdentifier(partition)
+  const {
+    bee,
+    stamper,
+    backupSigner,
+    swarmEncryptionKey,
+    batchId,
+    partition,
+    payload,
+  } = opts
+  const identifier = makePartitionLockIdentifier(batchId, partition)
   const data = new TextEncoder().encode(JSON.stringify(payload))
   const target: UploadTarget = { mode: "stamper", bee, stamper }
   // No `deferred` flag: Bee's /soc handler hardcodes Deferred:false and ignores
@@ -229,6 +243,7 @@ export async function acquirePartitionLock(opts: {
   stamper: Stamper
   backupSigner: PrivateKey
   swarmEncryptionKey: Uint8Array
+  batchId: BatchId
   partition: number
   deviceId: string
   ttlMs: number
@@ -384,6 +399,7 @@ export async function releasePartitionLock(opts: {
   stamper: Stamper
   backupSigner: PrivateKey
   swarmEncryptionKey: Uint8Array
+  batchId: BatchId
   partition: number
   deviceId: string
   /** Generation of the claim being released — fences the sentinel. */

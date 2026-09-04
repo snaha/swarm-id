@@ -65,6 +65,12 @@ const LeaseRequestIdSchema = z.string().regex(/^[0-9a-f]{8}$/)
  * Swarm lease protocol and answers with `lease-released`; holders mid-write
  * ignore it. Repeats are harmless (yield-if-idle is a guarded no-op).
  *
+ * `batchId` scopes the ask, because the lock it is a fast path for is scoped
+ * that way: lanes are per (batch, partition) since #589, so a holder on batch X
+ * and a waiter on batch Y contend for nothing. Answering across batches would
+ * drop a lease for a waiter it cannot help — the bus must not be broader than
+ * the lock it front-runs, any more than it may be narrower.
+ *
  * `requestId` is 8 hex chars, fresh per poll round, and exists so exactly one
  * holder answers: each derives the same permutation of the partitions from it
  * and yields at its own rank (`swarm-id-proxy.ts`, `yieldRankDelayMs`). It is
@@ -77,6 +83,7 @@ const LeaseRequestIdSchema = z.string().regex(/^[0-9a-f]{8}$/)
 export const LeaseRequestMessageSchema = z.object({
   type: z.literal("lease-request"),
   accountId: z.string().length(40),
+  batchId: z.string().length(64),
   fromDeviceId: DeviceIdSchema,
   requestId: LeaseRequestIdSchema.optional(),
 })
@@ -92,6 +99,7 @@ export const LeaseRequestMessageSchema = z.object({
 export const LeaseClaimMessageSchema = z.object({
   type: z.literal("lease-claim"),
   accountId: z.string().length(40),
+  batchId: z.string().length(64),
   fromDeviceId: DeviceIdSchema,
   requestId: LeaseRequestIdSchema,
 })
@@ -108,6 +116,7 @@ export const LeaseClaimMessageSchema = z.object({
 export const LeaseReleasedMessageSchema = z.object({
   type: z.literal("lease-released"),
   accountId: z.string().length(40),
+  batchId: z.string().length(64),
   partition: z.number().int().min(0),
   fromDeviceId: DeviceIdSchema,
   requestId: LeaseRequestIdSchema.optional(),

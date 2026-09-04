@@ -58,6 +58,7 @@ import {
   Bee,
   Identifier,
   PrivateKey,
+  type BatchId,
   type EthAddress,
   type Stamper,
 } from "@ethersphere/bee-js"
@@ -140,13 +141,14 @@ export function intentEpochBucket(nowMs: number): number {
  * the writer's nor a reader's node has a cached copy.
  */
 export function makePartitionIntentIdentifier(
+  batchId: BatchId,
   partition: number,
   deviceId: string,
   epochBucket: number,
 ): Identifier {
   const hash = Binary.keccak256(
     new TextEncoder().encode(
-      `${PARTITION_INTENT_DOMAIN}:${partition}:${deviceId}:${epochBucket}`,
+      `${PARTITION_INTENT_DOMAIN}:${batchId.toHex()}:${partition}:${deviceId}:${epochBucket}`,
     ),
   )
   return new Identifier(hash)
@@ -159,12 +161,14 @@ export function makePartitionIntentIdentifier(
  * reserved index instead of a data lane).
  */
 export function intentSocAddress(
+  batchId: BatchId,
   partition: number,
   deviceId: string,
   epochBucket: number,
   owner: EthAddress,
 ): Uint8Array {
   const identifier = makePartitionIntentIdentifier(
+    batchId,
     partition,
     deviceId,
     epochBucket,
@@ -174,14 +178,17 @@ export function intentSocAddress(
   )
 }
 
-/** Build the deviceId-INDEPENDENT occupancy identifier for (partition, epoch). */
+/** Build the deviceId-INDEPENDENT occupancy identifier for (batch, partition,
+ *  epoch). Batch-scoped for the same reason the lock is (#589): a beacon on
+ *  lane p of batch X says nothing about lane p of batch Y. */
 export function makePartitionOccupancyIdentifier(
+  batchId: BatchId,
   partition: number,
   epochBucket: number,
 ): Identifier {
   const hash = Binary.keccak256(
     new TextEncoder().encode(
-      `${PARTITION_OCCUPANCY_DOMAIN}:${partition}:${epochBucket}`,
+      `${PARTITION_OCCUPANCY_DOMAIN}:${batchId.toHex()}:${partition}:${epochBucket}`,
     ),
   )
   return new Identifier(hash)
@@ -189,11 +196,16 @@ export function makePartitionOccupancyIdentifier(
 
 /** 32-byte SOC address for an occupancy beacon (for stamper slot reservation). */
 export function partitionOccupancyAddress(
+  batchId: BatchId,
   partition: number,
   epochBucket: number,
   owner: EthAddress,
 ): Uint8Array {
-  const identifier = makePartitionOccupancyIdentifier(partition, epochBucket)
+  const identifier = makePartitionOccupancyIdentifier(
+    batchId,
+    partition,
+    epochBucket,
+  )
   return Binary.keccak256(
     Binary.concatBytes(identifier.toUint8Array(), owner.toUint8Array()),
   )
@@ -210,6 +222,7 @@ export async function writePartitionIntent(opts: {
   stamper: Stamper
   backupSigner: PrivateKey
   swarmEncryptionKey: Uint8Array
+  batchId: BatchId
   partition: number
   deviceId: string
   epochBucket: number
@@ -222,12 +235,14 @@ export async function writePartitionIntent(opts: {
   leasedUntil?: number
 }): Promise<void> {
   const identifier = makePartitionIntentIdentifier(
+    opts.batchId,
     opts.partition,
     opts.deviceId,
     opts.epochBucket,
   )
   const owner = opts.backupSigner.publicKey().address()
   const address = intentSocAddress(
+    opts.batchId,
     opts.partition,
     opts.deviceId,
     opts.epochBucket,
@@ -264,6 +279,7 @@ export async function writePartitionOccupancy(opts: {
   stamper: Stamper
   backupSigner: PrivateKey
   swarmEncryptionKey: Uint8Array
+  batchId: BatchId
   partition: number
   deviceId: string
   epochBucket: number
@@ -271,11 +287,13 @@ export async function writePartitionOccupancy(opts: {
   leasedUntil: number
 }): Promise<void> {
   const identifier = makePartitionOccupancyIdentifier(
+    opts.batchId,
     opts.partition,
     opts.epochBucket,
   )
   const owner = opts.backupSigner.publicKey().address()
   const address = partitionOccupancyAddress(
+    opts.batchId,
     opts.partition,
     opts.epochBucket,
     owner,
@@ -419,6 +437,7 @@ export async function readPartitionIntent(opts: {
   bee: Bee
   backupSigner: PrivateKey
   swarmEncryptionKey: Uint8Array
+  batchId: BatchId
   partition: number
   deviceId: string
   epochBucket: number
@@ -430,6 +449,7 @@ export async function readPartitionIntent(opts: {
     bee: opts.bee,
     owner: opts.backupSigner.publicKey().address(),
     identifier: makePartitionIntentIdentifier(
+      opts.batchId,
       opts.partition,
       opts.deviceId,
       opts.epochBucket,
@@ -449,6 +469,7 @@ export async function readPartitionOccupancy(opts: {
   bee: Bee
   backupSigner: PrivateKey
   swarmEncryptionKey: Uint8Array
+  batchId: BatchId
   partition: number
   epochBucket: number
   timeoutMs?: number
@@ -457,6 +478,7 @@ export async function readPartitionOccupancy(opts: {
     bee: opts.bee,
     owner: opts.backupSigner.publicKey().address(),
     identifier: makePartitionOccupancyIdentifier(
+      opts.batchId,
       opts.partition,
       opts.epochBucket,
     ),
@@ -486,6 +508,7 @@ export async function resolveIntentRound(opts: {
   stamper: Stamper
   backupSigner: PrivateKey
   swarmEncryptionKey: Uint8Array
+  batchId: BatchId
   partition: number
   deviceId: string
   generation: PartitionLockGeneration
@@ -524,6 +547,7 @@ export async function resolveIntentRound(opts: {
     stamper: opts.stamper,
     backupSigner: opts.backupSigner,
     swarmEncryptionKey: opts.swarmEncryptionKey,
+    batchId: opts.batchId,
     partition: opts.partition,
     deviceId: opts.deviceId,
     epochBucket: currentBucket,
@@ -550,6 +574,7 @@ export async function resolveIntentRound(opts: {
             bee: opts.bee,
             backupSigner: opts.backupSigner,
             swarmEncryptionKey: opts.swarmEncryptionKey,
+            batchId: opts.batchId,
             partition: opts.partition,
             deviceId: rivalId,
             epochBucket: bucket,

@@ -1045,7 +1045,7 @@ describe("UtilizationAwareStamper partition awareness", () => {
     const swarmEncryptionKeyHex = uint8ArrayToHex(swarmEncryptionKey)
     const backupKeyHex = await deriveSecret(swarmEncryptionKeyHex, "backup-key")
     const backupOwner = new PrivateKey(backupKeyHex).publicKey().address()
-    const expectedLockSocAddr = lockSocAddress(0, backupOwner)
+    const expectedLockSocAddr = lockSocAddress(TEST_BATCH_ID, 0, backupOwner)
 
     // Deliberately wrong `owner` — a random unrelated address. If the bug
     // resurfaced, the auto-bind would use this address and the synthetic

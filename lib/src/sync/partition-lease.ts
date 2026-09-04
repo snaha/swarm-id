@@ -251,12 +251,18 @@ export class PartitionLease {
       /** Backup signer for the partition-lock SOC and partition-state feed. */
       backupSigner: PrivateKey
       /**
-       * Batch + stamper are only needed for the WRITE paths (acquire,
+       * Which batch's lanes this lease is about. Required even for a reader:
+       * every lock, intent and occupancy address is derived per (batch,
+       * partition) since #589, so "who holds partition p" has no answer
+       * without naming the batch.
+       */
+      batchId: BatchId
+      /**
+       * Stamper + depth are only needed for the WRITE paths (acquire,
        * refresh, release). They're optional so a reader — e.g. the SwarmID
        * UI's Devices tab — can build a lease purely to `refreshFromSwarm`
        * and inspect holders without a stamper.
        */
-      batchId?: BatchId
       batchDepth?: number
       /**
        * Stamper used to upload the small payload chunks (lock SOC, state
@@ -306,7 +312,7 @@ export class PartitionLease {
     bee: Bee
     deviceId: string
     swarmEncryptionKey: Uint8Array
-    batchId?: BatchId
+    batchId: BatchId
     batchDepth?: number
     stamper?: Stamper
     now?: () => number
@@ -348,6 +354,7 @@ export class PartitionLease {
             bee: this.opts.bee,
             backupSigner: this.opts.backupSigner,
             swarmEncryptionKey: this.opts.swarmEncryptionKey,
+            batchId: this.opts.batchId,
             partition: p,
           }),
           LOCK_READ_TIMEOUT_MS,
@@ -448,6 +455,7 @@ export class PartitionLease {
               bee: this.opts.bee,
               backupSigner: this.opts.backupSigner,
               swarmEncryptionKey: this.opts.swarmEncryptionKey,
+              batchId: this.opts.batchId,
               partition: p,
               deviceId,
               epochBucket: bucket,
@@ -541,6 +549,7 @@ export class PartitionLease {
             bee: this.opts.bee,
             backupSigner: this.opts.backupSigner,
             swarmEncryptionKey: this.opts.swarmEncryptionKey,
+            batchId: this.opts.batchId,
             partition: p,
             epochBucket: bucket,
             timeoutMs: this.opts.intentReadTimeoutMs,
@@ -748,15 +757,13 @@ export class PartitionLease {
    * the lookup `readPartitionState` performs when the partition has no known
    * prior holder (`holderLeasedUntilMs` undefined; `readPartitionState`
    * enforces that before trusting the prefetch). Best-effort: `undefined` on a
-   * read-only lease (no batch) or a thrown read → the claim falls back to its
-   * own serial lookup.
+   * thrown read → the claim falls back to its own serial lookup.
    */
   private async speculativeStatePointer(
     partition: number,
     nowMs: number,
   ): Promise<StatePointerLookup | undefined> {
     const { batchId } = this.opts
-    if (!batchId) return undefined
     try {
       return await readStatePointer({
         bee: this.opts.bee,
@@ -882,6 +889,7 @@ export class PartitionLease {
         stamper,
         backupSigner: this.opts.backupSigner,
         swarmEncryptionKey: this.opts.swarmEncryptionKey,
+        batchId: this.opts.batchId,
         partition,
         deviceId: this.opts.deviceId,
         generation,
@@ -913,6 +921,7 @@ export class PartitionLease {
       stamper,
       backupSigner: this.opts.backupSigner,
       swarmEncryptionKey: this.opts.swarmEncryptionKey,
+      batchId: this.opts.batchId,
       partition,
       deviceId: this.opts.deviceId,
       ttlMs: LEASE_TTL_MS,
@@ -1080,6 +1089,7 @@ export class PartitionLease {
       stamper,
       backupSigner: this.opts.backupSigner,
       swarmEncryptionKey: this.opts.swarmEncryptionKey,
+      batchId: this.opts.batchId,
       partition,
       deviceId: this.opts.deviceId,
       ttlMs: LEASE_TTL_MS,
@@ -1164,6 +1174,7 @@ export class PartitionLease {
             bee: this.opts.bee,
             backupSigner: this.opts.backupSigner,
             swarmEncryptionKey: this.opts.swarmEncryptionKey,
+            batchId: this.opts.batchId,
             partition,
             deviceId,
             epochBucket: bucket,
@@ -1231,6 +1242,7 @@ export class PartitionLease {
           bee: this.opts.bee,
           backupSigner: this.opts.backupSigner,
           swarmEncryptionKey: this.opts.swarmEncryptionKey,
+          batchId: this.opts.batchId,
           partition,
           epochBucket: bucket,
           timeoutMs: this.opts.intentReadTimeoutMs,
@@ -1279,6 +1291,7 @@ export class PartitionLease {
         stamper,
         backupSigner: this.opts.backupSigner,
         swarmEncryptionKey: this.opts.swarmEncryptionKey,
+        batchId: this.opts.batchId,
         partition,
         deviceId: this.opts.deviceId,
         epochBucket,
@@ -1290,6 +1303,7 @@ export class PartitionLease {
         stamper,
         backupSigner: this.opts.backupSigner,
         swarmEncryptionKey: this.opts.swarmEncryptionKey,
+        batchId: this.opts.batchId,
         partition,
         deviceId: this.opts.deviceId,
         epochBucket,
@@ -1333,6 +1347,7 @@ export class PartitionLease {
       stamper,
       backupSigner: this.opts.backupSigner,
       swarmEncryptionKey: this.opts.swarmEncryptionKey,
+      batchId: this.opts.batchId,
       partition,
       deviceId: this.opts.deviceId,
       releasedGeneration: generation,
@@ -1512,10 +1527,12 @@ export class PartitionLease {
     const epoch = intentEpochBucket(nowMs)
     // This device's own reserved-slot writers for the current epoch.
     const fixed = new Set<number>([
-      lockSocBucket(partition, owner),
+      lockSocBucket(batchId, partition, owner),
       toBucket(statePointerAddress(batchId, partition, owner, nowMs)),
-      toBucket(partitionOccupancyAddress(partition, epoch, owner)),
-      toBucket(intentSocAddress(partition, this.opts.deviceId, epoch, owner)),
+      toBucket(partitionOccupancyAddress(batchId, partition, epoch, owner)),
+      toBucket(
+        intentSocAddress(batchId, partition, this.opts.deviceId, epoch, owner),
+      ),
     ])
     // Retained chunks a rotating writer above could evict: the non-zero counter
     // chunks + the reference chunk (its bucket isn't in `publishedReferences`).
@@ -1585,7 +1602,7 @@ export class PartitionLease {
   serialize(): PartitionLeaseStateSnapshot {
     return {
       deviceId: this.opts.deviceId,
-      batchId: this.opts.batchId?.toHex() ?? "",
+      batchId: this.opts.batchId.toHex(),
       self: this.self,
     }
   }
@@ -1593,14 +1610,11 @@ export class PartitionLease {
   /**
    * Seed `self` from a persisted cache snapshot. No Swarm activity — the
    * next `refresh()`/`acquire()` re-validates against the lock SOC. Ignores
-   * snapshots for a different device or batch (and read-only instances,
-   * which have no batch).
+   * snapshots for a different device or batch.
    */
   hydrate(snapshot: PartitionLeaseStateSnapshot): void {
     if (snapshot.deviceId !== this.opts.deviceId) return
-    if (!this.opts.batchId || snapshot.batchId !== this.opts.batchId.toHex()) {
-      return
-    }
+    if (snapshot.batchId !== this.opts.batchId.toHex()) return
     this.self = snapshot.self
   }
 
@@ -1613,13 +1627,9 @@ export class PartitionLease {
     batchId: BatchId
     batchDepth: number
   } {
-    if (
-      !this.opts.stamper ||
-      !this.opts.batchId ||
-      this.opts.batchDepth === undefined
-    ) {
+    if (!this.opts.stamper || this.opts.batchDepth === undefined) {
       throw new Error(
-        "PartitionLease: write operation requires stamper + batchId + batchDepth (read-only instance)",
+        "PartitionLease: write operation requires stamper + batchDepth (read-only instance)",
       )
     }
     return {
