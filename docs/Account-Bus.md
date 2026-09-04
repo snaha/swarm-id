@@ -247,6 +247,19 @@ With the bus in place the partitioned iframe is a first-class writer:
   `swarm-id-device-id` and lease cache — it _is_ a device, named after the dApp it belongs to
   in the roster (#643), and its liveness comes from presence like every other device's; nothing
   expires a device (see Message kinds).
+- **What that session PUBLISHES, and why a partial view is safe to publish**
+  ([#579](https://github.com/snaha/swarm-id/issues/579)). A partitioned session writes its own
+  device-state feed from the same hydrated view — narrowed to this app's reachable stamps, and
+  only as current as the last `account-delta` it folded. It is safe because the read fold
+  (`foldAccount`) unions every device's view **per id**: a publisher states what it holds and
+  never what it lacks, so the stamps the narrowing removed are supplied by the first-party
+  context's own feed and cannot be deleted by their absence here. What it does hold cannot
+  revive anything either — collections merge per entry on tombstone clocks, so a peer's
+  `revokedAt` / `deletedAt` beats the connect-time copy, and the scalars ride per-field clocks
+  (`accountNameAt`, `defaultStampAt`, `settingsAt`), so a stale rename loses rather than
+  clobbers. Pinned by tests in `lib/src/sync/device-state.test.ts` ("a stale, narrowed
+  publisher"). Since #568 the view is not frozen for the session either: a delta that lands
+  folds in and is re-persisted, so what it publishes is the handover plus every overlap since.
 - On successful hydration `uploadMode` flips to `user-stamp` and `ensureCanUpload` passes;
   `storagePartitioned` stays surfaced in `ConnectionInfo` for UI messaging. The download-only
   session that used to exist for a handover without an account projection is gone (#642): the

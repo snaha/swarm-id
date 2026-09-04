@@ -203,6 +203,64 @@ describe("foldAccount — differential equivalence with mergeSnapshotWithRemote"
   })
 })
 
+// #579: a partitioned session publishes its own device feed from the view the
+// connect popup handed it — narrowed to the stamps this app can reach (#578),
+// and only as current as the last delta it folded. What that cannot do is the
+// question, and it is the fold that answers it: every device's view is unioned
+// per id, so a publisher states what it holds and never what it lacks.
+describe("foldAccount — a stale, narrowed publisher", () => {
+  it("does not delete the stamps it never held", () => {
+    const mine = "aa".repeat(32)
+    const theirs = "bb".repeat(32)
+    // What the handover narrowed to: this app's own stamp, nothing else.
+    const partitioned = makeView({ postageStamps: [makeStamp(mine)] })
+    // The first-party context, which holds the whole collection.
+    const firstParty = makeView({
+      postageStamps: [makeStamp(mine), makeStamp(theirs, { createdAt: 9 })],
+    })
+
+    const folded = foldAccount(
+      [partitioned, firstParty] as unknown as DeviceStateSnapshot[],
+      [makeDevice("dev-partition"), makeDevice("dev-first-party")],
+    )
+
+    expect(folded.postageStamps.map((s) => s.batchID.toHex()).sort()).toEqual(
+      [mine, theirs].sort(),
+    )
+  })
+
+  it("cannot revive what a peer ended while it was frozen", () => {
+    const hex = "cc".repeat(32)
+    const app = "https://dapp.example"
+    // Held since connect: both entries active, on their connect-time clocks.
+    // `makeApp` connects at 1_000_000, and membership ranks on
+    // `max(revokedAt, disconnectedAt, lastConnectedAt)` (#682) — so the peer's
+    // end has to be later than the CONNECT, not merely later than some edit
+    // clock, or the two tie and the accumulator keeps the live copy.
+    const frozen = makeView({
+      connectedApps: [makeApp(app)],
+      postageStamps: [makeStamp(hex, { createdAt: 1 })],
+    })
+    // What happened after, on another device.
+    const peer = makeView({
+      connectedApps: [
+        makeApp(app, { disconnectedAt: 9_000_000, revokedAt: 9_000_000 }),
+      ],
+      postageStamps: [makeStamp(hex, { createdAt: 1, deletedAt: 9 })],
+    })
+
+    const folded = foldAccount(
+      [frozen, peer] as unknown as DeviceStateSnapshot[],
+      [makeDevice("dev-partition"), makeDevice("dev-peer")],
+    )
+
+    expect(folded.connectedApps).toHaveLength(1)
+    expect(folded.connectedApps[0].revokedAt).toBe(9_000_000)
+    expect(folded.postageStamps).toHaveLength(1)
+    expect(folded.postageStamps[0].deletedAt).toBe(9)
+  })
+})
+
 describe("foldAccount — per-field scalar LWW", () => {
   it("a concurrent name change on A and default-stamp change on B both survive", () => {
     const viewA = makeView({
