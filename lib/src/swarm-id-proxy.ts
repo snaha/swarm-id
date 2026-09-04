@@ -488,6 +488,16 @@ export class SwarmIdProxy {
         if (event.key !== STORAGE_KEY_NETWORK_SETTINGS) {
           return
         }
+        // Never for a partitioned session: its settings came over the handover,
+        // and the store this event points at is the PARTITION's, which holds
+        // none. Re-reading it loads `undefined` and falls through to the public
+        // gateway and the default RPC, moving a user on a local or custom Bee
+        // node onto neither (#580). A settings change made in the first-party
+        // tab does not reach such a session at all — it is picked up at the
+        // next connect (docs/Account-Bus.md, Known gaps).
+        if (this.partitionAccount) {
+          return
+        }
         this.applyNetworkSettings()
       }
       window.addEventListener("storage", onNetworkSettingsChange)

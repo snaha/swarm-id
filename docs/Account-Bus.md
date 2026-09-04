@@ -417,6 +417,14 @@ Not yet written:
   signer key or moved default stamp** made while the tab was closed is not adopted on restore;
   the session comes up on the handed-over view and corrects at the next live overlap. Changes
   that arrive while it IS live are folded and re-persisted, so they survive a reload.
+- **Network settings do not reach a partitioned session at all.** The Bee node and RPC URLs are
+  browser-local (`swarm-id-network-settings`), not account state, so they ride the connect
+  handover and nothing refreshes them: a node changed in the first-party SwarmID tab is picked up
+  at the next connect. Deliberately out of scope for the bus — the settings are per-browser, and a
+  peer's copy would be as meaningless as its session deadline. The proxy's `storage` listener for
+  that key is skipped while partitioned, since the store it would re-read is the partition's own
+  and holds nothing: loading it would silently reset the session to the public gateway and the
+  default RPC ([#580](https://github.com/snaha/swarm-id/issues/580)).
 - Without TURN, WebRTC will not connect across restrictive NATs; those pairs fall back to the
   signaling-server relay.
 - A newcomer's join-time presence beat is dropped (its socket has no peers yet), so remote
