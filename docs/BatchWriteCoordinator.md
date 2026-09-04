@@ -36,8 +36,10 @@ SwarmIdProxy (iframe)            sync-account (SwarmID UI)
 ```
 
 The lock SOC on Swarm stays the source of truth for who holds a partition; the local lease cache
-(localStorage, persistent mode only) is just a hint. The coordinator is the lifecycle layer above
-`PartitionLease`.
+(localStorage, persistent mode only) is just a hint — keyed
+`swarm-id-lease-v2:<accountId>:<batchId>`, because the lease it hints at belongs to one batch and an
+account with a per-app stamp override runs two coordinators. The coordinator is the lifecycle layer
+above `PartitionLease`.
 
 ## API
 
