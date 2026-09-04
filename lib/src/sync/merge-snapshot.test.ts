@@ -377,13 +377,10 @@ describe("mergeSnapshotWithRemote — apps / stamps", () => {
     // The device-2 case: device 1 revoked the app and published a tombstone;
     // device 2 still has the app active. The newer tombstone must win so the
     // revocation propagates.
-    const active = {
-      ...makeConnectedApp("https://app.example"),
-      updatedAt: 1_000_000,
-    }
+    const active = makeConnectedApp("https://app.example")
     const tombstone = {
       ...makeConnectedApp("https://app.example"),
-      updatedAt: 5_000_000,
+      disconnectedAt: 5_000_000,
       revokedAt: 5_000_000,
       connectedUntil: undefined,
       appSecret: undefined,
@@ -396,18 +393,86 @@ describe("mergeSnapshotWithRemote — apps / stamps", () => {
     expect(result.connectedApps[0].revokedAt).toBe(5_000_000)
   })
 
+  // #681: every write to an entry used to bump one `updatedAt` that ranked the
+  // WHOLE entry, so an edit that says nothing about whether the app is still
+  // connected — picking a drive for it, which the connect flow's own picker
+  // does — outranked a revoke made elsewhere and took the tombstone with it,
+  // credential included. Membership rides the markers that state it, exactly as
+  // a device's does (`max(removedAt, lastSignedInAt)`).
+  it("a drive picked on a stale copy does not undo a revoke", () => {
+    const tombstone = {
+      ...makeConnectedApp("https://app.example"),
+      disconnectedAt: 5_000_000,
+      revokedAt: 5_000_000,
+      appSecret: undefined,
+      connectedUntil: undefined,
+    }
+    // Device 2 has not seen the revoke and points the app at a drive: newer
+    // than the revoke, and about something else entirely.
+    const staleWithNewStamp = {
+      ...makeConnectedApp("https://app.example"),
+      appSecret: "33".repeat(32),
+      postageStampBatchID: new BatchId("cc".repeat(32)),
+      postageStampBatchIDAt: 9_000_000,
+    }
+    const result = mergeSnapshotWithRemote(
+      makeSnapshot({ connectedApps: [staleWithNewStamp] }),
+      makeSnapshot({ connectedApps: [tombstone] }),
+    )
+    expect(result.connectedApps).toHaveLength(1)
+    expect(result.connectedApps[0].revokedAt).toBe(5_000_000)
+    expect(result.connectedApps[0].appSecret).toBeUndefined()
+  })
+
+  // The other half of the overlay, and the reason it has to exist: a drive
+  // choice moves no membership field, so without a clock of its own it ties
+  // with every stale copy of the entry and loses.
+  it("a newer drive choice propagates between two live copies", () => {
+    const chosen = {
+      ...makeConnectedApp("https://app.example"),
+      postageStampBatchID: new BatchId("cc".repeat(32)),
+      postageStampBatchIDAt: 9_000_000,
+    }
+    const stale = makeConnectedApp("https://app.example")
+    const result = mergeSnapshotWithRemote(
+      makeSnapshot({ connectedApps: [stale] }),
+      makeSnapshot({ connectedApps: [chosen] }),
+    )
+    expect(result.connectedApps[0].postageStampBatchID?.toHex()).toBe(
+      "cc".repeat(32),
+    )
+  })
+
+  // A removal is not permanent: connecting again clears both markers and sets a
+  // fresh `lastConnectedAt`, which is what has to outrank the tombstone.
+  it("a genuine reconnect beats an older removal", () => {
+    const tombstone = {
+      ...makeConnectedApp("https://app.example"),
+      disconnectedAt: 5_000_000,
+      revokedAt: 5_000_000,
+    }
+    const reconnected = {
+      ...makeConnectedApp("https://app.example"),
+      lastConnectedAt: 9_000_000,
+      appSecret: "44".repeat(32),
+    }
+    const result = mergeSnapshotWithRemote(
+      makeSnapshot({ connectedApps: [reconnected] }),
+      makeSnapshot({ connectedApps: [tombstone] }),
+    )
+    expect(result.connectedApps[0].revokedAt).toBeUndefined()
+    expect(result.connectedApps[0].appSecret).toBe("44".repeat(32))
+  })
+
   it("local revocation is not undone by an older remote active copy (publish merge)", () => {
     // The publish case: device 1 revoked locally; the remote snapshot still has
     // the app active (older). The union used to re-add it — LWW keeps the tombstone.
     const tombstone = {
       ...makeConnectedApp("https://app.example"),
-      updatedAt: 5_000_000,
+      disconnectedAt: 5_000_000,
       revokedAt: 5_000_000,
     }
-    const staleActive = {
-      ...makeConnectedApp("https://app.example"),
-      updatedAt: 1_000_000,
-    }
+    const staleActive = makeConnectedApp("https://app.example")
     const result = mergeSnapshotWithRemote(
       makeSnapshot({ connectedApps: [tombstone] }), // local (device 1): revoked
       makeSnapshot({ connectedApps: [staleActive] }), // remote: still active (older)

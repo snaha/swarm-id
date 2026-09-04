@@ -162,7 +162,7 @@ export function serializeConnectedApp(
     connectedUntil: app.connectedUntil,
     appSecret: app.appSecret,
     postageStampBatchID: app.postageStampBatchID?.toString(),
-    updatedAt: app.updatedAt,
+    postageStampBatchIDAt: app.postageStampBatchIDAt,
     revokedAt: app.revokedAt,
     disconnectedAt: app.disconnectedAt,
   }

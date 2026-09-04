@@ -34,17 +34,17 @@ a device that was closed reads when it comes back.
 
 `Account` (`lib/src/types.ts` / `schemas.ts`), serialized by `serializeAccount`:
 
-| Field                                           | Notes                                                                                        |
-| ----------------------------------------------- | -------------------------------------------------------------------------------------------- |
-| `id`, `name`, `type`, `createdAt`               | `type` ∈ passkey / ethereum / agent (+ type-specific fields, e.g. `credentialId`)            |
-| `derivationKey`, `publicKey`                    | `derivationKey` is the shared account key every device holds (see Assumptions)               |
-| `devices: Device[]`                             | each: `deviceId, name, createdAt, lastSignedInAt`, tombstone `removedAt?`                    |
-| `connectedApps: ConnectedApp[]`                 | each: app fields + `updatedAt`, optional `postageStampBatchID`, tombstone `revokedAt?`       |
-| `postageStamps: PostageStamp[]`                 | account-owned set; each: stamp fields + `createdAt`, tombstone `deletedAt?`                  |
-| `defaultPostageStampBatchID`                    | the account's default batch (stores account data; default for app uploads)                   |
-| `settings`                                      | e.g. `appSessionDuration`                                                                    |
-| `accountNameAt`, `defaultStampAt`, `settingsAt` | **per-field LWW clocks** for the three scalars above (optional; fall back to `lastModified`) |
-| `partitionCount`, `lastModified`                | partition count for the shared batch; local modified clock                                   |
+| Field                                           | Notes                                                                                                                               |
+| ----------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
+| `id`, `name`, `type`, `createdAt`               | `type` ∈ passkey / ethereum / agent (+ type-specific fields, e.g. `credentialId`)                                                   |
+| `derivationKey`, `publicKey`                    | `derivationKey` is the shared account key every device holds (see Assumptions)                                                      |
+| `devices: Device[]`                             | each: `deviceId, name, createdAt, lastSignedInAt`, tombstone `removedAt?`                                                           |
+| `connectedApps: ConnectedApp[]`                 | each: app fields, optional `postageStampBatchID` + its own `postageStampBatchIDAt` clock, `disconnectedAt?`, tombstone `revokedAt?` |
+| `postageStamps: PostageStamp[]`                 | account-owned set; each: stamp fields + `createdAt`, tombstone `deletedAt?`                                                         |
+| `defaultPostageStampBatchID`                    | the account's default batch (stores account data; default for app uploads)                                                          |
+| `settings`                                      | e.g. `appSessionDuration`                                                                                                           |
+| `accountNameAt`, `defaultStampAt`, `settingsAt` | **per-field LWW clocks** for the three scalars above (optional; fall back to `lastModified`)                                        |
+| `partitionCount`, `lastModified`                | partition count for the shared batch; local modified clock                                                                          |
 
 Collections converge by **per-entry tombstones** (`removedAt` / `revokedAt` / `deletedAt`); the three
 scalars converge by **per-field LWW** using their `*At` clocks. Tombstones are kept in the document (so a
@@ -129,14 +129,19 @@ immutables come from any view.
 
 ## Convergence rules — `merge-snapshot.ts`
 
-| Collection     | Merge function       | Recency clock                         | Tombstone   |
-| -------------- | -------------------- | ------------------------------------- | ----------- |
-| postage stamps | `mergePostageStamps` | `deletedAt ?? createdAt`              | `deletedAt` |
-| devices        | `mergeDevicesList`   | `max(removedAt ?? 0, lastSignedInAt)` | `removedAt` |
-| connected apps | `mergeConnectedApps` | `max(revokedAt ?? 0, updatedAt)`      | `revokedAt` |
+| Collection     | Merge function       | Recency clock                                               | Tombstone   |
+| -------------- | -------------------- | ----------------------------------------------------------- | ----------- |
+| postage stamps | `mergePostageStamps` | `deletedAt ?? createdAt`                                    | `deletedAt` |
+| devices        | `mergeDevicesList`   | `max(removedAt ?? 0, lastSignedInAt)`                       | `removedAt` |
+| connected apps | `mergeConnectedApps` | `max(revokedAt ?? 0, disconnectedAt ?? 0, lastConnectedAt)` | `revokedAt` |
 
 Last-writer-wins by recency; tombstones are retained and a later activity with a larger clock resurrects an
-entry (e.g. a removed device re-signing in). Scalars (`accountName`, `defaultPostageStampBatchID`,
+entry (e.g. a removed device re-signing in). The recency clock is built from the fields that state
+membership, never from a general "last edit" one: a device's name (`nameUpdatedAt`), a stamp's name, and
+an app's drive pointer (`postageStampBatchIDAt`) each ride their own clock and overlay onto the winner,
+because each is an edit that says nothing about whether the entry still belongs. Ranking a connected app
+on one clock every write bumped let a drive picked on a stale copy outrank a revoke made elsewhere and
+restore the credential it had cleared ([#681](https://github.com/snaha/swarm-id/issues/681)). Scalars (`accountName`, `defaultPostageStampBatchID`,
 `settings`) converge by per-field LWW on their `*At` clocks, so concurrent changes to _different_ scalars
 on different devices both survive.
 

@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, it, expect } from "vitest"
+import { BatchId } from "@ethersphere/bee-js"
 
 import {
   accountDeltaSnapshot,
@@ -28,7 +29,6 @@ function localSession(overrides?: Partial<ConnectedApp>): ConnectedApp {
     lastConnectedAt: CONNECTED_AT,
     appSecret: "aabb",
     connectedUntil: SESSION_END,
-    updatedAt: CONNECTED_AT,
     ...overrides,
   }
 }
@@ -47,13 +47,13 @@ function fold(local: ConnectedApp[], incoming: ConnectedApp[]): ConnectedApp[] {
 
 describe("restoreLocalSessionFields — a peer's Disconnect", () => {
   it("ends this context's session when the winning entry was disconnected", () => {
-    // The UI's plain "Disconnect": session fields cleared, `updatedAt` bumped,
-    // no tombstone (the app stays listed). On the wire the cleared fields are
+    // The UI's plain "Disconnect": session fields cleared, `disconnectedAt`
+    // stamped, no tombstone (the app stays listed). On the wire the cleared
+    // fields are
     // indistinguishable from a strip, so the disconnect needs its own marker.
     const local = localSession()
     const disconnected = onWire({
       ...local,
-      updatedAt: LATER,
       disconnectedAt: LATER,
     })
 
@@ -63,17 +63,35 @@ describe("restoreLocalSessionFields — a peer's Disconnect", () => {
     expect(app.connectedUntil).toBeUndefined()
   })
 
-  it("keeps the session across a merely-newer benign update", () => {
-    // A rename / icon change / per-app drive choice from another context is
-    // newer, so it wins the merge — but it is nobody's logout.
+  it("keeps the session across a benign update", () => {
+    // A per-app drive choice from another context. It rides its own clock
+    // (#681) and wins the pointer without touching membership — and it is
+    // nobody's logout.
     const local = localSession()
-    const renamed = onWire({
+    const repointed = onWire({
       ...local,
-      appName: "Renamed App",
-      updatedAt: LATER,
+      postageStampBatchID: new BatchId("cc".repeat(32)),
+      postageStampBatchIDAt: LATER,
     })
 
-    const [app] = fold([local], [renamed])
+    const [app] = fold([local], [repointed])
+
+    expect(app.postageStampBatchID?.toHex()).toBe("cc".repeat(32))
+    expect(app.appSecret).toBe("aabb")
+    expect(app.connectedUntil).toBe(SESSION_END)
+  })
+
+  it("keeps the session across a reconnect made elsewhere", () => {
+    // The other benign update, and the only way an app's NAME changes: the
+    // metadata rides a connect, so membership moves with it.
+    const local = localSession()
+    const reconnected = onWire({
+      ...local,
+      appName: "Renamed App",
+      lastConnectedAt: LATER,
+    })
+
+    const [app] = fold([local], [reconnected])
 
     expect(app.appName).toBe("Renamed App")
     expect(app.appSecret).toBe("aabb")
@@ -83,14 +101,9 @@ describe("restoreLocalSessionFields — a peer's Disconnect", () => {
   it("keeps a session established after the disconnect", () => {
     // This context reconnected after the peer disconnected: our session is the
     // newer fact, so a late-arriving stale disconnect must not end it.
-    const local = localSession({
-      lastConnectedAt: EVEN_LATER,
-      updatedAt: EVEN_LATER,
-    })
+    const local = localSession({ lastConnectedAt: EVEN_LATER })
     const staleDisconnect = onWire({
       ...localSession(),
-      appName: "Renamed App",
-      updatedAt: EVEN_LATER,
       disconnectedAt: LATER,
     })
 
@@ -104,7 +117,6 @@ describe("restoreLocalSessionFields — a peer's Disconnect", () => {
     const local = localSession()
     const removed = onWire({
       ...local,
-      updatedAt: LATER,
       disconnectedAt: LATER,
       revokedAt: LATER,
     })
@@ -145,7 +157,7 @@ describe("accountDeltaSnapshot", () => {
 
   it("strips the session material but carries the disconnect marker", () => {
     const wire = accountDeltaSnapshot(
-      snapshot([localSession({ updatedAt: LATER, disconnectedAt: LATER })]),
+      snapshot([localSession({ disconnectedAt: LATER })]),
     )
     const parsed = AccountDeltaMessageSchema.parse({
       type: "account-delta",

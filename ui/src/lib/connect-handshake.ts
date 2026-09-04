@@ -46,7 +46,6 @@ function saveConnection(account: Account, request: ConnectRequest, appSecret: st
     appSecret,
     lastConnectedAt: now,
     connectedUntil: now + connectionDuration(account),
-    updatedAt: now,
   }
   account.connectApp(connection)
 }
