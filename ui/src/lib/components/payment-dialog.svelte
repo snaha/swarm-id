@@ -38,8 +38,8 @@
     type PaymentQuote,
     type PaymentRail,
     displayAmount,
-    switchWalletChain,
   } from '$lib/payment/payment-rail'
+  import { createWalletChainRecord } from '$lib/payment/wallet-chain-record'
 
   /**
    * The payment screens: choose a method, then — for the built-in engine —
@@ -309,17 +309,21 @@
       }
       provider = wallet.provider as unknown as EthereumProvider
       walletAddress = address
+      // A wallet that has just arrived has been put on nothing.
+      walletChain.forget()
 
       // Adding a network is what makes the wallet show a balance for it at all,
       // so it is offered here rather than at Pay. A refusal is not fatal — they
       // may mean to pay from somewhere else, and `pay()` asks again for
       // whichever chain they land on.
       screen = 'switching'
-      await attempt.guard(
-        switchWalletChain(provider, Number(chainId), rail.chains).catch(() => undefined),
-      )
+      await attempt.guard(ensureWalletChain().catch(() => undefined))
 
       screen = 'configure'
+      // After the guard, like everything else here: a connect cancelled at the
+      // network prompt reads nothing. Through the wallet's own RPC, since the
+      // switch has just run.
+      void readBalances()
       void refreshQuote()
     } catch (caught) {
       if (!attempt.current) {
@@ -347,8 +351,9 @@
 
   /**
    * Read what the wallet holds of every token on the selected chain, one slot
-   * per token, fire-and-forget from `refreshQuote` and the wallet's own
-   * chain-change events.
+   * per token. Fire-and-forget from the events that move what it holds: the
+   * switch (at connect, and on a chain change), a new account, the wallet's
+   * own chain change, and a failed attempt that may still have spent.
    *
    * Through the wallet's RPC when the wallet is on that chain — the figures
    * MetaMask itself would show — and through the chain's own endpoint
@@ -409,17 +414,46 @@
   }
 
   /**
-   * Walk the wallet to the newly selected chain right away rather than only at
-   * Pay: the network prompt then happens while the user is still weighing the
-   * choice, and the balances can come from the wallet's own RPC. A refusal is
-   * not fatal — `pay()` asks again — so the switch is offered, not enforced.
+   * Where the wallet was last put, so connect and Pay do not each buy the same
+   * genesis read. Not proof, and never what decides a payment — the rail that
+   * signs proves the chain itself (`wallet-chain-record.ts`). Forgotten when a
+   * new wallet arrives and when the wallet says it changed chain.
    */
-  async function followChain() {
+  const walletChain = createWalletChainRecord()
+
+  /**
+   * Put the wallet on the selected chain unless it is recorded as already
+   * there. Rejects the way `switchWalletChain` does: a refusal is the caller's
+   * to interpret.
+   */
+  async function ensureWalletChain() {
     const walletProvider = provider
     if (!walletProvider) {
       return
     }
-    await switchWalletChain(walletProvider, Number(chainId), rail.chains).catch(() => undefined)
+    await walletChain.ensure(walletProvider, Number(chainId), rail.chains)
+  }
+
+  /**
+   * Walk the wallet to the newly selected chain right away rather than only at
+   * Pay: the network prompt then happens while the user is still weighing the
+   * choice, and the balances can come from the wallet's own RPC. A refusal is
+   * not fatal — `pay()` asks again — so the switch is offered, not enforced.
+   *
+   * The one balance read a chain change gets, deliberately this one: it runs
+   * after the wallet has moved, so it reads through the wallet's own RPC rather
+   * than the chain's endpoint. A second read from `refreshQuote` would race it
+   * for the same figures with no rule about which won.
+   *
+   * Outside any attempt guard, deliberately: it runs beside the re-price the
+   * picker fires with it, which owns the attempt, and a figure landing after a
+   * cancel goes into its own keyed slot of a dialog that is already gone.
+   */
+  async function followChain() {
+    if (!provider) {
+      return
+    }
+    await ensureWalletChain().catch(() => undefined)
     void readBalances()
   }
 
@@ -441,9 +475,17 @@
       }
       walletAddress = first
       balances = {}
+      void readBalances()
       void refreshQuote()
     }
-    const onChain = () => void readBalances()
+    const onChain = () => {
+      // Where the wallet is, is no longer known: the next switch pays for the
+      // proof again. For the switch we asked for this lands while it is still
+      // pending, and the record written once it resolves stands
+      // (`createWalletChainRecord`).
+      walletChain.forget()
+      void readBalances()
+    }
     on.call(walletProvider, 'accountsChanged', onAccounts)
     on.call(walletProvider, 'chainChanged', onChain)
     return () => {
@@ -464,11 +506,15 @@
    * operation in full, there is nothing left to charge for and the payment is
    * settled rather than taken again.
    *
+   * Reads no balances of its own. They move when the wallet moves — a new
+   * account, a new chain, a payment that spent some — not when a price is asked
+   * for again, and `readBalances` covers every token on the chain at once, so a
+   * token change already has its figures.
+   *
    * @param failure - message from the attempt that led here, kept visible under
    *   the re-priced cost.
    */
   async function refreshQuote(failure = '') {
-    void readBalances()
     // The Gnosis side in force, kept as a local: it is replaced mid-flight by
     // the re-price below, and every figure handed to the rail must come from
     // the same one.
@@ -542,7 +588,7 @@
     errorMessage = ''
     try {
       screen = 'switching'
-      await attempt.guard(switchWalletChain(provider, Number(chainId), rail.chains))
+      await attempt.guard(ensureWalletChain())
       screen = 'approving'
       attempted = true
       paying = true
@@ -589,6 +635,9 @@
         return
       }
       screen = 'configure'
+      // A failed attempt can still have moved money — a broadcast whose
+      // confirmation timed out is the ordinary case — so the figures are stale.
+      void readBalances()
       await refreshQuote(failure)
     }
   }
