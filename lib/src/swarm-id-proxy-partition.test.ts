@@ -469,6 +469,30 @@ describe("SwarmIdProxy partitioned write enablement", () => {
     ).toBeNull()
   })
 
+  // Refusing the payload is only half of it: the attempt it belongs to has to
+  // end. The proxy's own auth button sets `isConnecting` and shows a spinner
+  // until something clears it, and on this path nothing did — the spinner sat
+  // there while the popup, which has no idea it was refused, said "Connected!"
+  // (#587). The only thing that eventually cleared it was the popup closing,
+  // which the user had no reason to do.
+  it("ends the connect attempt when the handover cannot be parsed", async () => {
+    const challenge = await startPartitionedConnect()
+    const internals = proxy as unknown as {
+      isConnecting: boolean
+      pendingChallenge: string | undefined
+    }
+    // What `handleLoginClick` does when the button is the one connecting.
+    internals.isConnecting = true
+
+    await sendSetSecret(challenge, {})
+
+    expect(internals.isConnecting).toBe(false)
+    // The challenge stays: the popup is still open and may yet send a payload
+    // this bundle can read. Refusing one message ends the attempt's spinner,
+    // not the ceremony behind it.
+    expect(internals.pendingChallenge).toBe(challenge)
+  })
+
   // Two ways a partitioned session ends up unable to upload, and from the
   // dApp side they were indistinguishable — every one of them just said
   // "unavailable". That cost a real-Safari run (#584): an account with no drive
@@ -2675,6 +2699,35 @@ describe("SwarmIdProxy partitioned write enablement", () => {
     // to avoid.
     expect(internals.beeApiUrl).toBe("https://bee.example.test/")
     expect(internals.gnosisRpcUrl).toBe("https://rpc.example.test/")
+  })
+
+  // The same hang, one guard down (#678 review). A handover carrying OUR
+  // challenge is this attempt's popup answering, so refusing it for the origin
+  // it names has to end the attempt too — otherwise the button spins on while
+  // the popup says "Connected!", which is the whole point of the fix above.
+  // Only reachable through a popup whose origin disagrees with `parentOrigin`
+  // — an origin-normalisation drift is the realistic way.
+  it("ends the connect attempt when the handover names another origin", async () => {
+    const challenge = await startPartitionedConnect()
+    const internals = proxy as unknown as { isConnecting: boolean }
+    // What `handleLoginClick` does when the button is the one connecting.
+    internals.isConnecting = true
+
+    await dispatch(
+      {
+        type: "setSecret",
+        appOrigin: "https://not-our-parent.example.com",
+        challenge,
+        data: {
+          secret: "33".repeat(32),
+          account: serializeSyncedAccount(makeSyncedAccount()),
+        },
+      },
+      ID_ORIGIN,
+    )
+
+    expect(messagesOfType("authSuccess")).toHaveLength(0)
+    expect(internals.isConnecting).toBe(false)
   })
 
   it("rejects a hydration payload with a wrong challenge", async () => {
