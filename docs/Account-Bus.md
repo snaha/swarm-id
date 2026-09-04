@@ -427,6 +427,12 @@ Not yet written:
   socket, and the presence window covers it until then. **The lock is not reclaimed any
   faster either way**: releasing it is a stamped SOC write the dying page cannot finish, so
   `LEASE_TTL_MS` remains the mechanism for a partition a closed tab was holding.
+- The same promptness cuts the other way on a **reconnect**: a peer whose socket closes cleanly
+  and comes back (a `1013` backoff, a blip the client sees before the server does) is dropped at
+  once and is missing from every rival set until its rejoin beat, so a claim made in that window
+  sees no rival and skips the intent round. This is a new way to flap out of the live set, which
+  the three-minute window was sized to avoid; it is safe because the occupancy beacon on the
+  refresh tick backstops a peer that is invisible right now (`partition-lease.ts`).
 - Safari (ITP) deletes script-writable storage for sites without first-party user
   interaction. The window is **30 operational days** by default since a Feb 2024 WebKit
   change ([`DataRemovalFrequency`](https://github.com/WebKit/WebKit/commit/45061230013728ec9c4900b01b12af26dc592b4b));

@@ -344,10 +344,9 @@ describe('accountBusStore', () => {
     expect(accountBusStore.liveDeviceIds()).toEqual([])
   })
 
-  // A closed tab announces nothing of its own — a leave would have to encrypt
-  // first, and a page being torn down never gets back to the send. The room
-  // reports it instead, and the device goes with the socket it was heard on
-  // rather than waiting out PRESENCE_MAX_AGE_MS (#572).
+  // A closed tab announces nothing of its own (why, in `PresenceTracker`'s
+  // header). The room reports it instead, and the device goes with the socket
+  // it was heard on rather than waiting out PRESENCE_MAX_AGE_MS (#572).
   it('drops a peer when the room says its socket left', async () => {
     accountBusStore.join(makeAccount())
     await settle()

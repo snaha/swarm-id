@@ -336,9 +336,8 @@ export class SignalingTransport implements BusTransport {
         const peer = this.peers.get(message.peerId)
         peer?.connection?.close()
         this.peers.delete(message.peerId)
-        // Reported, not just cleaned up. This is the only departure signal a
-        // closing tab produces — its own leave would have to encrypt first,
-        // and a page being torn down never gets back to the send (#572). The
+        // Reported, not just cleaned up: this is the only departure signal a
+        // closing tab produces (why, in `PresenceTracker`'s header). The
         // server's reaper closes a dead socket too, so a crash and a dropped
         // network arrive here as well.
         for (const handler of this.peerLeftHandlers) {

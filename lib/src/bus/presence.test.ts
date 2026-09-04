@@ -48,6 +48,17 @@ describe("PresenceTracker", () => {
     expect(presence.liveDeviceIds(1000)).toEqual([])
   })
 
+  // Nothing enforces one socket beating under one `deviceId`, so `forgetPeer`
+  // does not stop at the first match: a device left holding a dead socket id
+  // could only age out, which is the three-minute wait this exists to remove.
+  it("forgets every device a departing peer carried", () => {
+    const presence = new PresenceTracker()
+    presence.observe("a", 1000, "peer-1")
+    presence.observe("b", 1000, "peer-1")
+    presence.forgetPeer("peer-1")
+    expect(presence.liveDeviceIds(1000)).toEqual([])
+  })
+
   // A beat heard with no peer behind it came over the local transport, which
   // has no sockets to lose. Only ageing can drop it.
   it("leaves a locally-heard device alone", () => {

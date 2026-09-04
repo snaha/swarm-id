@@ -72,12 +72,16 @@ export class PresenceTracker {
    * partition, and therefore a `deviceId`, while holding a socket each — one
    * of them closing is not the device leaving. A device heard only over the
    * local transport has no socket to lose and is left to age out.
+   *
+   * Every entry is checked rather than stopping at the first match. Nothing
+   * here enforces that one socket only ever beats under one `deviceId`, and a
+   * device left holding a dead socket id could only age out — the three-minute
+   * wait this exists to remove. The loop is over a handful of entries.
    */
   forgetPeer(peerId: string): void {
     for (const [deviceId, entry] of this.seen) {
       if (!entry.peers.delete(peerId)) continue
       if (entry.peers.size === 0) this.seen.delete(deviceId)
-      return
     }
   }
 
