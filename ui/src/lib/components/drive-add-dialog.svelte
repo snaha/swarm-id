@@ -329,6 +329,12 @@
    * `fund.bzz.limo`, which is the older deployment of the same widget.)
    */
   async function purchaseWithWidget(attempt: Attempt) {
+    // Release whatever is still open before taking a new handle. Every route in
+    // releases first, so this is a no-op today; it sits at the assignment so a
+    // new one can't silently orphan a live popup, which nothing could cancel
+    // afterwards. `abandonPurchase()` and not `release()` — that also supersedes
+    // the attempt, which the `UseWidgetError` route carries in.
+    abandonPurchase()
     phase = 'pending'
     // The popup-less /dev mock settles locally — telling the user to look for a
     // popup window there is wrong.
