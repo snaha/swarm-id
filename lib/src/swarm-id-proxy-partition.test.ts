@@ -169,6 +169,7 @@ import { serializeAccountStateSnapshot } from "./utils/account-state-snapshot"
 import {
   STORAGE_CHALLENGE_KEY,
   STORAGE_KEY_ACCOUNTS,
+  STORAGE_KEY_NETWORK_SETTINGS,
   partitionSessionStorageKey,
 } from "./types"
 import { KNOWN_DEVICE_MAX_AGE_MS } from "./utils/active-devices"
@@ -255,6 +256,8 @@ describe("SwarmIdProxy partitioned write enablement", () => {
   let messageListener: MessageListener
   let localStorageFake: Storage
   let proxy: SwarmIdProxy
+  /** The raw `storage` listener the proxy adds for network settings (#515). */
+  let storageListener: (event: StorageEvent) => void
 
   /** (Re)create the proxy under a fresh window mock; keeps `localStorageFake`. */
   function mountProxy(config?: ProxyConfig): void {
@@ -276,6 +279,7 @@ describe("SwarmIdProxy partitioned write enablement", () => {
 
     proxy = new SwarmIdProxy(config)
     messageListener = listeners["message"] as MessageListener
+    storageListener = listeners["storage"] as (event: StorageEvent) => void
   }
 
   /**
@@ -2641,6 +2645,35 @@ describe("SwarmIdProxy partitioned write enablement", () => {
     })
 
     const internals = proxy as unknown as { gnosisRpcUrl: string }
+    expect(internals.gnosisRpcUrl).toBe("https://rpc.example.test/")
+  })
+
+  // The settings this session runs on came over the handover; the store this
+  // event points at is the PARTITION's, which holds none. Re-reading it there
+  // loads `undefined` and falls through to the public gateway and the default
+  // RPC — silently moving a user on a local or custom Bee node onto neither
+  // (#580). The event only fires from another context in this same partition,
+  // never from the first-party tab where settings are actually changed.
+  it("keeps hydrated network settings when a storage event says they changed", async () => {
+    const challenge = await startPartitionedConnect()
+    await sendSetSecret(challenge, {
+      account: serializeSyncedAccount(makeSyncedAccount()),
+      networkSettings: {
+        beeNodeUrl: "https://bee.example.test/",
+        gnosisRpcUrl: "https://rpc.example.test/",
+      },
+    })
+
+    storageListener({ key: STORAGE_KEY_NETWORK_SETTINGS } as StorageEvent)
+
+    const internals = proxy as unknown as {
+      beeApiUrl: string
+      gnosisRpcUrl: string
+    }
+    // Both, not just the Bee URL: an RPC-only difference is invisible to a
+    // `beeNodeUrl` guard, which is the trap `applyNetworkSettingsValues` exists
+    // to avoid.
+    expect(internals.beeApiUrl).toBe("https://bee.example.test/")
     expect(internals.gnosisRpcUrl).toBe("https://rpc.example.test/")
   })
 
