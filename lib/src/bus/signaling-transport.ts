@@ -55,11 +55,11 @@ const DATA_CHANNEL_LABEL = "bus"
  * The server's close code for a topic it refuses, and the only close it sends
  * that is permanent — everything transient comes back as 1013, and a socket
  * turned away for never naming a room gets 4408 (`WS_CLOSE_JOIN_TIMEOUT`),
- * deliberately NOT this code: the fallback below reads 1008 as "a server older
- * than the join frame", and answering a join timeout that way would put the
- * topic back in the URL for the life of the page. Mirrors the constant exported
- * from `signaling/src/server.ts` rather than importing it: that module pulls in
- * `ws` and `node:http`, and `@swarm-id/signaling` is a devDependency here, so an
+ * deliberately NOT this code: a client stops reconnecting on 1008, which is
+ * right for a topic that will be refused identically next time and wrong for a
+ * socket that simply never spoke. Mirrors the constant exported from
+ * `signaling/src/server.ts` rather than importing it: that module pulls in `ws`
+ * and `node:http`, and `@swarm-id/signaling` is a devDependency here, so an
  * import would drag a Node-only server into the browser bundle for the sake of
  * one number.
  */
@@ -116,7 +116,6 @@ export class SignalingTransport implements BusTransport {
   /** Set after a server refuses the join frame — one that predates it reads the
    *  topic from the URL only. Sticky for the transport's life: having learned
    *  which server it is talking to, there is nothing to re-probe. */
-  private legacyTopicInUrl = false
   private reconnectDelayMs = RECONNECT_BASE_DELAY_MS
   private reconnectTimer: ReturnType<typeof setTimeout> | undefined
   /** In-flight `deliver` calls, awaited by `close()` so a teardown
@@ -198,13 +197,10 @@ export class SignalingTransport implements BusTransport {
     // envelope key come from separate HMAC contexts); what a topic buys is
     // membership: presence, traffic patterns, ciphertext to keep, and a
     // position to inject from.
-    const url = new URL(this.options.url)
-    if (this.legacyTopicInUrl) url.searchParams.set("topic", this.options.topic)
-    const socket = new WebSocket(url.toString())
+    const socket = new WebSocket(this.options.url)
     this.socket = socket
 
     socket.addEventListener("open", () => {
-      if (this.legacyTopicInUrl) return
       this.sendToServer({ type: "join", topic: this.options.topic })
     })
 
@@ -221,19 +217,6 @@ export class SignalingTransport implements BusTransport {
       // for a topic it will reject identically next time); retrying is a hot
       // loop against an answer that will not change.
       if (event.code === WS_CLOSE_POLICY_VIOLATION) {
-        // Unless it is a server from before the join frame existed, which
-        // refuses a socket that named no topic in the URL. Retry once the old
-        // way rather than leave this context bus-less for the life of the page
-        // — the deploy window is exactly when a reload happens.
-        // `closed` is checked here for the same reason `scheduleReconnect`
-        // checks it: a `close()` racing a server-initiated 1008 would otherwise
-        // reopen a socket nothing holds a handle to, join the room, and leave a
-        // ghost peer there until the page unloads.
-        if (!this.legacyTopicInUrl && !this.closed) {
-          this.legacyTopicInUrl = true
-          this.connect()
-          return
-        }
         console.error(
           "[SignalingTransport] Signaling server rejected the topic; not reconnecting.",
         )

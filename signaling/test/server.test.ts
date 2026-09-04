@@ -89,14 +89,14 @@ function clientFrame(payload: string): Buffer {
  * client this is about, the same way `autoPong: false` is the only stand-in
  * for a dead socket in the heartbeat tests.
  */
-function rudeUpgrade(port: number, topic: string): Promise<Socket> {
+function rudeUpgrade(port: number): Promise<Socket> {
   const key = Buffer.from(randomTopic(), 'hex').toString('base64')
   const socket = createConnection(port, '127.0.0.1')
   // Writing to a socket the server has since destroyed is expected here, and an
   // unhandled 'error' on a stream would take the runner down with it.
   socket.on('error', () => {})
   socket.write(
-    `GET /?topic=${topic} HTTP/1.1\r\n` +
+    `GET / HTTP/1.1\r\n` +
       `Host: 127.0.0.1:${port}\r\n` +
       'Upgrade: websocket\r\n' +
       'Connection: Upgrade\r\n' +
@@ -132,8 +132,13 @@ interface TestClient {
   close(): void
 }
 
+/** Connect and name the topic in the first frame — the only way in (#577). */
 function connect(topic: string, port: number = server.port): Promise<TestClient> {
-  return clientFromSocket(new WebSocket(`ws://127.0.0.1:${port}/?topic=${topic}`))
+  const socket = new WebSocket(`ws://127.0.0.1:${port}/`)
+  socket.addEventListener('open', () => {
+    socket.send(JSON.stringify({ type: 'join', topic }))
+  })
+  return clientFromSocket(socket)
 }
 
 /** Wrap an already-opening socket as a test client, resolving on `welcome`. */
@@ -337,53 +342,20 @@ describe('signaling server', () => {
     }
   })
 
-  it('rejects connections with an invalid topic', async () => {
-    const socket = new WebSocket(`ws://127.0.0.1:${server.port}/?topic=nope`)
-    const code = await new Promise<number>((resolve) => {
-      socket.addEventListener('close', (event) => resolve(event.code))
-    })
-    expect(code).toBe(WS_CLOSE_POLICY_VIOLATION)
-  })
-
   // The topic is the room capability, and a query string is recorded by every
   // ingress and proxy access log there is — DigitalOcean's included. Anything
   // reading those logs learns which rooms exist and can join them. So it moves
   // into the first frame, with the socket held in a pre-join state until it
   // arrives (#577).
   describe('joining by frame instead of query string', () => {
-    /** Connect with no `?topic=`, send the join frame, resolve on `welcome`. */
-    function joinByFrame(topic: string, port: number = server.port): Promise<TestClient> {
-      const socket = new WebSocket(`ws://127.0.0.1:${port}/`)
-      socket.addEventListener('open', () => {
-        socket.send(JSON.stringify({ type: 'join', topic }))
-      })
-      return clientFromSocket(socket)
-    }
-
     it('welcomes a peer that names its topic in the first frame', async () => {
       const topic = randomTopic()
-      const client = await joinByFrame(topic)
+      const client = await connect(topic)
       try {
         expect(client.peerId).toBeTruthy()
         expect(client.peersAtWelcome).toEqual([])
       } finally {
         client.close()
-      }
-    })
-
-    // The deploy window: a cached client bundle still puts the topic in the
-    // URL. Both have to land in the same room, or a mid-deploy reload silently
-    // stops seeing its own other tabs.
-    it('puts a query-string peer and a frame peer in the same room', async () => {
-      const topic = randomTopic()
-      const legacy = await connect(topic)
-      const modern = await joinByFrame(topic)
-      try {
-        expect(modern.peersAtWelcome).toEqual([legacy.peerId])
-        await legacy.next((message) => message.type === 'peer-joined')
-      } finally {
-        legacy.close()
-        modern.close()
       }
     })
 
@@ -401,9 +373,9 @@ describe('signaling server', () => {
     // A socket that never joins holds a connection slot for nothing, which is
     // a cheaper flood than any the caps in #575 bound.
     //
-    // Its own close code, NOT 1008: a client reads 1008 as "this server is
-    // older than the join frame" and answers by putting the topic back in the
-    // URL for the life of the page, which is what #577 exists to stop.
+    // Its own close code, NOT 1008: 1008 means "this topic is refused", which
+    // a client treats as permanent for the room. A socket that simply never
+    // spoke has been told nothing about its topic, and must be free to retry.
     it('drops a socket that never sends its join frame', async () => {
       const quick = await createSignalingServer({ port: 0, preJoinTimeoutMs: 100 })
       try {
@@ -421,7 +393,7 @@ describe('signaling server', () => {
     // A second join is not a room change: the peer is already in one, and
     // moving it would leave the first room announcing a peer that left it.
     it('ignores a second join frame', async () => {
-      const client = await joinByFrame(randomTopic())
+      const client = await connect(randomTopic())
       try {
         client.socket.send(JSON.stringify({ type: 'join', topic: randomTopic() }))
         await new Promise((resolve) => setTimeout(resolve, EVENT_SETTLE_MS))
@@ -441,10 +413,13 @@ describe('signaling server', () => {
       const capped = await createSignalingServer({ port: 0, maxRooms: 1 })
       const topic = randomTopic()
       const resident = await connect(topic, capped.port)
-      // The room cap is what refuses this one; the room it then asks for is the
-      // one that already exists, so nothing else would turn it away.
-      const rude = await rudeUpgrade(capped.port, randomTopic())
+      // Refused for asking after a room the cap has no space for, THEN asking
+      // after the one that already exists — which nothing else would turn away,
+      // so admitting it would be the bug.
+      const rude = await rudeUpgrade(capped.port)
       try {
+        rude.write(clientFrame(JSON.stringify({ type: 'join', topic: randomTopic() })))
+        await new Promise((resolve) => setTimeout(resolve, EVENT_SETTLE_MS))
         rude.write(clientFrame(JSON.stringify({ type: 'join', topic })))
         await new Promise((resolve) => setTimeout(resolve, EVENT_SETTLE_MS))
 
@@ -481,7 +456,7 @@ describe('signaling server', () => {
       allowedOrigins: ['https://allowed.example'],
     })
     try {
-      const socket = new WebSocket(`ws://127.0.0.1:${guarded.port}/?topic=${randomTopic()}`)
+      const socket = new WebSocket(`ws://127.0.0.1:${guarded.port}/`)
       const failed = await new Promise<boolean>((resolve) => {
         socket.addEventListener('error', () => resolve(true))
         socket.addEventListener('close', () => resolve(true))
@@ -514,11 +489,12 @@ describe('signaling server — heartbeat', () => {
       // `autoPong: false` is the whole point: the global WebSocket (and a stock
       // `ws` client) answers pings at protocol level, so a half-open socket
       // cannot be simulated with either.
-      const ghost = new WS(`ws://127.0.0.1:${beating.port}/?topic=${topic}`, {
+      const ghost = new WS(`ws://127.0.0.1:${beating.port}/`, {
         autoPong: false,
       })
       try {
         await new Promise((resolve) => ghost.on('open', resolve))
+        ghost.send(JSON.stringify({ type: 'join', topic }))
         const joined = await live.next((m) => m.type === 'peer-joined')
 
         // Round one pings both; round two finds the ghost never answered.
@@ -616,7 +592,10 @@ describe('signaling server — limits', () => {
       const first = await connect(topic, capped.port)
       const second = await connect(topic, capped.port)
       try {
-        const third = new WebSocket(`ws://127.0.0.1:${capped.port}/?topic=${topic}`)
+        const third = new WebSocket(`ws://127.0.0.1:${capped.port}/`)
+        third.addEventListener('open', () => {
+          third.send(JSON.stringify({ type: 'join', topic }))
+        })
         // 1013 (try again later), NOT 1008 — the client stops reconnecting on
         // 1008, which is right for a bad topic and wrong for transient load.
         expect((await closeInfo(third)).code).toBe(WS_CLOSE_TRY_AGAIN_LATER)
@@ -638,7 +617,10 @@ describe('signaling server — limits', () => {
     try {
       const resident = await connect(randomTopic(), capped.port)
       try {
-        const newcomer = new WebSocket(`ws://127.0.0.1:${capped.port}/?topic=${randomTopic()}`)
+        const newcomer = new WebSocket(`ws://127.0.0.1:${capped.port}/`)
+        newcomer.addEventListener('open', () => {
+          newcomer.send(JSON.stringify({ type: 'join', topic: randomTopic() }))
+        })
         expect((await closeInfo(newcomer)).code).toBe(WS_CLOSE_TRY_AGAIN_LATER)
       } finally {
         resident.close()
@@ -671,9 +653,12 @@ describe('signaling server — limits', () => {
   // would trade one burst for a context that never syncs again — and a full room
   // legitimately bursts, which is what the budget is now sized for.
   it('closes a socket that exceeds its message budget with a retryable code', async () => {
+    // Four, for three relays: joining spends a message of the budget, the way
+    // it does for every client now that the topic arrives in the first frame
+    // and not the URL (#662).
     const capped = await createSignalingServer({
       port: 0,
-      messageRateLimit: 3,
+      messageRateLimit: 4,
       messageRateWindowMs: 60_000,
     })
     try {
@@ -751,7 +736,8 @@ describe('signaling server — limits', () => {
       messageRateLimit: 1,
       messageRateWindowMs: 60_000,
     })
-    const rude = await rudeUpgrade(capped.port, randomTopic())
+    const rude = await rudeUpgrade(capped.port)
+    rude.write(clientFrame(JSON.stringify({ type: 'join', topic: randomTopic() })))
     const startedAt = Date.now()
     const dropped = new Promise<number>((resolve) =>
       rude.once('close', () => resolve(Date.now() - startedAt)),
@@ -776,7 +762,7 @@ describe('signaling server — limits', () => {
       try {
         // Rejected in verifyClient, so the handshake itself fails — there is
         // no WebSocket to carry a close code.
-        const socket = new WebSocket(`ws://127.0.0.1:${capped.port}/?topic=${randomTopic()}`)
+        const socket = new WebSocket(`ws://127.0.0.1:${capped.port}/`)
         const opened = await new Promise<boolean>((resolve) => {
           socket.addEventListener('open', () => resolve(true))
           socket.addEventListener('error', () => resolve(false))
@@ -799,7 +785,8 @@ describe('signaling server — limits', () => {
   it('drops a refused socket that ignores the close frame', async () => {
     const capped = await createSignalingServer({ port: 0 })
     try {
-      const rude = await rudeUpgrade(capped.port, 'not-a-topic')
+      const rude = await rudeUpgrade(capped.port)
+      rude.write(clientFrame(JSON.stringify({ type: 'join', topic: 'not-a-topic' })))
       const dropped = new Promise<boolean>((resolve) => {
         rude.once('close', () => resolve(true))
         setTimeout(() => resolve(false), REFUSAL_DROP_TIMEOUT_MS).unref()

@@ -415,41 +415,6 @@ describe("SignalingTransport — joining a room", () => {
     }
   })
 
-  // A server that only reads `?topic=` refuses the frame-only socket with a
-  // policy close, which the transport treats as permanent. Retrying once with
-  // the legacy URL is what keeps a mid-deploy reload from losing its bus until
-  // the page is closed.
-  it("falls back to the query string when the server refuses the frame", async () => {
-    const opened: { url: string; socket: FakeSocket }[] = []
-    class FakeSocket extends EventTarget {
-      static OPEN = 1
-      readyState = 0
-      constructor(readonly url: string) {
-        super()
-        opened.push({ url, socket: this })
-      }
-      send(): void {}
-      close(): void {}
-    }
-    vi.stubGlobal("WebSocket", FakeSocket)
-    const transport = makeTransport()
-    try {
-      await vi.waitFor(() => expect(opened).toHaveLength(1))
-      expect(opened[0].url).not.toContain(context.topic)
-
-      // The old server's answer to a socket that named no topic.
-      opened[0].socket.dispatchEvent(
-        Object.assign(new Event("close"), { code: 1008 }),
-      )
-
-      await vi.waitFor(() => expect(opened).toHaveLength(2))
-      expect(opened[1].url).toContain(`topic=${context.topic}`)
-    } finally {
-      vi.unstubAllGlobals()
-      transport.close()
-    }
-  })
-
   // The fallback is the one reconnect path that did not ask whether this
   // transport is still wanted. A close racing a server-initiated 1008 would
   // reopen a socket nothing holds a handle to any more, join the room, and sit
