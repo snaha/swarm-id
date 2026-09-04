@@ -747,7 +747,22 @@ export class SwarmIdProxy {
     message: PopupToIframeMessage,
   ): Promise<void> {
     if (message.type === "setSecret") {
-      // Validate the appOrigin matches our parent
+      // Challenge FIRST, so the origin check below can tell whose handover it
+      // is refusing. Both are guards before anything is read out of the
+      // payload, and the message is already same-origin (the listener checks
+      // that), so the order is free — what it buys is that a mismatch past
+      // this line is provably THIS attempt's popup answering.
+      if (
+        !this.pendingChallenge ||
+        message.challenge !== this.pendingChallenge
+      ) {
+        // Not this attempt's: a stale popup from a previous round, or one for
+        // another dApp. Ending the attempt on it would let a leftover message
+        // cancel a connect in flight, so this one only logs.
+        console.warn("[Proxy] setSecret challenge mismatch — ignoring")
+        return
+      }
+
       if (message.appOrigin !== this.parentOrigin) {
         console.warn(
           "[Proxy] setSecret appOrigin mismatch:",
@@ -755,15 +770,11 @@ export class SwarmIdProxy {
           "!==",
           this.parentOrigin,
         )
-        return
-      }
-
-      // Verify challenge matches what we generated in openAuthPopup()
-      if (
-        !this.pendingChallenge ||
-        message.challenge !== this.pendingChallenge
-      ) {
-        console.warn("[Proxy] setSecret challenge mismatch — ignoring")
+        // Our challenge, so this IS the handover this attempt was waiting for
+        // — refused for naming an origin that is not our parent, which an
+        // origin-normalisation drift is the realistic way to reach. The
+        // spinner would hang exactly as it did on the schema gate (#587).
+        this.endRefusedConnect()
         return
       }
 
@@ -811,6 +822,29 @@ export class SwarmIdProxy {
       })
       this.emitConnectionInfoIfChanged()
     }
+  }
+
+  /**
+   * End the connect attempt a refused handover belonged to.
+   *
+   * The popup cannot be told it was refused — there is no channel back — so it
+   * shows "Connected!" while the button here spins on, and the only other
+   * thing that ever cleared the flag was the user closing that popup
+   * (`checkPopupClosed`), which nothing gave them a reason to do.
+   *
+   * `isConnecting` first: `showAuthButton` early-returns while it is set, so
+   * clearing the flag is what lets the button come back. `authLoading` is
+   * already false on every path that reaches here — belt-and-braces, not a
+   * second fix.
+   *
+   * The challenge is deliberately kept. The popup is still open and may yet
+   * send a payload this bundle can read; refusing one message ends the
+   * attempt's spinner, not the ceremony behind it.
+   */
+  private endRefusedConnect(): void {
+    this.isConnecting = false
+    this.authLoading = false
+    this.showAuthButton()
   }
 
   /**
@@ -2007,6 +2041,7 @@ export class SwarmIdProxy {
           // required, a refused handover is the ordinary way a version-skewed
           // identity deployment fails, and it must not read as an origin bug.
           console.warn("[Proxy] Invalid setSecret payload:", popupResult.error)
+          this.endRefusedConnect()
           return
         }
         await this.handlePopupMessage(popupResult.data)
