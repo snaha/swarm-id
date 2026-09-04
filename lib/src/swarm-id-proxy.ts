@@ -54,7 +54,7 @@ import {
   PopupToIframeMessageSchema,
   STORAGE_CHALLENGE_KEY,
   STORAGE_KEY_NETWORK_SETTINGS,
-  STORAGE_KEY_PARTITION_SESSION,
+  partitionSessionStorageKey,
   PartitionSessionSchemaV1,
   leaseCacheStorageKey,
 } from "./types"
@@ -834,7 +834,7 @@ export class SwarmIdProxy {
     }
     try {
       localStorage.setItem(
-        STORAGE_KEY_PARTITION_SESSION,
+        partitionSessionStorageKey(this.parentOrigin),
         JSON.stringify(record),
       )
     } catch (error) {
@@ -861,17 +861,15 @@ export class SwarmIdProxy {
    * Never creates a record — a session that failed to persist stays unpersisted.
    */
   private refreshStoredPartitionAccount(): void {
-    if (!this.partitionAccount) return
+    if (!this.partitionAccount || !this.parentOrigin) return
+    const key = partitionSessionStorageKey(this.parentOrigin)
     try {
-      const raw = localStorage.getItem(STORAGE_KEY_PARTITION_SESSION)
+      const raw = localStorage.getItem(key)
       if (!raw) return
       const record = JSON.parse(raw) as { data?: Record<string, unknown> }
       if (!record.data) return
       record.data.account = serializeSyncedAccount(this.partitionAccount)
-      localStorage.setItem(
-        STORAGE_KEY_PARTITION_SESSION,
-        JSON.stringify(record),
-      )
+      localStorage.setItem(key, JSON.stringify(record))
     } catch (error) {
       // As on write: a session that cannot be stored still works for this load.
       console.warn("[Proxy] Could not persist the folded session:", error)
@@ -880,8 +878,9 @@ export class SwarmIdProxy {
 
   /** Forget the stored session. Every path that ends one calls this. */
   private clearPartitionSession(): void {
+    if (!this.parentOrigin) return
     try {
-      localStorage.removeItem(STORAGE_KEY_PARTITION_SESSION)
+      localStorage.removeItem(partitionSessionStorageKey(this.parentOrigin))
     } catch {
       // Nothing to do: an unreadable store cannot hold a session either.
     }
@@ -890,15 +889,17 @@ export class SwarmIdProxy {
   /**
    * The stored session for THIS parent, if it is still within its deadline.
    *
-   * A record for another origin is refused rather than trusted on the strength
-   * of where it was found — the partition already scopes the store, and this is
-   * the belt to that pair of braces. An expired or malformed one is removed on
-   * the way past: it will never become valid again.
+   * The key is per dApp origin, because the partition is not: it is scoped to
+   * the top-level SITE, so same-site dApps share this store (#671). The
+   * `parentOrigin` check below is now the belt to that pair of braces rather
+   * than the only thing keeping two dApps apart. An expired or malformed
+   * record is removed on the way past: it will never become valid again.
    */
   private readPartitionSession(): PartitionSession | undefined {
+    if (!this.parentOrigin) return undefined
     let raw: string | null = null
     try {
-      raw = localStorage.getItem(STORAGE_KEY_PARTITION_SESSION)
+      raw = localStorage.getItem(partitionSessionStorageKey(this.parentOrigin))
     } catch {
       return undefined
     }
