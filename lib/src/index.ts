@@ -245,7 +245,6 @@ export {
   snapshotContainsContribution,
   // Sync account
   createSyncAccount,
-  ACCOUNT_SYNC_TOPIC_PREFIX,
   // Restore account from Swarm
   restoreAccountFromSwarm,
   SnapshotDataUnavailableError,

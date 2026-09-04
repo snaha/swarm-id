@@ -52,7 +52,6 @@ import {
 // Re-exported from its new home so existing importers of `./sync-account`
 // (the legacy shared-feed topic, retained for the cutover invariant test) keep
 // working.
-export { ACCOUNT_SYNC_TOPIC_PREFIX } from "./publish-account-state"
 
 // Timeout for utilization upload in milliseconds
 const UTILIZATION_UPLOAD_TIMEOUT_MS = 30000

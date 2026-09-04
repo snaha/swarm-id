@@ -38,10 +38,10 @@ export interface ChunkCacheEntry {
    * the previously-chosen value, so unchanged plaintexts keep the same
    * derived key (and therefore the same `contentHash`) across saves.
    *
-   * Optional for backward compatibility — entries written before this field
-   * existed are treated as `nonce = 0`.
+   * Required: every row is written by a bundle that sets it, and an upgrade
+   * drops the stores rather than carrying rows forward (#662).
    */
-  nonce?: number
+  nonce: number
 
   /** Last access timestamp (for eviction) */
   lastAccess: number
@@ -90,7 +90,12 @@ const DB_NAME = "swarm-utilization-store"
  * value Bee assigns), not keccak(plaintext). Drop legacy rows so dedup
  * doesn't mismatch on the first post-upgrade upload of each chunk.
  */
-const DB_VERSION = 3
+/**
+ * Bumped whenever a stored row's shape changes, because an upgrade DROPS the
+ * stores rather than migrating them: this is a cache of utilisation counters
+ * that re-derives itself on next use, and 0.x owes no migration (#661).
+ */
+const DB_VERSION = 4
 const CHUNKS_STORE = "chunks"
 const METADATA_STORE = "metadata"
 
@@ -135,10 +140,9 @@ export class UtilizationStoreDB {
       request.onupgradeneeded = (event) => {
         const db = (event.target as IDBOpenDBRequest).result
 
-        // v1 → v2: chunk layout changed (uint32 → uint16 for depth ≤ 31).
-        // Legacy rows are unreadable under the new layout, so drop and
-        // recreate both stores; utilization tracking re-initializes to
-        // defaults on next use.
+        // Any upgrade drops and recreates: rows from an older version are not
+        // migrated, and utilization tracking re-initializes to defaults on next
+        // use. See `DB_VERSION`.
         if (db.objectStoreNames.contains(CHUNKS_STORE)) {
           db.deleteObjectStore(CHUNKS_STORE)
         }

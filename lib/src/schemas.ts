@@ -198,8 +198,11 @@ export const PostageStampSchemaV1 = z.object({
   createdAt: z.number(),
   // Node-state edit clock (dilute / top-up: depth, amount, batchTTL). Doubles
   // as the instant `batchTTL` was measured, so the UI can age the countdown.
-  // Optional: stamps written before the field existed have none and fall back
-  // to `createdAt` in the merge. Without it, an edited copy would tie with a
+  //
+  // Optional because a stamp that has never been edited has no edit clock:
+  // `addStamp` sets `createdAt` alone, so the merge's `updatedAt ?? 0` is the
+  // ordinary case for a fresh add, not a shim for records written before the
+  // field existed (#662). Without the clock an edited copy would tie with a
   // stale remote copy and the edit would never propagate across devices.
   updatedAt: z.number().optional(),
   // Tombstone marker. A deleted stamp is kept in the snapshot (so the removal

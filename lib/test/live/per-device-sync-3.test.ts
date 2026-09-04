@@ -17,7 +17,6 @@ import { Topic } from "@ethersphere/bee-js"
 import { publishDeviceState } from "../../src/sync/device-state"
 import { ensureInRoster } from "../../src/sync/device-roster"
 import { foldAccountFromSwarm } from "../../src/sync/fold-account-from-swarm"
-import { ACCOUNT_SYNC_TOPIC_PREFIX } from "../../src/sync/publish-account-state"
 import { AsyncEpochFinder } from "../../src/proxy/feeds/epochs"
 import {
   liveEnv,
@@ -187,20 +186,6 @@ describe.skipIf(!liveEnv.configured)(
       )
       expect(resurrected, "fold converged on resurrection").toBeDefined()
       expect(activeDevices(resurrected!)).toHaveLength(3)
-    })
-
-    it("never writes the legacy shared swarm-id-backup-v1 feed (§7 invariant)", async () => {
-      const legacyTopic = Topic.fromString(
-        `${ACCOUNT_SYNC_TOPIC_PREFIX}:${keys.accountId}`,
-      )
-      const legacyRef = await new AsyncEpochFinder(
-        ctx.bee,
-        legacyTopic,
-        keys.owner,
-      )
-        .findAt(BigInt(Math.floor(Date.now() / 1000)))
-        .catch(() => undefined)
-      expect(legacyRef).toBeUndefined()
     })
   },
 )

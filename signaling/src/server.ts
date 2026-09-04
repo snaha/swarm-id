@@ -23,7 +23,7 @@
  */
 
 import { createServer } from 'node:http'
-import type { IncomingMessage, Server } from 'node:http'
+import type { Server } from 'node:http'
 import { randomUUID } from 'node:crypto'
 import { WebSocketServer, WebSocket } from 'ws'
 import { z } from 'zod'
@@ -239,7 +239,7 @@ export function createSignalingServer(options: SignalingServerOptions): Promise<
     }
   })
 
-  wss.on('connection', (socket: WebSocket, request: IncomingMessage) => {
+  wss.on('connection', (socket: WebSocket) => {
     // First, before any early return: `ws` reports every protocol-level fault
     // by emitting 'error' on the socket — a frame past `maxPayload`, a reserved
     // opcode, invalid UTF-8 in a text frame — and an unhandled 'error' on an
@@ -249,15 +249,12 @@ export function createSignalingServer(options: SignalingServerOptions): Promise<
     // in `wss.clients` for 30 s; terminate instead, as with a refusal.
     socket.on('error', () => socket.terminate())
 
-    const url = new URL(request.url ?? '/', 'http://localhost')
-    // The topic belongs in the first frame, not the URL: query strings are
+    // The topic arrives in the first frame, never the URL: query strings are
     // recorded by every ingress and proxy access log as a matter of course, and
     // the topic IS the room capability — anything that reads those logs can
-    // join (#577). The query string is still accepted, and has to be: a client
-    // bundle cached from before this change puts it there, and a mid-deploy
-    // reload that could not join its own account's room would silently stop
-    // seeing its other tabs.
-    const queryTopic = url.searchParams.get('topic')
+    // join (#577). The query string used to be accepted too, for a client
+    // bundle cached from before the join frame existed; both sides deploy
+    // together, so that is gone (#662).
 
     const peer: Peer = {
       id: randomUUID(),
@@ -271,8 +268,7 @@ export function createSignalingServer(options: SignalingServerOptions): Promise<
       peer.alive = true
     })
 
-    /** Admit this socket to a room, or refuse it. Same answer either way in,
-     *  so the query string and the join frame cannot drift apart. */
+    /** Admit this socket to a room, or refuse it. */
     const join = (topic: string): void => {
       // Refusing a socket closes it, but cannot stop the client talking — a
       // frame may already be in flight, and a rude client ignores the close
@@ -315,15 +311,10 @@ export function createSignalingServer(options: SignalingServerOptions): Promise<
     // Unjoined sockets are turned away rather than left to sit: one that never
     // names a room costs a connection slot for nothing. Unref'd so it cannot be
     // what keeps the process alive.
-    const preJoinTimer =
-      queryTopic !== null
-        ? undefined
-        : setTimeout(() => {
-            if (!joined) refuse(socket, WS_CLOSE_JOIN_TIMEOUT, 'no join')
-          }, preJoinTimeoutMs)
-    preJoinTimer?.unref()
-
-    if (queryTopic !== null) join(queryTopic)
+    const preJoinTimer = setTimeout(() => {
+      if (!joined) refuse(socket, WS_CLOSE_JOIN_TIMEOUT, 'no join')
+    }, preJoinTimeoutMs)
+    preJoinTimer.unref()
 
     socket.on('message', (data) => {
       // Counted before the parse, so a flood of garbage is bounded too. A
