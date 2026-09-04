@@ -72,13 +72,25 @@ export const STORAGE_KEY_LEASE_CACHE_PREFIX = "swarm-id-lease-v2"
 export const STORAGE_KEY_PARTITION_SESSION = "swarm-id-partition-session"
 
 /**
- * localStorage key for the proxy's per-account partition-lease cache (a
- * `PartitionLeaseStateSnapshot`). Same-origin tabs share this, so the
- * SwarmID UI reads it to render the *self* device's active partition
- * without a Swarm round-trip. The proxy is the sole writer.
+ * localStorage key for the proxy's partition-lease cache (a
+ * `PartitionLeaseStateSnapshot`), per account AND per batch. Same-origin tabs
+ * share this, so the SwarmID UI reads it to render the *self* device's active
+ * partition without a Swarm round-trip. The proxy is the sole writer.
+ *
+ * The batch is in the key because the lease is: a lane is one partition of one
+ * batch (#589), and an account has two coordinators whenever a dApp carries a
+ * per-app stamp override. Under one key per account they shared a slot and
+ * overwrote each other — safe, since `PartitionLease.hydrate` refuses a
+ * snapshot whose `batchId` differs, but a hint that stops hinting exactly when
+ * there are two writers to hint for is no hint. The `batchId` inside the record
+ * stays as the second line of that pair of braces, as `parentOrigin` does in
+ * the partitioned session (#671).
  */
-export function leaseCacheStorageKey(accountId: string): string {
-  return `${STORAGE_KEY_LEASE_CACHE_PREFIX}:${accountId.toLowerCase()}`
+export function leaseCacheStorageKey(
+  accountId: string,
+  batchId: string,
+): string {
+  return `${STORAGE_KEY_LEASE_CACHE_PREFIX}:${accountId.toLowerCase()}:${batchId.toLowerCase()}`
 }
 
 /**

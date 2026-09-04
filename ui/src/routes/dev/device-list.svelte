@@ -60,14 +60,23 @@
   let holders = $state<{ partition: number; deviceId: string; leasedUntil: number }[]>([])
 
   // SELF active state, read from the proxy-written localStorage lease cache
-  // (`swarm-id-lease-v2:<accountId>`). Shared across same-origin tabs, so it
-  // reflects the demo iframe's held partition without a Swarm read (which is
-  // currently 500ing). The proxy is the sole writer; refreshed ~every 10 s.
+  // (`swarm-id-lease-v2:<accountId>:<batchId>`). Shared across same-origin tabs,
+  // so it reflects the demo iframe's held partition without a Swarm read (which
+  // is currently 500ing). The proxy is the sole writer; refreshed ~every 10 s.
+  //
+  // The account default is the batch shown, matching the holders read below: a
+  // lane belongs to one batch, so an app running on a per-app stamp override
+  // caches under its own key and is not what this panel is about.
   let leaseCache = $state<PartitionLeaseStateSnapshot | undefined>(undefined)
 
   $effect(() => {
     if (!browser) return
-    const key = leaseCacheStorageKey(account.id.toHex())
+    const defaultBatch = account.defaultPostageStampBatchID
+    if (!defaultBatch) {
+      leaseCache = undefined
+      return
+    }
+    const key = leaseCacheStorageKey(account.id.toHex(), defaultBatch.toHex())
     const read = () => {
       const raw = localStorage.getItem(key)
       leaseCache = raw ? (JSON.parse(raw) as PartitionLeaseStateSnapshot) : undefined

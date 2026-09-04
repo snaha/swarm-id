@@ -1776,9 +1776,14 @@ export class SwarmIdProxy {
       "backup-key",
     )
     const tuning = readPartitionTuningOverride()
+    // Captured once: the callbacks below outlive this narrowing, and the batch
+    // they name has to be the one the coordinator serves — its lease cache is
+    // keyed on it, and a snapshot filed under a batch we have since moved off
+    // hints at a lane nobody holds.
+    const batchId = this.postageBatchId
     this.coordinator = new BatchWriteCoordinator({
       bee: this.bee,
-      batchId: this.postageBatchId,
+      batchId,
       stamper: this.stamper,
       deviceId: this.requireDeviceId(),
       knownDeviceIds: () =>
@@ -1799,9 +1804,9 @@ export class SwarmIdProxy {
       swarmEncryptionKey: accountInfo.encryptionKey,
       partitionCount: accountInfo.partitionCount,
       mode: "persistent",
-      readLeaseCache: () => this.readLeaseCache(accountInfo.accountId),
+      readLeaseCache: () => this.readLeaseCache(accountInfo.accountId, batchId),
       writeLeaseCache: (snap) =>
-        this.writeLeaseCache(accountInfo.accountId, snap ?? null),
+        this.writeLeaseCache(accountInfo.accountId, batchId, snap ?? null),
       flushStamperState: () => this.saveStamperStateIfNeeded(),
       getWorkerPool: (count) => this.getOrCreateWorkerPool(count),
       onLeaseChange: () => this.emitConnectionInfoIfChanged(),
@@ -1848,9 +1853,10 @@ export class SwarmIdProxy {
 
   private readLeaseCache(
     accountId: string,
+    batchId: string,
   ): PartitionLeaseStateSnapshot | undefined {
     try {
-      const raw = localStorage.getItem(leaseCacheStorageKey(accountId))
+      const raw = localStorage.getItem(leaseCacheStorageKey(accountId, batchId))
       return raw ? (JSON.parse(raw) as PartitionLeaseStateSnapshot) : undefined
     } catch {
       return undefined
@@ -1859,9 +1865,10 @@ export class SwarmIdProxy {
 
   private writeLeaseCache(
     accountId: string,
+    batchId: string,
     snap: PartitionLeaseStateSnapshot | null,
   ): void {
-    const key = leaseCacheStorageKey(accountId)
+    const key = leaseCacheStorageKey(accountId, batchId)
     if (snap === null) {
       localStorage.removeItem(key)
     } else {

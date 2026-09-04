@@ -170,6 +170,7 @@ import {
   STORAGE_CHALLENGE_KEY,
   STORAGE_KEY_ACCOUNTS,
   STORAGE_KEY_NETWORK_SETTINGS,
+  leaseCacheStorageKey,
   partitionSessionStorageKey,
 } from "./types"
 import { KNOWN_DEVICE_MAX_AGE_MS } from "./utils/active-devices"
@@ -451,6 +452,45 @@ describe("SwarmIdProxy partitioned write enablement", () => {
       }),
     })
   }
+
+  // The lease cache is a HINT at which lane this device holds, and a lane is
+  // one partition of one batch. Keyed per account alone, the two coordinators
+  // an account has whenever a dApp carries a per-app stamp override share one
+  // slot and overwrite each other. Safe — `hydrate` refuses a snapshot whose
+  // `batchId` differs, so the loser cold-acquires — but a hint that stops
+  // hinting exactly when there are two writers to hint for is no hint.
+  it("does not evict another batch's lease-cache entry", async () => {
+    const accountId = "aa".repeat(20)
+    const otherBatch = "dd".repeat(32)
+    const otherKey = leaseCacheStorageKey(accountId, otherBatch)
+    // What this account's OTHER coordinator has already cached.
+    localStorageFake.setItem(
+      otherKey,
+      JSON.stringify({ deviceId: "other-device", batchId: otherBatch }),
+    )
+
+    const challenge = await startPartitionedConnect()
+    await sendSetSecret(challenge, {
+      account: serializeSyncedAccount(makeSyncedAccount()),
+    })
+    const { deps } = vi.mocked(BatchWriteCoordinator).mock.results.at(-1)!
+      .value as {
+      deps: {
+        writeLeaseCache: (snap: unknown) => void
+        readLeaseCache: () => unknown
+      }
+    }
+
+    deps.writeLeaseCache({ deviceId: "self-device", batchId: BATCH_ID_HEX })
+
+    const other = JSON.parse(localStorageFake.getItem(otherKey)!) as {
+      deviceId: string
+    }
+    expect(other.deviceId).toBe("other-device")
+    // And ours does not read theirs back: a snapshot for another batch is not
+    // a hint this coordinator can use, and `hydrate` would only drop it.
+    expect(deps.readLeaseCache()).toMatchObject({ deviceId: "self-device" })
+  })
 
   // A payload with no account used to build a "download-only" session: no
   // stamps, and — the part that made it untenable — no `derivationKey`, so it
