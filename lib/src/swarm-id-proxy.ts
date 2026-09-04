@@ -777,6 +777,9 @@ export class SwarmIdProxy {
         message.data.account,
         message.data.secret,
         message.data.networkSettings,
+        // A handover is a genuine connect — the same reasoning as the
+        // `reactivateThisDevice()` below, one field over.
+        Date.now(),
       )
 
       // A handover IS the genuine sign-in for a partition device: the user
@@ -934,6 +937,7 @@ export class SwarmIdProxy {
     account: SyncedAccount,
     appSecret: string,
     networkSettings: NetworkSettings | undefined,
+    connectedAt: number,
   ): Promise<void> {
     const now = Date.now()
     const connection: ConnectedApp = {
@@ -942,10 +946,19 @@ export class SwarmIdProxy {
       ) ?? {
         appUrl: this.parentOrigin!,
         appName: this.appMetadata?.name ?? this.parentOrigin!,
-        lastConnectedAt: now,
+        lastConnectedAt: connectedAt,
       }),
       appSecret,
-      lastConnectedAt: now,
+      // From the CALLER, never `now`: a handover is a connection and a restore
+      // is not, and this clock is what every reader compares a Disconnect
+      // against (`restoreLocalSessionFields`, `verifyRestoredSession`).
+      // Restamping it on a reload made a disconnect made while the tab was
+      // closed read as stale, and the session came back undead (#670).
+      lastConnectedAt: connectedAt,
+      // The deadline IS this context's to issue, which is why it is `now`-based
+      // while the line above is not: `savePartitionSession` reads it straight
+      // back off this connection, and a restore is bounded by the deadline the
+      // stored record already carries (`readPartitionSession`).
       connectedUntil:
         now +
         (account.settings?.appSessionDuration ?? DEFAULT_SESSION_DURATION),
@@ -2311,21 +2324,29 @@ export class SwarmIdProxy {
     this.authLoading = false
     this.deviceId = getOrCreateDeviceId()
 
+    // The handover's own record of when this connection began. A reload is not
+    // a connection, so the restored view keeps it rather than stamping a fresh
+    // one — see `hydratePartitionAccount`.
+    const connectedAt = data.account.connectedApps.find(
+      (app) => app.appUrl === this.parentOrigin,
+    )?.lastConnectedAt
+
     await this.hydratePartitionAccount(
       data.account,
       data.secret,
       data.networkSettings,
+      // A record with no entry for this origin has no connection to date; the
+      // session is nonsense either way, and nothing downstream can be poisoned
+      // by a clock invented for an entry that does not exist.
+      connectedAt ?? Date.now(),
     )
 
     this.showAuthButton()
     this.emitConnectionInfoIfChanged()
-    // The handover's own record of when this connection began — read from the
-    // stored projection, not from the view just hydrated, which stamps
-    // `lastConnectedAt` afresh on every restore.
-    void this.verifyRestoredSession(
-      data.account.connectedApps.find((app) => app.appUrl === this.parentOrigin)
-        ?.lastConnectedAt,
-    )
+    // Deliberately the raw value, `undefined` included: a missing instant is
+    // not evidence that we connected after a disconnect, and the check reads it
+    // as 0 for exactly that reason.
+    void this.verifyRestoredSession(connectedAt)
   }
 
   /**
