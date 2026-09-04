@@ -309,6 +309,14 @@ Each landed as its own PR chain, in this order:
    ~one bus round-trip instead of the 10 s `LEASE_REFRESH_MS` poll. The Swarm lock-SOC protocol
    is untouched as the authority and offline fallback.
 
+   **Scoped to the batch, like the lock it front-runs** (#589). Every lease message carries a
+   `batchId`, and a receiver drops one naming a batch it does not serve. A lane is
+   `(batchId, partition)` — the lock, intent and occupancy addresses all hash the batch — so a
+   holder on batch X and a waiter on batch Y contend for nothing, and answering across batches
+   would drop a lease that helps neither. The bus must be neither broader nor narrower than the
+   lock: while lanes were account-wide, the same argument said these messages must NOT carry a
+   batch, and filtering on one would have suppressed legitimate yields.
+
    **Exactly one holder answers** (#576). A waiter needs one slot, but the request names no
    partition, so every idle holder used to release at once and whoever lost the re-race got
    "Uploads are unavailable". Every holder that would presently yield (`canYieldForPeer`)
@@ -418,6 +426,14 @@ Not yet written:
 
 ## Known gaps
 
+- **A mixed-version window means two holders of one lane.** The lock, intent and occupancy
+  addresses derive from the batch since [#589](https://github.com/snaha/swarm-id/issues/589), so an
+  old bundle and a new one compute different addresses for the same `(batch, partition)` and each
+  reads the other's lane as free — two writers in one slot set, not a stale read. Both sides deploy
+  together, which is what makes that window short rather than absent; it is the same deploy-in-step
+  property [#588](https://github.com/snaha/swarm-id/issues/588) tracks for the channel rename, and
+  the first change here where the cost of getting it wrong is a corrupted lane rather than a missed
+  message.
 - A revocation made while a dApp partition is **closed** is not pushed to it: the room has no
   mailbox. Since #635 the popup re-handshake is no longer what catches it either — a restored
   session reads the account's published state once instead, and ends itself on a tombstone.

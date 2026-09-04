@@ -30,10 +30,18 @@ SwarmIdProxy (iframe)            sync-account (SwarmID UI)
         └────────────┬───────────────────┘
             BatchWriteCoordinator      ← write lock + lease lifecycle + stamper flush
                      │
-              PartitionLease           ← one device's claim on one partition
+              PartitionLease           ← one device's claim on one partition OF ONE BATCH
                      │
               partition-lock.ts        ← lock SOCs on Swarm: the cross-device authority
 ```
+
+A lane is `(batchId, partition)`, and every address the protocol writes says so: the lock, intent
+and occupancy SOCs hash the batch alongside the partition, as the state pointer they guard already
+did (`makePartitionStateTopic`). Keying the lock on the partition alone made lane p of batch X and
+lane p of batch Y one chunk address, so two coordinators whose slot sets cannot overlap —
+`dataSlot` is computed within a batch — took turns anyway. Per-app stamp overrides put two live
+coordinators on two batches without any multi-batch feature
+([#589](https://github.com/snaha/swarm-id/issues/589)).
 
 The lock SOC on Swarm stays the source of truth for who holds a partition; the local lease cache
 (localStorage, persistent mode only) is just a hint — keyed
@@ -54,7 +62,7 @@ Dependencies are injected — no global storage-manager reach-in:
 | `bee`, `batchId`                     | Bee client; the batch id (hex) is also the `withBatchWriteLock` key                                                                   |
 | `stamper`                            | `UtilizationAwareStamper`, already created + account-bound by the caller; the coordinator only binds/unbinds the held partition on it |
 | `deviceId`, `accountId`              | This device's identity (one `getOrCreateDeviceId` per browser) and the account                                                        |
-| `backupSigner`, `swarmEncryptionKey` | Own/read the per-partition lock SOCs                                                                                                  |
+| `backupSigner`, `swarmEncryptionKey` | Own/read the lock SOCs for this batch's partitions                                                                                    |
 | `partitionCount`                     | `<= 1` (legacy single-device accounts) means: never lease, lock-only coordination                                                     |
 | `mode`                               | `"persistent"` (proxy) or `"oneshot"` (sync-account) — see below                                                                      |
 | `readLeaseCache` / `writeLeaseCache` | Optional local lease-cache hint (persistent mode)                                                                                     |

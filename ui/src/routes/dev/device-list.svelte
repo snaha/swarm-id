@@ -114,7 +114,12 @@
       // Build a read-only PartitionLease and read its holders — the single
       // in-code lease model (no parallel holder variable).
       const partitionCount = account.partitionCount ?? 1
-      if (partitionCount > 1 && account.derivationKey) {
+      // The account default is the batch these lanes are about: lock, intent
+      // and occupancy addresses are per (batch, partition) since #589, so
+      // "who holds partition p" needs one named. An account with no drive has
+      // no partition writes to show.
+      const batchId = account.defaultPostageStampBatchID
+      if (partitionCount > 1 && account.derivationKey && batchId) {
         try {
           const bee = new Bee(networkSettingsStore.beeNodeUrl)
           const swarmKeyHex = await deriveSwarmEncryptionKey(account.derivationKey)
@@ -122,6 +127,7 @@
             bee,
             deviceId: thisDeviceId ?? '',
             swarmEncryptionKey: hexToUint8Array(swarmKeyHex),
+            batchId,
           })
           await lease.refreshFromSwarm(partitionCount)
           holders = lease.getHolders()

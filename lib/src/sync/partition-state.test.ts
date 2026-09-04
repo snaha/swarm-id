@@ -162,7 +162,9 @@ describe("writePartitionState — reserved-slot bucket-collision avoidance", () 
       statePointerAddress(TEST_BATCH_ID, PARTITION, OWNER, now),
     )
     // Guard: a false green if the target happened to already be claimed.
-    expect(pointerBucket).not.toBe(lockSocBucket(PARTITION, OWNER))
+    expect(pointerBucket).not.toBe(
+      lockSocBucket(TEST_BATCH_ID, PARTITION, OWNER),
+    )
 
     force.bucket = pointerBucket // steer the first counter chunk onto the pointer
     const stateBuckets = await publishOneChunk(stamper, now)
@@ -177,9 +179,16 @@ describe("writePartitionState — reserved-slot bucket-collision avoidance", () 
     const now = 1_000_000_000_000
     const stamper = await makeBoundStamper()
     const occupancyBucket = toBucket(
-      partitionOccupancyAddress(PARTITION, intentEpochBucket(now), OWNER),
+      partitionOccupancyAddress(
+        TEST_BATCH_ID,
+        PARTITION,
+        intentEpochBucket(now),
+        OWNER,
+      ),
     )
-    expect(occupancyBucket).not.toBe(lockSocBucket(PARTITION, OWNER))
+    expect(occupancyBucket).not.toBe(
+      lockSocBucket(TEST_BATCH_ID, PARTITION, OWNER),
+    )
 
     force.bucket = occupancyBucket
     const stateBuckets = await publishOneChunk(stamper, now)

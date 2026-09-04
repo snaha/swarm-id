@@ -670,6 +670,7 @@ describe("SwarmIdProxy partitioned write enablement", () => {
       busChannel.postMessage({
         type: "lease-request",
         accountId: "aa".repeat(20),
+        batchId: BATCH_ID_HEX,
         fromDeviceId: "peer-device",
       })
       await vi.waitFor(() =>
@@ -689,6 +690,7 @@ describe("SwarmIdProxy partitioned write enablement", () => {
       busChannel.postMessage({
         type: "lease-released",
         accountId: "aa".repeat(20),
+        batchId: BATCH_ID_HEX,
         partition: 0,
         fromDeviceId: "peer-device",
       })
@@ -742,6 +744,7 @@ describe("SwarmIdProxy partitioned write enablement", () => {
       channel.postMessage({
         type: "lease-request",
         accountId: ACCOUNT_ID,
+        batchId: BATCH_ID_HEX,
         fromDeviceId: "peer-device",
         requestId,
       })
@@ -783,6 +786,7 @@ describe("SwarmIdProxy partitioned write enablement", () => {
           expect(published).toContainEqual({
             type: "lease-claim",
             accountId: ACCOUNT_ID,
+            batchId: BATCH_ID_HEX,
             fromDeviceId: expect.any(String),
             requestId: REQUEST_ID,
           }),
@@ -821,6 +825,7 @@ describe("SwarmIdProxy partitioned write enablement", () => {
         busChannel.postMessage({
           type: "lease-claim",
           accountId: ACCOUNT_ID,
+          batchId: BATCH_ID_HEX,
           fromDeviceId: "peer-device",
           requestId: REQUEST_ID,
         })
@@ -840,6 +845,7 @@ describe("SwarmIdProxy partitioned write enablement", () => {
         busChannel.postMessage({
           type: "lease-released",
           accountId: ACCOUNT_ID,
+          batchId: BATCH_ID_HEX,
           partition: 0,
           fromDeviceId: "peer-device",
           requestId: REQUEST_ID,
@@ -864,6 +870,7 @@ describe("SwarmIdProxy partitioned write enablement", () => {
         busChannel.postMessage({
           type: "lease-claim",
           accountId: ACCOUNT_ID,
+          batchId: BATCH_ID_HEX,
           fromDeviceId: "peer-device",
           requestId: REQUEST_ID,
         })
@@ -961,7 +968,7 @@ describe("SwarmIdProxy partitioned write enablement", () => {
     }
   })
 
-  it("ignores its own lease messages and other accounts' messages", async () => {
+  it("ignores its own lease messages, and other accounts' and batches'", async () => {
     const account = makeSyncedAccount()
     const challenge = await startPartitionedConnect()
     await sendSetSecret(challenge, { account: serializeSyncedAccount(account) })
@@ -980,16 +987,37 @@ describe("SwarmIdProxy partitioned write enablement", () => {
       busChannel.postMessage({
         type: "lease-request",
         accountId: "aa".repeat(20),
+        batchId: BATCH_ID_HEX,
         fromDeviceId: ownDeviceId,
       })
       busChannel.postMessage({
         type: "lease-request",
         accountId: "bb".repeat(20),
+        batchId: BATCH_ID_HEX,
         fromDeviceId: "peer-device",
       })
       busChannel.postMessage({
         type: "lease-released",
         accountId: "bb".repeat(20),
+        batchId: BATCH_ID_HEX,
+        partition: 0,
+        fromDeviceId: "peer-device",
+      })
+      // A lane is one partition of ONE batch (#589), so a waiter on another
+      // batch contends with nothing this holder has. Answering it would drop a
+      // lease that helps neither side — and per-app stamp overrides make two
+      // live coordinators on two batches an ordinary account, not a
+      // multi-batch hypothetical.
+      busChannel.postMessage({
+        type: "lease-request",
+        accountId: "aa".repeat(20),
+        batchId: "dd".repeat(32),
+        fromDeviceId: "peer-device",
+      })
+      busChannel.postMessage({
+        type: "lease-released",
+        accountId: "aa".repeat(20),
+        batchId: "dd".repeat(32),
         partition: 0,
         fromDeviceId: "peer-device",
       })
@@ -998,6 +1026,7 @@ describe("SwarmIdProxy partitioned write enablement", () => {
       busChannel.postMessage({
         type: "lease-request",
         accountId: "aa".repeat(20),
+        batchId: BATCH_ID_HEX,
         fromDeviceId: "peer-device",
       })
       await vi.waitFor(() =>

@@ -1687,7 +1687,7 @@ export class UtilizationAwareStamper implements Stamper {
     const backupOwner = backupSigner.publicKey().address()
     instance.lockSocs = Array.from({ length: PARTITION_COUNT }, (_, p) => ({
       partition: p,
-      address: lockSocAddress(p, backupOwner),
+      address: lockSocAddress(batchId, p, backupOwner),
     }))
 
     return instance

@@ -10,7 +10,12 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
-import { PrivateKey, type Bee, type Stamper } from "@ethersphere/bee-js"
+import {
+  BatchId,
+  PrivateKey,
+  type Bee,
+  type Stamper,
+} from "@ethersphere/bee-js"
 import { Binary } from "cafe-utility"
 import {
   acquirePartitionLock,
@@ -41,6 +46,9 @@ import {
 // ============================================================================
 // Fixtures
 // ============================================================================
+
+/** The batch whose lanes these locks are about (#589). */
+const TEST_BATCH_ID = new BatchId("ab".repeat(32))
 
 const DEVICE_A = "device-alpha-111"
 const DEVICE_B = "device-beta-222"
@@ -108,6 +116,7 @@ function commonOpts(deviceId: string, overrides?: { now?: () => number }) {
     stamper,
     backupSigner: BACKUP_SIGNER,
     swarmEncryptionKey: TEST_ENC_KEY,
+    batchId: TEST_BATCH_ID,
     partition: PARTITION,
     deviceId,
     ttlMs: TTL_MS,
@@ -123,14 +132,14 @@ function commonOpts(deviceId: string, overrides?: { now?: () => number }) {
 
 describe("makePartitionLockIdentifier", () => {
   it("is deterministic for the same partition", () => {
-    const a = makePartitionLockIdentifier(0)
-    const b = makePartitionLockIdentifier(0)
+    const a = makePartitionLockIdentifier(TEST_BATCH_ID, 0)
+    const b = makePartitionLockIdentifier(TEST_BATCH_ID, 0)
     expect(a.toHex()).toBe(b.toHex())
   })
 
   it("differs across partitions", () => {
-    const p0 = makePartitionLockIdentifier(0)
-    const p1 = makePartitionLockIdentifier(1)
+    const p0 = makePartitionLockIdentifier(TEST_BATCH_ID, 0)
+    const p1 = makePartitionLockIdentifier(TEST_BATCH_ID, 1)
     expect(p0.toHex()).not.toBe(p1.toHex())
   })
 })
@@ -210,6 +219,7 @@ describe("readPartitionLock / writePartitionLock round-trip", () => {
       bee: bee as unknown as Bee,
       backupSigner: BACKUP_SIGNER,
       swarmEncryptionKey: TEST_ENC_KEY,
+      batchId: TEST_BATCH_ID,
       partition: PARTITION,
     })
     expect(lock).toBeUndefined()
@@ -230,6 +240,7 @@ describe("readPartitionLock / writePartitionLock round-trip", () => {
       stamper,
       backupSigner: BACKUP_SIGNER,
       swarmEncryptionKey: TEST_ENC_KEY,
+      batchId: TEST_BATCH_ID,
       partition: PARTITION,
       payload,
     })
@@ -237,6 +248,7 @@ describe("readPartitionLock / writePartitionLock round-trip", () => {
       bee: bee as unknown as Bee,
       backupSigner: BACKUP_SIGNER,
       swarmEncryptionKey: TEST_ENC_KEY,
+      batchId: TEST_BATCH_ID,
       partition: PARTITION,
     })
     expect(read).toEqual(payload)
@@ -248,6 +260,7 @@ describe("readPartitionLock / writePartitionLock round-trip", () => {
       stamper,
       backupSigner: BACKUP_SIGNER,
       swarmEncryptionKey: TEST_ENC_KEY,
+      batchId: TEST_BATCH_ID,
       partition: PARTITION,
     }
     const first: PartitionLockPayload = {
@@ -276,6 +289,7 @@ describe("readPartitionLock / writePartitionLock round-trip", () => {
       bee: bee as unknown as Bee,
       backupSigner: BACKUP_SIGNER,
       swarmEncryptionKey: TEST_ENC_KEY,
+      batchId: TEST_BATCH_ID,
       partition: PARTITION,
     })
     expect(read?.holderDeviceId).toBe(DEVICE_B)
@@ -351,7 +365,7 @@ describe("readPartitionLock — schema validation", () => {
     // Write a SOC at the lock identifier whose (decrypted) JSON body is missing
     // the required fields. readPartitionLock must reject it like a missing lock,
     // not surface a half-formed object to callers.
-    const identifier = makePartitionLockIdentifier(PARTITION)
+    const identifier = makePartitionLockIdentifier(TEST_BATCH_ID, PARTITION)
     const target: UploadTarget = {
       mode: "stamper",
       bee: bee as unknown as Bee,
@@ -368,6 +382,7 @@ describe("readPartitionLock — schema validation", () => {
       bee: bee as unknown as Bee,
       backupSigner: BACKUP_SIGNER,
       swarmEncryptionKey: TEST_ENC_KEY,
+      batchId: TEST_BATCH_ID,
       partition: PARTITION,
     })
     expect(read).toBeUndefined()
@@ -394,6 +409,7 @@ describe("acquirePartitionLock — single device", () => {
       bee: bee as unknown as Bee,
       backupSigner: BACKUP_SIGNER,
       swarmEncryptionKey: TEST_ENC_KEY,
+      batchId: TEST_BATCH_ID,
       partition: PARTITION,
     })
     expect(observed?.holderDeviceId).toBe(DEVICE_A)
@@ -436,6 +452,7 @@ describe("acquirePartitionLock — single device", () => {
       stamper,
       backupSigner: BACKUP_SIGNER,
       swarmEncryptionKey: TEST_ENC_KEY,
+      batchId: TEST_BATCH_ID,
       partition: PARTITION,
       payload: {
         holderDeviceId: NO_HOLDER_DEVICE_ID,
@@ -563,6 +580,7 @@ describe("acquirePartitionLock — verify-after-write", () => {
       stamper,
       backupSigner: BACKUP_SIGNER,
       swarmEncryptionKey: TEST_ENC_KEY,
+      batchId: TEST_BATCH_ID,
       partition: PARTITION,
       payload: {
         holderDeviceId: DEVICE_B,
@@ -646,7 +664,7 @@ describe("acquirePartitionLock — known failure modes", () => {
    * underlying mock store directly (used to simulate gossip-delay scenarios).
    */
   function lockSocAddress(): string {
-    const identifier = makePartitionLockIdentifier(PARTITION)
+    const identifier = makePartitionLockIdentifier(TEST_BATCH_ID, PARTITION)
     const addr = Binary.keccak256(
       Binary.concatBytes(identifier.toUint8Array(), OWNER.toUint8Array()),
     )
@@ -668,6 +686,7 @@ describe("acquirePartitionLock — known failure modes", () => {
       stamper,
       backupSigner: BACKUP_SIGNER,
       swarmEncryptionKey: TEST_ENC_KEY,
+      batchId: TEST_BATCH_ID,
       partition: PARTITION,
       payload: {
         holderDeviceId: DEVICE_B,
@@ -736,6 +755,7 @@ describe("acquirePartitionLock — known failure modes", () => {
       stamper,
       backupSigner: BACKUP_SIGNER,
       swarmEncryptionKey: TEST_ENC_KEY,
+      batchId: TEST_BATCH_ID,
       partition: PARTITION,
       payload: {
         holderDeviceId: DEVICE_B,
@@ -792,6 +812,7 @@ describe("acquirePartitionLock — known failure modes", () => {
       stamper,
       backupSigner: BACKUP_SIGNER,
       swarmEncryptionKey: TEST_ENC_KEY,
+      batchId: TEST_BATCH_ID,
       partition: PARTITION,
       payload: {
         holderDeviceId: DEVICE_B,
@@ -823,6 +844,7 @@ describe("acquirePartitionLock — known failure modes", () => {
       bee: bee as unknown as Bee,
       backupSigner: BACKUP_SIGNER,
       swarmEncryptionKey: TEST_ENC_KEY,
+      batchId: TEST_BATCH_ID,
       partition: PARTITION,
     })
     expect(converged?.holderDeviceId).toBe(DEVICE_B)
@@ -857,6 +879,7 @@ describe("acquirePartitionLock — known failure modes", () => {
       stamper,
       backupSigner: BACKUP_SIGNER,
       swarmEncryptionKey: TEST_ENC_KEY,
+      batchId: TEST_BATCH_ID,
       partition: PARTITION,
       payload: {
         holderDeviceId: DEVICE_B,
@@ -889,6 +912,7 @@ describe("acquirePartitionLock — shouldAbort", () => {
         bee: bee as unknown as Bee,
         backupSigner: BACKUP_SIGNER,
         swarmEncryptionKey: TEST_ENC_KEY,
+        batchId: TEST_BATCH_ID,
         partition: PARTITION,
       }),
     ).toBeUndefined()
@@ -959,6 +983,7 @@ describe("acquirePartitionLock — bounded reads / skipInitialRead", () => {
       stamper,
       backupSigner: BACKUP_SIGNER,
       swarmEncryptionKey: TEST_ENC_KEY,
+      batchId: TEST_BATCH_ID,
       partition: PARTITION,
       payload: {
         holderDeviceId: DEVICE_B,
@@ -989,6 +1014,7 @@ describe("releasePartitionLock — generation fencing", () => {
       stamper,
       backupSigner: BACKUP_SIGNER,
       swarmEncryptionKey: TEST_ENC_KEY,
+      batchId: TEST_BATCH_ID,
       partition: PARTITION,
       payload,
     })
@@ -1003,6 +1029,7 @@ describe("releasePartitionLock — generation fencing", () => {
       stamper,
       backupSigner: BACKUP_SIGNER,
       swarmEncryptionKey: TEST_ENC_KEY,
+      batchId: TEST_BATCH_ID,
       partition: PARTITION,
       deviceId,
       releasedGeneration,
@@ -1016,6 +1043,7 @@ describe("releasePartitionLock — generation fencing", () => {
       bee: bee as unknown as Bee,
       backupSigner: BACKUP_SIGNER,
       swarmEncryptionKey: TEST_ENC_KEY,
+      batchId: TEST_BATCH_ID,
       partition: PARTITION,
     })
   }
@@ -1143,6 +1171,7 @@ describe("acquirePartitionLock — verify vs fenced sentinels", () => {
       stamper,
       backupSigner: BACKUP_SIGNER,
       swarmEncryptionKey: TEST_ENC_KEY,
+      batchId: TEST_BATCH_ID,
       partition: PARTITION,
       payload: {
         holderDeviceId: NO_HOLDER_DEVICE_ID,
@@ -1164,12 +1193,12 @@ describe("acquirePartitionLock — verify vs fenced sentinels", () => {
 
 describe("lockSocAddress / lockSocBucket", () => {
   it("lockSocAddress is deterministic and matches the SOC address formula", () => {
-    const addr1 = lockSocAddress(0, OWNER)
-    const addr2 = lockSocAddress(0, OWNER)
+    const addr1 = lockSocAddress(TEST_BATCH_ID, 0, OWNER)
+    const addr2 = lockSocAddress(TEST_BATCH_ID, 0, OWNER)
     expect(addr1).toEqual(addr2)
 
     // Spec: keccak256(identifier || owner).
-    const identifier = makePartitionLockIdentifier(0)
+    const identifier = makePartitionLockIdentifier(TEST_BATCH_ID, 0)
     const expected = Binary.keccak256(
       Binary.concatBytes(identifier.toUint8Array(), OWNER.toUint8Array()),
     )
@@ -1177,8 +1206,8 @@ describe("lockSocAddress / lockSocBucket", () => {
   })
 
   it("different partitions produce different lock-SOC addresses", () => {
-    const a = lockSocAddress(0, OWNER)
-    const b = lockSocAddress(1, OWNER)
+    const a = lockSocAddress(TEST_BATCH_ID, 0, OWNER)
+    const b = lockSocAddress(TEST_BATCH_ID, 1, OWNER)
     expect(a).not.toEqual(b)
   })
 
@@ -1188,12 +1217,14 @@ describe("lockSocAddress / lockSocBucket", () => {
     )
       .publicKey()
       .address()
-    expect(lockSocAddress(0, OWNER)).not.toEqual(lockSocAddress(0, otherOwner))
+    expect(lockSocAddress(TEST_BATCH_ID, 0, OWNER)).not.toEqual(
+      lockSocAddress(TEST_BATCH_ID, 0, otherOwner),
+    )
   })
 
   it("lockSocBucket extracts the bucket from the lock-SOC address", () => {
-    const bucket = lockSocBucket(0, OWNER)
-    const addr = lockSocAddress(0, OWNER)
+    const bucket = lockSocBucket(TEST_BATCH_ID, 0, OWNER)
+    const addr = lockSocAddress(TEST_BATCH_ID, 0, OWNER)
     expect(bucket).toBe(toBucket(addr))
     expect(bucket).toBeGreaterThanOrEqual(0)
     expect(bucket).toBeLessThan(65536)

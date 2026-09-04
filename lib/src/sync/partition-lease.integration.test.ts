@@ -248,7 +248,9 @@ describe("readPartitionState / writePartitionState round-trip", () => {
     expect(written.stateBuckets).toHaveLength(2) // 1 non-zero counter chunk + ref chunk
     expect(written.stateBuckets.length).toBeLessThan(numUtilizationChunks)
     expect(new Set(written.stateBuckets).size).toBe(2)
-    expect(written.stateBuckets).not.toContain(lockSocBucket(0, OWNER))
+    expect(written.stateBuckets).not.toContain(
+      lockSocBucket(TEST_BATCH_ID, 0, OWNER),
+    )
 
     // A taking-over device derives the same protection set from the
     // reference chunk it downloads.
@@ -626,6 +628,7 @@ describe("intent / occupancy / state-pointer SOC slot race (regression)", () => 
       stamper: stamper as unknown as Stamper,
       backupSigner: BACKUP_SIGNER,
       swarmEncryptionKey: TEST_ENC_KEY,
+      batchId: TEST_BATCH_ID,
       partition: PARTITION,
     }
 
@@ -996,6 +999,7 @@ describe("PartitionLease.acquire — unreadable partition state", () => {
       bee: bee as unknown as Bee,
       backupSigner: BACKUP_SIGNER,
       swarmEncryptionKey: TEST_ENC_KEY,
+      batchId: TEST_BATCH_ID,
       partition: 0,
     })
     expect(lock).toBeUndefined()
@@ -1255,6 +1259,7 @@ describe("PartitionLease.acquire — fresh scan", () => {
       bee: bee as unknown as Bee,
       backupSigner: BACKUP_SIGNER,
       swarmEncryptionKey: TEST_ENC_KEY,
+      batchId: TEST_BATCH_ID,
       partition: 0,
     })
     expect(observed?.holderDeviceId).toBe(DEVICE_A)
@@ -1267,6 +1272,7 @@ describe("PartitionLease.acquire — fresh scan", () => {
       stamper: createMockStamper() as unknown as Stamper,
       backupSigner: BACKUP_SIGNER,
       swarmEncryptionKey: TEST_ENC_KEY,
+      batchId: TEST_BATCH_ID,
       partition: 0,
       payload: {
         holderDeviceId: DEVICE_B,
@@ -1298,6 +1304,7 @@ describe("PartitionLease.acquire — fresh scan", () => {
       stamper: createMockStamper() as unknown as Stamper,
       backupSigner: BACKUP_SIGNER,
       swarmEncryptionKey: TEST_ENC_KEY,
+      batchId: TEST_BATCH_ID,
       partition: 0,
       payload: {
         holderDeviceId: DEVICE_B,
@@ -1322,6 +1329,7 @@ describe("PartitionLease.acquire — fresh scan", () => {
       bee: bee as unknown as Bee,
       backupSigner: BACKUP_SIGNER,
       swarmEncryptionKey: TEST_ENC_KEY,
+      batchId: TEST_BATCH_ID,
       partition: 0,
     })
     expect(observed?.holderDeviceId).toBe(DEVICE_A)
@@ -1358,6 +1366,7 @@ describe("PartitionLease.acquire — fresh scan", () => {
       stamper: createMockStamper() as unknown as Stamper,
       backupSigner: BACKUP_SIGNER,
       swarmEncryptionKey: TEST_ENC_KEY,
+      batchId: TEST_BATCH_ID,
       partition: 0,
       payload: {
         holderDeviceId: DEVICE_B,
@@ -1392,6 +1401,7 @@ describe("PartitionLease.acquire — fresh scan", () => {
         stamper,
         backupSigner: BACKUP_SIGNER,
         swarmEncryptionKey: TEST_ENC_KEY,
+        batchId: TEST_BATCH_ID,
         partition: p,
         payload: {
           holderDeviceId: DEVICE_B,
@@ -1524,6 +1534,7 @@ describe("PartitionLease.acquire — turn-taking (3rd device)", () => {
       bee: bee as unknown as Bee,
       backupSigner: BACKUP_SIGNER,
       swarmEncryptionKey: TEST_ENC_KEY,
+      batchId: TEST_BATCH_ID,
       partition: 0,
     })
     expect(p0?.holderDeviceId).toBe(DEVICE_C)
@@ -1549,6 +1560,7 @@ describe("acquirePartitionLock — self-refresh through a frozen-cache read (reg
       stamper: createMockStamper() as unknown as Stamper,
       backupSigner: BACKUP_SIGNER,
       swarmEncryptionKey: TEST_ENC_KEY,
+      batchId: TEST_BATCH_ID,
       partition: 0,
       payload: {
         holderDeviceId: DEVICE_A,
@@ -1564,7 +1576,7 @@ describe("acquirePartitionLock — self-refresh through a frozen-cache read (reg
     // Freeze every read of the lock SOC address at that seeded chunk, so the
     // verify-read inside acquirePartitionLock returns the stale claim no matter
     // what we write (the gateway frozen-cache effect). Other reads pass through.
-    const lockId = makePartitionLockIdentifier(0)
+    const lockId = makePartitionLockIdentifier(TEST_BATCH_ID, 0)
     const lockAddr = new Reference(
       Binary.keccak256(
         Binary.concatBytes(lockId.toUint8Array(), OWNER.toUint8Array()),
@@ -1592,6 +1604,7 @@ describe("acquirePartitionLock — self-refresh through a frozen-cache read (reg
       stamper: createMockStamper() as unknown as Stamper,
       backupSigner: BACKUP_SIGNER,
       swarmEncryptionKey: TEST_ENC_KEY,
+      batchId: TEST_BATCH_ID,
       partition: 0,
       deviceId: DEVICE_A,
       ttlMs: LEASE_TTL_MS,
@@ -1655,6 +1668,7 @@ describe("PartitionLease.acquire — unknown-holder dual-acquire guard (regressi
       stamper: createMockStamper() as unknown as Stamper,
       backupSigner: BACKUP_SIGNER,
       swarmEncryptionKey: TEST_ENC_KEY,
+      batchId: TEST_BATCH_ID,
       partition: 1,
       payload: {
         holderDeviceId: DEVICE_B,
@@ -1786,6 +1800,7 @@ describe("PartitionLease.refresh", () => {
       bee: bee as unknown as Bee,
       backupSigner: BACKUP_SIGNER,
       swarmEncryptionKey: TEST_ENC_KEY,
+      batchId: TEST_BATCH_ID,
       partition: 0,
     })
     expect(observed?.holderDeviceId).toBe(DEVICE_A)
@@ -2002,6 +2017,7 @@ describe("PartitionLease.publishState — commit without release", () => {
       bee: bee as unknown as Bee,
       backupSigner: BACKUP_SIGNER,
       swarmEncryptionKey: TEST_ENC_KEY,
+      batchId: TEST_BATCH_ID,
       partition: 0,
     })
     expect(observed?.holderDeviceId).toBe(DEVICE_A)
@@ -2032,6 +2048,7 @@ describe("PartitionLease.release", () => {
       bee: bee as unknown as Bee,
       backupSigner: BACKUP_SIGNER,
       swarmEncryptionKey: TEST_ENC_KEY,
+      batchId: TEST_BATCH_ID,
       partition: 0,
     })
     expect(observed?.holderDeviceId).toBe(NO_HOLDER_DEVICE_ID)
@@ -2139,6 +2156,7 @@ describe("PartitionLease.release — generation fencing (#349)", () => {
       bee: bee as unknown as Bee,
       backupSigner: BACKUP_SIGNER,
       swarmEncryptionKey: TEST_ENC_KEY,
+      batchId: TEST_BATCH_ID,
       partition,
     })
   }
@@ -2242,6 +2260,7 @@ describe("PartitionLease.refreshFromSwarm / isActive / heldPartition", () => {
       stamper,
       backupSigner: BACKUP_SIGNER,
       swarmEncryptionKey: TEST_ENC_KEY,
+      batchId: TEST_BATCH_ID,
       partition: 1,
       payload: {
         holderDeviceId: DEVICE_B,
@@ -2308,6 +2327,7 @@ describe("PartitionLease.acquire — intent round (Phase 2)", () => {
       stamper: createMockStamper() as unknown as Stamper,
       backupSigner: BACKUP_SIGNER,
       swarmEncryptionKey: TEST_ENC_KEY,
+      batchId: TEST_BATCH_ID,
       partition: 0,
       deviceId: DEVICE_B,
       epochBucket: intentEpochBucket(NOW),
@@ -2333,6 +2353,7 @@ describe("PartitionLease.acquire — intent round (Phase 2)", () => {
       bee: bee as unknown as Bee,
       backupSigner: BACKUP_SIGNER,
       swarmEncryptionKey: TEST_ENC_KEY,
+      batchId: TEST_BATCH_ID,
       partition: 0,
     })
     expect(lock?.holderDeviceId).not.toBe(DEVICE_A)
@@ -2344,6 +2365,7 @@ describe("PartitionLease.acquire — intent round (Phase 2)", () => {
       stamper: createMockStamper() as unknown as Stamper,
       backupSigner: BACKUP_SIGNER,
       swarmEncryptionKey: TEST_ENC_KEY,
+      batchId: TEST_BATCH_ID,
       partition: 0,
       deviceId: DEVICE_B,
       epochBucket: intentEpochBucket(NOW),
@@ -2368,6 +2390,7 @@ describe("PartitionLease.acquire — intent round (Phase 2)", () => {
       bee: bee as unknown as Bee,
       backupSigner: BACKUP_SIGNER,
       swarmEncryptionKey: TEST_ENC_KEY,
+      batchId: TEST_BATCH_ID,
       partition: 0,
     })
     expect(lock?.holderDeviceId).toBe(DEVICE_A)
@@ -2393,6 +2416,7 @@ describe("PartitionLease.acquire — intent round (Phase 2)", () => {
       stamper: createMockStamper() as unknown as Stamper,
       backupSigner: BACKUP_SIGNER,
       swarmEncryptionKey: TEST_ENC_KEY,
+      batchId: TEST_BATCH_ID,
       partition: 0,
       deviceId: DEVICE_B,
       epochBucket: intentEpochBucket(NOW),
@@ -2428,6 +2452,7 @@ describe("PartitionLease.acquire — holder presence beacons (gateway holder-exi
       stamper: createMockStamper() as unknown as Stamper,
       backupSigner: BACKUP_SIGNER,
       swarmEncryptionKey: TEST_ENC_KEY,
+      batchId: TEST_BATCH_ID,
       partition: opts.partition,
       deviceId: opts.deviceId,
       epochBucket: opts.epochBucket,
@@ -2468,6 +2493,7 @@ describe("PartitionLease.acquire — holder presence beacons (gateway holder-exi
       bee: bee as unknown as Bee,
       backupSigner: BACKUP_SIGNER,
       swarmEncryptionKey: TEST_ENC_KEY,
+      batchId: TEST_BATCH_ID,
       partition: 0,
     })
     expect(p0?.holderDeviceId).not.toBe(DEVICE_A)
@@ -2528,6 +2554,7 @@ describe("PartitionLease.acquire — holder presence beacons (gateway holder-exi
       stamper: createMockStamper() as unknown as Stamper,
       backupSigner: BACKUP_SIGNER,
       swarmEncryptionKey: TEST_ENC_KEY,
+      batchId: TEST_BATCH_ID,
       partition: 0,
       deviceId: DEVICE_B,
       epochBucket: intentEpochBucket(NOW),
@@ -2553,6 +2580,7 @@ describe("PartitionLease.acquire — holder presence beacons (gateway holder-exi
       bee: bee as unknown as Bee,
       backupSigner: BACKUP_SIGNER,
       swarmEncryptionKey: TEST_ENC_KEY,
+      batchId: TEST_BATCH_ID,
       partition: 0,
       deviceId: DEVICE_A,
       epochBucket: intentEpochBucket(NOW),
@@ -2578,6 +2606,7 @@ describe("PartitionLease.acquire — holder presence beacons (gateway holder-exi
       bee: bee as unknown as Bee,
       backupSigner: BACKUP_SIGNER,
       swarmEncryptionKey: TEST_ENC_KEY,
+      batchId: TEST_BATCH_ID,
       partition: 0,
       deviceId: DEVICE_A,
       epochBucket: intentEpochBucket(NOW),
@@ -2697,6 +2726,7 @@ describe("PartitionLease.refresh — occupancy displacement vs a PRUNED peer", (
       stamper: createMockStamper() as unknown as Stamper,
       backupSigner: BACKUP_SIGNER,
       swarmEncryptionKey: TEST_ENC_KEY,
+      batchId: TEST_BATCH_ID,
       partition: opts.partition,
       deviceId: opts.deviceId,
       epochBucket: opts.epochBucket,

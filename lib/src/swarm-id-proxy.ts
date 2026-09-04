@@ -345,6 +345,12 @@ export class SwarmIdProxy {
   private busBoundAccountId: string | undefined
   /** Account the live coordinator serves — routes bus lease messages. */
   private coordinatorAccountId: string | undefined
+  /** Batch the live coordinator serves. Lanes are per (batch, partition), so
+   *  this routes the lease messages alongside the account (#589): a yield for
+   *  another batch's waiter drops a lease that helps nobody. Captured with the
+   *  coordinator rather than read from `postageBatchId`, which can move to a
+   *  new batch before the coordinator is rebuilt. */
+  private coordinatorBatchId: string | undefined
   /** Scheduled answers to peers' `lease-request`s, by request id, so a peer
    *  earlier in the rank order can call ours off (`yieldRankDelayMs`). */
   private pendingYields = new Map<string, ReturnType<typeof setTimeout>>()
@@ -1236,15 +1242,20 @@ export class SwarmIdProxy {
   private teardownCoordinator(): void {
     const partition = this.coordinator?.currentPartition
     const accountId = this.coordinatorAccountId
+    const batchId = this.coordinatorBatchId
     // Scheduled answers describe a lease we are about to drop anyway.
     this.cancelPendingYields()
     this.coordinator?.teardown()
     this.coordinator = undefined
     this.coordinatorAccountId = undefined
-    if (partition === undefined || !accountId || !this.deviceId) return
+    this.coordinatorBatchId = undefined
+    if (partition === undefined || !accountId || !batchId || !this.deviceId) {
+      return
+    }
     this.bus.publish({
       type: "lease-released",
       accountId,
+      batchId,
       partition,
       fromDeviceId: this.deviceId,
     })
@@ -1320,7 +1331,11 @@ export class SwarmIdProxy {
    * with extra steps. A claim is cheap to send and is what the rank step
    * actually budgets for.
    */
-  private answerLeaseRequest(accountId: string, requestId?: string): void {
+  private answerLeaseRequest(
+    accountId: string,
+    batchId: string,
+    requestId?: string,
+  ): void {
     const coordinator = this.coordinator
     if (!coordinator) return
     if (requestId !== undefined) {
@@ -1334,6 +1349,7 @@ export class SwarmIdProxy {
       this.bus.publish({
         type: "lease-claim",
         accountId,
+        batchId,
         fromDeviceId: this.requireDeviceId(),
         requestId,
       })
@@ -1345,6 +1361,7 @@ export class SwarmIdProxy {
         this.bus.publish({
           type: "lease-released",
           accountId,
+          batchId,
           partition,
           fromDeviceId: this.requireDeviceId(),
           requestId,
@@ -1483,9 +1500,15 @@ export class SwarmIdProxy {
         }
         case "lease-request": {
           const coordinator = this.coordinator
+          // Batch as well as account: a lane is one partition of ONE batch
+          // (#589), so a waiter on another batch contends with nothing we
+          // hold, and yielding to it would drop a lease that helps neither of
+          // us. Per-app stamp overrides make that a live pairing, not a
+          // multi-batch hypothetical.
           if (
             !coordinator ||
             message.accountId !== this.coordinatorAccountId ||
+            message.batchId !== this.coordinatorBatchId ||
             message.fromDeviceId === this.deviceId
           ) {
             return
@@ -1494,7 +1517,7 @@ export class SwarmIdProxy {
           if (requestId === undefined) {
             // A peer on an older bundle: no rank order to join, so answer as
             // we always did rather than leaving it unserved.
-            this.answerLeaseRequest(message.accountId)
+            this.answerLeaseRequest(message.accountId, message.batchId)
             return
           }
           // Idempotent per request: the same message reaches us over every
@@ -1508,7 +1531,11 @@ export class SwarmIdProxy {
           if (!coordinator.canYieldForPeer) return
           const timer = setTimeout(() => {
             this.pendingYields.delete(requestId)
-            this.answerLeaseRequest(message.accountId, requestId)
+            this.answerLeaseRequest(
+              message.accountId,
+              message.batchId,
+              requestId,
+            )
           }, this.yieldRankDelayMs(requestId))
           this.pendingYields.set(requestId, timer)
           return
@@ -1516,7 +1543,8 @@ export class SwarmIdProxy {
         case "lease-claim": {
           if (
             message.fromDeviceId === this.deviceId ||
-            message.accountId !== this.coordinatorAccountId
+            message.accountId !== this.coordinatorAccountId ||
+            message.batchId !== this.coordinatorBatchId
           ) {
             return
           }
@@ -1529,7 +1557,8 @@ export class SwarmIdProxy {
         case "lease-released": {
           if (
             message.fromDeviceId === this.deviceId ||
-            message.accountId !== this.coordinatorAccountId
+            message.accountId !== this.coordinatorAccountId ||
+            message.batchId !== this.coordinatorBatchId
           ) {
             return
           }
@@ -1777,9 +1806,10 @@ export class SwarmIdProxy {
     )
     const tuning = readPartitionTuningOverride()
     // Captured once: the callbacks below outlive this narrowing, and the batch
-    // they name has to be the one the coordinator serves — its lease cache is
-    // keyed on it, and a snapshot filed under a batch we have since moved off
-    // hints at a lane nobody holds.
+    // they name has to be the one the coordinator serves, on both counts: its
+    // lease cache is keyed on it, so a snapshot filed under a batch we have
+    // since moved off hints at a lane nobody holds (#684), and a lease message
+    // naming that batch answers nobody (#589).
     const batchId = this.postageBatchId
     this.coordinator = new BatchWriteCoordinator({
       bee: this.bee,
@@ -1819,6 +1849,7 @@ export class SwarmIdProxy {
         this.bus.publish({
           type: "lease-request",
           accountId: accountInfo.accountId,
+          batchId,
           fromDeviceId: this.requireDeviceId(),
           requestId: newLeaseRequestId(),
         }),
@@ -1837,6 +1868,7 @@ export class SwarmIdProxy {
       },
     })
     this.coordinatorAccountId = accountInfo.accountId
+    this.coordinatorBatchId = batchId
     this.coordinator.startLease()
   }
 
