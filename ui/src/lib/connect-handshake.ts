@@ -15,8 +15,8 @@
  */
 import {
   type ConnectedApp,
-  DEFAULT_SESSION_DURATION,
   type SyncedAccount,
+  appSessionDuration,
   deriveSecret,
   serializeSyncedAccount,
   stampsReachableByApp,
@@ -27,10 +27,6 @@ import { privateKeyFromEntropy } from '$lib/crypto/mnemonic'
 import type { ConnectRequest } from '$lib/stores/connect.svelte'
 import { networkSettingsStore } from '$lib/stores/network-settings.svelte'
 import type { Account } from '$lib/types'
-
-function connectionDuration(account: Account): number {
-  return account.settings?.appSessionDuration ?? DEFAULT_SESSION_DURATION
-}
 
 /**
  * Write the connected-app entry into the account record (this is what fires the
@@ -45,7 +41,7 @@ function saveConnection(account: Account, request: ConnectRequest, appSecret: st
     appDescription: request.appDescription,
     appSecret,
     lastConnectedAt: now,
-    connectedUntil: now + connectionDuration(account),
+    connectedUntil: now + appSessionDuration(account.settings ?? {}),
     updatedAt: now,
   }
   account.connectApp(connection)

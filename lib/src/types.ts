@@ -1744,8 +1744,6 @@ export type IframeToParentMessage = z.infer<typeof IframeToParentMessageSchema>
 
 export const AuthDataSchema = z.object({
   secret: z.string(),
-  postageBatchId: BatchIdSchema.optional(),
-  signerKey: PrivateKeySchema.optional(),
   networkSettings: NetworkSettingsSchemaV1.optional(),
   /**
    * Full synced-account projection (the `serializeSyncedAccount` wire shape:

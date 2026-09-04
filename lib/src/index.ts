@@ -526,7 +526,6 @@ export { SWARM_SECRET_PREFIX, STORAGE_CHALLENGE_KEY } from "./types"
 export { buildAuthUrl, isHttpUrl } from "./utils/url"
 
 // Browser detection utilities
-export { isWebKit } from "./utils/browser"
 
 // Storage-partition probe. The trusted domain's own pages call
 // `markFirstPartyStorage()`; the proxy reads it back to learn which auth
@@ -582,6 +581,7 @@ export {
   HOUR,
   DAY,
   DEFAULT_SESSION_DURATION,
+  appSessionDuration,
 } from "./utils/constants"
 
 // TTL calculation and formatting utilities

@@ -167,7 +167,7 @@ import {
   type SyncedAccount,
   type NetworkSettings,
 } from "./schemas"
-import { DEFAULT_SESSION_DURATION } from "./utils/constants"
+import { DEFAULT_SESSION_DURATION, appSessionDuration } from "./utils/constants"
 import { buildAuthUrl } from "./utils/url"
 import {
   createActForContent,
@@ -874,9 +874,6 @@ export class SwarmIdProxy {
         // The projection carries `BatchId`/`PrivateKey`/`EthAddress`; this is
         // the same serializer the popup used to build it.
         account: serializeSyncedAccount(data.account),
-        // Both are already hex on this schema, unlike the account's fields.
-        postageBatchId: data.postageBatchId,
-        signerKey: data.signerKey,
       },
     }
     try {
@@ -1004,9 +1001,7 @@ export class SwarmIdProxy {
       // while the line above is not: `savePartitionSession` reads it straight
       // back off this connection, and a restore is bounded by the deadline the
       // stored record already carries (`readPartitionSession`).
-      connectedUntil:
-        now +
-        (account.settings?.appSessionDuration ?? DEFAULT_SESSION_DURATION),
+      connectedUntil: now + appSessionDuration(account.settings ?? {}),
     }
     this.partitionAccount = {
       ...account,
