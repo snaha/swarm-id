@@ -457,6 +457,40 @@ describe("SwarmIdProxy partitioned write enablement", () => {
   // derived no bus topic, joined no room, and could never be told it had been
   // revoked. `AuthDataSchema` now requires the projection, so the parse fails
   // and the message is ignored. No session beats a session nothing can reach.
+  // The end has to be stated in the language the merge ranks on (#682 review).
+  // This wrote `lastConnectedAt: 0` — a sentinel nothing read, and under the
+  // membership clock the value that loses every merge, so the next fold handed
+  // the entry its old timestamp back and a dApp-initiated Disconnect never
+  // travelled the way the identity UI's does.
+  it("states a dApp-initiated disconnect on the entry", async () => {
+    seedConnectedAccount()
+    await dispatch(
+      { type: "parentIdentify", requestId: "r1", metadata: { name: "dApp" } },
+      PARENT_ORIGIN,
+      parentWindow,
+    )
+    const before = Date.now()
+
+    await dispatch(
+      { type: "disconnect", requestId: "r2" },
+      PARENT_ORIGIN,
+      parentWindow,
+    )
+
+    const stored = JSON.parse(
+      localStorageFake.getItem(STORAGE_KEY_ACCOUNTS)!,
+    ) as { data: { connectedApps: Record<string, unknown>[] }[] }
+    const app = stored.data[0].connectedApps.find(
+      (entry) => entry.appUrl === PARENT_ORIGIN,
+    )!
+    expect(app.disconnectedAt).toBeGreaterThanOrEqual(before)
+    expect(app.connectedUntil).toBeUndefined()
+    expect(app.appSecret).toBeUndefined()
+    // Not zeroed: the connection did happen, and a merge that ranks on
+    // `max(revokedAt, disconnectedAt, lastConnectedAt)` needs the truth.
+    expect(app.lastConnectedAt).toBeGreaterThan(0)
+  })
+
   it("refuses a handover that carries no account", async () => {
     const challenge = await startPartitionedConnect()
     await sendSetSecret(challenge, {})
@@ -1209,7 +1243,7 @@ describe("SwarmIdProxy partitioned write enablement", () => {
         lastConnectedAt: now - 1000,
         appSecret: undefined,
         connectedUntil: undefined,
-        updatedAt: now,
+        disconnectedAt: now,
         revokedAt: now,
       }
     }
@@ -1224,7 +1258,6 @@ describe("SwarmIdProxy partitioned write enablement", () => {
         lastConnectedAt: at - 1000,
         appSecret: undefined,
         connectedUntil: undefined,
-        updatedAt: at,
         disconnectedAt: at,
       }
     }
@@ -1431,8 +1464,8 @@ describe("SwarmIdProxy partitioned write enablement", () => {
                 appUrl: PARENT_ORIGIN,
                 appName: "dApp",
                 lastConnectedAt: Date.now(),
-                updatedAt: Date.now() + 1,
                 postageStampBatchID: new BatchId(OTHER_BATCH_ID_HEX),
+                postageStampBatchIDAt: Date.now() + 1,
               },
             ],
             postageStamps: [
@@ -1596,7 +1629,6 @@ describe("SwarmIdProxy partitioned write enablement", () => {
                 appUrl: PARENT_ORIGIN,
                 appName: "dApp",
                 lastConnectedAt: Date.now(),
-                updatedAt: Date.now(),
               },
             ],
           }),
@@ -1668,7 +1700,6 @@ describe("SwarmIdProxy partitioned write enablement", () => {
                 appUrl: PARENT_ORIGIN,
                 appName: "dApp",
                 lastConnectedAt: Date.now(),
-                updatedAt: Date.now(),
                 appSecret: "99".repeat(32),
                 connectedUntil: Date.now() + 60_000,
               },

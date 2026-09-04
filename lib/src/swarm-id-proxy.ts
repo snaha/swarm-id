@@ -3054,7 +3054,14 @@ export class SwarmIdProxy {
     localStorage.removeItem(stamperKey)
 
     // Invalidate matching connected-app entries in the nested account documents
-    // so reconnect doesn't happen on refresh (lastConnectedAt=0, no session).
+    // so a refresh does not reconnect: `connectedUntil: undefined` is what
+    // `isConnectionValid` gates on, and `disconnectedAt` is how the end travels
+    // — the marker membership merges on (#681). This used to write
+    // `lastConnectedAt: 0` instead, a sentinel nothing ever read and a claim
+    // ("never connected") that was not true; under the membership clock a zero
+    // is simply the value that loses every merge, so the entry's old timestamp
+    // came back on the next fold and a dApp-initiated Disconnect never reached
+    // a peer the way the identity UI's does.
     try {
       const manager = createAccountsStorageManager()
       const accounts = manager.load()
@@ -3064,7 +3071,12 @@ export class SwarmIdProxy {
         const connectedApps = account.connectedApps.map((app) => {
           if (app.appUrl === this.parentOrigin) {
             changed = true
-            return { ...app, lastConnectedAt: 0, connectedUntil: undefined }
+            return {
+              ...app,
+              connectedUntil: undefined,
+              appSecret: undefined,
+              disconnectedAt: Date.now(),
+            }
           }
           return app
         })

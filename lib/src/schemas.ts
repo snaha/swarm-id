@@ -151,9 +151,12 @@ export const ConnectedAppSchemaV1 = z.object({
   // Optional per-app postage-batch override. Absent → the account default
   // (`account.defaultPostageStampBatchID`) pays for this app's uploads.
   postageStampBatchID: StoredBatchId.optional(),
-  // Last-writer-wins clock for cross-device merge (set on any change). Absent
-  // on pre-existing records → merge falls back to `lastConnectedAt`.
-  updatedAt: z.number().optional(),
+  // The pointer above rides its own last-writer-wins clock, because it is the
+  // one edit to an entry that says nothing about whether the app is still
+  // connected. Ranking the whole entry on a clock this bumped let a drive
+  // picked on a stale copy outrank a revoke made elsewhere and take the
+  // tombstone with it (#681). Membership merges on the markers below instead.
+  postageStampBatchIDAt: z.number().optional(),
   // Tombstone marker. A revoked app is kept in the snapshot (so the removal
   // propagates to other devices) but hidden from the UI and invalid for auth.
   revokedAt: z.number().optional(),

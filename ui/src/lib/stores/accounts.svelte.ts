@@ -378,8 +378,10 @@ export class Account {
 
   /**
    * Point an app at a specific drive — or back at the account default with
-   * `undefined`. `updatedAt` carries the choice through the cross-device
-   * merge. No-op when the app has no entry (nothing to point).
+   * `undefined`. The choice carries through the cross-device merge on its OWN
+   * clock: it says nothing about whether the app is still connected, and a
+   * clock that ranked the whole entry let this edit outrank a revoke made on
+   * another device (#681). No-op when the app has no entry (nothing to point).
    */
   setAppStamp(appUrl: string, batchID: BatchId | undefined) {
     if (!this.connectedApps.some((app) => app.appUrl === appUrl)) {
@@ -387,7 +389,9 @@ export class Account {
     }
     const now = Date.now()
     this.connectedApps = this.connectedApps.map((app) =>
-      app.appUrl === appUrl ? { ...app, postageStampBatchID: batchID, updatedAt: now } : app,
+      app.appUrl === appUrl
+        ? { ...app, postageStampBatchID: batchID, postageStampBatchIDAt: now }
+        : app,
     )
     this.lastModified = now
     this.#commit()
@@ -592,7 +596,6 @@ function revoked(app: ConnectedApp, tombstone: boolean): ConnectedApp {
     // not read as "never used").
     appSecret: undefined,
     connectedUntil: undefined,
-    updatedAt: now,
     // Cleared session fields do not survive the trip to another context — the
     // account bus strips exactly those two — so the END has to be stated on the
     // entry itself, or a partitioned session puts its own secret back after the

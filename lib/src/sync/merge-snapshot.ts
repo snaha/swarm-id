@@ -108,17 +108,45 @@ export function mergeConnectedApps(
   remote: ConnectedApp[],
 ): ConnectedApp[] {
   const keyOf = (a: ConnectedApp) => a.appUrl
-  // Last-writer-wins per app so updates AND removals propagate: a revoke is a
-  // tombstone (`revokedAt`) carrying a fresh `updatedAt`, so it supersedes an
-  // older active copy. `updatedAt` falls back to `lastConnectedAt` for records
-  // written before the field existed. Distinct apps still both survive (union).
-  const recency = (a: ConnectedApp) => a.updatedAt ?? a.lastConnectedAt ?? 0
+  // Last-writer-wins per app on TWO clocks, the way devices and stamps merge:
+  //
+  // - Membership (the whole entry) merges on the fields that STATE membership,
+  //   `max(revokedAt, disconnectedAt, lastConnectedAt)`. A removal beats an
+  //   older connect, and a genuine reconnect — `connectApp` clears both markers
+  //   and sets a fresh `lastConnectedAt` — beats an older removal. One clock
+  //   bumped by every write ranked the entry instead, so a drive picked on a
+  //   stale copy outranked a revoke and restored the credential it had cleared
+  //   (#681).
+  // - The stamp pointer overlays on its own `postageStampBatchIDAt`. It moves
+  //   no membership field, so without a clock of its own it ties with every
+  //   stale copy of the entry and loses — the same correction #663 made for a
+  //   device's name.
+  //
+  // Distinct apps still both survive (union).
+  const recency = (a: ConnectedApp) =>
+    Math.max(a.revokedAt ?? 0, a.disconnectedAt ?? 0, a.lastConnectedAt ?? 0)
+  const stampRecency = (a: ConnectedApp) => a.postageStampBatchIDAt ?? 0
   const merged = new Map<string, ConnectedApp>()
   // Process remote first, then local, so a tie favours local (most recent
   // observation here); a strictly-newer entry on either side wins.
   for (const a of [...remote, ...local]) {
     const existing = merged.get(keyOf(a))
-    if (!existing || recency(a) >= recency(existing)) merged.set(keyOf(a), a)
+    if (!existing) {
+      merged.set(keyOf(a), a)
+      continue
+    }
+    const winner = recency(a) >= recency(existing) ? a : existing
+    const loser = winner === a ? existing : a
+    merged.set(
+      keyOf(a),
+      stampRecency(loser) > stampRecency(winner)
+        ? {
+            ...winner,
+            postageStampBatchID: loser.postageStampBatchID,
+            postageStampBatchIDAt: loser.postageStampBatchIDAt,
+          }
+        : winner,
+    )
   }
   return Array.from(merged.values())
 }

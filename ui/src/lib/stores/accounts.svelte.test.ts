@@ -309,12 +309,15 @@ describe('Account.setAppStamp', () => {
     )
   }
 
-  it('points the app at a drive and stamps updatedAt', () => {
+  // On its own clock, not the entry's: the choice says nothing about whether
+  // the app is still connected, and ranking the entry by it discarded a revoke
+  // made on another device (#681).
+  it('points the app at a drive and stamps the pointer clock', () => {
     const account = accountWithApp()
     account.setAppStamp(APP_URL, new BatchId(BATCH_HEX))
     const app = account.connectedApps[0]
     expect(app.postageStampBatchID?.toHex()).toBe(BATCH_HEX)
-    expect(app.updatedAt).toEqual(expect.any(Number))
+    expect(app.postageStampBatchIDAt).toEqual(expect.any(Number))
   })
 
   it('clears the pointer back to the account default', () => {
