@@ -70,13 +70,25 @@ vi.mock("./storage/utilization-store", () => ({
   }),
 }))
 // The signaling transport opens a real WebSocket; the tests only assert that
-// the proxy attaches one (and with which topic).
+// the proxy attaches one (and with which topic). The two handler lists let a
+// test drive the room — an attributed delivery, and a departure — without one.
+const signalingRoom = vi.hoisted(() => ({
+  deliver: [] as ((raw: unknown, from?: string) => void)[],
+  peerLeft: [] as ((peerId: string) => void)[],
+}))
 vi.mock("./bus/signaling-transport", () => ({
   SignalingTransport: vi.fn(function (options: unknown) {
     return {
       options,
       publish: vi.fn(),
-      subscribe: vi.fn(() => () => {}),
+      subscribe: vi.fn((handler: (raw: unknown, from?: string) => void) => {
+        signalingRoom.deliver.push(handler)
+        return () => {}
+      }),
+      onPeerLeft: vi.fn((handler: (peerId: string) => void) => {
+        signalingRoom.peerLeft.push(handler)
+        return () => {}
+      }),
       close: vi.fn(),
     }
   }),
@@ -2635,6 +2647,36 @@ describe("SwarmIdProxy partitioned write enablement", () => {
         vi.restoreAllMocks()
         busChannel.close()
       }
+    })
+
+    // Ageing is the backstop, not the mechanism: a closed tab would otherwise
+    // stay a rival for PRESENCE_MAX_AGE_MS, costing every acquire in that
+    // window an absent intent read. The room says who left — the signaling
+    // server sends `peer-left` on socket close, and its reaper sends it for a
+    // crash too — which is the only departure signal a dying page can produce,
+    // since a leave published on unload never finishes encrypting (#572).
+    it("drops a peer from the rival set when the room says it left", async () => {
+      proxy.destroy()
+      signalingRoom.deliver.length = 0
+      signalingRoom.peerLeft.length = 0
+      mountProxy({ signalingUrl: "ws://signaling.test" })
+      await connect()
+
+      await vi.waitFor(() => expect(signalingRoom.deliver).not.toHaveLength(0))
+      for (const deliver of signalingRoom.deliver) {
+        deliver(
+          {
+            type: "presence",
+            accountId: ACCOUNT_ID,
+            fromDeviceId: "peer-live",
+          },
+          "socket-1",
+        )
+      }
+      expect(knownDeviceIds()).toContain("peer-live")
+
+      for (const left of signalingRoom.peerLeft) left("socket-1")
+      expect(knownDeviceIds()).not.toContain("peer-live")
     })
 
     // A rival set is per account, so a switch must FORGET the old room's live

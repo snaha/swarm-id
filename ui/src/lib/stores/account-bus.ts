@@ -51,6 +51,8 @@ let presenceTimer: ReturnType<typeof setInterval> | undefined
 /** Detaches the delta consumer; the bus outlives no join, but a stale handler
  *  folding another account's room would. */
 let unsubscribe: (() => void) | undefined
+/** Detaches the departure handler; same reason as the one above. */
+let unsubscribePeerLeft: (() => void) | undefined
 /** The account this tab is committed to, set the moment `join()` is called
  *  rather than when the transport comes up: a publish landing during the
  *  derivation belongs to this account and must be held, not dropped. */
@@ -72,6 +74,8 @@ function closeBus(): void {
   presence.clear()
   unsubscribe?.()
   unsubscribe = undefined
+  unsubscribePeerLeft?.()
+  unsubscribePeerLeft = undefined
   bus?.close()
   bus = undefined
   joinedKey = undefined
@@ -105,11 +109,12 @@ async function attach(account: SyncedAccount, forGeneration: number): Promise<vo
   // crosses a device boundary. `applyAccountDelta` commits with `skipSync`, so
   // this never publishes back.
   const deviceId = getOrCreateDeviceId()
-  unsubscribe = bus.subscribe((message) => {
+  unsubscribePeerLeft = bus.onPeerLeft((peerId) => presence.forgetPeer(peerId))
+  unsubscribe = bus.subscribe((message, from) => {
     if (message.type === 'presence') {
       // Our own id is this device's unpartitioned proxy, not a peer.
       if (message.accountId !== joinedAccountId || message.fromDeviceId === deviceId) return
-      presence.observe(message.fromDeviceId, Date.now())
+      presence.observe(message.fromDeviceId, Date.now(), from)
       return
     }
     if (message.type !== 'account-delta') return
