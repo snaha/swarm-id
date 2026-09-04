@@ -38,8 +38,8 @@
     type PaymentQuote,
     type PaymentRail,
     displayAmount,
-    switchWalletChain,
   } from '$lib/payment/payment-rail'
+  import { createWalletChainRecord } from '$lib/payment/wallet-chain-record'
 
   /**
    * The payment screens: choose a method, then — for the built-in engine —
@@ -310,16 +310,20 @@
       provider = wallet.provider as unknown as EthereumProvider
       walletAddress = address
       // A wallet that has just arrived has been put on nothing.
-      switchedChainId = undefined
+      walletChain.forget()
 
       // Adding a network is what makes the wallet show a balance for it at all,
       // so it is offered here rather than at Pay. A refusal is not fatal — they
       // may mean to pay from somewhere else, and `pay()` asks again for
       // whichever chain they land on.
       screen = 'switching'
-      await attempt.guard(followChain())
+      await attempt.guard(ensureWalletChain().catch(() => undefined))
 
       screen = 'configure'
+      // After the guard, like everything else here: a connect cancelled at the
+      // network prompt reads nothing. Through the wallet's own RPC, since the
+      // switch has just run.
+      void readBalances()
       void refreshQuote()
     } catch (caught) {
       if (!attempt.current) {
@@ -347,8 +351,9 @@
 
   /**
    * Read what the wallet holds of every token on the selected chain, one slot
-   * per token, fire-and-forget from `refreshQuote` and the wallet's own
-   * chain-change events.
+   * per token. Fire-and-forget from the events that move what it holds: the
+   * switch (at connect, and on a chain change), a new account, the wallet's
+   * own chain change, and a failed attempt that may still have spent.
    *
    * Through the wallet's RPC when the wallet is on that chain — the figures
    * MetaMask itself would show — and through the chain's own endpoint
@@ -409,36 +414,24 @@
   }
 
   /**
-   * The chain the wallet has been put on and — where that chain carries a
-   * genesis hash — proven to be on. Undefined when it is not settled.
-   *
-   * `switchWalletChain` costs a genesis read on the Gnosis chain, which is the
-   * selection this dialog opens on whenever the direct rail resolves. Connect,
-   * chain selection and Pay would otherwise each buy one in turn, back to back
-   * on the same provider with nothing between them that can change the answer.
-   *
-   * This is not the guarantee, and is not load-bearing: the direct rail reads
-   * genesis again before it signs anything (`executeDirectPayment`), and must,
-   * because nothing here can promise the wallet has not moved since. Cleared by
-   * the two things that move it — the wallet arriving, and the wallet saying it
-   * changed chain — so a stale record costs a skipped prompt, never a payment
-   * signed on the wrong network.
+   * Where the wallet was last put, so connect and Pay do not each buy the same
+   * genesis read. Not proof, and never what decides a payment — the rail that
+   * signs proves the chain itself (`wallet-chain-record.ts`). Forgotten when a
+   * new wallet arrives and when the wallet says it changed chain.
    */
-  let switchedChainId: number | undefined
+  const walletChain = createWalletChainRecord()
 
   /**
-   * Put the wallet on the selected chain unless it is already known to be
+   * Put the wallet on the selected chain unless it is recorded as already
    * there. Rejects the way `switchWalletChain` does: a refusal is the caller's
    * to interpret.
    */
   async function ensureWalletChain() {
     const walletProvider = provider
-    const target = Number(chainId)
-    if (!walletProvider || switchedChainId === target) {
+    if (!walletProvider) {
       return
     }
-    await switchWalletChain(walletProvider, target, rail.chains)
-    switchedChainId = target
+    await walletChain.ensure(walletProvider, Number(chainId), rail.chains)
   }
 
   /**
@@ -451,6 +444,10 @@
    * after the wallet has moved, so it reads through the wallet's own RPC rather
    * than the chain's endpoint. A second read from `refreshQuote` would race it
    * for the same figures with no rule about which won.
+   *
+   * Outside any attempt guard, deliberately: it runs beside the re-price the
+   * picker fires with it, which owns the attempt, and a figure landing after a
+   * cancel goes into its own keyed slot of a dialog that is already gone.
    */
   async function followChain() {
     if (!provider) {
@@ -482,10 +479,11 @@
       void refreshQuote()
     }
     const onChain = () => {
-      // The wallet moved itself, or moved because we asked and the event
-      // arrived after the record was written. Either way what it is on is no
-      // longer settled, and the next switch pays for the proof again.
-      switchedChainId = undefined
+      // Where the wallet is, is no longer known: the next switch pays for the
+      // proof again. For the switch we asked for this lands while it is still
+      // pending, and the record written once it resolves stands
+      // (`createWalletChainRecord`).
+      walletChain.forget()
       void readBalances()
     }
     on.call(walletProvider, 'accountsChanged', onAccounts)

@@ -19,6 +19,7 @@ import { withIdleTimeout, withTimeout } from '@snaha/swarm-id'
 import { createWalletClient, custom } from 'viem'
 import { arbitrum, base, gnosis, mainnet, optimism, polygon } from 'viem/chains'
 
+import { isGnosisMainnetGenesis } from '$lib/payment/chain'
 import {
   type EthereumProvider,
   type ExecutePaymentOptions,
@@ -30,6 +31,7 @@ import {
   WALLET_CHAINS,
   displayAmount,
   displayUsd,
+  walletGenesisHash,
 } from '$lib/payment/payment-rail'
 
 const GNOSIS_CHAIN_ID = 100
@@ -235,8 +237,37 @@ function stepStatus(stepId: string | undefined, progressState: string | undefine
   return wordingFor(stepId) ?? DELIVERY_STATUS
 }
 
+/**
+ * Before signing on Gnosis: the wallet must be on the REAL one. Relay serves
+ * no other network by that id, and a local chain wearing it on purpose is told
+ * apart by nothing but its genesis block — viem's wallet client asserts the
+ * chain id, and 100 == 100 is exactly the comparison that cannot tell the two
+ * apart. The direct rail makes the same check on its own path
+ * (`executeDirectPayment`); this rail's other sources have no lookalike.
+ *
+ * Here rather than left to the dialog's switch, which probes genesis too: that
+ * switch is skipped when the wallet is recorded as already there, and a record
+ * is not proof (`wallet-chain-record.ts`). The rail that signs is what proves.
+ *
+ * A wallet that will not say is let through, as `walletChainRefusal` lets one
+ * through on mainnet: what silence risks is a deposit on a chain Relay never
+ * watches, and no real money moves on one.
+ */
+async function assertWalletOnGnosis(provider: EthereumProvider): Promise<void> {
+  const reported = await walletGenesisHash(provider)
+  if (reported === undefined || isGnosisMainnetGenesis(reported)) {
+    return
+  }
+  throw new Error(
+    'Your wallet is on a network that answers as Gnosis but is not the real Gnosis Chain, which is the only one Relay serves. Nothing was sent — switch your wallet to Gnosis Chain and try again.',
+  )
+}
+
 /** Execute a quoted payment, reporting what it is doing in our own words. */
 async function executePayment(options: ExecutePaymentOptions): Promise<void> {
+  if (options.chainId === GNOSIS_CHAIN_ID) {
+    await assertWalletOnGnosis(options.provider)
+  }
   await withIdleTimeout(
     (keepAlive) =>
       relayClient().actions.execute({
