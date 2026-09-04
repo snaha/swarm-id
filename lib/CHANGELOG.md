@@ -1,5 +1,61 @@
 # Changelog
 
+## [0.4.0](https://github.com/snaha/swarm-id/compare/v0.3.0...v0.4.0) (2026-09-04)
+
+
+### ⚠ BREAKING CHANGES
+
+* **lib:** a partition lane belongs to one batch, not to the account ([#683](https://github.com/snaha/swarm-id/issues/683))
+* **lib:** the lease cache is keyed per batch, like the lease it caches ([#685](https://github.com/snaha/swarm-id/issues/685))
+* **lib:** a connected app's membership merges on the markers that state it ([#682](https://github.com/snaha/swarm-id/issues/682))
+* **lib:** `UploadUnavailableReason` no longer includes `"download-only"`, and `AuthData.account` is required. An already-persisted partition session carrying no `account` fails `PartitionSessionSchemaV1` on restore and is cleared, forcing a fresh re-auth on next load — those are exactly the revoke-deaf sessions this removes.
+* **lib:** the chain reads in `@snaha/swarm-id` now carry a 10 second deadline (`CHAIN_READ_TIMEOUT_MS`) where they previously waited as long as the endpoint held the socket. This affects `getBlockTimestamp` and the PostageStamp contract reads built on the `eth_call` batch — `fetchOnChainBatchState`, `fetchOnChainBatchStateResult`, `fetchBatchTTLFromContract`, `fetchAuthoritativeBatchTTL` and `resolveBatchStatus` — which now reject (or settle to their `undefined` / `status: 'error'` result) once it passes, rather than hanging. The messages they throw changed with it, so anything matching on message text rather than catching needs updating. No export was removed: `postJsonRpc` and the `chunking-encrypted` merkle builder were never in the published surface.
+* **lib:** `rejectAfter` is no longer exported from @snaha/swarm-id. Use `withTimeout(work, ms, message)` instead.
+
+### Features
+
+* account bus — live state propagation across tabs, partitions, and devices ([#547](https://github.com/snaha/swarm-id/issues/547)) ([5a3cfbd](https://github.com/snaha/swarm-id/commit/5a3cfbdbc9f9a4ffbee5d1245615fc0e8d0144a6))
+* consume account-delta so a revoke reaches a partitioned iframe ([#598](https://github.com/snaha/swarm-id/issues/598)) ([bd47f98](https://github.com/snaha/swarm-id/commit/bd47f9875d75b07cae22e01fba808e671b67881f))
+* **demo:** a self-reporting Safari check for the partitioned upload path ([#606](https://github.com/snaha/swarm-id/issues/606)) ([8b36aec](https://github.com/snaha/swarm-id/commit/8b36aecd3c7c7ec8d1f2ac489f0fc8677bbd9956))
+* hand a partitioned session only the stamps its app can spend ([#601](https://github.com/snaha/swarm-id/issues/601)) ([0f6636c](https://github.com/snaha/swarm-id/commit/0f6636c8c3c5fdea9e5f7d627601779d1989a179))
+* harden the account-bus signaling service ([#592](https://github.com/snaha/swarm-id/issues/592)) ([c00ba6e](https://github.com/snaha/swarm-id/commit/c00ba6e4764a4cbf14a1b47603a9c820e1b76af2))
+* **lib:** a departing peer leaves the live set at once ([#669](https://github.com/snaha/swarm-id/issues/669)) ([b565e65](https://github.com/snaha/swarm-id/commit/b565e651f92525b4b01d14942ef2e9a3f5b501b7))
+* **lib:** add deriveAppSecret(label) to the client API ([#530](https://github.com/snaha/swarm-id/issues/530)) ([09a1cc5](https://github.com/snaha/swarm-id/commit/09a1cc506d60d999587ddc6ec698be39b3b9b53d)), closes [#520](https://github.com/snaha/swarm-id/issues/520)
+* **lib:** export withTimeout/TimeoutError and drop rejectAfter ([#553](https://github.com/snaha/swarm-id/issues/553)) ([ee18527](https://github.com/snaha/swarm-id/commit/ee18527a9865ebb954e8949b0f824f91a18e6c52))
+* **lib:** keep a partitioned session across a reload ([#636](https://github.com/snaha/swarm-id/issues/636)) ([af35287](https://github.com/snaha/swarm-id/commit/af35287f8b385d773a6386715b14fd8b0b1add74))
+* **lib:** name a partition device after the dApp it belongs to ([#643](https://github.com/snaha/swarm-id/issues/643)) ([4bdc2d0](https://github.com/snaha/swarm-id/commit/4bdc2d01ba7577348f71929dbcd89b4f73f2b0ff)), closes [#570](https://github.com/snaha/swarm-id/issues/570)
+* **lib:** one JSON-RPC contract and one deadline, across every transport ([#554](https://github.com/snaha/swarm-id/issues/554)) ([4c4ab6a](https://github.com/snaha/swarm-id/commit/4c4ab6afc42478e906fd2ed7976584f5adbbaf20))
+* **lib:** presence heartbeat on the account bus ([#655](https://github.com/snaha/swarm-id/issues/655)) ([b20c379](https://github.com/snaha/swarm-id/commit/b20c37989a71fc9065d0679672c09c4e49936b6a))
+* **lib:** remove the download-only session ([#642](https://github.com/snaha/swarm-id/issues/642)) ([304004a](https://github.com/snaha/swarm-id/commit/304004a27f35613111d8196316831169906151dc)), closes [#599](https://github.com/snaha/swarm-id/issues/599)
+* **payment:** pay from any chain over Relay, and rehearse it locally ([#534](https://github.com/snaha/swarm-id/issues/534)) ([d146cc2](https://github.com/snaha/swarm-id/commit/d146cc242dfe1928bc671cff6f328bec927415e0))
+* **ui:** fold a peer's account-delta into shared storage ([#631](https://github.com/snaha/swarm-id/issues/631)) ([f431d3f](https://github.com/snaha/swarm-id/commit/f431d3f129a8e7bd26663f7d940eab14f5489de9))
+* **ui:** publish account-delta from the SwarmID tab ([#600](https://github.com/snaha/swarm-id/issues/600)) ([372b5bf](https://github.com/snaha/swarm-id/commit/372b5bfb0bf5b0e191f3dceb8364a0aa39bff555))
+
+
+### Bug Fixes
+
+* elect one holder per lease-request, and stop losing the wake ([#593](https://github.com/snaha/swarm-id/issues/593)) ([430ff5b](https://github.com/snaha/swarm-id/commit/430ff5bbdf97926d8136205a4c5ac397139d323b))
+* harden account-delta propagation and folding ([#610](https://github.com/snaha/swarm-id/issues/610)) ([5659fe9](https://github.com/snaha/swarm-id/commit/5659fe9652cdd4172ceb6ef9943d511c8b59c975))
+* **lib:** a connected app's membership merges on the markers that state it ([#682](https://github.com/snaha/swarm-id/issues/682)) ([e0b6d82](https://github.com/snaha/swarm-id/commit/e0b6d82074982b3cf5e8c9315b86c957c43a3ac1)), closes [#681](https://github.com/snaha/swarm-id/issues/681)
+* **lib:** a device rename carries its own clock ([#665](https://github.com/snaha/swarm-id/issues/665)) ([ac9d507](https://github.com/snaha/swarm-id/commit/ac9d50700d6b4142dbfbe1761cc817a373c0d000)), closes [#663](https://github.com/snaha/swarm-id/issues/663)
+* **lib:** a device tombstone survives the poll that used to undo it ([#644](https://github.com/snaha/swarm-id/issues/644)) ([e0a1646](https://github.com/snaha/swarm-id/commit/e0a1646ff6cf486a62b3132f2a63034cf5471e49))
+* **lib:** a Disconnect ends a restored session, not just a Remove ([#668](https://github.com/snaha/swarm-id/issues/668)) ([56bc430](https://github.com/snaha/swarm-id/commit/56bc430cd818fb0322ca115dd6a9adc24da0b51e)), closes [#667](https://github.com/snaha/swarm-id/issues/667)
+* **lib:** a partition lane belongs to one batch, not to the account ([#683](https://github.com/snaha/swarm-id/issues/683)) ([2e8962f](https://github.com/snaha/swarm-id/commit/2e8962fe8ae053313094fb452f398c804196a979)), closes [#589](https://github.com/snaha/swarm-id/issues/589)
+* **lib:** a partitioned session is stored per dApp origin ([#672](https://github.com/snaha/swarm-id/issues/672)) ([d9c99a7](https://github.com/snaha/swarm-id/commit/d9c99a707599f7007998583c653a615f894672e5)), closes [#671](https://github.com/snaha/swarm-id/issues/671)
+* **lib:** a poll no longer stamps lastSignedInAt ([#654](https://github.com/snaha/swarm-id/issues/654)) ([f1cfbdf](https://github.com/snaha/swarm-id/commit/f1cfbdff7949ebd027e6d1c7f52034d84c79c8ef)), closes [#652](https://github.com/snaha/swarm-id/issues/652)
+* **lib:** a refused handover ends the attempt it belonged to ([#678](https://github.com/snaha/swarm-id/issues/678)) ([d11a0f9](https://github.com/snaha/swarm-id/commit/d11a0f98785ce6aeb532ee426b8e4053ae4d548b)), closes [#587](https://github.com/snaha/swarm-id/issues/587)
+* **lib:** a restore keeps the connect instant it was handed ([#675](https://github.com/snaha/swarm-id/issues/675)) ([dba3131](https://github.com/snaha/swarm-id/commit/dba313196d739e0938d3655ebbd3d8dcd25280ce)), closes [#670](https://github.com/snaha/swarm-id/issues/670)
+* **lib:** a storage event cannot reset a partitioned session to defaults ([#677](https://github.com/snaha/swarm-id/issues/677)) ([628dd6f](https://github.com/snaha/swarm-id/commit/628dd6f382cc3c1d34aa848dbf659e8b0b8fdc94)), closes [#580](https://github.com/snaha/swarm-id/issues/580)
+* **lib:** flush ICE candidates for the connection that was described ([#603](https://github.com/snaha/swarm-id/issues/603)) ([0f89a65](https://github.com/snaha/swarm-id/commit/0f89a65464672dabf4cb7f0467c4e1be9eb7f3e4))
+* **lib:** persist a device-registry merge on content, not on length ([#602](https://github.com/snaha/swarm-id/issues/602)) ([a686217](https://github.com/snaha/swarm-id/commit/a68621731383a911e2fc95b32d65161386f0ecd4))
+* **lib:** repoint proxy Bee client when the node URL changes ([#529](https://github.com/snaha/swarm-id/issues/529)) ([3837233](https://github.com/snaha/swarm-id/commit/3837233599483812a827e57858cc5bbbf38b68d2)), closes [#515](https://github.com/snaha/swarm-id/issues/515)
+* **lib:** route the auth popup by storage mode, not by user agent ([#630](https://github.com/snaha/swarm-id/issues/630)) ([46a60e5](https://github.com/snaha/swarm-id/commit/46a60e56e86b2369cd1cd4a12008d6e475d073f8))
+* **lib:** the lease cache is keyed per batch, like the lease it caches ([#685](https://github.com/snaha/swarm-id/issues/685)) ([2a264ef](https://github.com/snaha/swarm-id/commit/2a264efe7b6adc2874d6c9e438bd834de37ccb94)), closes [#684](https://github.com/snaha/swarm-id/issues/684)
+* name the bus room in the first frame, not the query string ([#605](https://github.com/snaha/swarm-id/issues/605)) ([5f639b7](https://github.com/snaha/swarm-id/commit/5f639b7f4e085298a954ef4f791215afc7cdbc58))
+* scope the local bus channel to the account ([#594](https://github.com/snaha/swarm-id/issues/594)) ([56caaef](https://github.com/snaha/swarm-id/commit/56caaef72689e5eeaf28aa06e78a5a68dda5c19a))
+* split the Safari check's handover verdict from its writer verdict ([#616](https://github.com/snaha/swarm-id/issues/616)) ([fce6721](https://github.com/snaha/swarm-id/commit/fce672146b4b79e0ee216cffb86137fac635545c))
+* **ui:** stop offering drive sizes with no usable capacity ([#565](https://github.com/snaha/swarm-id/issues/565)) ([d817e74](https://github.com/snaha/swarm-id/commit/d817e74a021b67ceddd205c6dbae0289e269f38a)), closes [#538](https://github.com/snaha/swarm-id/issues/538)
+
 ## [0.3.0](https://github.com/snaha/swarm-id/compare/v0.2.0...v0.3.0) (2026-08-10)
 
 
