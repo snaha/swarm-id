@@ -26,6 +26,9 @@ export default defineConfig((env) => ({
     testTimeout: 60_000,
     // The Relay suite quotes every picker pair sequentially in `beforeAll`,
     // which is a dozen round-trips to a hosted API before the first assertion.
+    // That sweep bounds itself — first pass plus retries — well inside this, so
+    // a Relay short on inventory reports the routes it refused by name instead
+    // of timing this out with nothing named. See `SWEEP_BUDGET_MS` there.
     hookTimeout: 300_000,
   },
 }))

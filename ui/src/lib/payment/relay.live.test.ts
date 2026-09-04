@@ -53,6 +53,28 @@ const REQUEST_TIMEOUT_MS = 25_000
  */
 const REFUSED_RETRIES = 2
 const REFUSED_RETRY_DELAY_MS = 15_000
+/**
+ * What the retry pass may spend in total — every refused pair together, not one
+ * budget each.
+ *
+ * Per pair it did not fit. Worst case one was `25s + 2 x (15s + 25s) = 105s`,
+ * walked sequentially, so three refused pairs already outran the 300 s
+ * `hookTimeout` in `vitest.live.config.ts` and six outran the job's own
+ * ten-minute cap. That is the wrong way round: several pairs refusing AT ONCE
+ * is a Relay short on inventory, which is precisely the state the retries were
+ * added for, and the report it produced there was an unnamed hook timeout
+ * rather than "this route is gone, and here it is".
+ *
+ * The two failure modes stay asymmetric on purpose — `unreachable`
+ * short-circuits without retrying, so an outage is still fast.
+ */
+const REFUSED_RETRY_BUDGET_MS = 120_000
+/**
+ * The sweep as a whole, first pass and retries together, against the 300 s
+ * `hookTimeout` that contains it. Retries only get what the first pass left, so
+ * a slow first pass costs coverage of the second rather than the whole hook.
+ */
+const SWEEP_BUDGET_MS = 240_000
 
 interface RelayQuote {
   steps?: { id?: string }[]
@@ -140,16 +162,56 @@ describe('Relay quote contract', () => {
   const outcomes = new Map<string, QuoteOutcome>()
   let quoted: RelayQuote | undefined
 
+  /**
+   * Quote the refused pairs again, up to `REFUSED_RETRIES` rounds, until the
+   * shared budget runs out. A round retries every pair still refused and pays
+   * ONE delay for all of them: the spacing is what gives a solver time to
+   * restock, and that wait is the same whether one pair is retried or twelve.
+   *
+   * @returns the pairs the budget ran out on — still refused, and given fewer
+   *   attempts than the rest, which is not the same verdict and is worth saying.
+   */
+  async function retryRefused(deadline: number): Promise<Pair[]> {
+    for (let round = 0; round < REFUSED_RETRIES; round += 1) {
+      const pending = PAIRS.filter((pair) => outcomes.get(pair.key)?.status === 'refused')
+      if (pending.length === 0) {
+        return []
+      }
+      if (Date.now() + REFUSED_RETRY_DELAY_MS >= deadline) {
+        return pending
+      }
+      await new Promise((resolve) => setTimeout(resolve, REFUSED_RETRY_DELAY_MS))
+      for (const [index, pair] of pending.entries()) {
+        if (Date.now() >= deadline) {
+          return pending.slice(index)
+        }
+        outcomes.set(pair.key, await quote(pair.chainId, pair.currency))
+      }
+    }
+    return []
+  }
+
   beforeAll(async () => {
+    const sweepDeadline = Date.now() + SWEEP_BUDGET_MS
+    // ONE attempt per pair first, retrying nothing. The first pass therefore
+    // always completes, so every refused route is named even when the budget
+    // below never reaches it — which is the whole report this suite exists to
+    // produce, and what a per-pair retry budget could swallow.
+    //
     // Sequential on purpose: a dozen simultaneous POSTs to a public API with no
     // key is how a contract test turns into a rate-limited one.
     for (const pair of PAIRS) {
-      let outcome = await quote(pair.chainId, pair.currency)
-      for (let retry = 0; retry < REFUSED_RETRIES && outcome.status === 'refused'; retry += 1) {
-        await new Promise((resolve) => setTimeout(resolve, REFUSED_RETRY_DELAY_MS))
-        outcome = await quote(pair.chainId, pair.currency)
-      }
-      outcomes.set(pair.key, outcome)
+      outcomes.set(pair.key, await quote(pair.chainId, pair.currency))
+    }
+    const unretried = await retryRefused(
+      Math.min(sweepDeadline, Date.now() + REFUSED_RETRY_BUDGET_MS),
+    )
+    if (unretried.length > 0) {
+      // Not a silent cap: a pair that got one attempt and a pair that got all
+      // of them fail below in the same words, and only this says which.
+      console.warn(
+        `Relay retry budget spent — ${unretried.length} refused pair(s) got fewer than ${REFUSED_RETRIES} retries: ${unretried.map((pair) => pair.label).join(', ')}`,
+      )
     }
     const canonical = outcomes.get(`${BASE_CHAIN_ID}:${NATIVE}`)
     quoted = canonical?.status === 'quoted' ? canonical.quote : undefined
