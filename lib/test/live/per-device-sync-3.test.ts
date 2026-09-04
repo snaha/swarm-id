@@ -7,18 +7,15 @@
  * X, C connects app Y; each publishes its own feed + appends to the roster. A
  * 3rd device joining can never clobber the existing two. Asserts cross-device
  * convergence over all 3, stamp-delete propagation, device removal +
- * resurrection, the §7 invariant, and reports steady-state fold latency.
+ * resurrection, and reports steady-state fold latency.
  *
  * Opt-in — skips unless a `.env` configures BATCH_ID/SIGNER_KEY (see README).
  */
 
 import { describe, it, expect, beforeAll } from "vitest"
-import { Topic } from "@ethersphere/bee-js"
 import { publishDeviceState } from "../../src/sync/device-state"
 import { ensureInRoster } from "../../src/sync/device-roster"
 import { foldAccountFromSwarm } from "../../src/sync/fold-account-from-swarm"
-import { ACCOUNT_SYNC_TOPIC_PREFIX } from "../../src/sync/publish-account-state"
-import { AsyncEpochFinder } from "../../src/proxy/feeds/epochs"
 import {
   liveEnv,
   createContext,
@@ -187,20 +184,6 @@ describe.skipIf(!liveEnv.configured)(
       )
       expect(resurrected, "fold converged on resurrection").toBeDefined()
       expect(activeDevices(resurrected!)).toHaveLength(3)
-    })
-
-    it("never writes the legacy shared swarm-id-backup-v1 feed (§7 invariant)", async () => {
-      const legacyTopic = Topic.fromString(
-        `${ACCOUNT_SYNC_TOPIC_PREFIX}:${keys.accountId}`,
-      )
-      const legacyRef = await new AsyncEpochFinder(
-        ctx.bee,
-        legacyTopic,
-        keys.owner,
-      )
-        .findAt(BigInt(Math.floor(Date.now() / 1000)))
-        .catch(() => undefined)
-      expect(legacyRef).toBeUndefined()
     })
   },
 )

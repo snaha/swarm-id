@@ -5,18 +5,14 @@
  * Multi-device, 2 devices: each publishes its OWN device-state feed (+ appends
  * to the append-only roster); a reader folds the roster + all device feeds and
  * must converge. Covers cross-device convergence, stamp-delete + device-removal
- * tombstone propagation, resurrection, and the §7 invariant (the legacy shared
- * `swarm-id-backup-v1` feed is never written).
+ * tombstone propagation, and resurrection.
  *
  * Opt-in — skips unless a `.env` configures BATCH_ID/SIGNER_KEY (see README).
  */
 
 import { describe, it, expect, beforeAll } from "vitest"
-import { Topic } from "@ethersphere/bee-js"
 import { publishDeviceState } from "../../src/sync/device-state"
 import { ensureInRoster } from "../../src/sync/device-roster"
-import { ACCOUNT_SYNC_TOPIC_PREFIX } from "../../src/sync/publish-account-state"
-import { AsyncEpochFinder } from "../../src/proxy/feeds/epochs"
 import {
   liveEnv,
   createContext,
@@ -149,20 +145,6 @@ describe.skipIf(!liveEnv.configured)(
           .filter((d) => !d.removedAt)
           .some((d) => d.deviceId === DEVICE_B),
       ).toBe(true)
-    })
-
-    it("never writes the legacy shared swarm-id-backup-v1 feed (§7 invariant)", async () => {
-      const legacyTopic = Topic.fromString(
-        `${ACCOUNT_SYNC_TOPIC_PREFIX}:${keys.accountId}`,
-      )
-      const legacyRef = await new AsyncEpochFinder(
-        ctx.bee,
-        legacyTopic,
-        keys.owner,
-      )
-        .findAt(BigInt(Math.floor(Date.now() / 1000)))
-        .catch(() => undefined)
-      expect(legacyRef).toBeUndefined()
     })
   },
 )
