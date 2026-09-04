@@ -371,9 +371,53 @@ Each landed as its own PR chain, in this order:
 
 - **SWIP-60 transport adapter**, once bee/bee-js release it
   ([#571](https://github.com/snaha/swarm-id/issues/571)).
-- **Replay protection** ([#604](https://github.com/snaha/swarm-id/issues/604)): envelopes carry
-  no nonce or timestamp. The lease paths are bounded by their own guards; a replayed delta or
-  presence is inert or merely refreshes what was already true.
+- **Replay protection** ([#604](https://github.com/snaha/swarm-id/issues/604)): envelopes carry no
+  replay nonce or timestamp (they do carry a per-message AES-GCM IV — a nonce in the cryptographic
+  sense, fresh per encryption, which is not what stops a replay), and nothing durable tracks what
+  has been seen. Checked per kind, worst first:
+
+  | kind                  | reaches the relay? | what a replay does                                                                                                                                                                  |
+  | --------------------- | ------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+  | `lease-request`       | yes                | an idle holder releases its lane — two stamped Swarm writes — and re-acquires on its next upload. **The only durable cost.**                                                        |
+  | `lease-claim`         | yes                | stands other holders down for that round; the waiter falls back to its 10 s poll                                                                                                    |
+  | `lease-released`      | yes                | wakes a waiter early: one extra read round, and #593 spends the sticky wake once                                                                                                    |
+  | `presence`            | yes                | the receiver stamps its own clock, so a replay keeps a departed device in the rival set for the 3-minute window — one absent intent read, and indefinitely if replayed on a timer\* |
+  | `account-delta`       | yes                | inert up to the one bounded echo described above\*                                                                                                                                  |
+  | `utilization-updated` | **no**             | published `localOnly`, so it never leaves the device and a relay never sees it                                                                                                      |
+
+  \* The `account-delta` echo: LWW converges and a replayed tombstone re-applies itself, but the
+  SwarmID tab's fold always commits, so the _first_ replay of a stale snapshot can change serialized
+  bytes → a real storage event → the one-round-trip republish above (a bus delta, plus a stamped feed
+  write if a partition is held). Self-limiting: the second identical replay writes identical bytes.
+  A timed `presence` replay is the same denial as a withheld `peer-left`, which the threat model
+  below already covers.
+
+  Server-originated frames (`welcome`, `peer-joined`, `peer-left`) are not envelopes and are not in
+  that table: they are the server's word, trusted from it by construction. Since #669 `peer-left`
+  drops a device from the rival set, so a forged one costs an intent round its rival — but a server
+  that would forge it can drop the real ones instead, which is the same denial for less work.
+
+  **Who can replay.** The room topic and the envelope key both derive from `derivationKey`
+  (`bus-context.ts`), so anything that can join the room already holds the account. The replayer is
+  therefore the signaling server or a WSS MITM — a party that can already deny the fast path
+  outright by dropping frames, which is cheaper and more effective than replaying one.
+
+  **What bounds the one path that costs.** `canYieldForPeer` requires a held lane, zero in-flight
+  uploads, and 3 s since the last lease activity, so a context with work ignores replays entirely;
+  and a yield leaves the holder with no lane, so it cannot be made to yield again until it
+  re-acquires. `answeredRequests` (32 ids, FIFO, in memory) absorbs a replay of a round this
+  instance already handled — but it falls through twice over: it is empty after a reload, so a
+  captured request replayed against a fresh page always lands, and FIFO eviction means even a
+  long-lived instance yields again for a captured request once 32 later rounds have pushed it out. That residue is exactly what a `sentAt` window would cover: the
+  two guards are complementary, not redundant.
+
+  **Why it is not built.** A `{ sentAt, message }` wrapper reintroduces clock skew into a design
+  that avoided it on purpose — presence carries no timestamp precisely so there is "no timestamp to
+  skew" — and the window has to be generous enough for a hidden tab's throttled timers, which still
+  admits an immediate replay. Bounded nuisance, from an attacker with cheaper denial available,
+  against a real new failure mode. Revisit with SWIP-60 (#571), where the transport is brokered by
+  someone else and the envelope has to carry its own guarantees.
+
 - **Gating the signaling attach** ([#581](https://github.com/snaha/swarm-id/issues/581)) — see
   Why this shape.
 
