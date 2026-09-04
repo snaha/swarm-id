@@ -418,6 +418,36 @@ describe("SwarmIdProxy partitioned write enablement", () => {
     )
   }
 
+  /** Reconnect the way a page load does: a new proxy over the same store. */
+  async function reload(): Promise<void> {
+    proxy.destroy()
+    mountProxy()
+    await dispatch(
+      { type: "parentIdentify", requestId: "r1", metadata: { name: "dApp" } },
+      PARENT_ORIGIN,
+      parentWindow,
+    )
+  }
+
+  /** Connect with the handover the popup really sends: the account's own
+   *  entry for this origin, whose `lastConnectedAt` is the instant being
+   *  connected (`saveConnection` runs before `sendSecretToOpener`). */
+  async function connectPartitionedAt(connectedAt: number): Promise<void> {
+    const challenge = await startPartitionedConnect()
+    await sendSetSecret(challenge, {
+      account: serializeSyncedAccount({
+        ...makeSyncedAccount(),
+        connectedApps: [
+          {
+            appUrl: PARENT_ORIGIN,
+            appName: "dApp",
+            lastConnectedAt: connectedAt,
+          },
+        ],
+      }),
+    })
+  }
+
   // A payload with no account used to build a "download-only" session: no
   // stamps, and — the part that made it untenable — no `derivationKey`, so it
   // derived no bus topic, joined no room, and could never be told it had been
@@ -882,17 +912,6 @@ describe("SwarmIdProxy partitioned write enablement", () => {
   // the ordinary mode, that is every reload. It is kept now, under the same
   // 30-day deadline the unpartitioned path enforces out of shared storage.
   describe("a session that survives a reload", () => {
-    /** Reconnect the way a page load does: a new proxy over the same store. */
-    async function reload(): Promise<void> {
-      proxy.destroy()
-      mountProxy()
-      await dispatch(
-        { type: "parentIdentify", requestId: "r1", metadata: { name: "dApp" } },
-        PARENT_ORIGIN,
-        parentWindow,
-      )
-    }
-
     async function connectPartitioned(): Promise<void> {
       const challenge = await startPartitionedConnect()
       await sendSetSecret(challenge, {
@@ -1038,25 +1057,6 @@ describe("SwarmIdProxy partitioned write enablement", () => {
       foldedFromSwarm.value = undefined
     })
 
-    /** Connect with the handover the popup really sends: the account's own
-     *  entry for this origin, whose `lastConnectedAt` is the instant being
-     *  connected (`saveConnection` runs before `sendSecretToOpener`). */
-    async function connectPartitionedAt(connectedAt: number): Promise<void> {
-      const challenge = await startPartitionedConnect()
-      await sendSetSecret(challenge, {
-        account: serializeSyncedAccount({
-          ...makeSyncedAccount(),
-          connectedApps: [
-            {
-              appUrl: PARENT_ORIGIN,
-              appName: "dApp",
-              lastConnectedAt: connectedAt,
-            },
-          ],
-        }),
-      })
-    }
-
     // Disconnect and Remove both end a session, and both state it on the entry
     // — but only Remove wrote the marker this check looked at. So a Disconnect
     // made while the tab was closed came back still connected and still able to
@@ -1130,6 +1130,25 @@ describe("SwarmIdProxy partitioned write enablement", () => {
       expect(storedSession()).toBeTruthy()
       foldedFromSwarm.value = undefined
     })
+
+    // A reload is not a connection, and `hydratePartitionAccount` used to
+    // record it as one. #668 worked around that at the one call site that
+    // needed the true instant; every other reader still got "just now" (#670).
+    it("keeps the connect instant it was handed, across a reload", async () => {
+      const connectedAt = Date.now() - 60_000
+      await connectPartitionedAt(connectedAt)
+
+      await reload()
+
+      const { partitionAccount } = proxy as unknown as {
+        partitionAccount: SignedInAccount | undefined
+      }
+      expect(
+        partitionAccount?.connectedApps.find(
+          (app) => app.appUrl === PARENT_ORIGIN,
+        )?.lastConnectedAt,
+      ).toBe(connectedAt)
+    })
   })
 
   // A revoke reaches a live proxy only through the browser `storage` event, and
@@ -1191,6 +1210,21 @@ describe("SwarmIdProxy partitioned write enablement", () => {
       }
     }
 
+    /** A plain Disconnect as the UI writes it: auth material cleared, but no
+     *  tombstone — the end is stated by a `disconnectedAt` newer than the
+     *  connection the reader holds. */
+    function disconnected(appUrl: string, at: number): ConnectedApp {
+      return {
+        appUrl,
+        appName: "dApp",
+        lastConnectedAt: at - 1000,
+        appSecret: undefined,
+        connectedUntil: undefined,
+        updatedAt: at,
+        disconnectedAt: at,
+      }
+    }
+
     async function hydratedSession(): Promise<BroadcastChannel> {
       const challenge = await startPartitionedConnect()
       await sendSetSecret(challenge, {
@@ -1205,6 +1239,36 @@ describe("SwarmIdProxy partitioned write enablement", () => {
       try {
         busChannel.postMessage(
           accountDelta({ connectedApps: [revoked(PARENT_ORIGIN)] }),
+        )
+        await vi.waitFor(() =>
+          expect(messagesOfType("disconnectResponse")).toHaveLength(1),
+        )
+        const infos = messagesOfType("connectionInfoChanged")
+        expect(infos[infos.length - 1].canUpload).toBe(false)
+      } finally {
+        busChannel.close()
+      }
+    })
+
+    // The other end of #670. `verifyRestoredSession` has nothing to read for an
+    // account that never published — no drive, no feed — so the live overlap on
+    // this bus is the only thing left that can deliver a Disconnect made while
+    // the tab was closed. It could not: the restore restamped `lastConnectedAt`,
+    // so `restoreLocalSessionFields` read the disconnect as older than "our"
+    // connection, handed the secret back, and the session stayed undead for the
+    // rest of its 30 days. A Remove was caught (a tombstone needs no clock),
+    // which is why only the Disconnect went missing.
+    it("ends a restored session a peer disconnected while the tab was closed", async () => {
+      const connectedAt = Date.now() - 60_000
+      await connectPartitionedAt(connectedAt)
+      await reload()
+      await awaitBusJoin()
+      const busChannel = new BroadcastChannel(accountChannelName)
+      try {
+        busChannel.postMessage(
+          accountDelta({
+            connectedApps: [disconnected(PARENT_ORIGIN, connectedAt + 1000)],
+          }),
         )
         await vi.waitFor(() =>
           expect(messagesOfType("disconnectResponse")).toHaveLength(1),
