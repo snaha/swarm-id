@@ -53,9 +53,10 @@ every pull request touching `lib/**`, so these tests gate merges like any other.
   `swarm-postage-batch-id`. Mocking that contract would only ever confirm our
   own assumptions back to us, so the real server runs.
 
-  It needs nothing beyond Docker, which the cluster already requires. When the
-  container cannot start, the start is skipped with a warning and the
-  subsidised suites skip with it — the same shape as the no-cluster skip.
+  It needs nothing beyond Docker, which the cluster already requires — so with
+  a cluster up, a gateway that will not start is a real breakage, and the setup
+  **fails** rather than skipping. A skip reports a breakage in the one colour
+  CI cannot tell from success. Only the absence of a cluster skips.
 
 ### Adding a new integration test file
 
