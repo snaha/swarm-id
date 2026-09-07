@@ -10,14 +10,21 @@
  * same provider with nothing between them that can change the answer.
  *
  * A record, not proof of where the wallet is. `switchWalletChain` accepts a
- * wallet that will not answer its probe, and a wallet moved between two
- * networks wearing one chain id has no event to announce it — so what is
- * remembered here can be stale. That is safe because the record decides no
- * payment: every rail that signs on a chain two networks answer to reads
- * genesis itself, right before signing (`executeDirectPayment`, and the Relay
- * rail's Gnosis source). What a stale record costs is the prompt and the probe
- * it skips, and a refusal in words at Pay where a fresh switch might have
- * repaired the network — never a payment signed on the wrong network.
+ * wallet that will not answer its probe; a wallet moved between two networks
+ * wearing one chain id has no event to announce it; and a chain change the
+ * user makes while our own switch is still pending is forgotten before the
+ * record is written, so its event is swallowed with the wallet's echo of our
+ * request (`ensure`) — that last one is the stale case where an event DID
+ * fire. So what is remembered here can be stale. That is safe because the
+ * record decides no payment: every rail that signs on a chain two networks
+ * answer to reads genesis itself, right before signing (`executeDirectPayment`,
+ * and the Relay rail's Gnosis source), and a wallet on a chain of another id
+ * has another genesis, so the same read refuses it; the Relay rail's other
+ * sources have no lookalike and lean on the chain id, which the SDK switches
+ * to and viem asserts before signing. What a stale record costs is the prompt
+ * and the probe it skips, and a refusal in words at Pay where a fresh switch
+ * might have repaired the network — never a payment signed on the wrong
+ * network.
  */
 import type { Chain } from 'viem'
 

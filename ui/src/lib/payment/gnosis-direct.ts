@@ -298,6 +298,13 @@ export async function quoteDirectPayment(request: QuoteRequest): Promise<Payment
  * of them mainnet": two chains that are both not mainnet are still two
  * different chains, and a wallet left on Ethereum matches a dev endpoint on
  * every question but that one.
+ *
+ * The Relay rail asks the same question of a Gnosis source before it signs
+ * (`assertWalletOnGnosis`, `relay.ts`), with a different rule for silence: it
+ * always lets a wallet that will not say through. Right for that rail, not
+ * this one — Relay is only offered against an endpoint proven mainnet, so
+ * silence there risks a deposit on a chain Relay never watches, and no real
+ * money moves on one. Two policies, each owned by the rail that signs.
  */
 export function walletChainRefusal(
   endpoint: ChainIdentity,

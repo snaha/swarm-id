@@ -470,7 +470,10 @@ wallet that already has real Gnosis configured satisfies a switch to 100 without
 local RPC, and the transfer that follows would move REAL xDAI to an address only this machine holds
 the key for. `walletChainRefusal` compares **genesis hashes**, which a chain cannot borrow, and fails
 closed: a wallet that will not say which chain it is on is refused unless the app's own endpoint is
-proven mainnet.
+proven mainnet. The Relay rail makes the mirror check before signing on a Gnosis source
+(`assertWalletOnGnosis` in `relay.ts`) — it signs on chain 100 too, and the dialog's own switch is
+skipped when the wallet is recorded as already there, so each rail proves the chain itself rather
+than trusting a record.
 
 The comparison is against the **endpoint's own** genesis (carried on `ChainIdentity`), not against
 "is either side mainnet". Two chains that are both not mainnet are still two chains, and a wallet
