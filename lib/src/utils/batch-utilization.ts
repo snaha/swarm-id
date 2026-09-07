@@ -896,7 +896,7 @@ export async function loadUtilizationState(
           contentHash: cached.contentHash,
           lastUpload: cached.lastAccess, // Use lastAccess as lastUpload
           dirty: false, // Not dirty if loaded from cache
-          nonce: cached.nonce ?? 0,
+          nonce: cached.nonce,
         })
       }
 
@@ -940,7 +940,7 @@ export async function loadUtilizationState(
         contentHash: cached.contentHash,
         lastUpload: cached.lastAccess,
         dirty: false,
-        nonce: cached.nonce ?? 0,
+        nonce: cached.nonce,
       })
       continue
     }

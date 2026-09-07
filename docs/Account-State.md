@@ -162,9 +162,10 @@ on different devices both survive.
 
 The earlier model published one **shared** account-state snapshot feed (`swarm-id-backup-v1:account`) via
 `publishAccountState`, using a read-merge-rewrite + `verifyWon` retry loop to arbitrate concurrent writers.
-That is **gone** — replaced by the per-device feeds above. `publish-account-state.ts` now exports only
-`ACCOUNT_SYNC_TOPIC_PREFIX` / `accountSyncTopic`, kept so a test can assert the legacy shared feed is
-**never** written.
+That is **gone** — replaced by the per-device feeds above, and so is `publish-account-state.ts`. It had
+survived only to keep `ACCOUNT_SYNC_TOPIC_PREFIX` / `accountSyncTopic` alive for a test asserting the
+legacy feed is never written; with no writer left to regress into, the module and that assertion went
+too (#662).
 
 ## Files & tests
 
@@ -185,6 +186,5 @@ That is **gone** — replaced by the per-device feeds above. `publish-account-st
 | `ui/src/lib/stores/accounts.svelte.ts`         | `applyRefreshed`, per-field scalar setters/clocks                                |
 
 Tests: `merge-snapshot.test.ts`, `device-state.test.ts`, `device-roster.test.ts`, `sync-account.test.ts`
-(unit/CI), and the opt-in live suite `lib/test/multi-device/` (`per-device-sync`, `per-device-sync-3`:
-cross-device convergence, tombstone propagation, resurrection, and the "legacy shared feed never written"
-invariant).
+(unit/CI), and the opt-in live suite `lib/test/live/` (`per-device-sync`, `per-device-sync-3`:
+cross-device convergence, tombstone propagation, and resurrection).

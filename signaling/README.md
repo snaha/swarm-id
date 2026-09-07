@@ -34,10 +34,9 @@ payload cap, and a join timeout for a socket that never names a room. A server-s
 30 s terminates a socket that has not answered by the next tick, which is what turns a
 half-open peer into `peer-left`.
 
-`1008` (policy violation) is permanent for that topic — but the client first retries once with
-the topic in the URL, the pre-join-frame form ([#577](https://github.com/snaha/swarm-id/issues/577)),
-because a server mid-deploy rejects a socket that named no topic there; only then does it stop
-reconnecting.
+`1008` (policy violation) is permanent for that topic and the client stops reconnecting: the
+server only sends it for a topic it would refuse identically next time. A socket that never sent
+its join frame gets `4408` instead, precisely so it is not read that way.
 `1013` (try again later) is transient and the client backs off with jitter; `4408` is the join
 timeout. The exact values and the reasoning behind each live in the header of
 [`src/server.ts`](./src/server.ts), which is the source of truth.

@@ -23,7 +23,7 @@ export {
 } from "./merge-snapshot"
 
 // Sync account
-export { createSyncAccount, ACCOUNT_SYNC_TOPIC_PREFIX } from "./sync-account"
+export { createSyncAccount } from "./sync-account"
 export type { SyncAccountOptions, SyncAccountFunction } from "./sync-account"
 
 // Restore account from Swarm
