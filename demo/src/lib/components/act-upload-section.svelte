@@ -53,7 +53,7 @@
     const grantees = granteesInput
       ? granteesInput
           .split(',')
-          .map((s) => s.trim())
+          .map((s) => s.trim().replace(/^0x/i, ''))
           .filter(Boolean)
       : []
 
