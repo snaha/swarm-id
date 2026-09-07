@@ -37,16 +37,20 @@ export default async function setup({ provide }: TestProject) {
   // a CI step so the suite brings up everything it needs on its own, and skips
   // cleanly where Docker cannot.
   const gateway = await startGatewayProxy(batchId)
-  if (gateway) {
-    console.log(`[gateway] Subsidised gateway ready at ${GATEWAY_URL}`)
-  } else {
-    console.warn(
-      "[gateway] No subsidised gateway — those suites will be skipped.",
+  if (!gateway) {
+    // Hard failure, not a skip. Reaching here means the cluster answered, so
+    // Docker is running by definition — bee-compose IS Docker. A gateway that
+    // will not start under those conditions is a real breakage, and a skip
+    // would report it in the one colour CI cannot tell from success.
+    throw new Error(
+      "[gateway] The cluster is up but the subsidised gateway would not start. " +
+        "See the warning above for why. Fix it, or run the unit suite (`pnpm test`) instead.",
     )
   }
+  console.log(`[gateway] Subsidised gateway ready at ${GATEWAY_URL}`)
 
   return async () => {
-    await gateway?.stop()
+    await gateway.stop()
   }
 }
 

@@ -27,10 +27,12 @@ import {
   downloadSOC,
 } from "../../src/proxy/download-data"
 import { isClusterReachable, createQueenBee } from "./cluster"
-import { createSubsidisedTarget, isGatewayReachable } from "./gateway"
+import { createSubsidisedTarget } from "./gateway"
 
+// Only the cluster gates this suite. With a cluster up, `global-setup.ts`
+// treats a gateway that will not start as a hard failure rather than a reason
+// to skip, so there is no second condition to test for here.
 const clusterReachable = await isClusterReachable()
-const gatewayReachable = clusterReachable && (await isGatewayReachable())
 
 /** Generate a unique random payload so each test is independent. */
 function randomPayload(size: number): Uint8Array {
@@ -43,7 +45,7 @@ const SMALL_PAYLOAD_SIZE = 64
 const MULTI_CHUNK_PAYLOAD_SIZE = 10_000
 const SOC_PAYLOAD_SIZE = 32
 
-describe.skipIf(!gatewayReachable)(
+describe.skipIf(!clusterReachable)(
   "Subsidised-gateway round-trip against live cluster",
   () => {
     let bee: Bee
