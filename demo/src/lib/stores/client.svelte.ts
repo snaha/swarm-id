@@ -40,6 +40,7 @@ interface IdentityInfo {
   name: string
   address: string
   publicKey?: string
+  sharingPublicKey?: string
   avatar: Avatar
 }
 
@@ -224,13 +225,13 @@ async function onConnectionChange(info: ConnectionInfo) {
   }
 
   if (info.identity) {
-    const { id, name, address, publicKey, avatar } = info.identity
+    const { id, name, address, publicKey, sharingPublicKey, avatar } = info.identity
     if (currentIdentityId && currentIdentityId !== id) {
       logStore.log(`Identity switched from "${currentIdentityName}" to "${name}"`)
     }
     currentIdentityId = id
     currentIdentityName = name
-    identity = { id, name, address, publicKey, avatar }
+    identity = { id, name, address, publicKey, sharingPublicKey, avatar }
   } else {
     if (currentIdentityId) {
       logStore.log(`Disconnected from identity "${currentIdentityName}"`)

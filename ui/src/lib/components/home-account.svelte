@@ -20,7 +20,7 @@
   import LoaderCircle from '@lucide/svelte/icons/loader-circle'
   import RefreshCw from '@lucide/svelte/icons/refresh-cw'
   import Wallet from '@lucide/svelte/icons/wallet'
-  import type { AccessMethod } from '@snaha/swarm-id'
+  import { type AccessMethod, deriveSharingKey } from '@snaha/swarm-id'
 
   import { createAttemptTracker } from '$lib/attempt'
   import AccountAvatar from '$lib/components/account-avatar.svelte'
@@ -101,6 +101,7 @@
     access.type === 'passkey' ? Fingerprint : access.type === 'eth-wallet' ? Wallet : KeyRound,
   )
   const publicKeyDisplay = $derived(prefix0x(account.publicKey))
+  const sharingKeyDisplay = $derived(prefix0x(deriveSharingKey(account.derivationKey).publicKey))
   const newPasswordValid = $derived(isNewPasswordValid(newPassword, verifyNewPassword))
 
   const unlockTitle = $derived(
@@ -406,10 +407,7 @@
               </div>
 
               <div class="flex flex-col gap-1">
-                {@render keyBlock(
-                  'Public key',
-                  'Can be used for establishing secure, private communication.',
-                )}
+                {@render keyBlock('Public key', 'Identifies the account. Pairs with the address.')}
                 <div class="flex items-center gap-2">
                   <p class="min-w-0 flex-1 text-sm break-all">{publicKeyDisplay}</p>
                   <Button
@@ -418,6 +416,25 @@
                     class="size-7 shrink-0"
                     aria-label="Copy public key"
                     onclick={() => copyText(publicKeyDisplay, 'Public key')}
+                  >
+                    <Copy />
+                  </Button>
+                </div>
+              </div>
+
+              <div class="flex flex-col gap-1">
+                {@render keyBlock(
+                  'Sharing key',
+                  'Other people grant you access with this key. It is the same in every app.',
+                )}
+                <div class="flex items-center gap-2">
+                  <p class="min-w-0 flex-1 text-sm break-all">{sharingKeyDisplay}</p>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    class="size-7 shrink-0"
+                    aria-label="Copy sharing key"
+                    onclick={() => copyText(sharingKeyDisplay, 'Sharing key')}
                   >
                     <Copy />
                   </Button>

@@ -28,6 +28,41 @@ import {
 
 type ActUploadOptions = UploadOptions & { beeCompatible?: boolean }
 
+/**
+ * The private keys one session may read or publish with. A proxy holds two —
+ * the origin-bound app key and the account-wide sharing key (#519) — and does
+ * not know which one a share was made out to, so every reader/publisher entry
+ * point takes candidates and uses the one the ACT names.
+ */
+export type ActKeyCandidates = Uint8Array | Uint8Array[]
+
+function candidateKeys(keys: ActKeyCandidates): Uint8Array[] {
+  return Array.isArray(keys) ? keys : [keys]
+}
+
+/**
+ * The candidate that published the ACT: the one whose self-entry (ECDH with
+ * its own public key) the manifest carries.
+ */
+function findPublisherKey(
+  entries: ActEntry[],
+  keys: ActKeyCandidates,
+): {
+  privateKey: Uint8Array
+  derived: ReturnType<typeof deriveKeys>
+  entry: ActEntry
+} {
+  for (const privateKey of candidateKeys(keys)) {
+    const pub = publicKeyFromPrivate(privateKey)
+    const derived = deriveKeys(privateKey, pub.x, pub.y)
+    const entry = findEntryByLookupKey(entries, derived.lookupKey)
+    if (entry) {
+      return { privateKey, derived, entry }
+    }
+  }
+  throw new Error("Cannot find publisher entry in ACT")
+}
+
 import {
   serializeAct,
   deserializeAct,
@@ -249,7 +284,8 @@ export async function createActForContent(
  * @param encryptedReference - The encrypted reference (hex string)
  * @param historyReference - History manifest reference
  * @param publisherPubKeyHex - Publisher's compressed public key (hex)
- * @param readerPrivateKey - Reader's private key (32 bytes)
+ * @param readerPrivateKeys - Reader's private key(s), 32 bytes each; the first
+ *   one the ACT names (as a grantee, or as the publisher itself) decrypts
  * @param timestamp - Optional timestamp to look up specific ACT version
  * @param requestOptions - Bee request options
  * @returns Decrypted content reference (hex string)
@@ -259,7 +295,7 @@ export async function decryptActReference(
   encryptedReference: string,
   historyReference: string,
   publisherPubKeyHex: string,
-  readerPrivateKey: Uint8Array,
+  readerPrivateKeys: ActKeyCandidates,
   timestamp?: number,
   requestOptions?: BeeRequestOptions,
 ): Promise<string> {
@@ -312,51 +348,28 @@ export async function decryptActReference(
   )
   const entries = deserializeAct(actData)
 
-  // Derive keys using reader's private key and publisher's public key
-  const derivedKeys = deriveKeys(
-    readerPrivateKey,
-    publisherPubKey.x,
-    publisherPubKey.y,
-  )
-
-  // Find entry matching the lookup key
-  let foundEntry = findEntryByLookupKey(entries, derivedKeys.lookupKey)
-
-  if (!foundEntry) {
-    // Also try self-lookup (if reader is publisher)
+  // Each candidate key, first as a grantee (ECDH with the publisher), then as
+  // the publisher itself (ECDH with its own key) — all local, the manifest is
+  // already here.
+  for (const readerPrivateKey of candidateKeys(readerPrivateKeys)) {
     const readerPubKey = publicKeyFromPrivate(readerPrivateKey)
-    const selfKeys = deriveKeys(
-      readerPrivateKey,
-      readerPubKey.x,
-      readerPubKey.y,
-    )
-    foundEntry = findEntryByLookupKey(entries, selfKeys.lookupKey)
-
-    if (!foundEntry) {
-      throw new Error("Access denied: no ACT entry found for this key")
+    for (const peer of [publisherPubKey, readerPubKey]) {
+      const keys = deriveKeys(readerPrivateKey, peer.x, peer.y)
+      const entry = findEntryByLookupKey(entries, keys.lookupKey)
+      if (!entry) continue
+      const accessKey = counterModeDecrypt(
+        entry.encryptedAccessKey,
+        keys.accessKeyDecryptionKey,
+      )
+      const decryptedRef = counterModeDecrypt(
+        hexToUint8Array(encryptedReference),
+        accessKey,
+      )
+      return formatDecryptedReference(decryptedRef)
     }
-
-    // Use self keys for decryption
-    const accessKey = counterModeDecrypt(
-      foundEntry.encryptedAccessKey,
-      selfKeys.accessKeyDecryptionKey,
-    )
-    const encryptedRef = hexToUint8Array(encryptedReference)
-    const decryptedRef = counterModeDecrypt(encryptedRef, accessKey)
-    return formatDecryptedReference(decryptedRef)
   }
 
-  // Decrypt access key
-  const accessKey = counterModeDecrypt(
-    foundEntry.encryptedAccessKey,
-    derivedKeys.accessKeyDecryptionKey,
-  )
-
-  // Decrypt the content reference
-  const encryptedRef = hexToUint8Array(encryptedReference)
-  const decryptedRef = counterModeDecrypt(encryptedRef, accessKey)
-
-  return formatDecryptedReference(decryptedRef)
+  throw new Error("Access denied: no ACT entry found for this key")
 }
 
 /**
@@ -366,7 +379,7 @@ export async function addGranteesToAct(
   target: UploadTarget,
   bee: Bee,
   historyReference: string,
-  publisherPrivateKey: Uint8Array,
+  publisherCandidates: ActKeyCandidates,
   newGranteePublicKeys: Array<{ x: Uint8Array; y: Uint8Array }>,
   options?: ActUploadOptions,
   requestOptions?: BeeRequestOptions,
@@ -414,19 +427,12 @@ export async function addGranteesToAct(
   )
   const entries = deserializeAct(actData)
 
-  // Get publisher's public key and recover access key
-  const publisherPubKey = publicKeyFromPrivate(publisherPrivateKey)
-  const publisherKeys = deriveKeys(
-    publisherPrivateKey,
-    publisherPubKey.x,
-    publisherPubKey.y,
-  )
-  const publisherEntry = findEntryByLookupKey(entries, publisherKeys.lookupKey)
-
-  if (!publisherEntry) {
-    throw new Error("Cannot find publisher entry in ACT")
-  }
-
+  // Recover the access key with whichever candidate published the ACT
+  const {
+    privateKey: publisherPrivateKey,
+    derived: publisherKeys,
+    entry: publisherEntry,
+  } = findPublisherKey(entries, publisherCandidates)
   const accessKey = counterModeDecrypt(
     publisherEntry.encryptedAccessKey,
     publisherKeys.accessKeyDecryptionKey,
@@ -533,7 +539,7 @@ export async function revokeGranteesFromAct(
   bee: Bee,
   historyReference: string,
   encryptedReference: string,
-  publisherPrivateKey: Uint8Array,
+  publisherCandidates: ActKeyCandidates,
   revokePublicKeys: Array<{ x: Uint8Array; y: Uint8Array }>,
   options?: ActUploadOptions,
   requestOptions?: BeeRequestOptions,
@@ -581,18 +587,12 @@ export async function revokeGranteesFromAct(
   )
   const entries = deserializeAct(actData)
 
-  // Get publisher's public key and recover old access key
-  const publisherPubKey = publicKeyFromPrivate(publisherPrivateKey)
-  const publisherKeys = deriveKeys(
-    publisherPrivateKey,
-    publisherPubKey.x,
-    publisherPubKey.y,
-  )
-  const publisherEntry = findEntryByLookupKey(entries, publisherKeys.lookupKey)
-
-  if (!publisherEntry) {
-    throw new Error("Cannot find publisher entry in ACT")
-  }
+  // Recover the access key with whichever candidate published the ACT
+  const {
+    privateKey: publisherPrivateKey,
+    derived: publisherKeys,
+    entry: publisherEntry,
+  } = findPublisherKey(entries, publisherCandidates)
 
   // Keep the existing access key. Rotating it and re-encrypting the SAME content
   // reference under the new key was a revocation bypass (#496): counterModeEncrypt
@@ -721,7 +721,7 @@ export async function revokeGranteesFromAct(
 export async function getGranteesFromAct(
   bee: Bee,
   historyReference: string,
-  publisherPrivateKey: Uint8Array,
+  publisherCandidates: ActKeyCandidates,
   requestOptions?: BeeRequestOptions,
 ): Promise<string[]> {
   // Download history manifest
@@ -753,6 +753,21 @@ export async function getGranteesFromAct(
   if (!latestEntry || !latestEntry.metadata.encryptedGranteeListRef) {
     return []
   }
+
+  // The ACT manifest says which candidate published it. Decrypting the list
+  // with the wrong key yields garbage that only a 0x04 prefix check would
+  // catch, so it is not used to tell the keys apart.
+  const actData = await downloadDataWithChunkAPI(
+    bee,
+    latestEntry.metadata.actReference,
+    undefined,
+    undefined,
+    requestOptions,
+  )
+  const { privateKey: publisherPrivateKey } = findPublisherKey(
+    deserializeAct(actData),
+    publisherCandidates,
+  )
 
   // Download and decrypt grantee list
   const encryptedList = await downloadDataWithChunkAPI(

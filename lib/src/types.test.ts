@@ -127,6 +127,28 @@ describe("connectionInfoChanged identity (#230)", () => {
     ).not.toThrow()
   })
 
+  it("carries the sharing key, and still parses without it (#519)", () => {
+    const avatar = { source: "generated", url: "data:image/svg+xml,%3Csvg%3E" }
+    const parsed = IframeToParentMessageSchema.parse({
+      ...MESSAGE,
+      identity: {
+        ...IDENTITY,
+        avatar,
+        sharingPublicKey: "03" + "ab".repeat(32),
+      },
+    })
+    expect(parsed).toMatchObject({
+      identity: { sharingPublicKey: "03" + "ab".repeat(32) },
+    })
+    // A proxy deployed before the field still speaks to this lib
+    expect(() =>
+      IframeToParentMessageSchema.parse({
+        ...MESSAGE,
+        identity: { ...IDENTITY, avatar },
+      }),
+    ).not.toThrow()
+  })
+
   it("rejects an identity with no avatar", () => {
     // Every identity has an avatar; the proxy is the only writer and always
     // sends one, so a message without it is malformed rather than legacy.

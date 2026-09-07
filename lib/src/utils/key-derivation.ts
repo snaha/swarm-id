@@ -9,7 +9,11 @@
  */
 
 import { PrivateKey } from "@ethersphere/bee-js"
+import { hmac } from "@noble/hashes/hmac"
+import { sha256 } from "@noble/hashes/sha256"
 import { hexToUint8Array, uint8ArrayToHex } from "./hex"
+
+const SHARING_KEY_LABEL = new TextEncoder().encode("act-sharing")
 
 /**
  * Derive an app-specific secret from a master key and app origin
@@ -145,6 +149,30 @@ export async function derivePostageSignerKey(
   derivationKey: string,
 ): Promise<string> {
   return deriveSecret(derivationKey, `postage-signer`)
+}
+
+/**
+ * The account-wide ACT key (#519): what other people grant access to when they
+ * mean the person rather than one of their apps. Derived from the derivation
+ * key, so every app origin and every device of the account arrives at the same
+ * key — and the master key still never leaves the identity UI. Its public half
+ * is `identity.sharingPublicKey`.
+ *
+ * The same HMAC-SHA256 as `deriveSecret(derivationKey, "act-sharing")`, computed
+ * synchronously with `@noble/hashes` because ConnectionInfo is built without
+ * awaiting and `deriveSecret` still goes through Web Crypto. Once #692 makes the
+ * derivation chain synchronous this becomes that one call — the test pins the
+ * two equal so the swap cannot move the key.
+ */
+export function deriveSharingKey(derivationKey: string): {
+  secret: Uint8Array
+  publicKey: string
+} {
+  const secret = hmac(sha256, hexToUint8Array(derivationKey), SHARING_KEY_LABEL)
+  return {
+    secret,
+    publicKey: new PrivateKey(secret).publicKey().toCompressedHex(),
+  }
 }
 
 /**

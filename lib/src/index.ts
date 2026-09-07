@@ -18,6 +18,7 @@ export type { ProxyConfig } from "./swarm-id-proxy"
 // Key derivation utilities
 export {
   deriveSecret,
+  deriveSharingKey,
   generateMasterKey,
   hexToUint8Array,
   uint8ArrayToHex,
@@ -517,7 +518,7 @@ export {
   publicKeyFromCompressed,
 } from "./proxy/act"
 
-export type { ActEntry } from "./proxy/act"
+export type { ActEntry, ActKeyCandidates } from "./proxy/act"
 
 // Constant exports
 export { SWARM_SECRET_PREFIX, STORAGE_CHALLENGE_KEY } from "./types"

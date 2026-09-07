@@ -2924,8 +2924,12 @@ export class SwarmIdClient {
    * Only the specified grantees (and the publisher) can decrypt and access the data.
    *
    * @param data - The binary data to upload as a Uint8Array
-   * @param grantees - Array of grantee public keys as compressed hex strings (33 bytes = 66 hex chars)
+   * @param grantees - Array of grantee public keys as compressed hex strings (33 bytes = 66 hex chars).
+   *   A grantee is either another user's `appKey.publicKey` (that user in this app origin only) or
+   *   their `identity.sharingPublicKey` (that user in every app they connect, #519)
    * @param options - Optional upload configuration
+   * @param options.publisher - `"app"` (default) publishes with this origin's app key; `"identity"`
+   *   publishes with the account-wide sharing key, so any of the user's apps can manage the grantees later
    * @param options.pin - Whether to pin the data locally (defaults to false)
    * @param options.tag - Tag ID for tracking upload progress
    * @param options.deferred - Whether to use deferred upload (defaults to false)

@@ -34,6 +34,7 @@
   let data = $state('Secret message for ACT test!')
   let granteesInput = $state('')
   let beeCompatible = $state(true)
+  let publishAsIdentity = $state(false)
   let result = $state<ResultData | undefined>(undefined)
   let error = $state<string | undefined>(undefined)
 
@@ -72,6 +73,7 @@
       const actResult = await clientStore.client!.actUploadData(uint8Data, grantees, {
         deferred: clientStore.deferred,
         beeCompatible,
+        publisher: publishAsIdentity ? 'identity' : 'app',
       })
 
       logStore.log('ACT Upload successful!')
@@ -148,9 +150,16 @@
       </p>
     {:else}
       <p class="text-xs text-muted-foreground">
-        Grantees are SwarmID users — copy a public key from the Account tab.
+        Grantees are SwarmID users — copy an app key (this app only) or a sharing key (every app
+        they use) from the Account tab.
       </p>
     {/if}
+    <div class="flex items-start gap-2">
+      <Checkbox bind:checked={publishAsIdentity} id="publish-as-identity" />
+      <Label for="publish-as-identity" class="cursor-pointer text-sm text-muted-foreground">
+        Publish as identity (any of your apps can manage the grantees afterwards)
+      </Label>
+    </div>
 
     <AsyncButton onclick={handleUpload} disabled={!clientStore.canUpload} loadingText="Uploading…">
       Upload with ACT
