@@ -122,8 +122,13 @@ const UploadOptionsObjectSchema = z.object({
 
 export const UploadOptionsSchema = UploadOptionsObjectSchema.optional()
 
+export const ActPublisherSchema = z.enum(["app", "identity"])
+
+export type ActPublisher = z.infer<typeof ActPublisherSchema>
+
 export const ActUploadOptionsSchema = UploadOptionsObjectSchema.extend({
   beeCompatible: z.boolean().optional(),
+  publisher: ActPublisherSchema.optional(),
 }).optional()
 
 export const RequestOptionsSchema = z
@@ -175,6 +180,12 @@ export type RequestOptions = z.infer<typeof RequestOptionsSchema>
 export type DownloadOptions = z.infer<typeof DownloadOptionsSchema>
 export interface ActUploadOptions extends UploadOptions {
   beeCompatible?: boolean
+  /**
+   * Which of the user's keys publishes the ACT (default `"app"`, the
+   * origin-bound app key). `"identity"` publishes with the account-wide
+   * sharing key, so any of the user's apps can manage the grantees later.
+   */
+  publisher?: ActPublisher
 }
 
 // ============================================================================
@@ -660,6 +671,12 @@ export const ConnectionIdentitySchema = z.object({
   name: z.string(),
   address: AddressSchema,
   publicKey: CompressedPublicKeySchema.optional(),
+  /**
+   * The account-wide ACT key (#519): grant to this to share with the person
+   * across every app they use, rather than with one app origin (`appKey`).
+   * Every app the account connects can read what is granted to it.
+   */
+  sharingPublicKey: CompressedPublicKeySchema.optional(),
   /** Ready-to-render account avatar — every identity has one. */
   avatar: AvatarSchema,
 })

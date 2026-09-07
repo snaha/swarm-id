@@ -133,6 +133,7 @@ import {
   hexToUint8Array,
   uint8ArrayToHex,
   deriveSecret,
+  deriveSharingKey,
   deriveSwarmEncryptionKey,
 } from "./utils/key-derivation"
 import { generatedAvatar } from "./utils/avatar"
@@ -3303,6 +3304,7 @@ export class SwarmIdProxy {
             name: account.name,
             address: account.id.toHex(),
             publicKey: account.publicKey,
+            sharingPublicKey: deriveSharingKey(account.derivationKey).publicKey,
             avatar: generatedAvatar(account.id.toHex()),
           }
         }
@@ -5196,6 +5198,26 @@ export class SwarmIdProxy {
   // ACT (Access Control Tries) Handlers
   // ============================================================================
 
+  /**
+   * The account-wide ACT key (#519), or undefined when the session carries no
+   * account to derive it from.
+   */
+  private sharingSecret(): Uint8Array | undefined {
+    const derivationKey = this.findConnectionForParent()?.account.derivationKey
+    return derivationKey ? deriveSharingKey(derivationKey).secret : undefined
+  }
+
+  /**
+   * The keys this session may read or manage ACT data with: the origin-bound
+   * app key, then the account-wide sharing key. The ACT module picks the one
+   * a share names.
+   */
+  private actKeys(): Uint8Array[] {
+    const appKey = hexToUint8Array(this.appSecret!)
+    const sharing = this.sharingSecret()
+    return sharing ? [appKey, sharing] : [appKey]
+  }
+
   private async handleActUploadData(
     message: ActUploadDataMessage,
     event: MessageEvent,
@@ -5224,8 +5246,14 @@ export class SwarmIdProxy {
         enableProgress,
       )
 
-      // Use appSecret as publisher private key (user's identity key for this app)
-      const publisherPrivateKey = hexToUint8Array(this.appSecret!)
+      // The app key publishes unless the dApp asked for the identity-level key
+      const publisherPrivateKey =
+        options?.publisher === "identity"
+          ? this.sharingSecret()
+          : hexToUint8Array(this.appSecret!)
+      if (!publisherPrivateKey) {
+        throw new Error("No sharing key: this session carries no account")
+      }
       const beeCompatible = options?.beeCompatible === true
 
       const { actResult, contentUpload } = await this.withModeAwareWriteLock(
@@ -5329,17 +5357,13 @@ export class SwarmIdProxy {
         throw new Error("Not authenticated. Please login first.")
       }
 
-      // appSecret is already checked by authenticated check above
-      // Use appSecret as reader private key (user's identity key for this app)
-      const readerPrivateKey = hexToUint8Array(this.appSecret)
-
       // Decrypt the ACT reference to get the content reference
       const contentReference = await decryptActReference(
         this.bee,
         encryptedReference,
         historyReference,
         publisherPubKey,
-        readerPrivateKey,
+        this.actKeys(),
         timestamp,
         requestOptions,
       )
@@ -5403,8 +5427,7 @@ export class SwarmIdProxy {
     try {
       this.ensureCanUpload()
 
-      // Use appSecret as publisher private key (user's identity key for this app)
-      const publisherPrivateKey = hexToUint8Array(this.appSecret!)
+      const publisherPrivateKey = this.actKeys()
 
       // Parse grantee public keys from compressed hex
       const newGranteePublicKeys = grantees.map((hex) =>
@@ -5458,8 +5481,7 @@ export class SwarmIdProxy {
     try {
       this.ensureCanUpload()
 
-      // Use appSecret as publisher private key (user's identity key for this app)
-      const publisherPrivateKey = hexToUint8Array(this.appSecret!)
+      const publisherPrivateKey = this.actKeys()
 
       // Parse grantee public keys from compressed hex
       const revokePublicKeys = revokeGrantees.map((hex) =>
@@ -5511,9 +5533,7 @@ export class SwarmIdProxy {
         throw new Error("Not authenticated. Please login first.")
       }
 
-      // appSecret is already checked by authenticated check above
-      // Use appSecret as publisher private key (user's identity key for this app)
-      const publisherPrivateKey = hexToUint8Array(this.appSecret)
+      const publisherPrivateKey = this.actKeys()
 
       // Get grantees from ACT
       const grantees = await getGranteesFromAct(

@@ -369,21 +369,22 @@ Synchronous accessor for the current connection state. Populated by the proxy as
 
 **Throws:** `Error` if `initialize()` has not been called yet.
 
-| Property                  | Type                                            | Description                                                                                                                                                                             |
-| ------------------------- | ----------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `canUpload`               | `boolean`                                       | Whether the user can upload data                                                                                                                                                        |
-| `uploadMode`              | `"user-stamp" \| "subsidised" \| "unavailable"` | How uploads will be handled. See [Upload Availability](/subsidised-gateway#upload-availability-truth-table)                                                                             |
-| `uploadUnavailableReason` | `"no-stamp" \| "stamper-failed" \| undefined`   | Why `uploadMode` is `"unavailable"`; absent whenever uploads work. See [Why Uploads Are Unavailable](/subsidised-gateway#why-uploads-are-unavailable)                                   |
-| `storagePartitioned`      | `boolean \| undefined`                          | `true` when the browser gave the proxy iframe its own partitioned store (Safari ITP, strict privacy settings). Reported for UI messaging; it does **not** decide whether you can upload |
-| `identity`                | `object \| undefined`                           | The connected identity details (if authenticated)                                                                                                                                       |
-| `identity.id`             | `string`                                        | Unique identifier for the identity                                                                                                                                                      |
-| `identity.name`           | `string`                                        | Display name of the identity                                                                                                                                                            |
-| `identity.address`        | `string`                                        | Ethereum address associated with the identity                                                                                                                                           |
-| `identity.publicKey`      | `string \| undefined`                           | Public key of the identity                                                                                                                                                              |
-| `identity.avatar`         | `Avatar`                                        | Ready-to-render account avatar. See [Avatars](#avatars)                                                                                                                                 |
-| `appKey`                  | `object \| undefined`                           | The app-specific key details                                                                                                                                                            |
-| `appKey.address`          | `string`                                        | Ethereum address of the app key                                                                                                                                                         |
-| `appKey.publicKey`        | `string`                                        | Public key of the app key                                                                                                                                                               |
+| Property                    | Type                                            | Description                                                                                                                                                                             |
+| --------------------------- | ----------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `canUpload`                 | `boolean`                                       | Whether the user can upload data                                                                                                                                                        |
+| `uploadMode`                | `"user-stamp" \| "subsidised" \| "unavailable"` | How uploads will be handled. See [Upload Availability](/subsidised-gateway#upload-availability-truth-table)                                                                             |
+| `uploadUnavailableReason`   | `"no-stamp" \| "stamper-failed" \| undefined`   | Why `uploadMode` is `"unavailable"`; absent whenever uploads work. See [Why Uploads Are Unavailable](/subsidised-gateway#why-uploads-are-unavailable)                                   |
+| `storagePartitioned`        | `boolean \| undefined`                          | `true` when the browser gave the proxy iframe its own partitioned store (Safari ITP, strict privacy settings). Reported for UI messaging; it does **not** decide whether you can upload |
+| `identity`                  | `object \| undefined`                           | The connected identity details (if authenticated)                                                                                                                                       |
+| `identity.id`               | `string`                                        | Unique identifier for the identity                                                                                                                                                      |
+| `identity.name`             | `string`                                        | Display name of the identity                                                                                                                                                            |
+| `identity.address`          | `string`                                        | Ethereum address associated with the identity                                                                                                                                           |
+| `identity.publicKey`        | `string \| undefined`                           | Public key of the identity                                                                                                                                                              |
+| `identity.sharingPublicKey` | `string \| undefined`                           | The account-wide ACT key: grant to it to share with this person in every app they use. See [Which key do I grant to?](#which-key-do-i-grant-to)                                         |
+| `identity.avatar`           | `Avatar`                                        | Ready-to-render account avatar. See [Avatars](#avatars)                                                                                                                                 |
+| `appKey`                    | `object \| undefined`                           | The app-specific key details                                                                                                                                                            |
+| `appKey.address`            | `string`                                        | Ethereum address of the app key                                                                                                                                                         |
+| `appKey.publicKey`          | `string`                                        | Public key of the app key                                                                                                                                                               |
 
 **Example:**
 
@@ -1236,6 +1237,17 @@ console.log('Message sent with reference:', result.reference)
 
 ACT (Access Control Tries) methods enable encrypted data sharing with specific grantees. Data is encrypted and only users with the appropriate public key can decrypt it.
 
+#### Which key do I grant to?
+
+A grantee is a compressed public key, and a SwarmID user has two of them:
+
+- **`appKey.publicKey`** — that user in **one app origin**. It is derived from the origin, so a share made out to it cannot be read from another origin, not even a dev build of the same app.
+- **`identity.sharingPublicKey`** — that user across **every app they connect**. Use it to share a drive or folder between two dApps, or between your dev and production origins.
+
+The proxy tries both of the reader's keys on download, so nothing changes on the reading side. Trust consequence: anything granted to a sharing key can be read by every app that user connects — the person granting chooses which key to grant to.
+
+By default the ACT is published with the app key, and only that origin can add or revoke grantees afterwards. Pass `publisher: "identity"` to `actUploadData` to publish with the sharing key instead, so any of the user's apps can manage the grantee list.
+
 ### `actUploadData(data, grantees, options?, requestOptions?)`
 
 Uploads encrypted data to the Swarm network with access control for specific grantees.
@@ -1244,19 +1256,20 @@ The data is encrypted using ACT (Access Control Tries) and can only be downloade
 
 **Parameters:**
 
-| Parameter                       | Type                     | Required | Description                                           |
-| ------------------------------- | ------------------------ | -------- | ----------------------------------------------------- |
-| `data`                          | `Uint8Array`             | Yes      | The binary data to upload                             |
-| `grantees`                      | `string[]`               | Yes      | Array of compressed public keys (66 hex chars each)   |
-| `options`                       | `ActUploadOptions`       | No       | Upload configuration                                  |
-| `options.pin`                   | `boolean`                | No       | Whether to pin the data locally (defaults to `false`) |
-| `options.tag`                   | `number`                 | No       | Tag ID for tracking upload progress                   |
-| `options.deferred`              | `boolean`                | No       | Whether to use deferred upload (defaults to `false`)  |
-| `options.onProgress`            | `(progress) => void`     | No       | Callback for tracking upload progress                 |
-| `requestOptions`                | `RequestOptions`         | No       | Request configuration                                 |
-| `requestOptions.timeout`        | `number`                 | No       | Request timeout in milliseconds                       |
-| `requestOptions.headers`        | `Record<string, string>` | No       | Custom headers                                        |
-| `requestOptions.endlesslyRetry` | `boolean`                | No       | Whether to retry endlessly                            |
+| Parameter                       | Type                     | Required | Description                                                                         |
+| ------------------------------- | ------------------------ | -------- | ----------------------------------------------------------------------------------- |
+| `data`                          | `Uint8Array`             | Yes      | The binary data to upload                                                           |
+| `grantees`                      | `string[]`               | Yes      | Array of compressed public keys (66 hex chars each)                                 |
+| `options`                       | `ActUploadOptions`       | No       | Upload configuration                                                                |
+| `options.pin`                   | `boolean`                | No       | Whether to pin the data locally (defaults to `false`)                               |
+| `options.tag`                   | `number`                 | No       | Tag ID for tracking upload progress                                                 |
+| `options.deferred`              | `boolean`                | No       | Whether to use deferred upload (defaults to `false`)                                |
+| `options.onProgress`            | `(progress) => void`     | No       | Callback for tracking upload progress                                               |
+| `options.publisher`             | `"app" \| "identity"`    | No       | Key that publishes: this origin's app key (default) or the account-wide sharing key |
+| `requestOptions`                | `RequestOptions`         | No       | Request configuration                                                               |
+| `requestOptions.timeout`        | `number`                 | No       | Request timeout in milliseconds                                                     |
+| `requestOptions.headers`        | `Record<string, string>` | No       | Custom headers                                                                      |
+| `requestOptions.endlesslyRetry` | `boolean`                | No       | Whether to retry endlessly                                                          |
 
 **Returns:** `Promise<ActUploadResult>`
 

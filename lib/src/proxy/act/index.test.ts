@@ -818,3 +818,117 @@ describe("ACT end-to-end flow", () => {
     expect(finalGrantees).not.toContain(bob.compressedPublicKey)
   })
 })
+
+describe("identity-level keys: a reader or publisher holding several keys", () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+  })
+
+  // The proxy holds two keys per session — the origin-bound app key and the
+  // account-wide sharing key — and does not know which one a share was made out
+  // to. Every reader/publisher entry point therefore accepts candidates and
+  // picks the one the ACT names (#519).
+  function setup(seed: number) {
+    const publisher = createTestKeyPair(seed)
+    const appKey = createTestKeyPair(seed + 1)
+    const sharingKey = createTestKeyPair(seed + 2)
+    const { uploadMock, downloadMock } = createContentAddressedUploadMock()
+    vi.mocked(uploadData).mockImplementation(uploadMock)
+    vi.mocked(downloadDataWithChunkAPI).mockImplementation(downloadMock)
+    return { publisher, appKey, sharingKey, target: createMockTarget() }
+  }
+
+  it("decrypts with whichever candidate is the grantee, and denies when none is", async () => {
+    const { publisher, appKey, sharingKey, target } = setup(110)
+    const contentRef = randomBytes(32)
+    const created = await createActForContent(
+      target,
+      contentRef,
+      publisher.privateKey,
+      [sharingKey.publicKey],
+    )
+
+    await expect(
+      decryptActReference(
+        mockBee,
+        created.encryptedReference,
+        created.historyReference,
+        created.publisherPubKey,
+        [appKey.privateKey, sharingKey.privateKey],
+      ),
+    ).resolves.toBe(toHex(contentRef))
+
+    await expect(
+      decryptActReference(
+        mockBee,
+        created.encryptedReference,
+        created.historyReference,
+        created.publisherPubKey,
+        [appKey.privateKey],
+      ),
+    ).rejects.toThrow("Access denied")
+  })
+
+  it("adds, lists and revokes grantees with whichever candidate published the ACT", async () => {
+    const { publisher, appKey, sharingKey, target } = setup(120)
+    const newGrantee = createTestKeyPair(123)
+    const created = await createActForContent(
+      target,
+      randomBytes(32),
+      sharingKey.privateKey,
+      [publisher.publicKey],
+    )
+    const candidates = [appKey.privateKey, sharingKey.privateKey]
+
+    const added = await addGranteesToAct(
+      target,
+      mockBee,
+      created.historyReference,
+      candidates,
+      [newGrantee.publicKey],
+    )
+    await expect(
+      getGranteesFromAct(mockBee, added.historyReference, candidates),
+    ).resolves.toEqual([
+      publisher.compressedPublicKey,
+      newGrantee.compressedPublicKey,
+    ])
+
+    const revoked = await revokeGranteesFromAct(
+      target,
+      mockBee,
+      added.historyReference,
+      created.encryptedReference,
+      candidates,
+      [publisher.publicKey],
+    )
+    await expect(
+      getGranteesFromAct(mockBee, revoked.historyReference, candidates),
+    ).resolves.toEqual([newGrantee.compressedPublicKey])
+  })
+
+  it("refuses to manage an ACT none of the candidates published", async () => {
+    const { publisher, appKey, sharingKey, target } = setup(130)
+    const created = await createActForContent(
+      target,
+      randomBytes(32),
+      sharingKey.privateKey,
+      [publisher.publicKey],
+    )
+
+    await expect(
+      getGranteesFromAct(mockBee, created.historyReference, [
+        appKey.privateKey,
+      ]),
+    ).rejects.toThrow("Cannot find publisher entry")
+    await expect(
+      addGranteesToAct(
+        target,
+        mockBee,
+        created.historyReference,
+        [appKey.privateKey],
+        [appKey.publicKey],
+      ),
+    ).rejects.toThrow("Cannot find publisher entry")
+  })
+})

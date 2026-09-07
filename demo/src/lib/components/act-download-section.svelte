@@ -42,7 +42,7 @@
     error = undefined
     const ref = encryptedRef.trim()
     const hist = historyRef.trim()
-    const pub = publisherPubKey.trim()
+    const pub = publisherPubKey.trim().replace(/^0x/i, '')
 
     if (!ref || (ref.length !== REFERENCE_LENGTH && ref.length !== ENCRYPTED_REFERENCE_LENGTH)) {
       error = `Invalid encrypted reference (must be ${REFERENCE_LENGTH} or ${ENCRYPTED_REFERENCE_LENGTH} hex chars)`
