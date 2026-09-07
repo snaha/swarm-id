@@ -31,8 +31,9 @@
       <CardHeader>
         <CardTitle>Identity</CardTitle>
         <CardDescription>
-          Your identity on the trusted domain. The public key is derived from your master key and is
-          the same across all apps.
+          Your identity on the trusted domain. The address and public key identify the account. The
+          sharing key is the one other people grant access to, and it is the same in every app you
+          connect.
         </CardDescription>
       </CardHeader>
       <div class="px-6 pb-6 space-y-3 p-6">
@@ -192,6 +193,12 @@
                 </svg>
               {/if}
             </button>
+            <p class="text-xs text-muted-foreground mt-1">
+              Give this to anyone who wants to share with you. Data granted to it can be read from
+              every app connected to this account, not only this origin, so it works across dApps
+              and between the dev and production origins of one app. Publish with the checkbox on
+              the Access Control page to let any of your apps manage that data's grantees.
+            </p>
           </div>
         {/if}
       </div>
@@ -202,8 +209,8 @@
         <CardHeader>
           <CardTitle>App Key</CardTitle>
           <CardDescription>
-            Derived from your identity for this app's origin. Share the public key below when adding
-            grantees for Access Control (ACT) operations.
+            Derived from your identity for this app's origin. A grant to this public key is readable
+            in this app only; use the sharing key above to reach the person in every app.
           </CardDescription>
         </CardHeader>
         <div class="px-6 pb-6 space-y-3 p-6">
