@@ -112,7 +112,17 @@ jobs:
           echo "::group::queen logs"
           pnpm dev:cluster logs queen --tail 300 || true
           echo "::endgroup::"
+          # Started and stopped by the integration suite's globalSetup, so it is
+          # usually gone by now — worth asking anyway when the run died mid-suite.
+          echo "::group::subsidised gateway logs"
+          docker logs swarm-id-gateway-proxy --tail 200 2>&1 || true
+          echo "::endgroup::"
 
       - name: Stop Bee cluster
         if: always()
         run: pnpm dev:cluster stop || true
+
+      # The suite removes it on a clean run; this catches a crashed one.
+      - name: Stop the subsidised gateway
+        if: always()
+        run: docker rm -f swarm-id-gateway-proxy >/dev/null 2>&1 || true

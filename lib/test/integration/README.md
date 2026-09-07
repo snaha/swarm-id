@@ -46,6 +46,16 @@ every pull request touching `lib/**`, so these tests gate merges like any other.
   postage stamp before any test file runs and shares its batch id with every
   file via `provide`/`inject`. This makes the ~minute-long stamp warmup a
   one-time cost for the whole run instead of per file.
+- `gateway.ts` then starts upstream's `ethersphere/gateway-proxy` in front of
+  the same queen, stamping with that same batch, and stops it when the run
+  ends. That covers **subsidised mode** — the one upload path the library does
+  not stamp itself, where it POSTs bare chunks and SOCs and the gateway injects
+  `swarm-postage-batch-id`. Mocking that contract would only ever confirm our
+  own assumptions back to us, so the real server runs.
+
+  It needs nothing beyond Docker, which the cluster already requires. When the
+  container cannot start, the start is skipped with a warning and the
+  subsidised suites skip with it — the same shape as the no-cluster skip.
 
 ### Adding a new integration test file
 
@@ -72,11 +82,13 @@ independent and can run in any order against the shared node.
 ## Next steps
 
 Covered so far: plain and encrypted data round-trips (`round-trip.test.ts`),
-chunk-boundary sizes (`data-sizes.test.ts`), and large plain uploads read back
-through Bee's native `/bytes` as an interop proof (`large-plain-upload.test.ts`).
+chunk-boundary sizes (`data-sizes.test.ts`), large plain uploads read back
+through Bee's native `/bytes` as an interop proof (`large-plain-upload.test.ts`),
+and subsidised-gateway mode — plain, multi-chunk, and SOC
+(`subsidised-round-trip.test.ts`).
 
-Natural extensions: SOC, sequential/epoch feeds, ACT, manifests, and
-subsidised-gateway mode. These need network push and retrieval to work, which is
-why they waited on a multi-node cluster; `dev:cluster:start` has run queen + 3
-full workers with public reachability since bee-compose 0.1.4, so the original
-blocker is gone and the gap is just unwritten tests.
+Natural extensions: sequential/epoch feeds, ACT, and manifests. These need
+network push and retrieval to work, which is why they waited on a multi-node
+cluster; `dev:cluster:start` has run queen + 3 full workers with public
+reachability since bee-compose 0.1.4, so the original blocker is gone and the
+gap is just unwritten tests.
