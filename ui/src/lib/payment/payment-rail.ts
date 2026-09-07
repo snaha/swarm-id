@@ -383,7 +383,8 @@ export async function switchWalletChain(
   }
   const reported = await walletGenesisHash(provider)
   // Silence is not a mismatch: a wallet that will not answer is judged at pay
-  // time (`walletChainRefusal`), where mainnet and dev earn different verdicts.
+  // time by the rail that signs (`walletChainRefusal`, and the Relay rail's own
+  // check on a Gnosis source), where mainnet and dev earn different verdicts.
   if (reported === undefined || reported.toLowerCase() === expected.toLowerCase()) {
     return
   }

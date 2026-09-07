@@ -11,7 +11,7 @@ import { gnosisMainnetSettings } from '@swarm-id/multichain'
 import { gnosis } from 'viem/chains'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
-import { NATIVE_CURRENCY } from '$lib/payment/payment-rail'
+import { type EthereumProvider, NATIVE_CURRENCY } from '$lib/payment/payment-rail'
 
 import { PAYMENT_TOKENS, relayRail } from './relay'
 
@@ -38,7 +38,12 @@ vi.mock('@relayprotocol/relay-sdk', () => ({
 const TEN_MINUTES_MS = 600_000
 const THIRTY_SECONDS_MS = 30_000
 
-function pay(onStatus?: (status: string) => void) {
+function payFrom(
+  chainId: number,
+  currency: string,
+  provider: EthereumProvider,
+  onStatus?: (status: string) => void,
+) {
   return relayRail.execute({
     quote: {
       handle: {},
@@ -46,12 +51,17 @@ function pay(onStatus?: (status: string) => void) {
       amountUsd: '0.01',
       delivers: { input: 'xdai', amount: 0n },
     },
-    provider: { request: () => Promise.resolve(undefined) },
-    chainId: 8453,
-    currency: NATIVE_CURRENCY,
+    provider,
+    chainId,
+    currency,
     address: '0xpayer',
     onStatus,
   })
+}
+
+/** From Base, with a wallet that has nothing to say. */
+function pay(onStatus?: (status: string) => void) {
+  return payFrom(8453, NATIVE_CURRENCY, { request: () => Promise.resolve(undefined) }, onStatus)
 }
 
 describe('relay execute', () => {
@@ -162,6 +172,72 @@ describe('relay execute', () => {
       'Confirm the payment in your wallet',
       'Cross-swap xDAI on Relay',
     ])
+  })
+})
+
+/**
+ * Relay serves the real Gnosis and no other network by that id, and the chain
+ * id is all viem's wallet client asserts — 100 == 100 on a local chain wearing
+ * it. The dialog's own switch probes genesis, but skips itself when the wallet
+ * is recorded as already there, so the rail proves the chain itself before it
+ * signs, as the direct rail does on its path.
+ */
+describe('a Gnosis source', () => {
+  const GNOSIS_GENESIS = '0x4f1dd23188aab3a76b463e4af801b52b1248ef073c648cbdc4c9333d3da79756'
+  const OTHER_GENESIS = `0x${'ab'.repeat(32)}`
+  /** The one Gnosis token this rail carries; xDAI there goes to the direct rail. */
+  const USDC_E = PAYMENT_TOKENS[gnosis.id].find((token) => token.address !== NATIVE_CURRENCY)!
+
+  /** A wallet answering for `genesis`, or refusing the question; every request counted. */
+  function walletOn(genesis: string | undefined) {
+    const calls: string[] = []
+    const provider: EthereumProvider = {
+      request({ method }) {
+        calls.push(method)
+        if (method === 'eth_getBlockByNumber') {
+          return genesis === undefined
+            ? Promise.reject(new Error('the method eth_getBlockByNumber does not exist'))
+            : Promise.resolve({ hash: genesis })
+        }
+        return Promise.resolve(undefined)
+      },
+    }
+    return { provider, calls }
+  }
+
+  afterEach(() => {
+    execute.mockReset()
+    execute.mockImplementation(() => new Promise<void>(() => undefined))
+  })
+
+  it('signs nothing on a network that only wears Gnosis’s chain id', async () => {
+    execute.mockResolvedValue(undefined)
+    const { provider } = walletOn(OTHER_GENESIS)
+    await expect(payFrom(gnosis.id, USDC_E.address, provider)).rejects.toThrow(/real Gnosis Chain/)
+    expect(execute).not.toHaveBeenCalled()
+  })
+
+  it('pays once the wallet has proven it is on the real one', async () => {
+    execute.mockResolvedValue(undefined)
+    const { provider } = walletOn(GNOSIS_GENESIS)
+    await payFrom(gnosis.id, USDC_E.address, provider)
+    expect(execute).toHaveBeenCalledOnce()
+  })
+
+  /** As `walletChainRefusal` rules on mainnet: what silence risks is a deposit
+   * on a chain Relay never watches, and no real money moves on one. */
+  it('lets a wallet that would not say pay', async () => {
+    execute.mockResolvedValue(undefined)
+    const { provider } = walletOn(undefined)
+    await payFrom(gnosis.id, USDC_E.address, provider)
+    expect(execute).toHaveBeenCalledOnce()
+  })
+
+  it('asks no other source chain for its genesis', async () => {
+    execute.mockResolvedValue(undefined)
+    const { provider, calls } = walletOn(OTHER_GENESIS)
+    await payFrom(8453, NATIVE_CURRENCY, provider)
+    expect(calls).not.toContain('eth_getBlockByNumber')
   })
 })
 
