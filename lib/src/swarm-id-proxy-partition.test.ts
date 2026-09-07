@@ -184,6 +184,7 @@ import {
 } from "./utils/storage-managers"
 import { serializeAccountStateSnapshot } from "./utils/account-state-snapshot"
 import {
+  IframeToParentMessageSchema,
   STORAGE_CHALLENGE_KEY,
   STORAGE_KEY_ACCOUNTS,
   STORAGE_KEY_NETWORK_SETTINGS,
@@ -271,6 +272,16 @@ function makeSyncedAccount(): SyncedAccount {
 
 describe("SwarmIdProxy partitioned write enablement", () => {
   let parentWindow: { postMessage: ReturnType<typeof vi.fn> }
+  /**
+   * Messages the proxy posted that the client would refuse to parse. The wire
+   * is validated on ONE side only — `SwarmIdClient` parses what it receives,
+   * `sendToParent` parses nothing it sends — so a shape only the proxy can
+   * produce is dropped silently in the browser, and dropping the first
+   * `connectionInfoChanged` leaves the dApp's `initialize()` to time out. Every
+   * scenario in this file puts messages on that wire; each one is parsed here,
+   * so the drift fails a test rather than a deployment.
+   */
+  let unsendable: Array<{ message: unknown; error: unknown }>
   let messageListener: MessageListener
   let localStorageFake: Storage
   let proxy: SwarmIdProxy
@@ -325,7 +336,17 @@ describe("SwarmIdProxy partitioned write enablement", () => {
   beforeEach(() => {
     vi.restoreAllMocks()
 
-    parentWindow = { postMessage: vi.fn() }
+    unsendable = []
+    parentWindow = {
+      postMessage: vi.fn((message: unknown) => {
+        // `proxyInitialized` is the one message outside the union by design: it
+        // goes out on a wildcard origin before the parent has identified
+        // itself, and the client answers it ahead of its own schema parse.
+        if ((message as { type?: string })?.type === "proxyInitialized") return
+        const parsed = IframeToParentMessageSchema.safeParse(message)
+        if (!parsed.success) unsendable.push({ message, error: parsed.error })
+      }),
+    }
     localStorageFake = makeLocalStorage()
     mountProxy()
   })
@@ -334,6 +355,8 @@ describe("SwarmIdProxy partitioned write enablement", () => {
   // previous test's proxy keeps answering this test's bus traffic.
   afterEach(() => {
     proxy.destroy()
+    // Whatever the scenario above was about, it also put messages on the wire.
+    expect(unsendable).toEqual([])
   })
 
   /**
