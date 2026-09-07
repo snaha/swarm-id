@@ -14,7 +14,7 @@
  */
 
 import { z } from "zod"
-import { deriveSecret, hexToUint8Array } from "./key-derivation"
+import { deriveAesGcmKey } from "./key-derivation"
 import {
   serializeAccountStateSnapshot,
   deserializeAccountStateSnapshot,
@@ -72,16 +72,7 @@ export type ParseHeaderResult =
 export async function deriveBackupEncryptionKey(
   swarmEncryptionKeyHex: string,
 ): Promise<CryptoKey> {
-  const backupKeyHex = await deriveSecret(
-    swarmEncryptionKeyHex,
-    BACKUP_KEY_DERIVATION_CONTEXT,
-  )
-  const keyBytes = hexToUint8Array(backupKeyHex)
-
-  return crypto.subtle.importKey("raw", keyBytes, "AES-GCM", false, [
-    "encrypt",
-    "decrypt",
-  ])
+  return deriveAesGcmKey(swarmEncryptionKeyHex, BACKUP_KEY_DERIVATION_CONTEXT)
 }
 
 // ============================================================================
