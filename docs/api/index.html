@@ -465,6 +465,11 @@
 <td>Public key of the identity</td>
 </tr>
 <tr>
+<td><code dir="auto">identity.sharingPublicKey</code></td>
+<td><code dir="auto">string | undefined</code></td>
+<td>The account-wide ACT key: grant to it to share with this person in every app they use. See <a href="#which-key-do-i-grant-to">Which key do I grant to?</a></td>
+</tr>
+<tr>
 <td><code dir="auto">identity.avatar</code></td>
 <td><code dir="auto">Avatar</code></td>
 <td>Ready-to-render account avatar. See <a href="#avatars">Avatars</a></td>
@@ -2171,6 +2176,14 @@
 <hr>
 <div class="sl-heading-wrapper level-h2"><h2 id="act-methods">ACT Methods</h2><a class="sl-anchor-link" href="#act-methods"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 1 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 0 0-1.42-1.42m8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 1 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 0 0 0 1.42 1 1 0 0 0 1.42 0l3.88-3.89a4.49 4.49 0 0 0 0-6.33M8.83 15.17a1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.92-4.92a1 1 0 1 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42"></path></svg></span><span class="sr-only" data-pagefind-ignore>Section titled “ACT Methods”</span></a></div>
 <p>ACT (Access Control Tries) methods enable encrypted data sharing with specific grantees. Data is encrypted and only users with the appropriate public key can decrypt it.</p>
+<div class="sl-heading-wrapper level-h4"><h4 id="which-key-do-i-grant-to">Which key do I grant to?</h4><a class="sl-anchor-link" href="#which-key-do-i-grant-to"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 1 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 0 0-1.42-1.42m8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 1 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 0 0 0 1.42 1 1 0 0 0 1.42 0l3.88-3.89a4.49 4.49 0 0 0 0-6.33M8.83 15.17a1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.92-4.92a1 1 0 1 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42"></path></svg></span><span class="sr-only" data-pagefind-ignore>Section titled “Which key do I grant to?”</span></a></div>
+<p>A grantee is a compressed public key, and a SwarmID user has two of them:</p>
+<ul>
+<li><strong><code dir="auto">appKey.publicKey</code></strong> — that user in <strong>one app origin</strong>. It is derived from the origin, so a share made out to it cannot be read from another origin, not even a dev build of the same app.</li>
+<li><strong><code dir="auto">identity.sharingPublicKey</code></strong> — that user across <strong>every app they connect</strong>. Use it to share a drive or folder between two dApps, or between your dev and production origins.</li>
+</ul>
+<p>The proxy tries both of the reader’s keys on download, so nothing changes on the reading side. Trust consequence: anything granted to a sharing key can be read by every app that user connects — the person granting chooses which key to grant to.</p>
+<p>By default the ACT is published with the app key, and only that origin can add or revoke grantees afterwards. Pass <code dir="auto">publisher: "identity"</code> to <code dir="auto">actUploadData</code> to publish with the sharing key instead, so any of the user’s apps can manage the grantee list.</p>
 <div class="sl-heading-wrapper level-h3"><h3 id="actuploaddatadata-grantees-options-requestoptions"><code dir="auto">actUploadData(data, grantees, options?, requestOptions?)</code></h3><a class="sl-anchor-link" href="#actuploaddatadata-grantees-options-requestoptions"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 1 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 0 0-1.42-1.42m8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 1 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 0 0 0 1.42 1 1 0 0 0 1.42 0l3.88-3.89a4.49 4.49 0 0 0 0-6.33M8.83 15.17a1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.92-4.92a1 1 0 1 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42"></path></svg></span><span class="sr-only" data-pagefind-ignore>Section titled “actUploadData(data, grantees, options?, requestOptions?)”</span></a></div>
 <p>Uploads encrypted data to the Swarm network with access control for specific grantees.</p>
 <p>The data is encrypted using ACT (Access Control Tries) and can only be downloaded by users who have one of the grantee public keys.</p>
@@ -2226,6 +2239,12 @@
 <td><code dir="auto">(progress) =&gt; void</code></td>
 <td>No</td>
 <td>Callback for tracking upload progress</td>
+</tr>
+<tr>
+<td><code dir="auto">options.publisher</code></td>
+<td><code dir="auto">"app" | "identity"</code></td>
+<td>No</td>
+<td>Key that publishes: this origin’s app key (default) or the account-wide sharing key</td>
 </tr>
 <tr>
 <td><code dir="auto">requestOptions</code></td>
