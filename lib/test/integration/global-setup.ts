@@ -15,6 +15,7 @@
 
 import type { TestProject } from "vitest/node"
 import { isClusterReachable, buyUsableStamp } from "./cluster"
+import { GATEWAY_URL, startGatewayProxy } from "./gateway"
 
 export default async function setup({ provide }: TestProject) {
   if (!(await isClusterReachable())) {
@@ -30,6 +31,23 @@ export default async function setup({ provide }: TestProject) {
   const batchId = await buyUsableStamp()
   console.log(`[cluster] Using batch ${batchId}`)
   provide("clusterBatchId", batchId)
+
+  // Subsidised mode uploads to a gateway that stamps for it, so covering it
+  // needs a real one in front of the same queen. Started here rather than from
+  // a CI step so the suite brings up everything it needs on its own, and skips
+  // cleanly where Docker cannot.
+  const gateway = await startGatewayProxy(batchId)
+  if (gateway) {
+    console.log(`[gateway] Subsidised gateway ready at ${GATEWAY_URL}`)
+  } else {
+    console.warn(
+      "[gateway] No subsidised gateway — those suites will be skipped.",
+    )
+  }
+
+  return async () => {
+    await gateway?.stop()
+  }
 }
 
 declare module "vitest" {
