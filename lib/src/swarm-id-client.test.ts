@@ -4,7 +4,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest"
 import { SwarmIdClient } from "./swarm-id-client"
 import { generatedAvatar } from "./utils/avatar"
-import * as browser from "./utils/browser"
 
 describe("SwarmIdClient connect()", () => {
   let client: SwarmIdClient
@@ -59,7 +58,6 @@ describe("SwarmIdClient connect()", () => {
   describe("shared storage", () => {
     it("opens the popup from the parent, keeping the user gesture", async () => {
       vi.spyOn(client, "ensureReady").mockImplementation(() => {})
-      vi.spyOn(browser, "isWebKit").mockReturnValue(true)
       setStorageShared(true)
       const sendRequestSpy = vi.spyOn(client as never, "sendRequest")
 
@@ -91,7 +89,6 @@ describe("SwarmIdClient connect()", () => {
       "delegates to the proxy when storageShared is %s",
       async (storageShared) => {
         vi.spyOn(client, "ensureReady").mockImplementation(() => {})
-        vi.spyOn(browser, "isWebKit").mockReturnValue(false)
         setStorageShared(storageShared)
         const sendRequestSpy = vi
           .spyOn(client as never, "sendRequest")

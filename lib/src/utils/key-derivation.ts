@@ -70,6 +70,29 @@ export async function generateMasterKey(): Promise<string> {
 export { hexToUint8Array, uint8ArrayToHex } from "./hex"
 
 /**
+ * Derive an AES-GCM-256 key from `secretHex` under `context`.
+ *
+ * The three steps — HMAC to a fresh secret, hex to bytes, import as AES-GCM —
+ * are one pipeline with two callers that differ only in their context string:
+ * the account backup (`deriveBackupEncryptionKey`) and the bus envelope
+ * (`deriveBusContext`). Non-extractable and encrypt/decrypt only, which is the
+ * part worth stating once rather than twice (#590).
+ */
+export async function deriveAesGcmKey(
+  secretHex: string,
+  context: string,
+): Promise<CryptoKey> {
+  const keyHex = await deriveSecret(secretHex, context)
+  return crypto.subtle.importKey(
+    "raw",
+    hexToUint8Array(keyHex),
+    "AES-GCM",
+    false,
+    ["encrypt", "decrypt"],
+  )
+}
+
+/**
  * Verify that a derived secret matches the expected value
  *
  * Useful for testing.

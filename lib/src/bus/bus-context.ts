@@ -11,8 +11,7 @@
  * account's `derivationKey`.
  */
 
-import { deriveSecret } from "../utils/key-derivation"
-import { hexToUint8Array } from "../utils/hex"
+import { deriveAesGcmKey, deriveSecret } from "../utils/key-derivation"
 
 const BUS_TOPIC_CONTEXT = "swarm-id/account-bus/topic/v1"
 const BUS_ENCRYPTION_CONTEXT = "swarm-id/account-bus/encryption/v1"
@@ -28,13 +27,9 @@ export async function deriveBusContext(
   derivationKey: string,
 ): Promise<BusContext> {
   const topic = await deriveSecret(derivationKey, BUS_TOPIC_CONTEXT)
-  const keyHex = await deriveSecret(derivationKey, BUS_ENCRYPTION_CONTEXT)
-  const encryptionKey = await crypto.subtle.importKey(
-    "raw",
-    hexToUint8Array(keyHex),
-    "AES-GCM",
-    false,
-    ["encrypt", "decrypt"],
+  const encryptionKey = await deriveAesGcmKey(
+    derivationKey,
+    BUS_ENCRYPTION_CONTEXT,
   )
   return { topic, encryptionKey }
 }
