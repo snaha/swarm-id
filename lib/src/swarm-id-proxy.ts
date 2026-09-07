@@ -3307,14 +3307,30 @@ export class SwarmIdProxy {
   /**
    * Check if subsidised upload mode is active.
    * Subsidised mode is active when:
-   * - User has no postage stamp OR no signer key — partitioning is not one of
-   *   the causes: the connect popup hands the stamps over, so a partitioned
-   *   session resolves its own like any other
+   * - There is no USABLE user stamp — no batch id, no signer key, no stamper
+   *   built from them, or a stamp the session refuses (`stampRefusal`: the
+   *   drive has expired, or its record says the node cannot use it).
+   *   Partitioning is not one of the causes: the connect popup hands the
+   *   stamps over, so a partitioned session resolves its own like any other
    * - AND a subsidised gateway URL is configured
+   *
+   * This is the rule `buildConnectionInfo` reports `uploadMode` by, term for
+   * term, and the two have to stay that way: that one decides what the dApp
+   * is told, this one where the bytes go. A resolved stamp with no stamper is
+   * a state the proxy really reaches: `initializeStamper` logs and returns
+   * rather than throwing, and the stamp is set before an init's first await.
+   * Either way no coordinator has been built for this stamp, and the dApp is
+   * told `subsidised, canUpload: true`; without the stamper term an upload
+   * would take the user-stamp branch of `withModeAwareWriteLock` instead of
+   * the gateway it was promised, and with no coordinator there throw "Stamper
+   * not initialized".
    */
   private isSubsidisedModeActive(): boolean {
     return (
-      (!this.postageBatchId || !this.signerKey || !!this.stampRefusal) &&
+      (!this.postageBatchId ||
+        !this.signerKey ||
+        !this.stamper ||
+        !!this.stampRefusal) &&
       !!this.subsidisedGatewayUrl
     )
   }

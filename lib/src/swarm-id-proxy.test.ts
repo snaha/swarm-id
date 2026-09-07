@@ -26,6 +26,7 @@ import { deriveSecret } from "./utils/key-derivation"
 import { uint8ArrayToHex } from "./utils/hex"
 import { STORAGE_KEY_NETWORK_SETTINGS } from "./types"
 import type { ButtonConfig } from "./types"
+import type { StampLifetimeFields } from "./utils/stamp-lifespan"
 
 /**
  * A view of the proxy that admits to the private members these tests drive.
@@ -40,6 +41,22 @@ type ProxyInternals = {
   ) => Promise<void>
   authenticated: boolean
   appSecret: string
+  postageBatchId?: string
+  signerKey?: string
+  stamper?: unknown
+  stampLifetime?: StampLifetimeFields
+  buildConnectionInfo: () => {
+    canUpload: boolean
+    uploadMode: string
+    uploadUnavailableReason?: string
+  }
+  ensureCanUpload: () => void
+  withModeAwareWriteLock: <T>(
+    targetOptions: undefined,
+    operation: (target: unknown) => Promise<T>,
+  ) => Promise<T>
+  initializeStamper: (stampDepth: number) => Promise<void>
+  lookupAccountForApp: () => Promise<unknown>
 }
 
 const internals = (p: SwarmIdProxy): ProxyInternals =>
@@ -416,5 +433,362 @@ describe("SwarmIdProxy auth button typography (#779)", () => {
     // Deliberately unset rather than `inherit`: inheriting would pick up the
     // IFRAME's font, which is no closer to the embedding page.
     expect(style.fontFamily).toBeUndefined()
+  })
+})
+
+describe("SwarmIdProxy subsidised-mode selection", () => {
+  const GATEWAY_URL = "https://gateway.example.com/"
+  const CUSTOM_BEE_URL = "https://custom-node.example.com/"
+  const APP_SECRET_HEX = "11".repeat(32)
+  const BATCH_ID = "22".repeat(32)
+  const SIGNER_KEY = "33".repeat(32)
+  const STAMP_DEPTH = 17
+  /** A TTL measured twice its own length ago: it has run out. */
+  const EXPIRED_TTL_SECONDS = 60
+  const MEASURED_AGO_MS = 120_000
+
+  /**
+   * The two stored records the session refuses to stamp with even once the
+   * stamper has built from them — the refusal is read off the record.
+   */
+  const REFUSED_DRIVES = [
+    {
+      reason: "stamp-expired",
+      lifetime: (): StampLifetimeFields => ({
+        batchTTL: EXPIRED_TTL_SECONDS,
+        createdAt: Date.now() - MEASURED_AGO_MS,
+      }),
+    },
+    {
+      reason: "stamp-not-usable",
+      lifetime: (): StampLifetimeFields => ({
+        createdAt: Date.now(),
+        usable: false,
+      }),
+    },
+  ]
+
+  const BeeMock = vi.mocked(Bee)
+
+  let proxy: SwarmIdProxy
+  let parentWindow: { postMessage: ReturnType<typeof vi.fn> }
+  let messageListener: MessageListener
+  let storageListeners: Array<(event: StorageEvent) => void>
+  let store: Map<string, string>
+  let localStorageFake: Storage
+
+  const setNetworkSettings = (beeNodeUrl: string) =>
+    store.set(
+      STORAGE_KEY_NETWORK_SETTINGS,
+      JSON.stringify({ beeNodeUrl, gnosisRpcUrl: "https://rpc.example.com/" }),
+    )
+
+  const fireStorage = (key: string) =>
+    storageListeners.forEach((listener) => listener({ key } as StorageEvent))
+
+  function mountProxy(): void {
+    const listeners: Record<string, unknown> = {}
+    vi.stubGlobal("window", {
+      addEventListener: vi.fn((type: string, listener: unknown) => {
+        if (type === "storage") {
+          storageListeners.push(listener as (event: StorageEvent) => void)
+        }
+        listeners[type] = listener
+      }),
+      removeEventListener: vi.fn(),
+      dispatchEvent: vi.fn(),
+      parent: parentWindow,
+      location: { origin: "https://id.example.com", pathname: "/proxy" },
+      localStorage: localStorageFake,
+    })
+    proxy = new SwarmIdProxy()
+    messageListener = listeners["message"] as MessageListener
+  }
+
+  /** Bind the parent, optionally handing the proxy a subsidised gateway. */
+  const identify = (subsidisedGatewayUrl?: string) =>
+    messageListener({
+      data: {
+        type: "parentIdentify",
+        requestId: "r1",
+        metadata: { name: "Test App" },
+        subsidisedGatewayUrl,
+      },
+      origin: PARENT_ORIGIN,
+      source: parentWindow,
+    } as unknown as MessageEvent)
+
+  /**
+   * Put the proxy in the state a given account leaves it in. `stamper` is the
+   * one that is not a straight consequence of the others: `initializeStamper`
+   * logs and returns rather than throwing, so a resolved stamp with no stamper
+   * is a state the proxy really reaches.
+   */
+  function setAccountState(state: {
+    postageBatchId?: string
+    signerKey?: string
+    stamper?: boolean
+    stampLifetime?: StampLifetimeFields
+  }): void {
+    internals(proxy).authenticated = true
+    internals(proxy).appSecret = APP_SECRET_HEX
+    internals(proxy).postageBatchId = state.postageBatchId
+    internals(proxy).signerKey = state.signerKey
+    internals(proxy).stamper = state.stamper ? { mock: "stamper" } : undefined
+    internals(proxy).stampLifetime = state.stampLifetime
+  }
+
+  const connectionInfo = () => internals(proxy).buildConnectionInfo()
+
+  /**
+   * The target an upload would actually be executed against, through the
+   * same two gates every upload handler passes: the refusal check, then the
+   * mode-aware write.
+   */
+  const uploadTarget = async () => {
+    internals(proxy).ensureCanUpload()
+    return internals(proxy).withModeAwareWriteLock(
+      undefined,
+      async (target) => target,
+    )
+  }
+
+  beforeEach(() => {
+    vi.restoreAllMocks()
+    BeeMock.mockClear()
+
+    store = new Map()
+    localStorageFake = {
+      getItem: (key: string) => store.get(key) ?? null,
+      setItem: (key: string, value: string) => store.set(key, value),
+      removeItem: (key: string) => store.delete(key),
+    } as unknown as Storage
+    vi.stubGlobal("localStorage", localStorageFake)
+
+    storageListeners = []
+    parentWindow = { postMessage: vi.fn() }
+    mountProxy()
+  })
+
+  describe("which mode the dApp is told it is in", () => {
+    it("is subsidised when the account has no stamp and a gateway was given", async () => {
+      await identify(GATEWAY_URL)
+      setAccountState({})
+
+      expect(connectionInfo()).toMatchObject({
+        canUpload: true,
+        uploadMode: "subsidised",
+        uploadUnavailableReason: undefined,
+      })
+    })
+
+    // The gateway is a fallback, not a preference: a user who can pay for their
+    // own upload does.
+    it("is user-stamp when the account can stamp for itself", async () => {
+      await identify(GATEWAY_URL)
+      setAccountState({
+        postageBatchId: BATCH_ID,
+        signerKey: SIGNER_KEY,
+        stamper: true,
+      })
+
+      expect(connectionInfo()).toMatchObject({
+        canUpload: true,
+        uploadMode: "user-stamp",
+      })
+    })
+
+    it("is unavailable, no-stamp, with neither a stamp nor a gateway", async () => {
+      await identify()
+      setAccountState({})
+
+      expect(connectionInfo()).toMatchObject({
+        canUpload: false,
+        uploadMode: "unavailable",
+        uploadUnavailableReason: "no-stamp",
+      })
+    })
+
+    it("is unavailable, stamper-failed, when nothing can cover a failed stamper", async () => {
+      await identify()
+      setAccountState({ postageBatchId: BATCH_ID, signerKey: SIGNER_KEY })
+
+      expect(connectionInfo()).toMatchObject({
+        canUpload: false,
+        uploadMode: "unavailable",
+        uploadUnavailableReason: "stamper-failed",
+      })
+    })
+  })
+
+  // What the dApp is told and where the bytes go have to be the same answer.
+  // `buildConnectionInfo` decides the first and `isSubsidisedModeActive` the
+  // second; a stamp counts as usable only with a built stamper and no refusal,
+  // and a term one of them misses reports `subsidised, canUpload: true` for a
+  // session whose uploads then take the user-stamp branch and fail there.
+  describe("where the upload actually goes", () => {
+    it("routes to the gateway in subsidised mode", async () => {
+      await identify(GATEWAY_URL)
+      setAccountState({})
+
+      await expect(uploadTarget()).resolves.toEqual({
+        mode: "subsidised",
+        gatewayUrl: GATEWAY_URL,
+      })
+    })
+
+    it("routes a failed stamper to the gateway, as the dApp was told", async () => {
+      await identify(GATEWAY_URL)
+      setAccountState({ postageBatchId: BATCH_ID, signerKey: SIGNER_KEY })
+
+      expect(connectionInfo().uploadMode).toBe("subsidised")
+      await expect(uploadTarget()).resolves.toEqual({
+        mode: "subsidised",
+        gatewayUrl: GATEWAY_URL,
+      })
+    })
+
+    it("refuses rather than silently subsidising when no gateway was given", async () => {
+      await identify()
+      setAccountState({ postageBatchId: BATCH_ID, signerKey: SIGNER_KEY })
+
+      await expect(uploadTarget()).rejects.toMatchObject({
+        code: "not-authenticated",
+        message: expect.stringContaining("Stamper not initialized"),
+      })
+    })
+
+    // `initializeStamper` awaits the account lookup before it builds anything,
+    // and the stamp is already set while it does: the window in which an
+    // upload sees a stamp and no stamper.
+    it("routes to the gateway while the stamper is still being built, and after it fails", async () => {
+      await identify(GATEWAY_URL)
+      setAccountState({ postageBatchId: BATCH_ID, signerKey: SIGNER_KEY })
+      let finishLookup: ((account: undefined) => void) | undefined
+      vi.spyOn(internals(proxy), "lookupAccountForApp").mockImplementation(
+        () =>
+          new Promise((resolve) => {
+            finishLookup = resolve
+          }),
+      )
+
+      const init = internals(proxy).initializeStamper(STAMP_DEPTH)
+      await vi.waitFor(() => expect(finishLookup).toBeDefined())
+
+      expect(connectionInfo().uploadMode).toBe("subsidised")
+      await expect(uploadTarget()).resolves.toEqual({
+        mode: "subsidised",
+        gatewayUrl: GATEWAY_URL,
+      })
+
+      // The lookup finds no account, so the init gives up without a stamper.
+      finishLookup!(undefined)
+      await init
+
+      expect(internals(proxy).stamper).toBeUndefined()
+      expect(connectionInfo().uploadMode).toBe("subsidised")
+      await expect(uploadTarget()).resolves.toEqual({
+        mode: "subsidised",
+        gatewayUrl: GATEWAY_URL,
+      })
+    })
+  })
+
+  // An expired drive, or one whose record says the node cannot use it, still
+  // resolves and still builds a stamper. The gateway is the fallback for it
+  // as for no stamp at all; without one, the refusal is what the dApp hears.
+  describe.each(REFUSED_DRIVES)(
+    "a drive refused as $reason",
+    ({ reason, lifetime }) => {
+      it("falls back to the gateway, in what the dApp is told and where the upload goes", async () => {
+        await identify(GATEWAY_URL)
+        setAccountState({
+          postageBatchId: BATCH_ID,
+          signerKey: SIGNER_KEY,
+          stamper: true,
+          stampLifetime: lifetime(),
+        })
+
+        expect(connectionInfo()).toMatchObject({
+          canUpload: true,
+          uploadMode: "subsidised",
+          uploadUnavailableReason: undefined,
+        })
+        await expect(uploadTarget()).resolves.toEqual({
+          mode: "subsidised",
+          gatewayUrl: GATEWAY_URL,
+        })
+      })
+
+      it("is refused with that reason when there is no gateway", async () => {
+        await identify()
+        setAccountState({
+          postageBatchId: BATCH_ID,
+          signerKey: SIGNER_KEY,
+          stamper: true,
+          stampLifetime: lifetime(),
+        })
+
+        expect(connectionInfo()).toMatchObject({
+          canUpload: false,
+          uploadMode: "unavailable",
+          uploadUnavailableReason: reason,
+        })
+        await expect(uploadTarget()).rejects.toMatchObject({
+          code: "upload-unavailable",
+          reason,
+        })
+      })
+    },
+  )
+
+  describe("a custom Bee node drops the dApp's gateway", () => {
+    it("drops it at parentIdentify when the node is already custom", async () => {
+      setNetworkSettings(CUSTOM_BEE_URL)
+      fireStorage(STORAGE_KEY_NETWORK_SETTINGS)
+
+      await identify(GATEWAY_URL)
+      setAccountState({})
+
+      expect(connectionInfo()).toMatchObject({
+        canUpload: false,
+        uploadMode: "unavailable",
+      })
+    })
+
+    it("drops it mid-session when the node changes", async () => {
+      await identify(GATEWAY_URL)
+      setAccountState({})
+      expect(connectionInfo().uploadMode).toBe("subsidised")
+
+      setNetworkSettings(CUSTOM_BEE_URL)
+      fireStorage(STORAGE_KEY_NETWORK_SETTINGS)
+
+      expect(connectionInfo().uploadMode).toBe("unavailable")
+      expect(BeeMock).toHaveBeenLastCalledWith(CUSTOM_BEE_URL)
+    })
+
+    // Documented one-way door: going back to the default node does NOT bring
+    // the gateway back — that needs a fresh parentIdentify (a dApp reload).
+    it("does not bring it back when the node returns to the default", async () => {
+      await identify(GATEWAY_URL)
+      setAccountState({})
+      setNetworkSettings(CUSTOM_BEE_URL)
+      fireStorage(STORAGE_KEY_NETWORK_SETTINGS)
+
+      setNetworkSettings(DEFAULT_BEE_NODE_URL)
+      fireStorage(STORAGE_KEY_NETWORK_SETTINGS)
+
+      expect(connectionInfo().uploadMode).toBe("unavailable")
+      expect(BeeMock).toHaveBeenLastCalledWith(DEFAULT_BEE_NODE_URL)
+    })
+  })
+
+  // Downloads have to come from the same place the uploads went, or a dApp
+  // reads back a 404 for the chunk it just wrote.
+  it("points the Bee client at the gateway in subsidised mode", async () => {
+    await identify(GATEWAY_URL)
+
+    expect(BeeMock).toHaveBeenLastCalledWith(GATEWAY_URL)
   })
 })
