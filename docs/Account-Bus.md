@@ -329,9 +329,8 @@ Each landed as its own PR chain, in this order:
    reach them only after they had all begun releasing too. `lease-released` still carries
    the `requestId` and also stands holders down, covering a missed claim. If the winner then
    declines (an upload slipped in), the round goes unanswered and the next one draws a fresh
-   id. `requestId` is optional on the wire — a peer on an older bundle is answered the way
-   it always was — but a present one must be `^[0-9a-f]{8}$`, since it is parsed straight
-   into the rank seed.
+   id. `requestId` is required on the wire and must be `^[0-9a-f]{8}$`, since it is parsed
+   straight into the rank seed; a request without one is dropped at parse.
 
    The waiter's wake is **sticky for one round** (#582): the answer usually lands during the
    `acquire()` at the top of the poll loop — it is a reply to the request that loop
