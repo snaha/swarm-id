@@ -10,6 +10,7 @@ import { chainFromSettings, publicClientFor, walletClientFor } from "./chain"
 import { getGasPrice, getTransactionCount, getTransactionReceipt } from "./rpc"
 import type { MultichainSettings } from "./settings"
 import { withFeeTooLowRetry } from "./write-retry"
+import { withGasMargin } from "./gas"
 
 /**
  * Estimated per call, with the same quarter margin the swap uses. The widget's
@@ -20,12 +21,6 @@ import { withFeeTooLowRetry } from "./write-retry"
  * An estimate also fails BEFORE sending when the call would revert, with the
  * contract's reason instead of a silent receipt.
  */
-const GAS_BUFFER_NUMERATOR = 5n
-const GAS_BUFFER_DENOMINATOR = 4n
-
-function withGasMargin(estimate: bigint): bigint {
-  return (estimate * GAS_BUFFER_NUMERATOR) / GAS_BUFFER_DENOMINATOR
-}
 
 export interface CreateBatchOptions {
   originPrivateKey: `0x${string}`
@@ -38,6 +33,11 @@ export interface CreateBatchOptions {
   /** 32-byte hex nonce; batchId = keccak256(sender, nonce). */
   batchNonce: `0x${string}`
   immutable: boolean
+  /**
+   * Explicit nonce for chaining sends. The gas estimate still simulates
+   * against latest state, so a send that needs an earlier one mined (an
+   * approval, say) reverts at estimation if pipelined — await it instead.
+   */
   nonce?: number
 }
 
@@ -66,6 +66,10 @@ export async function createBatch(
     options.batchNonce,
     options.immutable,
   ] as const
+  // Estimated once, outside the retry: a revert surfaces here with the
+  // contract's reason instead of being retried, and the estimate is not
+  // refreshed across FeeTooLow attempts (price and nonce are) — with at most
+  // a few attempts seconds apart the 25% margin covers any drift.
   const gas = withGasMargin(
     await publicClientFor(settings, rpcProvider).estimateContractGas({
       account,
@@ -127,6 +131,11 @@ export interface TopUpBatchOptions {
    * approved the PostageStamp contract for at least that.
    */
   amountPerChunk: bigint
+  /**
+   * Explicit nonce for chaining sends. The gas estimate still simulates
+   * against latest state, so a send that needs an earlier one mined (an
+   * approval, say) reverts at estimation if pipelined — await it instead.
+   */
   nonce?: number
 }
 
@@ -174,6 +183,11 @@ export interface IncreaseDepthOptions {
   originPrivateKey: `0x${string}`
   batchId: `0x${string}`
   newDepth: number
+  /**
+   * Explicit nonce for chaining sends. The gas estimate still simulates
+   * against latest state, so a send that needs an earlier one mined (an
+   * approval, say) reverts at estimation if pipelined — await it instead.
+   */
   nonce?: number
 }
 
