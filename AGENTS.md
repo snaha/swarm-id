@@ -90,9 +90,9 @@ package's own `check:all` in order:
 - **`@snaha/swarm-id`**, **`@swarm-id/multichain`**, **`@swarm-id/signaling`**: `format:check`, `lint`, `typecheck`, `test`
 - **`@swarm-id/ui`**, **`@swarm-id/demo`**: `lint` (includes license headers), `check`, `knip`, `test`
 
-Chain-backed suites are NOT in `check:all` — they need a chain running, and skip themselves
-without one: `pnpm test:fork` (needs `pnpm dev:chain:detach`) and
-`pnpm --filter @swarm-id/ui test:e2e` (needs `pnpm dev:local`).
+Chain-backed suites are NOT in `check:all` — they need a chain running. `pnpm test:fork` (needs
+`pnpm dev:chain:detach`) fails without one, naming the command; `pnpm --filter @swarm-id/ui test:e2e`
+(needs `pnpm dev:local`) runs its chain-free tests anyway and skips the chain-backed ones.
 
 ## Code Style
 
