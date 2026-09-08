@@ -3,7 +3,7 @@
 
 /**
  * Interop tests pinning the plain (unencrypted) upload path to Bee's
- * canonical Merkle layout, with bee-js's `MerkleTree` as the oracle.
+ * canonical Merkle layout, with core-sdk's `ChunkSplitter` as the oracle.
  *
  * Canonical facts these tests encode (independent of the code under test):
  * - An intermediate chunk is 4096 bytes of refs. Plain refs are 32 bytes,
