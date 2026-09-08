@@ -187,17 +187,15 @@ function attachBus(
     clearTimeout(timer)
     pending.delete(requestId)
   }
-  const answer = (requestId?: string): void => {
-    if (requestId !== undefined) {
-      if (answered.has(requestId)) return
-      answered.add(requestId)
-      bus.publish({
-        type: 'lease-claim',
-        accountId,
-        fromDeviceId: device.id,
-        requestId,
-      })
-    }
+  const answer = (requestId: string): void => {
+    if (answered.has(requestId)) return
+    answered.add(requestId)
+    bus.publish({
+      type: 'lease-claim',
+      accountId,
+      fromDeviceId: device.id,
+      requestId,
+    })
     device.coordinator
       .yieldForPeer()
       .then((partition) => {
@@ -224,10 +222,6 @@ function attachBus(
     switch (message.type) {
       case 'lease-request': {
         const { requestId } = message
-        if (requestId === undefined) {
-          answer()
-          return
-        }
         if (pending.has(requestId) || answered.has(requestId)) return
         if (!device.coordinator.canYieldForPeer) return
         pending.set(

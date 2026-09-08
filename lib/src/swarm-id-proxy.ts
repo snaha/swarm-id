@@ -1331,26 +1331,24 @@ export class SwarmIdProxy {
   private answerLeaseRequest(
     accountId: string,
     batchId: string,
-    requestId?: string,
+    requestId: string,
   ): void {
     const coordinator = this.coordinator
     if (!coordinator) return
-    if (requestId !== undefined) {
-      // Once the rank timer fires its handle is gone from `pendingYields`, so
-      // the answered-id memory is what keeps a round from being answered twice
-      // from here on. The claim below goes out in this same tick, so nothing
-      // can slip between the two — the guard is what keeps that true if a
-      // caller ever gets here after an await.
-      if (this.answeredRequests.has(requestId)) return
-      this.markRequestAnswered(requestId)
-      this.bus.publish({
-        type: "lease-claim",
-        accountId,
-        batchId,
-        fromDeviceId: this.requireDeviceId(),
-        requestId,
-      })
-    }
+    // Once the rank timer fires its handle is gone from `pendingYields`, so
+    // the answered-id memory is what keeps a round from being answered twice
+    // from here on. The claim below goes out in this same tick, so nothing
+    // can slip between the two — the guard is what keeps that true if a
+    // caller ever gets here after an await.
+    if (this.answeredRequests.has(requestId)) return
+    this.markRequestAnswered(requestId)
+    this.bus.publish({
+      type: "lease-claim",
+      accountId,
+      batchId,
+      fromDeviceId: this.requireDeviceId(),
+      requestId,
+    })
     coordinator
       .yieldForPeer()
       .then((partition) => {
@@ -1511,12 +1509,6 @@ export class SwarmIdProxy {
             return
           }
           const { requestId } = message
-          if (requestId === undefined) {
-            // A peer on an older bundle: no rank order to join, so answer as
-            // we always did rather than leaving it unserved.
-            this.answerLeaseRequest(message.accountId, message.batchId)
-            return
-          }
           // Idempotent per request: the same message reaches us over every
           // attached transport, and the waiter re-broadcasts each round.
           if (this.pendingYields.has(requestId)) return

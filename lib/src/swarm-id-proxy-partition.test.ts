@@ -672,6 +672,7 @@ describe("SwarmIdProxy partitioned write enablement", () => {
         accountId: "aa".repeat(20),
         batchId: BATCH_ID_HEX,
         fromDeviceId: "peer-device",
+        requestId: "00000000",
       })
       await vi.waitFor(() =>
         expect(coordinator.yieldForPeer).toHaveBeenCalledTimes(1),
@@ -740,7 +741,7 @@ describe("SwarmIdProxy partitioned write enablement", () => {
       return coordinator
     }
 
-    function postRequest(channel: BroadcastChannel, requestId?: string): void {
+    function postRequest(channel: BroadcastChannel, requestId: string): void {
       channel.postMessage({
         type: "lease-request",
         accountId: ACCOUNT_ID,
@@ -758,6 +759,17 @@ describe("SwarmIdProxy partitioned write enablement", () => {
       })
       return seen
     }
+
+    it("drops a lease-request that carries no id at parse", () => {
+      // Every holder takes a rank; there is no unranked answer any more.
+      const result = BusMessageSchema.safeParse({
+        type: "lease-request",
+        accountId: ACCOUNT_ID,
+        batchId: BATCH_ID_HEX,
+        fromDeviceId: "peer-device",
+      })
+      expect(result.success).toBe(false)
+    })
 
     it("answers immediately at rank 0", async () => {
       const coordinator = await hydrateHolder(0)
@@ -989,12 +1001,14 @@ describe("SwarmIdProxy partitioned write enablement", () => {
         accountId: "aa".repeat(20),
         batchId: BATCH_ID_HEX,
         fromDeviceId: ownDeviceId,
+        requestId: "00000000",
       })
       busChannel.postMessage({
         type: "lease-request",
         accountId: "bb".repeat(20),
         batchId: BATCH_ID_HEX,
         fromDeviceId: "peer-device",
+        requestId: "00000000",
       })
       busChannel.postMessage({
         type: "lease-released",
@@ -1013,6 +1027,7 @@ describe("SwarmIdProxy partitioned write enablement", () => {
         accountId: "aa".repeat(20),
         batchId: "dd".repeat(32),
         fromDeviceId: "peer-device",
+        requestId: "00000000",
       })
       busChannel.postMessage({
         type: "lease-released",
@@ -1028,6 +1043,7 @@ describe("SwarmIdProxy partitioned write enablement", () => {
         accountId: "aa".repeat(20),
         batchId: BATCH_ID_HEX,
         fromDeviceId: "peer-device",
+        requestId: "00000000",
       })
       await vi.waitFor(() =>
         expect(coordinator.yieldForPeer).toHaveBeenCalledTimes(1),

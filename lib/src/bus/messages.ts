@@ -74,8 +74,6 @@ const LeaseRequestIdSchema = z.string().regex(/^[0-9a-f]{8}$/)
  * `requestId` is 8 hex chars, fresh per poll round, and exists so exactly one
  * holder answers: each derives the same permutation of the partitions from it
  * and yields at its own rank (`swarm-id-proxy.ts`, `yieldRankDelayMs`). It is
- * optional so a peer on an older bundle still gets served — its request is
- * answered by every idle holder, as it was before — but a present one is
  * format-checked: the rank is `parseInt(requestId, 16)`, so an unconstrained
  * string reintroduces the very bug this fixes (`NaN` or a negative collapses
  * every holder onto the same rank), silently and with nothing to diagnose.
@@ -85,7 +83,7 @@ export const LeaseRequestMessageSchema = z.object({
   accountId: z.string().length(40),
   batchId: z.string().length(64),
   fromDeviceId: DeviceIdSchema,
-  requestId: LeaseRequestIdSchema.optional(),
+  requestId: LeaseRequestIdSchema,
 })
 
 /**
