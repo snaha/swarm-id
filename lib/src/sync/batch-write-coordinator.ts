@@ -52,7 +52,11 @@ import type {
   LeaseRefreshOutcome,
   PartitionLeaseStateSnapshot,
 } from "./partition-lease"
-import { readPartitionLock, NO_HOLDER_DEVICE_ID } from "./partition-lock"
+import {
+  compareGenerations,
+  readPartitionLock,
+  NO_HOLDER_DEVICE_ID,
+} from "./partition-lock"
 import { STATE_POINTER_EPOCH_MS } from "./partition-state"
 import type { UploadTarget } from "../proxy/upload"
 import type { StampWorkerPool } from "../proxy/stamp-worker-pool"
@@ -400,15 +404,35 @@ export class BatchWriteCoordinator {
    * `teardown()` for a page that is unloading (#676). Nothing asynchronous
    * runs again, so the lease is either released with the one send a dying
    * page can still make (`PartitionLease.releaseOnUnload`) or, when a sibling
-   * context of this device holds the same lease, abandoned to it — a sentinel
-   * under a live sibling would fail its in-flight upload. Neither schedules
-   * the awaited release: a page restored from the back/forward cache would
-   * resume it against a lock a sibling still holds.
+   * context of this device re-acquired it, abandoned to that sibling — a
+   * sentinel under it would fail its in-flight upload. Neither schedules the
+   * awaited release: a page restored from the back/forward cache would resume
+   * it against a lock the sibling still holds.
    */
-  teardownOnUnload(release: boolean): void {
+  teardownOnUnload(): void {
     this.dispose((lease) => {
-      if (release) lease.releaseOnUnload()
+      if (!this.siblingHoldsLease(lease)) lease.releaseOnUnload()
     })
+  }
+
+  /**
+   * The awaited release's "a newer own claim exists" skip, answered from the
+   * shared lease cache instead of the lock SOC, because the unload path cannot
+   * read Swarm. A sibling context of this device — a second tab of the dApp,
+   * or the SwarmID tab's one-shot sync — re-acquires the device's claim under
+   * a newer generation and writes it there (`lease-cache.ts`); while that
+   * claim is live on this clock, the lease is its to keep.
+   */
+  private siblingHoldsLease(lease: PartitionLease): boolean {
+    const own = lease.serialize().self
+    const cached = this.deps.readLeaseCache?.()
+    if (!own || !cached?.self || cached.deviceId !== this.deps.deviceId) {
+      return false
+    }
+    return (
+      cached.self.leasedUntil > Date.now() &&
+      compareGenerations(cached.self.generation, own.generation) > 0
+    )
   }
 
   private dispose(

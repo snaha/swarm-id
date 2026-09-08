@@ -56,7 +56,6 @@ import {
   STORAGE_KEY_NETWORK_SETTINGS,
   partitionSessionStorageKey,
   PartitionSessionSchemaV1,
-  leaseCacheStorageKey,
 } from "./types"
 import type { PopupToIframeMessage } from "./types"
 import {
@@ -74,11 +73,7 @@ import { AccountBus, BroadcastChannelTransport } from "./bus/account-bus"
 import { SignalingTransport } from "./bus/signaling-transport"
 import { deriveBusContext } from "./bus/bus-context"
 import type { BusContext } from "./bus/bus-context"
-import {
-  PresenceTracker,
-  PRESENCE_INTERVAL_MS,
-  PRESENCE_MAX_AGE_MS,
-} from "./bus/presence"
+import { PresenceTracker, PRESENCE_INTERVAL_MS } from "./bus/presence"
 import type { BeeRequestOptions } from "@ethersphere/bee-js"
 import {
   uploadData,
@@ -118,7 +113,7 @@ import {
 } from "./bus/account-delta"
 import { UtilizationAwareStamper } from "./utils/batch-utilization"
 import { UtilizationStoreDB } from "./storage/utilization-store"
-import type { PartitionLeaseStateSnapshot } from "./sync/partition-lease"
+import { readLeaseCache, writeLeaseCache } from "./sync/lease-cache"
 import { BatchWriteCoordinator } from "./sync/batch-write-coordinator"
 import {
   getOrCreateDeviceId,
@@ -391,9 +386,6 @@ export class SwarmIdProxy {
   private bus: AccountBus
   /** Who else is live in the account's room, from their `presence` beats. */
   private presence = new PresenceTracker()
-  /** When a context sharing this device's id last beat — another tab of this
-   *  dApp, or the SwarmID tab. Not a rival, but a co-holder of the lease. */
-  private lastSiblingBeatAt = 0
   private presenceTimer: ReturnType<typeof setInterval> | undefined
   private subsidisedGatewayUrl: string | undefined
   /**
@@ -469,19 +461,13 @@ export class SwarmIdProxy {
    * dying page's socket closes by itself, which is the room's `peer-left`,
    * and a restored page's transport reconnects by itself.
    *
-   * Whether the lease is released or left to its TTL is decided here, not in
-   * the coordinator: only the proxy hears the presence beats that say whether
-   * a sibling context of this device is alive.
+   * Whether the lease is released or left to a sibling context of this device
+   * is the coordinator's call (`teardownOnUnload`), read from the shared lease
+   * cache.
    */
   private setupLifecycleListeners(): void {
     window.addEventListener("pagehide", () => {
-      // ponytail: "alive" is a beat inside the presence window, so a sibling
-      // that closed less than PRESENCE_MAX_AGE_MS ago still keeps this tab
-      // from releasing — the TTL covers that, as it covered everything before.
-      // A local leave beat would tighten it, if the window ever matters.
-      const siblingAlive =
-        Date.now() - this.lastSiblingBeatAt < PRESENCE_MAX_AGE_MS
-      this.teardownCoordinator(siblingAlive ? "abandon" : "release")
+      this.teardownCoordinator(true)
     })
     window.addEventListener("pageshow", (event) => {
       if (!event.persisted || !this.authenticated) return
@@ -1275,29 +1261,24 @@ export class SwarmIdProxy {
    * Swarm release it describes, which is harmless: the lock SOCs stay the
    * authority, so a peer woken too early just spends one extra read round.
    */
-  private teardownCoordinator(unload?: "release" | "abandon"): void {
+  private teardownCoordinator(unload = false): void {
     const partition = this.coordinator?.currentPartition
     const accountId = this.coordinatorAccountId
     const batchId = this.coordinatorBatchId
     // Scheduled answers describe a lease we are about to drop anyway.
     this.cancelPendingYields()
     if (unload) {
-      this.coordinator?.teardownOnUnload(unload === "release")
+      this.coordinator?.teardownOnUnload()
     } else {
       this.coordinator?.teardown()
     }
     this.coordinator = undefined
     this.coordinatorAccountId = undefined
     this.coordinatorBatchId = undefined
-    if (
-      unload === "abandon" ||
-      partition === undefined ||
-      !accountId ||
-      !batchId ||
-      !this.deviceId
-    ) {
-      return
-    }
+    // No announcement on unload: the remote send dies with the page (#669),
+    // and a local sibling — if one holds the lease — keeps it, not takes it.
+    if (unload || partition === undefined || !accountId || !batchId) return
+    if (!this.deviceId) return
     this.bus.publish({
       type: "lease-released",
       accountId,
@@ -1622,9 +1603,10 @@ export class SwarmIdProxy {
           // A sibling tab of this device shares the id over the local
           // transport; it is not a rival. A beat naming another account did
           // not come from this room's scope (belt and braces, as elsewhere).
-          if (message.accountId !== this.busBoundAccountId) return
-          if (message.fromDeviceId === this.deviceId) {
-            this.lastSiblingBeatAt = Date.now()
+          if (
+            message.accountId !== this.busBoundAccountId ||
+            message.fromDeviceId === this.deviceId
+          ) {
             return
           }
           this.presence.observe(message.fromDeviceId, Date.now(), from)
@@ -1879,9 +1861,9 @@ export class SwarmIdProxy {
       swarmEncryptionKey: accountInfo.encryptionKey,
       partitionCount: accountInfo.partitionCount,
       mode: "persistent",
-      readLeaseCache: () => this.readLeaseCache(accountInfo.accountId, batchId),
+      readLeaseCache: () => readLeaseCache(accountInfo.accountId, batchId),
       writeLeaseCache: (snap) =>
-        this.writeLeaseCache(accountInfo.accountId, batchId, snap ?? null),
+        writeLeaseCache(accountInfo.accountId, batchId, snap),
       flushStamperState: () => this.saveStamperStateIfNeeded(),
       getWorkerPool: (count) => this.getOrCreateWorkerPool(count),
       onLeaseChange: () => this.emitConnectionInfoIfChanged(),
@@ -1926,31 +1908,6 @@ export class SwarmIdProxy {
   private requireDeviceId(): string {
     if (!this.deviceId) this.deviceId = getOrCreateDeviceId()
     return this.deviceId
-  }
-
-  private readLeaseCache(
-    accountId: string,
-    batchId: string,
-  ): PartitionLeaseStateSnapshot | undefined {
-    try {
-      const raw = localStorage.getItem(leaseCacheStorageKey(accountId, batchId))
-      return raw ? (JSON.parse(raw) as PartitionLeaseStateSnapshot) : undefined
-    } catch {
-      return undefined
-    }
-  }
-
-  private writeLeaseCache(
-    accountId: string,
-    batchId: string,
-    snap: PartitionLeaseStateSnapshot | null,
-  ): void {
-    const key = leaseCacheStorageKey(accountId, batchId)
-    if (snap === null) {
-      localStorage.removeItem(key)
-    } else {
-      localStorage.setItem(key, JSON.stringify(snap))
-    }
   }
 
   /**

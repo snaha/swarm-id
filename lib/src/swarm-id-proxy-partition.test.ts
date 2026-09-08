@@ -999,7 +999,7 @@ describe("SwarmIdProxy partitioned write enablement", () => {
       return coordinator
     }
 
-    it("releases the held partition on pagehide and wakes the waiters", async () => {
+    it("tears the coordinator down for unload on pagehide, announcing nothing", async () => {
       const coordinator = await holdPartition(2)
       const busChannel = new BroadcastChannel(accountChannelName)
       const published: Record<string, unknown>[] = []
@@ -1007,36 +1007,11 @@ describe("SwarmIdProxy partitioned write enablement", () => {
         published.push(event.data as Record<string, unknown>)
       try {
         lifecycle.pagehide()
-        expect(coordinator.teardownOnUnload).toHaveBeenCalledWith(true)
-        await vi.waitFor(() =>
-          expect(
-            published.filter((m) => m.type === "lease-released"),
-          ).toHaveLength(1),
-        )
-        expect(published[0].partition).toBe(2)
-      } finally {
-        busChannel.close()
-      }
-    })
-
-    it("leaves the lease to a live sibling context of this device", async () => {
-      const coordinator = await holdPartition(2)
-      const busChannel = new BroadcastChannel(accountChannelName)
-      const published: Record<string, unknown>[] = []
-      busChannel.onmessage = (event) =>
-        published.push(event.data as Record<string, unknown>)
-      try {
-        // Another tab of this dApp (or the SwarmID tab) beats with our own
-        // device id: it holds the same lease, and keeps refreshing it.
-        busChannel.postMessage({
-          type: "presence",
-          accountId: "aa".repeat(20),
-          fromDeviceId: localStorageFake.getItem("swarm-id-device-id"),
-        })
-        await flushBus()
-
-        lifecycle.pagehide()
-        expect(coordinator.teardownOnUnload).toHaveBeenCalledWith(false)
+        // Whether the lease is released or left to a sibling is the
+        // coordinator's call, from the shared lease cache. Nothing goes on
+        // the bus: the remote send would die with the page, and a local
+        // sibling that holds the lease keeps it rather than takes it.
+        expect(coordinator.teardownOnUnload).toHaveBeenCalledWith()
         await flushBus()
         expect(published.some((m) => m.type === "lease-released")).toBe(false)
       } finally {

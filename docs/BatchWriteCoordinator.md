@@ -86,12 +86,16 @@ Methods and getters:
 - **`teardown()`** — stop all background work, best-effort release of the held partition so peers
   see this device vacate promptly, invalidate-then-unbind the stamper, clear the cache. Never
   throws. Sets a `disposed` flag (see below).
-- **`teardownOnUnload(release)`** — the same from `pagehide` (#676), where nothing asynchronous
-  runs again: the lease is released with the one send a dying page can still make
+- **`teardownOnUnload()`** — the same from `pagehide` (#676), where nothing asynchronous runs
+  again: the lease is released with the one send a dying page can still make
   (`PartitionLease.releaseOnUnload`, a keepalive `fetch` with everything before it synchronous)
-  or, when a sibling context of this device holds it too, abandoned to it. Never schedules the
-  awaited release — restored from the back/forward cache, that would run against a lock the
-  sibling still holds.
+  or, when a sibling context of this device re-acquired it under a newer generation that is
+  still live, abandoned to that sibling. The sibling's claim is read from the shared lease cache
+  (`lease-cache.ts`) — the unload path cannot read the lock SOC — so every same-device claimant
+  writes there: this coordinator on acquire and refresh, and the one-shot sync coordinator
+  (`sync-account.ts`), write-only, so a failed acquire never wipes the proxy's record. Never
+  schedules the awaited release — restored from the back/forward cache, that would run against
+  a lock the sibling still holds.
 - **`currentPartition`** / **`isReadOnly`** / **`stamperRef`** — read by the proxy's
   `buildConnectionInfo` (partition, read-only state, appKey/uploadMode).
 - **`PartitionContendedError`** — thrown when there is genuinely no slot to claim (every partition

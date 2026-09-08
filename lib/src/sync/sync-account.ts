@@ -43,6 +43,7 @@ import {
   PartitionContendedError,
 } from "./batch-write-coordinator"
 import { accountStateToDeviceView, publishDeviceState } from "./device-state"
+import { writeLeaseCache } from "./lease-cache"
 import { getOrCreateDeviceId, detectDeviceName } from "../utils/device-id"
 import {
   activeDeviceIds,
@@ -357,6 +358,16 @@ export function createSyncAccount(
       swarmEncryptionKey: hexToUint8Array(encryptionKey),
       partitionCount,
       mode: "oneshot",
+      // Record the claim in the shared lease cache: on this device it is a
+      // successor to the proxy's claim (a newer generation on the same lock
+      // SOC), and the proxy's `pagehide` reads the cache to leave the lease
+      // alone while this claim is live (#676). Write-only: hydrating from the
+      // cache would adopt the proxy's own generation and hide the sync behind
+      // it; and never clear — this coordinator is never torn down, and an
+      // acquire that fails must not wipe the proxy's record.
+      writeLeaseCache: (snap) => {
+        if (snap) writeLeaseCache(accountId, defaultStamp.batchID.toHex(), snap)
+      },
     })
 
     console.log(

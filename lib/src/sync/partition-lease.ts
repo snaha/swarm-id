@@ -1371,10 +1371,12 @@ export class PartitionLease {
    * no peer can hold a lock whose lease has not lapsed, and a lapsed one may
    * already be a peer's. No state flush either: the successor resumes at the
    * last published counter, exactly as after a crash, which ack-after-publish
-   * makes safe (`publishState`). No-op when no lease is held.
+   * makes safe (`publishState`). No-op when no lease is held. `closed` is not
+   * consulted: an awaited release or yield in flight at `pagehide` dies with
+   * the page before its sentinel, and this one carries the same generation.
    */
   releaseOnUnload(): void {
-    if (!this.self || this.closed || !this.opts.stamper) return
+    if (!this.self || !this.opts.stamper) return
     const { partition, generation, acquiredAt, leasedUntil } = this.self
     if (this.now() >= leasedUntil - LEASE_SKEW_MARGIN_MS) return
     this.closed = true

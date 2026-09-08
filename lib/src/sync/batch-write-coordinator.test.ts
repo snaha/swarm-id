@@ -650,6 +650,66 @@ describe("BatchWriteCoordinator — sentinel re-assert at upload start", () => {
   })
 })
 
+describe("BatchWriteCoordinator — teardownOnUnload (#676)", () => {
+  const own = { timestampMs: NOW - 5_000, tiebreaker: "00" }
+  const newer = { timestampMs: NOW - 1_000, tiebreaker: "00" }
+  const older = { timestampMs: NOW - 9_000, tiebreaker: "00" }
+
+  function cached(generation: typeof own, leasedUntil: number) {
+    return {
+      deviceId: SELF,
+      batchId: BATCH_ID,
+      self: { partition: 2, generation, acquiredAt: NOW - 9_000, leasedUntil },
+    }
+  }
+
+  function mount(readLeaseCache: () => ReturnType<typeof cached> | undefined) {
+    const releaseOnUnload = vi.fn()
+    const coordinator = new BatchWriteCoordinator(
+      makeDeps({
+        stamper: makeStamper(
+          [],
+        ) as unknown as BatchWriteCoordinatorDeps["stamper"],
+        readLeaseCache,
+      }),
+    )
+    ;(coordinator as unknown as Internals).partitionLease = {
+      ...makeLease({ partition: 2 }),
+      releaseOnUnload,
+      serialize: () => cached(own, Date.now() + LEASE_TTL_MS),
+    }
+    return { coordinator, releaseOnUnload }
+  }
+
+  it("releases when the cache holds our own claim, or nothing", () => {
+    for (const read of [
+      () => cached(own, Date.now() + LEASE_TTL_MS),
+      () => cached(older, Date.now() + LEASE_TTL_MS),
+      () => undefined,
+    ]) {
+      const { coordinator, releaseOnUnload } = mount(read)
+      coordinator.teardownOnUnload()
+      expect(releaseOnUnload).toHaveBeenCalledTimes(1)
+    }
+  })
+
+  it("leaves the lease to a sibling that re-acquired it and still holds it", () => {
+    const { coordinator, releaseOnUnload } = mount(() =>
+      cached(newer, Date.now() + LEASE_TTL_MS),
+    )
+    coordinator.teardownOnUnload()
+    expect(releaseOnUnload).not.toHaveBeenCalled()
+  })
+
+  it("releases once the sibling's newer claim has lapsed", () => {
+    const { coordinator, releaseOnUnload } = mount(() =>
+      cached(newer, Date.now() - 1),
+    )
+    coordinator.teardownOnUnload()
+    expect(releaseOnUnload).toHaveBeenCalledTimes(1)
+  })
+})
+
 describe("BatchWriteCoordinator — teardown safety", () => {
   it("invalidates the held lease BEFORE unbinding (off-lock teardown race)", () => {
     const calls: string[] = []

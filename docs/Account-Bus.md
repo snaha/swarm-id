@@ -512,12 +512,15 @@ Not yet written:
   is a `fetch` keepalive the browser finishes after the page is gone
   (`PartitionLease.releaseOnUnload`), so a waiter picks it up on its next poll instead of
   waiting out `LEASE_TTL_MS`. A crash, a force-quit or a dropped network run no `pagehide`, and
-  there the TTL remains the mechanism. So does a tab that heard a **sibling context of its own
-  device** — another tab of the dApp, or the SwarmID tab — beat within the presence window: they
-  hold the same lease, a sentinel under them would fail their in-flight upload, so the closing
-  tab leaves it to them; when the sibling has itself closed inside that window, nobody releases
-  and the TTL covers it. The proxy does not announce this release on the bus any faster than it
-  announces anything: a bus publish encrypts before it sends, and a dying page never gets there.
+  there the TTL remains the mechanism. So does a lease a **sibling context of the same device**
+  re-acquired: a second tab of the dApp, or the SwarmID tab's one-shot sync
+  (`sync-account.ts`), claims the device's own lock under a newer generation, and a sentinel
+  under it would fail its in-flight upload. The closing tab cannot read the lock SOC to see
+  that, so every such claim is also written to the shared lease cache in localStorage
+  (`lease-cache.ts`), and `teardownOnUnload` reads it synchronously: a newer generation that
+  is still live on this clock keeps the lease, the same skip the awaited release makes from
+  the SOC. Nothing is announced on the bus: the remote send would die with the page, and a
+  local sibling that holds the lease keeps it rather than takes it.
 - **Back/forward cache.** `pagehide` also fires on the way into it, so the proxy tears its write
   coordinator down on every `pagehide` — a frozen one would return holding a lease it stopped
   refreshing — and rebuilds it on `pageshow` with `persisted` (a cold acquire; the lease cache
