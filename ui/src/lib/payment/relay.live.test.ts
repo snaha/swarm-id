@@ -21,7 +21,10 @@
  *
  * Kept out of `pnpm test` because it needs the internet. It SKIPS when the API
  * cannot be reached — an outage is not our bug — and FAILS when the API answers
- * with a shape we do not handle, or refuses a route we offer, which is.
+ * with a shape we do not handle, or refuses a route we offer, which is. Skips,
+ * never silent passes: an unreached check must not report the colour of one
+ * that ran. In CI the reachability test is enforced, so an outage still turns
+ * the job red rather than quietly halving what was verified.
  */
 import { TimeoutError } from '@snaha/swarm-id'
 import { beforeAll, describe, expect, it } from 'vitest'
@@ -225,8 +228,12 @@ describe('Relay quote contract', () => {
     expect(quoted, 'Relay did not answer — the contract below went unchecked').toBeDefined()
   })
 
-  it('still routes Base ETH to native xDAI on Gnosis', () => {
+  it('still routes Base ETH to native xDAI on Gnosis', (context) => {
+    // Skipped, not passed — the same rule the pair sweep below states: a green
+    // tick on a check that never ran reads as coverage this suite does not
+    // have. In CI the reachability test above has already gone red.
     if (!quoted) {
+      context.skip()
       return
     }
     // The pair the rail is built on. If Relay stopped serving it, the payment
@@ -234,8 +241,9 @@ describe('Relay quote contract', () => {
     expect(quoted.details?.currencyOut?.currency?.chainId).toBe(GNOSIS_CHAIN_ID)
   })
 
-  it('honours EXACT_OUTPUT, which is what makes the funding maths hold', () => {
+  it('honours EXACT_OUTPUT, which is what makes the funding maths hold', (context) => {
     if (!quoted) {
+      context.skip()
       return
     }
     // `quoteFunding` sizes the swap input and gas to the wei; a rail that
@@ -243,8 +251,9 @@ describe('Relay quote contract', () => {
     expect(quoted.details?.currencyOut?.amountFormatted).toBe('0.06')
   })
 
-  it('exposes the currencyIn fields the pay screen reads', () => {
+  it('exposes the currencyIn fields the pay screen reads', (context) => {
     if (!quoted) {
+      context.skip()
       return
     }
     const currencyIn = quoted.details?.currencyIn
@@ -254,8 +263,9 @@ describe('Relay quote contract', () => {
     expect(Number(currencyIn?.amountUsd)).toBeGreaterThan(0)
   })
 
-  it('hands back raw precision, which is why the rail formats it', () => {
+  it('hands back raw precision, which is why the rail formats it', (context) => {
     if (!quoted) {
+      context.skip()
       return
     }
     // Not a wish — a guard. `amountFormatted` is the full wei expansion
@@ -273,8 +283,9 @@ describe('Relay quote contract', () => {
     )
   })
 
-  it('returns a deposit step for the wallet to sign', () => {
+  it('returns a deposit step for the wallet to sign', (context) => {
     if (!quoted) {
+      context.skip()
       return
     }
     // `executePayment` hands the whole quote to the SDK, which walks the steps.
