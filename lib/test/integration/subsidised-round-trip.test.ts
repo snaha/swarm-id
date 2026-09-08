@@ -26,13 +26,8 @@ import {
   downloadDataWithChunkAPI,
   downloadSOC,
 } from "../../src/proxy/download-data"
-import { isClusterReachable, createQueenBee } from "./cluster"
+import { createQueenBee } from "./cluster"
 import { createSubsidisedTarget } from "./gateway"
-
-// Only the cluster gates this suite. With a cluster up, `global-setup.ts`
-// treats a gateway that will not start as a hard failure rather than a reason
-// to skip, so there is no second condition to test for here.
-const clusterReachable = await isClusterReachable()
 
 /** Generate a unique random payload so each test is independent. */
 function randomPayload(size: number): Uint8Array {
@@ -45,52 +40,45 @@ const SMALL_PAYLOAD_SIZE = 64
 const MULTI_CHUNK_PAYLOAD_SIZE = 10_000
 const SOC_PAYLOAD_SIZE = 32
 
-describe.skipIf(!clusterReachable)(
-  "Subsidised-gateway round-trip against live cluster",
-  () => {
-    let bee: Bee
-    let target: UploadTarget
+describe("Subsidised-gateway round-trip against live cluster", () => {
+  let bee: Bee
+  let target: UploadTarget
 
-    beforeAll(() => {
-      bee = createQueenBee()
-      target = createSubsidisedTarget()
-    })
+  beforeAll(() => {
+    bee = createQueenBee()
+    target = createSubsidisedTarget()
+  })
 
-    it("uploads and downloads small plain data", async () => {
-      const data = randomPayload(SMALL_PAYLOAD_SIZE)
+  it("uploads and downloads small plain data", async () => {
+    const data = randomPayload(SMALL_PAYLOAD_SIZE)
 
-      const { reference } = await uploadData(target, data)
-      expect(reference).toMatch(/^[0-9a-f]{64}$/)
+    const { reference } = await uploadData(target, data)
+    expect(reference).toMatch(/^[0-9a-f]{64}$/)
 
-      expect(await downloadDataWithChunkAPI(bee, reference)).toEqual(data)
-    })
+    expect(await downloadDataWithChunkAPI(bee, reference)).toEqual(data)
+  })
 
-    // The merkle-tree branch: intermediate chunks are POSTed to the gateway too,
-    // so a gateway that stamps leaves but not the tree fails only here.
-    it("uploads and downloads multi-chunk plain data", async () => {
-      const data = randomPayload(MULTI_CHUNK_PAYLOAD_SIZE)
+  // The merkle-tree branch: intermediate chunks are POSTed to the gateway too,
+  // so a gateway that stamps leaves but not the tree fails only here.
+  it("uploads and downloads multi-chunk plain data", async () => {
+    const data = randomPayload(MULTI_CHUNK_PAYLOAD_SIZE)
 
-      const { reference } = await uploadData(target, data)
+    const { reference } = await uploadData(target, data)
 
-      expect(await downloadDataWithChunkAPI(bee, reference)).toEqual(data)
-    })
+    expect(await downloadDataWithChunkAPI(bee, reference)).toEqual(data)
+  })
 
-    // The second endpoint: `POST /soc/{owner}/{id}?sig=…`, signed here and
-    // stamped there. Reading it back from the queen proves the signature
-    // survived the proxy hop intact.
-    it("uploads a single-owner chunk the queen serves back", async () => {
-      const signer = new PrivateKey(randomPayload(32))
-      const identifier = new Identifier(randomPayload(32))
-      const data = randomPayload(SOC_PAYLOAD_SIZE)
+  // The second endpoint: `POST /soc/{owner}/{id}?sig=…`, signed here and
+  // stamped there. Reading it back from the queen proves the signature
+  // survived the proxy hop intact.
+  it("uploads a single-owner chunk the queen serves back", async () => {
+    const signer = new PrivateKey(randomPayload(32))
+    const identifier = new Identifier(randomPayload(32))
+    const data = randomPayload(SOC_PAYLOAD_SIZE)
 
-      await uploadSOC(target, signer, identifier, data)
+    await uploadSOC(target, signer, identifier, data)
 
-      const soc = await downloadSOC(
-        bee,
-        signer.publicKey().address(),
-        identifier,
-      )
-      expect(soc.payload).toEqual(data)
-    })
-  },
-)
+    const soc = await downloadSOC(bee, signer.publicKey().address(), identifier)
+    expect(soc.payload).toEqual(data)
+  })
+})

@@ -26,8 +26,11 @@ pnpm dev:cluster:start   # start queen + 3 full workers (Docker)
 pnpm --filter @snaha/swarm-id test:integration
 ```
 
-The suite is **skipped automatically** when no cluster is reachable at
-`http://localhost:1633`, so it never breaks a local unit-test run.
+The suite **fails** when no cluster is reachable at `http://localhost:1633`,
+naming the command to start one. It is a precondition, not a condition: `pnpm
+test` is the command that runs without services, and a run that checked nothing
+must not be able to report the same colour as a run that did. Nothing here is
+skipped, so a local unit-test run is unaffected either way.
 
 It is not optional in CI: `integration-tests.yml` starts a cluster and runs
 `pnpm --filter @snaha/swarm-id test:integration` on every push to `main` and
@@ -39,6 +42,8 @@ every pull request touching `lib/**`, so these tests gate merges like any other.
   live outside `src/`, so the default unit-test run does not pick them up and the
   rollup build does not bundle them. They **are** typechecked, linted and
   formatted with the rest of the package (`tsconfig.check.json`, `eslint.config.js`).
+  Being opt-in to _run_ is what lets them be unconditional: the two commands
+  differ by what they require, not by what they silently decline to check.
 - `cluster.ts` provides helpers: cluster reachability, buying/reusing a usable
   postage stamp, and building a bee-js `Stamper` from the queen's well-known
   dev key (uploads in Node without the browser-only proxy machinery).
@@ -55,8 +60,8 @@ every pull request touching `lib/**`, so these tests gate merges like any other.
 
   It needs nothing beyond Docker, which the cluster already requires — so with
   a cluster up, a gateway that will not start is a real breakage, and the setup
-  **fails** rather than skipping. A skip reports a breakage in the one colour
-  CI cannot tell from success. Only the absence of a cluster skips.
+  **fails**, exactly as a missing cluster does. Nothing in this suite skips: a
+  skip reports a breakage in the one colour CI cannot tell from success.
 
 ### Adding a new integration test file
 
@@ -64,11 +69,9 @@ Reuse the shared stamp — do not buy your own:
 
 ```ts
 import { inject, beforeAll } from "vitest"
-import { isClusterReachable, createClusterContext } from "./cluster"
+import { createClusterContext } from "./cluster"
 
-const clusterReachable = await isClusterReachable()
-
-describe.skipIf(!clusterReachable)("my feature", () => {
+describe("my feature", () => {
   let bee, target
   beforeAll(() => {
     ;({ bee, target } = createClusterContext(inject("clusterBatchId")))
