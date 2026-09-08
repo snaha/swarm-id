@@ -10,6 +10,7 @@ import { publicClientFor, walletClientFor } from "./chain"
 import { getGasPrice, getTransactionCount } from "./rpc"
 import type { MultichainSettings } from "./settings"
 import { withFeeTooLowRetry } from "./write-retry"
+import { withGasMargin } from "./gas"
 
 const QUOTER_ABI = parseAbi([
   "function quoteExactInputSingle((address tokenIn, address tokenOut, uint256 amountIn, uint24 fee, uint160 sqrtPriceLimitX96)) returns (uint256 amountOut, uint160 sqrtPriceX96After, uint32 initializedTicksCrossed, uint256 gasEstimate)",
@@ -28,9 +29,6 @@ const SLIPPAGE_NUMERATOR = 995n
 const SLIPPAGE_DENOMINATOR = 1000n
 const DEADLINE_SECONDS = 600
 const MILLIS_PER_SECOND = 1000
-// The router refunds unused gas; estimate + 25% headroom, as upstream.
-const GAS_BUFFER_NUMERATOR = 5n
-const GAS_BUFFER_DENOMINATOR = 4n
 
 interface SushiAddresses {
   wxdai: `0x${string}`
@@ -444,7 +442,7 @@ export async function swapTokenToBzz(
   return withFeeTooLowRetry(async () => {
     const serializedTransaction = await account.signTransaction({
       chainId: settings.chainId,
-      gas: (gasEstimate * GAS_BUFFER_NUMERATOR) / GAS_BUFFER_DENOMINATOR,
+      gas: withGasMargin(gasEstimate),
       gasPrice: await getGasPrice(settings, rpcProvider),
       type: "legacy",
       to: sushi.router,
@@ -510,7 +508,7 @@ export async function swapXdaiToBzz(
   return withFeeTooLowRetry(async () => {
     const serializedTransaction = await account.signTransaction({
       chainId: settings.chainId,
-      gas: (gasEstimate * GAS_BUFFER_NUMERATOR) / GAS_BUFFER_DENOMINATOR,
+      gas: withGasMargin(gasEstimate),
       gasPrice: await getGasPrice(settings, rpcProvider),
       type: "legacy",
       to: sushi.router,
