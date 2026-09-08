@@ -6,14 +6,26 @@
 import { RollingValueProvider, System } from "cafe-utility"
 import { privateKeyToAccount } from "viem/accounts"
 import { POSTAGE_STAMP_ABI } from "./abi"
-import { chainFromSettings, walletClientFor } from "./chain"
+import { chainFromSettings, publicClientFor, walletClientFor } from "./chain"
 import { getGasPrice, getTransactionCount, getTransactionReceipt } from "./rpc"
 import type { MultichainSettings } from "./settings"
 import { withFeeTooLowRetry } from "./write-retry"
 
-// Mirrors the multichain widget's proven fixed budget; actual usage is
-// ~340-590k (createBatch/topUp/increaseDepth), the excess is refunded.
-const POSTAGE_GAS_LIMIT = 1_200_000n
+/**
+ * Estimated per call, with the same quarter margin the swap uses. The widget's
+ * fixed 1.2M budget was measured at ~340-590k, but every PostageStamp write
+ * first sweeps expired batches, and that sweep grows with the chain's backlog:
+ * on a long-running dev chain `createBatch` was mined out of gas at 1.2M
+ * (estimate 1.37M), which surfaces as "mined without a BatchCreated event".
+ * An estimate also fails BEFORE sending when the call would revert, with the
+ * contract's reason instead of a silent receipt.
+ */
+const GAS_BUFFER_NUMERATOR = 5n
+const GAS_BUFFER_DENOMINATOR = 4n
+
+function withGasMargin(estimate: bigint): bigint {
+  return (estimate * GAS_BUFFER_NUMERATOR) / GAS_BUFFER_DENOMINATOR
+}
 
 export interface CreateBatchOptions {
   originPrivateKey: `0x${string}`
@@ -46,21 +58,31 @@ export async function createBatch(
 ): Promise<CreateBatchResult> {
   const account = privateKeyToAccount(options.originPrivateKey)
   const client = walletClientFor(settings, rpcProvider)
+  const args = [
+    options.owner,
+    options.amount,
+    options.depth,
+    options.bucketDepth,
+    options.batchNonce,
+    options.immutable,
+  ] as const
+  const gas = withGasMargin(
+    await publicClientFor(settings, rpcProvider).estimateContractGas({
+      account,
+      abi: POSTAGE_STAMP_ABI,
+      address: settings.addresses.postageStamp,
+      functionName: "createBatch",
+      args,
+    }),
+  )
   const transactionHash = await withFeeTooLowRetry(async () =>
     client.writeContract({
       account,
       abi: POSTAGE_STAMP_ABI,
       address: settings.addresses.postageStamp,
       functionName: "createBatch",
-      args: [
-        options.owner,
-        options.amount,
-        options.depth,
-        options.bucketDepth,
-        options.batchNonce,
-        options.immutable,
-      ],
-      gas: POSTAGE_GAS_LIMIT,
+      args,
+      gas,
       gasPrice: await getGasPrice(settings, rpcProvider),
       type: "legacy",
       chain: chainFromSettings(settings),
@@ -116,14 +138,24 @@ export async function topUpBatch(
 ): Promise<`0x${string}`> {
   const account = privateKeyToAccount(options.originPrivateKey)
   const client = walletClientFor(settings, rpcProvider)
+  const args = [options.batchId, options.amountPerChunk] as const
+  const gas = withGasMargin(
+    await publicClientFor(settings, rpcProvider).estimateContractGas({
+      account,
+      abi: POSTAGE_STAMP_ABI,
+      address: settings.addresses.postageStamp,
+      functionName: "topUp",
+      args,
+    }),
+  )
   return withFeeTooLowRetry(async () =>
     client.writeContract({
       account,
       abi: POSTAGE_STAMP_ABI,
       address: settings.addresses.postageStamp,
       functionName: "topUp",
-      args: [options.batchId, options.amountPerChunk],
-      gas: POSTAGE_GAS_LIMIT,
+      args,
+      gas,
       gasPrice: await getGasPrice(settings, rpcProvider),
       type: "legacy",
       chain: chainFromSettings(settings),
@@ -157,14 +189,24 @@ export async function increaseDepth(
 ): Promise<`0x${string}`> {
   const account = privateKeyToAccount(options.originPrivateKey)
   const client = walletClientFor(settings, rpcProvider)
+  const args = [options.batchId, options.newDepth] as const
+  const gas = withGasMargin(
+    await publicClientFor(settings, rpcProvider).estimateContractGas({
+      account,
+      abi: POSTAGE_STAMP_ABI,
+      address: settings.addresses.postageStamp,
+      functionName: "increaseDepth",
+      args,
+    }),
+  )
   return withFeeTooLowRetry(async () =>
     client.writeContract({
       account,
       abi: POSTAGE_STAMP_ABI,
       address: settings.addresses.postageStamp,
       functionName: "increaseDepth",
-      args: [options.batchId, options.newDepth],
-      gas: POSTAGE_GAS_LIMIT,
+      args,
+      gas,
       gasPrice: await getGasPrice(settings, rpcProvider),
       type: "legacy",
       chain: chainFromSettings(settings),

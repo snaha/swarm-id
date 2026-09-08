@@ -178,14 +178,15 @@ describe.skipIf(!forkUp)("full purchase path on a Gnosis fork", () => {
     const strangerKey = generatePrivateKey()
     await setNativeBalance(privateKeyToAccount(strangerKey).address, XDAI)
 
-    const hash = await client.increaseDepth({
-      originPrivateKey: strangerKey,
-      batchId,
-      newDepth: NEW_DEPTH + 1,
-    })
-    await expect(client.waitForTransactionSuccess(hash)).rejects.toThrow(
-      /reverted/,
-    )
+    // Refused before anything is sent: the gas estimate runs the call and
+    // carries the contract's revert, so no transaction is mined to wait on.
+    await expect(
+      client.increaseDepth({
+        originPrivateKey: strangerKey,
+        batchId,
+        newDepth: NEW_DEPTH + 1,
+      }),
+    ).rejects.toThrow(/reverted/)
     expect((await client.getPostageBatch(batchId))?.depth).toBe(NEW_DEPTH)
   })
 })
