@@ -21,7 +21,6 @@
 import { execFile } from "node:child_process"
 import { promisify } from "node:util"
 import type { UploadTarget } from "../../src/proxy/upload"
-import { QUEEN_URL } from "./cluster"
 
 const run = promisify(execFile)
 
@@ -40,6 +39,20 @@ const DOCKER_MAX_BUFFER = 16 * 1024 * 1024
 const GATEWAY_IMAGE = "ethersphere/gateway-proxy:0.17.0"
 const GATEWAY_CONTAINER = "swarm-id-gateway-proxy"
 
+/**
+ * The gateway talks to the queen container-to-container, on bee-compose's own
+ * network, rather than back out through the host.
+ *
+ * Not a preference — the host route does not work. bee-compose publishes the
+ * queen on `127.0.0.1:1633`, so a container reaching `host.docker.internal`
+ * lands on the host's docker0 gateway, which loopback does not answer: the
+ * gateway comes up healthy and 500s every upload. Docker Desktop forwards
+ * loopback publishes and hides this, so it only fails on Linux CI.
+ */
+const BEE_COMPOSE_NETWORK = "bee-compose_default"
+/** Container-network address of the queen — its own port, not the published one. */
+const QUEEN_CONTAINER_URL = "http://bee-compose-queen:1633"
+
 /** The port gateway-proxy listens on inside the container (its default). */
 const GATEWAY_CONTAINER_PORT = 3000
 /**
@@ -51,6 +64,8 @@ export const GATEWAY_URL = `http://localhost:${GATEWAY_PORT}`
 
 const HTTP_OK = 200
 const GATEWAY_START_TIMEOUT_MS = 60_000
+/** Lines of the gateway's own log to surface in CI at teardown. */
+const GATEWAY_LOG_TAIL = 80
 const GATEWAY_POLL_INTERVAL_MS = 500
 const REACHABLE_TIMEOUT_MS = 2000
 
@@ -88,6 +103,30 @@ async function removeExistingContainer(): Promise<void> {
 }
 
 /**
+ * Print what the gateway made of the run before removing it.
+ *
+ * At teardown, because that is the last moment the container exists: a CI step
+ * that dumps logs after the suite finds it already gone. This is the only place
+ * the gateway's own account of a failure is reachable, and without it a 500
+ * from it is a number with no reason attached.
+ */
+async function stopGateway(): Promise<void> {
+  if (process.env.CI) {
+    try {
+      const { stdout, stderr } = await run(
+        "docker",
+        ["logs", "--tail", String(GATEWAY_LOG_TAIL), GATEWAY_CONTAINER],
+        { maxBuffer: DOCKER_MAX_BUFFER },
+      )
+      console.log(`[gateway] container log:\n${stdout}${stderr}`)
+    } catch {
+      // Already gone, or Docker will not say — nothing to add.
+    }
+  }
+  await removeExistingContainer()
+}
+
+/**
  * Start `gateway-proxy` in front of the queen, stamping with `batchId`.
  *
  * `POSTAGE_STAMP` rather than the image's autobuy: the batch the suite already
@@ -115,12 +154,10 @@ export async function startGatewayProxy(
         GATEWAY_CONTAINER,
         "-p",
         `${GATEWAY_PORT}:${GATEWAY_CONTAINER_PORT}`,
-        // The queen publishes 1633 on the host, and the gateway has to reach it
-        // from inside its own network namespace. `host-gateway` is what makes
-        // `host.docker.internal` resolve on Linux CI as well as Docker Desktop.
-        "--add-host=host.docker.internal:host-gateway",
+        "--network",
+        BEE_COMPOSE_NETWORK,
         "-e",
-        `BEE_API_URL=${QUEEN_URL.replace("localhost", "host.docker.internal")}`,
+        `BEE_API_URL=${QUEEN_CONTAINER_URL}`,
         "-e",
         `POSTAGE_STAMP=${batchId}`,
         "-e",
@@ -131,7 +168,8 @@ export async function startGatewayProxy(
     )
   } catch (error) {
     console.warn(
-      `[gateway] Could not start ${GATEWAY_IMAGE}: ${error instanceof Error ? error.message : String(error)}`,
+      `[gateway] Could not start ${GATEWAY_IMAGE} on network ${BEE_COMPOSE_NETWORK}: ` +
+        `${error instanceof Error ? error.message : String(error)}`,
     )
     return undefined
   }
@@ -139,7 +177,7 @@ export async function startGatewayProxy(
   const deadline = Date.now() + GATEWAY_START_TIMEOUT_MS
   while (Date.now() < deadline) {
     if (await isGatewayReachable()) {
-      return { url: GATEWAY_URL, stop: removeExistingContainer }
+      return { url: GATEWAY_URL, stop: stopGateway }
     }
     await delay(GATEWAY_POLL_INTERVAL_MS)
   }
