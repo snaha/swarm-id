@@ -1191,7 +1191,10 @@ export class BatchWriteCoordinator {
     console.info(
       `[BatchWriteCoordinator] Released idle partition ${yieldedPartition ?? "?"}; will re-acquire on next write.`,
     )
-    if (yieldedPartition !== undefined) {
+    // `teardown()` can land during the release write above; it has already
+    // announced this partition itself, and a second `lease-released` would
+    // only burn a waiter's sticky fast round against a slot it just took.
+    if (yieldedPartition !== undefined && !this.disposed) {
       this.deps.onLeaseReleased?.(yieldedPartition, requestId)
     }
   }
