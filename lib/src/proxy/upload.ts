@@ -196,40 +196,17 @@ export interface UploadChunkResult {
 // ============================================================================
 
 /**
- * Simple Uint8ArrayWriter - minimal stub required by Stamper interface.
- * The Stamper interface requires a writer field but never calls it during stamp().
- */
-class SimpleUint8ArrayWriter {
-  cursor: number = 0
-  buffer: Uint8Array
-
-  constructor(buffer: Uint8Array) {
-    this.buffer = buffer
-  }
-
-  write(_reader: unknown): number {
-    throw new Error("SimpleUint8ArrayWriter.write() not implemented")
-  }
-
-  max(): number {
-    return this.buffer.length
-  }
-}
-
-/**
  * Stamp chunk data by address and return the envelope.
+ *
+ * `_chunkData` is unused — bee-js 13's `Stamper.stamp` takes the address alone
+ * — but stays in the signature to match `StampChunkFn` and the worker pool.
  */
 function stampChunkData(
   stamper: Stamper,
-  chunkData: Uint8Array,
+  _chunkData: Uint8Array,
   address: Uint8Array,
 ): EnvelopeWithBatchId {
-  return stamper.stamp({
-    hash: () => address,
-    build: () => chunkData,
-    span: 0n,
-    writer: new SimpleUint8ArrayWriter(chunkData),
-  })
+  return stamper.stamp(address)
 }
 
 /**
@@ -314,7 +291,7 @@ async function uploadStampedChunkViaHttp(
   requestOptions?: BeeRequestOptions,
 ): Promise<void> {
   const envelope = await stamp(chunkData, address)
-  await bee.uploadChunk(envelope, chunkData, options, requestOptions)
+  await bee.chunk.upload(envelope, chunkData, options, requestOptions)
 }
 
 /**
@@ -971,13 +948,7 @@ export async function uploadSOC(
     const { bee, stamper } = target
     const tag = options?.tag ?? (await tryCreateTag(bee))
 
-    const envelope = stamper.stamp({
-      hash: () => socAddressBytes,
-      build: () => socBody,
-      span: 0n,
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      writer: undefined as any,
-    })
+    const envelope = stamper.stamp(socAddressBytes)
 
     const stampHex = Binary.uint8ArrayToHex(marshalEnvelope(envelope))
     const url = `${bee.url}/soc/${owner.toHex()}/${identifier.toHex()}?sig=${signature.toHex()}`

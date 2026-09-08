@@ -18,7 +18,7 @@
  * needs a peer to pushsync a receipt from, so run with workers
  * (`pnpm dev:local` brings up four full nodes).
  */
-import { Bee, MerkleTree, Stamper } from '@ethersphere/bee-js'
+import { Bee, ChunkSplitter, Stamper } from '@ethersphere/bee-js'
 import { expect, test } from '@playwright/test'
 import { gnosisMainnetSettings } from '@swarm-id/multichain'
 import { simulateWidgetPurchase } from '@swarm-id/multichain/dev'
@@ -150,11 +150,15 @@ test('a chunk stamped client-side by the batch owner uploads and reads back', as
   // with the owner key.
   const stamper = Stamper.fromBlank(ownerKey, batchId, DEPTH)
   const payload = new TextEncoder().encode(`hybrid chain ${crypto.randomUUID()}`)
-  const chunk = await MerkleTree.root(payload)
+  const chunk = await ChunkSplitter.root(payload)
 
   const bee = new Bee(BEE_URL)
-  const uploaded = await bee.uploadChunk(stamper.stamp(chunk), chunk.build(), { deferred: false })
-  const stored = await bee.downloadChunk(uploaded.reference)
+  const uploaded = await bee.chunk.upload(
+    stamper.stamp(chunk.hash().toUint8Array()),
+    chunk.build(),
+    { deferred: false },
+  )
+  const stored = await bee.chunk.download(uploaded.reference)
 
   // A content-addressed chunk is `span (8 bytes) || payload`, zero-padded to
   // the full 4096; the span is what says where the payload ends.

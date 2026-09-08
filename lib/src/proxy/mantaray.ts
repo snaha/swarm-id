@@ -1,7 +1,7 @@
 // Copyright 2026 The Swarm Authors. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { MantarayNode } from "@ethersphere/bee-js"
+import { MantarayNode } from "@ethersphere/core-sdk"
 import type { Bee, BeeRequestOptions } from "@ethersphere/bee-js"
 import {
   makeContentAddressedChunk,
@@ -184,4 +184,27 @@ export async function loadMantarayTreeWithChunkAPI(
 
   await loadRecursively(root)
   return root
+}
+
+/**
+ * Read the website index/error documents from a manifest's root metadata.
+ *
+ * bee-js 13 has this as `MantarayNode.getDocsMetadata()`, but only on its own
+ * `MantarayNode` facade — the one whose fields are read-only getters and whose
+ * `saveRecursively` insists on uploading through a Bee node. We build and walk
+ * trees with core-sdk's mutable `MantarayNode` instead, so the helper lives
+ * here. It reads the same place: the metadata on the "/" fork.
+ */
+export function getDocsMetadata(node: MantarayNode): {
+  indexDocument: string | undefined
+  errorDocument: string | undefined
+} {
+  const root = node.find("/")
+  if (!root || !root.metadata) {
+    return { indexDocument: undefined, errorDocument: undefined }
+  }
+  return {
+    indexDocument: root.metadata["website-index-document"],
+    errorDocument: root.metadata["website-error-document"],
+  }
 }

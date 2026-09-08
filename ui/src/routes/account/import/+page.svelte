@@ -90,7 +90,7 @@
       // nothing — so run it alongside the fold instead of serially in front.
       // `.catch(false)` both prevents a floating rejection and treats a probe
       // error as "unreachable".
-      const connectedPromise = bee.isConnected().catch(() => false)
+      const connectedPromise = bee.connectivity.isConnected().catch(() => false)
       const folded = await foldAccountFromSwarm({ bee, derivationKey, accountId })
 
       if (!folded) {

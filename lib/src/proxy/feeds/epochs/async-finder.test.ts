@@ -61,10 +61,12 @@ describe("AsyncEpochFinder — exact probe does not gate the traversal (#400)", 
       failExact = () => reject(notFound())
     })
     const bee = {
-      downloadChunk: (addr: string) => {
-        requested.push(addr)
-        if (addr === exactAddr) return exactGate // gateway still probing peers
-        return Promise.reject(notFound())
+      chunk: {
+        download: (addr: string) => {
+          requested.push(addr)
+          if (addr === exactAddr) return exactGate // gateway still probing peers
+          return Promise.reject(notFound())
+        },
       },
     }
 
@@ -80,9 +82,11 @@ describe("AsyncEpochFinder — exact probe does not gate the traversal (#400)", 
     const exactAddr = await epochAddressHex(new EpochIndex(AT, 0))
     const ref = new Uint8Array(32).fill(7)
     const bee = {
-      downloadChunk: async (addr: string) => {
-        if (addr === exactAddr) return socChunk(AT, ref)
-        throw notFound() // every ancestor missing
+      chunk: {
+        download: async (addr: string) => {
+          if (addr === exactAddr) return socChunk(AT, ref)
+          throw notFound() // every ancestor missing
+        },
       },
     }
     const result = await new AsyncEpochFinder(
@@ -97,9 +101,11 @@ describe("AsyncEpochFinder — exact probe does not gate the traversal (#400)", 
     const rootAddr = await epochAddressHex(new EpochIndex(0n, MAX_LEVEL))
     const ref = new Uint8Array(32).fill(9)
     const bee = {
-      downloadChunk: async (addr: string) => {
-        if (addr === rootAddr) return socChunk(AT - 100n, ref)
-        throw notFound()
+      chunk: {
+        download: async (addr: string) => {
+          if (addr === rootAddr) return socChunk(AT - 100n, ref)
+          throw notFound()
+        },
       },
     }
     const result = await new AsyncEpochFinder(

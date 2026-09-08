@@ -19,7 +19,7 @@
  */
 
 import { describe, it, expect } from "vitest"
-import { MerkleTree } from "@ethersphere/bee-js"
+import { ChunkSplitter } from "@ethersphere/bee-js"
 import { uploadData, type UploadTarget } from "./upload"
 import { downloadDataWithChunkAPI } from "./download-data"
 import { SPAN_SIZE, UNENCRYPTED_REF_SIZE } from "../chunk"
@@ -61,8 +61,8 @@ function setup(): {
 
 /** Compute the canonical root reference for a payload via bee-js. */
 async function canonicalRootHex(data: Uint8Array): Promise<string> {
-  const root = await MerkleTree.root(data)
-  return uint8ArrayToHex(root.hash())
+  const root = await ChunkSplitter.root(data)
+  return uint8ArrayToHex(root.hash().toUint8Array())
 }
 
 /**
@@ -75,14 +75,28 @@ async function seedCanonicalTree(
   data: Uint8Array,
 ): Promise<{ rootHex: string; chunkCount: number }> {
   let chunkCount = 0
-  const tree = new MerkleTree(async (chunk) => {
-    chunkCount++
-    const chunkData = chunk.build().slice(0, SPAN_SIZE + chunk.writer.cursor)
-    await store.put(uint8ArrayToHex(chunk.hash()), chunkData)
+  // `onBatch` is handed every sealed chunk of one level and returns that
+  // level's erasure-coding parity chunks — `[]` means "no parity", the same
+  // contract as `ChunkSplitter.NOOP`. Echoing the batch back would splice
+  // bogus parity refs into the parent and change the root address.
+  const tree = new ChunkSplitter(async (batch) => {
+    for (const { chunk } of batch) {
+      chunkCount++
+      const chunkData = chunk.build().slice(0, SPAN_SIZE + chunk.writer.cursor)
+      await store.put(uint8ArrayToHex(chunk.hash().toUint8Array()), chunkData)
+    }
+    return []
   })
   await tree.append(data)
   const root = await tree.finalize()
-  return { rootHex: uint8ArrayToHex(root.hash()), chunkCount }
+  // `onBatch` only sees sealed levels; the root is handed back by `finalize`
+  // instead, so store and count it here. (bee-js 11's `MerkleTree` invoked its
+  // callback for the root too — `ChunkSplitter` does not.)
+  chunkCount++
+  const rootData = root.build().slice(0, SPAN_SIZE + root.writer.cursor)
+  const rootHex = uint8ArrayToHex(root.hash().toUint8Array())
+  await store.put(rootHex, rootData)
+  return { rootHex, chunkCount }
 }
 
 function readSpan(chunkData: Uint8Array): number {

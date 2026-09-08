@@ -18,6 +18,6 @@ export function marshalEnvelope(envelope: EnvelopeWithBatchId): Uint8Array {
     envelope.batchId.toUint8Array(),
     envelope.index,
     envelope.timestamp,
-    envelope.signature,
+    envelope.signature.toUint8Array(),
   )
 }
