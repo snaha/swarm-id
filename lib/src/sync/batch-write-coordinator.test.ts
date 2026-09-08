@@ -215,6 +215,23 @@ describe("BatchWriteCoordinator (Step A shell)", () => {
     })
   })
 
+  it("teardown announces the partition it held", () => {
+    const onLeaseReleased = vi.fn()
+    const coordinator = new BatchWriteCoordinator(
+      makeDeps({
+        stamper: makeStamper(
+          [],
+        ) as unknown as BatchWriteCoordinatorDeps["stamper"],
+        onLeaseReleased,
+      }),
+    )
+    ;(coordinator as unknown as Internals).partitionLease = makeLease({
+      partition: 2,
+    })
+    coordinator.teardown()
+    expect(onLeaseReleased).toHaveBeenCalledWith(2)
+  })
+
   it("teardown is safe with no optional hooks provided", () => {
     const coordinator = new BatchWriteCoordinator(makeDeps())
     expect(() => coordinator.teardown()).not.toThrow()
@@ -791,14 +808,16 @@ describe("BatchWriteCoordinator — idle-yield under the write lock", () => {
   // 30s pause was pure UX cost). These tests declare one.
   const RIVAL_DEPS = { knownDeviceIds: () => [SELF, "device-rival-1"] }
 
-  it("yields an idle lease: releases, unbinds, and emits the transition", async () => {
+  it("yields an idle lease: releases, unbinds, emits the transition, announces", async () => {
     const calls: string[] = []
     const stamper = makeStamper(calls)
     const onLeaseChange = vi.fn()
+    const onLeaseReleased = vi.fn()
     const coordinator = new BatchWriteCoordinator(
       makeDeps({
         stamper: stamper as unknown as BatchWriteCoordinatorDeps["stamper"],
         onLeaseChange,
+        onLeaseReleased,
         ...RIVAL_DEPS,
       }),
     )
@@ -817,6 +836,9 @@ describe("BatchWriteCoordinator — idle-yield under the write lock", () => {
       currentPartition: undefined,
       isReadOnly: false,
     })
+    // The timer yield answers no request, so a waiter learns of it only from
+    // this announcement (#590).
+    expect(onLeaseReleased).toHaveBeenCalledWith(0, undefined)
   })
 
   it("keeps an idle lease when no rival is known (solo device)", async () => {

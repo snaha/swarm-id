@@ -172,6 +172,13 @@ export interface BatchWriteCoordinatorDeps {
    * after `IDLE_YIELD_MS` (docs/Account-Bus.md, bus-accelerated leases).
    */
   onSlotWait?: () => void
+  /**
+   * Fired after every release of a held partition — the idle-timer yield, a
+   * yield for a peer's `lease-request` (`requestId` echoes it), and teardown —
+   * so announcing it on the bus is the coordinator's doing, not something each
+   * release path remembers. The proxy publishes `lease-released`.
+   */
+  onLeaseReleased?: (partition: number, requestId?: string) => void
 }
 
 /**
@@ -284,6 +291,12 @@ export class BatchWriteCoordinator {
     return this.deps.accountId
   }
 
+  /** The batch this coordinator's lease lives on — lanes are per (batch,
+   *  partition), so the proxy routes bus lease messages by both (#589). */
+  get batchId(): string {
+    return this.deps.batchId
+  }
+
   // ---- write entry point --------------------------------------------------
 
   /**
@@ -389,6 +402,7 @@ export class BatchWriteCoordinator {
     // out its interval first. The wait clears its own state on the way out.
     this.slotWait?.wake?.()
     const lease = this.partitionLease
+    const heldPartition = lease?.currentPartition
     const stamper = this.deps.stamper
     if (lease) {
       const localCounter = stamper.getLocalCounter()
@@ -430,6 +444,10 @@ export class BatchWriteCoordinator {
     this.lastLeaseValidatedAt = 0
     this.deps.writeLeaseCache?.(undefined)
     this.emitLeaseChange()
+    // Announced before the detached release lands, which is harmless: the
+    // lock SOCs stay the authority, so a peer woken early spends one extra
+    // read round.
+    if (heldPartition !== undefined) this.deps.onLeaseReleased?.(heldPartition)
   }
 
   // ---- lease lifecycle ----------------------------------------------------
@@ -1141,7 +1159,10 @@ export class BatchWriteCoordinator {
    * coordinator able to re-acquire on the next write (re-arm via `ensureLease`).
    * MUST run under the write lock (see the idle-yield note in `refreshTick`).
    */
-  private async yieldIdleLease(lease: PartitionLease): Promise<void> {
+  private async yieldIdleLease(
+    lease: PartitionLease,
+    requestId?: string,
+  ): Promise<void> {
     this.leaseEpoch++
     const yieldedPartition = lease.currentPartition
     if (this.partitionRefreshTimer !== undefined) {
@@ -1170,6 +1191,9 @@ export class BatchWriteCoordinator {
     console.info(
       `[BatchWriteCoordinator] Released idle partition ${yieldedPartition ?? "?"}; will re-acquire on next write.`,
     )
+    if (yieldedPartition !== undefined) {
+      this.deps.onLeaseReleased?.(yieldedPartition, requestId)
+    }
   }
 
   /**
@@ -1206,9 +1230,10 @@ export class BatchWriteCoordinator {
    * `PEER_YIELD_MIN_IDLE_MS`. Runs the exact idle-yield path (under the write
    * lock, with the same re-checks), so the Swarm release protocol and counter
    * flushes are identical to a timer yield. Returns the released partition,
-   * or undefined when nothing was (or could safely be) yielded.
+   * or undefined when nothing was (or could safely be) yielded; the release
+   * is announced through `onLeaseReleased` with the `requestId` it answers.
    */
-  async yieldForPeer(): Promise<number | undefined> {
+  async yieldForPeer(requestId?: string): Promise<number | undefined> {
     if (!this.canYieldForPeer) return undefined
     const lease = this.partitionLease
     const partition = lease?.currentPartition
@@ -1220,7 +1245,7 @@ export class BatchWriteCoordinator {
       if (Date.now() - this.lastLeaseActivityAt < PEER_YIELD_MIN_IDLE_MS) {
         return
       }
-      await this.yieldIdleLease(lease)
+      await this.yieldIdleLease(lease, requestId)
       released = partition
     })
     return released

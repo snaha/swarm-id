@@ -57,21 +57,22 @@ new BatchWriteCoordinator(deps: BatchWriteCoordinatorDeps)
 
 Dependencies are injected — no global storage-manager reach-in:
 
-| Dep                                  | Role                                                                                                                                  |
-| ------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------- |
-| `bee`, `batchId`                     | Bee client; the batch id (hex) is also the `withBatchWriteLock` key                                                                   |
-| `stamper`                            | `UtilizationAwareStamper`, already created + account-bound by the caller; the coordinator only binds/unbinds the held partition on it |
-| `deviceId`, `accountId`              | This device's identity (one `getOrCreateDeviceId` per browser) and the account                                                        |
-| `backupSigner`, `swarmEncryptionKey` | Own/read the lock SOCs for this batch's partitions                                                                                    |
-| `partitionCount`                     | `<= 1` (legacy single-device accounts) means: never lease, lock-only coordination                                                     |
-| `mode`                               | `"persistent"` (proxy) or `"oneshot"` (sync-account) — see below                                                                      |
-| `readLeaseCache` / `writeLeaseCache` | Optional local lease-cache hint (persistent mode)                                                                                     |
-| `flushStamperState`                  | Flush stamper bucket state after a write (proxy: `saveStamperStateIfNeeded`)                                                          |
-| `getWorkerPool`                      | Build/reuse a parallel-signing worker pool for `useWorkers` uploads                                                                   |
-| `onLeaseChange`                      | Fired on every partition / read-only transition (proxy → `emitConnectionInfoIfChanged`)                                               |
-| `onLeaseAcquired`                    | Fired when a partition is (re)acquired (proxy → schedule an account-state publish)                                                    |
-| `onSlotWait`                         | Fired each round of a slot wait (proxy → broadcast a `lease-request` on the account bus, see below)                                   |
-| `knownDeviceIds`                     | The rival set for the intent round and the idle yield: devices heard live on the account bus ∪ the registry's recent sign-ins         |
+| Dep                                  | Role                                                                                                                                     |
+| ------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------- |
+| `bee`, `batchId`                     | Bee client; the batch id (hex) is also the `withBatchWriteLock` key                                                                      |
+| `stamper`                            | `UtilizationAwareStamper`, already created + account-bound by the caller; the coordinator only binds/unbinds the held partition on it    |
+| `deviceId`, `accountId`              | This device's identity (one `getOrCreateDeviceId` per browser) and the account                                                           |
+| `backupSigner`, `swarmEncryptionKey` | Own/read the lock SOCs for this batch's partitions                                                                                       |
+| `partitionCount`                     | `<= 1` (legacy single-device accounts) means: never lease, lock-only coordination                                                        |
+| `mode`                               | `"persistent"` (proxy) or `"oneshot"` (sync-account) — see below                                                                         |
+| `readLeaseCache` / `writeLeaseCache` | Optional local lease-cache hint (persistent mode)                                                                                        |
+| `flushStamperState`                  | Flush stamper bucket state after a write (proxy: `saveStamperStateIfNeeded`)                                                             |
+| `getWorkerPool`                      | Build/reuse a parallel-signing worker pool for `useWorkers` uploads                                                                      |
+| `onLeaseChange`                      | Fired on every partition / read-only transition (proxy → `emitConnectionInfoIfChanged`)                                                  |
+| `onLeaseAcquired`                    | Fired when a partition is (re)acquired (proxy → schedule an account-state publish)                                                       |
+| `onSlotWait`                         | Fired each round of a slot wait (proxy → broadcast a `lease-request` on the account bus, see below)                                      |
+| `onLeaseReleased`                    | Fired after every release of a held partition — idle yield, yield for a peer (with its `requestId`), teardown (proxy → `lease-released`) |
+| `knownDeviceIds`                     | The rival set for the intent round and the idle yield: devices heard live on the account bus ∪ the registry's recent sign-ins            |
 
 Methods and getters:
 

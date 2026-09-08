@@ -122,11 +122,22 @@ vi.mock("./bus/bus-context", async (importActual) => {
   }
 })
 vi.mock("./sync/batch-write-coordinator", () => ({
-  BatchWriteCoordinator: vi.fn(function (deps: unknown) {
-    return {
+  BatchWriteCoordinator: vi.fn(function (deps: {
+    accountId: string
+    batchId: string
+    onLeaseReleased?: (partition: number, requestId?: string) => void
+  }) {
+    const coordinator = {
       deps,
+      accountId: deps.accountId,
+      batchId: deps.batchId,
       startLease: vi.fn(),
-      teardown: vi.fn(),
+      // Like the real one: a held partition is announced on the way out.
+      teardown: vi.fn(() => {
+        if (coordinator.currentPartition !== undefined) {
+          deps.onLeaseReleased?.(coordinator.currentPartition)
+        }
+      }),
       withWrite: vi.fn(),
       // Deliberately NOT instant. The real yield is two stamped Swarm writes
       // (`yieldIdleLease` → `release`), i.e. far longer than a rank step, so a
@@ -134,9 +145,12 @@ vi.mock("./sync/batch-write-coordinator", () => ({
       // never has — and hides whether the election's cancel signal actually
       // arrives before the other ranks fire.
       yieldForPeer: vi.fn(
-        async () =>
+        async (requestId?: string) =>
           await new Promise<number>((resolve) =>
-            setTimeout(() => resolve(1), SLOW_YIELD_MS),
+            setTimeout(() => {
+              deps.onLeaseReleased?.(1, requestId)
+              resolve(1)
+            }, SLOW_YIELD_MS),
           ),
       ),
       notifySlotMaybeFree: vi.fn(),
@@ -148,6 +162,7 @@ vi.mock("./sync/batch-write-coordinator", () => ({
        *  rank. Mutable: a test can make the holder mid-burst. */
       canYieldForPeer: true,
     }
+    return coordinator
   }),
 }))
 
