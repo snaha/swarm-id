@@ -112,9 +112,10 @@ jobs:
           echo "::group::queen logs"
           pnpm dev:cluster logs queen --tail 300 || true
           echo "::endgroup::"
-          # Started and stopped by the integration suite's globalSetup, so it is
-          # usually gone by now — worth asking anyway when the run died mid-suite.
-          echo "::group::subsidised gateway logs"
+          # The suite prints the gateway's log itself, at teardown, because that
+          # is the last moment the container exists. This is only the backstop
+          # for a run that died before reaching it.
+          echo "::group::subsidised gateway logs (backstop)"
           docker logs swarm-id-gateway-proxy --tail 200 2>&1 || true
           echo "::endgroup::"
 
