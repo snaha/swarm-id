@@ -27,6 +27,7 @@ import {
   makePartitionLockIdentifier,
   readPartitionLock,
   releasePartitionLock,
+  releasePartitionLockOnUnload,
   writePartitionLock,
   NO_HOLDER_DEVICE_ID,
   type PartitionLockGeneration,
@@ -1148,6 +1149,57 @@ describe("releasePartitionLock — generation fencing", () => {
     expect(result.outcome).toBe("released")
     expect(result.observed).toBeUndefined()
     expect((await readLock())?.holderDeviceId).toBe(NO_HOLDER_DEVICE_ID)
+  })
+})
+
+describe("releasePartitionLockOnUnload", () => {
+  const NOW = 1_000_000
+  const generation: PartitionLockGeneration = {
+    timestampMs: NOW - 5_000,
+    tiebreaker: makeDeviceTiebreaker(DEVICE_A),
+  }
+  const lockOpts = () => ({
+    bee: bee as unknown as Bee,
+    stamper,
+    backupSigner: BACKUP_SIGNER,
+    swarmEncryptionKey: TEST_ENC_KEY,
+    batchId: TEST_BATCH_ID,
+    partition: PARTITION,
+  })
+
+  it("sends the released sentinel synchronously, as a keepalive request", async () => {
+    await writePartitionLock({
+      ...lockOpts(),
+      payload: {
+        holderDeviceId: DEVICE_A,
+        generation,
+        acquiredAt: NOW - 10_000,
+        leasedUntil: NOW + TTL_MS,
+      },
+    })
+    const fetchSpy = vi.spyOn(globalThis, "fetch")
+
+    releasePartitionLockOnUnload({
+      ...lockOpts(),
+      releasedGeneration: generation,
+      acquiredAt: NOW - 10_000,
+      now: () => NOW,
+    })
+
+    // Asserted before yielding to the microtask queue: the page that made
+    // the call may not exist by the time anything asynchronous runs, so the
+    // request has to be in the browser's hands already — and marked to
+    // outlive its page.
+    expect(fetchSpy).toHaveBeenCalledTimes(1)
+    expect(fetchSpy.mock.calls[0][1]).toMatchObject({ keepalive: true })
+
+    await vi.waitFor(async () => {
+      const lock = await readPartitionLock(lockOpts())
+      expect(lock?.holderDeviceId).toBe(NO_HOLDER_DEVICE_ID)
+      // Fenced like the awaited release: the sentinel names the claim it ends.
+      expect(lock?.generation).toEqual(generation)
+      expect(lock?.leasedUntil).toBe(NOW)
+    })
   })
 })
 

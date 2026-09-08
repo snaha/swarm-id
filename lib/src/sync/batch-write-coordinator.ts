@@ -376,6 +376,44 @@ export class BatchWriteCoordinator {
    * disconnect. Never throws.
    */
   teardown(): void {
+    this.dispose((lease, localCounter) => {
+      // Serialize the detached release under the batch write lock (#349):
+      // a successor coordinator's acquire (`startLease`/`withWrite` →
+      // `lockAndFlush`) queues on the same origin-wide Web Lock, so the
+      // release's publish + sentinel fully complete BEFORE the successor
+      // can read or write the lock SOC — the sentinel's postage stamp is
+      // minted strictly before the successor's claim stamp, and Bee's
+      // newer-stamp-wins replacement keeps the claim. The generation fence
+      // in `releasePartitionLock` covers writers outside this lock. (In
+      // non-browser contexts the lock no-ops; only `oneshot` mode runs
+      // there and it never releases.)
+      void this.lock(() => lease.release(localCounter)).catch((err) =>
+        console.warn(
+          "[BatchWriteCoordinator] Partition lease release failed:",
+          err,
+        ),
+      )
+    })
+  }
+
+  /**
+   * `teardown()` for a page that is unloading (#676). Nothing asynchronous
+   * runs again, so the lease is either released with the one send a dying
+   * page can still make (`PartitionLease.releaseOnUnload`) or, when a sibling
+   * context of this device holds the same lease, abandoned to it — a sentinel
+   * under a live sibling would fail its in-flight upload. Neither schedules
+   * the awaited release: a page restored from the back/forward cache would
+   * resume it against a lock a sibling still holds.
+   */
+  teardownOnUnload(release: boolean): void {
+    this.dispose((lease) => {
+      if (release) lease.releaseOnUnload()
+    })
+  }
+
+  private dispose(
+    releaseLease: (lease: PartitionLease, localCounter: Uint32Array) => void,
+  ): void {
     // Disposed coordinators must never re-acquire: an in-flight `withWrite`
     // (deferred publish or upload) can outlive this call and would otherwise
     // re-lease the slot + arm a detached refresh interval.
@@ -393,27 +431,13 @@ export class BatchWriteCoordinator {
     if (lease) {
       const localCounter = stamper.getLocalCounter()
       if (localCounter !== undefined) {
-        // Serialize the detached release under the batch write lock (#349):
-        // a successor coordinator's acquire (`startLease`/`withWrite` →
-        // `lockAndFlush`) queues on the same origin-wide Web Lock, so the
-        // release's publish + sentinel fully complete BEFORE the successor
-        // can read or write the lock SOC — the sentinel's postage stamp is
-        // minted strictly before the successor's claim stamp, and Bee's
-        // newer-stamp-wins replacement keeps the claim. The generation fence
-        // in `releasePartitionLock` covers writers outside this lock. (In
-        // non-browser contexts the lock no-ops; only `oneshot` mode runs
-        // there and it never releases.)
-        //
-        // The release runs AFTER the synchronous unbind below — the publish
-        // goes through an unbound stamper, which is safe because
-        // `writePartitionState` marks its chunks with the explicit partition
-        // slot.
-        void this.lock(() => lease.release(localCounter)).catch((err) =>
-          console.warn(
-            "[BatchWriteCoordinator] Partition lease release failed:",
-            err,
-          ),
-        )
+        // The awaited release queues on the write lock and so runs AFTER the
+        // synchronous unbind below — its publish goes through an unbound
+        // stamper, which is safe because `writePartitionState` marks its
+        // chunks with the explicit partition slot. The unload release sends
+        // right here, still bound; a lock SOC is routed by address before
+        // the lease check either way.
+        releaseLease(lease, localCounter)
       }
       // Invalidate BEFORE unbinding (same ordering as the displacement race
       // fix): teardown runs synchronously, off the write lock, so it can land

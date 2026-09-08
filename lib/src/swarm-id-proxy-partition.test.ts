@@ -127,6 +127,7 @@ vi.mock("./sync/batch-write-coordinator", () => ({
       deps,
       startLease: vi.fn(),
       teardown: vi.fn(),
+      teardownOnUnload: vi.fn(),
       withWrite: vi.fn(),
       // Deliberately NOT instant. The real yield is two stamped Swarm writes
       // (`yieldIdleLease` → `release`), i.e. far longer than a rank step, so a
@@ -259,6 +260,11 @@ describe("SwarmIdProxy partitioned write enablement", () => {
   let proxy: SwarmIdProxy
   /** The raw `storage` listener the proxy adds for network settings (#515). */
   let storageListener: (event: StorageEvent) => void
+  /** The page lifecycle hooks the proxy adds (#676). */
+  let lifecycle: {
+    pagehide: () => void
+    pageshow: (event: { persisted: boolean }) => void
+  }
 
   /** (Re)create the proxy under a fresh window mock; keeps `localStorageFake`. */
   function mountProxy(config?: ProxyConfig): void {
@@ -281,6 +287,12 @@ describe("SwarmIdProxy partitioned write enablement", () => {
     proxy = new SwarmIdProxy(config)
     messageListener = listeners["message"] as MessageListener
     storageListener = listeners["storage"] as (event: StorageEvent) => void
+    lifecycle = {
+      pagehide: listeners["pagehide"] as () => void,
+      pageshow: listeners["pageshow"] as (event: {
+        persisted: boolean
+      }) => void,
+    }
   }
 
   /**
@@ -966,6 +978,89 @@ describe("SwarmIdProxy partitioned write enablement", () => {
     } finally {
       busChannel.close()
     }
+  })
+
+  describe("page lifecycle (#676)", () => {
+    type LifecycleCoordinator = {
+      currentPartition: number | undefined
+      teardownOnUnload: ReturnType<typeof vi.fn>
+    }
+
+    async function holdPartition(partition: number) {
+      const account = makeSyncedAccount()
+      const challenge = await startPartitionedConnect()
+      await sendSetSecret(challenge, {
+        account: serializeSyncedAccount(account),
+      })
+      const coordinator = vi.mocked(BatchWriteCoordinator).mock.results.at(-1)!
+        .value as LifecycleCoordinator
+      coordinator.currentPartition = partition
+      await awaitBusJoin()
+      return coordinator
+    }
+
+    it("releases the held partition on pagehide and wakes the waiters", async () => {
+      const coordinator = await holdPartition(2)
+      const busChannel = new BroadcastChannel(accountChannelName)
+      const published: Record<string, unknown>[] = []
+      busChannel.onmessage = (event) =>
+        published.push(event.data as Record<string, unknown>)
+      try {
+        lifecycle.pagehide()
+        expect(coordinator.teardownOnUnload).toHaveBeenCalledWith(true)
+        await vi.waitFor(() =>
+          expect(
+            published.filter((m) => m.type === "lease-released"),
+          ).toHaveLength(1),
+        )
+        expect(published[0].partition).toBe(2)
+      } finally {
+        busChannel.close()
+      }
+    })
+
+    it("leaves the lease to a live sibling context of this device", async () => {
+      const coordinator = await holdPartition(2)
+      const busChannel = new BroadcastChannel(accountChannelName)
+      const published: Record<string, unknown>[] = []
+      busChannel.onmessage = (event) =>
+        published.push(event.data as Record<string, unknown>)
+      try {
+        // Another tab of this dApp (or the SwarmID tab) beats with our own
+        // device id: it holds the same lease, and keeps refreshing it.
+        busChannel.postMessage({
+          type: "presence",
+          accountId: "aa".repeat(20),
+          fromDeviceId: localStorageFake.getItem("swarm-id-device-id"),
+        })
+        await flushBus()
+
+        lifecycle.pagehide()
+        expect(coordinator.teardownOnUnload).toHaveBeenCalledWith(false)
+        await flushBus()
+        expect(published.some((m) => m.type === "lease-released")).toBe(false)
+      } finally {
+        busChannel.close()
+      }
+    })
+
+    it("rebuilds the coordinator when the page returns from the back/forward cache", async () => {
+      await holdPartition(2)
+      const built = vi.mocked(BatchWriteCoordinator).mock.calls.length
+      lifecycle.pagehide()
+
+      // A fresh load's pageshow is not a restore; the auth path builds it.
+      lifecycle.pageshow({ persisted: false })
+      await flushBus()
+      expect(vi.mocked(BatchWriteCoordinator).mock.calls.length).toBe(built)
+
+      lifecycle.pageshow({ persisted: true })
+      await vi.waitFor(() =>
+        expect(vi.mocked(BatchWriteCoordinator).mock.calls.length).toBe(
+          built + 1,
+        ),
+      )
+    })
   })
 
   it("ignores its own lease messages, and other accounts' and batches'", async () => {

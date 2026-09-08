@@ -127,6 +127,14 @@ export interface UploadDataOptions {
   onProgress?: (progress: UploadProgress) => void
   /** Bee request options (stamper mode only) */
   requestOptions?: BeeRequestOptions
+  /**
+   * Send from a page that is unloading (stamper mode only): the request is a
+   * `fetch` keepalive the browser finishes after the page is gone, and no tag
+   * is created for it — that would be an await before the send, which a dying
+   * page never returns from. Everything up to the send is synchronous, so the
+   * call must not be preceded by an await either.
+   */
+  keepalive?: boolean
 }
 
 /**
@@ -155,6 +163,14 @@ export interface UploadSOCOptions {
   tag?: number
   /** Bee request options (stamper mode only) */
   requestOptions?: BeeRequestOptions
+  /**
+   * Send from a page that is unloading (stamper mode only): the request is a
+   * `fetch` keepalive the browser finishes after the page is gone, and no tag
+   * is created for it — that would be an await before the send, which a dying
+   * page never returns from. Everything up to the send is synchronous, so the
+   * call must not be preceded by an await either.
+   */
+  keepalive?: boolean
 }
 
 /**
@@ -969,7 +985,8 @@ export async function uploadSOC(
   } else {
     // Stamper mode
     const { bee, stamper } = target
-    const tag = options?.tag ?? (await tryCreateTag(bee))
+    const tag =
+      options?.tag ?? (options?.keepalive ? undefined : await tryCreateTag(bee))
 
     const envelope = stamper.stamp({
       hash: () => socAddressBytes,
@@ -998,6 +1015,7 @@ export async function uploadSOC(
       method: "POST",
       headers,
       body: socBody,
+      keepalive: options?.keepalive,
     })
 
     if (!response.ok) {

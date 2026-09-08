@@ -37,6 +37,7 @@ import { withTimeout } from "../utils/promise"
 import { SYNC_READ_TIMEOUT_MS } from "./timing-constants"
 import { deriveSecret } from "../utils/key-derivation"
 import {
+  LEASE_SKEW_MARGIN_MS,
   LEASE_TTL_MS,
   NUM_BUCKETS,
   UtilizationAwareStamper,
@@ -46,6 +47,7 @@ import { lockSocBucket } from "../utils/lock-soc"
 import {
   acquirePartitionLock,
   compareGenerations,
+  releasePartitionLockOnUnload,
   deviceHomePartition,
   makeDeviceTiebreaker,
   NO_HOLDER_DEVICE_ID,
@@ -1357,6 +1359,36 @@ export class PartitionLease {
 
     // The lease session is over on BOTH outcomes — "skipped" means a
     // successor or peer owns the lock now, which releases us just the same.
+    this.self = undefined
+    this.holders.delete(partition)
+  }
+
+  /**
+   * `release()` for a page that is unloading (#676). Synchronous: the lock
+   * sentinel goes out as the one keepalive send a dying page can still make
+   * (`releasePartitionLockOnUnload`), and nothing else does. No lock read
+   * first, so the write is guarded by the lease being live on our own clock —
+   * no peer can hold a lock whose lease has not lapsed, and a lapsed one may
+   * already be a peer's. No state flush either: the successor resumes at the
+   * last published counter, exactly as after a crash, which ack-after-publish
+   * makes safe (`publishState`). No-op when no lease is held.
+   */
+  releaseOnUnload(): void {
+    if (!this.self || this.closed || !this.opts.stamper) return
+    const { partition, generation, acquiredAt, leasedUntil } = this.self
+    if (this.now() >= leasedUntil - LEASE_SKEW_MARGIN_MS) return
+    this.closed = true
+    releasePartitionLockOnUnload({
+      bee: this.opts.bee,
+      stamper: this.opts.stamper,
+      backupSigner: this.opts.backupSigner,
+      swarmEncryptionKey: this.opts.swarmEncryptionKey,
+      batchId: this.opts.batchId,
+      partition,
+      releasedGeneration: generation,
+      acquiredAt,
+      now: () => this.now(),
+    })
     this.self = undefined
     this.holders.delete(partition)
   }

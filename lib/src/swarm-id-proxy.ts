@@ -74,7 +74,11 @@ import { AccountBus, BroadcastChannelTransport } from "./bus/account-bus"
 import { SignalingTransport } from "./bus/signaling-transport"
 import { deriveBusContext } from "./bus/bus-context"
 import type { BusContext } from "./bus/bus-context"
-import { PresenceTracker, PRESENCE_INTERVAL_MS } from "./bus/presence"
+import {
+  PresenceTracker,
+  PRESENCE_INTERVAL_MS,
+  PRESENCE_MAX_AGE_MS,
+} from "./bus/presence"
 import type { BeeRequestOptions } from "@ethersphere/bee-js"
 import {
   uploadData,
@@ -387,6 +391,9 @@ export class SwarmIdProxy {
   private bus: AccountBus
   /** Who else is live in the account's room, from their `presence` beats. */
   private presence = new PresenceTracker()
+  /** When a context sharing this device's id last beat — another tab of this
+   *  dApp, or the SwarmID tab. Not a rival, but a co-holder of the lease. */
+  private lastSiblingBeatAt = 0
   private presenceTimer: ReturnType<typeof setInterval> | undefined
   private subsidisedGatewayUrl: string | undefined
   /**
@@ -441,6 +448,7 @@ export class SwarmIdProxy {
     this.bee = new Bee(this.beeApiUrl)
     this.setupMessageListener()
     this.setupStorageListeners()
+    this.setupLifecycleListeners()
 
     // Multi-tab coordination rides the account bus (docs/Account-Bus.md).
     this.bus = new AccountBus([])
@@ -449,6 +457,37 @@ export class SwarmIdProxy {
     // Announce readiness to parent window immediately
     // This signals that our message listener is ready to receive parentIdentify
     this.announceReady()
+  }
+
+  /**
+   * Page lifecycle (#676). `pagehide` is the last code a closing page runs,
+   * and it also fires on the way into the back/forward cache, from which the
+   * page may return (`pageshow` with `persisted`). Both take the same path:
+   * the write coordinator is torn down on the way out — a frozen one would
+   * come back holding a lease it stopped refreshing, and a dead one cannot
+   * refresh at all — and rebuilt on the way back. The bus is left alone: a
+   * dying page's socket closes by itself, which is the room's `peer-left`,
+   * and a restored page's transport reconnects by itself.
+   *
+   * Whether the lease is released or left to its TTL is decided here, not in
+   * the coordinator: only the proxy hears the presence beats that say whether
+   * a sibling context of this device is alive.
+   */
+  private setupLifecycleListeners(): void {
+    window.addEventListener("pagehide", () => {
+      // ponytail: "alive" is a beat inside the presence window, so a sibling
+      // that closed less than PRESENCE_MAX_AGE_MS ago still keeps this tab
+      // from releasing — the TTL covers that, as it covered everything before.
+      // A local leave beat would tighten it, if the window ever matters.
+      const siblingAlive =
+        Date.now() - this.lastSiblingBeatAt < PRESENCE_MAX_AGE_MS
+      this.teardownCoordinator(siblingAlive ? "abandon" : "release")
+    })
+    window.addEventListener("pageshow", (event) => {
+      if (!event.persisted || !this.authenticated) return
+      const stamp = this.lookupPostageStampForApp()
+      if (stamp) void this.initializeStamper(stamp.depth)
+    })
   }
 
   /**
@@ -1236,17 +1275,27 @@ export class SwarmIdProxy {
    * Swarm release it describes, which is harmless: the lock SOCs stay the
    * authority, so a peer woken too early just spends one extra read round.
    */
-  private teardownCoordinator(): void {
+  private teardownCoordinator(unload?: "release" | "abandon"): void {
     const partition = this.coordinator?.currentPartition
     const accountId = this.coordinatorAccountId
     const batchId = this.coordinatorBatchId
     // Scheduled answers describe a lease we are about to drop anyway.
     this.cancelPendingYields()
-    this.coordinator?.teardown()
+    if (unload) {
+      this.coordinator?.teardownOnUnload(unload === "release")
+    } else {
+      this.coordinator?.teardown()
+    }
     this.coordinator = undefined
     this.coordinatorAccountId = undefined
     this.coordinatorBatchId = undefined
-    if (partition === undefined || !accountId || !batchId || !this.deviceId) {
+    if (
+      unload === "abandon" ||
+      partition === undefined ||
+      !accountId ||
+      !batchId ||
+      !this.deviceId
+    ) {
       return
     }
     this.bus.publish({
@@ -1573,10 +1622,9 @@ export class SwarmIdProxy {
           // A sibling tab of this device shares the id over the local
           // transport; it is not a rival. A beat naming another account did
           // not come from this room's scope (belt and braces, as elsewhere).
-          if (
-            message.accountId !== this.busBoundAccountId ||
-            message.fromDeviceId === this.deviceId
-          ) {
+          if (message.accountId !== this.busBoundAccountId) return
+          if (message.fromDeviceId === this.deviceId) {
+            this.lastSiblingBeatAt = Date.now()
             return
           }
           this.presence.observe(message.fromDeviceId, Date.now(), from)

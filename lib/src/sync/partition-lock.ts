@@ -208,6 +208,8 @@ export async function writePartitionLock(opts: {
   batchId: BatchId
   partition: number
   payload: PartitionLockPayload
+  /** See `UploadSOCOptions.keepalive`: a send from an unloading page. */
+  keepalive?: boolean
 }): Promise<void> {
   const {
     bee,
@@ -217,6 +219,7 @@ export async function writePartitionLock(opts: {
     batchId,
     partition,
     payload,
+    keepalive,
   } = opts
   const identifier = makePartitionLockIdentifier(batchId, partition)
   const data = new TextEncoder().encode(JSON.stringify(payload))
@@ -227,6 +230,7 @@ export async function writePartitionLock(opts: {
   // depends on node reachability — see .claude/rules/bee-cluster.md.)
   await uploadSOC(target, backupSigner, identifier, data, {
     encryptionKey: swarmEncryptionKey,
+    keepalive,
   })
 }
 
@@ -438,4 +442,45 @@ export async function releasePartitionLock(opts: {
   }
   await writePartitionLock({ ...opts, payload: releasePayload })
   return { outcome: "released", observed: current }
+}
+
+/**
+ * `releasePartitionLock` for a page that is unloading (#676): the one write a
+ * dying page can still make. Synchronous up to the send, which is a `fetch`
+ * keepalive the browser completes after the page is gone. There is no lock
+ * read first — nothing asynchronous runs again — so the caller vouches that
+ * the claim is live on this device's own clock, which is what makes the blind
+ * write safe: no peer can hold a lock whose lease has not lapsed. The
+ * generation fence is the same as the awaited release's, so a claim newer
+ * than the one named here outranks the sentinel on read.
+ */
+export function releasePartitionLockOnUnload(opts: {
+  bee: Bee
+  stamper: Stamper
+  backupSigner: PrivateKey
+  swarmEncryptionKey: Uint8Array
+  batchId: BatchId
+  partition: number
+  releasedGeneration: PartitionLockGeneration
+  acquiredAt: number
+  now?: () => number
+}): void {
+  const releasePayload: PartitionLockPayload = {
+    holderDeviceId: NO_HOLDER_DEVICE_ID,
+    generation: opts.releasedGeneration,
+    acquiredAt: opts.acquiredAt,
+    leasedUntil: (opts.now ?? Date.now)(),
+  }
+  // Nothing can await this: the page is going away. On a back/forward-cache
+  // restore the promise settles late, and its outcome is of no use then.
+  void writePartitionLock({
+    ...opts,
+    payload: releasePayload,
+    keepalive: true,
+  }).catch((error) => {
+    console.warn(
+      `[partition-lock] Unload release of partition ${opts.partition} failed:`,
+      error,
+    )
+  })
 }

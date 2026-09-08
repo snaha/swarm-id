@@ -86,6 +86,12 @@ Methods and getters:
 - **`teardown()`** — stop all background work, best-effort release of the held partition so peers
   see this device vacate promptly, invalidate-then-unbind the stamper, clear the cache. Never
   throws. Sets a `disposed` flag (see below).
+- **`teardownOnUnload(release)`** — the same from `pagehide` (#676), where nothing asynchronous
+  runs again: the lease is released with the one send a dying page can still make
+  (`PartitionLease.releaseOnUnload`, a keepalive `fetch` with everything before it synchronous)
+  or, when a sibling context of this device holds it too, abandoned to it. Never schedules the
+  awaited release — restored from the back/forward cache, that would run against a lock the
+  sibling still holds.
 - **`currentPartition`** / **`isReadOnly`** / **`stamperRef`** — read by the proxy's
   `buildConnectionInfo` (partition, read-only state, appKey/uploadMode).
 - **`PartitionContendedError`** — thrown when there is genuinely no slot to claim (every partition
@@ -103,7 +109,7 @@ Methods and getters:
 | Refresh timer            | yes (`LEASE_REFRESH_MS`)                                                                                                                                                                                       | never armed                                                        |
 | `withWrite` default wait | `"block"`                                                                                                                                                                                                      | `"skip"`                                                           |
 | No slot available        | ask live holders over the account bus each round and wake on their answer (~one round trip); otherwise poll every `LEASE_REFRESH_MS` up to 30 s, inside a 45 s overall acquire timeout; then the upload errors | single claim attempt; throws `PartitionContendedError` immediately |
-| Lease end-of-life        | released on `teardown()` (sign-out / disconnect), or idle-yielded                                                                                                                                              | lapses by TTL                                                      |
+| Lease end-of-life        | released on `teardown()` (sign-out / disconnect) or `teardownOnUnload()` (`pagehide`, #676), or idle-yielded                                                                                                   | lapses by TTL                                                      |
 
 ## Lease lifecycle
 
@@ -193,7 +199,8 @@ single-partition accounts get a lock-only coordinator). Every upload handler goe
 `withModeAwareWriteLock`: subsidised mode (gateway stamping, no local stamp state) short-circuits
 to an unlocked gateway target; everything else delegates to `coordinator.withWrite`.
 `buildConnectionInfo` reads `currentPartition` / `stamperRef`; `onLeaseChange` →
-`emitConnectionInfoIfChanged`; sign-out / disconnect / re-auth → `teardown()`.
+`emitConnectionInfoIfChanged`; sign-out / disconnect / re-auth → `teardown()`; `pagehide` →
+`teardownOnUnload()`, and `pageshow` with `persisted` → `initializeStamper()` again.
 
 ### Proxy-side account-state publish
 

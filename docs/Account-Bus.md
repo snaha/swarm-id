@@ -506,9 +506,25 @@ Not yet written:
   set.
 - A departure is only as prompt as the socket's close. A tab closed normally produces one at
   once; a crashed peer or a dropped network waits for the server's ping cycle to reap the
-  socket, and the presence window covers it until then. **The lock is not reclaimed any
-  faster either way**: releasing it is a stamped SOC write the dying page cannot finish, so
-  `LEASE_TTL_MS` remains the mechanism for a partition a closed tab was holding.
+  socket, and the presence window covers it until then. The **lock** follows the same line
+  ([#676](https://github.com/snaha/swarm-id/issues/676)): a tab closed normally releases its
+  partition from `pagehide` — the sentinel write is synchronous up to its send, and the send
+  is a `fetch` keepalive the browser finishes after the page is gone
+  (`PartitionLease.releaseOnUnload`), so a waiter picks it up on its next poll instead of
+  waiting out `LEASE_TTL_MS`. A crash, a force-quit or a dropped network run no `pagehide`, and
+  there the TTL remains the mechanism. So does a tab that heard a **sibling context of its own
+  device** — another tab of the dApp, or the SwarmID tab — beat within the presence window: they
+  hold the same lease, a sentinel under them would fail their in-flight upload, so the closing
+  tab leaves it to them; when the sibling has itself closed inside that window, nobody releases
+  and the TTL covers it. The proxy does not announce this release on the bus any faster than it
+  announces anything: a bus publish encrypts before it sends, and a dying page never gets there.
+- **Back/forward cache.** `pagehide` also fires on the way into it, so the proxy tears its write
+  coordinator down on every `pagehide` — a frozen one would return holding a lease it stopped
+  refreshing — and rebuilds it on `pageshow` with `persisted` (a cold acquire; the lease cache
+  went with the teardown). The bus is left alone: the socket closes by itself and the transport
+  reconnects by itself. Not yet exercised on a device: whether Chrome and Safari actually admit
+  the proxy iframe to the cache with its socket and `BroadcastChannel` open, and what the
+  restored page's first acquire costs, are the manual checks #676 lists.
 - The same promptness cuts the other way on a **reconnect**: a peer whose socket closes cleanly
   and comes back (a `1013` backoff, a blip the client sees before the server does) is dropped at
   once and is missing from every rival set until its rejoin beat, so a claim made in that window
