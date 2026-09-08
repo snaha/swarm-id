@@ -344,14 +344,6 @@ export class SwarmIdProxy {
    *  transport encrypts with its construction-time key, so this — not whichever
    *  connection resolves now — is who a publish actually reaches. */
   private busBoundAccountId: string | undefined
-  /** Account the live coordinator serves — routes bus lease messages. */
-  private coordinatorAccountId: string | undefined
-  /** Batch the live coordinator serves. Lanes are per (batch, partition), so
-   *  this routes the lease messages alongside the account (#589): a yield for
-   *  another batch's waiter drops a lease that helps nobody. Captured with the
-   *  coordinator rather than read from `postageBatchId`, which can move to a
-   *  new batch before the coordinator is rebuilt. */
-  private coordinatorBatchId: string | undefined
   /** Scheduled answers to peers' `lease-request`s, by request id, so a peer
    *  earlier in the rank order can call ours off (`yieldRankDelayMs`). */
   private pendingYields = new Map<string, ReturnType<typeof setTimeout>>()
@@ -1237,25 +1229,11 @@ export class SwarmIdProxy {
    * authority, so a peer woken too early just spends one extra read round.
    */
   private teardownCoordinator(): void {
-    const partition = this.coordinator?.currentPartition
-    const accountId = this.coordinatorAccountId
-    const batchId = this.coordinatorBatchId
     // Scheduled answers describe a lease we are about to drop anyway.
     this.cancelPendingYields()
+    // A held partition is announced through `onLeaseReleased` on the way out.
     this.coordinator?.teardown()
     this.coordinator = undefined
-    this.coordinatorAccountId = undefined
-    this.coordinatorBatchId = undefined
-    if (partition === undefined || !accountId || !batchId || !this.deviceId) {
-      return
-    }
-    this.bus.publish({
-      type: "lease-released",
-      accountId,
-      batchId,
-      partition,
-      fromDeviceId: this.deviceId,
-    })
   }
 
   private static laneKey(
@@ -1349,22 +1327,10 @@ export class SwarmIdProxy {
       fromDeviceId: this.requireDeviceId(),
       requestId,
     })
-    coordinator
-      .yieldForPeer()
-      .then((partition) => {
-        if (partition === undefined) return
-        this.bus.publish({
-          type: "lease-released",
-          accountId,
-          batchId,
-          partition,
-          fromDeviceId: this.requireDeviceId(),
-          requestId,
-        })
-      })
-      .catch((error) => {
-        console.error("[Proxy] Peer lease yield failed:", error)
-      })
+    // The release itself is announced through `onLeaseReleased`.
+    coordinator.yieldForPeer(requestId).catch((error) => {
+      console.error("[Proxy] Peer lease yield failed:", error)
+    })
   }
 
   /**
@@ -1502,8 +1468,8 @@ export class SwarmIdProxy {
           // multi-batch hypothetical.
           if (
             !coordinator ||
-            message.accountId !== this.coordinatorAccountId ||
-            message.batchId !== this.coordinatorBatchId ||
+            message.accountId !== coordinator.accountId ||
+            message.batchId !== coordinator.batchId ||
             message.fromDeviceId === this.deviceId
           ) {
             return
@@ -1532,8 +1498,8 @@ export class SwarmIdProxy {
         case "lease-claim": {
           if (
             message.fromDeviceId === this.deviceId ||
-            message.accountId !== this.coordinatorAccountId ||
-            message.batchId !== this.coordinatorBatchId
+            message.accountId !== this.coordinator?.accountId ||
+            message.batchId !== this.coordinator?.batchId
           ) {
             return
           }
@@ -1546,8 +1512,8 @@ export class SwarmIdProxy {
         case "lease-released": {
           if (
             message.fromDeviceId === this.deviceId ||
-            message.accountId !== this.coordinatorAccountId ||
-            message.batchId !== this.coordinatorBatchId
+            message.accountId !== this.coordinator?.accountId ||
+            message.batchId !== this.coordinator?.batchId
           ) {
             return
           }
@@ -1855,9 +1821,19 @@ export class SwarmIdProxy {
         this.applyPendingLaneUpdate()
         this.schedulePublish("acquired")
       },
+      // Every release — idle timer, a peer's request, teardown — wakes the
+      // waiters' slot polls; the announcement is not each path's to remember.
+      onLeaseReleased: (partition, requestId) => {
+        this.bus.publish({
+          type: "lease-released",
+          accountId: accountInfo.accountId,
+          batchId,
+          partition,
+          fromDeviceId: this.requireDeviceId(),
+          requestId,
+        })
+      },
     })
-    this.coordinatorAccountId = accountInfo.accountId
-    this.coordinatorBatchId = batchId
     this.coordinator.startLease()
   }
 

@@ -215,6 +215,23 @@ describe("BatchWriteCoordinator (Step A shell)", () => {
     })
   })
 
+  it("teardown announces the partition it held", () => {
+    const onLeaseReleased = vi.fn()
+    const coordinator = new BatchWriteCoordinator(
+      makeDeps({
+        stamper: makeStamper(
+          [],
+        ) as unknown as BatchWriteCoordinatorDeps["stamper"],
+        onLeaseReleased,
+      }),
+    )
+    ;(coordinator as unknown as Internals).partitionLease = makeLease({
+      partition: 2,
+    })
+    coordinator.teardown()
+    expect(onLeaseReleased).toHaveBeenCalledWith(2)
+  })
+
   it("teardown is safe with no optional hooks provided", () => {
     const coordinator = new BatchWriteCoordinator(makeDeps())
     expect(() => coordinator.teardown()).not.toThrow()
@@ -791,14 +808,16 @@ describe("BatchWriteCoordinator — idle-yield under the write lock", () => {
   // 30s pause was pure UX cost). These tests declare one.
   const RIVAL_DEPS = { knownDeviceIds: () => [SELF, "device-rival-1"] }
 
-  it("yields an idle lease: releases, unbinds, and emits the transition", async () => {
+  it("yields an idle lease: releases, unbinds, emits the transition, announces", async () => {
     const calls: string[] = []
     const stamper = makeStamper(calls)
     const onLeaseChange = vi.fn()
+    const onLeaseReleased = vi.fn()
     const coordinator = new BatchWriteCoordinator(
       makeDeps({
         stamper: stamper as unknown as BatchWriteCoordinatorDeps["stamper"],
         onLeaseChange,
+        onLeaseReleased,
         ...RIVAL_DEPS,
       }),
     )
@@ -817,6 +836,9 @@ describe("BatchWriteCoordinator — idle-yield under the write lock", () => {
       currentPartition: undefined,
       isReadOnly: false,
     })
+    // The timer yield answers no request, so a waiter learns of it only from
+    // this announcement (#590).
+    expect(onLeaseReleased).toHaveBeenCalledWith(0, undefined)
   })
 
   it("keeps an idle lease when no rival is known (solo device)", async () => {
@@ -1749,12 +1771,14 @@ describe("BatchWriteCoordinator — bus-accelerated leases (docs/Account-Bus.md)
       const calls: string[] = []
       const stamper = makeStamper(calls)
       const onLeaseChange = vi.fn()
+      const onLeaseReleased = vi.fn()
       const writeLeaseCache = vi.fn()
       const coordinator = new BatchWriteCoordinator(
         makeDeps({
           stamper: stamper as unknown as BatchWriteCoordinatorDeps["stamper"],
           mode: "oneshot",
           onLeaseChange,
+          onLeaseReleased,
           writeLeaseCache,
         }),
       )
@@ -1763,16 +1787,72 @@ describe("BatchWriteCoordinator — bus-accelerated leases (docs/Account-Bus.md)
       expect(coordinator.currentPartition).toBe(1)
 
       // Within the grace window right after the write: refuse to yield.
-      await expect(coordinator.yieldForPeer()).resolves.toBeUndefined()
+      await expect(
+        coordinator.yieldForPeer("cafe0001"),
+      ).resolves.toBeUndefined()
       expect(lease.release).not.toHaveBeenCalled()
+      expect(onLeaseReleased).not.toHaveBeenCalled()
 
-      // Once idle past the grace window: yield through the normal release path.
+      // Once idle past the grace window: yield through the normal release path,
+      // and announce it with the requestId it answers — the proxy's bus reply
+      // is built from this echo, so the real coordinator must carry it.
       await vi.advanceTimersByTimeAsync(PEER_YIELD_MIN_IDLE_MS)
-      await expect(coordinator.yieldForPeer()).resolves.toBe(1)
+      await expect(coordinator.yieldForPeer("cafe0001")).resolves.toBe(1)
       expect(lease.release).toHaveBeenCalledTimes(1)
+      expect(onLeaseReleased).toHaveBeenCalledTimes(1)
+      expect(onLeaseReleased).toHaveBeenCalledWith(1, "cafe0001")
       expect(coordinator.currentPartition).toBeUndefined()
       expect(writeLeaseCache).toHaveBeenLastCalledWith(undefined)
       expect(onLeaseChange).toHaveBeenCalled()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it("teardown during an in-flight yield announces the partition once", async () => {
+    vi.useFakeTimers()
+    try {
+      const lease = makeLease({
+        acquireResult: {
+          partition: 1,
+          partitionCount: 4,
+          localCounter: new Uint32Array(8),
+          isReadOnly: false,
+        },
+      })
+      leaseController.lease = lease
+      // The yield's release is a stamped Swarm write that takes seconds; hold
+      // it open so teardown can land in the middle.
+      // Teardown issues its own detached release too, so hold every call.
+      const finishReleases: Array<() => void> = []
+      lease.release.mockImplementation(
+        () => new Promise<void>((resolve) => finishReleases.push(resolve)),
+      )
+      const stamper = makeStamper([])
+      const onLeaseReleased = vi.fn()
+      const coordinator = new BatchWriteCoordinator(
+        makeDeps({
+          stamper: stamper as unknown as BatchWriteCoordinatorDeps["stamper"],
+          mode: "oneshot",
+          onLeaseReleased,
+        }),
+      )
+      await coordinator.withWrite(
+        vi.fn(async () => "ok"),
+        { wait: "block" },
+      )
+      await vi.advanceTimersByTimeAsync(PEER_YIELD_MIN_IDLE_MS)
+
+      const yielding = coordinator.yieldForPeer("cafe0002")
+      await vi.advanceTimersByTimeAsync(0)
+      expect(lease.release).toHaveBeenCalledTimes(1)
+      // Teardown announces synchronously, then the yield's release completes.
+      coordinator.teardown()
+      expect(onLeaseReleased).toHaveBeenCalledTimes(1)
+      for (const finish of finishReleases) finish()
+      await yielding
+
+      expect(onLeaseReleased).toHaveBeenCalledTimes(1)
     } finally {
       vi.useRealTimers()
     }

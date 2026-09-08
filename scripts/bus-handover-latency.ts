@@ -23,7 +23,11 @@
  * Each row runs on a fresh account, so nothing carries over. The bus glue is a
  * copy of the proxy's three handlers (`answerLeaseRequest`, `yieldRankDelayMs`,
  * `standDownFromRequest`), which are private there; keep the rank formula
- * identical or the script measures a race the product does not have.
+ * identical or the script measures a race the product does not have. One
+ * known difference: the proxy announces `lease-released` from the
+ * coordinator's `onLeaseReleased` hook, this script from
+ * `yieldForPeer().then(...)` — the same moment in practice, so the timing
+ * holds, but do not read the script as a byte-for-byte mirror.
  *
  * Needs the local cluster and the dev signaling server (`pnpm dev:local`, or
  * `pnpm dev:cluster:start` + `pnpm dev:signaling`) and a usable batch owned by
