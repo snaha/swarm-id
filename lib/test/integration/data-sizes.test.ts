@@ -13,9 +13,7 @@ import { describe, it, expect, beforeAll, inject } from "vitest"
 import type { Bee } from "@ethersphere/bee-js"
 import { uploadData, type UploadTarget } from "../../src/proxy/upload"
 import { downloadDataWithChunkAPI } from "../../src/proxy/download-data"
-import { isClusterReachable, createClusterContext } from "./cluster"
-
-const clusterReachable = await isClusterReachable()
+import { createClusterContext } from "./cluster"
 
 function sequentialPayload(size: number): Uint8Array {
   const data = new Uint8Array(size)
@@ -28,24 +26,21 @@ function sequentialPayload(size: number): Uint8Array {
 const MAX_CHUNK = 4096
 const SIZES = [1, MAX_CHUNK - 1, MAX_CHUNK, MAX_CHUNK + 1, MAX_CHUNK * 2]
 
-describe.skipIf(!clusterReachable)(
-  "Data round-trip at chunk boundaries",
-  () => {
-    let bee: Bee
-    let target: UploadTarget
+describe("Data round-trip at chunk boundaries", () => {
+  let bee: Bee
+  let target: UploadTarget
 
-    beforeAll(() => {
-      ;({ bee, target } = createClusterContext(inject("clusterBatchId")))
+  beforeAll(() => {
+    ;({ bee, target } = createClusterContext(inject("clusterBatchId")))
+  })
+
+  for (const size of SIZES) {
+    it(`round-trips ${size}-byte payload`, async () => {
+      const data = sequentialPayload(size)
+      const { reference } = await uploadData(target, data)
+      const downloaded = await downloadDataWithChunkAPI(bee, reference)
+      expect(downloaded.length).toBe(size)
+      expect(downloaded).toEqual(data)
     })
-
-    for (const size of SIZES) {
-      it(`round-trips ${size}-byte payload`, async () => {
-        const data = sequentialPayload(size)
-        const { reference } = await uploadData(target, data)
-        const downloaded = await downloadDataWithChunkAPI(bee, reference)
-        expect(downloaded.length).toBe(size)
-        expect(downloaded).toEqual(data)
-      })
-    }
-  },
-)
+  }
+})

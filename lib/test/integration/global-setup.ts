@@ -9,20 +9,25 @@
  * every test file via `provide`/`inject`. This keeps the ~minute-long stamp
  * warmup a one-time cost for the whole run instead of paying it per file.
  *
- * When no cluster is reachable it provides nothing; the test files detect this
- * independently and skip (see `isClusterReachable` usage in *.cluster.test.ts).
+ * It also owns the services the suite needs, and refuses the run when they are
+ * not there. Nothing in `test/integration` skips: `pnpm test` is the command
+ * that runs without services, so a run of THIS one that checked nothing must
+ * not be able to report the same colour as a run that did.
  */
 
 import type { TestProject } from "vitest/node"
-import { isClusterReachable, buyUsableStamp } from "./cluster"
+import { QUEEN_URL, isClusterReachable, buyUsableStamp } from "./cluster"
 import { GATEWAY_URL, startGatewayProxy } from "./gateway"
 
 export default async function setup({ provide }: TestProject) {
   if (!(await isClusterReachable())) {
-    console.warn(
-      "[cluster] No local Bee cluster reachable at http://localhost:1633 — cluster integration tests will be skipped. Run `pnpm dev:cluster:start` to enable them.",
+    // A precondition, not a condition. `pnpm test` is the command that runs
+    // without services; this one exists to check them, and a run that checked
+    // nothing must not be able to report the same colour as a run that did.
+    throw new Error(
+      `[cluster] No local Bee cluster reachable at ${QUEEN_URL}.\n` +
+        "Start one with `pnpm dev:cluster:start`, or run `pnpm test` for the suite that needs no services.",
     )
-    return
   }
 
   console.log(
@@ -34,8 +39,8 @@ export default async function setup({ provide }: TestProject) {
 
   // Subsidised mode uploads to a gateway that stamps for it, so covering it
   // needs a real one in front of the same queen. Started here rather than from
-  // a CI step so the suite brings up everything it needs on its own, and skips
-  // cleanly where Docker cannot.
+  // a CI step, so the suite brings up everything it needs on its own and CI
+  // needs no wiring that could drift from it.
   const gateway = await startGatewayProxy(batchId)
   if (!gateway) {
     // Hard failure, not a skip. Reaching here means the cluster answered, so

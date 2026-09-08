@@ -12,10 +12,10 @@
  * `gateway-proxy`, in a container, in front of the same bee-compose queen the
  * stamper-mode tests use.
  *
- * Started once from `global-setup.ts` and torn down with the run. When Docker
- * is unavailable (or the image cannot be pulled) the start is skipped with a
- * warning and the subsidised suites self-skip, exactly as they do without a
- * cluster.
+ * Started once from `global-setup.ts` and torn down with the run. Reaching that
+ * start means the cluster answered, and bee-compose IS Docker — so a gateway
+ * that will not come up is a real breakage, and the setup fails the run instead
+ * of skipping. Nothing in this suite skips.
  */
 
 import { execFile } from "node:child_process"
@@ -24,6 +24,14 @@ import type { UploadTarget } from "../../src/proxy/upload"
 import { QUEEN_URL } from "./cluster"
 
 const run = promisify(execFile)
+
+/**
+ * `docker run` pulls the image when it is missing — a cold CI runner fetching
+ * ~106 MB — and every layer line lands in this buffer. The default 1 MB is
+ * probably enough and failing on it would look like a broken gateway rather
+ * than a full pipe, which is not a debugging session worth having.
+ */
+const DOCKER_MAX_BUFFER = 16 * 1024 * 1024
 
 /**
  * Pinned rather than `latest`: the image publishes no `latest` tag, and a
@@ -38,7 +46,7 @@ const GATEWAY_CONTAINER_PORT = 3000
  * Host port. Deliberately not 3000 — that collides with half the dev servers on
  * a typical machine — and adjacent to the demo's 3500 so it reads as ours.
  */
-export const GATEWAY_PORT = 3600
+const GATEWAY_PORT = 3600
 export const GATEWAY_URL = `http://localhost:${GATEWAY_PORT}`
 
 const HTTP_OK = 200
@@ -50,13 +58,8 @@ function delay(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms))
 }
 
-/**
- * Whether the gateway is up. Used by the subsidised suites to skip when the
- * harness could not start one, mirroring `isClusterReachable`.
- */
-export async function isGatewayReachable(
-  url: string = GATEWAY_URL,
-): Promise<boolean> {
+/** Whether the container is answering yet — the start's own readiness poll. */
+async function isGatewayReachable(url: string = GATEWAY_URL): Promise<boolean> {
   try {
     const response = await fetch(`${url}/health`, {
       signal: AbortSignal.timeout(REACHABLE_TIMEOUT_MS),
@@ -76,7 +79,9 @@ export function createSubsidisedTarget(
 
 async function removeExistingContainer(): Promise<void> {
   try {
-    await run("docker", ["rm", "-f", GATEWAY_CONTAINER])
+    await run("docker", ["rm", "-f", GATEWAY_CONTAINER], {
+      maxBuffer: DOCKER_MAX_BUFFER,
+    })
   } catch {
     // No such container, which is the normal case.
   }
@@ -89,10 +94,10 @@ async function removeExistingContainer(): Promise<void> {
  * bought and warmed is the one the stamper-mode tests use, so both modes write
  * against the same batch and a failure cannot be blamed on a second, colder one.
  *
- * Returns `undefined` when Docker cannot run it — the caller warns and the
- * subsidised suites skip. Anything past a healthy container (a stamp the
- * gateway will not use, an endpoint it no longer proxies) is left to fail in
- * the tests, where the reason is visible.
+ * Returns `undefined` when Docker cannot run it, having warned why; the caller
+ * turns that into a failed run rather than a skipped suite. Anything past a
+ * healthy container (a stamp the gateway will not use, an endpoint it no longer
+ * proxies) is left to fail in the tests, where the reason is visible.
  */
 export async function startGatewayProxy(
   batchId: string,
@@ -100,26 +105,30 @@ export async function startGatewayProxy(
   await removeExistingContainer()
 
   try {
-    await run("docker", [
-      "run",
-      "-d",
-      "--rm",
-      "--name",
-      GATEWAY_CONTAINER,
-      "-p",
-      `${GATEWAY_PORT}:${GATEWAY_CONTAINER_PORT}`,
-      // The queen publishes 1633 on the host, and the gateway has to reach it
-      // from inside its own network namespace. `host-gateway` is what makes
-      // `host.docker.internal` resolve on Linux CI as well as Docker Desktop.
-      "--add-host=host.docker.internal:host-gateway",
-      "-e",
-      `BEE_API_URL=${QUEEN_URL.replace("localhost", "host.docker.internal")}`,
-      "-e",
-      `POSTAGE_STAMP=${batchId}`,
-      "-e",
-      "LOG_LEVEL=warn",
-      GATEWAY_IMAGE,
-    ])
+    await run(
+      "docker",
+      [
+        "run",
+        "-d",
+        "--rm",
+        "--name",
+        GATEWAY_CONTAINER,
+        "-p",
+        `${GATEWAY_PORT}:${GATEWAY_CONTAINER_PORT}`,
+        // The queen publishes 1633 on the host, and the gateway has to reach it
+        // from inside its own network namespace. `host-gateway` is what makes
+        // `host.docker.internal` resolve on Linux CI as well as Docker Desktop.
+        "--add-host=host.docker.internal:host-gateway",
+        "-e",
+        `BEE_API_URL=${QUEEN_URL.replace("localhost", "host.docker.internal")}`,
+        "-e",
+        `POSTAGE_STAMP=${batchId}`,
+        "-e",
+        "LOG_LEVEL=warn",
+        GATEWAY_IMAGE,
+      ],
+      { maxBuffer: DOCKER_MAX_BUFFER },
+    )
   } catch (error) {
     console.warn(
       `[gateway] Could not start ${GATEWAY_IMAGE}: ${error instanceof Error ? error.message : String(error)}`,
