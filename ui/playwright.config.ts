@@ -38,6 +38,12 @@ const SERIAL_SPEC = '**/drive-onchain-serial.test.ts'
  */
 const PARTITIONED_SPEC = '**/bus-propagation.test.ts'
 
+/**
+ * The three-device partition scenarios: minutes of TTL and idle waits by
+ * design, so they run only through `playwright.devices.config.ts`.
+ */
+const DEVICES_SPEC = '**/three-devices.test.ts'
+
 const CHROMIUM_ARGS = [
   '--disable-dev-shm-usage',
   '--no-sandbox',
@@ -96,7 +102,7 @@ export default defineConfig({
   projects: [
     {
       name: 'chromium',
-      testIgnore: [SERIAL_SPEC, PARTITIONED_SPEC],
+      testIgnore: [SERIAL_SPEC, PARTITIONED_SPEC, DEVICES_SPEC],
       use: CHROMIUM,
     },
     {

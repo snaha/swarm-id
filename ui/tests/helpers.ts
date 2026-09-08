@@ -311,7 +311,7 @@ export const CHAIN_RPC_URL = process.env.CHAIN_RPC_URL ?? 'http://localhost:9545
  * times the operation's fixed gas budget, which is what `fundingShortfall`
  * compares against — under it, a need is raised however much BZZ is there.
  */
-const DRIVE_FUNDING = {
+export const DRIVE_FUNDING = {
   xdai: 5n * 10n ** 16n, // 0.05 xDAI
   bzzPlur: 3n * 10n ** 16n, // 3 BZZ (16 decimals)
 }
@@ -331,13 +331,21 @@ const DRIVE_FUNDING = {
  * (`gnosis-direct.ts` and friends) — those are covered by
  * `payment-rail.test.ts` and the multichain unit/fork tests, not here.
  */
-export async function fundPostageSigner(page: Page) {
+export async function fundPostageSigner(
+  page: Page,
+  {
+    slot = test.info().parallelIndex,
+    bzzPlur = DRIVE_FUNDING.bzzPlur,
+  }: { slot?: number; bzzPlur?: bigint } = {},
+) {
   const to = await postageSignerAddress(page)
   await fundLocalAccount(
     // From this slot's own faucet, never the chain's: workers run at the same
     // time, and two of them signing from one address race its nonce.
-    // `parallelIndex`, not `workerIndex` — see `worker-faucet.ts`.
-    { to, ...DRIVE_FUNDING, from: workerFaucetKey(test.info().parallelIndex) },
+    // `parallelIndex`, not `workerIndex` — see `worker-faucet.ts`. A suite
+    // that knows it needs less than the default, or wants a slot that is
+    // still stocked, says so.
+    { to, xdai: DRIVE_FUNDING.xdai, bzzPlur, from: workerFaucetKey(slot) },
     gnosisMainnetSettings({ rpcUrls: [CHAIN_RPC_URL] }),
   )
 }

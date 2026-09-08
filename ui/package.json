@@ -17,7 +17,8 @@
     "test": "vitest run --passWithNoTests",
     "test:e2e": "playwright test",
     "test:live": "svelte-kit sync && vitest run --config vitest.live.config.ts",
-    "test:cluster": "playwright test --config=playwright.cluster.config.ts"
+    "test:cluster": "playwright test --config=playwright.cluster.config.ts",
+    "test:devices": "playwright test --config=playwright.devices.config.ts"
   },
   "devDependencies": {
     "@eslint/js": "10.0.1",
