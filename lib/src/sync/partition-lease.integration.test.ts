@@ -2798,3 +2798,83 @@ describe("PartitionLease.refresh — occupancy displacement vs a PRUNED peer", (
     expect(await lease.refresh()).toBe("held")
   })
 })
+
+describe("PartitionLease.releaseOnUnload — gated on the Swarm-confirmed lease (#676)", () => {
+  const NOW = 5_000_000
+
+  it("sends the keepalive sentinel while the confirmed claim is live", async () => {
+    let clock = NOW
+    const lease = makeLease({
+      deviceId: DEVICE_A,
+      bee: bee as unknown as Bee,
+      now: () => clock,
+    })
+    await lease.acquire({ partitionCount: PARTITION_COUNT })
+    const fetchSpy = vi.spyOn(globalThis, "fetch")
+    clock = NOW + LEASE_TTL_MS / 2
+
+    lease.releaseOnUnload()
+
+    expect(fetchSpy).toHaveBeenCalledTimes(1)
+    expect(fetchSpy.mock.calls[0][1]).toMatchObject({ keepalive: true })
+    expect(lease.currentPartition).toBeUndefined()
+    await vi.waitFor(async () => {
+      const lock = await readPartitionLock({
+        bee: bee as unknown as Bee,
+        backupSigner: BACKUP_SIGNER,
+        swarmEncryptionKey: TEST_ENC_KEY,
+        batchId: TEST_BATCH_ID,
+        partition: 0,
+      })
+      expect(lock?.holderDeviceId).toBe(NO_HOLDER_DEVICE_ID)
+    })
+  })
+
+  it("sends nothing once the claim has lapsed on Swarm, however live the local bump made it", async () => {
+    let clock = NOW
+    const lease = makeLease({
+      deviceId: DEVICE_A,
+      bee: bee as unknown as Bee,
+      now: () => clock,
+    })
+    await lease.acquire({ partitionCount: PARTITION_COUNT })
+    // The optimistic-resume path extends the local lease without a Swarm
+    // write; a peer may hold the slot by now, and a blind sentinel would
+    // clobber its claim.
+    clock = NOW + LEASE_TTL_MS + 1
+    lease.bumpLocalLease(LEASE_TTL_MS)
+    expect(lease.leasedUntil).toBeGreaterThan(clock)
+    const fetchSpy = vi.spyOn(globalThis, "fetch")
+
+    lease.releaseOnUnload()
+
+    expect(fetchSpy).not.toHaveBeenCalled()
+  })
+
+  it("sends nothing for a lease adopted from the cache before any refresh confirmed it", () => {
+    const lease = makeLease({
+      deviceId: DEVICE_A,
+      bee: bee as unknown as Bee,
+      now: () => NOW,
+    })
+    lease.hydrate({
+      deviceId: DEVICE_A,
+      batchId: TEST_BATCH_ID.toHex(),
+      self: {
+        partition: 0,
+        generation: {
+          timestampMs: NOW - 1000,
+          tiebreaker: makeDeviceTiebreaker(DEVICE_A),
+        },
+        acquiredAt: NOW - 1000,
+        leasedUntil: NOW + LEASE_TTL_MS,
+      },
+    })
+    expect(lease.adoptIfLive()).toBe(0)
+    const fetchSpy = vi.spyOn(globalThis, "fetch")
+
+    lease.releaseOnUnload()
+
+    expect(fetchSpy).not.toHaveBeenCalled()
+  })
+})

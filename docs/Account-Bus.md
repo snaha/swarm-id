@@ -518,13 +518,25 @@ Not yet written:
   under it would fail its in-flight upload. The closing tab cannot read the lock SOC to see
   that, so every such claim is also written to the shared lease cache in localStorage
   (`lease-cache.ts`), and `teardownOnUnload` reads it synchronously: a newer generation that
-  is still live on this clock keeps the lease, the same skip the awaited release makes from
-  the SOC. Nothing is announced on the bus: the remote send would die with the page, and a
-  local sibling that holds the lease keeps it rather than takes it.
+  is still live on this clock keeps the lease — and keeps its record, which the next context
+  to unload reads — the same skip the awaited release makes from the SOC. The sentinel is
+  written blind, so it is gated on the claim as **last written to Swarm**
+  (`PartitionLease.swarmLeasedUntil`), not on the locally extended lease: the optimistic-resume
+  path and a cache adoption run the local lease ahead of the SOC, and in that gap a peer may
+  already hold the slot. Nothing is announced on the bus: the remote send would die with the
+  page, and a local sibling that holds the lease keeps it rather than takes it. A **reload** is
+  an unload too: it releases and re-acquires cold, so the lease-cache re-adopt path is left to
+  crash recovery. Checked with Playwright (`scripts/unload-keepalive-probe.ts`, close / navigate / reload against
+  a logging CORS server): Chromium 143 and WebKit 26 deliver the preflighted keepalive POST
+  with its stamp header and full body every time. **Firefox 144 drops it** on close and reload
+  (five of five runs) and keeps it only on a navigation; a keepalive that needs no preflight
+  arrives every time, and the stamp header is what forces the preflight, so Bee's API leaves
+  no way around it. On Firefox a closed tab's partition still lapses by TTL. Safari on a
+  device is unrun.
 - **Back/forward cache.** `pagehide` also fires on the way into it, so the proxy tears its write
   coordinator down on every `pagehide` — a frozen one would return holding a lease it stopped
   refreshing — and rebuilds it on `pageshow` with `persisted` (a cold acquire; the lease cache
-  went with the teardown). The bus is left alone: the socket closes by itself and the transport
+  went with the teardown unless a sibling's record was kept). The bus is left alone: the socket closes by itself and the transport
   reconnects by itself. Not yet exercised on a device: whether Chrome and Safari actually admit
   the proxy iframe to the cache with its socket and `BroadcastChannel` open, and what the
   restored page's first acquire costs, are the manual checks #676 lists.

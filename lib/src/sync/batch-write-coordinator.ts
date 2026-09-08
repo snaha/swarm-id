@@ -381,6 +381,7 @@ export class BatchWriteCoordinator {
    */
   teardown(): void {
     this.dispose((lease, localCounter) => {
+      if (localCounter === undefined) return
       // Serialize the detached release under the batch write lock (#349):
       // a successor coordinator's acquire (`startLease`/`withWrite` →
       // `lockAndFlush`) queues on the same origin-wide Web Lock, so the
@@ -410,9 +411,14 @@ export class BatchWriteCoordinator {
    * it against a lock the sibling still holds.
    */
   teardownOnUnload(): void {
-    this.dispose((lease) => {
-      if (!this.siblingHoldsLease(lease)) lease.releaseOnUnload()
-    })
+    const lease = this.partitionLease
+    const sibling = lease !== undefined && this.siblingHoldsLease(lease)
+    // Deferring to the sibling keeps its cache record too: the next context
+    // of this device to unload answers the same question from it, and the
+    // one-shot sync writes its claim there exactly once.
+    this.dispose((held) => {
+      if (!sibling) held.releaseOnUnload()
+    }, !sibling)
   }
 
   /**
@@ -436,7 +442,11 @@ export class BatchWriteCoordinator {
   }
 
   private dispose(
-    releaseLease: (lease: PartitionLease, localCounter: Uint32Array) => void,
+    releaseLease: (
+      lease: PartitionLease,
+      localCounter: Uint32Array | undefined,
+    ) => void,
+    clearLeaseCache = true,
   ): void {
     // Disposed coordinators must never re-acquire: an in-flight `withWrite`
     // (deferred publish or upload) can outlive this call and would otherwise
@@ -453,16 +463,13 @@ export class BatchWriteCoordinator {
     const lease = this.partitionLease
     const stamper = this.deps.stamper
     if (lease) {
-      const localCounter = stamper.getLocalCounter()
-      if (localCounter !== undefined) {
-        // The awaited release queues on the write lock and so runs AFTER the
-        // synchronous unbind below — its publish goes through an unbound
-        // stamper, which is safe because `writePartitionState` marks its
-        // chunks with the explicit partition slot. The unload release sends
-        // right here, still bound; a lock SOC is routed by address before
-        // the lease check either way.
-        releaseLease(lease, localCounter)
-      }
+      // The awaited release queues on the write lock and so runs AFTER the
+      // synchronous unbind below — its publish goes through an unbound
+      // stamper, which is safe because `writePartitionState` marks its
+      // chunks with the explicit partition slot. The unload release sends
+      // right here, still bound; a lock SOC is routed by address before
+      // the lease check either way.
+      releaseLease(lease, stamper.getLocalCounter())
       // Invalidate BEFORE unbinding (same ordering as the displacement race
       // fix): teardown runs synchronously, off the write lock, so it can land
       // between two awaits of an in-flight `stamp()`. `unbindPartition` alone
@@ -476,7 +483,7 @@ export class BatchWriteCoordinator {
     this.partitionLease = undefined
     this.readOnly = false
     this.lastLeaseValidatedAt = 0
-    this.deps.writeLeaseCache?.(undefined)
+    if (clearLeaseCache) this.deps.writeLeaseCache?.(undefined)
     this.emitLeaseChange()
   }
 
@@ -602,10 +609,12 @@ export class BatchWriteCoordinator {
       const cached = this.deps.readLeaseCache?.()
       if (cached) lease.hydrate(cached)
 
-      // Re-adopt fast path: a still-valid cached lease (e.g. after a reload
-      // within the TTL) is re-established from local state alone — no lock-SOC
-      // scan/write, so it survives transient Bee 500s. The refresh tick then
-      // reconciles with Swarm and demotes only on a confirmed foreign holder.
+      // Re-adopt fast path: a still-valid cached lease is re-established from
+      // local state alone — no lock-SOC scan/write, so it survives transient
+      // Bee 500s. The refresh tick then reconciles with Swarm and demotes only
+      // on a confirmed foreign holder. Since #676 a normal unload — a reload
+      // included — releases the lease and clears the record, so this is the
+      // crash-restore path: the page died without running `pagehide`.
       const adopted = lease.adoptIfLive()
       if (adopted !== undefined) {
         // Seed the heartbeat's resume-pointer target from the persisted synced

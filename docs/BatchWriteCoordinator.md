@@ -88,9 +88,11 @@ Methods and getters:
   throws. Sets a `disposed` flag (see below).
 - **`teardownOnUnload()`** — the same from `pagehide` (#676), where nothing asynchronous runs
   again: the lease is released with the one send a dying page can still make
-  (`PartitionLease.releaseOnUnload`, a keepalive `fetch` with everything before it synchronous)
-  or, when a sibling context of this device re-acquired it under a newer generation that is
-  still live, abandoned to that sibling. The sibling's claim is read from the shared lease cache
+  (`PartitionLease.releaseOnUnload`, a keepalive `fetch` with everything before it synchronous,
+  gated on the claim as last written to Swarm rather than the locally bumped lease) or, when a
+  sibling context of this device re-acquired it under a newer generation that is still live,
+  abandoned to that sibling, whose cache record is then left in place. The sibling's claim is
+  read from the shared lease cache
   (`lease-cache.ts`) — the unload path cannot read the lock SOC — so every same-device claimant
   writes there: this coordinator on acquire and refresh, and the one-shot sync coordinator
   (`sync-account.ts`), write-only, so a failed acquire never wipes the proxy's record. Never

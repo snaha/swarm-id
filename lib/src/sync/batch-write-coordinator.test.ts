@@ -665,12 +665,14 @@ describe("BatchWriteCoordinator — teardownOnUnload (#676)", () => {
 
   function mount(readLeaseCache: () => ReturnType<typeof cached> | undefined) {
     const releaseOnUnload = vi.fn()
+    const writeLeaseCache = vi.fn()
     const coordinator = new BatchWriteCoordinator(
       makeDeps({
         stamper: makeStamper(
           [],
         ) as unknown as BatchWriteCoordinatorDeps["stamper"],
         readLeaseCache,
+        writeLeaseCache,
       }),
     )
     ;(coordinator as unknown as Internals).partitionLease = {
@@ -678,7 +680,7 @@ describe("BatchWriteCoordinator — teardownOnUnload (#676)", () => {
       releaseOnUnload,
       serialize: () => cached(own, Date.now() + LEASE_TTL_MS),
     }
-    return { coordinator, releaseOnUnload }
+    return { coordinator, releaseOnUnload, writeLeaseCache }
   }
 
   it("releases when the cache holds our own claim, or nothing", () => {
@@ -687,18 +689,22 @@ describe("BatchWriteCoordinator — teardownOnUnload (#676)", () => {
       () => cached(older, Date.now() + LEASE_TTL_MS),
       () => undefined,
     ]) {
-      const { coordinator, releaseOnUnload } = mount(read)
+      const { coordinator, releaseOnUnload, writeLeaseCache } = mount(read)
       coordinator.teardownOnUnload()
       expect(releaseOnUnload).toHaveBeenCalledTimes(1)
+      // Released: the record is ours and describes a lease that is over.
+      expect(writeLeaseCache).toHaveBeenCalledWith(undefined)
     }
   })
 
   it("leaves the lease to a sibling that re-acquired it and still holds it", () => {
-    const { coordinator, releaseOnUnload } = mount(() =>
+    const { coordinator, releaseOnUnload, writeLeaseCache } = mount(() =>
       cached(newer, Date.now() + LEASE_TTL_MS),
     )
     coordinator.teardownOnUnload()
     expect(releaseOnUnload).not.toHaveBeenCalled()
+    // The record is the sibling's, and the next context to unload reads it.
+    expect(writeLeaseCache).not.toHaveBeenCalled()
   })
 
   it("releases once the sibling's newer claim has lapsed", () => {

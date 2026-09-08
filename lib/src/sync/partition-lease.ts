@@ -237,6 +237,15 @@ export class PartitionLease {
    */
   private closed = false
   /**
+   * `leasedUntil` as last written to the lock SOC by an acquire or refresh —
+   * the only bound a peer honours. `self.leasedUntil` runs ahead of it: the
+   * optimistic-resume path (`bumpLocalLease`) and a cache adoption
+   * (`adoptIfLive`) extend the local lease without a Swarm write. Anything
+   * that writes the lock blind, without reading it first, must be gated on
+   * this one (#676, `releaseOnUnload`).
+   */
+  private swarmLeasedUntil = 0
+  /**
    * The claim-time presence/occupancy beacon publish, fired OFF the acquire
    * critical path (best-effort, never rejects — `publishPresenceBeacon`
    * swallows errors). `refresh()`/`release()` await it first so a later beacon
@@ -1032,6 +1041,7 @@ export class PartitionLease {
       acquiredAt: payload.acquiredAt,
       leasedUntil: payload.leasedUntil,
     }
+    this.swarmLeasedUntil = payload.leasedUntil
     this.holders.set(partition, {
       deviceId: this.opts.deviceId,
       generation: payload.generation,
@@ -1123,6 +1133,7 @@ export class PartitionLease {
       acquiredAt: payload.acquiredAt,
       leasedUntil: payload.leasedUntil,
     }
+    this.swarmLeasedUntil = payload.leasedUntil
     // Re-publish our presence beacon so a joining device can detect us on the
     // gateway, where the static lock SOC isn't reliably retrievable. Best-effort
     // (a failed beacon self-heals next tick).
@@ -1367,9 +1378,11 @@ export class PartitionLease {
    * `release()` for a page that is unloading (#676). Synchronous: the lock
    * sentinel goes out as the one keepalive send a dying page can still make
    * (`releasePartitionLockOnUnload`), and nothing else does. No lock read
-   * first, so the write is guarded by the lease being live on our own clock —
-   * no peer can hold a lock whose lease has not lapsed, and a lapsed one may
-   * already be a peer's. No state flush either: the successor resumes at the
+   * first, so the write is guarded by the claim being live on our own clock
+   * AS LAST WRITTEN TO SWARM (`swarmLeasedUntil`, not the locally bumped
+   * `self.leasedUntil`): no peer can hold a lock whose lease has not lapsed,
+   * and a lapsed one may already be a peer's, which a blind sentinel would
+   * clobber. No state flush either: the successor resumes at the
    * last published counter, exactly as after a crash, which ack-after-publish
    * makes safe (`publishState`). No-op when no lease is held. `closed` is not
    * consulted: an awaited release or yield in flight at `pagehide` dies with
@@ -1377,8 +1390,8 @@ export class PartitionLease {
    */
   releaseOnUnload(): void {
     if (!this.self || !this.opts.stamper) return
-    const { partition, generation, acquiredAt, leasedUntil } = this.self
-    if (this.now() >= leasedUntil - LEASE_SKEW_MARGIN_MS) return
+    const { partition, generation, acquiredAt } = this.self
+    if (this.now() >= this.swarmLeasedUntil - LEASE_SKEW_MARGIN_MS) return
     this.closed = true
     releasePartitionLockOnUnload({
       bee: this.opts.bee,
@@ -1612,9 +1625,11 @@ export class PartitionLease {
    * cold `acquire()` lock-SOC scan). On adoption it bumps `leasedUntil` and
    * mirrors `self` into `holders` so `getHolders()`/`heldPartition()` agree.
    *
-   * This is what lets a reload keep the lease: the fresh page reconstructs the
-   * binding from local state alone, surviving transient lock-SOC read/write
-   * failures. The next `refresh()` reconciles with Swarm.
+   * This is what lets a page that crashed keep its lease: the fresh page
+   * reconstructs the binding from local state alone, surviving transient
+   * lock-SOC read/write failures. The next `refresh()` reconciles with Swarm.
+   * (A reload no longer lands here: its `pagehide` releases the lease and
+   * clears the cache, #676.)
    */
   adoptIfLive(): number | undefined {
     if (!this.self || this.self.leasedUntil <= this.now()) return undefined
@@ -1650,6 +1665,8 @@ export class PartitionLease {
     if (snapshot.deviceId !== this.opts.deviceId) return
     if (snapshot.batchId !== this.opts.batchId.toHex()) return
     this.self = snapshot.self
+    // The snapshot's `leasedUntil` may itself be a local bump; nothing is
+    // Swarm-confirmed until the next refresh (`swarmLeasedUntil` stays 0).
   }
 
   /**
