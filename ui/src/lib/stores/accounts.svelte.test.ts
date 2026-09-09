@@ -135,6 +135,31 @@ describe('persist read-merge-write (two-tab race)', () => {
   })
 })
 
+// The proxy inside the proxy iframe subscribes beside this store and publishes
+// what it is told about — unless the write says peers must not hear of it.
+// A regression in this plumb reintroduces the echo of #707 silently.
+describe('persist tells the same-window proxy which writes not to republish', () => {
+  function detailOfLastWrite(): { noRepublish?: boolean } {
+    const spy = vi.mocked(window.dispatchEvent)
+    const event = spy.mock.calls.at(-1)?.[0] as CustomEvent<{ noRepublish?: boolean }>
+    return event.detail
+  }
+
+  beforeEach(() => {
+    vi.spyOn(window, 'dispatchEvent')
+  })
+
+  it("a plain mutation is this device's change to publish", () => {
+    accountsStore.add(record(X_ID_HEX, 'x')).rename('renamed')
+    expect(detailOfLastWrite().noRepublish).toBeFalsy()
+  })
+
+  it('a skipSync commit is marked noRepublish', () => {
+    accountsStore.add(record(X_ID_HEX, 'x')).signOut(ENCRYPTED_STATE)
+    expect(detailOfLastWrite().noRepublish).toBe(true)
+  })
+})
+
 describe('malformed account id (tampered current-account key)', () => {
   it('get() returns undefined instead of throwing', () => {
     accountsStore.add(record(X_ID_HEX, 'x'))

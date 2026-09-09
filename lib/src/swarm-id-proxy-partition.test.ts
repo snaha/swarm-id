@@ -169,7 +169,7 @@ vi.mock("./sync/batch-write-coordinator", () => ({
 
 import { BatchId, EthAddress, PrivateKey } from "@ethersphere/bee-js"
 
-import { SwarmIdProxy } from "./swarm-id-proxy"
+import { SwarmIdProxy, PUBLISH_DEBOUNCE_MS } from "./swarm-id-proxy"
 import type { ProxyConfig } from "./swarm-id-proxy"
 import { SignalingTransport } from "./bus/signaling-transport"
 import { busChannelName } from "./bus/account-bus"
@@ -178,6 +178,7 @@ import { deriveBusContext } from "./bus/bus-context"
 import { BatchWriteCoordinator } from "./sync/batch-write-coordinator"
 import { UtilizationAwareStamper } from "./utils/batch-utilization"
 import {
+  createAccountsStorageManager,
   serializeAccount,
   serializeSyncedAccount,
 } from "./utils/storage-managers"
@@ -284,7 +285,12 @@ describe("SwarmIdProxy partitioned write enablement", () => {
         listeners[type] = listener
       }),
       removeEventListener: vi.fn(),
-      dispatchEvent: vi.fn(),
+      // Delivers to the listener registered above, so a storage manager
+      // created in a test reaches the proxy's the way it does in a window.
+      dispatchEvent: vi.fn((event: Event) => {
+        ;(listeners[event.type] as ((e: Event) => void) | undefined)?.(event)
+        return true
+      }),
       parent: parentWindow,
       location: { origin: ID_ORIGIN, pathname: "/proxy" },
       localStorage: localStorageFake,
@@ -1764,6 +1770,33 @@ describe("SwarmIdProxy partitioned write enablement", () => {
         // Still a writer: the session kept the secret the handshake gave it.
         const infos = messagesOfType("connectionInfoChanged")
         expect(infos[infos.length - 1].canUpload).toBe(true)
+      } finally {
+        busChannel.close()
+      }
+    })
+
+    // The shell inside the proxy iframe folds a peer's delta into the shared
+    // document, and the manager tells the proxy's own instance in the same
+    // window. That write is the peer's change, not this device's: publishing
+    // it back is the echo that kept two devices publishing at each other every
+    // few seconds (#707). Written through a manager, as the shell does, so the
+    // subscribe wiring that carries the flag is what is under test.
+    it("does not publish a delta for a write the shell marked noRepublish", async () => {
+      const busChannel = await hydratedSession()
+      const published: Record<string, unknown>[] = []
+      busChannel.onmessage = (event) =>
+        published.push(event.data as Record<string, unknown>)
+      try {
+        const shell = createAccountsStorageManager()
+        shell.save(shell.load(), { noRepublish: true })
+
+        // Past the publish debounce, with room to spare.
+        await new Promise((resolve) =>
+          setTimeout(resolve, PUBLISH_DEBOUNCE_MS + 1000),
+        )
+        expect(
+          published.filter((m) => m.type === "account-delta"),
+        ).toHaveLength(0)
       } finally {
         busChannel.close()
       }
