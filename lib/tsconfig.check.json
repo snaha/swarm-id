@@ -1,12 +1,3 @@
-// Typecheck-only project: everything tsconfig.json builds, plus the test
-// files it cannot.
-//
-// The build config carries `rootDir: ./src` (rollup needs it to lay out
-// `dist/`), which makes every file under `test/` an error, and it excludes
-// `**/*.test.ts` so declarations stay clean. Dropping `rootDir` and emitting
-// nothing lifts both restrictions.
-//
-// `pnpm typecheck` uses this file; `pnpm build` still uses tsconfig.json.
 {
   "extends": "./tsconfig.json",
   "compilerOptions": {

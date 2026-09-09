@@ -1580,7 +1580,8 @@ describe("BatchWriteCoordinator — bus-accelerated leases (docs/Account-Bus.md)
   it("still sleeps the poll interval when nothing was announced", async () => {
     vi.useFakeTimers()
     try {
-      leaseController.lease = makeLease()
+      const lease = makeLease()
+      leaseController.lease = lease
       const calls: string[] = []
       const stamper = makeStamper(calls)
       const coordinator = new BatchWriteCoordinator(
@@ -1597,11 +1598,11 @@ describe("BatchWriteCoordinator — bus-accelerated leases (docs/Account-Bus.md)
       })
       await vi.advanceTimersByTimeAsync(0)
       expect(settled).toBe(false)
-      expect(leaseController.lease.acquire).toHaveBeenCalledTimes(1)
+      expect(lease.acquire).toHaveBeenCalledTimes(1)
 
       // Only the timer moves it on — no stale flag skipped the wait.
       await vi.advanceTimersByTimeAsync(LEASE_REFRESH_MS)
-      expect(leaseController.lease.acquire).toHaveBeenCalledTimes(2)
+      expect(lease.acquire).toHaveBeenCalledTimes(2)
       coordinator.teardown()
     } finally {
       vi.useRealTimers()
