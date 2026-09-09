@@ -319,8 +319,9 @@ class Device {
     await page.getByRole('button', { name: 'Disconnect' }).click()
     await expect(page.getByText(PARTITION_LINE)).toBeHidden()
     // And it stays disconnected: a session that comes back by itself a few
-    // seconds later, its coordinator still holding the partition, is a
-    // product failure this scenario exists to see (#712), not a flake.
+    // seconds later — a peer's delta folding its secret back in, and its own
+    // not-yet-released lock re-acquired — is a product failure this scenario
+    // exists to see (#712), not a flake.
     await sleep(DISCONNECT_SETTLE_MS)
     await expect(
       page.getByText(PARTITION_LINE),
