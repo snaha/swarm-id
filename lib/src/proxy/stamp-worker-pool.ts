@@ -20,7 +20,6 @@ import type {
 } from "./stamp-worker"
 
 // Imported at build time via virtual module (see rollup.config.js)
-// eslint-disable-next-line @typescript-eslint/no-require-imports
 import stampWorkerCode from "virtual:stamp-worker-code"
 
 interface PendingSign {

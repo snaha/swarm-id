@@ -9,8 +9,9 @@
  */
 
 import { Binary } from "cafe-utility"
-import type { Bee, BeeRequestOptions } from "@ethersphere/bee-js"
+import type { BeeRequestOptions } from "@ethersphere/bee-js"
 import { EthAddress, Reference, Topic } from "@ethersphere/bee-js"
+import type { ChunkDownloader } from "../../download-data"
 import { EpochIndex, MAX_LEVEL } from "./epoch"
 import type { EpochFinder, EpochLookupResult } from "./types"
 import { downloadEncryptedSOC } from "../../download-data"
@@ -28,7 +29,7 @@ const EPOCH_LOOKUP_TIMEOUT_MS = 2000
  */
 export class AsyncEpochFinder implements EpochFinder {
   constructor(
-    private readonly bee: Bee,
+    private readonly bee: ChunkDownloader,
     private readonly topic: Topic,
     private readonly owner: EthAddress,
     private readonly encryptionKey?: Uint8Array,
@@ -102,7 +103,7 @@ export class AsyncEpochFinder implements EpochFinder {
     let chunk: Uint8Array | undefined
     try {
       chunk = await this.getEpochChunk(at, epoch)
-    } catch (error) {
+    } catch {
       // Chunk missing at this epoch.
       if (epoch.isLeft()) {
         return currentBest
@@ -203,7 +204,7 @@ export class AsyncEpochFinder implements EpochFinder {
     let chunkData: { reference: Uint8Array; timestamp: bigint } | undefined
     try {
       chunkData = await this.getEpochChunkWithMetadata(at, epoch)
-    } catch (error) {
+    } catch {
       // Chunk missing at this epoch
       if (epoch.isLeft()) {
         return currentBest

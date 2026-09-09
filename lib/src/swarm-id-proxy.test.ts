@@ -22,6 +22,8 @@ import { Bee } from "@ethersphere/bee-js"
 
 import { DEFAULT_BEE_NODE_URL } from "./schemas"
 import { SwarmIdProxy } from "./swarm-id-proxy"
+import { deriveSecret, uint8ArrayToHex } from "./utils/key-derivation"
+import { STORAGE_KEY_NETWORK_SETTINGS } from "./types"
 
 /**
  * A view of the proxy that admits to the private members these tests drive.
@@ -41,8 +43,6 @@ type ProxyInternals = {
 
 const internals = (p: SwarmIdProxy): ProxyInternals =>
   p as unknown as ProxyInternals
-import { deriveSecret, uint8ArrayToHex } from "./utils/key-derivation"
-import { STORAGE_KEY_NETWORK_SETTINGS } from "./types"
 
 const PARENT_ORIGIN = "https://dapp.example.com"
 const ATTACKER_ORIGIN = "https://evil.example.com"

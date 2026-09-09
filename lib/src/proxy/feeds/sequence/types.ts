@@ -13,13 +13,14 @@ import type {
   Stamper,
   BeeRequestOptions,
 } from "@ethersphere/bee-js"
+import type { ChunkDownloader } from "../../download-data"
 
 /**
  * Options for creating a sequential feed reader
  */
 export interface SequentialFeedOptions {
-  /** Bee instance for chunk operations */
-  bee: Bee
+  /** Chunk reader — a `Bee`, or anything else that can `downloadChunk` */
+  bee: ChunkDownloader
 
   /** Feed topic (32 bytes) */
   topic: Topic
@@ -32,6 +33,9 @@ export interface SequentialFeedOptions {
  * Options for creating a sequential feed writer
  */
 export interface SequentialFeedWriterOptions extends SequentialFeedOptions {
+  /** The writer uploads as well as reads, so it needs the whole client */
+  bee: Bee
+
   /** Private key for signing chunks */
   signer: PrivateKey
 }

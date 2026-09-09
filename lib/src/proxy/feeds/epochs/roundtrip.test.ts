@@ -10,6 +10,7 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest"
 import { Binary } from "cafe-utility"
 import { PrivateKey } from "@ethersphere/bee-js"
+import type { Bee } from "@ethersphere/bee-js"
 import { SyncEpochFinder } from "./finder"
 import { AsyncEpochFinder } from "./async-finder"
 import { BasicEpochUpdater } from "./updater"
@@ -128,7 +129,8 @@ describe("Epoch Feeds Integration", () => {
     signer = createTestSigner()
     topic = createTestTopic()
     stamper = createMockStamper()
-    target = { mode: "stamper", bee: bee as any, stamper }
+    // `UploadTarget` still wants the whole client — the updater uploads.
+    target = { mode: "stamper", bee: bee as unknown as Bee, stamper }
     mockFetch(store, signer.publicKey().address())
   })
 
@@ -139,7 +141,7 @@ describe("Epoch Feeds Integration", () => {
   describe("Basic Updater and Finder", () => {
     it("should return undefined when no updates exist", async () => {
       const owner = signer.publicKey().address()
-      const finder = new SyncEpochFinder(bee as any, topic, owner)
+      const finder = new SyncEpochFinder(bee, topic, owner)
 
       const result = await finder.findAt(100n, 0n)
       expect(result).toBeUndefined()
@@ -148,7 +150,7 @@ describe("Epoch Feeds Integration", () => {
     it("should store and retrieve first update", async () => {
       const updater = new BasicEpochUpdater(topic, signer)
       const owner = updater.getOwner()
-      const finder = new SyncEpochFinder(bee as any, topic, owner)
+      const finder = new SyncEpochFinder(bee, topic, owner)
 
       // Create update
       const at = 100n
@@ -170,7 +172,7 @@ describe("Epoch Feeds Integration", () => {
     it("should find update at any timestamp via root epoch", async () => {
       const updater = new BasicEpochUpdater(topic, signer)
       const owner = updater.getOwner()
-      const finder = new SyncEpochFinder(bee as any, topic, owner)
+      const finder = new SyncEpochFinder(bee, topic, owner)
 
       const at = 100n
       const reference = createTestReference(1)
@@ -187,7 +189,7 @@ describe("Epoch Feeds Integration", () => {
     it("should not find update before it was created", async () => {
       const updater = new BasicEpochUpdater(topic, signer)
       const owner = updater.getOwner()
-      const finder = new SyncEpochFinder(bee as any, topic, owner)
+      const finder = new SyncEpochFinder(bee, topic, owner)
 
       const at = 100n
       const reference = createTestReference(1)
@@ -219,7 +221,7 @@ describe("Epoch Feeds Integration", () => {
     it("should use different epochs when hints are provided", async () => {
       const updater = new BasicEpochUpdater(topic, signer)
       const owner = updater.getOwner()
-      const finder = new SyncEpochFinder(bee as any, topic, owner)
+      const finder = new SyncEpochFinder(bee, topic, owner)
 
       const ref1 = createTestReference(1)
       const ref2 = createTestReference(2)
@@ -246,7 +248,7 @@ describe("Epoch Feeds Integration", () => {
     it("should find correct update at each timestamp with hints", async () => {
       const updater = new BasicEpochUpdater(topic, signer)
       const owner = updater.getOwner()
-      const finder = new SyncEpochFinder(bee as any, topic, owner)
+      const finder = new SyncEpochFinder(bee, topic, owner)
 
       const updates: {
         at: bigint
@@ -289,7 +291,7 @@ describe("Epoch Feeds Integration", () => {
     it("should handle sparse updates with hints", async () => {
       const updater = new BasicEpochUpdater(topic, signer)
       const owner = updater.getOwner()
-      const finder = new SyncEpochFinder(bee as any, topic, owner)
+      const finder = new SyncEpochFinder(bee, topic, owner)
 
       const ref1 = createTestReference(1)
       const ref2 = createTestReference(2)
@@ -319,7 +321,7 @@ describe("Epoch Feeds Integration", () => {
     it("should overwrite at root epoch when no hints provided", async () => {
       const updater = new BasicEpochUpdater(topic, signer)
       const owner = updater.getOwner()
-      const finder = new SyncEpochFinder(bee as any, topic, owner)
+      const finder = new SyncEpochFinder(bee, topic, owner)
 
       const ref1 = createTestReference(1)
       const ref2 = createTestReference(2)
@@ -338,7 +340,7 @@ describe("Epoch Feeds Integration", () => {
     it("should auto-lookup and use different epochs for sequential updates", async () => {
       const updater = new BasicEpochUpdater(topic, signer)
       const owner = updater.getOwner()
-      const finder = new SyncEpochFinder(bee as any, topic, owner)
+      const finder = new SyncEpochFinder(bee, topic, owner)
 
       const ref1 = createTestReference(1)
       const ref2 = createTestReference(2)
@@ -363,7 +365,7 @@ describe("Epoch Feeds Integration", () => {
     it("should preserve all updates with auto-lookup at fixed intervals", async () => {
       const updater = new BasicEpochUpdater(topic, signer)
       const owner = updater.getOwner()
-      const finder = new AsyncEpochFinder(bee as any, topic, owner)
+      const finder = new AsyncEpochFinder(bee, topic, owner)
 
       const interval = 10n
       const count = 5
@@ -387,7 +389,7 @@ describe("Epoch Feeds Integration", () => {
     it("should auto-lookup with sparse timestamps", async () => {
       const updater = new BasicEpochUpdater(topic, signer)
       const owner = updater.getOwner()
-      const finder = new AsyncEpochFinder(bee as any, topic, owner)
+      const finder = new AsyncEpochFinder(bee, topic, owner)
 
       const ref1 = createTestReference(1)
       const ref2 = createTestReference(2)
@@ -429,7 +431,7 @@ describe("Epoch Feeds Integration", () => {
     it("should work correctly when first update is at timestamp 0", async () => {
       const updater = new BasicEpochUpdater(topic, signer)
       const owner = updater.getOwner()
-      const finder = new AsyncEpochFinder(bee as any, topic, owner)
+      const finder = new AsyncEpochFinder(bee, topic, owner)
 
       const ref0 = createTestReference(10)
       const ref1 = createTestReference(11)
@@ -446,7 +448,7 @@ describe("Epoch Feeds Integration", () => {
     it("should work with 64-byte references and auto-lookup", async () => {
       const updater = new BasicEpochUpdater(topic, signer)
       const owner = updater.getOwner()
-      const finder = new AsyncEpochFinder(bee as any, topic, owner)
+      const finder = new AsyncEpochFinder(bee, topic, owner)
 
       const ref64a = createTestReference64(1)
       const ref64b = createTestReference64(2)
@@ -470,7 +472,7 @@ describe("Epoch Feeds Integration", () => {
     it("should preserve all updates at fixed intervals when hints used", async () => {
       const updater = new BasicEpochUpdater(topic, signer)
       const owner = updater.getOwner()
-      const finder = new SyncEpochFinder(bee as any, topic, owner)
+      const finder = new SyncEpochFinder(bee, topic, owner)
 
       const interval = 10n
       const count = 10 // Reduced for test performance
@@ -507,7 +509,7 @@ describe("Epoch Feeds Integration", () => {
     it("should preserve all updates at random intervals when hints used", async () => {
       const updater = new BasicEpochUpdater(topic, signer)
       const owner = updater.getOwner()
-      const finder = new SyncEpochFinder(bee as any, topic, owner)
+      const finder = new SyncEpochFinder(bee, topic, owner)
 
       const updates: { at: bigint; ref: Uint8Array }[] = []
       let current = 0n
@@ -543,7 +545,7 @@ describe("Epoch Feeds Integration", () => {
     it("should work with async finder (basic)", async () => {
       const updater = new BasicEpochUpdater(topic, signer)
       const owner = updater.getOwner()
-      const finder = new AsyncEpochFinder(bee as any, topic, owner)
+      const finder = new AsyncEpochFinder(bee, topic, owner)
 
       const at = 100n
       const reference = createTestReference(1)
@@ -559,7 +561,7 @@ describe("Epoch Feeds Integration", () => {
     it("should work with async finder (multiple updates with hints)", async () => {
       const updater = new BasicEpochUpdater(topic, signer)
       const owner = updater.getOwner()
-      const finder = new AsyncEpochFinder(bee as any, topic, owner)
+      const finder = new AsyncEpochFinder(bee, topic, owner)
 
       const updates: { at: bigint; ref: Uint8Array }[] = []
       let hints: EpochUpdateHints | undefined
@@ -592,7 +594,7 @@ describe("Epoch Feeds Integration", () => {
     it("should work with async finder (sparse updates with hints)", async () => {
       const updater = new BasicEpochUpdater(topic, signer)
       const owner = updater.getOwner()
-      const finder = new AsyncEpochFinder(bee as any, topic, owner)
+      const finder = new AsyncEpochFinder(bee, topic, owner)
 
       const ref1 = createTestReference(1)
       const ref2 = createTestReference(2)
@@ -646,8 +648,8 @@ describe("Epoch Feeds Integration", () => {
       })
 
       const finders = [
-        new SyncEpochFinder(bee as any, topic, owner),
-        new AsyncEpochFinder(bee as any, topic, owner),
+        new SyncEpochFinder(bee, topic, owner),
+        new AsyncEpochFinder(bee, topic, owner),
       ]
 
       // All updates should be findable at their respective timestamps
@@ -674,8 +676,8 @@ describe("Epoch Feeds Integration", () => {
       })
 
       const finders = [
-        new SyncEpochFinder(bee as any, topic, owner),
-        new AsyncEpochFinder(bee as any, topic, owner),
+        new SyncEpochFinder(bee, topic, owner),
+        new AsyncEpochFinder(bee, topic, owner),
       ]
 
       // Results should be consistent regardless of after hint
@@ -700,8 +702,8 @@ describe("Epoch Feeds Integration", () => {
         lastTimestamp: result0.timestamp,
       })
 
-      const syncFinder = new SyncEpochFinder(bee as any, topic, owner)
-      const asyncFinder = new AsyncEpochFinder(bee as any, topic, owner)
+      const syncFinder = new SyncEpochFinder(bee, topic, owner)
+      const asyncFinder = new AsyncEpochFinder(bee, topic, owner)
 
       // Both should be findable
       expect(await syncFinder.findAt(0n, 0n)).toEqual(ref0)
@@ -716,7 +718,7 @@ describe("Epoch Feeds Integration", () => {
       const ref2 = createTestReference(2)
       await updater.update(100n, ref2, target) // No hints - overwrites
       const finder = new AsyncEpochFinder(
-        bee as any,
+        bee,
         topic,
         signer.publicKey().address(),
       )
@@ -736,8 +738,8 @@ describe("Epoch Feeds Integration", () => {
       await updaterA.update(100n, refA, target)
       await updaterB.update(100n, refB, target)
 
-      const finderA = new AsyncEpochFinder(bee as any, topicA, owner)
-      const finderB = new AsyncEpochFinder(bee as any, topicB, owner)
+      const finderA = new AsyncEpochFinder(bee, topicA, owner)
+      const finderB = new AsyncEpochFinder(bee, topicB, owner)
       expect(await finderA.findAt(100n, 0n)).toEqual(refA)
       expect(await finderB.findAt(100n, 0n)).toEqual(refB)
     })
@@ -759,12 +761,12 @@ describe("Epoch Feeds Integration", () => {
       await putEpochSoc(store, signerB, topic, new EpochIndex(0n, 32), payloadB)
 
       const finderA = new AsyncEpochFinder(
-        bee as any,
+        bee,
         topic,
         signerA.publicKey().address(),
       )
       const finderB = new AsyncEpochFinder(
-        bee as any,
+        bee,
         topic,
         signerB.publicKey().address(),
       )
@@ -779,7 +781,7 @@ describe("Epoch Feeds Integration", () => {
 
       await updater.update(100n, ref64, target)
 
-      const finder = new AsyncEpochFinder(bee as any, topic, owner)
+      const finder = new AsyncEpochFinder(bee, topic, owner)
       const got64 = await finder.findAt(100n, 0n)
       expect(got64).toBeDefined()
       expect(got64).toHaveLength(64)
@@ -791,7 +793,7 @@ describe("Epoch Feeds Integration", () => {
       const ref32 = createTestReference(24)
       await updater32.update(200n, ref32, target)
 
-      const finder32 = new AsyncEpochFinder(bee as any, topic32, owner)
+      const finder32 = new AsyncEpochFinder(bee, topic32, owner)
       const got32 = await finder32.findAt(200n, 0n)
       expect(got32).toBeDefined()
       expect(got32).toHaveLength(32)
@@ -811,7 +813,7 @@ describe("Epoch Feeds Integration", () => {
         lastTimestamp: result1.timestamp,
       })
 
-      const finder = new AsyncEpochFinder(bee as any, topic, owner)
+      const finder = new AsyncEpochFinder(bee, topic, owner)
       // Both findable at their timestamps
       expect(await finder.findAt(100n, 0n)).toEqual(ref100)
       expect(await finder.findAt(150n, 0n)).toEqual(ref150)
@@ -853,7 +855,7 @@ describe("Epoch Feeds Integration", () => {
         payloadWithTimestamp(farAt, farRef),
       )
 
-      const finder = new AsyncEpochFinder(failingBee as any, topic, owner)
+      const finder = new AsyncEpochFinder(failingBee, topic, owner)
       const result = await finder.findAt(at, 0n)
       expect(result).toBeUndefined()
       expect(failingBee.downloadCalls).toBeLessThanOrEqual(220)
@@ -864,7 +866,7 @@ describe("Epoch Feeds Integration", () => {
     it("keeps probes bounded with mixed 404/500/timeout failures", async () => {
       const mixedBee = new MixedErrorMockBee(store)
       const owner = signer.publicKey().address()
-      const finder = new AsyncEpochFinder(mixedBee as any, topic, owner)
+      const finder = new AsyncEpochFinder(mixedBee, topic, owner)
 
       const result = await finder.findAt(1771362000n, 0n)
       expect(result).toBeUndefined()
@@ -899,8 +901,8 @@ describe("Epoch Feeds Integration", () => {
         payloadWithTimestamp(at, expected),
       )
 
-      const asyncFinder = new AsyncEpochFinder(failingBee as any, topic, owner)
-      const syncFinder = new SyncEpochFinder(failingBee as any, topic, owner)
+      const asyncFinder = new AsyncEpochFinder(failingBee, topic, owner)
+      const syncFinder = new SyncEpochFinder(failingBee, topic, owner)
       expect(await asyncFinder.findAt(at, 0n)).toEqual(expected)
       expect(await syncFinder.findAt(at, 0n)).toEqual(expected)
       expect(failingBee.downloadCalls).toBeLessThanOrEqual(120)
@@ -908,7 +910,7 @@ describe("Epoch Feeds Integration", () => {
 
     it("maintains expected behavior across power-of-two timestamp boundaries", async () => {
       const owner = signer.publicKey().address()
-      const finder = new AsyncEpochFinder(bee as any, topic, owner)
+      const finder = new AsyncEpochFinder(bee, topic, owner)
 
       const before = (1n << 20n) - 1n
       const at = 1n << 20n
@@ -973,7 +975,7 @@ describe("Epoch Feeds Integration", () => {
         new EpochIndex(insideAt, 0),
         payloadWithTimestamp(insideAt, insideRef),
       )
-      const finderInside = new AsyncEpochFinder(failingBee as any, topic, owner)
+      const finderInside = new AsyncEpochFinder(failingBee, topic, owner)
       expect(await finderInside.findAt(at, 0n)).toEqual(insideRef)
 
       // Separate topic: outside window should miss.
@@ -999,11 +1001,7 @@ describe("Epoch Feeds Integration", () => {
         new EpochIndex(outsideAt, 0),
         payloadWithTimestamp(outsideAt, outsideRef),
       )
-      const finderOutside = new AsyncEpochFinder(
-        failingBee as any,
-        topic2,
-        owner,
-      )
+      const finderOutside = new AsyncEpochFinder(failingBee, topic2, owner)
       expect(await finderOutside.findAt(at, 0n)).toBeUndefined()
     })
 
@@ -1049,12 +1047,12 @@ describe("Epoch Feeds Integration", () => {
       )
 
       const finderAA = new AsyncEpochFinder(
-        failingBee as any,
+        failingBee,
         topicA,
         signerA.publicKey().address(),
       )
       const finderBB = new AsyncEpochFinder(
-        failingBee as any,
+        failingBee,
         topicB,
         signerB.publicKey().address(),
       )
@@ -1067,7 +1065,7 @@ describe("Epoch Feeds Integration", () => {
     it("keeps lookup probes bounded when many epoch chunks fail with 500", async () => {
       const failingBee = new CountingMockBee(store)
       const owner = signer.publicKey().address()
-      const finder = new AsyncEpochFinder(failingBee as any, topic, owner)
+      const finder = new AsyncEpochFinder(failingBee, topic, owner)
 
       await finder.findAt(1771360835n, 0n)
 
@@ -1112,7 +1110,7 @@ describe("Epoch Feeds Integration", () => {
         leafPayload,
       )
 
-      const finder = new AsyncEpochFinder(failingBee as any, topic, owner)
+      const finder = new AsyncEpochFinder(failingBee, topic, owner)
       const result = await finder.findAt(at, 0n)
 
       expect(result).toBeDefined()
@@ -1155,7 +1153,7 @@ describe("Epoch Feeds Integration", () => {
         leafPayload,
       )
 
-      const finder = new SyncEpochFinder(failingBee as any, topic, owner)
+      const finder = new SyncEpochFinder(failingBee, topic, owner)
       const result = await finder.findAt(at, 0n)
 
       expect(result).toBeDefined()
@@ -1209,7 +1207,7 @@ describe("Epoch Feeds Integration", () => {
         secondLeaf,
       )
 
-      const finder = new AsyncEpochFinder(failingBee as any, topic, owner)
+      const finder = new AsyncEpochFinder(failingBee, topic, owner)
       const result = await finder.findAt(queryAt, 0n)
 
       expect(result).toBeDefined()
@@ -1238,7 +1236,7 @@ describe("Epoch Feeds Integration", () => {
         payloadWithTimestamp(2n ** 63n, createTestReference(1102)),
       )
 
-      const finder = new AsyncEpochFinder(failingBee as any, topic, owner)
+      const finder = new AsyncEpochFinder(failingBee, topic, owner)
       const result = await finder.findAt(at, at)
       expect(result).toBeUndefined()
       // Bound should stay near tree depth for upload read-back checks.
@@ -1273,7 +1271,7 @@ describe("Epoch Feeds Integration", () => {
         payloadWithTimestamp(at, expected),
       )
 
-      const finder = new AsyncEpochFinder(failingBee as any, topic, owner)
+      const finder = new AsyncEpochFinder(failingBee, topic, owner)
       const result = await finder.findAt(at, at)
       expect(result).toEqual(expected)
       expect(failingBee.downloadCalls).toBeLessThanOrEqual(MAX_LEVEL + 6)

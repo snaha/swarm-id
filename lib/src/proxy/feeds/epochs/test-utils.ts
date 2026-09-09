@@ -8,10 +8,14 @@
  */
 
 import { Binary } from "cafe-utility"
+import type { Chunk } from "cafe-utility"
 import { PrivateKey, Topic, EthAddress, BatchId } from "@ethersphere/bee-js"
 import type { Stamper } from "@ethersphere/bee-js"
-import type { Chunk as CafeChunk } from "cafe-utility"
 import { calculateChunkAddress } from "../../../chunk"
+import {
+  NUM_BUCKETS,
+  calculateMaxSlotsPerBucket,
+} from "../../../utils/batch-utilization"
 
 /**
  * In-memory chunk storage for testing
@@ -169,8 +173,6 @@ const SOC_IDENTIFIER_LENGTH = 32
  * EnvelopeWithBatchId without performing real cryptographic operations.
  */
 const MOCK_STAMPER_DEPTH = 24
-const MOCK_STAMPER_BUCKETS = 65536
-const BUCKET_DEPTH = 16
 
 /**
  * Create a mock Stamper for testing.
@@ -185,14 +187,14 @@ const BUCKET_DEPTH = 16
  */
 export function createMockStamper(): Stamper {
   const batchId = new BatchId(new Uint8Array(BATCH_ID_LENGTH))
-  const buckets = new Uint32Array(MOCK_STAMPER_BUCKETS)
+  const buckets = new Uint32Array(NUM_BUCKETS)
   return {
     signer: createTestSigner(),
     batchId,
     buckets,
     depth: MOCK_STAMPER_DEPTH,
-    maxSlot: 1 << (MOCK_STAMPER_DEPTH - BUCKET_DEPTH),
-    stamp(_chunk: CafeChunk) {
+    maxSlot: calculateMaxSlotsPerBucket(MOCK_STAMPER_DEPTH),
+    stamp(_chunk: Chunk) {
       return {
         batchId,
         index: new Uint8Array(INDEX_LENGTH),

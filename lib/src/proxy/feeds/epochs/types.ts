@@ -5,7 +5,8 @@
  * Types for Epoch-Based Feeds
  */
 
-import type { Bee, EthAddress, Topic, PrivateKey } from "@ethersphere/bee-js"
+import type { EthAddress, Topic, PrivateKey } from "@ethersphere/bee-js"
+import type { ChunkDownloader } from "../../download-data"
 import type { UploadTarget } from "../../upload"
 import type { EpochIndex } from "./epoch"
 
@@ -13,8 +14,8 @@ import type { EpochIndex } from "./epoch"
  * Options for creating an epoch feed reader
  */
 export interface EpochFeedOptions {
-  /** Bee instance for chunk operations */
-  bee: Bee
+  /** Chunk reader — a `Bee`, or anything else that can `downloadChunk` */
+  bee: ChunkDownloader
 
   /** Feed topic (32 bytes) */
   topic: Topic
