@@ -357,10 +357,10 @@ Each landed as its own PR chain, in this order:
 
    The same shell runs _inside_ the proxy iframe, so a fold happens there too, beside the
    proxy — and the storage manager tells other instances in the same window about every
-   write (`notifySameWindow`). A folded write carries that fact (`StorageChange.folded`), and
-   the proxy reconciles it as it would a bus delta, without publishing: republishing it
-   stamped a fresh snapshot clock on every hop, and two devices publishing at each other
-   every few seconds was the result
+   write (`notifySameWindow`). A `skipSync` write carries that fact
+   (`StorageChange.noRepublish`), and the proxy reconciles it as it would a bus delta,
+   without publishing: republishing a fold stamped a fresh snapshot clock on every hop, and
+   two devices publishing at each other every few seconds was the result
    ([#707](https://github.com/snaha/swarm-id/issues/707)).
 
    One echo does survive, bounded: with a SwarmID tab open beside a dApp tab, the tab's fold

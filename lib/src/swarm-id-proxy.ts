@@ -185,7 +185,7 @@ import {
  * Debounce window for proxy-side account-state publishing. Coalesces a burst of
  * triggers (lease acquisition + storage changes) into a single feed write.
  */
-const PUBLISH_DEBOUNCE_MS = 1500
+export const PUBLISH_DEBOUNCE_MS = 1500
 
 /** Min interval between pre-acquire device-registry pulls (throttles the
  *  slot-wait loop's repeated acquires from hammering the feed). */
@@ -472,7 +472,9 @@ export class SwarmIdProxy {
     this.unsubscribeStorageListeners.push(
       accountsManager.subscribe((_, change) => {
         this.enqueueReconcile("handleAccountStorageChange", () =>
-          this.handleAccountStorageChange(change?.folded ? "fold" : "storage"),
+          this.handleAccountStorageChange(
+            change?.noRepublish ? "bus" : "storage",
+          ),
         )
       }),
     )
@@ -573,23 +575,24 @@ export class SwarmIdProxy {
   }
 
   /**
-   * Handle changes to the nested account document (triggered by storage events
-   * from other windows). Covers auth transitions (connect / secret change /
-   * disconnect) AND derived-ConnectionInfo changes (default-stamp change, new
-   * stamp purchased, account rename) — all of which now live in one document.
-   */
-  /**
-   * `"fold"`: the shell sharing this window (the identity UI runs inside the
-   * proxy iframe too) merged a peer's delta into the document. That is the
-   * peer's change, already known to the room, so it reconciles the way a
-   * bus delta does — no publish. Republishing it stamped a fresh clock on
-   * every hop and kept two devices publishing at each other every few
-   * seconds (#707).
+   * Handle changes to the nested account document. Covers auth transitions
+   * (connect / secret change / disconnect) AND derived-ConnectionInfo changes
+   * (default-stamp change, new stamp purchased, account rename) — all of which
+   * now live in one document.
+   *
+   * `"storage"`: a `storage` event from another window, or a same-window write
+   * the shell made on its own — this device's change, so it publishes.
+   * `"bus"`: a same-window write the shell marked `noRepublish` — a peer's
+   * delta it folded, a volatile field, a device-local sign-out. The shell
+   * sharing this window (the identity UI runs inside the proxy iframe too)
+   * makes those beside the proxy, and they reconcile the way a bus delta does,
+   * without a publish: republishing a fold stamped a fresh clock on every hop
+   * and kept two devices publishing at each other every few seconds (#707).
    */
   private async handleAccountStorageChange(
-    source: "storage" | "fold" = "storage",
+    source: "storage" | "bus" = "storage",
   ): Promise<void> {
-    await this.reevaluateConnection(source === "fold" ? "bus" : "storage")
+    await this.reevaluateConnection(source)
   }
 
   /**

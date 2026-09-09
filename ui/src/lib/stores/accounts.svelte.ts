@@ -629,15 +629,15 @@ let accounts = $state<Account[]>([])
  * Accepted edge: merging by id means a mutation racing another tab's remove of
  * the SAME account re-adds it — benign, last-writer-wins. No sync.
  */
-function persistAccount(account: Account, folded = false): void {
+function persistAccount(account: Account, noRepublish = false): void {
   const record = account.toRecord()
   const stored = storageManager.load()
   const merged = stored.some((existing) => existing.id.equals(account.id))
     ? stored.map((existing) => (existing.id.equals(account.id) ? record : existing))
     : [...stored, record]
-  // A folded write is a peer's change: the proxy sharing this window (inside
-  // the proxy iframe) must not publish it back (#707).
-  storageManager.save(merged, { folded })
+  // `skipSync` means peers must not hear about this write: the proxy sharing
+  // this window (inside the proxy iframe) must not publish it either (#707).
+  storageManager.save(merged, { noRepublish })
 }
 
 /** Remove one account from storage by read-merge-write (see `persistAccount`). */

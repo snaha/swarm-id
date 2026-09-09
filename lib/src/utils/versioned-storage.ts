@@ -45,19 +45,18 @@ export type VersionParser<T> = (data: unknown, version: number) => T[]
 export type Serializer<T> = (data: T) => Record<string, unknown>
 
 /**
- * Listener function for storage change events
- */
-/**
- * What a listener learns about a write besides the data. `folded` is set by a
- * writer that merged a peer's change into the document (a bus delta, a Swarm
- * fold) rather than making one of its own: another instance in the same
- * window must not publish that write back at the peer (#707). Absent for a
- * write from another window, whose origin the `storage` event cannot carry.
+ * What a listener learns about a write besides the data. `noRepublish` is set
+ * by a writer for a change peers must not hear about: one it folded from a
+ * peer (a bus delta, a Swarm fold), a volatile field nobody else needs, or a
+ * device-local sign-out. Another instance in the same window must not publish
+ * that write to the room (#707). Absent for a write from another window,
+ * whose origin the `storage` event cannot carry.
  */
 export interface StorageChange {
-  folded: boolean
+  noRepublish: boolean
 }
 
+/** Listener for storage change events, from other windows or this one. */
 export type StorageChangeListener<T> = (
   data: T[],
   change?: StorageChange,
@@ -154,8 +153,8 @@ interface SameWindowWriteDetail {
   key: string
   /** The writing manager, so it can skip notifying itself. */
   source: object
-  /** See `StorageChange.folded`. */
-  folded?: boolean
+  /** See `StorageChange.noRepublish`. */
+  noRepublish?: boolean
 }
 
 /**
@@ -222,7 +221,10 @@ export class VersionedStorageManager<T> {
         return
 
       const data = this.load()
-      this.notifyListeners(data, detail.folded ? { folded: true } : undefined)
+      this.notifyListeners(
+        data,
+        detail.noRepublish ? { noRepublish: true } : undefined,
+      )
     }
 
     window.addEventListener(
@@ -252,11 +254,11 @@ export class VersionedStorageManager<T> {
   /**
    * Broadcast a write to other manager instances in this window.
    */
-  private notifySameWindow(folded?: boolean): void {
+  private notifySameWindow(noRepublish?: boolean): void {
     if (typeof window === "undefined") return
     window.dispatchEvent(
       new CustomEvent<SameWindowWriteDetail>(SAME_WINDOW_WRITE_EVENT, {
-        detail: { key: this.options.key, source: this, folded },
+        detail: { key: this.options.key, source: this, noRepublish },
       }),
     )
   }
@@ -321,7 +323,7 @@ export class VersionedStorageManager<T> {
   /**
    * Save data to storage
    */
-  save(data: T[], options?: { folded?: boolean }): void {
+  save(data: T[], options?: { noRepublish?: boolean }): void {
     try {
       // Apply serializer if provided
       const serialized = this.options.serializer
@@ -334,7 +336,7 @@ export class VersionedStorageManager<T> {
       }
 
       this.options.storage.setItem(this.options.key, JSON.stringify(wrapped))
-      this.notifySameWindow(options?.folded)
+      this.notifySameWindow(options?.noRepublish)
     } catch (e) {
       console.error(`[${this.options.loggerName ?? "Storage"}] Save failed:`, e)
     }

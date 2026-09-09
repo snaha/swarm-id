@@ -55,7 +55,7 @@ describe("VersionedStorageManager — same-window change notification", () => {
     expect(seen).toEqual([[{ name: "x" }]])
   })
 
-  it("tells the other instance whether the write folded a peer's change", () => {
+  it("tells the other instance when a write is not for republishing", () => {
     // The proxy in the iframe subscribes beside the shell's accounts store.
     // A write the shell made by folding a peer's delta is not this window's
     // change to publish back at the peer (#707), so the notification says so.
@@ -64,9 +64,9 @@ describe("VersionedStorageManager — same-window change notification", () => {
     const reader = makeManager(storage)
 
     const seen: (boolean | undefined)[] = []
-    reader.subscribe((_, change) => seen.push(change?.folded))
+    reader.subscribe((_, change) => seen.push(change?.noRepublish))
 
-    writer.save([{ name: "x" }], { folded: true })
+    writer.save([{ name: "x" }], { noRepublish: true })
     writer.save([{ name: "y" }])
 
     expect(seen).toEqual([true, undefined])
