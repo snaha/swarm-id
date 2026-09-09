@@ -27,9 +27,8 @@ import { STORAGE_KEY_NETWORK_SETTINGS } from "./types"
 
 /**
  * A view of the proxy that admits to the private members these tests drive.
- * `as never` compiles the spy call but types the result as `never`, so
- * `.mockRejectedValue(...)` on it does not — invisible while test files were
- * excluded from `tsc`.
+ * A spy on `proxy as never` is itself typed `never`, so nothing can be
+ * chained on it.
  */
 type ProxyInternals = {
   loadAuthData: () => Promise<unknown>

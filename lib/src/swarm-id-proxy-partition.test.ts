@@ -1988,8 +1988,6 @@ describe("SwarmIdProxy partitioned write enablement", () => {
                 lastConnectedAt: Date.now(),
                 // Strictly newer than the hydrated entry, so the fold cannot
                 // tie on a same-millisecond clock and keep the local pointer.
-                // #681 split the single `updatedAt` into per-field clocks; the
-                // one that ranks a drive pointer is `postageStampBatchIDAt`.
                 postageStampBatchIDAt: Date.now() + 1,
                 postageStampBatchID: new BatchId(OTHER_BATCH_ID_HEX),
               },

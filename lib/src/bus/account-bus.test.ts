@@ -42,8 +42,6 @@ const UTILIZATION_MESSAGE: BusMessageInput = {
 const LEASE_RELEASED_MESSAGE: BusMessageInput = {
   type: "lease-released",
   accountId: "aa".repeat(20),
-  // A lane is (batchId, partition) since #589 — the message is scoped to one
-  // batch, so the bus is never broader than the lock it front-runs.
   batchId: "ab".repeat(32),
   partition: 1,
   fromDeviceId: "device-remote",

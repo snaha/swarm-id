@@ -3,10 +3,8 @@
 //
 // The build config carries `rootDir: ./src` (rollup needs it to lay out
 // `dist/`), which makes every file under `test/` an error, and it excludes
-// `**/*.test.ts` so declarations stay clean. The result was that no test file
-// in the package was ever typechecked — a whole suite could call a method that
-// no longer exists and only fail when something ran it. Dropping `rootDir` and
-// emitting nothing lifts both restrictions.
+// `**/*.test.ts` so declarations stay clean. Dropping `rootDir` and emitting
+// nothing lifts both restrictions.
 //
 // `pnpm typecheck` uses this file; `pnpm build` still uses tsconfig.json.
 {

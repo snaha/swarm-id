@@ -13,7 +13,6 @@
  * independently and skip (see `isClusterReachable` usage in *.cluster.test.ts).
  */
 
-// vitest 4 dropped `GlobalSetupContext`; global setup receives the project.
 import type { TestProject } from "vitest/node"
 import { isClusterReachable, buyUsableStamp } from "./cluster"
 

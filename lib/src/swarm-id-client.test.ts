@@ -9,12 +9,10 @@ import { generatedAvatar } from "./utils/avatar"
 
 /**
  * A view of the client that admits to the private members these tests drive.
- *
  * `vi.spyOn(client, "ensureReady")` does not compile — the method is private —
- * and the `as never` workaround this file used instead types the returned spy
- * as `never`, so chaining `.mockResolvedValue(...)` failed too. Neither showed
- * up while test files were excluded from `tsc`. Naming the shape once keeps the
- * casts honest and the spies chainable.
+ * and a spy on `client as never` is itself typed `never`, so nothing can be
+ * chained on it. Naming the shape once keeps the casts honest and the spies
+ * chainable.
  */
 type ClientInternals = {
   ensureReady: () => void
