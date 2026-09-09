@@ -48,6 +48,8 @@ import {
 /** Same-site with the identity origin, so every context's proxy reads the
  *  shared store — three devices, not three partitions of one. */
 const DEMO_ORIGIN = 'http://localhost:3500'
+/** The account-bus signaling server `pnpm dev` starts (`dev:signaling`). */
+const SIGNALING_HEALTH_URL = 'http://localhost:5520/healthz'
 
 // Production timings, restated: the lib ships one bundle and it is the browser
 // one, so importing the constants here dies on `window`. Keep in step with
@@ -74,6 +76,10 @@ const IDLE_WAIT_MS = IDLE_YIELD_MS + LEASE_REFRESH_MS * 2
 /** How an upload fails when no holder answers its slot wait: the wait runs out, or the
  *  acquire around it does. */
 const UNANSWERED_WAIT = /No partition available|Partition lease timed out/
+/** The proxy's log line per device-state publish, and the coordinator's per idle yield —
+ *  both marked at their source as what this suite keys on. */
+const PUBLISHED_LINE = 'Published device state'
+const YIELDED_LINE = 'Released idle partition'
 /** Device-state publishes inside one idle window that say a holder was never idle (#707). */
 const BUSY_PUBLISHES = 3
 /** Where a run keeps its account (in the project's output dir), so a worker restarted
@@ -111,9 +117,17 @@ class Device {
     page.on('console', (message) => this.log.push({ at: Date.now(), text: message.text() }))
   }
 
-  /** How many device-state publishes this device made since `since`. */
+  /** How many device-state publishes this device made since `since`. Keyed on
+   *  the proxy's own log line (`swarm-id-proxy.ts`, `runAccountStatePublish`),
+   *  which says so beside it. */
   publishesSince(since: number): number {
-    return this.log.filter((l) => l.at >= since && l.text.includes('Published device state')).length
+    return this.log.filter((l) => l.at >= since && l.text.includes(PUBLISHED_LINE)).length
+  }
+
+  /** Whether this device idle-yielded since `since` — the one console line a
+   *  yield leaves, and one a teardown release does not. */
+  yieldedSince(since: number): boolean {
+    return this.log.some((l) => l.at >= since && l.text.includes(YIELDED_LINE))
   }
 
   static async open(browser: Browser, label: string, seed?: Seed): Promise<Device> {
@@ -343,11 +357,11 @@ class Device {
 
 /** The one invariant: the partitions held right now are pairwise distinct. */
 async function expectNoDualHold(devices: Device[]): Promise<Map<string, number | undefined>> {
-  const held = new Map<string, number | undefined>()
-  for (const device of devices) {
-    if (device.page.isClosed()) continue
-    held.set(device.label, await device.partition())
-  }
+  // Read together, not in turn: a release landing between two reads would
+  // show a hold that was already gone by the time the next was read.
+  const live = devices.filter((device) => !device.page.isClosed())
+  const partitions = await Promise.all(live.map((device) => device.partition()))
+  const held = new Map(live.map((device, index) => [device.label, partitions[index]]))
   const taken = [...held.values()].filter((p): p is number => p !== undefined)
   expect(new Set(taken).size, `dual hold: ${JSON.stringify([...held])}`).toBe(taken.length)
   return held
@@ -364,6 +378,20 @@ async function demoReachable(): Promise<boolean> {
   try {
     await fetch(DEMO_ORIGIN, { signal: AbortSignal.timeout(2000) })
     return true
+  } catch {
+    return false
+  }
+}
+
+/**
+ * The bus is what a handover rides on. Without the signaling server every
+ * slot request goes unanswered, which reads exactly like #707's busy holders
+ * — so its absence must fail the gate, not masquerade as that skip.
+ */
+async function busReachable(): Promise<boolean> {
+  try {
+    const response = await fetch(SIGNALING_HEALTH_URL, { signal: AbortSignal.timeout(2000) })
+    return response.ok
   } catch {
     return false
   }
@@ -394,13 +422,20 @@ async function createAccountWithDrive(page: Page): Promise<Seed> {
   }))
 }
 
-const rigUp = (await chainReachable()) && (await beeReachable()) && (await demoReachable())
+const rigUp =
+  (await chainReachable()) &&
+  (await beeReachable()) &&
+  (await demoReachable()) &&
+  (await busReachable())
 
 // Not `serial`: a scenario that fails must not hide the ones after it — the
 // point of the run is a verdict per scenario. Each one re-establishes what it
 // needs (`ensureConnected`) and takes the lease state as it finds it.
 test.describe('three devices on two partitions', () => {
-  test.skip(!rigUp, 'requires the local chain, the Bee cluster and the demo (pnpm dev:local)')
+  test.skip(
+    !rigUp,
+    'requires the chain, the Bee cluster, the demo and the signaling server (pnpm dev:local)',
+  )
 
   let A: Device
   let B: Device
@@ -436,6 +471,12 @@ test.describe('three devices on two partitions', () => {
   // Playwright reads fixtures off the destructured first argument; none are needed here.
   // eslint-disable-next-line no-empty-pattern
   test.afterEach(async ({}, testInfo) => {
+    // The list reporter prints a skip without its reason; the reason is the
+    // whole point of an evidence-based skip.
+    if (testInfo.status === 'skipped') {
+      const reason = testInfo.annotations.find((a) => a.type === 'skip')?.description
+      if (reason) console.log(`--- ${testInfo.title}\n    skipped: ${reason}`)
+    }
     if (testInfo.status === testInfo.expectedStatus) return
     // The reporter prints errors at the end of the run; say it now, beside
     // the state that produced it.
@@ -576,15 +617,21 @@ test.describe('three devices on two partitions', () => {
     await C.uploadAndHoldOrSkip()
     await expectNoDualHold(all())
 
-    // A waits for a slot: it asks the room, and B — idle by now — may yield;
-    // or B disconnects first and the teardown's `lease-released` wakes A. Either
-    // way A ends up holding, and B's disconnect must not leave a slot A cannot
-    // take: B's partition is released immediately, not at the TTL.
-    await sleep(PEER_YIELD_MIN_IDLE_MS)
+    // A waits for a slot while B disconnects. The mechanism under test is the
+    // teardown release: B's slot is freed at once and its `lease-released`
+    // wakes A's wait. The other way A could be served — C idle-yielding to
+    // A's request — is kept out by C having just uploaded (inside the
+    // peer-yield window when A asks), and is detected if it happens anyway:
+    // a yield is the one release that logs, a teardown release does not.
+    const pB = (await B.partition())!
+    const asked = Date.now()
     const aUpload = A.upload()
     await B.disconnect()
     await aUpload
-    expect(await A.partition()).toBeDefined()
+    if (C.yieldedSince(asked)) {
+      test.skip(true, 'C yielded to the request before B’s release could be told apart')
+    }
+    expect(await A.partition(), 'A did not land on the slot B released').toBe(pB)
     await expectNoDualHold([A, C])
 
     // B reconnects and is served in turn: C or A yields on request.

@@ -63,5 +63,11 @@ export default defineConfig({
       reuseExistingServer: true,
       timeout: 30000,
     },
+    {
+      command: 'pnpm -C .. dev:signaling',
+      url: 'http://localhost:5520/healthz',
+      reuseExistingServer: true,
+      timeout: 30000,
+    },
   ],
 })
