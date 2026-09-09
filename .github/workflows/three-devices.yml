@@ -25,6 +25,7 @@ on:
       - 'lib/src/utils/batch-utilization.ts'
       - 'ui/src/lib/stores/account-bus.ts'
       - 'ui/src/lib/stores/account-delta.ts'
+      - 'ui/src/lib/stores/accounts.svelte.ts'
       - 'ui/src/routes/proxy/**'
       - 'ui/tests/three-devices.test.ts'
       - 'ui/tests/global-setup-devices.ts'
