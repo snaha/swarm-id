@@ -3,16 +3,20 @@
 
 import { describe, it, expect, vi } from "vitest"
 
+type MockLease = ReturnType<typeof makeLease>
+
 // The lease primitive and the lock-SOC read are mocked so the coordinator's
 // acquire / refresh / demote paths are unit-testable without a live Bee node.
-// Typed as the lease the factory builds, so the tests can read `.acquire`
-// and friends without casting at each use.
-const leaseController: { lease: ReturnType<typeof makeLease> } = {
-  lease: undefined as unknown as ReturnType<typeof makeLease>,
-}
+// Each test installs the lease the coordinator is to be handed; being asked
+// for one before that is a mistake in the test, so it fails loudly rather
+// than handing the coordinator `undefined`.
+const leaseController: { lease: MockLease | undefined } = { lease: undefined }
 vi.mock("./partition-lease", () => ({
   PartitionLease: {
-    fromSwarmEncryptionKey: vi.fn(async () => leaseController.lease),
+    fromSwarmEncryptionKey: vi.fn(async () => {
+      if (!leaseController.lease) throw new Error("no mock lease installed")
+      return leaseController.lease
+    }),
   },
 }))
 const lockController: {
