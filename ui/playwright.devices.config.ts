@@ -9,7 +9,8 @@ import { defineConfig, devices } from '@playwright/test'
  * lease TTL, the idle yield and the beacon grace are each 30 s and the suite
  * waits them out — so it is not part of `pnpm test:e2e`. It runs on its own
  * workflow (`.github/workflows/three-devices.yml`): on a PR that touches the
- * lease seams, nightly on main, and on demand. Locally:
+ * lease seams, nightly on main, before every npm publish, and on demand.
+ * Locally:
  *
  *   pnpm dev:local                      # cluster + chain + solver + apps
  *   pnpm test:devices                   # chromium

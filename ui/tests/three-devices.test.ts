@@ -19,7 +19,8 @@
  * Minutes per run, by design: the lease TTL, the idle yield and the beacon
  * grace are each 30 s and several steps wait them out. Not part of the
  * everyday e2e run: `.github/workflows/three-devices.yml` runs it on a PR that
- * touches the lease seams, nightly on main, and on demand. Locally:
+ * touches the lease seams, nightly on main, before every npm publish (a red
+ * run stops the publish), and on demand. Locally:
  *
  *   pnpm dev:local                                       # cluster, chain, solver, apps
  *   pnpm test:devices                                    # chromium

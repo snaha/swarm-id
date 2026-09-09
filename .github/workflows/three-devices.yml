@@ -7,6 +7,8 @@
 #     required check while #707 makes some scenarios skip on evidence),
 #   - nightly on main, so a regression is dated to a day rather than found by
 #     hand,
+#   - before every npm publish (`release.yml` calls it once release-please has
+#     cut the release; a red run stops the publish),
 #   - on demand from the Actions tab.
 #
 # The job log carries every verdict and every skip's reason; the HTML report
@@ -33,6 +35,7 @@ on:
   schedule:
     - cron: '17 3 * * *'
   workflow_dispatch:
+  workflow_call:
 
 # Cancel superseded runs on the same ref.
 concurrency:
