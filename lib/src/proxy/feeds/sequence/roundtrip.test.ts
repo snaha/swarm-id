@@ -198,8 +198,7 @@ describe("Sequential Feeds Integration", () => {
   describe("Basic Operations", () => {
     it("should return undefined when no updates exist", async () => {
       const owner = signer.publicKey().address()
-      const beeClient = bee
-      const finder = new SyncSequentialFinder(beeClient, topic, owner)
+      const finder = new SyncSequentialFinder(bee, topic, owner)
 
       const result = await finder.findAt(0n, 0n)
       expect(result.current).toBeUndefined()
@@ -207,10 +206,9 @@ describe("Sequential Feeds Integration", () => {
     })
 
     it("should store and retrieve latest update index", async () => {
-      const beeClient = bee
-      const updater = new BasicSequentialUpdater(beeClient, topic, signer)
+      const updater = new BasicSequentialUpdater(bee, topic, signer)
       const owner = updater.getOwner()
-      const finder = new SyncSequentialFinder(beeClient, topic, owner)
+      const finder = new SyncSequentialFinder(bee, topic, owner)
 
       const updates = 5
       for (let i = 0; i < updates; i++) {
@@ -223,11 +221,10 @@ describe("Sequential Feeds Integration", () => {
     })
 
     it("async finder should match sync finder", async () => {
-      const beeClient = bee
-      const updater = new BasicSequentialUpdater(beeClient, topic, signer)
+      const updater = new BasicSequentialUpdater(bee, topic, signer)
       const owner = updater.getOwner()
-      const syncFinder = new SyncSequentialFinder(beeClient, topic, owner)
-      const asyncFinder = new AsyncSequentialFinder(beeClient, topic, owner)
+      const syncFinder = new SyncSequentialFinder(bee, topic, owner)
+      const asyncFinder = new AsyncSequentialFinder(bee, topic, owner)
 
       const updates = 3
       for (let i = 0; i < updates; i++) {
@@ -244,10 +241,9 @@ describe("Sequential Feeds Integration", () => {
 
   describe("Multiple Updates", () => {
     it("should write and read 10 sequential updates", async () => {
-      const beeClient = bee
-      const updater = new BasicSequentialUpdater(beeClient, topic, signer)
+      const updater = new BasicSequentialUpdater(bee, topic, signer)
       const owner = updater.getOwner()
-      const finder = new SyncSequentialFinder(beeClient, topic, owner)
+      const finder = new SyncSequentialFinder(bee, topic, owner)
 
       // Write indices 0-9
       for (let i = 0; i < 10; i++) {
@@ -261,10 +257,9 @@ describe("Sequential Feeds Integration", () => {
     })
 
     it("should write and read 50 sequential updates", async () => {
-      const beeClient = bee
-      const updater = new BasicSequentialUpdater(beeClient, topic, signer)
+      const updater = new BasicSequentialUpdater(bee, topic, signer)
       const owner = updater.getOwner()
-      const finder = new SyncSequentialFinder(beeClient, topic, owner)
+      const finder = new SyncSequentialFinder(bee, topic, owner)
 
       // Larger scale test
       const count = 50
@@ -278,13 +273,8 @@ describe("Sequential Feeds Integration", () => {
     })
 
     it("should maintain correct ordering across updates", async () => {
-      const beeClient = bee
-      const updater = new BasicSequentialUpdater(beeClient, topic, signer)
-      const finder = new SyncSequentialFinder(
-        beeClient,
-        topic,
-        updater.getOwner(),
-      )
+      const updater = new BasicSequentialUpdater(bee, topic, signer)
+      const finder = new SyncSequentialFinder(bee, topic, updater.getOwner())
 
       const references: Uint8Array[] = []
       for (let i = 0; i < 5; i++) {
@@ -300,10 +290,9 @@ describe("Sequential Feeds Integration", () => {
     })
 
     it("should handle payload content correctly for each index", async () => {
-      const beeClient = bee
-      const updater = new BasicSequentialUpdater(beeClient, topic, signer)
+      const updater = new BasicSequentialUpdater(bee, topic, signer)
       const owner = updater.getOwner()
-      const finder = new SyncSequentialFinder(beeClient, topic, owner)
+      const finder = new SyncSequentialFinder(bee, topic, owner)
 
       // Write different payloads at different indices
       const payloads = [
@@ -323,10 +312,9 @@ describe("Sequential Feeds Integration", () => {
     })
 
     it("should handle sequential updates with 64-byte references", async () => {
-      const beeClient = bee
-      const updater = new BasicSequentialUpdater(beeClient, topic, signer)
+      const updater = new BasicSequentialUpdater(bee, topic, signer)
       const owner = updater.getOwner()
-      const finder = new SyncSequentialFinder(beeClient, topic, owner)
+      const finder = new SyncSequentialFinder(bee, topic, owner)
 
       // Mix of 32-byte and 64-byte references
       await updater.update(createTestReference64(1), stamper)
@@ -341,10 +329,9 @@ describe("Sequential Feeds Integration", () => {
 
   describe("Index Lookups", () => {
     it("should find latest update when multiple exist", async () => {
-      const beeClient = bee
-      const updater = new BasicSequentialUpdater(beeClient, topic, signer)
+      const updater = new BasicSequentialUpdater(bee, topic, signer)
       const owner = updater.getOwner()
-      const finder = new SyncSequentialFinder(beeClient, topic, owner)
+      const finder = new SyncSequentialFinder(bee, topic, owner)
 
       // Write 5 updates
       for (let i = 0; i < 5; i++) {
@@ -357,11 +344,10 @@ describe("Sequential Feeds Integration", () => {
     })
 
     it("should return undefined for non-existent feed", async () => {
-      const beeClient = bee
       // Different topic with no updates
       const emptyTopic = createTestTopic("empty-topic")
       const owner = signer.publicKey().address()
-      const finder = new SyncSequentialFinder(beeClient, emptyTopic, owner)
+      const finder = new SyncSequentialFinder(bee, emptyTopic, owner)
 
       const result = await finder.findAt(0n, 0n)
       expect(result.current).toBeUndefined()
@@ -369,10 +355,9 @@ describe("Sequential Feeds Integration", () => {
     })
 
     it("should handle index 0 correctly", async () => {
-      const beeClient = bee
-      const updater = new BasicSequentialUpdater(beeClient, topic, signer)
+      const updater = new BasicSequentialUpdater(bee, topic, signer)
       const owner = updater.getOwner()
-      const finder = new SyncSequentialFinder(beeClient, topic, owner)
+      const finder = new SyncSequentialFinder(bee, topic, owner)
 
       // Single update at index 0
       await updater.update(createTestReference(42), stamper)
@@ -383,10 +368,9 @@ describe("Sequential Feeds Integration", () => {
     })
 
     it("should handle large index counts", async () => {
-      const beeClient = bee
-      const updater = new BasicSequentialUpdater(beeClient, topic, signer)
+      const updater = new BasicSequentialUpdater(bee, topic, signer)
       const owner = updater.getOwner()
-      const finder = new SyncSequentialFinder(beeClient, topic, owner)
+      const finder = new SyncSequentialFinder(bee, topic, owner)
 
       // Write 100 updates to test scalability
       const count = 100
@@ -400,9 +384,8 @@ describe("Sequential Feeds Integration", () => {
     })
 
     it("should correctly report next index for empty feed", async () => {
-      const beeClient = bee
       const owner = signer.publicKey().address()
-      const finder = new SyncSequentialFinder(beeClient, topic, owner)
+      const finder = new SyncSequentialFinder(bee, topic, owner)
 
       const result = await finder.findAt(0n, 0n)
       expect(result.next).toBe(0n)
@@ -411,10 +394,9 @@ describe("Sequential Feeds Integration", () => {
 
   describe("Timestamp Handling", () => {
     it("should ignore at parameter (sequential feeds are index-based)", async () => {
-      const beeClient = bee
-      const updater = new BasicSequentialUpdater(beeClient, topic, signer)
+      const updater = new BasicSequentialUpdater(bee, topic, signer)
       const owner = updater.getOwner()
-      const finder = new SyncSequentialFinder(beeClient, topic, owner)
+      const finder = new SyncSequentialFinder(bee, topic, owner)
 
       await updater.update(createTestReference(1), stamper)
       await updater.update(createTestReference(2), stamper)
@@ -430,10 +412,9 @@ describe("Sequential Feeds Integration", () => {
     })
 
     it("should ignore after parameter (sequential feeds scan from 0)", async () => {
-      const beeClient = bee
-      const updater = new BasicSequentialUpdater(beeClient, topic, signer)
+      const updater = new BasicSequentialUpdater(bee, topic, signer)
       const owner = updater.getOwner()
-      const finder = new SyncSequentialFinder(beeClient, topic, owner)
+      const finder = new SyncSequentialFinder(bee, topic, owner)
 
       await updater.update(createTestReference(1), stamper)
       await updater.update(createTestReference(2), stamper)
@@ -448,10 +429,9 @@ describe("Sequential Feeds Integration", () => {
     })
 
     it("should work with async finder using same parameters", async () => {
-      const beeClient = bee
-      const updater = new BasicSequentialUpdater(beeClient, topic, signer)
+      const updater = new BasicSequentialUpdater(bee, topic, signer)
       const owner = updater.getOwner()
-      const asyncFinder = new AsyncSequentialFinder(beeClient, topic, owner)
+      const asyncFinder = new AsyncSequentialFinder(bee, topic, owner)
 
       await updater.update(createTestReference(1), stamper)
 
@@ -463,9 +443,8 @@ describe("Sequential Feeds Integration", () => {
     })
 
     it("should handle queries on empty feed consistently", async () => {
-      const beeClient = bee
       const owner = signer.publicKey().address()
-      const finder = new SyncSequentialFinder(beeClient, topic, owner)
+      const finder = new SyncSequentialFinder(bee, topic, owner)
 
       const result1 = await finder.findAt(0n, 0n)
       const result2 = await finder.findAt(100n, 50n)
@@ -479,8 +458,7 @@ describe("Sequential Feeds Integration", () => {
 
   describe("State Management", () => {
     it("should track next index correctly", async () => {
-      const beeClient = bee
-      const updater = new BasicSequentialUpdater(beeClient, topic, signer)
+      const updater = new BasicSequentialUpdater(bee, topic, signer)
 
       expect(updater.getState().nextIndex).toBe(0n)
 
@@ -495,8 +473,7 @@ describe("Sequential Feeds Integration", () => {
     })
 
     it("should resume from saved state", async () => {
-      const beeClient = bee
-      const updater1 = new BasicSequentialUpdater(beeClient, topic, signer)
+      const updater1 = new BasicSequentialUpdater(bee, topic, signer)
 
       // Write some updates
       await updater1.update(createTestReference(1), stamper)
@@ -504,7 +481,7 @@ describe("Sequential Feeds Integration", () => {
       const state = updater1.getState()
 
       // Create new updater and restore state
-      const updater2 = new BasicSequentialUpdater(beeClient, topic, signer)
+      const updater2 = new BasicSequentialUpdater(bee, topic, signer)
       updater2.setState(state)
 
       expect(updater2.getState().nextIndex).toBe(2n)
@@ -514,19 +491,14 @@ describe("Sequential Feeds Integration", () => {
       expect(updater2.getState().nextIndex).toBe(3n)
 
       // Verify all updates are findable
-      const finder = new SyncSequentialFinder(
-        beeClient,
-        topic,
-        updater2.getOwner(),
-      )
+      const finder = new SyncSequentialFinder(bee, topic, updater2.getOwner())
       const result = await finder.findAt(0n, 0n)
       expect(result.current).toBe(2n)
       expect(result.next).toBe(3n)
     })
 
     it("should reset state correctly", async () => {
-      const beeClient = bee
-      const updater = new BasicSequentialUpdater(beeClient, topic, signer)
+      const updater = new BasicSequentialUpdater(bee, topic, signer)
 
       // Write updates
       await updater.update(createTestReference(1), stamper)
@@ -547,9 +519,8 @@ describe("Sequential Feeds Integration", () => {
     it("should handle network errors gracefully", async () => {
       const failingStore = new MockChunkStore()
       const failingBee = new FailingMockBee(failingStore, 0) // Always fail
-      const beeClient = failingBee
       const owner = signer.publicKey().address()
-      const finder = new SyncSequentialFinder(beeClient, topic, owner)
+      const finder = new SyncSequentialFinder(failingBee, topic, owner)
 
       // Should return undefined, not throw
       const result = await finder.findAt(0n, 0n)
@@ -560,9 +531,8 @@ describe("Sequential Feeds Integration", () => {
     it("should handle 404 for missing chunks", async () => {
       const countingStore = new MockChunkStore()
       const countingBee = new CountingMockBee(countingStore)
-      const beeClient = countingBee
       const owner = signer.publicKey().address()
-      const finder = new SyncSequentialFinder(beeClient, topic, owner)
+      const finder = new SyncSequentialFinder(countingBee, topic, owner)
 
       // Finder should return undefined, not crash
       const result = await finder.findAt(0n, 0n)
@@ -574,9 +544,8 @@ describe("Sequential Feeds Integration", () => {
     it("should handle mixed error types", async () => {
       const mixedStore = new MockChunkStore()
       const mixedBee = new MixedErrorMockBee(mixedStore)
-      const beeClient = mixedBee
       const owner = signer.publicKey().address()
-      const finder = new SyncSequentialFinder(beeClient, topic, owner)
+      const finder = new SyncSequentialFinder(mixedBee, topic, owner)
 
       // Should handle gracefully regardless of error type
       const result = await finder.findAt(0n, 0n)
@@ -584,8 +553,7 @@ describe("Sequential Feeds Integration", () => {
     })
 
     it("should continue finding after partial success", async () => {
-      const beeClient = bee
-      const updater = new BasicSequentialUpdater(beeClient, topic, signer)
+      const updater = new BasicSequentialUpdater(bee, topic, signer)
       const owner = updater.getOwner()
 
       // Create 3 updates
@@ -605,8 +573,7 @@ describe("Sequential Feeds Integration", () => {
     })
 
     it("should handle empty payload gracefully", async () => {
-      const beeClient = bee
-      const updater = new BasicSequentialUpdater(beeClient, topic, signer)
+      const updater = new BasicSequentialUpdater(bee, topic, signer)
 
       // Empty payloads should throw (data length 0 is invalid)
       const emptyPayload = new Uint8Array(0)
@@ -616,16 +583,14 @@ describe("Sequential Feeds Integration", () => {
 
   describe("Owner/Topic Isolation", () => {
     it("should isolate updates by owner", async () => {
-      const beeClient = bee
-
       // Two different signers (owners)
       const signerA = createTestSigner()
       const signerB = new PrivateKey(
         "9a4ce1ef8d14b7864ea3f1ecfcb39f937ce4a45f47f4d7d02f6b76f1f3ab2c11",
       )
 
-      const updaterA = new BasicSequentialUpdater(beeClient, topic, signerA)
-      const updaterB = new BasicSequentialUpdater(beeClient, topic, signerB)
+      const updaterA = new BasicSequentialUpdater(bee, topic, signerA)
+      const updaterB = new BasicSequentialUpdater(bee, topic, signerB)
 
       // Write to both feeds
       await updaterA.update(createTestReference(100), stamper)
@@ -634,16 +599,8 @@ describe("Sequential Feeds Integration", () => {
       await updaterB.update(createTestReference(200), stamper)
 
       // Each owner should see only their own updates
-      const finderA = new SyncSequentialFinder(
-        beeClient,
-        topic,
-        updaterA.getOwner(),
-      )
-      const finderB = new SyncSequentialFinder(
-        beeClient,
-        topic,
-        updaterB.getOwner(),
-      )
+      const finderA = new SyncSequentialFinder(bee, topic, updaterA.getOwner())
+      const finderB = new SyncSequentialFinder(bee, topic, updaterB.getOwner())
 
       const resultA = await finderA.findAt(0n, 0n)
       const resultB = await finderB.findAt(0n, 0n)
@@ -653,13 +610,11 @@ describe("Sequential Feeds Integration", () => {
     })
 
     it("should isolate updates by topic", async () => {
-      const beeClient = bee
-
       const topicA = createTestTopic("topic-a")
       const topicB = createTestTopic("topic-b")
 
-      const updaterA = new BasicSequentialUpdater(beeClient, topicA, signer)
-      const updaterB = new BasicSequentialUpdater(beeClient, topicB, signer)
+      const updaterA = new BasicSequentialUpdater(bee, topicA, signer)
+      const updaterB = new BasicSequentialUpdater(bee, topicB, signer)
 
       // Write different amounts to each topic
       await updaterA.update(createTestReference(1), stamper)
@@ -669,8 +624,8 @@ describe("Sequential Feeds Integration", () => {
       await updaterB.update(createTestReference(10), stamper)
 
       const owner = signer.publicKey().address()
-      const finderA = new SyncSequentialFinder(beeClient, topicA, owner)
-      const finderB = new SyncSequentialFinder(beeClient, topicB, owner)
+      const finderA = new SyncSequentialFinder(bee, topicA, owner)
+      const finderB = new SyncSequentialFinder(bee, topicB, owner)
 
       const resultA = await finderA.findAt(0n, 0n)
       const resultB = await finderB.findAt(0n, 0n)
@@ -680,14 +635,12 @@ describe("Sequential Feeds Integration", () => {
     })
 
     it("should handle cross-owner lookup correctly", async () => {
-      const beeClient = bee
-
       const signerA = createTestSigner()
       const signerB = new PrivateKey(
         "7f6c8f5de489c56ba40b494a26d0c6dd0c05fc4f0d37fe2f217af6e9ac7b1a01",
       )
 
-      const updaterA = new BasicSequentialUpdater(beeClient, topic, signerA)
+      const updaterA = new BasicSequentialUpdater(bee, topic, signerA)
 
       // Owner A writes updates
       await updaterA.update(createTestReference(1), stamper)
@@ -695,7 +648,7 @@ describe("Sequential Feeds Integration", () => {
 
       // Try to find using Owner B's address - should find nothing
       const finderB = new SyncSequentialFinder(
-        beeClient,
+        bee,
         topic,
         signerB.publicKey().address(),
       )
@@ -708,8 +661,7 @@ describe("Sequential Feeds Integration", () => {
 
   describe("Concurrent Operations", () => {
     it("should handle concurrent reads safely", async () => {
-      const beeClient = bee
-      const updater = new BasicSequentialUpdater(beeClient, topic, signer)
+      const updater = new BasicSequentialUpdater(bee, topic, signer)
       const owner = updater.getOwner()
 
       // Write some updates
@@ -719,10 +671,10 @@ describe("Sequential Feeds Integration", () => {
 
       // Create multiple finders and read concurrently
       const finders = [
-        new SyncSequentialFinder(beeClient, topic, owner),
-        new SyncSequentialFinder(beeClient, topic, owner),
-        new AsyncSequentialFinder(beeClient, topic, owner),
-        new AsyncSequentialFinder(beeClient, topic, owner),
+        new SyncSequentialFinder(bee, topic, owner),
+        new SyncSequentialFinder(bee, topic, owner),
+        new AsyncSequentialFinder(bee, topic, owner),
+        new AsyncSequentialFinder(bee, topic, owner),
       ]
 
       const results = await Promise.all(
@@ -737,8 +689,7 @@ describe("Sequential Feeds Integration", () => {
     })
 
     it("should handle rapid sequential updates", async () => {
-      const beeClient = bee
-      const updater = new BasicSequentialUpdater(beeClient, topic, signer)
+      const updater = new BasicSequentialUpdater(bee, topic, signer)
       const owner = updater.getOwner()
 
       // Rapid sequential updates (must be sequential to avoid race conditions)
@@ -748,7 +699,7 @@ describe("Sequential Feeds Integration", () => {
       }
 
       // Verify all updates succeeded
-      const finder = new SyncSequentialFinder(beeClient, topic, owner)
+      const finder = new SyncSequentialFinder(bee, topic, owner)
       const result = await finder.findAt(0n, 0n)
 
       expect(result.current).toBe(19n)
@@ -761,9 +712,8 @@ describe("Sequential Feeds Integration", () => {
     it("should complete linear scan within reasonable bounds", async () => {
       const countingStore = new MockChunkStore()
       const countingBee = new CountingMockBee(countingStore)
-      const beeClient = countingBee
 
-      const updater = new BasicSequentialUpdater(beeClient, topic, signer)
+      const updater = new BasicSequentialUpdater(countingBee, topic, signer)
 
       // Write 100 updates
       const updateCount = 100
@@ -775,7 +725,7 @@ describe("Sequential Feeds Integration", () => {
       countingBee.downloadCalls = 0
 
       const finder = new SyncSequentialFinder(
-        beeClient,
+        countingBee,
         topic,
         updater.getOwner(),
       )
@@ -787,8 +737,7 @@ describe("Sequential Feeds Integration", () => {
     })
 
     it("sync and async finders should match for large datasets", async () => {
-      const beeClient = bee
-      const updater = new BasicSequentialUpdater(beeClient, topic, signer)
+      const updater = new BasicSequentialUpdater(bee, topic, signer)
       const owner = updater.getOwner()
 
       // Write 50 updates
@@ -796,8 +745,8 @@ describe("Sequential Feeds Integration", () => {
         await updater.update(createTestReference(i), stamper)
       }
 
-      const syncFinder = new SyncSequentialFinder(beeClient, topic, owner)
-      const asyncFinder = new AsyncSequentialFinder(beeClient, topic, owner)
+      const syncFinder = new SyncSequentialFinder(bee, topic, owner)
+      const asyncFinder = new AsyncSequentialFinder(bee, topic, owner)
 
       const syncResult = await syncFinder.findAt(0n, 0n)
       const asyncResult = await asyncFinder.findAt(0n, 0n)
@@ -810,13 +759,12 @@ describe("Sequential Feeds Integration", () => {
 
   describe("Edge Cases", () => {
     it("should handle single update correctly", async () => {
-      const beeClient = bee
-      const updater = new BasicSequentialUpdater(beeClient, topic, signer)
+      const updater = new BasicSequentialUpdater(bee, topic, signer)
       const owner = updater.getOwner()
 
       await updater.update(createTestReference(42), stamper)
 
-      const finder = new SyncSequentialFinder(beeClient, topic, owner)
+      const finder = new SyncSequentialFinder(bee, topic, owner)
       const result = await finder.findAt(0n, 0n)
 
       expect(result.current).toBe(0n)
@@ -824,8 +772,7 @@ describe("Sequential Feeds Integration", () => {
     })
 
     it("should handle maximum practical index", async () => {
-      const beeClient = bee
-      const updater = new BasicSequentialUpdater(beeClient, topic, signer)
+      const updater = new BasicSequentialUpdater(bee, topic, signer)
 
       // Start from a high index
       updater.setState({ nextIndex: 1000000n })
@@ -838,8 +785,7 @@ describe("Sequential Feeds Integration", () => {
     })
 
     it("should preserve reference integrity through update cycle", async () => {
-      const beeClient = bee
-      const updater = new BasicSequentialUpdater(beeClient, topic, signer)
+      const updater = new BasicSequentialUpdater(bee, topic, signer)
 
       const ref32 = createTestReference(123)
       const ref64 = createTestReference64(456)
@@ -854,8 +800,7 @@ describe("Sequential Feeds Integration", () => {
     })
 
     it("should handle getOwner correctly", async () => {
-      const beeClient = bee
-      const updater = new BasicSequentialUpdater(beeClient, topic, signer)
+      const updater = new BasicSequentialUpdater(bee, topic, signer)
 
       const owner = updater.getOwner()
       const expectedOwner = signer.publicKey().address()
@@ -866,15 +811,14 @@ describe("Sequential Feeds Integration", () => {
 
   describe("Finder Consistency", () => {
     it("should return consistent results across multiple queries", async () => {
-      const beeClient = bee
-      const updater = new BasicSequentialUpdater(beeClient, topic, signer)
+      const updater = new BasicSequentialUpdater(bee, topic, signer)
       const owner = updater.getOwner()
 
       await updater.update(createTestReference(1), stamper)
       await updater.update(createTestReference(2), stamper)
       await updater.update(createTestReference(3), stamper)
 
-      const finder = new SyncSequentialFinder(beeClient, topic, owner)
+      const finder = new SyncSequentialFinder(bee, topic, owner)
 
       // Query multiple times
       const results = await Promise.all([
@@ -890,10 +834,9 @@ describe("Sequential Feeds Integration", () => {
     })
 
     it("should handle interleaved reads and writes", async () => {
-      const beeClient = bee
-      const updater = new BasicSequentialUpdater(beeClient, topic, signer)
+      const updater = new BasicSequentialUpdater(bee, topic, signer)
       const owner = updater.getOwner()
-      const finder = new SyncSequentialFinder(beeClient, topic, owner)
+      const finder = new SyncSequentialFinder(bee, topic, owner)
 
       // Write, read, write, read pattern
       await updater.update(createTestReference(1), stamper)
