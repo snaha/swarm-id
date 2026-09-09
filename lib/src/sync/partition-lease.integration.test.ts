@@ -17,7 +17,6 @@ import {
   BatchId,
   PrivateKey,
   Reference,
-  type Bee,
   type Stamper,
 } from "@ethersphere/bee-js"
 
@@ -131,7 +130,7 @@ async function seedStatePointer(
   partition = 0,
 ): Promise<void> {
   await partitionState.writeStatePointer({
-    bee: bee as unknown as Bee,
+    bee: bee,
     stamper: createMockStamper(),
     backupSigner: BACKUP_SIGNER,
     swarmEncryptionKey: TEST_ENC_KEY,
@@ -144,7 +143,7 @@ async function seedStatePointer(
 
 function makeLease(opts: {
   deviceId: string
-  bee: Bee
+  bee: MockBee
   now?: () => number
   knownDeviceIds?: () => string[]
   intentReadTimeoutMs?: number
@@ -200,7 +199,7 @@ describe("readPartitionState / writePartitionState round-trip", () => {
 
     const stamper = createMockStamper()
     await partitionState.writePartitionState({
-      bee: bee as unknown as Bee,
+      bee: bee,
       stamper,
       batchId: TEST_BATCH_ID,
       batchDepth: TEST_BATCH_DEPTH,
@@ -211,7 +210,7 @@ describe("readPartitionState / writePartitionState round-trip", () => {
     })
 
     const result = await partitionState.readPartitionState({
-      bee: bee as unknown as Bee,
+      bee: bee,
       owner: OWNER,
       swarmEncryptionKey: TEST_ENC_KEY,
       batchId: TEST_BATCH_ID,
@@ -230,7 +229,7 @@ describe("readPartitionState / writePartitionState round-trip", () => {
     const localCounter = new Uint32Array(NUM_BUCKETS)
     localCounter[42] = 3
     const written = await partitionState.writePartitionState({
-      bee: bee as unknown as Bee,
+      bee: bee,
       stamper: createMockStamper(),
       batchId: TEST_BATCH_ID,
       batchDepth: TEST_BATCH_DEPTH,
@@ -255,7 +254,7 @@ describe("readPartitionState / writePartitionState round-trip", () => {
     // A taking-over device derives the same protection set from the
     // reference chunk it downloads.
     const read = await partitionState.readPartitionState({
-      bee: bee as unknown as Bee,
+      bee: bee,
       owner: OWNER,
       swarmEncryptionKey: TEST_ENC_KEY,
       batchId: TEST_BATCH_ID,
@@ -272,7 +271,7 @@ describe("readPartitionState / writePartitionState round-trip", () => {
     localCounter[100] = 5 // chunk 0
     const stamper = createMockStamper()
     const { referenceHex } = await partitionState.writePartitionState({
-      bee: bee as unknown as Bee,
+      bee: bee,
       stamper,
       batchId: TEST_BATCH_ID,
       batchDepth: TEST_BATCH_DEPTH,
@@ -286,7 +285,7 @@ describe("readPartitionState / writePartitionState round-trip", () => {
     // length numUtilizationChunks — exactly what claimPartition seeds as the
     // publish baseline so the first publish is incremental.
     const full = await partitionState.readPartitionState({
-      bee: bee as unknown as Bee,
+      bee: bee,
       owner: OWNER,
       swarmEncryptionKey: TEST_ENC_KEY,
       batchId: TEST_BATCH_ID,
@@ -299,7 +298,7 @@ describe("readPartitionState / writePartitionState round-trip", () => {
     // reload's re-acquire can seed an incremental first publish too.
     const cached = await partitionState.readPartitionState(
       {
-        bee: bee as unknown as Bee,
+        bee: bee,
         owner: OWNER,
         swarmEncryptionKey: TEST_ENC_KEY,
         batchId: TEST_BATCH_ID,
@@ -319,7 +318,7 @@ describe("readPartitionState / writePartitionState round-trip", () => {
     const stamper = createMockStamper()
     const { referenceHex: writtenRef } =
       await partitionState.writePartitionState({
-        bee: bee as unknown as Bee,
+        bee: bee,
         stamper,
         batchId: TEST_BATCH_ID,
         batchDepth: TEST_BATCH_DEPTH,
@@ -333,7 +332,7 @@ describe("readPartitionState / writePartitionState round-trip", () => {
 
     // No cached reference → full download.
     const full = await partitionState.readPartitionState({
-      bee: bee as unknown as Bee,
+      bee: bee,
       owner: OWNER,
       swarmEncryptionKey: TEST_ENC_KEY,
       batchId: TEST_BATCH_ID,
@@ -348,7 +347,7 @@ describe("readPartitionState / writePartitionState round-trip", () => {
     // Same reference cached → skip, reuse local counter, far fewer chunk reads.
     const cached = await partitionState.readPartitionState(
       {
-        bee: bee as unknown as Bee,
+        bee: bee,
         owner: OWNER,
         swarmEncryptionKey: TEST_ENC_KEY,
         batchId: TEST_BATCH_ID,
@@ -371,7 +370,7 @@ describe("readPartitionState / writePartitionState round-trip", () => {
     // zero-seed (that would re-issue every used slot); it reports readFailed.
     const danglingRef = Binary.uint8ArrayToHex(new Uint8Array(64).fill(0x99))
     await partitionState.writeStatePointer({
-      bee: bee as unknown as Bee,
+      bee: bee,
       stamper: createMockStamper(),
       backupSigner: BACKUP_SIGNER,
       swarmEncryptionKey: TEST_ENC_KEY,
@@ -382,7 +381,7 @@ describe("readPartitionState / writePartitionState round-trip", () => {
     })
 
     const result = await partitionState.readPartitionState({
-      bee: bee as unknown as Bee,
+      bee: bee,
       owner: OWNER,
       swarmEncryptionKey: TEST_ENC_KEY,
       batchId: TEST_BATCH_ID,
@@ -399,7 +398,7 @@ describe("readPartitionState / writePartitionState round-trip", () => {
     const localCounter = new Uint32Array(NUM_BUCKETS)
     localCounter[100] = 5
     await partitionState.writePartitionState({
-      bee: bee as unknown as Bee,
+      bee: bee,
       stamper: createMockStamper(),
       batchId: TEST_BATCH_ID,
       batchDepth: TEST_BATCH_DEPTH,
@@ -414,7 +413,7 @@ describe("readPartitionState / writePartitionState round-trip", () => {
     // chunks in order — so the LAST fetched address is a counter chunk.
     const getSpy = vi.spyOn(store, "get")
     const ok = await partitionState.readPartitionState({
-      bee: bee as unknown as Bee,
+      bee: bee,
       owner: OWNER,
       swarmEncryptionKey: TEST_ENC_KEY,
       batchId: TEST_BATCH_ID,
@@ -427,7 +426,7 @@ describe("readPartitionState / writePartitionState round-trip", () => {
 
     // One published chunk evicted/unreadable → the whole read fails safe.
     const result = await partitionState.readPartitionState({
-      bee: bee as unknown as Bee,
+      bee: bee,
       owner: OWNER,
       swarmEncryptionKey: TEST_ENC_KEY,
       batchId: TEST_BATCH_ID,
@@ -440,7 +439,7 @@ describe("readPartitionState / writePartitionState round-trip", () => {
 
   it("zero-seeds when no pointer exists and no prior holder is known", async () => {
     const result = await partitionState.readPartitionState({
-      bee: bee as unknown as Bee,
+      bee: bee,
       owner: OWNER,
       swarmEncryptionKey: TEST_ENC_KEY,
       batchId: TEST_BATCH_ID,
@@ -459,7 +458,7 @@ describe("readPartitionState / writePartitionState round-trip", () => {
     // holder's acked slots, so the read must degrade to `readFailed` instead —
     // the caller retries read-only rather than claiming-from-zero.
     const result = await partitionState.readPartitionState({
-      bee: bee as unknown as Bee,
+      bee: bee,
       owner: OWNER,
       swarmEncryptionKey: TEST_ENC_KEY,
       batchId: TEST_BATCH_ID,
@@ -476,7 +475,7 @@ describe("readPartitionState / writePartitionState round-trip", () => {
     // A genuinely fresh partition: the lock read returned cleanly absent
     // (lockUnreadable === false), so first-claim from zero must still proceed.
     const result = await partitionState.readPartitionState({
-      bee: bee as unknown as Bee,
+      bee: bee,
       owner: OWNER,
       swarmEncryptionKey: TEST_ENC_KEY,
       batchId: TEST_BATCH_ID,
@@ -498,7 +497,7 @@ describe("readPartitionState / writePartitionState round-trip", () => {
     const longAgo = Date.now() - 5 * 60_000
     vi.spyOn(Date, "now").mockReturnValue(longAgo)
     await partitionState.writePartitionState({
-      bee: bee as unknown as Bee,
+      bee: bee,
       stamper: createMockStamper(),
       batchId: TEST_BATCH_ID,
       batchDepth: TEST_BATCH_DEPTH,
@@ -514,7 +513,7 @@ describe("readPartitionState / writePartitionState round-trip", () => {
       partitionState.statePointerEpochBucket(longAgo),
     )
     const missed = await partitionState.readPartitionState({
-      bee: bee as unknown as Bee,
+      bee: bee,
       owner: OWNER,
       swarmEncryptionKey: TEST_ENC_KEY,
       batchId: TEST_BATCH_ID,
@@ -526,7 +525,7 @@ describe("readPartitionState / writePartitionState round-trip", () => {
     // With the gone holder's leasedUntil (≈ publish time + lease TTL), the
     // reader computes the right bucket and resumes exactly.
     const found = await partitionState.readPartitionState({
-      bee: bee as unknown as Bee,
+      bee: bee,
       owner: OWNER,
       swarmEncryptionKey: TEST_ENC_KEY,
       batchId: TEST_BATCH_ID,
@@ -549,7 +548,7 @@ describe("readPartitionState / writePartitionState round-trip", () => {
     const T0 = Date.now() - 5 * 60_000
     vi.spyOn(Date, "now").mockReturnValue(T0)
     await partitionState.writePartitionState({
-      bee: bee as unknown as Bee,
+      bee: bee,
       stamper: createMockStamper(),
       batchId: TEST_BATCH_ID,
       batchDepth: TEST_BATCH_DEPTH,
@@ -573,7 +572,7 @@ describe("readPartitionState / writePartitionState round-trip", () => {
     )
 
     const found = await partitionState.readPartitionState({
-      bee: bee as unknown as Bee,
+      bee: bee,
       owner: OWNER,
       swarmEncryptionKey: TEST_ENC_KEY,
       batchId: TEST_BATCH_ID,
@@ -624,7 +623,7 @@ describe("intent / occupancy / state-pointer SOC slot race (regression)", () => 
       tiebreaker: makeDeviceTiebreaker("device-A"),
     }
     const common = {
-      bee: bee as unknown as Bee,
+      bee: bee,
       stamper: stamper as unknown as Stamper,
       backupSigner: BACKUP_SIGNER,
       swarmEncryptionKey: TEST_ENC_KEY,
@@ -689,7 +688,7 @@ describe("PartitionLease.acquire — seeds the incremental first publish", () =>
     published[3000] = 7 // chunk 1
     published[5000] = 9 // chunk 2
     await partitionState.writePartitionState({
-      bee: bee as unknown as Bee,
+      bee: bee,
       stamper: createMockStamper(),
       batchId: TEST_BATCH_ID,
       batchDepth: TEST_BATCH_DEPTH,
@@ -708,7 +707,7 @@ describe("PartitionLease.acquire — seeds the incremental first publish", () =>
     // publishedReferences/publishedCounter from the resumed state.
     const lease = makeLease({
       deviceId: DEVICE_A,
-      bee: bee as unknown as Bee,
+      bee: bee,
       now: () => clock,
     })
     const acquired = await lease.acquire({ partitionCount: PARTITION_COUNT })
@@ -754,7 +753,7 @@ describe("PartitionLease.acquire — seeds the incremental first publish", () =>
     published[100] = 5 // chunk 0
     published[3000] = 7 // chunk 1
     await partitionState.writePartitionState({
-      bee: bee as unknown as Bee,
+      bee: bee,
       stamper: createMockStamper(),
       batchId: TEST_BATCH_ID,
       batchDepth: TEST_BATCH_DEPTH,
@@ -769,7 +768,7 @@ describe("PartitionLease.acquire — seeds the incremental first publish", () =>
 
     const lease = makeLease({
       deviceId: DEVICE_A,
-      bee: bee as unknown as Bee,
+      bee: bee,
       now: () => clock,
     })
     const acquired = await lease.acquire({ partitionCount: PARTITION_COUNT })
@@ -799,7 +798,7 @@ describe("PartitionLease.acquire — seeds the incremental first publish", () =>
     const published = new Uint32Array(NUM_BUCKETS)
     published[100] = 5
     await partitionState.writePartitionState({
-      bee: bee as unknown as Bee,
+      bee: bee,
       stamper: createMockStamper(),
       batchId: TEST_BATCH_ID,
       batchDepth: TEST_BATCH_DEPTH,
@@ -810,7 +809,7 @@ describe("PartitionLease.acquire — seeds the incremental first publish", () =>
     })
 
     // Resume the partition without ever uploading.
-    const lease = makeLease({ deviceId: DEVICE_A, bee: bee as unknown as Bee })
+    const lease = makeLease({ deviceId: DEVICE_A, bee: bee })
     const acquired = await lease.acquire({ partitionCount: PARTITION_COUNT })
     expect(acquired.partition).toBe(0)
 
@@ -831,7 +830,7 @@ describe("PartitionLease.acquire — seeds the incremental first publish", () =>
     const now = 1_000_000
     const lease = makeLease({
       deviceId: DEVICE_A,
-      bee: bee as unknown as Bee,
+      bee: bee,
       now: () => now,
     })
     lease.hydrate({
@@ -882,7 +881,7 @@ describe("PartitionLease.acquire — seeds the incremental first publish", () =>
       const published = new Uint32Array(NUM_BUCKETS)
       published[1000] = 3
       const setup = await partitionState.writePartitionState({
-        bee: bee as unknown as Bee,
+        bee: bee,
         stamper: createMockStamper(),
         batchId: TEST_BATCH_ID,
         batchDepth: TEST_BATCH_DEPTH,
@@ -919,7 +918,7 @@ describe("PartitionLease.acquire — seeds the incremental first publish", () =>
       // lastReferenceHex) without ever uploading.
       const lease = makeLease({
         deviceId: DEVICE_A,
-        bee: bee as unknown as Bee,
+        bee: bee,
       })
       const acquired = await lease.acquire({ partitionCount: PARTITION_COUNT })
       expect(acquired.partition).toBe(0)
@@ -947,7 +946,7 @@ describe("PartitionLease.acquire — seeds the incremental first publish", () =>
     const published = new Uint32Array(NUM_BUCKETS)
     published[100] = 5
     await partitionState.writePartitionState({
-      bee: bee as unknown as Bee,
+      bee: bee,
       stamper: createMockStamper(),
       batchId: TEST_BATCH_ID,
       batchDepth: TEST_BATCH_DEPTH,
@@ -957,7 +956,7 @@ describe("PartitionLease.acquire — seeds the incremental first publish", () =>
       swarmEncryptionKey: TEST_ENC_KEY,
     })
 
-    const lease = makeLease({ deviceId: DEVICE_A, bee: bee as unknown as Bee })
+    const lease = makeLease({ deviceId: DEVICE_A, bee: bee })
     const acquired = await lease.acquire({ partitionCount: PARTITION_COUNT })
     expect(acquired.partition).toBe(0)
 
@@ -986,7 +985,7 @@ describe("PartitionLease.acquire — unreadable partition state", () => {
       Binary.uint8ArrayToHex(new Uint8Array(64).fill(0x99)),
     )
 
-    const lease = makeLease({ deviceId: DEVICE_A, bee: bee as unknown as Bee })
+    const lease = makeLease({ deviceId: DEVICE_A, bee: bee })
     const result = await lease.acquire({ partitionCount: PARTITION_COUNT })
 
     expect(result.isReadOnly).toBe(true)
@@ -996,7 +995,7 @@ describe("PartitionLease.acquire — unreadable partition state", () => {
     // Crucially: no claim was written over a partition whose resume point is
     // unknown.
     const lock = await readPartitionLock({
-      bee: bee as unknown as Bee,
+      bee: bee,
       backupSigner: BACKUP_SIGNER,
       swarmEncryptionKey: TEST_ENC_KEY,
       batchId: TEST_BATCH_ID,
@@ -1008,7 +1007,7 @@ describe("PartitionLease.acquire — unreadable partition state", () => {
   it("reports readFailed when the reference chunk has the wrong length", async () => {
     const target: UploadTarget = {
       mode: "stamper",
-      bee: bee as unknown as Bee,
+      bee: bee,
       stamper: createMockStamper(),
     }
 
@@ -1023,7 +1022,7 @@ describe("PartitionLease.acquire — unreadable partition state", () => {
     await seedStatePointer(Binary.uint8ArrayToHex(malformedRef))
 
     const result = await partitionState.readPartitionState({
-      bee: bee as unknown as Bee,
+      bee: bee,
       owner: OWNER,
       swarmEncryptionKey: TEST_ENC_KEY,
       batchId: TEST_BATCH_ID,
@@ -1040,7 +1039,7 @@ describe("PartitionLease.acquire — unreadable partition state", () => {
   it("reports readFailed when a counter chunk has the wrong length", async () => {
     const target: UploadTarget = {
       mode: "stamper",
-      bee: bee as unknown as Bee,
+      bee: bee,
       stamper: createMockStamper(),
     }
 
@@ -1059,7 +1058,7 @@ describe("PartitionLease.acquire — unreadable partition state", () => {
     await seedStatePointer(Binary.uint8ArrayToHex(referenceChunkRef))
 
     const result = await partitionState.readPartitionState({
-      bee: bee as unknown as Bee,
+      bee: bee,
       owner: OWNER,
       swarmEncryptionKey: TEST_ENC_KEY,
       batchId: TEST_BATCH_ID,
@@ -1083,7 +1082,7 @@ describe("PartitionLease.acquire — unreadable partition state", () => {
       .mockImplementation((() => new Promise(() => {})) as never)
     try {
       const result = await partitionState.readPartitionState({
-        bee: bee as unknown as Bee,
+        bee: bee,
         owner: OWNER,
         swarmEncryptionKey: TEST_ENC_KEY,
         batchId: TEST_BATCH_ID,
@@ -1109,7 +1108,7 @@ describe("PartitionLease.acquire — unreadable partition state", () => {
       .mockImplementation((() => new Promise(() => {})) as never)
     try {
       const result = await partitionState.readPartitionState({
-        bee: bee as unknown as Bee,
+        bee: bee,
         owner: OWNER,
         swarmEncryptionKey: TEST_ENC_KEY,
         batchId: TEST_BATCH_ID,
@@ -1130,7 +1129,7 @@ describe("PartitionLease.acquire — unreadable partition state", () => {
     const localCounter = new Uint32Array(NUM_BUCKETS)
     localCounter[42] = 7
     await partitionState.writePartitionState({
-      bee: bee as unknown as Bee,
+      bee: bee,
       stamper: createMockStamper(),
       batchId: TEST_BATCH_ID,
       batchDepth: TEST_BATCH_DEPTH,
@@ -1151,7 +1150,7 @@ describe("PartitionLease.acquire — unreadable partition state", () => {
       .mockImplementationOnce((() => new Promise(() => {})) as never)
     try {
       const result = await partitionState.readPartitionState({
-        bee: bee as unknown as Bee,
+        bee: bee,
         owner: OWNER,
         swarmEncryptionKey: TEST_ENC_KEY,
         batchId: TEST_BATCH_ID,
@@ -1180,7 +1179,7 @@ describe("PartitionLease.acquire — unreadable partition state", () => {
     try {
       const result = await partitionState.readPartitionState(
         {
-          bee: bee as unknown as Bee,
+          bee: bee,
           owner: OWNER,
           swarmEncryptionKey: TEST_ENC_KEY,
           batchId: TEST_BATCH_ID,
@@ -1205,7 +1204,7 @@ describe("PartitionLease.acquire — unreadable partition state", () => {
     const knownRef = "aa".repeat(64)
     const result = await partitionState.readPartitionState(
       {
-        bee: bee as unknown as Bee,
+        bee: bee,
         owner: OWNER,
         swarmEncryptionKey: TEST_ENC_KEY,
         batchId: TEST_BATCH_ID,
@@ -1223,7 +1222,7 @@ describe("PartitionLease.acquire — unreadable partition state", () => {
   it("rejects publishing a counter with the wrong length", async () => {
     await expect(
       partitionState.writePartitionState({
-        bee: bee as unknown as Bee,
+        bee: bee,
         stamper: createMockStamper(),
         batchId: TEST_BATCH_ID,
         batchDepth: TEST_BATCH_DEPTH,
@@ -1239,7 +1238,7 @@ describe("PartitionLease.acquire — unreadable partition state", () => {
 describe("PartitionLease.acquire — legacy fall-through", () => {
   it("partitionCount=1 returns undefined partition with no Swarm activity", async () => {
     const spy = vi.spyOn(bee, "downloadChunk")
-    const lease = makeLease({ deviceId: DEVICE_A, bee: bee as unknown as Bee })
+    const lease = makeLease({ deviceId: DEVICE_A, bee: bee })
     const result = await lease.acquire({ partitionCount: 1 })
     expect(result.partition).toBeUndefined()
     expect(result.isReadOnly).toBe(false)
@@ -1249,14 +1248,14 @@ describe("PartitionLease.acquire — legacy fall-through", () => {
 
 describe("PartitionLease.acquire — fresh scan", () => {
   it("picks partition 0 when no lock SOCs exist", async () => {
-    const lease = makeLease({ deviceId: DEVICE_A, bee: bee as unknown as Bee })
+    const lease = makeLease({ deviceId: DEVICE_A, bee: bee })
     const result = await lease.acquire({ partitionCount: PARTITION_COUNT })
     expect(result.partition).toBe(0)
     expect(result.isReadOnly).toBe(false)
     expect(lease.currentPartition).toBe(0)
 
     const observed = await readPartitionLock({
-      bee: bee as unknown as Bee,
+      bee: bee,
       backupSigner: BACKUP_SIGNER,
       swarmEncryptionKey: TEST_ENC_KEY,
       batchId: TEST_BATCH_ID,
@@ -1268,7 +1267,7 @@ describe("PartitionLease.acquire — fresh scan", () => {
   it("skips over a live foreign holder and picks the next partition", async () => {
     const NOW = 5_000_000
     await writePartitionLock({
-      bee: bee as unknown as Bee,
+      bee: bee,
       stamper: createMockStamper(),
       backupSigner: BACKUP_SIGNER,
       swarmEncryptionKey: TEST_ENC_KEY,
@@ -1287,7 +1286,7 @@ describe("PartitionLease.acquire — fresh scan", () => {
 
     const lease = makeLease({
       deviceId: DEVICE_A,
-      bee: bee as unknown as Bee,
+      bee: bee,
       now: () => NOW + 1000,
     })
     const result = await lease.acquire({ partitionCount: PARTITION_COUNT })
@@ -1300,7 +1299,7 @@ describe("PartitionLease.acquire — fresh scan", () => {
     const NOW = PAST + LEASE_TTL_MS + 10_000
 
     await writePartitionLock({
-      bee: bee as unknown as Bee,
+      bee: bee,
       stamper: createMockStamper(),
       backupSigner: BACKUP_SIGNER,
       swarmEncryptionKey: TEST_ENC_KEY,
@@ -1319,14 +1318,14 @@ describe("PartitionLease.acquire — fresh scan", () => {
 
     const lease = makeLease({
       deviceId: DEVICE_A,
-      bee: bee as unknown as Bee,
+      bee: bee,
       now: () => NOW,
     })
     const result = await lease.acquire({ partitionCount: PARTITION_COUNT })
     expect(result.partition).toBe(0)
 
     const observed = await readPartitionLock({
-      bee: bee as unknown as Bee,
+      bee: bee,
       backupSigner: BACKUP_SIGNER,
       swarmEncryptionKey: TEST_ENC_KEY,
       batchId: TEST_BATCH_ID,
@@ -1349,7 +1348,7 @@ describe("PartitionLease.acquire — fresh scan", () => {
     published[100] = 5
     const nowSpy = vi.spyOn(Date, "now").mockReturnValue(PAST)
     await partitionState.writePartitionState({
-      bee: bee as unknown as Bee,
+      bee: bee,
       stamper: createMockStamper(),
       batchId: TEST_BATCH_ID,
       batchDepth: TEST_BATCH_DEPTH,
@@ -1362,7 +1361,7 @@ describe("PartitionLease.acquire — fresh scan", () => {
 
     // DEVICE_B's lock is expired at NOW (it departed without releasing).
     await writePartitionLock({
-      bee: bee as unknown as Bee,
+      bee: bee,
       stamper: createMockStamper(),
       backupSigner: BACKUP_SIGNER,
       swarmEncryptionKey: TEST_ENC_KEY,
@@ -1381,7 +1380,7 @@ describe("PartitionLease.acquire — fresh scan", () => {
 
     const lease = makeLease({
       deviceId: DEVICE_A,
-      bee: bee as unknown as Bee,
+      bee: bee,
       now: () => NOW,
     })
     const result = await lease.acquire({ partitionCount: PARTITION_COUNT })
@@ -1397,7 +1396,7 @@ describe("PartitionLease.acquire — fresh scan", () => {
     const stamper = createMockStamper()
     for (let p = 0; p < PARTITION_COUNT; p++) {
       await writePartitionLock({
-        bee: bee as unknown as Bee,
+        bee: bee,
         stamper,
         backupSigner: BACKUP_SIGNER,
         swarmEncryptionKey: TEST_ENC_KEY,
@@ -1417,7 +1416,7 @@ describe("PartitionLease.acquire — fresh scan", () => {
 
     const lease = makeLease({
       deviceId: DEVICE_A,
-      bee: bee as unknown as Bee,
+      bee: bee,
       now: () => NOW + 1000,
     })
     const result = await lease.acquire({ partitionCount: PARTITION_COUNT })
@@ -1431,7 +1430,7 @@ describe("PartitionLease.acquire — fresh scan", () => {
 
     const lease = makeLease({
       deviceId: DEVICE_A,
-      bee: bee as unknown as Bee,
+      bee: bee,
       now: () => NOW1,
     })
     const r1 = await lease.acquire({ partitionCount: PARTITION_COUNT })
@@ -1441,7 +1440,7 @@ describe("PartitionLease.acquire — fresh scan", () => {
     // itself as the holder, and refreshes the same partition.
     const lease2 = makeLease({
       deviceId: DEVICE_A,
-      bee: bee as unknown as Bee,
+      bee: bee,
       now: () => NOW2,
     })
     const r2 = await lease2.acquire({ partitionCount: PARTITION_COUNT })
@@ -1456,7 +1455,7 @@ describe("PartitionLease.acquire — two devices, disjoint partitions", () => {
 
     const leaseA = makeLease({
       deviceId: DEVICE_A,
-      bee: bee as unknown as Bee,
+      bee: bee,
       now: () => NOW,
     })
     const rA = await leaseA.acquire({ partitionCount: PARTITION_COUNT })
@@ -1464,7 +1463,7 @@ describe("PartitionLease.acquire — two devices, disjoint partitions", () => {
 
     const leaseB = makeLease({
       deviceId: DEVICE_B,
-      bee: bee as unknown as Bee,
+      bee: bee,
       now: () => NOW + 1000,
     })
     const rB = await leaseB.acquire({ partitionCount: PARTITION_COUNT })
@@ -1480,7 +1479,7 @@ describe("PartitionLease.acquire — turn-taking (3rd device)", () => {
     // Devices A and B hold both partitions with live leases.
     const leaseA = makeLease({
       deviceId: DEVICE_A,
-      bee: bee as unknown as Bee,
+      bee: bee,
       now: () => NOW,
     })
     expect(
@@ -1489,7 +1488,7 @@ describe("PartitionLease.acquire — turn-taking (3rd device)", () => {
 
     const leaseB = makeLease({
       deviceId: DEVICE_B,
-      bee: bee as unknown as Bee,
+      bee: bee,
       now: () => NOW + 1000,
     })
     expect(
@@ -1502,7 +1501,7 @@ describe("PartitionLease.acquire — turn-taking (3rd device)", () => {
     const DEVICE_C = "device-gamma-333"
     const leaseC = makeLease({
       deviceId: DEVICE_C,
-      bee: bee as unknown as Bee,
+      bee: bee,
       now: () => cNow,
     })
 
@@ -1516,7 +1515,7 @@ describe("PartitionLease.acquire — turn-taking (3rd device)", () => {
     // NOW + LEASE_TTL_MS.
     const leaseBRefresh = makeLease({
       deviceId: DEVICE_B,
-      bee: bee as unknown as Bee,
+      bee: bee,
       now: () => NOW + LEASE_TTL_MS - 5_000,
     })
     expect(
@@ -1531,7 +1530,7 @@ describe("PartitionLease.acquire — turn-taking (3rd device)", () => {
     expect(tookOver.isReadOnly).toBe(false)
 
     const p0 = await readPartitionLock({
-      bee: bee as unknown as Bee,
+      bee: bee,
       backupSigner: BACKUP_SIGNER,
       swarmEncryptionKey: TEST_ENC_KEY,
       batchId: TEST_BATCH_ID,
@@ -1556,7 +1555,7 @@ describe("acquirePartitionLock — self-refresh through a frozen-cache read (reg
 
     // Seed our own (older-generation) claim on p0.
     await writePartitionLock({
-      bee: bee as unknown as Bee,
+      bee: bee,
       stamper: createMockStamper(),
       backupSigner: BACKUP_SIGNER,
       swarmEncryptionKey: TEST_ENC_KEY,
@@ -1600,7 +1599,7 @@ describe("acquirePartitionLock — self-refresh through a frozen-cache read (reg
     }) as never)
 
     const result = await acquirePartitionLock({
-      bee: bee as unknown as Bee,
+      bee: bee,
       stamper: createMockStamper(),
       backupSigner: BACKUP_SIGNER,
       swarmEncryptionKey: TEST_ENC_KEY,
@@ -1636,7 +1635,7 @@ describe("PartitionLease.acquire — unknown-holder dual-acquire guard (regressi
     // A holds p0 (live, and known to B below).
     const leaseA = makeLease({
       deviceId: DEVICE_A,
-      bee: bee as unknown as Bee,
+      bee: bee,
       now: () => NOW,
     })
     expect(
@@ -1646,7 +1645,7 @@ describe("PartitionLease.acquire — unknown-holder dual-acquire guard (regressi
     // C takes p1 (p0 is A's). C is a freshly-joined device B hasn't discovered.
     const leaseC = makeLease({
       deviceId: DEVICE_C,
-      bee: bee as unknown as Bee,
+      bee: bee,
       now: () => NOW + 1000,
       knownDeviceIds: () => [DEVICE_A, DEVICE_C],
     })
@@ -1664,7 +1663,7 @@ describe("PartitionLease.acquire — unknown-holder dual-acquire guard (regressi
     // holder <self>"). After this overwrite, C's hold survives only on the
     // deviceId-independent occupancy channel the fix adds.
     await writePartitionLock({
-      bee: bee as unknown as Bee,
+      bee: bee,
       stamper: createMockStamper(),
       backupSigner: BACKUP_SIGNER,
       swarmEncryptionKey: TEST_ENC_KEY,
@@ -1686,7 +1685,7 @@ describe("PartitionLease.acquire — unknown-holder dual-acquire guard (regressi
     // C and fall back to read-only instead of binding p1.
     const leaseB = makeLease({
       deviceId: DEVICE_B,
-      bee: bee as unknown as Bee,
+      bee: bee,
       now: () => NOW + 2000,
       knownDeviceIds: () => [DEVICE_A, DEVICE_B], // C absent — the bug condition
     })
@@ -1719,7 +1718,7 @@ describe("PartitionLease.acquire — solo-clean guard skip", () => {
     knownDeviceIds?: () => string[]
   }): PartitionLease {
     return new PartitionLease({
-      bee: bee as unknown as Bee,
+      bee: bee,
       deviceId: opts.deviceId,
       batchId: TEST_BATCH_ID,
       batchDepth: TEST_BATCH_DEPTH,
@@ -1756,7 +1755,7 @@ describe("PartitionLease.acquire — solo-clean guard skip", () => {
     // second device — the contention guard must stay.
     const releaser = makeLease({
       deviceId: "device-releaser-999",
-      bee: bee as unknown as Bee,
+      bee: bee,
     })
     const acquired = await releaser.acquire({
       partitionCount: PARTITION_COUNT,
@@ -1787,7 +1786,7 @@ describe("PartitionLease.refresh", () => {
     let nowValue = NOW1
     const lease = makeLease({
       deviceId: DEVICE_A,
-      bee: bee as unknown as Bee,
+      bee: bee,
       now: () => nowValue,
     })
     await lease.acquire({ partitionCount: PARTITION_COUNT })
@@ -1797,7 +1796,7 @@ describe("PartitionLease.refresh", () => {
     expect(ok).toBe("held")
 
     const observed = await readPartitionLock({
-      bee: bee as unknown as Bee,
+      bee: bee,
       backupSigner: BACKUP_SIGNER,
       swarmEncryptionKey: TEST_ENC_KEY,
       batchId: TEST_BATCH_ID,
@@ -1808,7 +1807,7 @@ describe("PartitionLease.refresh", () => {
   })
 
   it("returns 'lost' when no lease is held", async () => {
-    const lease = makeLease({ deviceId: DEVICE_A, bee: bee as unknown as Bee })
+    const lease = makeLease({ deviceId: DEVICE_A, bee: bee })
     expect(await lease.refresh()).toBe("lost")
   })
 })
@@ -1822,7 +1821,7 @@ describe("writePartitionState — incremental", () => {
     const counter = new Uint32Array(NUM_BUCKETS)
     counter[100] = 5
     const first = await partitionState.writePartitionState({
-      bee: bee as unknown as Bee,
+      bee: bee,
       stamper,
       batchId: TEST_BATCH_ID,
       batchDepth: TEST_BATCH_DEPTH,
@@ -1844,7 +1843,7 @@ describe("writePartitionState — incremental", () => {
     expect(changed.size).toBe(2)
 
     const second = await partitionState.writePartitionState({
-      bee: bee as unknown as Bee,
+      bee: bee,
       stamper,
       batchId: TEST_BATCH_ID,
       batchDepth: TEST_BATCH_DEPTH,
@@ -1869,7 +1868,7 @@ describe("writePartitionState — incremental", () => {
     // The taking-over device still reconstructs the FULL counter (changed +
     // retained).
     const read = await partitionState.readPartitionState({
-      bee: bee as unknown as Bee,
+      bee: bee,
       owner: OWNER,
       swarmEncryptionKey: TEST_ENC_KEY,
       batchId: TEST_BATCH_ID,
@@ -1886,7 +1885,7 @@ describe("writePartitionState — incremental", () => {
     counter[1] = 1
     // previousCounter without previousReferences → NOT incremental.
     const res = await partitionState.writePartitionState({
-      bee: bee as unknown as Bee,
+      bee: bee,
       stamper,
       batchId: TEST_BATCH_ID,
       batchDepth: TEST_BATCH_DEPTH,
@@ -1918,7 +1917,7 @@ describe("writePartitionState — incremental", () => {
     const acked = new Uint32Array(NUM_BUCKETS)
     acked[AHEAD_BUCKET] = ACKED_VALUE
     const ackedPublish = await partitionState.writePartitionState({
-      bee: bee as unknown as Bee,
+      bee: bee,
       stamper,
       batchId: TEST_BATCH_ID,
       batchDepth: TEST_BATCH_DEPTH,
@@ -1944,7 +1943,7 @@ describe("writePartitionState — incremental", () => {
     expect(aheadChunk).not.toBe(newChunk)
 
     const incremental = await partitionState.writePartitionState({
-      bee: bee as unknown as Bee,
+      bee: bee,
       stamper,
       batchId: TEST_BATCH_ID,
       batchDepth: TEST_BATCH_DEPTH,
@@ -1969,7 +1968,7 @@ describe("writePartitionState — incremental", () => {
     // A takeover reconstructs the ACKED floor for the ahead bucket (5), never the
     // unacked 6 — so it reissues only the unacked slot, never an acked one.
     const read = await partitionState.readPartitionState({
-      bee: bee as unknown as Bee,
+      bee: bee,
       owner: OWNER,
       swarmEncryptionKey: TEST_ENC_KEY,
       batchId: TEST_BATCH_ID,
@@ -1986,7 +1985,7 @@ describe("PartitionLease.publishState — commit without release", () => {
     const NOW = 1_000_000
     const lease = makeLease({
       deviceId: DEVICE_A,
-      bee: bee as unknown as Bee,
+      bee: bee,
       now: () => NOW,
     })
     const acquired = await lease.acquire({ partitionCount: PARTITION_COUNT })
@@ -2001,7 +2000,7 @@ describe("PartitionLease.publishState — commit without release", () => {
     // A taking-over device resumes at EXACTLY this counter. It reads at the same
     // clock the lease published at (#385) — the rendezvous is clock-anchored.
     const read = await partitionState.readPartitionState({
-      bee: bee as unknown as Bee,
+      bee: bee,
       owner: OWNER,
       swarmEncryptionKey: TEST_ENC_KEY,
       batchId: TEST_BATCH_ID,
@@ -2014,7 +2013,7 @@ describe("PartitionLease.publishState — commit without release", () => {
     // Unlike release(), publishState keeps the lease: still held, no sentinel.
     expect(lease.currentPartition).toBe(0)
     const observed = await readPartitionLock({
-      bee: bee as unknown as Bee,
+      bee: bee,
       backupSigner: BACKUP_SIGNER,
       swarmEncryptionKey: TEST_ENC_KEY,
       batchId: TEST_BATCH_ID,
@@ -2024,7 +2023,7 @@ describe("PartitionLease.publishState — commit without release", () => {
   })
 
   it("is a no-op when no lease is held", async () => {
-    const lease = makeLease({ deviceId: DEVICE_A, bee: bee as unknown as Bee })
+    const lease = makeLease({ deviceId: DEVICE_A, bee: bee })
     await expect(
       lease.publishState(new Uint32Array(NUM_BUCKETS)),
     ).resolves.toBeUndefined()
@@ -2036,7 +2035,7 @@ describe("PartitionLease.release", () => {
     const NOW = 1_000_000
     const lease = makeLease({
       deviceId: DEVICE_A,
-      bee: bee as unknown as Bee,
+      bee: bee,
       now: () => NOW,
     })
     const acquired = await lease.acquire({ partitionCount: PARTITION_COUNT })
@@ -2045,7 +2044,7 @@ describe("PartitionLease.release", () => {
     await lease.release(new Uint32Array(NUM_BUCKETS))
 
     const observed = await readPartitionLock({
-      bee: bee as unknown as Bee,
+      bee: bee,
       backupSigner: BACKUP_SIGNER,
       swarmEncryptionKey: TEST_ENC_KEY,
       batchId: TEST_BATCH_ID,
@@ -2061,7 +2060,7 @@ describe("PartitionLease.release", () => {
     const NOW = 1_000_000
     const leaseA = makeLease({
       deviceId: DEVICE_A,
-      bee: bee as unknown as Bee,
+      bee: bee,
       now: () => NOW,
     })
     await leaseA.acquire({ partitionCount: PARTITION_COUNT })
@@ -2069,7 +2068,7 @@ describe("PartitionLease.release", () => {
 
     const leaseB = makeLease({
       deviceId: DEVICE_B,
-      bee: bee as unknown as Bee,
+      bee: bee,
       now: () => NOW + 1000,
     })
     const rB = await leaseB.acquire({ partitionCount: PARTITION_COUNT })
@@ -2086,7 +2085,7 @@ describe("PartitionLease.release", () => {
     const NOW = 1_000_000
     const leaseA = makeLease({
       deviceId: DEVICE_A,
-      bee: bee as unknown as Bee,
+      bee: bee,
       now: () => NOW,
       knownDeviceIds: () => [DEVICE_A, DEVICE_B],
     })
@@ -2095,7 +2094,7 @@ describe("PartitionLease.release", () => {
 
     const leaseB = makeLease({
       deviceId: DEVICE_B,
-      bee: bee as unknown as Bee,
+      bee: bee,
       now: () => NOW + 1000,
       knownDeviceIds: () => [DEVICE_A, DEVICE_B],
     })
@@ -2120,7 +2119,7 @@ describe("PartitionLease.release", () => {
     const NOW = 1_000_000
     const leaseA = makeLease({
       deviceId: DEVICE_A,
-      bee: bee as unknown as Bee,
+      bee: bee,
       now: () => NOW,
       knownDeviceIds: () => [DEVICE_A, DEVICE_B],
     })
@@ -2129,7 +2128,7 @@ describe("PartitionLease.release", () => {
 
     const leaseB = makeLease({
       deviceId: DEVICE_B,
-      bee: bee as unknown as Bee,
+      bee: bee,
       now: () => NOW + 1000,
       knownDeviceIds: () => [DEVICE_A, DEVICE_B],
     })
@@ -2143,7 +2142,7 @@ describe("PartitionLease.release", () => {
   })
 
   it("no-op when no lease is held", async () => {
-    const lease = makeLease({ deviceId: DEVICE_A, bee: bee as unknown as Bee })
+    const lease = makeLease({ deviceId: DEVICE_A, bee: bee })
     await expect(
       lease.release(new Uint32Array(NUM_BUCKETS)),
     ).resolves.toBeUndefined()
@@ -2153,7 +2152,7 @@ describe("PartitionLease.release", () => {
 describe("PartitionLease.release — generation fencing (#349)", () => {
   function readLock(partition: number) {
     return readPartitionLock({
-      bee: bee as unknown as Bee,
+      bee: bee,
       backupSigner: BACKUP_SIGNER,
       swarmEncryptionKey: TEST_ENC_KEY,
       batchId: TEST_BATCH_ID,
@@ -2162,7 +2161,7 @@ describe("PartitionLease.release — generation fencing (#349)", () => {
   }
 
   it("a detached release outliving a same-device re-acquire does not clobber the successor's claim", async () => {
-    const leaseA = makeLease({ deviceId: DEVICE_A, bee: bee as unknown as Bee })
+    const leaseA = makeLease({ deviceId: DEVICE_A, bee: bee })
     const first = await leaseA.acquire({ partitionCount: PARTITION_COUNT })
     expect(first.partition).toBe(0)
 
@@ -2177,7 +2176,7 @@ describe("PartitionLease.release — generation fencing (#349)", () => {
     releaseGate.block = undefined
     const leaseA2 = makeLease({
       deviceId: DEVICE_A,
-      bee: bee as unknown as Bee,
+      bee: bee,
     })
     const second = await leaseA2.acquire({ partitionCount: PARTITION_COUNT })
     expect(second.partition).toBe(0)
@@ -2196,7 +2195,7 @@ describe("PartitionLease.release — generation fencing (#349)", () => {
     const NOW_A = 1_000_000
     const leaseA = makeLease({
       deviceId: DEVICE_A,
-      bee: bee as unknown as Bee,
+      bee: bee,
       now: () => NOW_A,
     })
     await leaseA.acquire({ partitionCount: PARTITION_COUNT })
@@ -2211,7 +2210,7 @@ describe("PartitionLease.release — generation fencing (#349)", () => {
     releaseGate.block = undefined
     const leaseB = makeLease({
       deviceId: DEVICE_B,
-      bee: bee as unknown as Bee,
+      bee: bee,
       now: () => NOW_A + LEASE_TTL_MS * 2,
     })
     const b = await leaseB.acquire({ partitionCount: PARTITION_COUNT })
@@ -2225,7 +2224,7 @@ describe("PartitionLease.release — generation fencing (#349)", () => {
   })
 
   it("a refresh overlapping a release aborts instead of minting a ghost claim", async () => {
-    const leaseA = makeLease({ deviceId: DEVICE_A, bee: bee as unknown as Bee })
+    const leaseA = makeLease({ deviceId: DEVICE_A, bee: bee })
     const acquired = await leaseA.acquire({ partitionCount: PARTITION_COUNT })
     const claimGeneration = acquired.lockPayload!.generation
 
@@ -2256,7 +2255,7 @@ describe("PartitionLease.refreshFromSwarm / isActive / heldPartition", () => {
     const stamper = createMockStamper()
     // DEVICE_B holds partition 1 (live).
     await writePartitionLock({
-      bee: bee as unknown as Bee,
+      bee: bee,
       stamper,
       backupSigner: BACKUP_SIGNER,
       swarmEncryptionKey: TEST_ENC_KEY,
@@ -2276,7 +2275,7 @@ describe("PartitionLease.refreshFromSwarm / isActive / heldPartition", () => {
     // DEVICE_A acquires partition 0.
     const leaseA = makeLease({
       deviceId: DEVICE_A,
-      bee: bee as unknown as Bee,
+      bee: bee,
       now: () => NOW + 1000,
     })
     await leaseA.acquire({ partitionCount: PARTITION_COUNT })
@@ -2293,7 +2292,7 @@ describe("PartitionLease.serialize / hydrate", () => {
     const NOW = 1_000_000
     const lease = makeLease({
       deviceId: DEVICE_A,
-      bee: bee as unknown as Bee,
+      bee: bee,
       now: () => NOW,
     })
     await lease.acquire({ partitionCount: PARTITION_COUNT })
@@ -2302,12 +2301,12 @@ describe("PartitionLease.serialize / hydrate", () => {
     expect(snap.self?.partition).toBe(0)
 
     // A fresh instance hydrated from the snapshot sees the same partition.
-    const fresh = makeLease({ deviceId: DEVICE_A, bee: bee as unknown as Bee })
+    const fresh = makeLease({ deviceId: DEVICE_A, bee: bee })
     fresh.hydrate(snap)
     expect(fresh.currentPartition).toBe(0)
 
     // A different device ignores the snapshot.
-    const other = makeLease({ deviceId: DEVICE_B, bee: bee as unknown as Bee })
+    const other = makeLease({ deviceId: DEVICE_B, bee: bee })
     other.hydrate(snap)
     expect(other.currentPartition).toBeUndefined()
   })
@@ -2323,7 +2322,7 @@ describe("PartitionLease.acquire — intent round (Phase 2)", () => {
     // DEVICE_A will use (timestampMs NOW). No lock SOC exists, so without the
     // intent round DEVICE_A would bind partition 0 — the disjoint-gateway bug.
     await writePartitionIntent({
-      bee: bee as unknown as Bee,
+      bee: bee,
       stamper: createMockStamper(),
       backupSigner: BACKUP_SIGNER,
       swarmEncryptionKey: TEST_ENC_KEY,
@@ -2339,7 +2338,7 @@ describe("PartitionLease.acquire — intent round (Phase 2)", () => {
 
     const lease = makeLease({
       deviceId: DEVICE_A,
-      bee: bee as unknown as Bee,
+      bee: bee,
       now: () => NOW,
       knownDeviceIds: () => [DEVICE_A, DEVICE_B],
       intentReadTimeoutMs: 50,
@@ -2350,7 +2349,7 @@ describe("PartitionLease.acquire — intent round (Phase 2)", () => {
     expect(result.partition).toBeUndefined()
     // Crucially: no lock claim was written over the contested partition.
     const lock = await readPartitionLock({
-      bee: bee as unknown as Bee,
+      bee: bee,
       backupSigner: BACKUP_SIGNER,
       swarmEncryptionKey: TEST_ENC_KEY,
       batchId: TEST_BATCH_ID,
@@ -2361,7 +2360,7 @@ describe("PartitionLease.acquire — intent round (Phase 2)", () => {
 
   it("wins and binds when a rival advertises a later intent", async () => {
     await writePartitionIntent({
-      bee: bee as unknown as Bee,
+      bee: bee,
       stamper: createMockStamper(),
       backupSigner: BACKUP_SIGNER,
       swarmEncryptionKey: TEST_ENC_KEY,
@@ -2377,7 +2376,7 @@ describe("PartitionLease.acquire — intent round (Phase 2)", () => {
 
     const lease = makeLease({
       deviceId: DEVICE_A,
-      bee: bee as unknown as Bee,
+      bee: bee,
       now: () => NOW,
       knownDeviceIds: () => [DEVICE_A, DEVICE_B],
       intentReadTimeoutMs: 50,
@@ -2387,7 +2386,7 @@ describe("PartitionLease.acquire — intent round (Phase 2)", () => {
     expect(result.isReadOnly).toBe(false)
     expect(result.partition).toBe(0)
     const lock = await readPartitionLock({
-      bee: bee as unknown as Bee,
+      bee: bee,
       backupSigner: BACKUP_SIGNER,
       swarmEncryptionKey: TEST_ENC_KEY,
       batchId: TEST_BATCH_ID,
@@ -2400,7 +2399,7 @@ describe("PartitionLease.acquire — intent round (Phase 2)", () => {
     // First claim with no rivals.
     const lease = makeLease({
       deviceId: DEVICE_A,
-      bee: bee as unknown as Bee,
+      bee: bee,
       now: () => NOW,
       knownDeviceIds: () => [DEVICE_A, DEVICE_B],
       intentReadTimeoutMs: 50,
@@ -2412,7 +2411,7 @@ describe("PartitionLease.acquire — intent round (Phase 2)", () => {
     // A rival now advertises an earlier intent — but a re-acquire of a
     // partition we already hold must NOT be gated by the intent round.
     await writePartitionIntent({
-      bee: bee as unknown as Bee,
+      bee: bee,
       stamper: createMockStamper(),
       backupSigner: BACKUP_SIGNER,
       swarmEncryptionKey: TEST_ENC_KEY,
@@ -2448,7 +2447,7 @@ describe("PartitionLease.acquire — holder presence beacons (gateway holder-exi
     genTimestamp?: number
   }) {
     return writePartitionIntent({
-      bee: bee as unknown as Bee,
+      bee: bee,
       stamper: createMockStamper(),
       backupSigner: BACKUP_SIGNER,
       swarmEncryptionKey: TEST_ENC_KEY,
@@ -2467,7 +2466,7 @@ describe("PartitionLease.acquire — holder presence beacons (gateway holder-exi
   function joinerLease() {
     return makeLease({
       deviceId: DEVICE_A,
-      bee: bee as unknown as Bee,
+      bee: bee,
       now: () => NOW,
       knownDeviceIds: () => [DEVICE_A, DEVICE_B],
       intentReadTimeoutMs: 50,
@@ -2490,7 +2489,7 @@ describe("PartitionLease.acquire — holder presence beacons (gateway holder-exi
     expect(result.partition).toBe(1) // avoided the held partition 0
     // No claim written on partition 0 by the joiner.
     const p0 = await readPartitionLock({
-      bee: bee as unknown as Bee,
+      bee: bee,
       backupSigner: BACKUP_SIGNER,
       swarmEncryptionKey: TEST_ENC_KEY,
       batchId: TEST_BATCH_ID,
@@ -2550,7 +2549,7 @@ describe("PartitionLease.acquire — holder presence beacons (gateway holder-exi
     // not a holder. The joiner must still claim the partition (resolved by the
     // intent round), not treat it as held.
     await writePartitionIntent({
-      bee: bee as unknown as Bee,
+      bee: bee,
       stamper: createMockStamper(),
       backupSigner: BACKUP_SIGNER,
       swarmEncryptionKey: TEST_ENC_KEY,
@@ -2577,7 +2576,7 @@ describe("PartitionLease.acquire — holder presence beacons (gateway holder-exi
     })
     expect(withRival.partition).toBe(0)
     const beacon = await readPartitionIntent({
-      bee: bee as unknown as Bee,
+      bee: bee,
       backupSigner: BACKUP_SIGNER,
       swarmEncryptionKey: TEST_ENC_KEY,
       batchId: TEST_BATCH_ID,
@@ -2594,7 +2593,7 @@ describe("PartitionLease.acquire — holder presence beacons (gateway holder-exi
     // beacon and claims the same partition.
     const solo = makeLease({
       deviceId: DEVICE_A,
-      bee: bee as unknown as Bee,
+      bee: bee,
       now: () => NOW,
       knownDeviceIds: () => [DEVICE_A],
       intentReadTimeoutMs: 50,
@@ -2603,7 +2602,7 @@ describe("PartitionLease.acquire — holder presence beacons (gateway holder-exi
       (await solo.acquire({ partitionCount: PARTITION_COUNT })).partition,
     ).toBe(0)
     const beacon = await readPartitionIntent({
-      bee: bee as unknown as Bee,
+      bee: bee,
       backupSigner: BACKUP_SIGNER,
       swarmEncryptionKey: TEST_ENC_KEY,
       batchId: TEST_BATCH_ID,
@@ -2618,7 +2617,7 @@ describe("PartitionLease.acquire — holder presence beacons (gateway holder-exi
     // DEVICE_A claims p0 cleanly (no rival beacon yet at acquire).
     const lease = makeLease({
       deviceId: DEVICE_A,
-      bee: bee as unknown as Bee,
+      bee: bee,
       now: () => NOW,
       knownDeviceIds: () => [DEVICE_A, DEVICE_B],
       intentReadTimeoutMs: 50,
@@ -2648,7 +2647,7 @@ describe("PartitionLease.acquire — holder presence beacons (gateway holder-exi
   it("refresh keeps the lease when only a LATER-generation peer is present", async () => {
     const lease = makeLease({
       deviceId: DEVICE_A,
-      bee: bee as unknown as Bee,
+      bee: bee,
       now: () => NOW,
       knownDeviceIds: () => [DEVICE_A, DEVICE_B],
       intentReadTimeoutMs: 50,
@@ -2679,7 +2678,7 @@ describe("PartitionLease.acquire — holder presence beacons (gateway holder-exi
     let clock = NOW
     const lease = makeLease({
       deviceId: DEVICE_A,
-      bee: bee as unknown as Bee,
+      bee: bee,
       now: () => clock,
       knownDeviceIds: () => [DEVICE_A, DEVICE_B],
       intentReadTimeoutMs: 50,
@@ -2722,7 +2721,7 @@ describe("PartitionLease.refresh — occupancy displacement vs a PRUNED peer", (
     genTimestamp?: number
   }) {
     return writePartitionOccupancy({
-      bee: bee as unknown as Bee,
+      bee: bee,
       stamper: createMockStamper(),
       backupSigner: BACKUP_SIGNER,
       swarmEncryptionKey: TEST_ENC_KEY,
@@ -2742,7 +2741,7 @@ describe("PartitionLease.refresh — occupancy displacement vs a PRUNED peer", (
     // DEVICE_B intentionally absent → it's the pruned/unknown peer.
     return makeLease({
       deviceId: DEVICE_A,
-      bee: bee as unknown as Bee,
+      bee: bee,
       now: () => NOW,
       knownDeviceIds: () => [DEVICE_A],
       intentReadTimeoutMs: 50,

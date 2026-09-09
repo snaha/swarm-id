@@ -7,10 +7,16 @@
  * Provides mock storage and helpers for testing epoch feed operations
  */
 
-import { Binary } from "cafe-utility"
+import { Binary, Optional } from "cafe-utility"
 import type { Chunk } from "cafe-utility"
-import { PrivateKey, Topic, EthAddress, BatchId } from "@ethersphere/bee-js"
-import type { Stamper } from "@ethersphere/bee-js"
+import {
+  PrivateKey,
+  Topic,
+  EthAddress,
+  BatchId,
+  Reference,
+} from "@ethersphere/bee-js"
+import type { Bee, Stamper, UploadResult } from "@ethersphere/bee-js"
 import { calculateChunkAddress } from "../../../chunk"
 import {
   NUM_BUCKETS,
@@ -92,20 +98,19 @@ export class MockBee {
   }
 
   async uploadChunk(
-    envelopeOrData: unknown,
-    dataOrBatchId: Uint8Array | string,
-    _options?: unknown,
-    _requestOptions?: unknown,
-  ): Promise<{ reference: { toHex(): string } }> {
-    // Support both new signature (envelope, data) and legacy (data, batchId)
-    const data =
-      dataOrBatchId instanceof Uint8Array
-        ? dataOrBatchId
-        : (envelopeOrData as Uint8Array)
+    ...args: Parameters<Bee["uploadChunk"]>
+  ): Promise<UploadResult> {
+    const data = args[1]
+    if (!(data instanceof Uint8Array)) {
+      throw new Error("MockBee.uploadChunk takes raw chunk bytes")
+    }
     const address = calculateChunkAddress(data).toUint8Array()
     const reference = Binary.uint8ArrayToHex(address)
     await this.store.put(reference, data)
-    return { reference: { toHex: () => reference } }
+    return {
+      reference: new Reference(reference),
+      historyAddress: Optional.empty(),
+    }
   }
 
   getStore(): MockChunkStore {

@@ -1,14 +1,15 @@
 // Copyright 2026 The Swarm Authors. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import type { Bee, Stamper } from "@ethersphere/bee-js"
+import type { Stamper } from "@ethersphere/bee-js"
+import type { ChunkClient } from "./upload"
 import type { StampWorkerPool } from "./stamp-worker-pool"
 
 /**
  * Upload context shared across handlers
  */
 export interface UploadContext {
-  bee: Bee
+  bee: ChunkClient
   stamper: Stamper
   workerPool?: StampWorkerPool
 }

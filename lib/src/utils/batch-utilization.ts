@@ -21,7 +21,6 @@
 import {
   Stamper,
   BatchId,
-  type Bee,
   EthAddress,
   PrivateKey,
   type EnvelopeWithBatchId,
@@ -32,7 +31,11 @@ import {
 } from "../chunk"
 import { Binary, type Chunk as CafeChunk } from "cafe-utility"
 import type { UtilizationStoreDB } from "../storage/utilization-store"
-import { uploadChunk, type UploadTarget } from "../proxy/upload"
+import {
+  uploadChunk,
+  type ChunkClient,
+  type UploadTarget,
+} from "../proxy/upload"
 import { tryCreateTag } from "./tag"
 import { lockSocAddress } from "./lock-soc"
 import { deriveSecret } from "./key-derivation"
@@ -576,7 +579,7 @@ function claimedBucketsForCleanChunks(
  * @returns CAC reference
  */
 export async function uploadUtilizationChunk(
-  bee: Bee,
+  bee: ChunkClient,
   stamper: Stamper,
   data: Uint8Array,
   encryptionKey: Uint8Array,
@@ -978,7 +981,7 @@ export async function loadUtilizationState(
 export async function saveUtilizationState(
   state: BatchUtilizationState,
   options: {
-    bee: Bee
+    bee: ChunkClient
     stamper: Stamper
     encryptionKey: Uint8Array
     cache: UtilizationStoreDB

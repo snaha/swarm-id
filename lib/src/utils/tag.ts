@@ -3,13 +3,16 @@
 
 import type { Bee } from "@ethersphere/bee-js"
 
+/** The one call this module makes on the client. */
+type TagClient = Pick<Bee, "createTag">
+
 /**
  * Nodes that have already 404'd `POST /tags` (e.g. public gateways). Keyed per
  * `Bee` so the verdict is scoped to the node URL — pointing at a real node
  * later uses a different `Bee` and re-probes. Without this, every upload retries
  * the same failing round-trip on the critical path.
  */
-const tagsUnsupported = new WeakMap<Bee, boolean>()
+const tagsUnsupported = new WeakMap<TagClient, boolean>()
 
 /** HTTP status for an unimplemented endpoint. */
 const NOT_FOUND = 404
@@ -33,7 +36,9 @@ function isStatus(error: unknown, status: number): boolean {
  * transient failure (5xx / network / timeout) is NOT cached, so a later upload
  * re-probes the node instead of being permanently tag-less after one blip.
  */
-export async function tryCreateTag(bee: Bee): Promise<number | undefined> {
+export async function tryCreateTag(
+  bee: TagClient,
+): Promise<number | undefined> {
   if (tagsUnsupported.get(bee)) {
     return undefined
   }

@@ -10,12 +10,7 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
-import {
-  BatchId,
-  PrivateKey,
-  type Bee,
-  type Stamper,
-} from "@ethersphere/bee-js"
+import { BatchId, PrivateKey, type Stamper } from "@ethersphere/bee-js"
 import { Binary } from "cafe-utility"
 import {
   acquirePartitionLock,
@@ -112,7 +107,7 @@ function controlledWait(): ControlledWait {
 
 function commonOpts(deviceId: string, overrides?: { now?: () => number }) {
   return {
-    bee: bee as unknown as Bee,
+    bee: bee,
     stamper,
     backupSigner: BACKUP_SIGNER,
     swarmEncryptionKey: TEST_ENC_KEY,
@@ -216,7 +211,7 @@ describe("deviceHomePartition", () => {
 describe("readPartitionLock / writePartitionLock round-trip", () => {
   it("returns undefined when the SOC has never been written", async () => {
     const lock = await readPartitionLock({
-      bee: bee as unknown as Bee,
+      bee: bee,
       backupSigner: BACKUP_SIGNER,
       swarmEncryptionKey: TEST_ENC_KEY,
       batchId: TEST_BATCH_ID,
@@ -236,7 +231,7 @@ describe("readPartitionLock / writePartitionLock round-trip", () => {
       leasedUntil: 1_000_000 + TTL_MS,
     }
     await writePartitionLock({
-      bee: bee as unknown as Bee,
+      bee: bee,
       stamper,
       backupSigner: BACKUP_SIGNER,
       swarmEncryptionKey: TEST_ENC_KEY,
@@ -245,7 +240,7 @@ describe("readPartitionLock / writePartitionLock round-trip", () => {
       payload,
     })
     const read = await readPartitionLock({
-      bee: bee as unknown as Bee,
+      bee: bee,
       backupSigner: BACKUP_SIGNER,
       swarmEncryptionKey: TEST_ENC_KEY,
       batchId: TEST_BATCH_ID,
@@ -256,7 +251,7 @@ describe("readPartitionLock / writePartitionLock round-trip", () => {
 
   it("subsequent writes overwrite the lock SOC (LWW)", async () => {
     const baseOpts = {
-      bee: bee as unknown as Bee,
+      bee: bee,
       stamper,
       backupSigner: BACKUP_SIGNER,
       swarmEncryptionKey: TEST_ENC_KEY,
@@ -286,7 +281,7 @@ describe("readPartitionLock / writePartitionLock round-trip", () => {
     await writePartitionLock({ ...baseOpts, payload: second })
 
     const read = await readPartitionLock({
-      bee: bee as unknown as Bee,
+      bee: bee,
       backupSigner: BACKUP_SIGNER,
       swarmEncryptionKey: TEST_ENC_KEY,
       batchId: TEST_BATCH_ID,
@@ -368,7 +363,7 @@ describe("readPartitionLock — schema validation", () => {
     const identifier = makePartitionLockIdentifier(TEST_BATCH_ID, PARTITION)
     const target: UploadTarget = {
       mode: "stamper",
-      bee: bee as unknown as Bee,
+      bee: bee,
       stamper,
     }
     const body = new TextEncoder().encode(
@@ -379,7 +374,7 @@ describe("readPartitionLock — schema validation", () => {
     })
 
     const read = await readPartitionLock({
-      bee: bee as unknown as Bee,
+      bee: bee,
       backupSigner: BACKUP_SIGNER,
       swarmEncryptionKey: TEST_ENC_KEY,
       batchId: TEST_BATCH_ID,
@@ -406,7 +401,7 @@ describe("acquirePartitionLock — single device", () => {
     const NOW = 1_000_000
     await acquirePartitionLock(commonOpts(DEVICE_A, { now: () => NOW }))
     const observed = await readPartitionLock({
-      bee: bee as unknown as Bee,
+      bee: bee,
       backupSigner: BACKUP_SIGNER,
       swarmEncryptionKey: TEST_ENC_KEY,
       batchId: TEST_BATCH_ID,
@@ -448,7 +443,7 @@ describe("acquirePartitionLock — single device", () => {
   it("takes over a released lock (holderDeviceId is the sentinel)", async () => {
     const NOW = 1_000_000
     await writePartitionLock({
-      bee: bee as unknown as Bee,
+      bee: bee,
       stamper,
       backupSigner: BACKUP_SIGNER,
       swarmEncryptionKey: TEST_ENC_KEY,
@@ -576,7 +571,7 @@ describe("acquirePartitionLock — verify-after-write", () => {
     // writePartitionLock keeps the test below `acquirePartitionLock`'s
     // own pre-read decision logic.
     await writePartitionLock({
-      bee: bee as unknown as Bee,
+      bee: bee,
       stamper,
       backupSigner: BACKUP_SIGNER,
       swarmEncryptionKey: TEST_ENC_KEY,
@@ -682,7 +677,7 @@ describe("acquirePartitionLock — known failure modes", () => {
     // TTL, a buggy peer, or a propagation reorder). The protocol has no
     // backchannel to A — A's local belief is now stale.
     await writePartitionLock({
-      bee: bee as unknown as Bee,
+      bee: bee,
       stamper,
       backupSigner: BACKUP_SIGNER,
       swarmEncryptionKey: TEST_ENC_KEY,
@@ -751,7 +746,7 @@ describe("acquirePartitionLock — known failure modes", () => {
     // every device on this account) can write directly, bypassing the
     // read-write-verify cooperative protocol.
     await writePartitionLock({
-      bee: bee as unknown as Bee,
+      bee: bee,
       stamper,
       backupSigner: BACKUP_SIGNER,
       swarmEncryptionKey: TEST_ENC_KEY,
@@ -808,7 +803,7 @@ describe("acquirePartitionLock — known failure modes", () => {
 
     // B overwrites the lock with a higher-generation claim.
     await writePartitionLock({
-      bee: bee as unknown as Bee,
+      bee: bee,
       stamper,
       backupSigner: BACKUP_SIGNER,
       swarmEncryptionKey: TEST_ENC_KEY,
@@ -841,7 +836,7 @@ describe("acquirePartitionLock — known failure modes", () => {
     // The "fast" / converged view is B's chunk. Restore it.
     await store.put(addr, bChunk)
     const converged = await readPartitionLock({
-      bee: bee as unknown as Bee,
+      bee: bee,
       backupSigner: BACKUP_SIGNER,
       swarmEncryptionKey: TEST_ENC_KEY,
       batchId: TEST_BATCH_ID,
@@ -875,7 +870,7 @@ describe("acquirePartitionLock — known failure modes", () => {
     await waitA.triggered
     const aChunk = await store.get(addr)
     await writePartitionLock({
-      bee: bee as unknown as Bee,
+      bee: bee,
       stamper,
       backupSigner: BACKUP_SIGNER,
       swarmEncryptionKey: TEST_ENC_KEY,
@@ -909,7 +904,7 @@ describe("acquirePartitionLock — shouldAbort", () => {
     expect(store.size()).toBe(0) // nothing written
     expect(
       await readPartitionLock({
-        bee: bee as unknown as Bee,
+        bee: bee,
         backupSigner: BACKUP_SIGNER,
         swarmEncryptionKey: TEST_ENC_KEY,
         batchId: TEST_BATCH_ID,
@@ -979,7 +974,7 @@ describe("acquirePartitionLock — bounded reads / skipInitialRead", () => {
     })
     await wait.triggered
     await writePartitionLock({
-      bee: bee as unknown as Bee,
+      bee: bee,
       stamper,
       backupSigner: BACKUP_SIGNER,
       swarmEncryptionKey: TEST_ENC_KEY,
@@ -1010,7 +1005,7 @@ describe("releasePartitionLock — generation fencing", () => {
 
   function seedLock(payload: PartitionLockPayload): Promise<void> {
     return writePartitionLock({
-      bee: bee as unknown as Bee,
+      bee: bee,
       stamper,
       backupSigner: BACKUP_SIGNER,
       swarmEncryptionKey: TEST_ENC_KEY,
@@ -1025,7 +1020,7 @@ describe("releasePartitionLock — generation fencing", () => {
     releasedGeneration: PartitionLockGeneration,
   ) {
     return releasePartitionLock({
-      bee: bee as unknown as Bee,
+      bee: bee,
       stamper,
       backupSigner: BACKUP_SIGNER,
       swarmEncryptionKey: TEST_ENC_KEY,
@@ -1040,7 +1035,7 @@ describe("releasePartitionLock — generation fencing", () => {
 
   function readLock() {
     return readPartitionLock({
-      bee: bee as unknown as Bee,
+      bee: bee,
       backupSigner: BACKUP_SIGNER,
       swarmEncryptionKey: TEST_ENC_KEY,
       batchId: TEST_BATCH_ID,
@@ -1167,7 +1162,7 @@ describe("acquirePartitionLock — verify vs fenced sentinels", () => {
     // sentinel this read back as a HIGHER generation → false lost-race →
     // spurious read-only. The fenced sentinel is older → A's claim stands.
     await writePartitionLock({
-      bee: bee as unknown as Bee,
+      bee: bee,
       stamper,
       backupSigner: BACKUP_SIGNER,
       swarmEncryptionKey: TEST_ENC_KEY,

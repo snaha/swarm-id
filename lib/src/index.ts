@@ -494,6 +494,7 @@ export {
 // Download data utility
 export { downloadDataWithChunkAPI } from "./proxy/download-data"
 export type { ChunkDownloader } from "./proxy/download-data"
+export type { ChunkClient } from "./proxy/upload"
 
 // SOC write/read primitives (used by dev tooling, e.g. the gateway
 // retrievability self-check: write a SOC then read it back).

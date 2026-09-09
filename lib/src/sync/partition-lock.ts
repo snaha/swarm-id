@@ -28,12 +28,8 @@
  * See the "Multi-Device Postage Batches" page in docs-site for the full design.
  */
 
-import {
-  Bee,
-  PrivateKey,
-  type BatchId,
-  type Stamper,
-} from "@ethersphere/bee-js"
+import { PrivateKey, type BatchId, type Stamper } from "@ethersphere/bee-js"
+import type { ChunkClient } from "../proxy/upload"
 import { Binary } from "cafe-utility"
 import { downloadEncryptedSOC } from "../proxy/download-data"
 import { uploadSOC, type UploadTarget } from "../proxy/upload"
@@ -153,7 +149,7 @@ export function compareGenerations(
  * been written (the underlying chunk is missing on the Bee node).
  */
 export async function readPartitionLock(opts: {
-  bee: Bee
+  bee: ChunkClient
   backupSigner: PrivateKey
   swarmEncryptionKey: Uint8Array
   batchId: BatchId
@@ -201,7 +197,7 @@ export async function readPartitionLock(opts: {
  * delay).
  */
 export async function writePartitionLock(opts: {
-  bee: Bee
+  bee: ChunkClient
   stamper: Stamper
   backupSigner: PrivateKey
   swarmEncryptionKey: Uint8Array
@@ -239,7 +235,7 @@ export async function writePartitionLock(opts: {
  *          inside the guard window.
  */
 export async function acquirePartitionLock(opts: {
-  bee: Bee
+  bee: ChunkClient
   stamper: Stamper
   backupSigner: PrivateKey
   swarmEncryptionKey: Uint8Array
@@ -395,7 +391,7 @@ export async function acquirePartitionLock(opts: {
  * staleness falls back to the displacement/TTL machinery.
  */
 export async function releasePartitionLock(opts: {
-  bee: Bee
+  bee: ChunkClient
   stamper: Stamper
   backupSigner: PrivateKey
   swarmEncryptionKey: Uint8Array

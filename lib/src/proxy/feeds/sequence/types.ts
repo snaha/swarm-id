@@ -6,7 +6,6 @@
  */
 
 import type {
-  Bee,
   EthAddress,
   Topic,
   PrivateKey,
@@ -14,6 +13,7 @@ import type {
   BeeRequestOptions,
 } from "@ethersphere/bee-js"
 import type { ChunkDownloader } from "../../download-data"
+import type { ChunkClient } from "../../upload"
 
 /**
  * Options for creating a sequential feed reader
@@ -33,8 +33,8 @@ export interface SequentialFeedOptions {
  * Options for creating a sequential feed writer
  */
 export interface SequentialFeedWriterOptions extends SequentialFeedOptions {
-  /** The writer uploads as well as reads, so it needs the whole client */
-  bee: Bee
+  /** The writer uploads as well as reads */
+  bee: ChunkClient
 
   /** Private key for signing chunks */
   signer: PrivateKey

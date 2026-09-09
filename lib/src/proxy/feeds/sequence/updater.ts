@@ -8,7 +8,8 @@
  */
 
 import { Binary } from "cafe-utility"
-import type { Bee, Stamper } from "@ethersphere/bee-js"
+import type { ChunkClient } from "../../upload"
+import type { Stamper } from "@ethersphere/bee-js"
 import { EthAddress, Topic, PrivateKey, Identifier } from "@ethersphere/bee-js"
 import { uploadSOC, type UploadTarget } from "../../upload"
 import type { SequentialUpdater } from "./types"
@@ -17,7 +18,7 @@ export class BasicSequentialUpdater implements SequentialUpdater {
   private nextIndex: bigint = 0n
 
   constructor(
-    private readonly bee: Bee,
+    private readonly bee: ChunkClient,
     private readonly topic: Topic,
     private readonly signer: PrivateKey,
   ) {}

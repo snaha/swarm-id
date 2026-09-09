@@ -21,7 +21,7 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
-import { BatchId, PrivateKey, Reference, type Bee } from "@ethersphere/bee-js"
+import { BatchId, PrivateKey, Reference } from "@ethersphere/bee-js"
 
 // Steers the NEXT generated chunk address into `bucket` (consumed once), so a
 // test can force a collision with a specific reserved-slot bucket. `vi.hoisted`
@@ -141,7 +141,7 @@ async function publishOneChunk(
   localCounter[1000] = 1
   vi.spyOn(Date, "now").mockReturnValue(nowMs)
   const result = await writePartitionState({
-    bee: bee as unknown as Bee,
+    bee: bee,
     stamper,
     batchId: TEST_BATCH_ID,
     batchDepth: TEST_BATCH_DEPTH,
@@ -206,7 +206,7 @@ describe("writePartitionState — sparse sentinel refs are independent", () => {
     localCounter[1000] = 1 // exactly one non-zero chunk → the rest are sentinels
 
     const { references } = await writePartitionState({
-      bee: bee as unknown as Bee,
+      bee: bee,
       stamper,
       batchId: TEST_BATCH_ID,
       batchDepth: TEST_BATCH_DEPTH,
@@ -236,7 +236,7 @@ describe("writePartitionState — distinct-bucket invariant guard", () => {
     for (const b of [100, 3000, 5000, 7000]) localCounter[b] = 1
 
     const { stateBuckets } = await writePartitionState({
-      bee: bee as unknown as Bee,
+      bee: bee,
       stamper,
       batchId: TEST_BATCH_ID,
       batchDepth: TEST_BATCH_DEPTH,
@@ -268,7 +268,7 @@ describe("writePartitionState — two-phase publish (pointer after chunks)", () 
 
     await expect(
       writePartitionState({
-        bee: bee as unknown as Bee,
+        bee: bee,
         stamper,
         batchId: TEST_BATCH_ID,
         batchDepth: TEST_BATCH_DEPTH,
@@ -293,7 +293,7 @@ describe("writePartitionState — counter monotonicity tripwire", () => {
     const baseline = new Uint32Array(NUM_BUCKETS)
     baseline[1000] = 5
     const first = await writePartitionState({
-      bee: bee as unknown as Bee,
+      bee: bee,
       stamper,
       batchId: TEST_BATCH_ID,
       batchDepth: TEST_BATCH_DEPTH,
@@ -311,7 +311,7 @@ describe("writePartitionState — counter monotonicity tripwire", () => {
     regressed[1000] = 4
     await expect(
       writePartitionState({
-        bee: bee as unknown as Bee,
+        bee: bee,
         stamper,
         batchId: TEST_BATCH_ID,
         batchDepth: TEST_BATCH_DEPTH,
@@ -332,7 +332,7 @@ describe("writePartitionState — counter monotonicity tripwire", () => {
     const baseline = new Uint32Array(NUM_BUCKETS)
     baseline[1000] = 5
     const first = await writePartitionState({
-      bee: bee as unknown as Bee,
+      bee: bee,
       stamper,
       batchId: TEST_BATCH_ID,
       batchDepth: TEST_BATCH_DEPTH,
@@ -351,7 +351,7 @@ describe("writePartitionState — counter monotonicity tripwire", () => {
     regressed[1000] = 4
     await expect(
       writePartitionState({
-        bee: bee as unknown as Bee,
+        bee: bee,
         stamper,
         batchId: TEST_BATCH_ID,
         batchDepth: TEST_BATCH_DEPTH,
