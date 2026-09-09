@@ -9,8 +9,9 @@
  */
 
 import { Binary } from "cafe-utility"
-import type { Bee, BeeRequestOptions } from "@ethersphere/bee-js"
+import type { BeeRequestOptions } from "@ethersphere/bee-js"
 import { EthAddress, Reference, Topic } from "@ethersphere/bee-js"
+import type { ChunkDownloader } from "../../download-data"
 import { EpochIndex, lca, MAX_LEVEL } from "./epoch"
 import type { EpochFinder } from "./types"
 import { findPreviousLeaf } from "./utils"
@@ -27,7 +28,7 @@ const EPOCH_LOOKUP_TIMEOUT_MS = 2000
  */
 export class SyncEpochFinder implements EpochFinder {
   constructor(
-    private readonly bee: Bee,
+    private readonly bee: ChunkDownloader,
     private readonly topic: Topic,
     private readonly owner: EthAddress,
   ) {}
@@ -109,7 +110,7 @@ export class SyncEpochFinder implements EpochFinder {
         }
 
         // Chunk found but timestamp invalid, continue searching up
-      } catch (error) {
+      } catch {
         // Chunk not found, continue searching up
       }
 
@@ -144,7 +145,7 @@ export class SyncEpochFinder implements EpochFinder {
 
     try {
       chunk = await this.getEpochChunk(at, epoch)
-    } catch (error) {
+    } catch {
       // Epoch chunk not found
       if (epoch.isLeft()) {
         // No lower resolution available, return what we have

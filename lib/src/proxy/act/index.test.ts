@@ -36,7 +36,10 @@ vi.mock("../download-data", () => ({
 }))
 
 import { uploadData } from "../upload"
-import { downloadDataWithChunkAPI } from "../download-data"
+import {
+  downloadDataWithChunkAPI,
+  type ChunkDownloader,
+} from "../download-data"
 
 // Helper to create a random 32-byte array
 function randomBytes(length: number): Uint8Array {
@@ -73,14 +76,6 @@ function createMockTarget(): UploadTarget {
   }
 }
 
-// Create a valid 32-byte hex reference for mocking
-function createMockReference(counter: number): string {
-  // Create a 32-byte array with the counter as the last byte
-  const bytes = new Uint8Array(32)
-  bytes[31] = counter
-  return toHex(bytes)
-}
-
 // Compute content hash using Swarm's BMT algorithm (same as MantarayNode)
 async function computeContentHash(data: Uint8Array): Promise<string> {
   const rootNode = await MerkleTree.root(data)
@@ -109,7 +104,10 @@ function createContentAddressedUploadMock() {
     return { reference: ref, chunkAddresses: [] }
   }
 
-  const downloadMock = async (_bee: Bee, ref: string): Promise<Uint8Array> => {
+  const downloadMock = async (
+    _bee: ChunkDownloader,
+    ref: string,
+  ): Promise<Uint8Array> => {
     const data = storage.get(ref)
     if (!data) {
       throw new Error(`Data not found for reference: ${ref}`)

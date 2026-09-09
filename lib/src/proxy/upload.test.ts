@@ -15,7 +15,7 @@
  */
 
 import { describe, it, expect } from "vitest"
-import type { Bee, Stamper } from "@ethersphere/bee-js"
+import type { Bee } from "@ethersphere/bee-js"
 import { uploadData, type UploadTarget } from "./upload"
 import { downloadDataWithChunkAPI } from "./download-data"
 import { CHUNK_SIZE } from "./chunking"
@@ -47,7 +47,7 @@ function setup(): { bee: Bee; target: UploadTarget } {
   const target: UploadTarget = {
     mode: "stamper",
     bee,
-    stamper: createMockStamper() as unknown as Stamper,
+    stamper: createMockStamper(),
   }
   return { bee, target }
 }

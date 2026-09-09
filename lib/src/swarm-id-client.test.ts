@@ -2,8 +2,29 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, it, expect, vi, beforeEach } from "vitest"
+import type { Mock } from "vitest"
 import { SwarmIdClient } from "./swarm-id-client"
+import type { ConnectionInfo, IframeToParentMessage } from "./types"
 import { generatedAvatar } from "./utils/avatar"
+
+/**
+ * A view of the client that admits to the private members these tests drive.
+ * `vi.spyOn(client, "ensureReady")` does not compile — the method is private —
+ * and a spy on `client as never` is itself typed `never`, so nothing can be
+ * chained on it. Naming the shape once keeps the casts honest and the spies
+ * chainable.
+ */
+type ClientInternals = {
+  ensureReady: () => void
+  sendRequest: (message: unknown) => Promise<unknown>
+  handleIframeMessage: (message: IframeToParentMessage) => void
+  ready: boolean
+  iframe: unknown
+  storageShared?: boolean
+}
+
+const internals = (c: SwarmIdClient): ClientInternals =>
+  c as unknown as ClientInternals
 
 describe("SwarmIdClient connect()", () => {
   let client: SwarmIdClient
@@ -49,7 +70,7 @@ describe("SwarmIdClient connect()", () => {
 
   /** What the proxy reported about its own storage on `proxyReady`. */
   function setStorageShared(shared: boolean | undefined) {
-    ;(client as unknown as { storageShared?: boolean }).storageShared = shared
+    internals(client).storageShared = shared
   }
 
   // The transport is a property of the iframe's STORAGE, not of the browser
@@ -57,9 +78,9 @@ describe("SwarmIdClient connect()", () => {
   // itself, and no user agent tells you which mode you are in.
   describe("shared storage", () => {
     it("opens the popup from the parent, keeping the user gesture", async () => {
-      vi.spyOn(client, "ensureReady").mockImplementation(() => {})
+      vi.spyOn(internals(client), "ensureReady").mockImplementation(() => {})
       setStorageShared(true)
-      const sendRequestSpy = vi.spyOn(client as never, "sendRequest")
+      const sendRequestSpy = vi.spyOn(internals(client), "sendRequest")
 
       await client.connect()
 
@@ -74,7 +95,7 @@ describe("SwarmIdClient connect()", () => {
     // Nothing opened, so there is no connect in progress to report. This
     // branch used to discard `window.open`'s result and resolve regardless.
     it("throws when that popup is blocked", async () => {
-      vi.spyOn(client, "ensureReady").mockImplementation(() => {})
+      vi.spyOn(internals(client), "ensureReady").mockImplementation(() => {})
       setStorageShared(true)
       vi.mocked(window.open).mockReturnValue(null)
 
@@ -88,10 +109,10 @@ describe("SwarmIdClient connect()", () => {
     it.each([false, undefined])(
       "delegates to the proxy when storageShared is %s",
       async (storageShared) => {
-        vi.spyOn(client, "ensureReady").mockImplementation(() => {})
+        vi.spyOn(internals(client), "ensureReady").mockImplementation(() => {})
         setStorageShared(storageShared)
         const sendRequestSpy = vi
-          .spyOn(client as never, "sendRequest")
+          .spyOn(internals(client), "sendRequest")
           .mockResolvedValue({
             type: "connectResponse",
             requestId: "test",
@@ -114,9 +135,9 @@ describe("SwarmIdClient connect()", () => {
     // this branch had before the storage mode decided it, so it can never be
     // worse than not asking at all.
     it("falls back to opening from the parent when the proxy's popup is blocked", async () => {
-      vi.spyOn(client, "ensureReady").mockImplementation(() => {})
+      vi.spyOn(internals(client), "ensureReady").mockImplementation(() => {})
       setStorageShared(false)
-      vi.spyOn(client as never, "sendRequest").mockResolvedValue({
+      vi.spyOn(internals(client), "sendRequest").mockResolvedValue({
         type: "connectResponse",
         requestId: "test",
         success: false,
@@ -131,9 +152,9 @@ describe("SwarmIdClient connect()", () => {
     })
 
     it("throws when the fallback popup is blocked too", async () => {
-      vi.spyOn(client, "ensureReady").mockImplementation(() => {})
+      vi.spyOn(internals(client), "ensureReady").mockImplementation(() => {})
       setStorageShared(false)
-      vi.spyOn(client as never, "sendRequest").mockResolvedValue({
+      vi.spyOn(internals(client), "sendRequest").mockResolvedValue({
         type: "connectResponse",
         requestId: "test",
         success: false,
@@ -155,7 +176,7 @@ describe("SwarmIdClient connect()", () => {
 
 describe("SwarmIdClient connectionInfo", () => {
   let client: SwarmIdClient
-  let onConnectionChange: ReturnType<typeof vi.fn>
+  let onConnectionChange: Mock<(info: ConnectionInfo) => void>
 
   beforeEach(() => {
     vi.restoreAllMocks()
@@ -204,7 +225,7 @@ describe("SwarmIdClient connectionInfo", () => {
       },
     }
 
-    ;(client as never)["handleIframeMessage"](snapshot)
+    internals(client).handleIframeMessage(snapshot)
 
     expect(onConnectionChange).toHaveBeenCalledTimes(1)
     expect(onConnectionChange).toHaveBeenCalledWith({
@@ -216,7 +237,7 @@ describe("SwarmIdClient connectionInfo", () => {
     })
 
     // `connectionInfo` getter calls ensureReady — mark client as ready for the read
-    ;(client as never)["ready"] = true
+    internals(client).ready = true
     expect(client.connectionInfo).toEqual({
       canUpload: snapshot.canUpload,
       storagePartitioned: snapshot.storagePartitioned,
@@ -247,9 +268,9 @@ describe("SwarmIdClient connectionInfo", () => {
       appKey: undefined,
     }
 
-    ;(client as never)["handleIframeMessage"](first)
-    ;(client as never)["handleIframeMessage"](second)
-    ;(client as never)["ready"] = true
+    internals(client).handleIframeMessage(first)
+    internals(client).handleIframeMessage(second)
+    internals(client).ready = true
 
     expect(onConnectionChange).toHaveBeenCalledTimes(2)
     expect(client.connectionInfo.identity?.name).toBe("bob")
@@ -269,7 +290,7 @@ describe("SwarmIdClient request seam", () => {
 
   // Deliver an iframe→parent message as if it passed the origin/source checks
   const deliver = (message: unknown) =>
-    (client as never)["handleIframeMessage"](message)
+    internals(client).handleIframeMessage(message as IframeToParentMessage)
 
   const lastPostedMessage = () =>
     postMessage.mock.calls[postMessage.mock.calls.length - 1][0]
@@ -299,8 +320,8 @@ describe("SwarmIdClient request seam", () => {
       metadata: { name: "Test App", description: "A test application" },
     })
     postMessage = vi.fn()
-    ;(client as never)["ready"] = true
-    ;(client as never)["iframe"] = {
+    internals(client).ready = true
+    internals(client).iframe = {
       style: {},
       contentWindow: { postMessage },
     }

@@ -7,7 +7,7 @@ import {
   createAccountsStorageManager,
   serializeAccount,
 } from "./storage-managers"
-import { LocalAccountSchemaV1 } from "../schemas"
+import { LocalAccountSchemaV1, isSignedOutAccount } from "../schemas"
 import { STORAGE_KEY_ACCOUNTS } from "../types"
 import {
   TEST_BATCH_ID_HEX,
@@ -45,6 +45,10 @@ describe("serializeAccount — device-local seed vault", () => {
     })
     expect(reparsed.encryptedSeed).toBe("0011223344")
     expect(reparsed.id.equals(account.id)).toBe(true)
+    // `Account` is a union discriminated on `signedOutAt`; the synced fields
+    // live only on the signed-in arm, so prove which arm parsed before reading.
+    if (isSignedOutAccount(reparsed))
+      throw new Error("expected a signed-in account")
     expect(reparsed.derivationKey).toBe(account.derivationKey)
     expect(
       reparsed.postageStamps[0].batchID.equals(new BatchId(TEST_BATCH_ID_HEX)),
@@ -75,6 +79,8 @@ describe("serializeAccount — device-local seed vault", () => {
 
     expect(reparsed.access).toEqual(account.access)
     expect(reparsed.encryptedSeed).toBe(account.encryptedSeed)
+    if (!isSignedOutAccount(reparsed))
+      throw new Error("expected a signed-out account")
     expect(reparsed.encryptedState).toBe(account.encryptedState)
     expect(reparsed.signedOutAt).toBe(1700000000123)
   })

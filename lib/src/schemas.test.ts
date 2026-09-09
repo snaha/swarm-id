@@ -155,6 +155,9 @@ describe("LocalAccountSchemaV1 signed-in/signed-out union", () => {
       expect(result.data.signedOutAt).toBe(1700000000001)
       expect(result.data.access).toEqual(VAULT.access)
       expect(result.data.encryptedSeed).toBe(VAULT.encryptedSeed)
+      if (!isSignedOutAccount(result.data)) {
+        throw new Error("expected the signed-out arm")
+      }
       expect(result.data.encryptedState).toBe(SIGNED_OUT.encryptedState)
     }
   })

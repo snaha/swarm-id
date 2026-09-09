@@ -12,20 +12,18 @@
 
 import { describe, it, expect, beforeEach, afterEach } from "vitest"
 import { Identifier, PrivateKey, EthAddress } from "@ethersphere/bee-js"
-import type { Bee } from "@ethersphere/bee-js"
 import { Binary } from "cafe-utility"
 import { uploadSOC, type UploadTarget } from "./upload"
-import { downloadEncryptedSOC, downloadSOC } from "./download-data"
+import {
+  downloadEncryptedSOC,
+  downloadSOC,
+  type ChunkDownloader,
+} from "./download-data"
 import {
   MockChunkStore,
   createTestSigner,
   mockFetch,
 } from "./feeds/epochs/test-utils"
-
-/**
- * Minimal Bee interface for download operations
- */
-type MinimalBee = Pick<Bee, "downloadChunk">
 
 // ============================================================================
 // Test Utilities
@@ -55,12 +53,13 @@ function createSubsidisedTarget(
 /**
  * Mock Bee for download that uses MockChunkStore
  */
-function createMockBee(store: MockChunkStore): MinimalBee {
+function createMockBee(store: MockChunkStore): ChunkDownloader {
   return {
+    url: "http://localhost:1633",
     async downloadChunk(reference: string): Promise<Uint8Array> {
       return store.get(reference)
     },
-  } as MinimalBee
+  }
 }
 
 // ============================================================================

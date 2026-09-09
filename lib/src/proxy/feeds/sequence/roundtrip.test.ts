@@ -8,9 +8,8 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest"
-import { Binary } from "cafe-utility"
-import type { Bee } from "@ethersphere/bee-js"
 import { PrivateKey } from "@ethersphere/bee-js"
+import type { Bee, Identifier } from "@ethersphere/bee-js"
 import { SyncSequentialFinder } from "./finder"
 import { AsyncSequentialFinder } from "./async-finder"
 import { BasicSequentialUpdater } from "./updater"
@@ -124,20 +123,21 @@ class MixedErrorMockBee extends CountingMockBee {
  */
 vi.mock("../../upload", async (importOriginal) => {
   const mod = await importOriginal<typeof import("../../upload")>()
-  // eslint-disable-next-line no-restricted-syntax -- vi.mock factories are hoisted
-  // above the file's static imports, so a top-level `Binary` would be in the TDZ here.
+  // vi.mock factories are hoisted above the file's static imports, so a
+  // top-level `Binary` would be in the TDZ here.
+  // eslint-disable-next-line no-restricted-syntax
   const { Binary } = await import("cafe-utility")
 
   return {
     ...mod,
     uploadSOC: async (
-      target: any,
-      signer: any,
-      identifier: any,
+      // The tests build their target around a MockBee, and the mock stores
+      // straight into it — so that is the shape it takes, not `UploadTarget`.
+      target: { bee: MockBee },
+      signer: PrivateKey,
+      identifier: Identifier,
       data: Uint8Array,
-      _options?: any,
     ) => {
-      // Extract bee from target
       const bee = target.bee
 
       // Validate data size (1-4096 bytes) - matching real uploadSOC

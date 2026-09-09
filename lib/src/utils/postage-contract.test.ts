@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest"
+import type { MockInstance } from "vitest"
 import {
   calculateContractTTLSeconds,
   decodeBatches,
@@ -145,7 +146,7 @@ describe("calculateContractTTLSeconds", () => {
 })
 
 describe("fetchOnChainBatchState", () => {
-  let fetchSpy: ReturnType<typeof vi.spyOn>
+  let fetchSpy: MockInstance<typeof fetch>
 
   beforeEach(() => {
     fetchSpy = vi.spyOn(globalThis, "fetch")
@@ -287,7 +288,7 @@ describe("fetchOnChainBatchState", () => {
 })
 
 describe("fetchBatchTTLFromContract", () => {
-  let fetchSpy: ReturnType<typeof vi.spyOn>
+  let fetchSpy: MockInstance<typeof fetch>
 
   beforeEach(() => {
     fetchSpy = vi.spyOn(globalThis, "fetch")
@@ -315,7 +316,7 @@ describe("fetchBatchTTLFromContract", () => {
 })
 
 describe("fetchAuthoritativeBatchTTL", () => {
-  let fetchSpy: ReturnType<typeof vi.spyOn>
+  let fetchSpy: MockInstance<typeof fetch>
 
   const RPC = "https://rpc.example"
   const BEE = "https://bee.example"
@@ -409,7 +410,7 @@ describe("resolvePostageStampContractAddress", () => {
 const ZERO_TUPLE = "0x" + "0".repeat(64 * 6)
 
 describe("fetchOnChainBatchStateResult", () => {
-  let fetchSpy: ReturnType<typeof vi.spyOn>
+  let fetchSpy: MockInstance<typeof fetch>
 
   beforeEach(() => {
     fetchSpy = vi.spyOn(globalThis, "fetch")
@@ -456,7 +457,7 @@ describe("fetchOnChainBatchStateResult", () => {
 })
 
 describe("resolveBatchStatus", () => {
-  let fetchSpy: ReturnType<typeof vi.spyOn>
+  let fetchSpy: MockInstance<typeof fetch>
 
   const RPC = "https://rpc.example"
   const BEE = "https://bee.example"

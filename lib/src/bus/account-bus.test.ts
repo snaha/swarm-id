@@ -42,6 +42,7 @@ const UTILIZATION_MESSAGE: BusMessageInput = {
 const LEASE_RELEASED_MESSAGE: BusMessageInput = {
   type: "lease-released",
   accountId: "aa".repeat(20),
+  batchId: "ab".repeat(32),
   partition: 1,
   fromDeviceId: "device-remote",
 }
@@ -72,7 +73,6 @@ function makeSnapshot(): AccountStateSnapshot {
         appUrl: "https://dapp.example",
         appName: "dApp",
         lastConnectedAt: 2_000_000,
-        updatedAt: 2_000_000,
       },
     ],
     postageStamps: [

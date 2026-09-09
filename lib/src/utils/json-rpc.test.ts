@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
+import type { MockInstance } from "vitest"
 import { jsonRpcBatch, jsonRpcCall } from "./json-rpc"
 import { TimeoutError } from "./promise"
 
@@ -16,7 +17,7 @@ function mockResponse(body: unknown, status = 200): Response {
   } as Response
 }
 
-let fetchSpy: ReturnType<typeof vi.spyOn>
+let fetchSpy: MockInstance<typeof fetch>
 
 beforeEach(() => {
   fetchSpy = vi.spyOn(globalThis, "fetch")

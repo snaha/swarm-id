@@ -13,10 +13,10 @@
  * independently and skip (see `isClusterReachable` usage in *.cluster.test.ts).
  */
 
-import type { GlobalSetupContext } from "vitest/node"
+import type { TestProject } from "vitest/node"
 import { isClusterReachable, buyUsableStamp } from "./cluster"
 
-export default async function setup({ provide }: GlobalSetupContext) {
+export default async function setup({ provide }: TestProject) {
   if (!(await isClusterReachable())) {
     console.warn(
       "[cluster] No local Bee cluster reachable at http://localhost:1633 — cluster integration tests will be skipped. Run `pnpm dev:cluster:start` to enable them.",

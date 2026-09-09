@@ -8,8 +8,14 @@
  */
 
 import { Binary } from "cafe-utility"
-import { PrivateKey, Topic, EthAddress } from "@ethersphere/bee-js"
+import type { Chunk } from "cafe-utility"
+import { PrivateKey, Topic, EthAddress, BatchId } from "@ethersphere/bee-js"
+import type { Stamper } from "@ethersphere/bee-js"
 import { calculateChunkAddress } from "../../../chunk"
+import {
+  NUM_BUCKETS,
+  calculateMaxSlotsPerBucket,
+} from "../../../utils/batch-utilization"
 
 /**
  * In-memory chunk storage for testing
@@ -166,19 +172,38 @@ const SOC_IDENTIFIER_LENGTH = 32
  * Returns an object with a stamp() method that produces a valid-looking
  * EnvelopeWithBatchId without performing real cryptographic operations.
  */
-export function createMockStamper() {
+const MOCK_STAMPER_DEPTH = 24
+
+/**
+ * Create a mock Stamper for testing.
+ *
+ * Produces a valid-looking `EnvelopeWithBatchId` without the real stamper's
+ * ECDSA signing, which dominates wall time when a test stamps in bulk.
+ *
+ * The return type is `Stamper`, not a bare object, so callers can pass it
+ * straight into anything expecting one. It carries the whole public surface —
+ * `signer`, `batchId`, `buckets`, `depth`, `maxSlot`, `getState` — because
+ * `UtilizationAwareStamper` reads and writes `buckets` directly.
+ */
+export function createMockStamper(): Stamper {
+  const batchId = new BatchId(new Uint8Array(BATCH_ID_LENGTH))
+  const buckets = new Uint32Array(NUM_BUCKETS)
   return {
-    stamp(_chunk: any) {
+    signer: createTestSigner(),
+    batchId,
+    buckets,
+    depth: MOCK_STAMPER_DEPTH,
+    maxSlot: calculateMaxSlotsPerBucket(MOCK_STAMPER_DEPTH),
+    stamp(_chunk: Chunk) {
       return {
-        batchId: {
-          toUint8Array: () => new Uint8Array(BATCH_ID_LENGTH),
-        },
+        batchId,
         index: new Uint8Array(INDEX_LENGTH),
         timestamp: new Uint8Array(TIMESTAMP_LENGTH),
         signature: new Uint8Array(SIGNATURE_LENGTH),
         issuer: new Uint8Array(ISSUER_LENGTH),
       }
     },
+    getState: () => buckets,
   }
 }
 

@@ -214,7 +214,7 @@ export function makeView(over: Partial<DeviceStateView> = {}): DeviceStateView {
 
 export function makeApp(url: string): ConnectedApp {
   const now = Date.now()
-  return { appUrl: url, appName: url, lastConnectedAt: now, updatedAt: now }
+  return { appUrl: url, appName: url, lastConnectedAt: now }
 }
 
 /** The shape `foldAccountFromSwarm` returns for `.account`. */

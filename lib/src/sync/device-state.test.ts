@@ -91,9 +91,7 @@ function viewToSnapshot(v: DeviceStateView): AccountStateSnapshot {
 describe("device-state serialization", () => {
   it("round-trips a view (BatchId / bigint / tombstones preserved)", () => {
     const view = makeView({
-      connectedApps: [
-        makeApp("https://a.example", { updatedAt: 5, revokedAt: 5 }),
-      ],
+      connectedApps: [makeApp("https://a.example", { revokedAt: 5 })],
       postageStamps: [makeStamp("cc".repeat(32), { deletedAt: 7 })],
       accountName: { value: "my account", at: 9 },
       defaultPostageStampBatchID: { value: "cc".repeat(32), at: 9 },
@@ -160,11 +158,11 @@ describe("accountStateToDeviceView — never-edited scalar clocks", () => {
 describe("foldAccount — differential equivalence with mergeSnapshotWithRemote", () => {
   it("folded collections equal the Phase 0–2 snapshot merge for the same data", () => {
     const viewA = makeView({
-      connectedApps: [makeApp("https://a.example", { updatedAt: 2 })],
+      connectedApps: [makeApp("https://a.example")],
       postageStamps: [makeStamp("aa".repeat(32))],
     })
     const viewB = makeView({
-      connectedApps: [makeApp("https://b.example", { updatedAt: 3 })],
+      connectedApps: [makeApp("https://b.example")],
       postageStamps: [makeStamp("bb".repeat(32))],
     })
 

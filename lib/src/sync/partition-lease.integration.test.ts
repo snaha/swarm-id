@@ -132,7 +132,7 @@ async function seedStatePointer(
 ): Promise<void> {
   await partitionState.writeStatePointer({
     bee: bee as unknown as Bee,
-    stamper: createMockStamper() as unknown as Stamper,
+    stamper: createMockStamper(),
     backupSigner: BACKUP_SIGNER,
     swarmEncryptionKey: TEST_ENC_KEY,
     batchId: TEST_BATCH_ID,
@@ -157,7 +157,7 @@ function makeLease(opts: {
     batchDepth: TEST_BATCH_DEPTH,
     swarmEncryptionKey: TEST_ENC_KEY,
     backupSigner: BACKUP_SIGNER,
-    stamper: createMockStamper() as unknown as Stamper,
+    stamper: createMockStamper(),
     now: opts.now,
     guardMs: GUARD_MS,
     knownDeviceIds: opts.knownDeviceIds,
@@ -198,7 +198,7 @@ describe("readPartitionState / writePartitionState round-trip", () => {
     localCounter[100] = 5
     localCounter[200] = 12
 
-    const stamper = createMockStamper() as unknown as Stamper
+    const stamper = createMockStamper()
     await partitionState.writePartitionState({
       bee: bee as unknown as Bee,
       stamper,
@@ -231,7 +231,7 @@ describe("readPartitionState / writePartitionState round-trip", () => {
     localCounter[42] = 3
     const written = await partitionState.writePartitionState({
       bee: bee as unknown as Bee,
-      stamper: createMockStamper() as unknown as Stamper,
+      stamper: createMockStamper(),
       batchId: TEST_BATCH_ID,
       batchDepth: TEST_BATCH_DEPTH,
       partition: 0,
@@ -270,7 +270,7 @@ describe("readPartitionState / writePartitionState round-trip", () => {
 
     const localCounter = new Uint32Array(NUM_BUCKETS)
     localCounter[100] = 5 // chunk 0
-    const stamper = createMockStamper() as unknown as Stamper
+    const stamper = createMockStamper()
     const { referenceHex } = await partitionState.writePartitionState({
       bee: bee as unknown as Bee,
       stamper,
@@ -316,7 +316,7 @@ describe("readPartitionState / writePartitionState round-trip", () => {
   it("skips the reference + counter-chunk downloads when the pointer is unchanged", async () => {
     const localCounter = new Uint32Array(NUM_BUCKETS)
     localCounter[100] = 5
-    const stamper = createMockStamper() as unknown as Stamper
+    const stamper = createMockStamper()
     const { referenceHex: writtenRef } =
       await partitionState.writePartitionState({
         bee: bee as unknown as Bee,
@@ -372,7 +372,7 @@ describe("readPartitionState / writePartitionState round-trip", () => {
     const danglingRef = Binary.uint8ArrayToHex(new Uint8Array(64).fill(0x99))
     await partitionState.writeStatePointer({
       bee: bee as unknown as Bee,
-      stamper: createMockStamper() as unknown as Stamper,
+      stamper: createMockStamper(),
       backupSigner: BACKUP_SIGNER,
       swarmEncryptionKey: TEST_ENC_KEY,
       batchId: TEST_BATCH_ID,
@@ -400,7 +400,7 @@ describe("readPartitionState / writePartitionState round-trip", () => {
     localCounter[100] = 5
     await partitionState.writePartitionState({
       bee: bee as unknown as Bee,
-      stamper: createMockStamper() as unknown as Stamper,
+      stamper: createMockStamper(),
       batchId: TEST_BATCH_ID,
       batchDepth: TEST_BATCH_DEPTH,
       partition: 0,
@@ -499,7 +499,7 @@ describe("readPartitionState / writePartitionState round-trip", () => {
     vi.spyOn(Date, "now").mockReturnValue(longAgo)
     await partitionState.writePartitionState({
       bee: bee as unknown as Bee,
-      stamper: createMockStamper() as unknown as Stamper,
+      stamper: createMockStamper(),
       batchId: TEST_BATCH_ID,
       batchDepth: TEST_BATCH_DEPTH,
       partition: 0,
@@ -550,7 +550,7 @@ describe("readPartitionState / writePartitionState round-trip", () => {
     vi.spyOn(Date, "now").mockReturnValue(T0)
     await partitionState.writePartitionState({
       bee: bee as unknown as Bee,
-      stamper: createMockStamper() as unknown as Stamper,
+      stamper: createMockStamper(),
       batchId: TEST_BATCH_ID,
       batchDepth: TEST_BATCH_DEPTH,
       partition: 0,
@@ -690,7 +690,7 @@ describe("PartitionLease.acquire — seeds the incremental first publish", () =>
     published[5000] = 9 // chunk 2
     await partitionState.writePartitionState({
       bee: bee as unknown as Bee,
-      stamper: createMockStamper() as unknown as Stamper,
+      stamper: createMockStamper(),
       batchId: TEST_BATCH_ID,
       batchDepth: TEST_BATCH_DEPTH,
       partition: 0,
@@ -755,7 +755,7 @@ describe("PartitionLease.acquire — seeds the incremental first publish", () =>
     published[3000] = 7 // chunk 1
     await partitionState.writePartitionState({
       bee: bee as unknown as Bee,
-      stamper: createMockStamper() as unknown as Stamper,
+      stamper: createMockStamper(),
       batchId: TEST_BATCH_ID,
       batchDepth: TEST_BATCH_DEPTH,
       partition: 0,
@@ -800,7 +800,7 @@ describe("PartitionLease.acquire — seeds the incremental first publish", () =>
     published[100] = 5
     await partitionState.writePartitionState({
       bee: bee as unknown as Bee,
-      stamper: createMockStamper() as unknown as Stamper,
+      stamper: createMockStamper(),
       batchId: TEST_BATCH_ID,
       batchDepth: TEST_BATCH_DEPTH,
       partition: 0,
@@ -883,7 +883,7 @@ describe("PartitionLease.acquire — seeds the incremental first publish", () =>
       published[1000] = 3
       const setup = await partitionState.writePartitionState({
         bee: bee as unknown as Bee,
-        stamper: createMockStamper() as unknown as Stamper,
+        stamper: createMockStamper(),
         batchId: TEST_BATCH_ID,
         batchDepth: TEST_BATCH_DEPTH,
         partition: 0,
@@ -948,7 +948,7 @@ describe("PartitionLease.acquire — seeds the incremental first publish", () =>
     published[100] = 5
     await partitionState.writePartitionState({
       bee: bee as unknown as Bee,
-      stamper: createMockStamper() as unknown as Stamper,
+      stamper: createMockStamper(),
       batchId: TEST_BATCH_ID,
       batchDepth: TEST_BATCH_DEPTH,
       partition: 0,
@@ -1009,7 +1009,7 @@ describe("PartitionLease.acquire — unreadable partition state", () => {
     const target: UploadTarget = {
       mode: "stamper",
       bee: bee as unknown as Bee,
-      stamper: createMockStamper() as unknown as Stamper,
+      stamper: createMockStamper(),
     }
 
     // A readable chunk that is NOT numUtilizationChunks × 64 bytes — e.g. an
@@ -1041,7 +1041,7 @@ describe("PartitionLease.acquire — unreadable partition state", () => {
     const target: UploadTarget = {
       mode: "stamper",
       bee: bee as unknown as Bee,
-      stamper: createMockStamper() as unknown as Stamper,
+      stamper: createMockStamper(),
     }
 
     // A correctly-sized reference chunk whose entries all point at a counter
@@ -1131,7 +1131,7 @@ describe("PartitionLease.acquire — unreadable partition state", () => {
     localCounter[42] = 7
     await partitionState.writePartitionState({
       bee: bee as unknown as Bee,
-      stamper: createMockStamper() as unknown as Stamper,
+      stamper: createMockStamper(),
       batchId: TEST_BATCH_ID,
       batchDepth: TEST_BATCH_DEPTH,
       partition: 0,
@@ -1224,7 +1224,7 @@ describe("PartitionLease.acquire — unreadable partition state", () => {
     await expect(
       partitionState.writePartitionState({
         bee: bee as unknown as Bee,
-        stamper: createMockStamper() as unknown as Stamper,
+        stamper: createMockStamper(),
         batchId: TEST_BATCH_ID,
         batchDepth: TEST_BATCH_DEPTH,
         partition: 0,
@@ -1269,7 +1269,7 @@ describe("PartitionLease.acquire — fresh scan", () => {
     const NOW = 5_000_000
     await writePartitionLock({
       bee: bee as unknown as Bee,
-      stamper: createMockStamper() as unknown as Stamper,
+      stamper: createMockStamper(),
       backupSigner: BACKUP_SIGNER,
       swarmEncryptionKey: TEST_ENC_KEY,
       batchId: TEST_BATCH_ID,
@@ -1301,7 +1301,7 @@ describe("PartitionLease.acquire — fresh scan", () => {
 
     await writePartitionLock({
       bee: bee as unknown as Bee,
-      stamper: createMockStamper() as unknown as Stamper,
+      stamper: createMockStamper(),
       backupSigner: BACKUP_SIGNER,
       swarmEncryptionKey: TEST_ENC_KEY,
       batchId: TEST_BATCH_ID,
@@ -1350,7 +1350,7 @@ describe("PartitionLease.acquire — fresh scan", () => {
     const nowSpy = vi.spyOn(Date, "now").mockReturnValue(PAST)
     await partitionState.writePartitionState({
       bee: bee as unknown as Bee,
-      stamper: createMockStamper() as unknown as Stamper,
+      stamper: createMockStamper(),
       batchId: TEST_BATCH_ID,
       batchDepth: TEST_BATCH_DEPTH,
       partition: 0,
@@ -1363,7 +1363,7 @@ describe("PartitionLease.acquire — fresh scan", () => {
     // DEVICE_B's lock is expired at NOW (it departed without releasing).
     await writePartitionLock({
       bee: bee as unknown as Bee,
-      stamper: createMockStamper() as unknown as Stamper,
+      stamper: createMockStamper(),
       backupSigner: BACKUP_SIGNER,
       swarmEncryptionKey: TEST_ENC_KEY,
       batchId: TEST_BATCH_ID,
@@ -1394,7 +1394,7 @@ describe("PartitionLease.acquire — fresh scan", () => {
 
   it("returns read-only when every partition has a live foreign holder", async () => {
     const NOW = 5_000_000
-    const stamper = createMockStamper() as unknown as Stamper
+    const stamper = createMockStamper()
     for (let p = 0; p < PARTITION_COUNT; p++) {
       await writePartitionLock({
         bee: bee as unknown as Bee,
@@ -1557,7 +1557,7 @@ describe("acquirePartitionLock — self-refresh through a frozen-cache read (reg
     // Seed our own (older-generation) claim on p0.
     await writePartitionLock({
       bee: bee as unknown as Bee,
-      stamper: createMockStamper() as unknown as Stamper,
+      stamper: createMockStamper(),
       backupSigner: BACKUP_SIGNER,
       swarmEncryptionKey: TEST_ENC_KEY,
       batchId: TEST_BATCH_ID,
@@ -1601,7 +1601,7 @@ describe("acquirePartitionLock — self-refresh through a frozen-cache read (reg
 
     const result = await acquirePartitionLock({
       bee: bee as unknown as Bee,
-      stamper: createMockStamper() as unknown as Stamper,
+      stamper: createMockStamper(),
       backupSigner: BACKUP_SIGNER,
       swarmEncryptionKey: TEST_ENC_KEY,
       batchId: TEST_BATCH_ID,
@@ -1665,7 +1665,7 @@ describe("PartitionLease.acquire — unknown-holder dual-acquire guard (regressi
     // deviceId-independent occupancy channel the fix adds.
     await writePartitionLock({
       bee: bee as unknown as Bee,
-      stamper: createMockStamper() as unknown as Stamper,
+      stamper: createMockStamper(),
       backupSigner: BACKUP_SIGNER,
       swarmEncryptionKey: TEST_ENC_KEY,
       batchId: TEST_BATCH_ID,
@@ -1725,7 +1725,7 @@ describe("PartitionLease.acquire — solo-clean guard skip", () => {
       batchDepth: TEST_BATCH_DEPTH,
       swarmEncryptionKey: TEST_ENC_KEY,
       backupSigner: BACKUP_SIGNER,
-      stamper: createMockStamper() as unknown as Stamper,
+      stamper: createMockStamper(),
       guardMs: BIG_GUARD_MS,
       knownDeviceIds: opts.knownDeviceIds,
       intentGuardWindowMs: 0,
@@ -1815,7 +1815,7 @@ describe("PartitionLease.refresh", () => {
 
 describe("writePartitionState — incremental", () => {
   it("re-uploads only changed chunks (unchanged refs retained) and reads back the full counter", async () => {
-    const stamper = createMockStamper() as unknown as Stamper
+    const stamper = createMockStamper()
     const { numUtilizationChunks, bucketsPerChunk } =
       getChunkLayout(TEST_BATCH_DEPTH)
 
@@ -1880,7 +1880,7 @@ describe("writePartitionState — incremental", () => {
   })
 
   it("does a full publish when no previous refs are supplied", async () => {
-    const stamper = createMockStamper() as unknown as Stamper
+    const stamper = createMockStamper()
     const { numUtilizationChunks } = getChunkLayout(TEST_BATCH_DEPTH)
     const counter = new Uint32Array(NUM_BUCKETS)
     counter[1] = 1
@@ -1908,7 +1908,7 @@ describe("writePartitionState — incremental", () => {
   // (never past it into an acked slot). See the SAFETY INVARIANT note in
   // partition-lease.ts (`claimPartition`).
   it("retains the acked ref when the seed counter is ahead (unacked write); reader resumes at the acked floor", async () => {
-    const stamper = createMockStamper() as unknown as Stamper
+    const stamper = createMockStamper()
     const { bucketsPerChunk } = getChunkLayout(TEST_BATCH_DEPTH)
 
     // 1. The last ACKED publish: bucket 100 at counter 5.
@@ -2253,7 +2253,7 @@ describe("PartitionLease.release — generation fencing (#349)", () => {
 describe("PartitionLease.refreshFromSwarm / isActive / heldPartition", () => {
   it("reports live holders across partitions", async () => {
     const NOW = 5_000_000
-    const stamper = createMockStamper() as unknown as Stamper
+    const stamper = createMockStamper()
     // DEVICE_B holds partition 1 (live).
     await writePartitionLock({
       bee: bee as unknown as Bee,
@@ -2324,7 +2324,7 @@ describe("PartitionLease.acquire — intent round (Phase 2)", () => {
     // intent round DEVICE_A would bind partition 0 — the disjoint-gateway bug.
     await writePartitionIntent({
       bee: bee as unknown as Bee,
-      stamper: createMockStamper() as unknown as Stamper,
+      stamper: createMockStamper(),
       backupSigner: BACKUP_SIGNER,
       swarmEncryptionKey: TEST_ENC_KEY,
       batchId: TEST_BATCH_ID,
@@ -2362,7 +2362,7 @@ describe("PartitionLease.acquire — intent round (Phase 2)", () => {
   it("wins and binds when a rival advertises a later intent", async () => {
     await writePartitionIntent({
       bee: bee as unknown as Bee,
-      stamper: createMockStamper() as unknown as Stamper,
+      stamper: createMockStamper(),
       backupSigner: BACKUP_SIGNER,
       swarmEncryptionKey: TEST_ENC_KEY,
       batchId: TEST_BATCH_ID,
@@ -2413,7 +2413,7 @@ describe("PartitionLease.acquire — intent round (Phase 2)", () => {
     // partition we already hold must NOT be gated by the intent round.
     await writePartitionIntent({
       bee: bee as unknown as Bee,
-      stamper: createMockStamper() as unknown as Stamper,
+      stamper: createMockStamper(),
       backupSigner: BACKUP_SIGNER,
       swarmEncryptionKey: TEST_ENC_KEY,
       batchId: TEST_BATCH_ID,
@@ -2449,7 +2449,7 @@ describe("PartitionLease.acquire — holder presence beacons (gateway holder-exi
   }) {
     return writePartitionIntent({
       bee: bee as unknown as Bee,
-      stamper: createMockStamper() as unknown as Stamper,
+      stamper: createMockStamper(),
       backupSigner: BACKUP_SIGNER,
       swarmEncryptionKey: TEST_ENC_KEY,
       batchId: TEST_BATCH_ID,
@@ -2551,7 +2551,7 @@ describe("PartitionLease.acquire — holder presence beacons (gateway holder-exi
     // intent round), not treat it as held.
     await writePartitionIntent({
       bee: bee as unknown as Bee,
-      stamper: createMockStamper() as unknown as Stamper,
+      stamper: createMockStamper(),
       backupSigner: BACKUP_SIGNER,
       swarmEncryptionKey: TEST_ENC_KEY,
       batchId: TEST_BATCH_ID,
@@ -2723,7 +2723,7 @@ describe("PartitionLease.refresh — occupancy displacement vs a PRUNED peer", (
   }) {
     return writePartitionOccupancy({
       bee: bee as unknown as Bee,
-      stamper: createMockStamper() as unknown as Stamper,
+      stamper: createMockStamper(),
       backupSigner: BACKUP_SIGNER,
       swarmEncryptionKey: TEST_ENC_KEY,
       batchId: TEST_BATCH_ID,

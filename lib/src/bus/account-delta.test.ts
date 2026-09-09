@@ -149,6 +149,7 @@ describe("accountDeltaSnapshot", () => {
         createdAt: CONNECTED_AT,
         lastModified: CONNECTED_AT,
         devices: [],
+        partitionCount: 1,
       },
       connectedApps,
       postageStamps: [],

@@ -8,7 +8,7 @@ import {
   deserializeAccountStateSnapshot,
   AccountStateSnapshotSchemaV1,
 } from "./account-state-snapshot"
-import type { Account } from "../schemas"
+import type { SignedInAccount } from "../schemas"
 import {
   TEST_ETH_ADDRESS_HEX,
   TEST_BATCH_ID_HEX,
@@ -25,7 +25,10 @@ import {
  * Helper: build a snapshot from a nested account (apps + stamps are read off
  * the account; the wire snapshot strips secrets).
  */
-function serializeFromAccount(account: Account) {
+// `Account` is the signed-in | signed-out union; only the signed-in half has
+// the fields a snapshot projects, so narrow here rather than optional-chaining
+// every read below.
+function serializeFromAccount(account: SignedInAccount) {
   return serializeAccountStateSnapshot({
     accountId: account.id.toHex(),
     metadata: {
@@ -36,6 +39,9 @@ function serializeFromAccount(account: Account) {
       createdAt: account.createdAt,
       lastModified: Date.now(),
       devices: account.devices,
+      // The schema defaults this to 1; an account written before
+      // partitioning has none.
+      partitionCount: account.partitionCount ?? 1,
     },
     connectedApps: account.connectedApps,
     postageStamps: account.postageStamps,
