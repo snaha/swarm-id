@@ -63,6 +63,8 @@ const IDLE_YIELD_MS = 30_000
 const PEER_YIELD_MIN_IDLE_MS = 3_000
 const INTENT_LIVENESS_GRACE_MS = 30_000
 
+/** How long a disconnected session is watched for coming back on its own. */
+const DISCONNECT_SETTLE_MS = 5_000
 /** Long enough for a seeded device to authenticate from storage, or for one
  *  popup round trip and a retry. */
 const CONNECT_TIMEOUT_MS = 60_000
@@ -258,9 +260,7 @@ class Device {
       // The label and the message are separate elements; take the card's text.
       .then(async () => {
         const main = await page.getByRole('main').innerText()
-        return (
-          /Error:\s*([^\n]*)\n?([^\n]*)/.exec(main)?.slice(1).join(' ').trim() ?? 'unknown error'
-        )
+        return /Error:\s*([^\n]*)/.exec(main)?.[1].trim() ?? 'unknown error'
       })
     const outcome = await Promise.race([started.then(() => undefined), failed])
     if (outcome !== undefined) throw new Error(`${this.label}: upload failed — ${outcome}`)
@@ -317,6 +317,14 @@ class Device {
     await page.getByRole('button', { name: /[0-9a-fA-F]{6}\.\.\.[0-9a-fA-F]{4}/ }).click()
     await page.getByRole('button', { name: 'Disconnect' }).click()
     await expect(page.getByText(PARTITION_LINE)).toBeHidden()
+    // And it stays disconnected: a session that comes back by itself a few
+    // seconds later, its coordinator still holding the partition, is a
+    // product failure this scenario exists to see (#712), not a flake.
+    await sleep(DISCONNECT_SETTLE_MS)
+    await expect(
+      page.getByText(PARTITION_LINE),
+      `${this.label}: the session came back on its own after Disconnect`,
+    ).toBeHidden()
   }
 
   /** What this device's tabs show right now — the sidebar and the harness
