@@ -47,7 +47,21 @@ export type Serializer<T> = (data: T) => Record<string, unknown>
 /**
  * Listener function for storage change events
  */
-export type StorageChangeListener<T> = (data: T[]) => void
+/**
+ * What a listener learns about a write besides the data. `folded` is set by a
+ * writer that merged a peer's change into the document (a bus delta, a Swarm
+ * fold) rather than making one of its own: another instance in the same
+ * window must not publish that write back at the peer (#707). Absent for a
+ * write from another window, whose origin the `storage` event cannot carry.
+ */
+export interface StorageChange {
+  folded: boolean
+}
+
+export type StorageChangeListener<T> = (
+  data: T[],
+  change?: StorageChange,
+) => void
 
 /**
  * Options for versioned storage
@@ -140,6 +154,8 @@ interface SameWindowWriteDetail {
   key: string
   /** The writing manager, so it can skip notifying itself. */
   source: object
+  /** See `StorageChange.folded`. */
+  folded?: boolean
 }
 
 /**
@@ -206,7 +222,7 @@ export class VersionedStorageManager<T> {
         return
 
       const data = this.load()
-      this.notifyListeners(data)
+      this.notifyListeners(data, detail.folded ? { folded: true } : undefined)
     }
 
     window.addEventListener(
@@ -236,11 +252,11 @@ export class VersionedStorageManager<T> {
   /**
    * Broadcast a write to other manager instances in this window.
    */
-  private notifySameWindow(): void {
+  private notifySameWindow(folded?: boolean): void {
     if (typeof window === "undefined") return
     window.dispatchEvent(
       new CustomEvent<SameWindowWriteDetail>(SAME_WINDOW_WRITE_EVENT, {
-        detail: { key: this.options.key, source: this },
+        detail: { key: this.options.key, source: this, folded },
       }),
     )
   }
@@ -248,10 +264,10 @@ export class VersionedStorageManager<T> {
   /**
    * Notify all listeners of data changes
    */
-  private notifyListeners(data: T[]): void {
+  private notifyListeners(data: T[], change?: StorageChange): void {
     for (const listener of this.listeners) {
       try {
-        listener(data)
+        listener(data, change)
       } catch (e) {
         console.error(
           `[${this.options.loggerName ?? "Storage"}] Listener error:`,
@@ -305,7 +321,7 @@ export class VersionedStorageManager<T> {
   /**
    * Save data to storage
    */
-  save(data: T[]): void {
+  save(data: T[], options?: { folded?: boolean }): void {
     try {
       // Apply serializer if provided
       const serialized = this.options.serializer
@@ -318,7 +334,7 @@ export class VersionedStorageManager<T> {
       }
 
       this.options.storage.setItem(this.options.key, JSON.stringify(wrapped))
-      this.notifySameWindow()
+      this.notifySameWindow(options?.folded)
     } catch (e) {
       console.error(`[${this.options.loggerName ?? "Storage"}] Save failed:`, e)
     }

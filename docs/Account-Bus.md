@@ -355,13 +355,21 @@ Each landed as its own PR chain, in this order:
    braces — but without it a peer holding one account's room keys could write into another
    account co-resident on the device.
 
-   One echo does survive, bounded: with a dApp tab open, the fold's storage write reaches an
-   _unpartitioned_ proxy iframe as a `storage` event, and that iframe republishes the merged
-   snapshot (`schedulePublish("change")`). It terminates after that one round trip — LWW
-   converges, and an identical-bytes `setItem` fires no further storage event — so it is a
-   trailing confirmation of the merge, not a loop. This is also why nothing on the bus may
-   stamp a fresh clock into the snapshot on every publish: it would turn that one round trip
-   into a loop (see Presence).
+   The same shell runs _inside_ the proxy iframe, so a fold happens there too, beside the
+   proxy — and the storage manager tells other instances in the same window about every
+   write (`notifySameWindow`). A folded write carries that fact (`StorageChange.folded`), and
+   the proxy reconciles it as it would a bus delta, without publishing: republishing it
+   stamped a fresh snapshot clock on every hop, and two devices publishing at each other
+   every few seconds was the result
+   ([#707](https://github.com/snaha/swarm-id/issues/707)).
+
+   One echo does survive, bounded: with a SwarmID tab open beside a dApp tab, the tab's fold
+   reaches the _unpartitioned_ proxy iframe as a cross-window `storage` event, which carries
+   no origin, and that iframe republishes the merged snapshot (`schedulePublish("change")`).
+   It terminates after that one round trip — LWW converges, and an identical-bytes `setItem`
+   fires no further storage event — so it is a trailing confirmation of the merge, not a
+   loop. This is also why nothing on the bus may stamp a fresh clock into the snapshot on
+   every publish: it would turn that one round trip into a loop (see Presence).
 
 6. **Presence** (#655): the heartbeat above, in the proxy and the SwarmID tab, feeding the
    rival set and the dev device list's Online badge.

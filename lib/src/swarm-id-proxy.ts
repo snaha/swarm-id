@@ -470,9 +470,9 @@ export class SwarmIdProxy {
     // change that can affect auth or derived ConnectionInfo.
     const accountsManager = createAccountsStorageManager()
     this.unsubscribeStorageListeners.push(
-      accountsManager.subscribe(() => {
+      accountsManager.subscribe((_, change) => {
         this.enqueueReconcile("handleAccountStorageChange", () =>
-          this.handleAccountStorageChange(),
+          this.handleAccountStorageChange(change?.folded ? "fold" : "storage"),
         )
       }),
     )
@@ -578,8 +578,18 @@ export class SwarmIdProxy {
    * disconnect) AND derived-ConnectionInfo changes (default-stamp change, new
    * stamp purchased, account rename) — all of which now live in one document.
    */
-  private async handleAccountStorageChange(): Promise<void> {
-    await this.reevaluateConnection("storage")
+  /**
+   * `"fold"`: the shell sharing this window (the identity UI runs inside the
+   * proxy iframe too) merged a peer's delta into the document. That is the
+   * peer's change, already known to the room, so it reconciles the way a
+   * bus delta does — no publish. Republishing it stamped a fresh clock on
+   * every hop and kept two devices publishing at each other every few
+   * seconds (#707).
+   */
+  private async handleAccountStorageChange(
+    source: "storage" | "fold" = "storage",
+  ): Promise<void> {
+    await this.reevaluateConnection(source === "fold" ? "bus" : "storage")
   }
 
   /**

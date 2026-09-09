@@ -1768,6 +1768,35 @@ describe("SwarmIdProxy partitioned write enablement", () => {
       }
     })
 
+    // The shell inside the proxy iframe folds a peer's delta into the shared
+    // document, and the manager tells the proxy's own instance in the same
+    // window. That write is the peer's change, not this device's: publishing
+    // it back is the echo that kept two devices publishing at each other every
+    // few seconds (#707).
+    it("does not publish a delta for a write that folded a peer's change", async () => {
+      const busChannel = await hydratedSession()
+      const published: Record<string, unknown>[] = []
+      busChannel.onmessage = (event) =>
+        published.push(event.data as Record<string, unknown>)
+      try {
+        await (
+          proxy as unknown as {
+            handleAccountStorageChange(
+              source: "storage" | "fold",
+            ): Promise<void>
+          }
+        ).handleAccountStorageChange("fold")
+
+        // Past the publish debounce, with room to spare.
+        await new Promise((resolve) => setTimeout(resolve, 2500))
+        expect(
+          published.filter((m) => m.type === "account-delta"),
+        ).toHaveLength(0)
+      } finally {
+        busChannel.close()
+      }
+    })
+
     // The other half: a context that CAN see the change relays it. Nothing on
     // the wire may carry `appSecret` — the receiver may be an iframe embedded
     // by a different dApp, which the popup handshake never hands one to.
