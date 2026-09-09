@@ -7,7 +7,9 @@ import { defineConfig, devices } from '@playwright/test'
  * browser contexts of one account sharing two write partitions, driven through
  * the demo the way a person drives it. Minutes per run by construction — the
  * lease TTL, the idle yield and the beacon grace are each 30 s and the suite
- * waits them out — so it is opt-in and never part of `pnpm test:e2e` or CI:
+ * waits them out — so it is not part of `pnpm test:e2e`. It runs on its own
+ * workflow (`.github/workflows/three-devices.yml`): on a PR that touches the
+ * lease seams, nightly on main, and on demand. Locally:
  *
  *   pnpm dev:local                      # cluster + chain + solver + apps
  *   pnpm test:devices                   # chromium
@@ -26,7 +28,9 @@ export default defineConfig({
   fullyParallel: false,
   workers: 1,
   globalSetup: './tests/global-setup-devices.ts',
-  reporter: 'list',
+  // The list is what the job log shows, verdicts and skip reasons alike; the
+  // HTML report is what gets uploaded when something fails.
+  reporter: process.env.CI ? [['list'], ['html', { open: 'never' }]] : 'list',
   timeout: TEST_TIMEOUT_MS,
   expect: { timeout: 15_000 },
   use: {
