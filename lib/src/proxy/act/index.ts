@@ -12,8 +12,7 @@
  */
 
 import type { BeeRequestOptions, UploadOptions } from "@ethersphere/bee-js"
-import type { ChunkDownloader } from "../download-data"
-import type { ChunkClient } from "../upload"
+import type { ChunkClient } from "../types"
 import type { UploadProgress } from "../types"
 import { uploadData, type UploadTarget } from "../upload"
 import { downloadDataWithChunkAPI } from "../download-data"
@@ -293,7 +292,7 @@ export async function createActForContent(
  * @returns Decrypted content reference (hex string)
  */
 export async function decryptActReference(
-  bee: ChunkDownloader,
+  bee: ChunkClient,
   encryptedReference: string,
   historyReference: string,
   publisherPubKeyHex: string,
@@ -721,7 +720,7 @@ export async function revokeGranteesFromAct(
  * Get grantees from an ACT
  */
 export async function getGranteesFromAct(
-  bee: ChunkDownloader,
+  bee: ChunkClient,
   historyReference: string,
   publisherCandidates: ActKeyCandidates,
   requestOptions?: BeeRequestOptions,

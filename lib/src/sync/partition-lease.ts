@@ -31,7 +31,7 @@ import {
   Reference,
   type Stamper,
 } from "@ethersphere/bee-js"
-import type { ChunkClient } from "../proxy/upload"
+import type { ChunkClient } from "../proxy/types"
 import { uint8ArrayToHex } from "../utils/hex"
 import { withTimeout } from "../utils/promise"
 import { SYNC_READ_TIMEOUT_MS } from "./timing-constants"

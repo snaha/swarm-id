@@ -36,10 +36,8 @@ vi.mock("../download-data", () => ({
 }))
 
 import { uploadData } from "../upload"
-import {
-  downloadDataWithChunkAPI,
-  type ChunkDownloader,
-} from "../download-data"
+import { downloadDataWithChunkAPI } from "../download-data"
+import type { ChunkClient } from "../types"
 
 // Helper to create a random 32-byte array
 function randomBytes(length: number): Uint8Array {
@@ -105,7 +103,7 @@ function createContentAddressedUploadMock() {
   }
 
   const downloadMock = async (
-    _bee: ChunkDownloader,
+    _bee: ChunkClient,
     ref: string,
   ): Promise<Uint8Array> => {
     const data = storage.get(ref)

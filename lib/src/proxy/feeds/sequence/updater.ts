@@ -8,7 +8,7 @@
  */
 
 import { Binary } from "cafe-utility"
-import type { ChunkClient } from "../../upload"
+import type { ChunkClient } from "../../types"
 import type { Stamper } from "@ethersphere/bee-js"
 import { EthAddress, Topic, PrivateKey, Identifier } from "@ethersphere/bee-js"
 import { uploadSOC, type UploadTarget } from "../../upload"

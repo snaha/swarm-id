@@ -17,7 +17,7 @@ import {
   Reference,
 } from "@ethersphere/bee-js"
 import type { Bee, Stamper, UploadResult } from "@ethersphere/bee-js"
-import type { ChunkClient } from "../../upload"
+import type { ChunkClient } from "../../types"
 import { calculateChunkAddress } from "../../../chunk"
 import {
   NUM_BUCKETS,

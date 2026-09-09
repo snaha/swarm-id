@@ -38,7 +38,7 @@
  */
 
 import { BatchId, PrivateKey } from "@ethersphere/bee-js"
-import type { ChunkClient } from "../proxy/upload"
+import type { ChunkClient } from "../proxy/types"
 import {
   LEASE_TTL_MS,
   LEASE_REFRESH_MS,

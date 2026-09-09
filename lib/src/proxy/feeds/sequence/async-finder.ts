@@ -9,14 +9,14 @@
  */
 
 import type { EthAddress, Topic, BeeRequestOptions } from "@ethersphere/bee-js"
-import type { ChunkDownloader } from "../../download-data"
+import type { ChunkClient } from "../../types"
 import type { SequentialFinder, SequentialLookupResult } from "./types"
 import { SyncSequentialFinder } from "./finder"
 
 export class AsyncSequentialFinder implements SequentialFinder {
   private readonly syncFinder: SyncSequentialFinder
 
-  constructor(bee: ChunkDownloader, topic: Topic, owner: EthAddress) {
+  constructor(bee: ChunkClient, topic: Topic, owner: EthAddress) {
     this.syncFinder = new SyncSequentialFinder(bee, topic, owner)
   }
 

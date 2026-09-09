@@ -37,7 +37,7 @@ import {
   Topic,
   type Stamper,
 } from "@ethersphere/bee-js"
-import type { ChunkClient } from "../proxy/upload"
+import type { ChunkClient } from "../proxy/types"
 import { Binary } from "cafe-utility"
 import { z } from "zod"
 import {

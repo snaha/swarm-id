@@ -31,11 +31,8 @@ import {
 } from "../chunk"
 import { Binary, type Chunk as CafeChunk } from "cafe-utility"
 import type { UtilizationStoreDB } from "../storage/utilization-store"
-import {
-  uploadChunk,
-  type ChunkClient,
-  type UploadTarget,
-} from "../proxy/upload"
+import { uploadChunk, type UploadTarget } from "../proxy/upload"
+import type { ChunkClient } from "../proxy/types"
 import { tryCreateTag } from "./tag"
 import { lockSocAddress } from "./lock-soc"
 import { deriveSecret } from "./key-derivation"

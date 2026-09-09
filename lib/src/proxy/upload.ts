@@ -15,9 +15,7 @@
  */
 
 import { Reference, PrivateKey, Identifier, Span } from "@ethersphere/bee-js"
-import type { ChunkDownloader } from "./download-data"
 import type {
-  Bee,
   BeeRequestOptions,
   Stamper,
   UploadOptions,
@@ -41,7 +39,7 @@ import {
 } from "./chunking"
 import { ChunkUploadStream } from "./chunk-upload-stream"
 import { marshalEnvelope } from "./stamp-marshal"
-import type { ChunkReference, UploadProgress } from "./types"
+import type { ChunkClient, ChunkReference, UploadProgress } from "./types"
 import type { StampWorkerPool } from "./stamp-worker-pool"
 import { tryCreateTag } from "../utils/tag"
 import { uint8ArrayToHex } from "../utils/hex"
@@ -70,17 +68,6 @@ export class SocUploadError extends Error {
 // ============================================================================
 // Types
 // ============================================================================
-
-/**
- * The slice of a Bee client that writing chunks needs.
- *
- * `ChunkDownloader` plus the two calls an upload makes — `uploadChunk` and,
- * for progress tracking, `createTag`. Anything that both reads and writes
- * chunks takes this rather than a whole `Bee`; the store-backed mock in the
- * tests implements exactly these four members.
- */
-export type ChunkClient = ChunkDownloader &
-  Pick<Bee, "uploadChunk" | "createTag">
 
 /**
  * Upload target: stamper-based (user has postage batch) or subsidised gateway

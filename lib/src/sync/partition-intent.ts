@@ -61,7 +61,7 @@ import {
   type EthAddress,
   type Stamper,
 } from "@ethersphere/bee-js"
-import type { ChunkClient } from "../proxy/upload"
+import type { ChunkClient } from "../proxy/types"
 import { Binary } from "cafe-utility"
 import { downloadEncryptedSOC } from "../proxy/download-data"
 import { uploadSOC, type UploadTarget } from "../proxy/upload"

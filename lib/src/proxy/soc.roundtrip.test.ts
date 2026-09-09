@@ -14,12 +14,9 @@ import { describe, it, expect, beforeEach, afterEach } from "vitest"
 import { Identifier, PrivateKey, EthAddress } from "@ethersphere/bee-js"
 import { Binary } from "cafe-utility"
 import { uploadSOC, type UploadTarget } from "./upload"
+import { downloadEncryptedSOC, downloadSOC } from "./download-data"
 import {
-  downloadEncryptedSOC,
-  downloadSOC,
-  type ChunkDownloader,
-} from "./download-data"
-import {
+  MockBee,
   MockChunkStore,
   createTestSigner,
   mockFetch,
@@ -53,13 +50,8 @@ function createSubsidisedTarget(
 /**
  * Mock Bee for download that uses MockChunkStore
  */
-function createMockBee(store: MockChunkStore): ChunkDownloader {
-  return {
-    url: "http://localhost:1633",
-    async downloadChunk(reference: string): Promise<Uint8Array> {
-      return store.get(reference)
-    },
-  }
+function createMockBee(store: MockChunkStore): MockBee {
+  return new MockBee(store)
 }
 
 // ============================================================================

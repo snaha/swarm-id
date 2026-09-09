@@ -26,7 +26,7 @@ import {
   Reference,
   Topic,
 } from "@ethersphere/bee-js"
-import type { ChunkDownloader } from "../proxy/download-data"
+import type { ChunkClient } from "../proxy/types"
 import { z } from "zod"
 import {
   ConnectedAppSchemaV1,
@@ -265,7 +265,7 @@ export async function publishDeviceState(opts: {
  * Read a device's latest view, or `undefined` when its feed is empty/unreachable.
  */
 export async function readLatestDeviceState(opts: {
-  bee: ChunkDownloader
+  bee: ChunkClient
   accountId: string
   deviceId: string
   owner: EthAddress
