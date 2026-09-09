@@ -17,6 +17,7 @@ import {
   Reference,
 } from "@ethersphere/bee-js"
 import type { Bee, Stamper, UploadResult } from "@ethersphere/bee-js"
+import type { ChunkClient } from "../../upload"
 import { calculateChunkAddress } from "../../../chunk"
 import {
   NUM_BUCKETS,
@@ -61,7 +62,7 @@ export class MockChunkStore {
 /**
  * Mock Bee instance for testing
  */
-export class MockBee {
+export class MockBee implements ChunkClient {
   public readonly url = "http://localhost:1633"
   private store: MockChunkStore
   private tagCounter = 0
