@@ -1,0 +1,160 @@
+# The three-device partition scenarios (`ui/tests/three-devices.test.ts`) in
+# real browsers against a real cluster. Minutes per run by design — the lease
+# TTL, the idle yield and the beacon grace are each 30 s and the suite waits
+# them out — so it does not run on every change:
+#
+#   - on a PR that touches the lease seams or the suite itself (advisory: not a
+#     required check while #707 makes some scenarios skip on evidence),
+#   - nightly on main, so a regression is dated to a day rather than found by
+#     hand,
+#   - before every npm publish (`release.yml` calls it once release-please has
+#     cut the release; a red run stops the publish),
+#   - on demand from the Actions tab.
+#
+# The job log carries every verdict and every skip's reason; the HTML report
+# and the traces are uploaded when something fails.
+name: Three Devices
+
+on:
+  pull_request:
+    paths:
+      - 'lib/src/sync/**'
+      - 'lib/src/bus/**'
+      - 'lib/src/proxy/**'
+      - 'lib/src/swarm-id-proxy.ts'
+      - 'lib/src/utils/batch-utilization.ts'
+      - 'ui/src/lib/stores/account-bus.ts'
+      - 'ui/src/lib/stores/account-delta.ts'
+      - 'ui/src/routes/proxy/**'
+      - 'ui/tests/three-devices.test.ts'
+      - 'ui/tests/global-setup-devices.ts'
+      - 'ui/tests/helpers.ts'
+      - 'ui/tests/worker-faucet.ts'
+      - 'ui/playwright.devices.config.ts'
+      - '.github/workflows/three-devices.yml'
+  schedule:
+    - cron: '17 3 * * *'
+  workflow_dispatch:
+  workflow_call:
+
+# Cancel superseded runs on the same ref.
+concurrency:
+  group: three-devices-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  three-devices:
+    name: Three devices on two partitions
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          run_install: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: 'pnpm'
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Cache Playwright browsers
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml') }}
+
+      - name: Install Playwright browsers
+        working-directory: ./ui
+        timeout-minutes: 10
+        run: pnpm exec playwright install --with-deps chromium
+
+      - name: Build lib dependency
+        working-directory: ./lib
+        run: pnpm build
+
+      # The same image cache as the integration job: images only, never
+      # volumes, so the chain state baked into the image is always fresh —
+      # which is also what keeps the worker faucet stocked for every run.
+      - name: Cache Bee cluster images
+        id: bee-images
+        uses: actions/cache@v4
+        with:
+          path: /tmp/bee-images
+          key: bee-images-${{ hashFiles('pnpm-lock.yaml') }}-v1
+
+      - name: Load cached cluster images
+        if: steps.bee-images.outputs.cache-hit == 'true'
+        run: |
+          for f in /tmp/bee-images/*.tar; do docker load -i "$f"; done
+          docker images --filter 'reference=bee-compose:*'
+
+      - name: Start Bee cluster
+        run: pnpm dev:cluster:start
+
+      - name: Save cluster images to cache
+        if: steps.bee-images.outputs.cache-hit != 'true'
+        run: |
+          mkdir -p /tmp/bee-images
+          imgs=$(docker images --filter 'reference=bee-compose:*' --format '{{.Repository}}:{{.Tag}}')
+          echo "Saving images: $imgs"
+          docker save $imgs -o /tmp/bee-images/cluster.tar
+
+      - name: Wait for queen node to be ready
+        run: |
+          for i in $(seq 1 40); do
+            if curl -fsS http://localhost:1633/readiness 2>/dev/null | grep -q '"status":"ready"'; then
+              echo "Queen node is ready"
+              exit 0
+            fi
+            restarts=$(docker inspect -f '{{.RestartCount}}' bee-compose-queen 2>/dev/null || echo 0)
+            if [ "${restarts:-0}" -ge 3 ]; then
+              echo "::error::Queen node is crash-looping (RestartCount=$restarts)"
+              exit 1
+            fi
+            echo "Waiting for queen node... ($i/40, restarts=${restarts:-0})"
+            sleep 3
+          done
+          echo "::error::Queen node did not become ready in time"
+          exit 1
+
+      # The identity UI, the demo and the signaling server are started by the
+      # suite's own config (`webServer`), the way `pnpm dev` starts them.
+      - name: Run the three-device suite
+        working-directory: ./ui
+        run: pnpm test:devices
+        env:
+          CHAIN_RPC_URL: http://localhost:9545
+
+      - name: Dump cluster logs on failure
+        if: failure()
+        run: |
+          docker ps -a || true
+          echo "::group::blockchain logs"
+          pnpm dev:cluster logs blockchain --tail 200 || true
+          echo "::endgroup::"
+          echo "::group::queen logs"
+          pnpm dev:cluster logs queen --tail 300 || true
+          echo "::endgroup::"
+
+      - name: Stop Bee cluster
+        if: always()
+        run: pnpm dev:cluster stop || true
+
+      - name: Upload report and traces
+        uses: actions/upload-artifact@v4
+        if: failure() || cancelled()
+        with:
+          name: three-devices-report
+          path: |
+            ui/playwright-report/
+            ui/test-results/
+          retention-days: 7

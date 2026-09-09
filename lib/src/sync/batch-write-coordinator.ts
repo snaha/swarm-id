@@ -1188,6 +1188,8 @@ export class BatchWriteCoordinator {
     this.lastLeaseValidatedAt = 0
     this.deps.writeLeaseCache?.(undefined)
     this.emitLeaseChange()
+    // `ui/tests/three-devices.test.ts` reads this line as "a yield happened"
+    // (a teardown release logs nothing); reword it there too.
     console.info(
       `[BatchWriteCoordinator] Released idle partition ${yieldedPartition ?? "?"}; will re-acquire on next write.`,
     )

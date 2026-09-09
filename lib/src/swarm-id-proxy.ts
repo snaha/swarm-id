@@ -2922,6 +2922,8 @@ export class SwarmIdProxy {
           target,
         }),
       )
+      // `ui/tests/three-devices.test.ts` counts this line to tell a busy
+      // holder from an idle one (#707); reword it there too.
       console.info(
         `[Proxy] Published device state for ${snapshot.accountId} (partition ${coordinator.currentPartition})`,
       )
