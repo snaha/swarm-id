@@ -25,7 +25,6 @@ import {
 /**
  * Minimal Bee interface for download operations
  */
-type MinimalBee = Pick<Bee, "downloadChunk">
 
 // ============================================================================
 // Test Utilities
@@ -55,12 +54,12 @@ function createSubsidisedTarget(
 /**
  * Mock Bee for download that uses MockChunkStore
  */
-function createMockBee(store: MockChunkStore): MinimalBee {
+function createMockBee(store: MockChunkStore): Bee {
   return {
     async downloadChunk(reference: string): Promise<Uint8Array> {
       return store.get(reference)
     },
-  } as MinimalBee
+  } as unknown as Bee
 }
 
 // ============================================================================

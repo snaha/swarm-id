@@ -61,6 +61,7 @@ function makeSnapshot(overrides: {
     metadata: {
       accountName: overrides.accountName ?? "test account",
       defaultPostageStampBatchID: "cc".repeat(32),
+      publicKey: "00".repeat(33),
       createdAt: 1_000_000,
       lastModified: 1_000_000,
       devices: overrides.devices ?? [],

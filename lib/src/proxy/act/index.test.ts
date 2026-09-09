@@ -73,14 +73,6 @@ function createMockTarget(): UploadTarget {
   }
 }
 
-// Create a valid 32-byte hex reference for mocking
-function createMockReference(counter: number): string {
-  // Create a 32-byte array with the counter as the last byte
-  const bytes = new Uint8Array(32)
-  bytes[31] = counter
-  return toHex(bytes)
-}
-
 // Compute content hash using Swarm's BMT algorithm (same as MantarayNode)
 async function computeContentHash(data: Uint8Array): Promise<string> {
   const rootNode = await MerkleTree.root(data)

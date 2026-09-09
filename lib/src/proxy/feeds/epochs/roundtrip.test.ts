@@ -7,7 +7,7 @@
  * Based on the Go implementation tests from bee/pkg/feeds/epochs
  */
 
-import { describe, it, expect, beforeEach, afterEach, vi } from "vitest"
+import { describe, it, expect, beforeEach, afterEach } from "vitest"
 import { Binary } from "cafe-utility"
 import { PrivateKey } from "@ethersphere/bee-js"
 import { SyncEpochFinder } from "./finder"
@@ -27,7 +27,6 @@ import {
 } from "./test-utils"
 
 const SPAN_SIZE = 8
-const ENCRYPTION_KEY_SIZE = 32
 
 function createTestReference64(seed: number): Uint8Array {
   const ref = new Uint8Array(64)
@@ -114,67 +113,6 @@ function payloadWithTimestamp(
 
   return Binary.concatBytes(span, ts, reference)
 }
-
-/**
- * Mock uploadEncryptedSOC to store unencrypted SOC data in the mock store.
- *
- * The real function encrypts the payload, but the finder expects to read
- * unencrypted SOC data (identifier + signature + span + payload).
- * This mock bypasses encryption so the finder can parse the data directly.
- */
-vi.mock("../../upload-encrypted-data", async (importOriginal) => {
-  const mod =
-    await importOriginal<typeof import("../../upload-encrypted-data")>()
-  // eslint-disable-next-line no-restricted-syntax -- vi.mock factories are hoisted
-  // above the file's static imports, so a top-level `Binary` would be in the TDZ here.
-  const { Binary } = await import("cafe-utility")
-
-  return {
-    ...mod,
-    uploadEncryptedSOC: async (
-      bee: any,
-      _stamper: any,
-      signer: any,
-      identifier: any,
-      data: Uint8Array,
-    ) => {
-      // Create span (little-endian uint64 of data length)
-      const span = new Uint8Array(SPAN_SIZE)
-      const spanView = new DataView(span.buffer)
-      spanView.setBigUint64(0, BigInt(data.length), true)
-
-      // Sign: hash(identifier + hash(span + data))
-      const contentHash = Binary.keccak256(Binary.concatBytes(span, data))
-      const toSign = Binary.concatBytes(identifier.toUint8Array(), contentHash)
-      const signature = signer.sign(toSign)
-
-      // Build SOC data: identifier(32) + signature(65) + span(8) + payload
-      const socData = Binary.concatBytes(
-        identifier.toUint8Array(),
-        signature.toUint8Array(),
-        span,
-        data,
-      )
-
-      // Calculate SOC address: Keccak256(identifier + owner)
-      const owner = signer.publicKey().address()
-      const socAddress = Binary.keccak256(
-        Binary.concatBytes(identifier.toUint8Array(), owner.toUint8Array()),
-      )
-
-      // Store directly in mock store (bypassing fetch/encryption)
-      const store = bee.getStore()
-      const reference = Binary.uint8ArrayToHex(socAddress)
-      await store.put(reference, socData)
-
-      return {
-        socAddress,
-        encryptionKey: new Uint8Array(ENCRYPTION_KEY_SIZE),
-        tagUid: 0,
-      }
-    },
-  }
-})
 
 describe("Epoch Feeds Integration", () => {
   let store: MockChunkStore

@@ -590,9 +590,6 @@ describe("Bee Compatibility Tests", () => {
 
       const nonGranteePrivKey = hexToBytes(BEE_PRIVATE_KEYS.KEY_0)
 
-      // Test reference
-      const testReference = hexToBytes(BEE_TEST_REFERENCE)
-
       // Publisher creates ACT only for themselves and Key 2 (not Key 0)
       const accessKey = generateRandomKey()
 

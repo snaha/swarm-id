@@ -452,7 +452,6 @@ describe("ECDH key agreement integration", () => {
     // Publisher key pair
     const publisherPrivate = new Uint8Array(32)
     publisherPrivate[31] = 100
-    const publisherPublic = publicKeyFromPrivate(publisherPrivate)
 
     // Grantee 1
     const grantee1Private = new Uint8Array(32)

@@ -5,7 +5,11 @@ import { describe, it, expect, vi } from "vitest"
 
 // The lease primitive and the lock-SOC read are mocked so the coordinator's
 // acquire / refresh / demote paths are unit-testable without a live Bee node.
-const leaseController: { lease: unknown } = { lease: undefined }
+// Typed as the lease the factory builds, so the tests can read `.acquire`
+// and friends without casting at each use.
+const leaseController: { lease: ReturnType<typeof makeLease> } = {
+  lease: undefined as unknown as ReturnType<typeof makeLease>,
+}
 vi.mock("./partition-lease", () => ({
   PartitionLease: {
     fromSwarmEncryptionKey: vi.fn(async () => leaseController.lease),
@@ -63,10 +67,12 @@ function makeStamper(calls: string[]) {
     bindPartition: vi.fn(() => calls.push("bind")),
     setLeaseValidUntil: vi.fn(),
     buildLeaseLocalCounter: () => new Uint32Array(8),
-    getLocalCounter: () => new Uint32Array(8),
+    getLocalCounter: (): Uint32Array | undefined => new Uint32Array(8),
     // Persisted per-partition synced reference; the adopt fast path reads it to
     // seed the lease's heartbeat pointer. Default: none (fresh partition).
-    getSyncedReference: vi.fn(async (_partition: number) => undefined),
+    getSyncedReference: vi.fn(
+      async (_partition: number): Promise<string | undefined> => undefined,
+    ),
   }
 }
 
@@ -91,7 +97,7 @@ function makeLease(
   let leasedUntil = opts.leasedUntil
   return {
     hydrate: vi.fn(),
-    adoptIfLive: vi.fn(() => undefined),
+    adoptIfLive: vi.fn((): number | undefined => undefined),
     acquire: vi.fn(async () => {
       if (opts.acquireError) throw opts.acquireError
       const r = opts.acquireResult ?? {
@@ -409,8 +415,7 @@ describe("BatchWriteCoordinator.withWrite — commit-ordered ack", () => {
     // Held a partition lease, but the stamper exposes no local counter — the
     // commit publish would be silently skipped, acking an upload whose slots
     // were never reserved on Swarm. The coordinator must fail loudly instead.
-    stamper.getLocalCounter = (() =>
-      undefined) as typeof stamper.getLocalCounter
+    stamper.getLocalCounter = () => undefined
     const coordinator = new BatchWriteCoordinator(
       makeDeps({
         stamper: stamper as unknown as BatchWriteCoordinatorDeps["stamper"],
@@ -1320,11 +1325,11 @@ describe("BatchWriteCoordinator — stale refresh-tick guards", () => {
     const internals = coordinator as unknown as Internals
 
     // Held lease whose refresh is pending when teardown lands.
-    let resolveRefresh!: (ok: boolean) => void
+    let resolveRefresh!: (outcome: LeaseRefreshOutcome) => void
     const lease = makeLease({ partition: 0 })
     lease.refresh = vi.fn(
       () =>
-        new Promise<boolean>((resolve) => {
+        new Promise<LeaseRefreshOutcome>((resolve) => {
           resolveRefresh = resolve
         }),
     ) as typeof lease.refresh
@@ -1339,7 +1344,7 @@ describe("BatchWriteCoordinator — stale refresh-tick guards", () => {
     coordinator.teardown()
     writeLeaseCache.mockClear()
 
-    resolveRefresh(true)
+    resolveRefresh("held")
     await tick
 
     // The stale tick's tail must not re-write a live-looking snapshot into
@@ -1630,7 +1635,7 @@ describe("BatchWriteCoordinator — bus-accelerated leases (docs/Account-Bus.md)
   /** A read-only lease whose `acquire` blocks until the returned `let go` is
    *  called — the window where a peer's announcement actually lands. */
   function makeGatedLease(): {
-    lease: unknown
+    lease: ReturnType<typeof makeLease>
     acquire: ReturnType<typeof vi.fn>
     letGo: () => Promise<void>
   } {

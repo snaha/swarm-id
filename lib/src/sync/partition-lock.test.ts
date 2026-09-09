@@ -72,7 +72,7 @@ let stamper: Stamper
 beforeEach(() => {
   store = new MockChunkStore()
   bee = new MockBee(store)
-  stamper = createMockStamper() as unknown as Stamper
+  stamper = createMockStamper()
   mockFetch(store, OWNER)
 })
 

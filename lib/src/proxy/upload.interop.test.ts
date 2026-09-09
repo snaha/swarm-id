@@ -20,7 +20,7 @@
 
 import { describe, it, expect } from "vitest"
 import { MerkleTree } from "@ethersphere/bee-js"
-import type { Bee, Stamper } from "@ethersphere/bee-js"
+import type { Bee } from "@ethersphere/bee-js"
 import { uploadData, type UploadTarget } from "./upload"
 import { downloadDataWithChunkAPI } from "./download-data"
 import { SPAN_SIZE, UNENCRYPTED_REF_SIZE } from "../chunk"
@@ -51,7 +51,7 @@ function setup(): { bee: Bee; store: MockChunkStore; target: UploadTarget } {
   const target: UploadTarget = {
     mode: "stamper",
     bee,
-    stamper: createMockStamper() as unknown as Stamper,
+    stamper: createMockStamper(),
   }
   return { bee, store, target }
 }

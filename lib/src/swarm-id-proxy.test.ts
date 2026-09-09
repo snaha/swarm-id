@@ -22,6 +22,25 @@ import { Bee } from "@ethersphere/bee-js"
 
 import { DEFAULT_BEE_NODE_URL } from "./schemas"
 import { SwarmIdProxy } from "./swarm-id-proxy"
+
+/**
+ * A view of the proxy that admits to the private members these tests drive.
+ * `as never` compiles the spy call but types the result as `never`, so
+ * `.mockRejectedValue(...)` on it does not — invisible while test files were
+ * excluded from `tsc`.
+ */
+type ProxyInternals = {
+  loadAuthData: () => Promise<unknown>
+  handleDeriveAppSecret: (
+    message: { type: string; requestId: string; label: string },
+    event: MessageEvent,
+  ) => Promise<void>
+  authenticated: boolean
+  appSecret: string
+}
+
+const internals = (p: SwarmIdProxy): ProxyInternals =>
+  p as unknown as ProxyInternals
 import { deriveSecret, uint8ArrayToHex } from "./utils/key-derivation"
 import { STORAGE_KEY_NETWORK_SETTINGS } from "./types"
 
@@ -162,7 +181,7 @@ describe("SwarmIdProxy initialization failure (#420)", () => {
     )
 
   it("sends initError to the parent when parentIdentify handling throws", async () => {
-    vi.spyOn(proxy as never, "loadAuthData").mockRejectedValue(
+    vi.spyOn(internals(proxy), "loadAuthData").mockRejectedValue(
       new Error("storage exploded"),
     )
 
@@ -174,7 +193,7 @@ describe("SwarmIdProxy initialization failure (#420)", () => {
       },
       origin: PARENT_ORIGIN,
       source: parentWindow,
-    } as MessageEvent)
+    } as unknown as MessageEvent)
 
     expect(messagesOfType("proxyReady")).toHaveLength(0)
     const initErrors = messagesOfType("initError")
@@ -210,7 +229,7 @@ describe("SwarmIdProxy deriveAppSecret (#520)", () => {
   })
 
   const derive = (label: string) =>
-    (proxy as never)["handleDeriveAppSecret"](
+    internals(proxy).handleDeriveAppSecret(
       { type: "deriveAppSecret", requestId: "r1", label },
       { source, origin: PARENT_ORIGIN } as unknown as MessageEvent,
     )
@@ -219,8 +238,8 @@ describe("SwarmIdProxy deriveAppSecret (#520)", () => {
     source.postMessage.mock.calls[source.postMessage.mock.calls.length - 1][0]
 
   it("returns HMAC(appSecret, label) as bytes, stable and label-scoped", async () => {
-    ;(proxy as never)["authenticated"] = true
-    ;(proxy as never)["appSecret"] = APP_SECRET_HEX
+    internals(proxy).authenticated = true
+    internals(proxy).appSecret = APP_SECRET_HEX
 
     await derive("topic-seed")
     const first = lastMessage()

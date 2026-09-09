@@ -268,9 +268,11 @@ describe("createSyncAccount", () => {
 
     const result = await syncAccount(TEST_ETH_ADDRESS_HEX)
 
-    expect(result).toBeDefined()
-    expect(result!.status).toBe("success")
-    if (result!.status !== "success") return
+    // Narrow instead of asserting with `!`: the later reads of `result` are
+    // outside the `expect`, so only a real narrowing carries to them.
+    if (!result) throw new Error("expected syncAccount to return a result")
+    expect(result.status).toBe("success")
+    if (result.status !== "success") return
 
     // Phase 3a writes the device-state feed (the roster append is mocked here).
     expect(uploadCallCount).toBe(1)
@@ -422,9 +424,11 @@ describe("createSyncAccount", () => {
     })
 
     const result = await syncAccount(TEST_ETH_ADDRESS_HEX)
-    expect(result).toBeDefined()
-    expect(result!.status).toBe("success")
-    if (result!.status !== "success") return
+    // Narrow instead of asserting with `!`: the later reads of `result` are
+    // outside the `expect`, so only a real narrowing carries to them.
+    if (!result) throw new Error("expected syncAccount to return a result")
+    expect(result.status).toBe("success")
+    if (result.status !== "success") return
 
     // Last address should be the SOC address from epoch feed update
     const lastAddress = result.chunkAddresses[result.chunkAddresses.length - 1]

@@ -98,9 +98,10 @@ vi.mock("./bus/signaling-transport", () => ({
 const SLOW_YIELD_MS = vi.hoisted(() => 400)
 
 /** Devices the mocked `readRoster` reports for the account's Swarm roster. */
-const rosterDevices = vi.hoisted(
-  () => [] as { deviceId: string; createdAt: number; lastSignedInAt: number }[],
-)
+// Typed as the real `Device` so a test row that drifts from the schema —
+// a `name`, a `removedAt` — is a type error rather than a field Zod quietly
+// drops on the way through.
+const rosterDevices = vi.hoisted(() => [] as Device[])
 vi.mock("./sync", async (importActual) => {
   const actual = await importActual<typeof import("./sync")>()
   return { ...actual, readRoster: vi.fn(async () => rosterDevices) }
@@ -1987,7 +1988,9 @@ describe("SwarmIdProxy partitioned write enablement", () => {
                 lastConnectedAt: Date.now(),
                 // Strictly newer than the hydrated entry, so the fold cannot
                 // tie on a same-millisecond clock and keep the local pointer.
-                updatedAt: Date.now() + 1,
+                // #681 split the single `updatedAt` into per-field clocks; the
+                // one that ranks a drive pointer is `postageStampBatchIDAt`.
+                postageStampBatchIDAt: Date.now() + 1,
                 postageStampBatchID: new BatchId(OTHER_BATCH_ID_HEX),
               },
             ],
