@@ -18,9 +18,9 @@ export type PaymentMethod = 'widget' | 'built-in'
 export const WIDGET_LABEL = 'Pay with crypto (fund.bzz.limo)'
 export const BUILT_IN_LABEL = 'Pay with crypto (built in, experimental)'
 
-/** Why the size and lifespan on the form are only an estimate on this route. */
+/** Why the size and lifespan on the form are only a starting point on this route. */
 export const WIDGET_EXPLAINER =
-  'fund.bzz.limo opens in a popup and picks the drive’s size and lifespan itself, so the ones on the form are only an estimate of what you will pay.'
+  'fund.bzz.limo opens in a popup with the size and lifespan from the form as its defaults. Confirm or change them there — the drive gets what you buy in the popup.'
 
 /** What the built-in engine will ask for next, said before it is chosen. */
 export const BUILT_IN_EXPLAINER =
