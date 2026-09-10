@@ -59,7 +59,7 @@
 
   type SectionId = 'identity' | 'access' | 'keys' | 'phrase' | 'backup'
   /** What the unlock confirmation is for; completes once the seed decrypts. */
-  type UnlockTarget = 'private-key' | 'sharing-key' | 'phrase' | 'export' | 'change-method'
+  type UnlockTarget = 'private-key' | 'phrase' | 'export' | 'change-method'
 
   let name = $derived(account.name)
   let expanded = $state<Record<SectionId, boolean>>({
@@ -78,7 +78,10 @@
   // Reveals cache only their derived display value — never the raw seed, which
   // is zeroed the moment each ceremony finishes with it (issue #412).
   let revealedPrivateKey = $state<string | undefined>(undefined)
-  let revealedSharingKey = $state<string | undefined>(undefined)
+  // No unlock for this one: it derives from `derivationKey`, which sits in
+  // plaintext in storage while signed in, so a dialog would only pretend to
+  // guard it. The mask is a shoulder-surfing courtesy, nothing more.
+  let sharingKeyShown = $state(false)
   let revealedPhrase = $state<string[] | undefined>(undefined)
   // Seed held only across the change-method two-step ceremony; zeroed after.
   let changeMethodSeed: Uint8Array | undefined
@@ -107,18 +110,17 @@
   const sharingKey = $derived(deriveSharingKey(account.derivationKey))
   const sharingKeyDisplay = $derived(prefix0x(sharingKey.publicKey))
   const sharingAddress = $derived(new PublicKey(sharingKey.publicKey).address().toChecksum())
+  const sharingPrivateKeyDisplay = $derived(prefix0x(uint8ArrayToHex(sharingKey.secret)))
   const newPasswordValid = $derived(isNewPasswordValid(newPassword, verifyNewPassword))
 
   const unlockTitle = $derived(
     unlockTarget === 'private-key'
       ? 'Reveal private key'
-      : unlockTarget === 'sharing-key'
-        ? 'Reveal sharing private key'
-        : unlockTarget === 'phrase'
-          ? 'Reveal secret recovery phrase'
-          : unlockTarget === 'export'
-            ? 'Export backup'
-            : 'Change unlock method',
+      : unlockTarget === 'phrase'
+        ? 'Reveal secret recovery phrase'
+        : unlockTarget === 'export'
+          ? 'Export backup'
+          : 'Change unlock method',
   )
   const unlockDescription = $derived(
     unlockTarget === 'change-method'
@@ -168,11 +170,6 @@
   function complete(target: UnlockTarget, seed: Uint8Array) {
     if (target === 'private-key') {
       revealedPrivateKey = privateKeyFromEntropy(seed)
-      seed.fill(0)
-    } else if (target === 'sharing-key') {
-      // Derived from the in-memory derivation key; the unlock is the
-      // same "no one is watching" confirmation the private key gets.
-      revealedSharingKey = prefix0x(uint8ArrayToHex(sharingKey.secret))
       seed.fill(0)
     } else if (target === 'phrase') {
       revealedPhrase = phraseFromEntropy(seed).split(' ')
@@ -330,7 +327,7 @@
   description: string,
   revealed: string | undefined,
   what: string,
-  target: UnlockTarget,
+  onreveal: () => void,
 )}
   <div class="bg-muted flex flex-col gap-1 rounded-md p-4">
     {@render keyBlock(label, description)}
@@ -353,7 +350,7 @@
           size="icon"
           class="size-7 shrink-0"
           aria-label="Reveal {what.toLowerCase()}"
-          onclick={() => (unlockTarget = target)}
+          onclick={onreveal}
         >
           <Eye />
         </Button>
@@ -486,7 +483,7 @@
                 'Grants full control over your account. Never share it.',
                 revealedPrivateKey,
                 'Private key',
-                'private-key',
+                () => (unlockTarget = 'private-key'),
               )}
             </div>
           {/if}
@@ -517,9 +514,9 @@
               {@render secretRow(
                 'Sharing private key',
                 'Grants access to shared data. Never share it.',
-                revealedSharingKey,
+                sharingKeyShown ? sharingPrivateKeyDisplay : undefined,
                 'Sharing private key',
-                'sharing-key',
+                () => (sharingKeyShown = true),
               )}
             </div>
           {/if}
