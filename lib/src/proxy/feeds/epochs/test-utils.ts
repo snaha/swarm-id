@@ -10,14 +10,14 @@
 import { Binary, Optional } from "cafe-utility"
 import type { Chunk } from "cafe-utility"
 import {
+  Bee,
   PrivateKey,
   Topic,
   EthAddress,
   BatchId,
   Reference,
 } from "@ethersphere/bee-js"
-import type { Bee, Stamper, UploadResult } from "@ethersphere/bee-js"
-import type { ChunkClient } from "../../types"
+import type { Stamper, Tag, UploadResult } from "@ethersphere/bee-js"
 import { calculateChunkAddress } from "../../../chunk"
 import {
   NUM_BUCKETS,
@@ -60,27 +60,20 @@ export class MockChunkStore {
 }
 
 /**
- * Mock Bee instance for testing
+ * Store-backed `Bee` for tests. A real subclass, so it passes wherever a `Bee`
+ * is taken; only the chunk and tag members are overridden, anything else
+ * would try to reach `http://localhost:1633`.
  */
-export class MockBee implements ChunkClient {
-  public readonly url = "http://localhost:1633"
+export class MockBee extends Bee {
   private store: MockChunkStore
   private tagCounter = 0
 
   constructor(store?: MockChunkStore) {
+    super("http://localhost:1633")
     this.store = store || new MockChunkStore()
   }
 
-  async createTag(): Promise<{
-    uid: number
-    split: number
-    seen: number
-    stored: number
-    sent: number
-    synced: number
-    address: string
-    startedAt: string
-  }> {
+  override async createTag(): Promise<Tag> {
     this.tagCounter++
     return {
       uid: this.tagCounter,
@@ -94,11 +87,11 @@ export class MockBee implements ChunkClient {
     }
   }
 
-  async downloadChunk(reference: string): Promise<Uint8Array> {
+  override async downloadChunk(reference: string): Promise<Uint8Array> {
     return this.store.get(reference)
   }
 
-  async uploadChunk(
+  override async uploadChunk(
     ...args: Parameters<Bee["uploadChunk"]>
   ): Promise<UploadResult> {
     const data = args[1]

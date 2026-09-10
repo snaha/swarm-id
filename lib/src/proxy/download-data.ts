@@ -7,7 +7,11 @@ import {
   Reference,
   Signature,
 } from "@ethersphere/bee-js"
-import type { BeeRequestOptions, DownloadOptions } from "@ethersphere/bee-js"
+import type {
+  Bee,
+  BeeRequestOptions,
+  DownloadOptions,
+} from "@ethersphere/bee-js"
 import {
   calculateChunkAddress,
   decryptChunkData as decryptChunk,
@@ -21,9 +25,20 @@ import {
 } from "../chunk"
 import { Binary } from "cafe-utility"
 import { ENCRYPTED_REFS_PER_CHUNK, PLAIN_REFS_PER_CHUNK } from "./chunking"
-import type { ChunkClient, UploadProgress } from "./types"
+import type { UploadProgress } from "./types"
 import type { SingleOwnerChunk } from "../types"
 import { hexToUint8Array } from "../utils/hex"
+
+/**
+ * The slice of a Bee client that reading chunks needs.
+ *
+ * Everything that only downloads — the feed finders and the chunk readers
+ * here — takes this rather than a whole `Bee`, so a test can hand in a
+ * store-backed mock without casting, and the signature says which of the
+ * client's surface the caller actually depends on. `url` is there for the
+ * log lines only.
+ */
+export type ChunkDownloader = Pick<Bee, "downloadChunk" | "url">
 
 function readSpan(spanBytes: Uint8Array): number {
   const view = new DataView(
@@ -190,7 +205,7 @@ function extractReferences(
  * Download and process a single chunk
  */
 async function downloadAndProcessChunk(
-  bee: ChunkClient,
+  bee: ChunkDownloader,
   ref: ChunkRef,
   requestOptions?: BeeRequestOptions,
 ): Promise<{ span: number; payload: Uint8Array }> {
@@ -224,7 +239,7 @@ async function downloadAndProcessChunk(
  * Uses parallel fetching for performance
  */
 async function joinChunks(
-  bee: ChunkClient,
+  bee: ChunkDownloader,
   ref: ChunkRef,
   isEncrypted: boolean,
   concurrency: number,
@@ -323,7 +338,7 @@ function estimateTotalChunks(span: number, refsPerChunk: number): number {
  * - Encrypted references (128 hex chars = 64 bytes: 32-byte address + 32-byte encryption key)
  */
 export async function downloadDataWithChunkAPI(
-  bee: ChunkClient,
+  bee: ChunkDownloader,
   reference: string,
   _options?: DownloadOptions,
   onProgress?: (progress: UploadProgress) => void,
@@ -422,7 +437,7 @@ export async function downloadDataWithChunkAPI(
 }
 
 export async function downloadSOC(
-  bee: ChunkClient,
+  bee: ChunkDownloader,
   owner: string | Uint8Array | EthAddress,
   identifier: string | Uint8Array | Identifier,
   requestOptions?: BeeRequestOptions,
@@ -441,7 +456,7 @@ export async function downloadSOC(
 }
 
 export async function downloadEncryptedSOC(
-  bee: ChunkClient,
+  bee: ChunkDownloader,
   owner: string | Uint8Array | EthAddress,
   identifier: string | Uint8Array | Identifier,
   encryptionKey: string | Uint8Array,

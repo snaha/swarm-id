@@ -2,8 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { MantarayNode } from "@ethersphere/bee-js"
-import type { BeeRequestOptions } from "@ethersphere/bee-js"
-import type { ChunkClient } from "./types"
+import type { Bee, BeeRequestOptions } from "@ethersphere/bee-js"
 import {
   makeContentAddressedChunk,
   makeEncryptedContentAddressedChunk,
@@ -134,7 +133,7 @@ export async function saveMantarayTree(
  * This avoids /bytes and supports encrypted references.
  */
 export async function loadMantarayTreeWithChunkAPI(
-  bee: ChunkClient,
+  bee: Bee,
   rootReference: string,
   requestOptions?: BeeRequestOptions,
 ): Promise<MantarayNode> {

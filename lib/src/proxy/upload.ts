@@ -16,6 +16,7 @@
 
 import { Reference, PrivateKey, Identifier, Span } from "@ethersphere/bee-js"
 import type {
+  Bee,
   BeeRequestOptions,
   Stamper,
   UploadOptions,
@@ -39,7 +40,7 @@ import {
 } from "./chunking"
 import { ChunkUploadStream } from "./chunk-upload-stream"
 import { marshalEnvelope } from "./stamp-marshal"
-import type { ChunkClient, ChunkReference, UploadProgress } from "./types"
+import type { ChunkReference, UploadProgress } from "./types"
 import type { StampWorkerPool } from "./stamp-worker-pool"
 import { tryCreateTag } from "../utils/tag"
 import { uint8ArrayToHex } from "../utils/hex"
@@ -75,7 +76,7 @@ export class SocUploadError extends Error {
 export type UploadTarget =
   | {
       mode: "stamper"
-      bee: ChunkClient
+      bee: Bee
       stamper: Stamper
       workerPool?: StampWorkerPool
     }
@@ -305,7 +306,7 @@ function encryptChunkPayloads(
  * Upload a single stamped chunk via HTTP (stamper mode).
  */
 async function uploadStampedChunkViaHttp(
-  bee: ChunkClient,
+  bee: Bee,
   stamp: StampChunkFn,
   chunkData: Uint8Array,
   address: Uint8Array,
@@ -358,7 +359,7 @@ async function uploadChunkViaSubsidisedGatewayInternal(
  * Upload multiple chunks via HTTP with sliding-window concurrency.
  */
 async function uploadChunksViaHttp(
-  bee: ChunkClient,
+  bee: Bee,
   stamp: StampChunkFn,
   chunks: Array<{ data: Uint8Array; address: Uint8Array }>,
   options: UploadOptions,

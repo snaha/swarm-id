@@ -55,13 +55,13 @@
  */
 
 import {
+  Bee,
   Identifier,
   PrivateKey,
   type BatchId,
   type EthAddress,
   type Stamper,
 } from "@ethersphere/bee-js"
-import type { ChunkClient } from "../proxy/types"
 import { Binary } from "cafe-utility"
 import { downloadEncryptedSOC } from "../proxy/download-data"
 import { uploadSOC, type UploadTarget } from "../proxy/upload"
@@ -218,7 +218,7 @@ export function partitionOccupancyAddress(
  * device only ever writes its own identifier.
  */
 export async function writePartitionIntent(opts: {
-  bee: ChunkClient
+  bee: Bee
   stamper: Stamper
   backupSigner: PrivateKey
   swarmEncryptionKey: Uint8Array
@@ -275,7 +275,7 @@ export async function writePartitionIntent(opts: {
  * live hold).
  */
 export async function writePartitionOccupancy(opts: {
-  bee: ChunkClient
+  bee: Bee
   stamper: Stamper
   backupSigner: PrivateKey
   swarmEncryptionKey: Uint8Array
@@ -323,7 +323,7 @@ export async function writePartitionOccupancy(opts: {
  * fine there.
  */
 async function writeReservedPartitionSoc(opts: {
-  bee: ChunkClient
+  bee: Bee
   stamper: Stamper
   backupSigner: PrivateKey
   swarmEncryptionKey: Uint8Array
@@ -369,7 +369,7 @@ const isServerError = (error: unknown): boolean =>
  * address; preserves liveness).
  */
 async function readPartitionSoc(opts: {
-  bee: ChunkClient
+  bee: Bee
   owner: EthAddress
   identifier: Identifier
   swarmEncryptionKey: Uint8Array
@@ -434,7 +434,7 @@ async function readPartitionSoc(opts: {
  * when missing / timed out / malformed (treated as "no intent" — see header).
  */
 export async function readPartitionIntent(opts: {
-  bee: ChunkClient
+  bee: Bee
   backupSigner: PrivateKey
   swarmEncryptionKey: Uint8Array
   batchId: BatchId
@@ -466,7 +466,7 @@ export async function readPartitionIntent(opts: {
  * Lets a contender detect a live holder it doesn't know about.
  */
 export async function readPartitionOccupancy(opts: {
-  bee: ChunkClient
+  bee: Bee
   backupSigner: PrivateKey
   swarmEncryptionKey: Uint8Array
   batchId: BatchId
@@ -504,7 +504,7 @@ export async function readPartitionOccupancy(opts: {
  * @returns `"win"` to proceed with the claim, `"lose"` to back off (read-only).
  */
 export async function resolveIntentRound(opts: {
-  bee: ChunkClient
+  bee: Bee
   stamper: Stamper
   backupSigner: PrivateKey
   swarmEncryptionKey: Uint8Array

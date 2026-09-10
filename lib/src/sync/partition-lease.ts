@@ -26,12 +26,12 @@
  */
 
 import {
+  Bee,
   BatchId,
   PrivateKey,
   Reference,
   type Stamper,
 } from "@ethersphere/bee-js"
-import type { ChunkClient } from "../proxy/types"
 import { uint8ArrayToHex } from "../utils/hex"
 import { withTimeout } from "../utils/promise"
 import { SYNC_READ_TIMEOUT_MS } from "./timing-constants"
@@ -245,7 +245,7 @@ export class PartitionLease {
 
   constructor(
     private readonly opts: {
-      bee: ChunkClient
+      bee: Bee
       deviceId: string
       swarmEncryptionKey: Uint8Array
       /** Backup signer for the partition-lock SOC and partition-state feed. */
@@ -309,7 +309,7 @@ export class PartitionLease {
    * write path; omit them for a read-only lease (UI display).
    */
   static async fromSwarmEncryptionKey(opts: {
-    bee: ChunkClient
+    bee: Bee
     deviceId: string
     swarmEncryptionKey: Uint8Array
     batchId: BatchId

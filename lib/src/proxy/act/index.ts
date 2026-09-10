@@ -11,8 +11,7 @@
  * - History manifest (tracks ACT versions over time)
  */
 
-import type { BeeRequestOptions, UploadOptions } from "@ethersphere/bee-js"
-import type { ChunkClient } from "../types"
+import type { Bee, BeeRequestOptions, UploadOptions } from "@ethersphere/bee-js"
 import type { UploadProgress } from "../types"
 import { uploadData, type UploadTarget } from "../upload"
 import { downloadDataWithChunkAPI } from "../download-data"
@@ -292,7 +291,7 @@ export async function createActForContent(
  * @returns Decrypted content reference (hex string)
  */
 export async function decryptActReference(
-  bee: ChunkClient,
+  bee: Bee,
   encryptedReference: string,
   historyReference: string,
   publisherPubKeyHex: string,
@@ -378,7 +377,7 @@ export async function decryptActReference(
  */
 export async function addGranteesToAct(
   target: UploadTarget,
-  bee: ChunkClient,
+  bee: Bee,
   historyReference: string,
   publisherCandidates: ActKeyCandidates,
   newGranteePublicKeys: Array<{ x: Uint8Array; y: Uint8Array }>,
@@ -537,7 +536,7 @@ export async function addGranteesToAct(
  */
 export async function revokeGranteesFromAct(
   target: UploadTarget,
-  bee: ChunkClient,
+  bee: Bee,
   historyReference: string,
   encryptedReference: string,
   publisherCandidates: ActKeyCandidates,
@@ -720,7 +719,7 @@ export async function revokeGranteesFromAct(
  * Get grantees from an ACT
  */
 export async function getGranteesFromAct(
-  bee: ChunkClient,
+  bee: Bee,
   historyReference: string,
   publisherCandidates: ActKeyCandidates,
   requestOptions?: BeeRequestOptions,

@@ -6,7 +6,7 @@
  */
 
 import type { EthAddress, Topic, PrivateKey } from "@ethersphere/bee-js"
-import type { ChunkClient } from "../../types"
+import type { ChunkDownloader } from "../../download-data"
 import type { UploadTarget } from "../../upload"
 import type { EpochIndex } from "./epoch"
 
@@ -15,7 +15,7 @@ import type { EpochIndex } from "./epoch"
  */
 export interface EpochFeedOptions {
   /** Chunk reader — a `Bee`, or anything else that can `downloadChunk` */
-  bee: ChunkClient
+  bee: ChunkDownloader
 
   /** Feed topic (32 bytes) */
   topic: Topic

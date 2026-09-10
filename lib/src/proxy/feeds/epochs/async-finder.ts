@@ -11,7 +11,7 @@
 import { Binary } from "cafe-utility"
 import type { BeeRequestOptions } from "@ethersphere/bee-js"
 import { EthAddress, Reference, Topic } from "@ethersphere/bee-js"
-import type { ChunkClient } from "../../types"
+import type { ChunkDownloader } from "../../download-data"
 import { EpochIndex, MAX_LEVEL } from "./epoch"
 import type { EpochFinder, EpochLookupResult } from "./types"
 import { downloadEncryptedSOC } from "../../download-data"
@@ -29,7 +29,7 @@ const EPOCH_LOOKUP_TIMEOUT_MS = 2000
  */
 export class AsyncEpochFinder implements EpochFinder {
   constructor(
-    private readonly bee: ChunkClient,
+    private readonly bee: ChunkDownloader,
     private readonly topic: Topic,
     private readonly owner: EthAddress,
     private readonly encryptionKey?: Uint8Array,

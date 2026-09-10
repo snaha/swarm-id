@@ -11,7 +11,7 @@
 import { Binary } from "cafe-utility"
 import type { EthAddress, Topic, BeeRequestOptions } from "@ethersphere/bee-js"
 import { Reference } from "@ethersphere/bee-js"
-import type { ChunkClient } from "../../types"
+import type { ChunkDownloader } from "../../download-data"
 import type { SequentialFinder, SequentialLookupResult } from "./types"
 
 function makeSequentialIdentifier(topic: Topic, index: bigint): Uint8Array {
@@ -30,7 +30,7 @@ function makeSequentialAddress(
 
 export class SyncSequentialFinder implements SequentialFinder {
   constructor(
-    private readonly bee: ChunkClient,
+    private readonly bee: ChunkDownloader,
     private readonly topic: Topic,
     private readonly owner: EthAddress,
   ) {}

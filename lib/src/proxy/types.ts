@@ -5,23 +5,10 @@ import type { Bee, Stamper } from "@ethersphere/bee-js"
 import type { StampWorkerPool } from "./stamp-worker-pool"
 
 /**
- * The slice of a Bee client that chunk I/O uses.
- *
- * Reading is `downloadChunk`; writing adds `uploadChunk` and, for progress
- * tracking, `createTag`; `url` only feeds log lines. Everything that moves
- * chunks takes this rather than a whole `Bee`, so the signature says what is
- * actually called and a store-backed mock can stand in for the client.
- */
-export type ChunkClient = Pick<
-  Bee,
-  "url" | "downloadChunk" | "uploadChunk" | "createTag"
->
-
-/**
  * Upload context shared across handlers
  */
 export interface UploadContext {
-  bee: ChunkClient
+  bee: Bee
   stamper: Stamper
   workerPool?: StampWorkerPool
 }

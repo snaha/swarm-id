@@ -29,6 +29,7 @@
  */
 
 import {
+  Bee,
   BatchId,
   EthAddress,
   Identifier,
@@ -37,7 +38,6 @@ import {
   Topic,
   type Stamper,
 } from "@ethersphere/bee-js"
-import type { ChunkClient } from "../proxy/types"
 import { Binary } from "cafe-utility"
 import { z } from "zod"
 import {
@@ -213,7 +213,7 @@ function makeStatePointerIdentifier(
  * held partition always has a fresh pointer in the current bucket.
  */
 export async function writeStatePointer(opts: {
-  bee: ChunkClient
+  bee: Bee
   stamper: Stamper
   backupSigner: PrivateKey
   swarmEncryptionKey: Uint8Array
@@ -307,7 +307,7 @@ export function statePointerAddress(
  * resumes from zero.
  */
 export async function readStatePointer(opts: {
-  bee: ChunkClient
+  bee: Bee
   owner: EthAddress
   swarmEncryptionKey: Uint8Array
   batchId: BatchId
@@ -410,7 +410,7 @@ export async function readStatePointer(opts: {
  */
 export async function readPartitionState(
   opts: {
-    bee: ChunkClient
+    bee: Bee
     owner: EthAddress
     swarmEncryptionKey: Uint8Array
     batchId: BatchId
@@ -667,7 +667,7 @@ export async function readPartitionState(
  * full-read path, or to `undefined` references on the best-effort cache-hit path).
  */
 async function downloadReferenceChunkRefs(
-  bee: ChunkClient,
+  bee: Bee,
   refBytes: Uint8Array,
   numUtilizationChunks: number,
 ): Promise<Uint8Array[]> {
@@ -713,7 +713,7 @@ async function downloadReferenceChunkRefs(
  * bucket — no feed walk to publish, and the reader computes its address directly.
  */
 export async function writePartitionState(opts: {
-  bee: ChunkClient
+  bee: Bee
   stamper: Stamper
   batchId: BatchId
   batchDepth: number

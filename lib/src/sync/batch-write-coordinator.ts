@@ -37,8 +37,7 @@
  * corrupted the peer's slot space.
  */
 
-import { BatchId, PrivateKey } from "@ethersphere/bee-js"
-import type { ChunkClient } from "../proxy/types"
+import { Bee, BatchId, PrivateKey } from "@ethersphere/bee-js"
 import {
   LEASE_TTL_MS,
   LEASE_REFRESH_MS,
@@ -118,7 +117,7 @@ export interface WithWriteOptions {
 }
 
 export interface BatchWriteCoordinatorDeps {
-  bee: ChunkClient
+  bee: Bee
   /** Postage batch id (hex) — the `withBatchWriteLock` key. */
   batchId: string
   /** Already created + account-bound by the caller; the coordinator only

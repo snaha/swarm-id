@@ -9,7 +9,7 @@ import type { Bee } from "@ethersphere/bee-js"
  * later uses a different `Bee` and re-probes. Without this, every upload retries
  * the same failing round-trip on the critical path.
  */
-const tagsUnsupported = new WeakMap<Pick<Bee, "createTag">, boolean>()
+const tagsUnsupported = new WeakMap<Bee, boolean>()
 
 /** HTTP status for an unimplemented endpoint. */
 const NOT_FOUND = 404
@@ -33,9 +33,7 @@ function isStatus(error: unknown, status: number): boolean {
  * transient failure (5xx / network / timeout) is NOT cached, so a later upload
  * re-probes the node instead of being permanently tag-less after one blip.
  */
-export async function tryCreateTag(
-  bee: Pick<Bee, "createTag">,
-): Promise<number | undefined> {
+export async function tryCreateTag(bee: Bee): Promise<number | undefined> {
   if (tagsUnsupported.get(bee)) {
     return undefined
   }
