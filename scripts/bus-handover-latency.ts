@@ -43,11 +43,17 @@
  * Optional: BEE_URL (default http://localhost:1633), SIGNALING_URL (default
  * ws://localhost:5520), DEPTH (default 20). No rows named = all four.
  *
- * Measured 2026-09-02 on the local cluster (K=2, 2 s intent window), C's
- * write call to its lease binding: free 5.3 s · bus 9.0 s (the holder's
- * `lease-released` reached C 1.4 s after its call, two stamped release writes
- * included) · idle 39.4 s · dead 48.5 s. The bus part is the ~1.4 s; the rest
- * of the bus row is the same cold claim a free partition costs.
+ * Measured 2026-09-10 on the local cluster (K=2, 2 s intent window), C's
+ * write call to its lease binding: free 5.4 s · bus 7.4 s (the holder's
+ * `lease-released` reached C 0.7 s after its call, two stamped release writes
+ * included; 0.66–0.70 s over three runs) · idle 39.1 s · dead 38.5 s. The bus
+ * part is the ~0.7 s; the rest of the bus row is the same cold claim a free
+ * partition costs. One of three bus runs took 17.6 s: the local bee served the
+ * pre-release lock for a few seconds after the sentinel write, so C's woken
+ * scan still saw it held and slept until the next release — a stale read on
+ * the rig, not a bus delay (the answer was 0.7 s there too). Before #703 the
+ * script's lease messages carried no `batchId`, so every one was dropped at
+ * parse and the bus row measured the poll backstop: 39.0 s, same as idle.
  */
 
 import { randomBytes } from 'node:crypto'
@@ -153,6 +159,7 @@ async function makeDevice(
       device.bus?.publish({
         type: 'lease-request',
         accountId: keys.accountId,
+        batchId: batchID.toHex(),
         fromDeviceId: id,
         requestId: crypto.randomUUID().slice(0, LEASE_REQUEST_ID_LENGTH),
       }),
@@ -197,6 +204,7 @@ function attachBus(
     bus.publish({
       type: 'lease-claim',
       accountId,
+      batchId: batchID.toHex(),
       fromDeviceId: device.id,
       requestId,
     })
@@ -207,6 +215,7 @@ function attachBus(
         bus.publish({
           type: 'lease-released',
           accountId,
+          batchId: batchID.toHex(),
           partition,
           fromDeviceId: device.id,
           requestId,
@@ -223,6 +232,9 @@ function attachBus(
     if (!('fromDeviceId' in message) || message.fromDeviceId === device.id) {
       return
     }
+    // As in the proxy: a lane is one partition of ONE batch (#589), so a
+    // lease message for another batch is nobody's business here.
+    if ('batchId' in message && message.batchId !== batchID.toHex()) return
     switch (message.type) {
       case 'lease-request': {
         const { requestId } = message
