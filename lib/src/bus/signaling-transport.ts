@@ -14,6 +14,11 @@
  */
 
 import { z } from "zod"
+import {
+  ServerMessageSchema,
+  WS_CLOSE_POLICY_VIOLATION,
+} from "@swarm-id/signaling/protocol"
+import type { ClientMessage } from "@swarm-id/signaling/protocol"
 
 import type { BusTransport } from "./account-bus"
 import type { BusMessageInput } from "./messages"
@@ -21,26 +26,6 @@ import {
   encryptBackupPayload,
   decryptBackupPayload,
 } from "../utils/backup-encryption"
-
-const ServerMessageSchema = z.discriminatedUnion("type", [
-  z.object({
-    type: z.literal("welcome"),
-    peerId: z.string(),
-    peers: z.array(z.string()),
-  }),
-  z.object({ type: z.literal("peer-joined"), peerId: z.string() }),
-  z.object({ type: z.literal("peer-left"), peerId: z.string() }),
-  z.object({
-    type: z.literal("relay"),
-    from: z.string(),
-    payload: z.string(),
-  }),
-  z.object({
-    type: z.literal("signal"),
-    from: z.string(),
-    payload: z.unknown(),
-  }),
-])
 
 const SignalPayloadSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("offer"), sdp: z.string() }),
@@ -51,19 +36,6 @@ const SignalPayloadSchema = z.discriminatedUnion("kind", [
 const RECONNECT_BASE_DELAY_MS = 1000
 const RECONNECT_MAX_DELAY_MS = 30000
 const DATA_CHANNEL_LABEL = "bus"
-/**
- * The server's close code for a topic it refuses, and the only close it sends
- * that is permanent — everything transient comes back as 1013, and a socket
- * turned away for never naming a room gets 4408 (`WS_CLOSE_JOIN_TIMEOUT`),
- * deliberately NOT this code: a client stops reconnecting on 1008, which is
- * right for a topic that will be refused identically next time and wrong for a
- * socket that simply never spoke. Mirrors the constant exported from
- * `signaling/src/server.ts` rather than importing it: that module pulls in `ws`
- * and `node:http`, and `@swarm-id/signaling` is a devDependency here, so an
- * import would drag a Node-only server into the browser bundle for the sake of
- * one number.
- */
-const WS_CLOSE_POLICY_VIOLATION = 1008
 
 export interface SignalingTransportOptions {
   /** Signaling server URL, e.g. `wss://swarm-id.snaha.net/bus`. */
@@ -279,7 +251,7 @@ export class SignalingTransport implements BusTransport {
     }
   }
 
-  private sendToServer(message: Record<string, unknown>): void {
+  private sendToServer(message: ClientMessage): void {
     if (this.socket?.readyState === WebSocket.OPEN) {
       this.socket.send(JSON.stringify(message))
     }

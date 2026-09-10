@@ -26,7 +26,13 @@ import { createServer } from 'node:http'
 import type { Server } from 'node:http'
 import { randomUUID } from 'node:crypto'
 import { WebSocketServer, WebSocket } from 'ws'
-import { z } from 'zod'
+import {
+  ClientMessageSchema,
+  WS_CLOSE_POLICY_VIOLATION,
+  WS_CLOSE_TRY_AGAIN_LATER,
+  WS_CLOSE_JOIN_TIMEOUT,
+} from './protocol'
+import type { ServerMessage } from './protocol'
 
 // Topics are hex secrets derived per account (64 hex chars today); accept a
 // generous range so the derivation can evolve without a server deploy.
@@ -37,25 +43,11 @@ const MAX_PAYLOAD_BYTES = 65536
 const HTTP_OK = 200
 const HTTP_NOT_FOUND = 404
 const HTTP_SERVICE_UNAVAILABLE = 503
-/**
- * The client treats this as permanent and stops reconnecting for good, so it is
- * reserved for the one thing that will never come right: a topic this server
- * refuses and would refuse identically on every retry. Everything else — load,
- * an exhausted budget — closes with 1013.
- */
-export const WS_CLOSE_POLICY_VIOLATION = 1008
-/** Transient — the client backs off and comes back. */
-export const WS_CLOSE_TRY_AGAIN_LATER = 1013
-/**
- * A socket that never named a room (`preJoinTimeoutMs`). Its own code rather
- * than 1008, because 1008 already means "this server predates the join frame"
- * to a client, which answers it by putting the topic back in the URL for the
- * life of the page — the exact thing #577 removes. Application range (4000+),
- * numbered after HTTP 408 so it reads as what it is; a client that does not
- * know it backs off and retries, which is the right answer for a socket that
- * failed to speak in time.
- */
-export const WS_CLOSE_JOIN_TIMEOUT = 4408
+export {
+  WS_CLOSE_POLICY_VIOLATION,
+  WS_CLOSE_TRY_AGAIN_LATER,
+  WS_CLOSE_JOIN_TIMEOUT,
+} from './protocol'
 
 /**
  * `ws` keeps a closing socket in `wss.clients` for up to 30 s waiting for the
@@ -100,23 +92,6 @@ const DEFAULT_MESSAGE_RATE_WINDOW_MS = 10_000
  * Generous next to a round trip, far below anything a real client takes.
  */
 const DEFAULT_PRE_JOIN_TIMEOUT_MS = 10_000
-
-const ClientMessageSchema = z.discriminatedUnion('type', [
-  z.object({
-    type: z.literal('join'),
-    topic: z.string(),
-  }),
-  z.object({
-    type: z.literal('relay'),
-    to: z.string(),
-    payload: z.string(),
-  }),
-  z.object({
-    type: z.literal('signal'),
-    to: z.string(),
-    payload: z.unknown(),
-  }),
-])
 
 interface Peer {
   id: string
@@ -174,7 +149,7 @@ function refuse(socket: WebSocket, code: number, reason: string): void {
   setTimeout(() => socket.terminate(), REFUSAL_LINGER_MS).unref()
 }
 
-function send(peer: Peer, message: Record<string, unknown>): void {
+function send(peer: Peer, message: ServerMessage): void {
   if (peer.socket.readyState === WebSocket.OPEN) {
     peer.socket.send(JSON.stringify(message))
   }
