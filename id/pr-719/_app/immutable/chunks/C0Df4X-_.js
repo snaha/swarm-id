@@ -1,0 +1,1 @@
+class a extends Error{constructor(){super("Attempt superseded by cancel, retry, or leaving the page"),this.name="SupersededError"}}function u(){let e=0;return{begin(){const r=++e;return{get current(){return r===e},async guard(n,s){const t=await n;if(r!==e)throw s?.(t),new a;return t}}},supersede(){e++}}}export{u as c};
