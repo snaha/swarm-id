@@ -1,6 +1,6 @@
 // Copyright 2026 The Swarm Authors. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
-import { BatchId, PrivateKey } from '@ethersphere/bee-js'
+import { BatchId, PrivateKey, RedundancyLevel, Utils } from '@ethersphere/bee-js'
 import { MIN_USABLE_BATCH_DEPTH, type PostageStamp } from '@snaha/swarm-id'
 import { describe, expect, it } from 'vitest'
 
@@ -8,6 +8,7 @@ import {
   DRIVE_SIZE_BREAKPOINTS,
   accountNeedsStorageAttention,
   describeDrive,
+  driveEffectiveBytes,
   driveNeedsAttention,
   drivesNeedingAttention,
   formatBytes,
@@ -239,6 +240,26 @@ describe('soonestDriveExpiry / accountNeedsStorageAttention', () => {
   it('uses the live drive state for signed-in accounts', () => {
     const account = { stamps: [makeDrive({ utilization: 1 })], isSignedOut: false }
     expect(accountNeedsStorageAttention(account, measuredAt)).toBe(true)
+  })
+})
+
+describe('driveEffectiveBytes', () => {
+  it('is what a single writer fits into a batch one depth smaller — one partition lane (#566)', () => {
+    expect(driveEffectiveBytes(21)).toBe(
+      Utils.getStampEffectiveBytes(20, true, RedundancyLevel.OFF),
+    )
+    // Encrypted, no erasure coding — not the one-argument table with medium
+    // erasure coding baked in.
+    expect(driveEffectiveBytes(21)).not.toBe(Utils.getStampEffectiveBytes(20))
+  })
+
+  it('labels every size on offer, and the drive card, the same way', () => {
+    for (const [depth, bytes] of DRIVE_SIZE_BREAKPOINTS) {
+      expect(bytes).toBe(driveEffectiveBytes(depth))
+    }
+    expect(describeDrive(makeDrive({ depth: 21 })).sizeLabel).toBe(
+      formatBytes(driveEffectiveBytes(21)),
+    )
   })
 })
 

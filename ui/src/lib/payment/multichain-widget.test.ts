@@ -39,6 +39,8 @@ describe('buildWidgetUrl', () => {
     expect(url.searchParams.get('destination')).toBe(DESTINATION)
     expect(url.searchParams.get('depth')).toBe('21')
     expect(url.searchParams.get('amount')).toBe('10453363201')
+    // One halving, like our lane labels (#566).
+    expect(url.searchParams.get('reserved-slots')).toBe('1')
     expect(url.searchParams.has('mocked')).toBe(false)
   })
 

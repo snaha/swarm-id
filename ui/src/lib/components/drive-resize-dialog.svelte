@@ -6,7 +6,6 @@
 <script lang="ts">
   import { onDestroy } from 'svelte'
 
-  import { Utils } from '@ethersphere/bee-js'
   import ArrowRight from '@lucide/svelte/icons/arrow-right'
   import Info from '@lucide/svelte/icons/info'
   import type { PostageStamp } from '@snaha/swarm-id'
@@ -19,7 +18,12 @@
   import { Dialog } from '$lib/components/ui/dialog'
   import { Select } from '$lib/components/ui/select'
   import { Switch } from '$lib/components/ui/switch'
-  import { DRIVE_SIZE_BREAKPOINTS, formatBytes, formatRemaining } from '$lib/drives'
+  import {
+    DRIVE_SIZE_BREAKPOINTS,
+    driveEffectiveBytes,
+    formatBytes,
+    formatRemaining,
+  } from '$lib/drives'
   import { failureDetail } from '$lib/failure-detail'
   import { createCostEstimate } from '$lib/payment/cost-estimate.svelte'
   import {
@@ -77,7 +81,7 @@
   // below the usable floor can grow past it, never into the other unusable
   // size (#538).
   const sizeOptions = $derived([
-    { value: '', label: formatBytes(Utils.getStampEffectiveBytes(currentDepth)) },
+    { value: '', label: formatBytes(driveEffectiveBytes(currentDepth)) },
     ...DRIVE_SIZE_BREAKPOINTS.filter(([depth]) => depth > currentDepth).map(([depth, bytes]) => ({
       value: String(depth),
       label: formatBytes(bytes),

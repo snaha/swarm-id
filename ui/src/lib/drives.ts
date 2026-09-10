@@ -1,7 +1,7 @@
 // Copyright 2026 The Swarm Authors. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
-import { Utils } from '@ethersphere/bee-js'
-import { MIN_USABLE_BATCH_DEPTH, type PostageStamp } from '@snaha/swarm-id'
+import { RedundancyLevel, Utils } from '@ethersphere/bee-js'
+import { MIN_USABLE_BATCH_DEPTH, PARTITION_COUNT, type PostageStamp } from '@snaha/swarm-id'
 
 /**
  * Pure presentation helpers that turn a {@link PostageStamp} (a "drive") into
@@ -31,17 +31,48 @@ const BYTES_PER_UNIT = 1024
 const DECIMAL_UNIT_CEILING = 100
 
 /**
- * The drive sizes on offer, smallest first: bee-js's `[depth, bytes]`
- * breakpoints floored at {@link MIN_USABLE_BATCH_DEPTH}. Smaller batches have
- * no usable per-bucket data lane — depth 17 has no data slot at all and depth
- * 18 exactly one — so they read "Storage full" from the first chunk written
- * and are not worth buying or growing into (#538).
+ * How many depths smaller a batch is that one partition lane behaves like: a
+ * device writes into one of {@link PARTITION_COUNT} interleaved lanes, so its
+ * lane holds `1 / PARTITION_COUNT` of the slots in every bucket.
+ */
+const LANE_DEPTH_SHIFT = Math.log2(PARTITION_COUNT)
+
+/**
+ * The bytes one device can write to a drive of `depth` before its partition
+ * lane reports "Storage full" — the figure every size label shows, and the
+ * capacity the used % and "Storage full" are measured against (#566).
+ *
+ * bee-js's effective volume is what a single writer fits into a whole batch
+ * before some bucket fills, indexed by depth — i.e. by slots per bucket over
+ * the fixed 65,536 buckets. A lane has `slotsPerBucket / PARTITION_COUNT - 1`
+ * of those (the lib's `partitionCapacity`), so it behaves like a whole batch
+ * {@link LANE_DEPTH_SHIFT} depths smaller. Encrypted and without erasure
+ * coding, which is how the lib writes chunks; the one-argument form of the
+ * bee-js call silently uses a table with medium erasure coding baked in.
+ *
+ * ponytail: the `- 1` reserved slot is not modelled. It costs little from
+ * depth 22 up, but ~1.5x at depth 20 (7 slots, not 8) and ~6x at 19 (3, not
+ * 4); computing the volume for the exact lane capacity fixes that if it ever
+ * matters.
+ */
+export function driveEffectiveBytes(depth: number): number {
+  return Utils.getStampEffectiveBytes(depth - LANE_DEPTH_SHIFT, true, RedundancyLevel.OFF)
+}
+
+/**
+ * The drive sizes on offer, smallest first: every depth bee-js prices, floored
+ * at {@link MIN_USABLE_BATCH_DEPTH}, each labelled with what one device can
+ * write to it ({@link driveEffectiveBytes}). Smaller batches have no usable
+ * per-bucket data lane — depth 17 has no data slot at all and depth 18 exactly
+ * one — so they read "Storage full" from the first chunk written and are not
+ * worth buying or growing into (#538).
  */
 export const DRIVE_SIZE_BREAKPOINTS: [depth: number, bytes: number][] = [
-  ...Utils.getStampEffectiveBytesBreakpoints(false).entries(),
+  ...Utils.getStampEffectiveBytesBreakpoints(true, RedundancyLevel.OFF).keys(),
 ]
-  .filter(([depth]) => depth >= MIN_USABLE_BATCH_DEPTH)
-  .sort(([a], [b]) => a - b)
+  .filter((depth) => depth >= MIN_USABLE_BATCH_DEPTH)
+  .sort((a, b) => a - b)
+  .map((depth) => [depth, driveEffectiveBytes(depth)])
 
 /** A drive's lifespan state, driving badge/colour choices in the UI. */
 export type DriveStatus = 'active' | 'expires-soon' | 'expired'
@@ -132,9 +163,9 @@ function plural(count: number, unit: string): string {
 
 const PERCENT_MAX = 100
 
-/** Effective storage capacity of the batch (`Up to X`), formatted. */
+/** What one device can write to the drive (`Up to X`), formatted. */
 function driveSizeLabel(drive: PostageStamp): string {
-  return formatBytes(Utils.getStampEffectiveBytes(drive.depth))
+  return formatBytes(driveEffectiveBytes(drive.depth))
 }
 
 /**

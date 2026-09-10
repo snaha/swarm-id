@@ -87,7 +87,11 @@ export function buildWidgetUrl(
     mode: 'batch',
     destination,
     intent: 'postage-batch',
-    'reserved-slots': '2',
+    // The widget implements this as a depth shift on the capacity it shows —
+    // `n` halves the label n times — so 1 is the closest it gets to our labels,
+    // which are a lane of half the slots (#566, `driveEffectiveBytes`). With 2
+    // the popup said 111 MB for a batch we label ~650 MB (#632).
+    'reserved-slots': '1',
   })
 
   if (depth !== undefined) {
