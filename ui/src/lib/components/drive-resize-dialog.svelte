@@ -78,8 +78,8 @@
 
   // The current size is the default (empty-valued) option; only larger sizes are
   // offered — Bee can grow a batch (dilute) but not shrink it. An existing drive
-  // below the usable floor can grow past it, never into the other unusable
-  // size (#538).
+  // below the usable floor can grow past it, never into another unusable size
+  // (#538, #566).
   const sizeOptions = $derived([
     { value: '', label: formatBytes(driveEffectiveBytes(currentDepth)) },
     ...DRIVE_SIZE_BREAKPOINTS.filter(([depth]) => depth > currentDepth).map(([depth, bytes]) => ({

@@ -264,11 +264,13 @@ describe('driveEffectiveBytes', () => {
 })
 
 describe('DRIVE_SIZE_BREAKPOINTS', () => {
-  it('starts at the smallest usable depth, dropping 17 and 18 (#538)', () => {
+  it('starts at the smallest usable depth, dropping 17, 18 (#538) and 19 (#566)', () => {
     const depths = DRIVE_SIZE_BREAKPOINTS.map(([depth]) => depth)
     expect(depths).not.toContain(17)
     expect(depths).not.toContain(18)
+    expect(depths).not.toContain(19)
     expect(depths[0]).toBe(MIN_USABLE_BATCH_DEPTH)
+    expect(MIN_USABLE_BATCH_DEPTH).toBe(20)
   })
 
   it('lists the remaining sizes smallest first', () => {

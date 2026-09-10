@@ -62,10 +62,10 @@ export function driveEffectiveBytes(depth: number): number {
 /**
  * The drive sizes on offer, smallest first: every depth bee-js prices, floored
  * at {@link MIN_USABLE_BATCH_DEPTH}, each labelled with what one device can
- * write to it ({@link driveEffectiveBytes}). Smaller batches have no usable
- * per-bucket data lane — depth 17 has no data slot at all and depth 18 exactly
- * one — so they read "Storage full" from the first chunk written and are not
- * worth buying or growing into (#538).
+ * write to it ({@link driveEffectiveBytes}). Smaller batches are not worth
+ * buying or growing into: depth 17 has no per-bucket data lane at all and 18
+ * a single slot, so both read "Storage full" from the first chunk written
+ * (#538), and 19's three slots fill some bucket after ~1 MB (#566).
  */
 export const DRIVE_SIZE_BREAKPOINTS: [depth: number, bytes: number][] = [
   ...Utils.getStampEffectiveBytesBreakpoints(true, RedundancyLevel.OFF).keys(),

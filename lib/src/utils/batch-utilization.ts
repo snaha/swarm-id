@@ -797,9 +797,11 @@ export function partitionCapacity(
 /**
  * Fewest data chunks a partition's bucket lane must hold for a batch to be
  * worth buying. At 1 the first chunk written to a bucket already fills that
- * lane, so the batch reports 100% used while effectively empty.
+ * lane, so the batch reports 100% used while effectively empty (#538); at 3
+ * some bucket fills after ~1 MB of uniformly placed chunks, a drive too small
+ * to be worth its purchase (#566). 7 (depth 20) holds ~66 MB.
  */
-const MIN_USABLE_PARTITION_CAPACITY = 2
+export const MIN_USABLE_PARTITION_CAPACITY = 4
 
 /**
  * Smallest batch depth with a usable data lane: the first depth whose
@@ -807,7 +809,7 @@ const MIN_USABLE_PARTITION_CAPACITY = 2
  * Searched rather than written out, so it follows BUCKET_DEPTH,
  * PARTITION_COUNT and the reserved-slot term; capacity doubles with every
  * depth, so the search terminates. With BUCKET_DEPTH 16 and PARTITION_COUNT 2
- * it is 19 — depth 17 has no data slot at all and depth 18 exactly one (#538).
+ * it is 20 — depth 17 has no data slot at all, 18 exactly one, 19 three.
  */
 export const MIN_USABLE_BATCH_DEPTH = ((): number => {
   let batchDepth = BUCKET_DEPTH
