@@ -20,7 +20,7 @@ export const BUILT_IN_LABEL = 'Pay with crypto (built in, experimental)'
 
 /** Why the size and lifespan on the form are only a starting point on this route. */
 export const WIDGET_EXPLAINER =
-  'fund.bzz.limo opens in a popup with the size and lifespan from the form as its defaults. Confirm or change them there — the drive gets what you buy in the popup.'
+  'fund.bzz.limo opens in a popup. The size and lifespan from the form are passed along as its starting point where the popup supports that; check them there before paying — the drive gets what you buy in the popup.'
 
 /** What the built-in engine will ask for next, said before it is chosen. */
 export const BUILT_IN_EXPLAINER =

@@ -361,7 +361,8 @@
         // The form's choice, as the popup's defaults (#632). `amountPerChunk`
         // is unset when the chain price never loaded; the popup then opens on
         // its own lifespan, as it does everywhere for size when the depth is
-        // not one it offers.
+        // not one it offers (18–25) or the lifespan not one it takes (1–365
+        // days) — the widget clamps both rather than refusing.
         depth: depthValue === '' ? undefined : Number(depthValue),
         amount: amountPerChunk,
         onSuccess: (batch) => {

@@ -33,7 +33,9 @@ const DECIMAL_UNIT_CEILING = 100
 /**
  * How many depths smaller a batch is that one partition lane behaves like: a
  * device writes into one of {@link PARTITION_COUNT} interleaved lanes, so its
- * lane holds `1 / PARTITION_COUNT` of the slots in every bucket.
+ * lane holds `1 / PARTITION_COUNT` of the slots in every bucket. Whole only
+ * for a power-of-two count: a fractional depth misses bee-js's table and falls
+ * through to its theoretical estimate (5.47 GB at 20.5).
  */
 const LANE_DEPTH_SHIFT = Math.log2(PARTITION_COUNT)
 
@@ -51,9 +53,8 @@ const LANE_DEPTH_SHIFT = Math.log2(PARTITION_COUNT)
  * bee-js call silently uses a table with medium erasure coding baked in.
  *
  * ponytail: the `- 1` reserved slot is not modelled. It costs little from
- * depth 22 up, but ~1.5x at depth 20 (7 slots, not 8) and ~6x at 19 (3, not
- * 4); computing the volume for the exact lane capacity fixes that if it ever
- * matters.
+ * depth 22 up, but ~1.6x at depth 20 (7 slots, not 8) and ~6x at 19 (3, not
+ * 4); computing the volume for the exact lane capacity fixes that (#728).
  */
 export function driveEffectiveBytes(depth: number): number {
   return Utils.getStampEffectiveBytes(depth - LANE_DEPTH_SHIFT, true, RedundancyLevel.OFF)
