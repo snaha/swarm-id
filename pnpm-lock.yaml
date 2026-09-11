@@ -299,6 +299,9 @@ importers:
       '@swarm-id/multichain':
         specifier: workspace:*
         version: link:../multichain
+      '@web3-onboard/coinbase':
+        specifier: ^2.4.2
+        version: 2.4.2(typescript@5.8.3)(zod@3.25.76)
       '@web3-onboard/core':
         specifier: ^2.24.1
         version: 2.24.1(typescript@5.8.3)(zod@3.25.76)
@@ -630,6 +633,9 @@ packages:
         optional: true
       '@x402/svm':
         optional: true
+
+  '@coinbase/wallet-sdk@4.3.0':
+    resolution: {integrity: sha512-T3+SNmiCw4HzDm4we9wCHCxlP0pqCiwKe4sOwPH3YAK2KSKjxPRydKu6UQJrdONFVLG7ujXvbd/6ZqmvJb8rkw==}
 
   '@ctrl/tinycolor@4.2.0':
     resolution: {integrity: sha512-kzyuwOAQnXJNLS9PSyrk0CWk35nWJW/zl/6KvnTBMFK65gm7U1/Z5BqjxeapjZCIhQcM/DsrEmcbRwDyXyXK4A==}
@@ -2888,6 +2894,9 @@ packages:
 
   '@walletconnect/window-metadata@1.0.1':
     resolution: {integrity: sha512-9koTqyGrM2cqFRW517BPY/iEtUDx2r1+Pwwu5m7sJ7ka79wi3EyqhqcICk/yDmv6jAS1rjKgTKXlEhanYjijcA==}
+
+  '@web3-onboard/coinbase@2.4.2':
+    resolution: {integrity: sha512-XmxfM55dB/XFI173KPcvHBhXvOY5ygXxwDzdjFvIp/MhwoG6U/8xn4KVg0wavtpX9y9H7jz8jf/ur6AIAi1nmA==}
 
   '@web3-onboard/common@2.4.2':
     resolution: {integrity: sha512-3+zkBru5W2jBYFBPPQsnqZ7tuN1GUyM5PzD9/MmhvjCLNhmjFtMQ0MkLzG4Yshodb4UW/DmZpjUVrpjdhEhj/Q==}
@@ -6288,6 +6297,13 @@ snapshots:
       - utf-8-validate
     optional: true
 
+  '@coinbase/wallet-sdk@4.3.0':
+    dependencies:
+      '@noble/hashes': 1.8.0
+      clsx: 1.2.1
+      eventemitter3: 5.0.4
+      preact: 10.24.2
+
   '@ctrl/tinycolor@4.2.0': {}
 
   '@emnapi/core@1.11.1':
@@ -9044,6 +9060,16 @@ snapshots:
       '@walletconnect/window-getters': 1.0.1
       tslib: 1.14.1
 
+  '@web3-onboard/coinbase@2.4.2(typescript@5.8.3)(zod@3.25.76)':
+    dependencies:
+      '@coinbase/wallet-sdk': 4.3.0
+      '@web3-onboard/common': 2.4.2(typescript@5.8.3)(zod@3.25.76)
+    transitivePeerDependencies:
+      - bufferutil
+      - typescript
+      - utf-8-validate
+      - zod
+
   '@web3-onboard/common@2.4.2(typescript@5.8.3)(zod@3.25.76)':
     dependencies:
       joi: 17.9.1
@@ -9515,8 +9541,7 @@ snapshots:
       strip-ansi: 6.0.1
       wrap-ansi: 7.0.0
 
-  clsx@1.2.1:
-    optional: true
+  clsx@1.2.1: {}
 
   clsx@2.1.1: {}
 
@@ -11659,8 +11684,7 @@ snapshots:
       picocolors: 1.1.1
       source-map-js: 1.2.1
 
-  preact@10.24.2:
-    optional: true
+  preact@10.24.2: {}
 
   prelude-ls@1.2.1: {}
 

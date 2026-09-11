@@ -7,6 +7,7 @@
  * a wallet when several are installed — and lets a wallet that injects nothing
  * be offered at all, which is the only kind some browsers have.
  */
+import coinbaseModule from '@web3-onboard/coinbase'
 import Onboard from '@web3-onboard/core'
 import injectedModule from '@web3-onboard/injected-wallets'
 import walletConnectModule from '@web3-onboard/walletconnect'
@@ -36,7 +37,20 @@ const walletConnect = walletConnectOptions(
   browser ? window.location.origin : undefined,
   WALLET_CHAINS,
 )
-const wallets = walletConnect ? [injected, walletConnectModule(walletConnect)] : [injected]
+// Coinbase Wallet's own SDK, which like WalletConnect needs nothing installed:
+// it reaches the phone app directly. Narrower than WalletConnect — one wallet,
+// not any of them — so it is offered beside it rather than instead of it, and
+// listed first because a named wallet is a clearer choice than a generic QR
+// code to someone who has that wallet.
+//
+// `reloadOnDisconnect` is deprecated and the module reads it only to decide
+// whether to warn, so passing it silences a deprecation warning that otherwise
+// fires on every connect (it defaults to `true`, which trips the module's own
+// check even when nothing is passed). `false` is also what this app would want
+// if the option were still live: reloading the page out from under a disconnect
+// would discard whatever dialog the user is in the middle of.
+const coinbase = coinbaseModule({ supportedWalletType: 'all', reloadOnDisconnect: false })
+const wallets = [injected, coinbase, ...(walletConnect ? [walletConnectModule(walletConnect)] : [])]
 // Every chain onboard has to know about, or it reports the user's network as
 // unsupported. That covers two different callers: `eth-wallet.ts`'s
 // wallet-secured unlock, which only signs a plain message and stays on
