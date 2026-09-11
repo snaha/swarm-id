@@ -49,7 +49,7 @@
    * batch-owner address on Gnosis; the caller swaps it and runs the postage
    * operation with the owner key.
    *
-   * The other method is fund.bzz.limo, which is not a rail and not priced here:
+   * The other method is the widget, which is not a rail and not priced here:
    * it settles the whole purchase in its own popup and hands back a created
    * batch, so choosing it hands control back to the caller (`onUseWidget`)
    * rather than continuing through these screens.
@@ -72,7 +72,7 @@
     onPaid: (settled: FundingQuote) => void
     onCancel: (options?: CancelOptions) => void
     /**
-     * Hand the payment to the fund.bzz.limo widget instead. Passed only by
+     * Hand the payment to the widget instead. Passed only by
      * callers that widget can serve: its PostageStamp ABI carries `createBatch`
      * alone, so it can buy a drive and can neither extend nor resize one.
      * Absent, the built-in engine is the only method listed.
@@ -254,7 +254,7 @@
   /**
    * Price the built-in method's Gnosis side. Deferred to the moment that method
    * is chosen (or, where it is the only one, to the dialog opening): the
-   * default method is settled entirely by fund.bzz.limo and needs nothing from
+   * default method is settled entirely by the widget and needs nothing from
    * `quoteFunding`.
    */
   async function priceBuiltIn() {
@@ -276,7 +276,7 @@
       if (!attempt.current) {
         return
       }
-      // Only this method is out. fund.bzz.limo prices nothing through us, so it
+      // Only this method is out. The widget prices nothing through us, so it
       // is unaffected — fall back to it where it is offered, rather than
       // leaving the user on a method that cannot proceed.
       builtInRefusal = caught instanceof Error ? caught.message : 'Could not price this payment.'

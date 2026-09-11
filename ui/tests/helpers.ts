@@ -261,7 +261,7 @@ export function seedNoChain(page: Page) {
  *
  * Proceed now opens the method chooser — every route parts there, before
  * anything touches the chain — so this picks the engine explicitly. A suite
- * that wants fund.bzz.limo passes `method: 'widget'`, which is what reaches the
+ * that wants the widget passes `method: 'widget'`, which is what reaches the
  * /dev mock. Either way a chain is needed — gate with {@link chainReachable}.
  *
  * A settled purchase ends on a modal success screen whose Done click this
@@ -296,7 +296,7 @@ export async function addDrive(
   // The chooser, which opens whatever the owner address holds.
   await dialog.getByRole('combobox').first().selectOption(method)
   await dialog
-    .getByRole('button', { name: method === 'widget' ? 'Continue to fund.bzz.limo' : 'Continue' })
+    .getByRole('button', { name: method === 'widget' ? /^Continue to / : 'Continue' })
     .click()
   if (settle) {
     await dialog.getByRole('button', { name: 'Done' }).click({ timeout: DRIVE_SETTLE_TIMEOUT_MS })

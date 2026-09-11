@@ -23,11 +23,11 @@ import { strip0x } from '$lib/crypto/hex'
 const WIDGET_BASE_URL = 'https://fund.bzz.limo/'
 /** The popup's host as the UI names it, so copy cannot drift from the URL. */
 export const WIDGET_HOST = new URL(WIDGET_BASE_URL).host
-const ALLOWED_ORIGINS = [
-  'https://fund.bzz.limo',
-  'https://swarmbucks.eth.limo',
-  'https://fund.ethswarm.org',
-]
+/** The popup's origin, which its events arrive from. Exported for the test. */
+export const WIDGET_ORIGIN = new URL(WIDGET_BASE_URL).origin
+// The base is allowed by construction: moving it to a fourth host and
+// forgetting this list would silently drop every event the popup posts.
+const ALLOWED_ORIGINS = [WIDGET_ORIGIN, 'https://swarmbucks.eth.limo', 'https://fund.ethswarm.org']
 const POPUP_FEATURES = 'popup,width=500,height=700'
 
 /** Batch event posted by the multichain widget once a purchase settles. */

@@ -58,6 +58,7 @@
   import { syncStore } from '$lib/dev/sync.svelte'
   import { chainIdentity, evictChainCaches, probeChainId } from '$lib/payment/chain'
   import { fetchExistingBatchFromChain } from '$lib/payment/contract'
+  import { WIDGET_HOST } from '$lib/payment/multichain-widget'
   import { type EthereumProvider, switchWalletChain } from '$lib/payment/payment-rail'
   import { resolvePaymentRail } from '$lib/payment/resolve-rail'
   import routes from '$lib/routes'
@@ -1534,7 +1535,7 @@ Check console logs for details:
         for real, against whichever chain this page is pointed at: money reaches the batch owner
         through a payment the user makes, from Gnosis directly, or — with a local source chain
         running — through the payment screens and the local solver.
-        <strong>fund.bzz.limo</strong>, the method the payment screen offers first, settles on
+        <strong>{WIDGET_HOST}</strong>, the method the payment screen offers first, settles on
         Gnosis mainnet and nowhere else, so it cannot be exercised here at all — the simulated
         purchase below is what stands in for it. Nothing in the app settles an operation out of the
         faucet below; that is yours to do here, before an operation needs it.
@@ -1546,7 +1547,7 @@ Check console logs for details:
       <p class="text-muted-foreground text-sm">
         Simulate the product <strong>Add drive</strong> flow (Storage tab / Upgrade) without a real
         cross-chain payment — the purchase widget only settles on mainnet, so this is what makes
-        that flow reachable at all here. Applies to the <strong>fund.bzz.limo</strong> method only:
+        that flow reachable at all here. Applies to the <strong>{WIDGET_HOST}</strong> method only:
         the built-in engine never opens the widget, so nothing here reaches it. The batch it leaves
         behind is fabricated, which is why extend and resize cannot act on it; for a drive backed by
         a real batch, use <strong>Create drive to test with</strong> below.
