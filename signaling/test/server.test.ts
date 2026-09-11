@@ -8,13 +8,13 @@ import type { Socket } from 'node:net'
 import { describe, it, expect, beforeAll, afterAll } from 'vitest'
 import { WebSocket as WS } from 'ws'
 
+import { createSignalingServer } from '../src/server'
+import type { SignalingServer } from '../src/server'
 import {
-  createSignalingServer,
   WS_CLOSE_JOIN_TIMEOUT,
   WS_CLOSE_POLICY_VIOLATION,
   WS_CLOSE_TRY_AGAIN_LATER,
-} from '../src/server'
-import type { SignalingServer } from '../src/server'
+} from '../src/protocol'
 
 /** Bound on a wait for a message the server should send within a tick or two. */
 const MESSAGE_TIMEOUT_MS = 2000

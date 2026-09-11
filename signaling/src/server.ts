@@ -43,11 +43,6 @@ const MAX_PAYLOAD_BYTES = 65536
 const HTTP_OK = 200
 const HTTP_NOT_FOUND = 404
 const HTTP_SERVICE_UNAVAILABLE = 503
-export {
-  WS_CLOSE_POLICY_VIOLATION,
-  WS_CLOSE_TRY_AGAIN_LATER,
-  WS_CLOSE_JOIN_TIMEOUT,
-} from './protocol'
 
 /**
  * `ws` keeps a closing socket in `wss.clients` for up to 30 s waiting for the
