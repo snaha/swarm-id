@@ -58,7 +58,7 @@ describe.skipIf(!clusterReachable)(
         async () => {
           const data = distinctChunkPayload(size)
           const { reference } = await uploadData(target, data)
-          const downloaded = (await bee.downloadData(reference)).toUint8Array()
+          const downloaded = (await bee.data.download(reference)).toUint8Array()
           expect(downloaded.length).toBe(size)
           expect(downloaded).toEqual(data)
         },

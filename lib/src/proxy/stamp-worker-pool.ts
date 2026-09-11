@@ -13,6 +13,7 @@
  */
 
 import type { Stamper, EnvelopeWithBatchId, BatchId } from "@ethersphere/bee-js"
+import { EthAddress, Signature } from "@ethersphere/bee-js"
 import { Binary } from "cafe-utility"
 import type {
   StampWorkerReadyResponse,
@@ -198,8 +199,8 @@ export class StampWorkerPool {
     return {
       batchId: this.batchId,
       index,
-      issuer: this.issuer,
-      signature,
+      issuer: new EthAddress(this.issuer),
+      signature: new Signature(signature),
       timestamp,
     }
   }

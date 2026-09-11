@@ -38,7 +38,7 @@ export async function tryCreateTag(bee: Bee): Promise<number | undefined> {
     return undefined
   }
   try {
-    const tagResponse = await bee.createTag()
+    const tagResponse = await bee.tag.create()
     return tagResponse.uid
   } catch (error) {
     // A 404 means the node doesn't implement `POST /tags` — cache it so every

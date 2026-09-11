@@ -35,7 +35,6 @@ import {
   serializeUint32Array,
 } from "./batch-utilization"
 import { EthAddress, PrivateKey } from "@ethersphere/bee-js"
-import type { Chunk as CafeChunk } from "cafe-utility"
 import type {
   BatchMetadata,
   ChunkCacheEntry,
@@ -47,19 +46,18 @@ import { uint8ArrayToHex } from "./hex"
 
 const TEST_BATCH_ID = new BatchId("00".repeat(32))
 
-function makeChunkInBucket(bucket: number, indexSeed: number): CafeChunk {
+/**
+ * A chunk address landing in `bucket`. bee-js 13's `Stamper.stamp` takes the
+ * address alone, so that is all a stamp test needs to build.
+ */
+function makeAddressInBucket(bucket: number, indexSeed: number): Uint8Array {
   const address = new Uint8Array(32)
   address[0] = (bucket >> 8) & 0xff
   address[1] = bucket & 0xff
   for (let i = 2; i < 32; i++) {
     address[i] = ((indexSeed + 1) * (i + 1)) & 0xff
   }
-  return {
-    hash: () => address,
-    build: () => new Uint8Array(CHUNK_SIZE),
-    span: 0n,
-    writer: { write: () => undefined },
-  } as unknown as CafeChunk
+  return address
 }
 
 describe("getChunkLayout", () => {
@@ -427,8 +425,8 @@ describe("UtilizationAwareStamper partition awareness", () => {
     const seen = new Set<string>()
 
     for (let i = 0; i < STAMPS_PER_DEVICE; i++) {
-      const chunk0 = makeChunkInBucket(BUCKET, i * 2)
-      const chunk1 = makeChunkInBucket(BUCKET, i * 2 + 1)
+      const chunk0 = makeAddressInBucket(BUCKET, i * 2)
+      const chunk1 = makeAddressInBucket(BUCKET, i * 2 + 1)
       const env0 = decodeIndex(device0.stamp(chunk0).index)
       const env1 = decodeIndex(device1.stamp(chunk1).index)
 
@@ -477,16 +475,16 @@ describe("UtilizationAwareStamper partition awareness", () => {
     const BUCKET = 0x1234
     const cap = partitionCapacity(DEPTH, PARTITION_COUNT)
     for (let j = 0; j < cap; j++) {
-      stamper.stamp(makeChunkInBucket(BUCKET, j))
+      stamper.stamp(makeAddressInBucket(BUCKET, j))
     }
     // One more DATA chunk in BUCKET overflows the partition's lane → the
     // underlying bee-js stamper throws "Bucket is full".
-    expect(() => stamper.stamp(makeChunkInBucket(BUCKET, 9000))).toThrow()
+    expect(() => stamper.stamp(makeAddressInBucket(BUCKET, 9000))).toThrow()
 
     // A counter chunk marked reserved overstamps slot 0 (the partition's
     // reserved slot), which is free even though the data lane is full.
-    const counterChunk = makeChunkInBucket(BUCKET, 9999)
-    stamper.markReservedUtilizationChunk(counterChunk.hash())
+    const counterChunk = makeAddressInBucket(BUCKET, 9999)
+    stamper.markReservedUtilizationChunk(counterChunk)
     const env = decodeIndex(stamper.stamp(counterChunk).index)
     expect(env.bucket).toBe(BUCKET)
     expect(env.slot).toBe(0)
@@ -515,8 +513,8 @@ describe("UtilizationAwareStamper partition awareness", () => {
     )
 
     const BUCKET = 0x4321
-    const envA = decodeIndex(a.stamp(makeChunkInBucket(BUCKET, 0)).index)
-    const envB = decodeIndex(b.stamp(makeChunkInBucket(BUCKET, 1)).index)
+    const envA = decodeIndex(a.stamp(makeAddressInBucket(BUCKET, 0)).index)
+    const envB = decodeIndex(b.stamp(makeAddressInBucket(BUCKET, 1)).index)
     expect(envA.bucket).toBe(BUCKET)
     expect(envB.bucket).toBe(BUCKET)
     // Both behave as partition 0, K=1, j=0 → slot 1, so they collide. This is
@@ -568,7 +566,7 @@ describe("UtilizationAwareStamper partition awareness", () => {
 
     // Subsequent stamps fall back to the legacy single-device path
     // (partition 0, K=1): a fresh bucket (j=0) lands at dataSlot(0, 0, 1) = 1.
-    const env = decodeIndex(stamper.stamp(makeChunkInBucket(0x77, 0)).index)
+    const env = decodeIndex(stamper.stamp(makeAddressInBucket(0x77, 0)).index)
     expect(env.slot).toBe(dataSlot(0, 0, 1))
   })
 
@@ -588,13 +586,13 @@ describe("UtilizationAwareStamper partition awareness", () => {
     })
 
     // Sanity: a stamp before invalidation succeeds.
-    stamper.stamp(makeChunkInBucket(0x88, 0))
+    stamper.stamp(makeAddressInBucket(0x88, 0))
 
     stamper.invalidateLease()
 
     // Now any partition-bound stamp aborts — closing the window where an
     // in-flight upload would otherwise silently corrupt a peer's slot.
-    expect(() => stamper.stamp(makeChunkInBucket(0x88, 1))).toThrow(
+    expect(() => stamper.stamp(makeAddressInBucket(0x88, 1))).toThrow(
       PartitionLeaseLostError,
     )
   })
@@ -614,7 +612,7 @@ describe("UtilizationAwareStamper partition awareness", () => {
       localCounter: new Uint32Array(NUM_BUCKETS),
     })
     stamper.invalidateLease()
-    expect(() => stamper.stamp(makeChunkInBucket(0x99, 0))).toThrow(
+    expect(() => stamper.stamp(makeAddressInBucket(0x99, 0))).toThrow(
       PartitionLeaseLostError,
     )
 
@@ -624,7 +622,7 @@ describe("UtilizationAwareStamper partition awareness", () => {
       partitionCount: PARTITION_COUNT,
       localCounter: new Uint32Array(NUM_BUCKETS),
     })
-    expect(() => stamper.stamp(makeChunkInBucket(0x99, 1))).not.toThrow()
+    expect(() => stamper.stamp(makeAddressInBucket(0x99, 1))).not.toThrow()
   })
 
   it("a locally-lapsed lease fences the next partition-bound stamp (skew margin applied)", async () => {
@@ -651,7 +649,7 @@ describe("UtilizationAwareStamper partition awareness", () => {
     // treated as lapsed NOW even though raw expiry hasn't strictly passed.
     stamper.setLeaseValidUntil(Date.now() + 500)
 
-    expect(() => stamper.stamp(makeChunkInBucket(0xa1, 0))).toThrow(
+    expect(() => stamper.stamp(makeAddressInBucket(0xa1, 0))).toThrow(
       PartitionLeaseLostError,
     )
   })
@@ -675,7 +673,7 @@ describe("UtilizationAwareStamper partition awareness", () => {
 
     stamper.setLeaseValidUntil(Date.now() + LEASE_TTL_MS)
 
-    expect(() => stamper.stamp(makeChunkInBucket(0xa2, 0))).not.toThrow()
+    expect(() => stamper.stamp(makeAddressInBucket(0xa2, 0))).not.toThrow()
   })
 
   it("bindPartition clears a stale lease deadline (re-acquire reuses stamper)", async () => {
@@ -695,7 +693,7 @@ describe("UtilizationAwareStamper partition awareness", () => {
       localCounter: new Uint32Array(NUM_BUCKETS),
     })
     stamper.setLeaseValidUntil(Date.now() - 1) // already lapsed
-    expect(() => stamper.stamp(makeChunkInBucket(0xa3, 0))).toThrow(
+    expect(() => stamper.stamp(makeAddressInBucket(0xa3, 0))).toThrow(
       PartitionLeaseLostError,
     )
 
@@ -706,7 +704,7 @@ describe("UtilizationAwareStamper partition awareness", () => {
       partitionCount: PARTITION_COUNT,
       localCounter: new Uint32Array(NUM_BUCKETS),
     })
-    expect(() => stamper.stamp(makeChunkInBucket(0xa3, 1))).not.toThrow()
+    expect(() => stamper.stamp(makeAddressInBucket(0xa3, 1))).not.toThrow()
   })
 
   it("the lease fence reads the injected clock (deterministic, no Date.now)", async () => {
@@ -731,11 +729,11 @@ describe("UtilizationAwareStamper partition awareness", () => {
     })
     // Lease valid until clock + 10s. Well clear of the skew margin → no fence.
     stamper.setLeaseValidUntil(clock + 10_000)
-    expect(() => stamper.stamp(makeChunkInBucket(0xa4, 0))).not.toThrow()
+    expect(() => stamper.stamp(makeAddressInBucket(0xa4, 0))).not.toThrow()
 
     // Advance to exactly the skew margin before expiry → now fenced.
     clock = clock + 10_000 - LEASE_SKEW_MARGIN_MS
-    expect(() => stamper.stamp(makeChunkInBucket(0xa4, 1))).toThrow(
+    expect(() => stamper.stamp(makeAddressInBucket(0xa4, 1))).toThrow(
       PartitionLeaseLostError,
     )
   })
@@ -764,27 +762,13 @@ describe("UtilizationAwareStamper partition awareness", () => {
 
     // Stamping the partition-0 lock SOC many times always lands at slot 0.
     for (let i = 0; i < 8; i++) {
-      const env = decodeIndex(
-        stamper.stamp({
-          hash: () => lockAddr0,
-          build: () => new Uint8Array(CHUNK_SIZE),
-          span: 0n,
-          writer: { write: () => undefined },
-        } as unknown as CafeChunk).index,
-      )
+      const env = decodeIndex(stamper.stamp(lockAddr0).index)
       expect(env.bucket).toBe(0xabcd)
       expect(env.slot).toBe(0)
     }
 
     // Partition-1 lock SOC always lands at slot 1.
-    const env1 = decodeIndex(
-      stamper.stamp({
-        hash: () => lockAddr1,
-        build: () => new Uint8Array(CHUNK_SIZE),
-        span: 0n,
-        writer: { write: () => undefined },
-      } as unknown as CafeChunk).index,
-    )
+    const env1 = decodeIndex(stamper.stamp(lockAddr1).index)
     expect(env1.bucket).toBe(0xeeff)
     expect(env1.slot).toBe(1)
   })
@@ -817,17 +801,12 @@ describe("UtilizationAwareStamper partition awareness", () => {
 
     // Overstamp the lock SOC a bunch.
     for (let i = 0; i < 5; i++) {
-      stamper.stamp({
-        hash: () => lockAddr,
-        build: () => new Uint8Array(CHUNK_SIZE),
-        span: 0n,
-        writer: { write: () => undefined },
-      } as unknown as CafeChunk)
+      stamper.stamp(lockAddr)
     }
 
     // Now a data chunk in the same bucket: must NOT collide with the lock
     // SOC's reserved slot 0; slot must be ≥ DATA_COUNTER_START.
-    const env = decodeIndex(stamper.stamp(makeChunkInBucket(BUCKET, 1)).index)
+    const env = decodeIndex(stamper.stamp(makeAddressInBucket(BUCKET, 1)).index)
     expect(env.bucket).toBe(BUCKET)
     expect(env.slot).toBeGreaterThanOrEqual(DATA_COUNTER_START)
   })
@@ -848,8 +827,8 @@ describe("UtilizationAwareStamper partition awareness", () => {
     })
 
     const BUCKET = 0x6789
-    const chunk = makeChunkInBucket(BUCKET, 3)
-    stamper.markReservedUtilizationChunk(chunk.hash())
+    const chunk = makeAddressInBucket(BUCKET, 3)
+    stamper.markReservedUtilizationChunk(chunk)
 
     const env = decodeIndex(stamper.stamp(chunk).index)
     expect(env.bucket).toBe(BUCKET)
@@ -859,7 +838,9 @@ describe("UtilizationAwareStamper partition awareness", () => {
 
     // After clearing, the same bucket's data chunk uses the data lane again.
     stamper.clearReservedUtilizationChunks()
-    const env2 = decodeIndex(stamper.stamp(makeChunkInBucket(BUCKET, 4)).index)
+    const env2 = decodeIndex(
+      stamper.stamp(makeAddressInBucket(BUCKET, 4)).index,
+    )
     expect(env2.slot).toBe(dataSlot(1, 0, PARTITION_COUNT))
   })
 
@@ -885,8 +866,8 @@ describe("UtilizationAwareStamper partition awareness", () => {
 
     const BUCKET = 0x2222
     const CONTENDED = 1
-    const intentChunk = makeChunkInBucket(BUCKET, 1)
-    stamper.reserveIntentSocSlot(intentChunk.hash(), CONTENDED)
+    const intentChunk = makeAddressInBucket(BUCKET, 1)
+    stamper.reserveIntentSocSlot(intentChunk, CONTENDED)
     const intentEnv = decodeIndex(stamper.stamp(intentChunk).index)
     stamper.clearIntentSocSlot()
 
@@ -898,7 +879,7 @@ describe("UtilizationAwareStamper partition awareness", () => {
     // in this bucket still lands at j=0.
     expect(stamper.getLocalCounter()![BUCKET]).toBe(0)
     const dataEnv = decodeIndex(
-      stamper.stamp(makeChunkInBucket(BUCKET, 2)).index,
+      stamper.stamp(makeAddressInBucket(BUCKET, 2)).index,
     )
     expect(dataEnv.slot).toBe(dataSlot(0, 0, PARTITION_COUNT))
     expect(dataEnv.slot).toBeGreaterThanOrEqual(DATA_COUNTER_START)
@@ -929,14 +910,14 @@ describe("UtilizationAwareStamper partition awareness", () => {
     const dataSlots = new Set<number>()
     for (let i = 0; i < 10; i++) {
       const dataEnv = decodeIndex(
-        stamper.stamp(makeChunkInBucket(BUCKET, 100 + i)).index,
+        stamper.stamp(makeAddressInBucket(BUCKET, 100 + i)).index,
       )
       expect(dataEnv.slot).toBeGreaterThanOrEqual(DATA_COUNTER_START)
       expect(dataSlots.has(dataEnv.slot)).toBe(false) // data slots never reused
       dataSlots.add(dataEnv.slot)
 
-      const intentChunk = makeChunkInBucket(BUCKET, 200 + i)
-      stamper.reserveIntentSocSlot(intentChunk.hash(), 0)
+      const intentChunk = makeAddressInBucket(BUCKET, 200 + i)
+      stamper.reserveIntentSocSlot(intentChunk, 0)
       const intentEnv = decodeIndex(stamper.stamp(intentChunk).index)
       stamper.clearIntentSocSlot()
       // Intent slot is below the data range, so it can never equal a data slot.
@@ -971,8 +952,8 @@ describe("UtilizationAwareStamper partition awareness", () => {
     const SLOT = 0
     const slots: Record<string, number> = {}
     async function write(name: string, bucket: number): Promise<void> {
-      const chunk = makeChunkInBucket(bucket, bucket)
-      await stamper.withIntentSocSlot(chunk.hash(), SLOT, async () => {
+      const chunk = makeAddressInBucket(bucket, bucket)
+      await stamper.withIntentSocSlot(chunk, SLOT, async () => {
         // Yield microtasks so an unserialized concurrent writer would clobber
         // the shared reservation before this flow stamps.
         await Promise.resolve()
@@ -1024,9 +1005,9 @@ describe("UtilizationAwareStamper partition awareness", () => {
     // The mutex must have been released by the failed call: the next write
     // completes and routes to the reserved slot. Without the finally-release it
     // would hang forever on `await previous` (the test would time out).
-    const chunk = makeChunkInBucket(0x4444, 0x4444)
+    const chunk = makeAddressInBucket(0x4444, 0x4444)
     const slot = await stamper.withIntentSocSlot(
-      chunk.hash(),
+      chunk,
       SLOT,
       async () => decodeIndex(stamper.stamp(chunk).index).slot,
     )
@@ -1063,12 +1044,7 @@ describe("UtilizationAwareStamper partition awareness", () => {
       swarmEncryptionKey,
     )
 
-    const lockSocChunk = {
-      hash: () => expectedLockSocAddr,
-      build: () => new Uint8Array(CHUNK_SIZE),
-      span: 0n,
-      writer: { write: () => undefined },
-    } as unknown as CafeChunk
+    const lockSocChunk = expectedLockSocAddr
 
     // Two overstamps; if the short-circuit fires (which only happens when
     // auto-bind used the BACKUP owner), both land at slot 0.
@@ -1131,7 +1107,7 @@ describe("UtilizationAwareStamper partition awareness", () => {
       localCounter,
     })
 
-    const env = decodeIndex(stamper.stamp(makeChunkInBucket(BUCKET, 0)).index)
+    const env = decodeIndex(stamper.stamp(makeAddressInBucket(BUCKET, 0)).index)
     expect(env.bucket).toBe(BUCKET)
     expect(env.slot).toBe(DATA_COUNTER_START + 1 + PARTITION_COUNT * SKEW)
   })
@@ -1150,8 +1126,8 @@ describe("UtilizationAwareStamper partition awareness", () => {
     // afterwards. The slot recorded at marking time must win; falling back
     // to `partition ?? 0` would overstamp partition 0's reserved chunks.
     const BUCKET = 0x1234
-    const chunk = makeChunkInBucket(BUCKET, 7)
-    stamper.markReservedUtilizationChunk(chunk.hash(), 1)
+    const chunk = makeAddressInBucket(BUCKET, 7)
+    stamper.markReservedUtilizationChunk(chunk, 1)
 
     const env = decodeIndex(stamper.stamp(chunk).index)
     expect(env.bucket).toBe(BUCKET)
@@ -1173,8 +1149,8 @@ describe("UtilizationAwareStamper partition awareness", () => {
       localCounter: new Uint32Array(NUM_BUCKETS),
     })
     const BUCKET = 0x4321
-    const chunk = makeChunkInBucket(BUCKET, 9)
-    stamper.markReservedUtilizationChunk(chunk.hash())
+    const chunk = makeAddressInBucket(BUCKET, 9)
+    stamper.markReservedUtilizationChunk(chunk)
 
     const env = decodeIndex(stamper.stamp(chunk).index)
     expect(env.slot).toBe(1)
@@ -1327,9 +1303,9 @@ describe("updateAfterWrite capacity guard (#416)", () => {
     const BUCKET = 0x1234
     // Distinct content-addressed chunks that all hash into the same bucket.
     const chunks = Array.from({ length: cap + 1 }, (_, i) => {
-      const c = makeChunkInBucket(BUCKET, i)
+      const c = makeAddressInBucket(BUCKET, i)
       return {
-        address: { toUint8Array: () => c.hash() },
+        address: { toUint8Array: () => c },
       } as unknown as Parameters<typeof updateAfterWrite>[1][number]
     })
     await expect(

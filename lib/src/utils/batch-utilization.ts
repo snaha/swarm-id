@@ -30,7 +30,7 @@ import {
   makeEncryptedContentAddressedChunk,
   type ContentAddressedChunk,
 } from "../chunk"
-import { Binary, type Chunk as CafeChunk } from "cafe-utility"
+import { Binary } from "cafe-utility"
 import type { UtilizationStoreDB } from "../storage/utilization-store"
 import { uploadChunk, type UploadTarget } from "../proxy/upload"
 import { tryCreateTag } from "./tag"
@@ -1696,16 +1696,15 @@ export class UtilizationAwareStamper implements Stamper {
   }
 
   /**
-   * Stamp a chunk (implements Stamper interface)
+   * Stamp a chunk address (implements Stamper interface)
    *
    * Delegates to underlying stamper and tracks which buckets are used.
    *
-   * @param chunk - Chunk to stamp
+   * @param chunkAddress - Address of the chunk to stamp
+   * @param timestampMs - Stamp timestamp, defaults to now in the underlying stamper
    * @returns Envelope with batch ID and signature
    */
-  stamp(chunk: CafeChunk): EnvelopeWithBatchId {
-    const chunkAddress = chunk.hash()
-
+  stamp(chunkAddress: Uint8Array, timestampMs?: number): EnvelopeWithBatchId {
     // Lock-SOC short-circuit: when stamping our own per-partition lock SOC,
     // overstamp the fixed reserved slot (= partition index, 0 or 1) within
     // its bucket. Doesn't consume new slot budget, doesn't bump our local
@@ -1717,7 +1716,7 @@ export class UtilizationAwareStamper implements Stamper {
     if (lockSoc) {
       const bucket = toBucket(chunkAddress)
       this.stamper.buckets[bucket] = lockSoc.partition
-      return this.stamper.stamp(chunk)
+      return this.stamper.stamp(chunkAddress, timestampMs)
     }
 
     // Utilisation-chunk short-circuit: a counter/state chunk overstamps its
@@ -1732,7 +1731,7 @@ export class UtilizationAwareStamper implements Stamper {
     if (reservedSlot !== undefined) {
       const bucket = toBucket(chunkAddress)
       this.stamper.buckets[bucket] = reservedSlot
-      return this.stamper.stamp(chunk)
+      return this.stamper.stamp(chunkAddress, timestampMs)
     }
 
     // Intent-SOC short-circuit: a partition-intent chunk (Phase 2) overstamps
@@ -1746,7 +1745,7 @@ export class UtilizationAwareStamper implements Stamper {
     ) {
       const bucket = toBucket(chunkAddress)
       this.stamper.buckets[bucket] = this.intentSoc.slot
-      return this.stamper.stamp(chunk)
+      return this.stamper.stamp(chunkAddress, timestampMs)
     }
 
     // Partition lease was reclaimed — abort cleanly before the stamp lands in
@@ -1782,7 +1781,7 @@ export class UtilizationAwareStamper implements Stamper {
       )
     }
 
-    const envelope = this.stamper.stamp(chunk)
+    const envelope = this.stamper.stamp(chunkAddress, timestampMs)
 
     // Extract bucket from envelope index
     // The index is 8 bytes: first 4 bytes = bucket (big-endian), last 4 bytes = slot

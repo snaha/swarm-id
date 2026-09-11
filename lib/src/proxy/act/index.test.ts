@@ -7,7 +7,7 @@
 
 import { describe, it, expect, vi, beforeEach } from "vitest"
 import type { Bee, Stamper } from "@ethersphere/bee-js"
-import { MerkleTree } from "@ethersphere/bee-js"
+import { ChunkSplitter } from "@ethersphere/bee-js"
 import type { UploadTarget } from "../upload"
 import {
   createActForContent,
@@ -78,8 +78,8 @@ function createMockTarget(): UploadTarget {
 
 // Compute content hash using Swarm's BMT algorithm (same as MantarayNode)
 async function computeContentHash(data: Uint8Array): Promise<string> {
-  const rootNode = await MerkleTree.root(data)
-  return toHex(rootNode.hash())
+  const rootNode = await ChunkSplitter.root(data)
+  return toHex(rootNode.hash().toUint8Array())
 }
 
 // Create a content-addressed storage mock for uploads

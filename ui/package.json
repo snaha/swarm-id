@@ -55,7 +55,7 @@
     "pnpm": "11.x"
   },
   "dependencies": {
-    "@ethersphere/bee-js": "^11.1.1",
+    "@ethersphere/bee-js": "^13.0.0",
     "@relayprotocol/relay-sdk": "^7.0.0",
     "@scure/bip39": "1.6.0",
     "@snaha/swarm-id": "workspace:*",

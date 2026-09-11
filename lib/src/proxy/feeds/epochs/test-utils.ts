@@ -8,7 +8,6 @@
  */
 
 import { Binary, Optional } from "cafe-utility"
-import type { Chunk } from "cafe-utility"
 import {
   Bee,
   PrivateKey,
@@ -16,6 +15,7 @@ import {
   EthAddress,
   BatchId,
   Reference,
+  Signature,
 } from "@ethersphere/bee-js"
 import type { Stamper, Tag, UploadResult } from "@ethersphere/bee-js"
 import { calculateChunkAddress } from "../../../chunk"
@@ -61,8 +61,14 @@ export class MockChunkStore {
 
 /**
  * Store-backed `Bee` for tests. A real subclass, so it passes wherever a `Bee`
- * is taken; only the chunk and tag members are overridden, anything else
- * would try to reach `http://localhost:1633`.
+ * is taken; only the chunk and tag operations are redirected at the store,
+ * anything else would try to reach `http://localhost:1633`.
+ *
+ * bee-js 13 reaches those through namespaces, so the constructor replaces the
+ * methods on the inherited `chunk` and `tag` objects — the real ones, which
+ * production code and `vi.spyOn(bee.chunk, "download")` both hold — and each
+ * forwards to the method below, resolved on `this` at call time so a subclass
+ * override (or a test that reassigns `bee.downloadChunk`) still wins.
  */
 export class MockBee extends Bee {
   private store: MockChunkStore
@@ -71,9 +77,12 @@ export class MockBee extends Bee {
   constructor(store?: MockChunkStore) {
     super("http://localhost:1633")
     this.store = store || new MockChunkStore()
+    this.chunk.download = (reference) => this.downloadChunk(String(reference))
+    this.chunk.upload = (_stamp, data) => this.uploadChunk(data)
+    this.tag.create = () => this.createTag()
   }
 
-  override async createTag(): Promise<Tag> {
+  async createTag(): Promise<Tag> {
     this.tagCounter++
     return {
       uid: this.tagCounter,
@@ -87,14 +96,13 @@ export class MockBee extends Bee {
     }
   }
 
-  override async downloadChunk(reference: string): Promise<Uint8Array> {
+  async downloadChunk(reference: string): Promise<Uint8Array> {
     return this.store.get(reference)
   }
 
-  override async uploadChunk(
-    ...args: Parameters<Bee["uploadChunk"]>
+  async uploadChunk(
+    data: Parameters<Bee["chunk"]["upload"]>[1],
   ): Promise<UploadResult> {
-    const data = args[1]
     if (!(data instanceof Uint8Array)) {
       throw new Error("MockBee.uploadChunk takes raw chunk bytes")
     }
@@ -193,13 +201,17 @@ export function createMockStamper(): Stamper {
     buckets,
     depth: MOCK_STAMPER_DEPTH,
     maxSlot: calculateMaxSlotsPerBucket(MOCK_STAMPER_DEPTH),
-    stamp(_chunk: Chunk) {
+    // bee-js 13 stamps an address, not a chunk, and returns the typed byte
+    // classes (`BatchId`, `Signature`, `EthAddress`) rather than raw arrays.
+    // Use the real classes here so callers that reach for `.toUint8Array()`
+    // behave the same against the mock as against a live stamper.
+    stamp(_address: Uint8Array, _timestampMs?: number) {
       return {
         batchId,
         index: new Uint8Array(INDEX_LENGTH),
         timestamp: new Uint8Array(TIMESTAMP_LENGTH),
-        signature: new Uint8Array(SIGNATURE_LENGTH),
-        issuer: new Uint8Array(ISSUER_LENGTH),
+        signature: new Signature(new Uint8Array(SIGNATURE_LENGTH)),
+        issuer: new EthAddress(new Uint8Array(ISSUER_LENGTH)),
       }
     },
     getState: () => buckets,

@@ -22,7 +22,7 @@
  * loaded recursively.
  */
 
-import { MantarayNode } from "@ethersphere/bee-js"
+import { MantarayNode } from "@ethersphere/core-sdk"
 import { hexToUint8Array, uint8ArrayToHex } from "../../utils/hex"
 
 // Constants

@@ -37,30 +37,40 @@ import {
 const FOLD_RUNS = 10
 
 /**
- * Wrap a Bee so every chunk/SOC read increments `reads` — `downloadChunk` and
- * `makeSOCReader().download` are the only two read paths the fold uses
+ * Wrap a Bee so every chunk/SOC read increments `reads` — `chunk.download` and
+ * `soc.makeReader().download` are the only two read paths the fold uses
  * (roster SOCs, epoch-finder probes, and `downloadDataWithChunkAPI` blobs).
+ *
+ * bee-js 13 puts both behind namespaces, so the proxy intercepts the namespace
+ * property and hands back a wrapper around it. Trapping the old flat method
+ * names would count nothing: they no longer exist on `Bee`.
  */
 function withReadCounter(bee: Bee): { bee: Bee; counter: { reads: number } } {
   const counter = { reads: 0 }
   const proxied = new Proxy(bee, {
     get(target, prop) {
-      if (prop === "downloadChunk") {
-        return (...args: Parameters<Bee["downloadChunk"]>) => {
-          counter.reads++
-          return target.downloadChunk(...args)
+      if (prop === "chunk") {
+        return {
+          ...target.chunk,
+          download: (...args: Parameters<Bee["chunk"]["download"]>) => {
+            counter.reads++
+            return target.chunk.download(...args)
+          },
         }
       }
-      if (prop === "makeSOCReader") {
-        return (...args: Parameters<Bee["makeSOCReader"]>) => {
-          const reader = target.makeSOCReader(...args)
-          return {
-            ...reader,
-            download: (...a: Parameters<(typeof reader)["download"]>) => {
-              counter.reads++
-              return reader.download(...a)
-            },
-          }
+      if (prop === "soc") {
+        return {
+          ...target.soc,
+          makeReader: (...args: Parameters<Bee["soc"]["makeReader"]>) => {
+            const reader = target.soc.makeReader(...args)
+            return {
+              ...reader,
+              download: (...a: Parameters<(typeof reader)["download"]>) => {
+                counter.reads++
+                return reader.download(...a)
+              },
+            }
+          },
         }
       }
       // Bind methods to the real instance so bee-js internals (private state)
