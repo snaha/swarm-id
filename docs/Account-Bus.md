@@ -2,9 +2,11 @@
 
 Status: **implemented** ([#547](https://github.com/snaha/swarm-id/pull/547) through
 [#655](https://github.com/snaha/swarm-id/pull/655); the SWIP-60 transport adapter is the one
-part still pending). Resolves [#277](https://github.com/snaha/swarm-id/issues/277) by making the
-Safari iframe a full participant, and unifies cross-tab/cross-device propagation on every
-browser. Builds on the account model in [`Account-State.md`](./Account-State.md) and the write
+part still pending). Answers [#277](https://github.com/snaha/swarm-id/issues/277) — Safari sessions are no
+longer read-only — by making the Safari iframe a full participant, and unifies
+cross-tab/cross-device propagation on every browser. (#277 itself is still open at the time of
+writing; the behaviour it asks for is shipped and verified on device in
+[#584](https://github.com/snaha/swarm-id/issues/584).) Builds on the account model in [`Account-State.md`](./Account-State.md) and the write
 coordination in [`BatchWriteCoordinator.md`](./BatchWriteCoordinator.md) /
 [`Postage-Batch-Partitioning.md`](./Postage-Batch-Partitioning.md). The porter-facing
 walkthrough is on the docs site (`docs-site/src/content/docs/account-bus.mdx`); this file is
@@ -91,11 +93,11 @@ only _deltas and coordination between live peers_ — which is why WebRTC's
 
 One interface (`BusTransport`, `lib/src/bus/account-bus.ts`), three transports:
 
-| Transport                                       | Scope                                                                 | Status                                                                                 |
-| ----------------------------------------------- | --------------------------------------------------------------------- | -------------------------------------------------------------------------------------- |
-| `BroadcastChannel`                              | same origin + same partition (SwarmID tab↔tab, same-dApp Safari tabs) | shipped; generalizes the old `BroadcastChannel("swarm-id-utilization")` channel        |
-| WebRTC DataChannel mesh, self-hosted signaling  | across partitions, dApps, and devices                                 | shipped and deployed: `signaling/`, reached at `wss://swarm-id.snaha.net/bus` (`.do/`) |
-| SWIP-60 (`pubsubConnect`, `FEED_TOPIC` binding) | synced accounts, once bee/bee-js release it                           | future adapter behind the same interface                                               |
+| Transport                                       | Scope                                                                                                                                     | Status                                                                                 |
+| ----------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------- |
+| `BroadcastChannel`                              | same origin + same partition — its **reach** (SwarmID tab↔tab, same-dApp Safari tabs), not who attaches it: see "Who attaches what" below | shipped; generalizes the old `BroadcastChannel("swarm-id-utilization")` channel        |
+| WebRTC DataChannel mesh, self-hosted signaling  | across partitions, dApps, and devices                                                                                                     | shipped and deployed: `signaling/`, reached at `wss://swarm-id.snaha.net/bus` (`.do/`) |
+| SWIP-60 (`pubsubConnect`, `FEED_TOPIC` binding) | synced accounts, once bee/bee-js release it                                                                                               | future adapter behind the same interface                                               |
 
 The signaling WebSocket **doubles as an encrypted-blob relay** for peer pairs WebRTC cannot
 connect (restrictive NATs — there is no TURN). Same service, no extra infrastructure; the
@@ -157,12 +159,17 @@ Server limits (`signaling/src/server.ts`, all deliberately global rather than pe
 the service sits behind the platform ingress): 500 connections, 200 rooms, 24 peers per room, a
 per-socket message budget sized from the WebRTC negotiation cost, a 64 KiB payload cap, and a
 join timeout for a socket that never names a room. `1008` closes are permanent for a topic;
-everything transient closes `1013` and the client backs off with jitter.
+load-shedding (too many rooms, room full) closes `1013`, and the pre-join timeout closes with its
+own `4408` — not `1008`, which an older client reads as "this server predates the join frame" and
+answers by putting the topic back in the URL for the life of the page. The client treats both as
+transient and backs off with jitter.
 
 ### Message kinds
 
-- **Account deltas (P1).** The wire shape is the existing portable projection
-  (`serializeSyncedAccount`, `lib/src/utils/storage-managers.ts`) minus the per-context session
+- **Account deltas (P1).** The wire shape is the account-state snapshot:
+  `AccountDeltaMessageSchema.snapshot` extends `AccountStateSnapshotSchemaV1`
+  (`lib/src/bus/messages.ts`), assembled by `serializeAccountStateSnapshot` + `portableConnectedApp`
+  (`lib/src/bus/account-delta.ts`), minus the per-context session
   material (`appSecret`, `connectedUntil` — stripped on send _and_ on receive), and merging
   reuses the LWW fold rules of `lib/src/sync/merge-snapshot.ts` — a delta received over the bus
   merges exactly like a device-state feed payload, metadata scalars included on their per-field
@@ -173,8 +180,10 @@ everything transient closes `1013` and the client backs off with jitter.
   device unheard for three minutes — three beats at the once-a-minute cadence a hidden tab's
   timers are throttled to, so a backgrounded device does not flap out of the live set. A clean
   departure does not wait for that window: the server sends `peer-left` when a socket closes,
-  its reaper included, and the device that socket carried is dropped at once
-  ([#572](https://github.com/snaha/swarm-id/issues/572)). `peer-left` is a **transport** signal,
+  its reaper included, and the device that socket carried is dropped at once — but only when it was
+  that device's LAST socket (`forgetPeer`, `lib/src/bus/presence.ts`): two tabs of one dApp share a
+  partition and therefore a `deviceId` while holding a socket each, so one of them closing is not
+  the device leaving ([#572](https://github.com/snaha/swarm-id/issues/572)). `peer-left` is a **transport** signal,
   not a bus message kind — nothing publishes it, and nothing may. A leave message of our own is
   not an option: a publish encrypts before it sends, and a page being torn down never gets back
   to the send. Ageing is the backstop for what the room cannot see — a peer the server has not
@@ -277,10 +286,6 @@ With the bus in place the partitioned iframe is a first-class writer:
 - One code path everywhere: Chrome/Firefox cross-tab propagation moves onto the same bus
   (BroadcastChannel transport) instead of bespoke storage-event plumbing, and cross-device
   propagation gets faster on every browser. Safari stops being a special case.
-- The socket buys something even for a lone dApp tab: presence is what makes this device a
-  rival to every other context of the account, and what tells it who its own rivals are. Any
-  gating of the signaling attach ([#581](https://github.com/snaha/swarm-id/issues/581)) has to
-  be weighed against that.
 - The bus interface is the SWIP-60 seam. Its brokered per-topic model maps 1:1; adopting it
   is a transport adapter, not a redesign.
 
@@ -471,7 +476,7 @@ Not yet written:
   `lib/test/live/multi-device-acquire-upload.test.ts` and
   `three-device-acquire-handoff.test.ts`, not the Playwright rig.
 - Whether a dormant account's partitioned storage survives ITP's ~30-day window
-  ([#664](https://github.com/snaha/swarm-id/issues/664)) — two loads in one sitting say
+  ([#659](https://github.com/snaha/swarm-id/issues/659)) — two loads in one sitting say
   nothing about it. Nothing in the bus depends on the answer now that stale devices are
   ignored rather than removed.
 
@@ -482,7 +487,7 @@ Not yet written:
   old bundle and a new one compute different addresses for the same `(batch, partition)` and each
   reads the other's lane as free — two writers in one slot set, not a stale read. Both sides deploy
   together, which is what makes that window short rather than absent; it is the same deploy-in-step
-  property [#588](https://github.com/snaha/swarm-id/issues/588) tracks for the channel rename, and
+  property [#588](https://github.com/snaha/swarm-id/issues/588) established for the channel rename, and
   the first change here where the cost of getting it wrong is a corrupted lane rather than a missed
   message.
 - A revocation made while a dApp partition is **closed** is not pushed to it: the room has no

@@ -6,7 +6,8 @@ contract, batch reads, and the SushiSwap V3 xDAI→BZZ leg — all signable with
 locally held private key (the account's derived postage signer), no Bee node
 and no connected wallet required on the Gnosis side.
 
-Consumed by `ui/` for the drive extend/resize flows (see
+Consumed by `ui/` for buying a drive as well as extending and resizing one, and by the dev
+funding helpers (see
 [docs/Postage-On-Chain-Engine.md](../docs/Postage-On-Chain-Engine.md) and
 [docs/Drive-Payment-Flow.md](../docs/Drive-Payment-Flow.md)). The cross-chain
 payment leg (Relay Protocol) lives in `ui/`, not here — this package starts
@@ -35,27 +36,36 @@ Deliberate changes from upstream:
   transaction — `bundleExtend` (approve + topUp) and `bundleResize` (approve +
   topUp + increaseDepth), gated on `supportsBundling()`. The owner EOA
   authorises `Simple7702Account` and sends to itself, so `msg.sender` stays the
-  batch owner. Order is load-bearing regardless of atomicity; see
-  `docs/Postage-On-Chain-Engine.md` §4.4.
+  batch owner. Order is load-bearing regardless of atomicity; see "The ordering rule" and
+  "Atomic execution (EIP-7702)" in [docs/Postage-On-Chain-Engine.md](../docs/Postage-On-Chain-Engine.md).
 - **A solver wire format** (`local-solver-protocol.ts`): the calldata a
   cross-chain deposit carries its own delivery instruction in, so the off-chain
-  half that fills it can stay stateless. The process that reads it lands with
-  the local payment rail in `ui/`.
+  half that fills it can stay stateless. The process that reads it is
+  `local-solver.ts` in this package — `pnpm dev:solver`, and part of
+  `pnpm dev:local`. It watches the source chain (`SOURCE_RPC_URL`, default
+  `http://localhost:31337`) and pays out on the Gnosis side (`GNOSIS_RPC_URL`,
+  default `http://localhost:9545`). Its counterpart in the browser is
+  `ui/src/lib/dev/local-payment-rail.ts`.
 - **Selector pinning**: unit tests assert every ABI entry against selectors
   verified on the deployed contract, so an ABI typo cannot reach a wallet.
 - The duplicated FeeTooLow retry loops are extracted (`write-retry.ts`), the
   receipt/balance waiters take their cadence from settings (anvil mines every
-  5s; mainnet polling is slower), and dropped modules we do not use (USDC,
-  token prices, multi-transfer, the deprecated Sushi HTTP API quote).
+  5s; mainnet polling is slower), and dropped upstream modules we do not use (token prices,
+  multi-transfer, the deprecated Sushi HTTP API quote). USDC is not one of them — it is a
+  supported payment token, with its own pool fees, swap route and a mock deployment for the
+  local rig (`mock-usdc-bytecode.ts`).
 - **A checked JSON-RPC transport** (`json-rpc.ts`): a response is an answer only
   with a 2xx status, no `error` member, and a `result` present in the envelope.
   A missing `result` is always malformed; an explicit `null` is a real outcome
   for a few methods (`eth_getTransactionReceipt` while pending, anvil's admin
   calls on success), so the two are checked separately and each call site picks
-  between `jsonRpc` and `jsonRpcOrUndefined`. This is a verbatim copy of
-  `lib/src/utils/json-rpc.ts` rather than an import, so the package stays
-  self-contained and its tests do not wait on a lib build — change one, change
-  both.
+  between `jsonRpc` and `jsonRpcOrUndefined`. This started as a copy of `lib/src/utils/json-rpc.ts` rather than an
+  import, so the package stays self-contained and its tests do not wait on a lib
+  build. The two have since diverged — the lib's is generic over the result type
+  and carries its own deadline, this one exposes the envelope helpers and uses
+  `AbortSignal.timeout` — with only `checkedResult` and `requireValue` still
+  identical. Changing an envelope check in one is a prompt to look at the other,
+  not a guarantee the change applies.
 - **Where the rotation boundary sits** (`fetch.ts`): the status check runs
   inside `System.withRetries`, so a 429 or a 502 rotates to the next configured
   RPC. The JSON-RPC `error` check runs outside it — every endpoint refuses a
@@ -64,10 +74,17 @@ Deliberate changes from upstream:
 
 ## Local testing
 
-One local chain: the snapshot bee-compose bakes and its cluster runs on. It
-answers as Gnosis (100) — deliberately, so the production addresses resolve —
-which also means the chain id cannot tell it apart from mainnet. Genesis can;
-`chainIdentity()` in `ui/` is where that check lives.
+Two local chains. The first is the snapshot bee-compose bakes and its cluster
+runs on (`:9545`, `pnpm dev:chain:detach`). It answers as Gnosis (100) —
+deliberately, so the production addresses resolve — which also means the chain
+id cannot tell it apart from mainnet. Genesis can; `chainIdentity()` in `ui/` is
+where that check lives.
+
+The second is a bare anvil that stands in for the payment _source_ chain
+(`:31337`, chain id 31337, `pnpm dev:source-chain:detach`). A deposit is signed
+there and the solver delivers on the Gnosis side, which is how the cross-chain
+flow is exercised without a bridge. `pnpm dev:local` starts both plus the
+solver.
 
 ### Baked chain — a real BZZ market, **no internet**
 

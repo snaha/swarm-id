@@ -1,5 +1,7 @@
 # **Swarm ID Session Keys**
 
+Status: **historical.** Requirements input for a session-keys feature (added to the repo 2026-06-23, [#367](https://github.com/snaha/swarm-id/pull/367)) that was never built: nothing described here is implemented anywhere in the codebase, and no current design record supersedes it.
+
 ## Realistic Use Cases & Functional Requirements
 
 This document outlines practical use cases for **Snaha Session Keys**, focusing on the delegation of temporary authority from a **Persona (Identity)** to a client application. These examples are designed to guide the Snaha team in implementing node-independent identity solutions for Swarm, satisfying the constraints of time-bound validity, ACT (Access Control Trie) integration, and permission permanence.

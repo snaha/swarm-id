@@ -35,7 +35,7 @@ For trivial changes (typos, small doc fixes), you may skip the issue step.
 We enforce consistent code style. Before committing:
 
 ```bash
-pnpm check:all  # Run all checks (format, lint, typecheck, test)
+pnpm check:all  # Run all checks (format, lint, typecheck, test, knip)
 ```
 
 ### Style Rules
@@ -86,16 +86,21 @@ Keep PRs small and focused on a single concern.
 
 ## Testing
 
-- **Unit tests**: `*.test.ts` (Vitest)
-- **Component tests**: `*.ct.spec.ts` (Playwright)
-- **E2E tests**: `tests/*.test.ts` (Playwright)
+- **Unit tests**: `*.test.ts` (Vitest), beside the code they cover
+- **E2E and browser tests**: `tests/*.test.ts` in `ui/` and `demo/` (Playwright)
+- **Integration tests**: `lib/test/integration/` (Vitest) against a local Bee cluster — run in CI
+  by `integration-tests.yml`, and locally once `pnpm dev:cluster:start` is up
+- **Live tests**: `lib/test/live/` and `ui/`'s `test:live` — opt-in, they self-skip without a
+  configured endpoint
 
 Run tests with:
 
 ```bash
-pnpm test        # Unit tests
-pnpm check:all   # All checks including tests
+pnpm check:all                      # Everything CI runs, including each package's tests
+pnpm --filter @snaha/swarm-id test  # One package's unit tests
 ```
+
+There is no `pnpm test` at the repo root — tests run per package, or through `check:all`.
 
 ## Code Review
 

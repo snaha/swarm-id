@@ -318,7 +318,8 @@ describe("createSyncAccount", () => {
     // view's scalar clocks must stay at the stable createdAt — restamping them
     // with a fresh lastModified would let this device clobber a peer's genuine
     // concurrent rename / default-stamp / settings change under per-field LWW
-    // (§9.3, the hazard accountStateToDeviceView's createdAt fallback guards).
+    // (docs/Account-State.md "Convergence rules" — the hazard
+    // accountStateToDeviceView's createdAt fallback guards).
     const CREATED_AT = 1_000
     const LAST_MODIFIED = 5_000
     const stores = createMockStores({

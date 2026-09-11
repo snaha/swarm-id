@@ -12,7 +12,8 @@ Design source: Figma file `FavekByQemhpaWZ5KZ6mlU` ("SwarmID MVP Copy").
 - **Tailwind CSS v4** via `@tailwindcss/vite` (no PostCSS config needed)
 - **shadcn-svelte-style components** — hand-written primitives in `src/lib/components/ui/`,
   themed via CSS variables in `src/app.css`
-- **iA Writer Quattro** as the UI font, **polycon** identicons for identities
+- **iA Writer Quattro** as the UI font; generated identicons from the lib
+  (`generatedAvatar`, a Polycon-style algorithm with our own palette)
 
 ## Development
 
@@ -33,17 +34,23 @@ pnpm --filter @swarm-id/ui build    # outputs to ./build
 ## Checks & tests
 
 ```bash
-pnpm --filter @swarm-id/ui check:all   # prettier + eslint + svelte-check + knip
+pnpm --filter @swarm-id/ui check:all   # eslint + svelte-check + knip + vitest
 pnpm --filter @swarm-id/ui test        # vitest unit tests
 pnpm --filter @swarm-id/ui test:e2e    # Playwright end-to-end tests (tests/)
 pnpm --filter @swarm-id/ui format      # prettier --write + eslint --fix
 ```
 
-`test:e2e` starts the UI (`:5500`) and demo (`:3500`) dev servers itself and drives them
-with Playwright. First run locally needs the browser once:
-`pnpm --filter @swarm-id/ui exec playwright install chromium` (CI runs in the
-`mcr.microsoft.com/playwright` image, which ships them). Append `--ui` for the interactive
-runner, or a path (e.g. `tests/home.test.ts`) to run a single spec.
+`test:e2e` starts the UI (`:5500`), the demo (`:3500`) and the bus signaling server (`:5520`)
+itself and drives them with Playwright. First run locally needs the browser once:
+`pnpm --filter @swarm-id/ui exec playwright install chromium` (CI installs it the same way, on a
+plain `ubuntu-latest` runner). Append `--ui` for the interactive runner, or a path
+(e.g. `tests/home.test.ts`) to run a single spec.
+
+The drive and payment suites additionally need a chain: global setup stocks per-worker faucets
+from `CHAIN_RPC_URL`, and **without it those suites skip silently** rather than fail. To run them,
+bring up what CI does — `pnpm dev:chain:detach` (`:9545`), `pnpm dev:source-chain:detach`
+(`:31337`) and `pnpm dev:solver` — then `CHAIN_RPC_URL=http://localhost:9545 pnpm --filter
+@swarm-id/ui test:e2e`.
 
 Conventions:
 

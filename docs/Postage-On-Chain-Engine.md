@@ -70,16 +70,16 @@ contract's check, so a bundle that dilutes first reverts exactly as the sequenti
 
 ```ts
 export function resizePlan(
-  liveRemainingPerChunk: bigint, // from chain, NOT stamp.amount
   currentDepth: number,
   newDepth: number,
   keepLifespan: boolean,
+  liveRemaining: bigint, // per chunk, from chain, NOT stamp.amount
   minimumInitialBalancePerChunk: bigint,
   lastPrice: bigint,
-): ResizePlan // { topUpAmount, afterTopUp, afterDilute }
+): ResizePlan // { newDepth, topUpAmount, clampedToFloor, afterTopUp, afterDilute }
 ```
 
-With `Δ = newDepth − currentDepth`, `factor = 2^Δ` and `R = liveRemainingPerChunk`:
+With `Δ = newDepth − currentDepth`, `factor = 2^Δ` and `R = liveRemaining`:
 
 - **keepLifespan**: `topUpAmount = R × (factor − 1)`, so the post-dilution per-chunk balance returns
   to `R` and the TTL is preserved. Total BZZ = `topUpAmount << currentDepth`, which is
@@ -87,9 +87,13 @@ With `Δ = newDepth − currentDepth`, `factor = 2^Δ` and `R = liveRemainingPer
   existing cost estimates carry over unchanged.
 - **not keepLifespan**: `topUpAmount = 0`; the TTL divides by `factor`.
 - **Floor clamp**: if `(R + topUpAmount) / factor` still misses the minimum, `topUpAmount` is raised
-  to the shortfall and the plan is marked, so the dialog can say that resizing requires topping up
-  to at least ~1 day of lifespan. A user who declines the clamped amount cannot resize; the engine
-  says so rather than sending a known revert.
+  to reach `(minimum + lastPrice × FLOOR_MARGIN_BLOCKS) × factor` and the plan is marked
+  `clampedToFloor`. The margin — 36 blocks of decay — is the point of the clamp, not a rounding
+  allowance: the contract measures the post-dilution balance when `increaseDepth` **mines**, not
+  when the plan is made, and the per-chunk balance falls by `lastPrice` every block in between, so
+  a plan that merely meets the minimum is as certain a revert as one below it. The clamp is not put
+  to the user as a choice: the resize dialog labels the estimate "Includes the ~1 day minimum" and
+  proceeds with the clamped plan.
 
 ## Chain access — `chain.ts` and `postage-onchain.ts`
 
@@ -97,10 +101,15 @@ With `Δ = newDepth − currentDepth`, `factor = 2^Δ` and `R = liveRemainingPer
 
 ```ts
 export function probeChainId(rpcUrl): Promise<number> // one call, before any client exists
-export function chainIdentity(rpcUrl?): Promise<ChainIdentity> // { chainId, isMainnet }
+export function chainIdentity(rpcUrl?): Promise<ChainIdentity> // { chainId, genesisHash, kind }
 export function postageChain(rpcUrl?): Promise<MultichainClient>
-export function ownerFunds(address, client?): Promise<OwnerFunds> // { xdai, bzz }
+export function ownerFunds(address, client): Promise<OwnerFunds> // { xdai, bzz }
 ```
+
+`ChainKind` is three-valued — `'mainnet' | 'dev' | 'unsupported'` — because `dev` is the answer that
+tells a page spending is free, so it has to be proven rather than inferred from "not mainnet", and
+the genesis hash is carried beside it rather than collapsed into it. `ownerFunds` takes its client
+rather than resolving one: a balance is only meaningful together with the chain it was read from.
 
 `postage-onchain.ts` orchestrates over `@swarm-id/multichain`:
 
@@ -139,13 +148,17 @@ Rules that hold across all of it:
 - **Assert chain 100 before any signature** (`settingsFor` throws otherwise). Chain id alone cannot
   tell the local chain from mainnet — it reports `100` deliberately, so that an app resolving
   addresses by chain id finds what it expects. `chainIdentity()` separates them by **genesis hash**,
-  and an endpoint that is not mainnet never falls back to the public RPCs, so a failed local call
-  cannot silently read or write real mainnet.
+  and **no** endpoint falls back to public RPCs — `settingsFor` builds on the configured URL alone,
+  whichever chain it turns out to serve — so a failed local call cannot silently read or write real
+  mainnet, and a failed mainnet call cannot silently move off the endpoint the user chose.
 - Every wait wraps in `withTimeout` (`lib/src/utils/promise.ts`), never `Promise.race`. A timeout
   surfaces as "still pending" and is resolved by reconciliation on the next dialog open.
-- Preflights assemble from `getPostageBatch` + `getPostageWriteConstraints` and map every reachable
-  revert to a typed error before spending gas: batch missing, expired, paused, not owner, floor not
-  cleared, insufficient funds at the owner address.
+- Preflights assemble from `getPostageBatch` + `getPostageWriteConstraints` and refuse the reachable
+  reverts before any gas is spent — batch missing, expired, paused, and on a resize owned by another
+  key or immutable — throwing plain `Error`s carrying the wording below, not typed ones. The floor
+  is not theirs to check (the plan clamps for it) and neither are funds (`ensureFunded` raises the
+  payment seam), and a batch already at or above the target depth is reported on `alreadyResized`
+  rather than refused.
 - Transactions run sequentially from the owner key; the package resolves pending-block nonces.
 
 ## Flows
@@ -156,9 +169,10 @@ they run one at a time. The steps, their order and their preconditions are ident
 
 **Extend** — `approve → topUp`:
 
-1. `topUpAmount = stampAmountForSeconds(price, addedSeconds)`, with the price read from the
-   contract's `lastPrice` via `fetchPostageWriteConstraints` (`chain-price.ts`, 60s cache) rather
-   than the Bee `/chainstate`.
+1. `topUpAmount = stampAmountForSeconds(price, addedSeconds)`, with the price taken live from the
+   `lastPrice` on the constraints `preflightExtend` has just read, never the Bee `/chainstate`.
+   (`chain-price.ts`'s `currentChainPrice` caches the same figure for 60 s, but that cache serves
+   the dialogs' estimates — a spend prices itself.)
 2. `preflightExtend`: batch exists, not expired, not paused. Ownership is irrelevant here — `topUp`
    is permissionless — but the owner key signs anyway.
 3. Funds check: `topUpAmount << depth` PLUR of BZZ plus gas at the owner address. A shortfall hands
@@ -169,8 +183,9 @@ they run one at a time. The steps, their order and their preconditions are ident
 **Resize** — `approve → topUp → increaseDepth`:
 
 1. `preflightResize`: `batch.owner === ownerAddress` (a hard requirement — imported foreign batches
-   get a clear "owned by a different key" error), not expired, not paused, `newDepth > depth`, floor
-   cleared by the plan, `stamp.immutableFlag === false`.
+   get a clear "owned by a different key" error), not expired, not paused, and
+   `batch.immutableFlag === false`. A batch already at or above `newDepth` is not an error here: it
+   comes back as `alreadyResized`, which step 4 records.
 2. Funds check as above; BZZ is only needed when `topUpAmount > 0`.
 3. `ensureBzzAllowance` → `topUpOnChain(topUpAmount)` → `account.updateStamp(batchID, afterTopUp)`,
    then `increaseDepthOnChain(newDepth)` → `reconcileStampFromChain` (falling back to `afterDilute`).
@@ -223,15 +238,19 @@ transaction still lands a record.
 
 The runtime `Stamper` needs no explicit rebuild: `postage-stamps.svelte.ts`'s `getStamper()`
 constructs one per call from the stored `stamp.depth`, so there is no cached instance to go stale.
-Nothing pins that, so a future cache could reintroduce the bug silently —
-[#544](https://github.com/snaha/swarm-id/issues/544).
+A future cache could reintroduce the bug silently, so
+[#544](https://github.com/snaha/swarm-id/issues/544) pinned it: `getStamper after a dilute` in
+`ui/src/lib/dev/postage-stamps.svelte.test.ts`.
 
 ## Security
 
 - No new key-exposure class. The owner key already lives client-side and signs stamps; the hex key is
   passed function-scoped into `@swarm-id/multichain` calls, is never persisted anywhere new, and
   never leaves the origin.
-- Exact-amount approvals to the fixed PostageStamp address only. No unlimited allowances.
+- Exact-amount approvals, never unlimited ones: BZZ to the fixed PostageStamp address, and — when
+  the funding was paid in WXDAI or USDC — that token to the Sushi router for exactly the swap's
+  amount (`swapTokenToBzz`). The owner key goes on signing postage operations for the life of the
+  drive, so no allowance may outlive the swap that needed it.
 - Because the addresses are the mainnet ones on both chains, the safety property is not _which
   addresses_ but _which endpoint_ — see the genesis-hash rule above.
 - A hostile user-configured `gnosisRpcUrl` can lie about state and censor transactions, but cannot
@@ -260,17 +279,20 @@ Nothing pins that, so a future cache could reintroduce the bug silently —
 | `ui/src/lib/payment/postage-onchain.ts` | preflights, allowance, writes, bundles, reconcile         |
 | `ui/src/lib/payment/purchase.ts`        | `derivePostageSigner`, `resizePlan`, TTL and cost maths   |
 | `ui/src/lib/payment/drive-operation.ts` | `runPurchase` / `runExtend` / `runResize`                 |
-| `ui/src/lib/payment/chain-price.ts`     | `lastPrice` from the contract, 60s cache                  |
+| `ui/src/lib/payment/chain-price.ts`     | `currentChainPrice` — `lastPrice`, 60s cache, estimates   |
 | `multichain/`                           | ABI, signing, waiters, bundling, SushiSwap leg, dev tools |
 
 - `purchase.test.ts` covers `resizePlan` (cost parity with the old ordering, floor clamps,
   keepLifespan on and off, integer dust); `funding.test.ts` covers the funding maths.
 - `@swarm-id/multichain` pins the `b67644b9` / `47aab79b` selectors in `abi.test.ts` and runs a fork
   suite (`pnpm test:fork`): fund → swap → create → topUp → increaseDepth → non-owner revert.
-- `ui/tests/drive-onchain.test.ts` runs four Playwright tests against the local chain, skipped when
-  no chain answers: extend grows the on-chain balance and the recorded TTL; extend again with the
-  delegate cleared, covering the sequential fallback; resize keeps the lifespan by topping up before
-  increasing depth; an interrupted resize resumes from chain truth without paying twice.
+- `ui/tests/drive-onchain.test.ts` runs three Playwright tests against the local chain, skipped when
+  no chain answers: extend grows the on-chain balance and the recorded TTL; resize keeps the
+  lifespan by topping up before increasing depth; an interrupted resize resumes from chain truth
+  without paying twice. The sequential fallback — extend with the delegate cleared — is
+  `ui/tests/drive-onchain-serial.test.ts`, in a Playwright project of its own: clearing the delegate
+  mutates the one local chain every worker shares, so it may only run once the parallel project has
+  finished.
 - Chain-level dev helpers live in `@swarm-id/multichain`'s `src/dev.ts` (`fundLocalAccount`,
   `simulateWidgetPurchase`), wrapped by `ui/src/lib/dev/chain-funding.ts` and driven from the /dev
   **Chain** tab. Creating a batch there also calls `ensureBundlingDelegate`: a baked snapshot cannot
