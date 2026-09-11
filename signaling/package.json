@@ -9,6 +9,10 @@
     ".": {
       "import": "./src/server.ts",
       "types": "./src/server.ts"
+    },
+    "./protocol": {
+      "import": "./src/protocol.ts",
+      "types": "./src/protocol.ts"
     }
   },
   "scripts": {

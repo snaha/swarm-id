@@ -38,8 +38,9 @@ half-open peer into `peer-left`.
 server only sends it for a topic it would refuse identically next time. A socket that never sent
 its join frame gets `4408` instead, precisely so it is not read that way.
 `1013` (try again later) is transient and the client backs off with jitter; `4408` is the join
-timeout. The exact values and the reasoning behind each live in the header of
-[`src/server.ts`](./src/server.ts), which is the source of truth.
+timeout. The exact values and the reasoning behind each live in
+[`src/protocol.ts`](./src/protocol.ts), the one source of truth for both ends of the wire: the
+server and the client transport in `lib` import the same module.
 
 ## Running it
 
