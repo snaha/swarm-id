@@ -23,11 +23,9 @@
  * Each row runs on a fresh account, so nothing carries over. The bus glue is a
  * copy of the proxy's three handlers (`answerLeaseRequest`, `yieldRankDelayMs`,
  * `standDownFromRequest`), which are private there; keep the rank formula
- * identical or the script measures a race the product does not have. One
- * known difference: the proxy announces `lease-released` from the
- * coordinator's `onLeaseReleased` hook, this script from
- * `yieldForPeer().then(...)` — the same moment in practice, so the timing
- * holds, but do not read the script as a byte-for-byte mirror.
+ * identical or the script measures a race the product does not have. As in
+ * the proxy, every release — a peer yield, the idle timer, teardown — is
+ * announced from the coordinator's `onLeaseReleased` hook.
  *
  * Needs the local cluster and the dev signaling server (`pnpm dev:local`, or
  * `pnpm dev:cluster:start` + `pnpm dev:signaling`) and a usable batch owned by
@@ -48,12 +46,14 @@
  * `lease-released` reached C 0.7 s after its call, two stamped release writes
  * included; 0.66–0.70 s over three runs) · idle 39.1 s · dead 38.5 s. The bus
  * part is the ~0.7 s; the rest of the bus row is the same cold claim a free
- * partition costs. One of three bus runs took 17.6 s: the local bee served the
- * pre-release lock for a few seconds after the sentinel write, so C's woken
- * scan still saw it held and slept until the next release — a stale read on
- * the rig, not a bus delay (the answer was 0.7 s there too). Before #703 the
- * script's lease messages carried no `batchId`, so every one was dropped at
- * parse and the bus row measured the poll backstop: 39.0 s, same as idle.
+ * partition costs. Two of five bus runs took ~17.5 s with the answer still at
+ * 0.7 s: the bee served the pre-release lock for a few seconds after the
+ * sentinel write, so C's woken scan still saw it held, re-asked, and the other
+ * holder yielded too before C slept out a poll interval (#724). Until the fix
+ * for #703 the script's lease messages carried no `batchId`, so every one was
+ * dropped at parse and the bus row measured the poll backstop: 39.0 s, same
+ * as idle. `scripts/` has no typecheck, so nothing but a run catches the next
+ * such drift (#725).
  */
 
 import { randomBytes } from 'node:crypto'
@@ -163,6 +163,17 @@ async function makeDevice(
         fromDeviceId: id,
         requestId: crypto.randomUUID().slice(0, LEASE_REQUEST_ID_LENGTH),
       }),
+    // The proxy's `onLeaseReleased`: the coordinator announces every release
+    // it makes, whichever path made it. A closed bus (row teardown) drops it.
+    onLeaseReleased: (partition, requestId) =>
+      device.bus?.publish({
+        type: 'lease-released',
+        accountId: keys.accountId,
+        batchId: batchID.toHex(),
+        partition,
+        fromDeviceId: id,
+        requestId,
+      }),
   })
   return device
 }
@@ -208,32 +219,21 @@ function attachBus(
       fromDeviceId: device.id,
       requestId,
     })
-    device.coordinator
-      .yieldForPeer()
-      .then((partition) => {
-        if (partition === undefined) return
-        bus.publish({
-          type: 'lease-released',
-          accountId,
-          batchId: batchID.toHex(),
-          partition,
-          fromDeviceId: device.id,
-          requestId,
-        })
-      })
-      // As in the proxy: a failed release write must not become an unhandled
-      // rejection that kills the run mid-row, past the per-row teardown.
-      .catch((error) => {
-        console.error('[handover] peer lease yield failed:', error)
-      })
+    // The release itself is announced through `onLeaseReleased`. As in the
+    // proxy: a failed release write must not become an unhandled rejection
+    // that kills the run mid-row, past the per-row teardown.
+    device.coordinator.yieldForPeer(requestId).catch((error) => {
+      console.error('[handover] peer lease yield failed:', error)
+    })
   }
 
   bus.subscribe((message) => {
     if (!('fromDeviceId' in message) || message.fromDeviceId === device.id) {
       return
     }
-    // As in the proxy: a lane is one partition of ONE batch (#589), so a
-    // lease message for another batch is nobody's business here.
+    // As in the proxy: a lane is one partition of ONE batch (#589) of one
+    // account, so a lease message for another is nobody's business here.
+    if ('accountId' in message && message.accountId !== accountId) return
     if ('batchId' in message && message.batchId !== batchID.toHex()) return
     switch (message.type) {
       case 'lease-request': {
