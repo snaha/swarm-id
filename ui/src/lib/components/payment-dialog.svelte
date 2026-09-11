@@ -344,14 +344,19 @@
    * switch (at connect, and on a chain change), a new account, the wallet's
    * own chain change, and a failed attempt that may still have spent.
    *
-   * Through the chain's own endpoint, never the wallet's. It is the same chain
-   * state either way, and a WalletConnect wallet serves a read by relaying it
-   * to the user's phone: one round-trip per token, fired together, each given
-   * up on at the deadline above. A WalletConnect session cannot process the
-   * response to a request that is no longer waiting, so its relay redelivers
-   * each one for the rest of the session — the console fills with "emitting
-   * session_request:… without any listeners", and the prompts that matter, the
-   * network switch and the payment itself, queue behind the redeliveries.
+   * Through the chain's own endpoint, never the wallet's: the same chain state
+   * either way, and one path instead of two.
+   *
+   * That reverses #534, which read through the wallet wherever the wallet was
+   * on the selected chain — the figures the wallet itself shows. What it costs
+   * over WalletConnect is why: every read is a relay round-trip to the user's
+   * phone, one per token, fired together and given up on at the deadline above.
+   * A session cannot process the response to a request that is no longer
+   * waiting, and a Safari session paying from Gnosis logged one such response
+   * ("emitting session_request:… without any listeners") every second or so for
+   * the rest of its life. These reads are the only burst of parallel wallet
+   * requests this dialog makes, which is what points at them; that they were
+   * the abandoned ones was not proven.
    */
   async function readBalances() {
     const address = walletAddress

@@ -67,12 +67,6 @@ const PAYMENT_CHAINS = WALLET_CHAINS
 let initialized = false
 
 /**
- * Who we are to Relay, for the day attribution is worth a key. Set at
- * construction and cleared immediately — see `relayClient`.
- */
-const RELAY_SOURCE = 'swarm-id'
-
-/**
  * The shared Relay client (public mainnet API — no key, as in the widget).
  *
  * **It must send no referrer.** `/quote/v2` refuses any request that names one
@@ -84,19 +78,22 @@ const RELAY_SOURCE = 'swarm-id'
  *
  * So the source is set and then cleared, rather than never passed: left unset,
  * the SDK invents one from `location.hostname` and warns that we should have
- * supplied one — the same 401, with a console warning on top.
+ * supplied one — the same 401, with a console warning on top. Any non-empty
+ * string does; ours names us, for the day attribution is worth a key. Two SDK
+ * internals hold the shape up, and a major bump is where to re-read them:
+ * `getQuote` sends `client.source` as the referrer, and `configure()` replaces
+ * it only with a truthy value — so a second `createClient` would put it back.
  *
- * The chains are ours rather than the SDK's fallback, which is Ethereum alone.
- * It resolves the source chain's RPC from this list while a payment is in
- * flight, and for a chain it does not know it polls the receipt through the
- * WALLET instead — over WalletConnect, a relay round-trip to the user's phone
- * every few seconds until the deposit confirms.
+ * **The chains are ours because the SDK's own list is Ethereum alone.** That is
+ * not a slow path, it is a wall: `executeSteps` looks the source chain up there
+ * and throws `Unable to find chain` before anything is signed, so every other
+ * source chain — Base, Arbitrum, Optimism, Polygon — failed at Pay outright.
  */
 function relayClient() {
   if (!initialized) {
     const client = createClient({
       baseApiUrl: MAINNET_RELAY_API,
-      source: RELAY_SOURCE,
+      source: 'swarm-id',
       chains: PAYMENT_CHAINS.map(convertViemChainToRelayChain),
     })
     client.source = undefined

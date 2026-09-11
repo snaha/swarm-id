@@ -38,8 +38,15 @@ interface Client {
 const client: Client & { actions: { execute: typeof execute; getQuote: typeof getQuote } } = {
   actions: { execute, getQuote },
 }
+/**
+ * The SDK's own fallback, mirrored: given no source it takes the page's
+ * hostname — which is a referrer like any other, and the same 401. Without this
+ * a rail that simply omitted the source would pass the test below while failing
+ * in a browser.
+ */
+const HOSTNAME_SOURCE = 'localhost'
 const createClient = vi.fn((options: Client) => {
-  client.source = options.source
+  client.source = options.source || HOSTNAME_SOURCE
   client.chains = options.chains
   return client
 })
