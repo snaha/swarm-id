@@ -25,12 +25,21 @@
  */
 export const MIN_PRIORITY_FEE_WEI = 1_000_000_000n
 
-/** Eighths added to the tip per retry — the usual replacement bump, 12.5%. */
-const BUMP_EIGHTHS_PER_ATTEMPT = 1n
+/** Eighths added to a refused offer on retry — the usual replacement bump, 12.5%. */
+const BUMP_EIGHTHS = 1n
 const EIGHTHS = 8n
+
+export interface FeeFields {
+  maxFeePerGas: bigint
+  maxPriorityFeePerGas: bigint
+}
 
 function max(a: bigint, b: bigint): bigint {
   return a > b ? a : b
+}
+
+function bumped(refused: bigint): bigint {
+  return (refused * (EIGHTHS + BUMP_EIGHTHS)) / EIGHTHS
 }
 
 /**
@@ -39,23 +48,30 @@ function max(a: bigint, b: bigint): bigint {
  * @param gasPrice what `eth_gasPrice` answered — base fee plus whatever the
  *   endpoint thinks is going rate
  * @param suggestedTip what `eth_maxPriorityFeePerGas` answered, floored below
- * @param attempt 0 for the first send; each retry raises the offer, because a
- *   retry that repeats a refused number is the same transaction again
+ * @param refused the offer the node just turned down, on a retry. The next one
+ *   is at least a bump above it in BOTH fields, whatever the fresh quote says:
+ *   a tip fetch that fails answers 0, and a rotation onto a degraded endpoint
+ *   quotes low, and a retry that bids under the refused number is the same
+ *   transaction again with worse odds.
  */
 export function bundleFeeFields(
   gasPrice: bigint,
   suggestedTip: bigint,
-  attempt: number = 0,
-): { maxFeePerGas: bigint; maxPriorityFeePerGas: bigint } {
-  const floored = max(suggestedTip, MIN_PRIORITY_FEE_WEI)
-  const bumps = BUMP_EIGHTHS_PER_ATTEMPT * BigInt(Math.max(attempt, 0))
-  const maxPriorityFeePerGas = (floored * (EIGHTHS + bumps)) / EIGHTHS
+  refused?: FeeFields,
+): FeeFields {
+  const quotedTip = max(suggestedTip, MIN_PRIORITY_FEE_WEI)
+  const maxPriorityFeePerGas = refused
+    ? max(quotedTip, bumped(refused.maxPriorityFeePerGas))
+    : quotedTip
+  // The cap has to leave room for the base fee UNDER the tip, or the
+  // effective tip is capped back down to `maxFee - baseFee` and we are where
+  // we started. `gasPrice` already covers the base fee, so the tip goes on
+  // top of it rather than inside it.
+  const quotedCap = gasPrice + maxPriorityFeePerGas
   return {
     maxPriorityFeePerGas,
-    // The cap has to leave room for the base fee UNDER the tip, or the
-    // effective tip is capped back down to `maxFee - baseFee` and we are where
-    // we started. `gasPrice` already covers the base fee, so the tip goes on
-    // top of it rather than inside it.
-    maxFeePerGas: gasPrice + maxPriorityFeePerGas,
+    maxFeePerGas: refused
+      ? max(quotedCap, bumped(refused.maxFeePerGas))
+      : quotedCap,
   }
 }

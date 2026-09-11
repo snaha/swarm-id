@@ -43,6 +43,7 @@ import type { MultichainSettings } from "./settings"
 import { publicClientFor, walletClientFor } from "./chain"
 import { TransactionAlreadyKnownError, withFeeTooLowRetry } from "./write-retry"
 import { bundleFeeFields } from "./bundle-fees"
+import type { FeeFields } from "./bundle-fees"
 
 /** One call inside the bundle. */
 interface BundledCall {
@@ -164,8 +165,11 @@ async function sendBundle(
   // The hash is the keccak of exactly those bytes, so no round-trip is needed
   // to learn it — which matters, since the send is what would have told us.
   let lastSerialized: `0x${string}` | undefined
+  // The offer the node last refused, so a retry bids above IT rather than
+  // above a fresh quote that may have come in lower.
+  let lastOffer: FeeFields | undefined
   return withFeeTooLowRetry(
-    async (attempt) => {
+    async () => {
       const nonce = await getTransactionCount(
         account.address,
         settings,
@@ -184,11 +188,12 @@ async function sendBundle(
       // fall back on the way every other write in this package does. The tip
       // used to be hardcoded to zero here, which is a transaction no validator
       // will include (#618).
-      const { maxFeePerGas, maxPriorityFeePerGas } = bundleFeeFields(
-        await getGasPrice(settings, rpcProvider),
-        await getMaxPriorityFeePerGas(settings, rpcProvider),
-        attempt,
-      )
+      const { maxFeePerGas, maxPriorityFeePerGas } = (lastOffer =
+        bundleFeeFields(
+          await getGasPrice(settings, rpcProvider),
+          await getMaxPriorityFeePerGas(settings, rpcProvider),
+          lastOffer,
+        ))
       const data = encodeFunctionData({
         abi: ACCOUNT_7702_ABI,
         functionName: "executeBatch",

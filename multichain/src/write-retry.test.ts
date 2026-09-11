@@ -24,6 +24,16 @@ function alreadyKnown(): Error {
   )
 }
 
+/** geth's answer, as viem 2.55 surfaces it: a nonce error over the real text. */
+function nonceTooLowOverAlreadyKnown(): Error {
+  return new Error(
+    "Nonce provided for the transaction is lower than the current nonce of the account.\n" +
+      "Try increasing the nonce or find the latest nonce with `getTransactionCount`.\n" +
+      "Details: already known\n" +
+      "Version: viem@2.55.13",
+  )
+}
+
 function feeTooLow(): Error {
   return new Error("err: FeeTooLow: transaction underpriced")
 }
@@ -31,6 +41,24 @@ function feeTooLow(): Error {
 describe("isAlreadyKnown", () => {
   it("recognises the node's answer", () => {
     expect(isAlreadyKnown(alreadyKnown())).toBe(true)
+  })
+
+  // Every client family spells it differently, and viem re-types geth's
+  // `already known` as a nonce complaint — the node's text survives only in
+  // the details line, so the match has to be case-insensitive and by family.
+  it.each([
+    ["geth / erigon, re-typed by viem", nonceTooLowOverAlreadyKnown()],
+    ["geth, bare", new Error("already known")],
+    ["openethereum", new Error("transaction already imported")],
+    ["besu", new Error("Known transaction")],
+  ])("recognises the %s spelling", (_, error) => {
+    expect(isAlreadyKnown(error)).toBe(true)
+  })
+
+  it("looks through the cause chain", () => {
+    expect(
+      isAlreadyKnown(new Error("send failed", { cause: alreadyKnown() })),
+    ).toBe(true)
   })
 
   it("does not confuse it with the underpriced answer", () => {

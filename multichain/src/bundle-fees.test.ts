@@ -40,25 +40,36 @@ describe("bundleFeeFields", () => {
     expect(fees.maxFeePerGas).toBe(2n * GWEI + fees.maxPriorityFeePerGas)
   })
 
-  // `withFeeTooLowRetry` used to re-send byte-identical transactions; the
-  // attempt index is what lets a retry actually differ from what was refused.
-  it("raises the offer on each retry", () => {
-    const first = bundleFeeFields(REPORTED_GAS_PRICE, 0n, 0)
-    const second = bundleFeeFields(REPORTED_GAS_PRICE, 0n, 1)
-    const third = bundleFeeFields(REPORTED_GAS_PRICE, 0n, 2)
+  // `withFeeTooLowRetry` used to re-send byte-identical transactions. A retry
+  // has to bid ABOVE what was refused — and the refused offer is what it
+  // bids against, not a fresh quote: a tip fetch that fails answers 0, and a
+  // provider rotation can land on a degraded endpoint, so a re-quote can be
+  // lower than the attempt the node just turned down.
+  it("bids above the refused offer even when the fresh quote dropped", () => {
+    const refused = bundleFeeFields(2n * GWEI, 3n * GWEI)
+    const retry = bundleFeeFields(REPORTED_GAS_PRICE, 0n, refused)
+    expect(retry.maxPriorityFeePerGas).toBeGreaterThan(
+      refused.maxPriorityFeePerGas,
+    )
+    expect(retry.maxFeePerGas).toBeGreaterThan(refused.maxFeePerGas)
+  })
 
+  it("takes the fresh quote when it rose past the bump", () => {
+    const refused = bundleFeeFields(1n * GWEI, 1n * GWEI)
+    const retry = bundleFeeFields(5n * GWEI, 4n * GWEI, refused)
+    expect(retry.maxPriorityFeePerGas).toBe(4n * GWEI)
+    expect(retry.maxFeePerGas).toBe(9n * GWEI)
+  })
+
+  it("keeps rising across retries", () => {
+    const first = bundleFeeFields(REPORTED_GAS_PRICE, 0n)
+    const second = bundleFeeFields(REPORTED_GAS_PRICE, 0n, first)
+    const third = bundleFeeFields(REPORTED_GAS_PRICE, 0n, second)
     expect(second.maxPriorityFeePerGas).toBeGreaterThan(
       first.maxPriorityFeePerGas,
     )
     expect(third.maxPriorityFeePerGas).toBeGreaterThan(
       second.maxPriorityFeePerGas,
-    )
-    expect(second.maxFeePerGas).toBeGreaterThan(first.maxFeePerGas)
-  })
-
-  it("defaults to the first attempt", () => {
-    expect(bundleFeeFields(REPORTED_GAS_PRICE, 0n)).toEqual(
-      bundleFeeFields(REPORTED_GAS_PRICE, 0n, 0),
     )
   })
 })

@@ -9,6 +9,15 @@ const ATTEMPTS = 4
 const BACKOFF_MILLIS = Dates.seconds(2)
 
 /**
+ * How each client family says it: Nethermind `AlreadyKnown`, geth and erigon
+ * `already known` (which viem re-types as a nonce error, leaving the node's
+ * text only in its details line), OpenEthereum `transaction already imported`,
+ * Besu `Known transaction`. Case-insensitive, because the same node text
+ * reaches us through different wrappers.
+ */
+const ALREADY_KNOWN = /already ?known|already imported|known transaction/i
+
+/**
  * Whether the node is saying it ALREADY HAS this transaction.
  *
  * Not a failure: a successful broadcast reported as an error. It used to take
@@ -17,7 +26,12 @@ const BACKOFF_MILLIS = Dates.seconds(2)
  * nonce and the payload do not change on their own (#620).
  */
 export function isAlreadyKnown(error: unknown): boolean {
-  return Objects.errorMatches(error, "AlreadyKnown")
+  for (let e = error; e instanceof Error; e = e.cause) {
+    if (ALREADY_KNOWN.test(e.message)) {
+      return true
+    }
+  }
+  return false
 }
 
 /**
