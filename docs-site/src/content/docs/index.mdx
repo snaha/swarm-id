@@ -3,18 +3,18 @@ title: Introduction
 description: Cross-browser identity management for Swarm dApps
 ---
 
-Swarm ID is an authentication and identity management system for Swarm dApps. It gives a dApp a popup sign-in flow, in the style of OAuth, that works in Chrome, Firefox and Safari without a browser extension and without the Storage Access API. Where a browser partitions the proxy iframe's storage, Safari above all, the connect popup hands the iframe its credentials directly; see [Architecture](/architecture) for what is confirmed on a real device.
+Swarm ID is an authentication and identity management system for Swarm dApps. It gives a dApp a popup sign-in flow, in the style of OAuth, that works in Chrome, Firefox and Safari without a browser extension and without the Storage Access API. Where a browser partitions the proxy iframe's storage, Safari above all, the connect popup hands the iframe its credentials directly; see [Architecture](./architecture/) for what is confirmed on a real device.
 
 ## Key Features
 
 - **Works in every major browser** - Chrome, Firefox and Safari, with no extension
-- **One secret, many keys** - every key derives from the account's recovery phrase; see [Key Derivation](/key-derivation)
+- **One secret, many keys** - every key derives from the account's recovery phrase; see [Key Derivation](./key-derivation/)
 - **Master key stays home** - the master key never leaves the trusted domain
 - **One secret per app** - each dApp gets its own derived secret, so two apps never share one
 - **Three ways to unlock** - a passkey, an Ethereum wallet, or a password
 - **Backup and recovery** - an encrypted `.swarmid` file, plus restoration from Swarm on a new device
 - **Drives** - postage batches bought in the app, shared by all of the account's devices
-- **Live propagation** - a change reaches the account's open tabs, iframes and devices in about a round trip over the [account bus](/account-bus)
+- **Live propagation** - a change reaches the account's open tabs, iframes and devices in about a round trip over the [account bus](./account-bus/)
 
 ## How It Works
 
@@ -47,6 +47,6 @@ Three parts:
 
 ## Next Steps
 
-- [Quick Start](/getting-started) - integrate the library in a few steps
-- [Architecture](/architecture) - how the pieces fit, the message protocol, and where WebSocket is used
-- [Key Derivation](/key-derivation) - every key and where it comes from
+- [Quick Start](./getting-started/) - integrate the library in a few steps
+- [Architecture](./architecture/) - how the pieces fit, the message protocol, and where WebSocket is used
+- [Key Derivation](./key-derivation/) - every key and where it comes from

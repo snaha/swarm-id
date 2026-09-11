@@ -3,7 +3,7 @@ title: Local Development
 description: Advanced local development setup for Swarm ID
 ---
 
-This guide covers advanced local development topics. For basic setup, see the [Quick Start](/getting-started).
+This guide covers advanced local development topics. For basic setup, see the [Quick Start](../getting-started/).
 
 ## Starting the Local Bee Cluster
 
@@ -56,7 +56,7 @@ end; see [Paying for a Drive](#paying-for-a-drive).
 
 Every node in the cluster allows all CORS origins, so the identity UI can talk to
 `http://localhost:1633` as soon as it is up. A Bee node you run yourself instead needs the identity
-UI's origin allowed explicitly — see [Using Your Own Bee Node](/own-bee-node).
+UI's origin allowed explicitly — see [Using Your Own Bee Node](../own-bee-node/).
 
 ## Developer Tools (/dev)
 
@@ -107,7 +107,7 @@ Everything that talks to the Bee node:
 
 ### Devices Tab
 
-The devices registered to the selected account, which partitions each currently holds, and an **Online** badge for every device heard on the [account bus](/account-bus) in the last three minutes. The rows refresh every 5 s, so a peer shows up about one presence message (20 s) after it joins.
+The devices registered to the selected account, which partitions each currently holds, and an **Online** badge for every device heard on the [account bus](../account-bus/) in the last three minutes. The rows refresh every 5 s, so a peer shows up about one presence message (20 s) after it joins.
 
 ## Getting a Postage Batch
 
@@ -202,7 +202,7 @@ Safari's Intelligent Tracking Prevention (ITP) partitions storage for third-part
 
 The whole path — handover, stamper, upload — is confirmed on real Safari (iOS 18.7 / Safari 26.6), in a normal and a private window alike. A plain `pnpm dev` cannot reproduce it — the identity UI and demo are served from the same site, and ports do not make them cross-site. Browsing the demo under a **different hostname for the same machine** does: `http://127.0.0.1:3500` or `http://[::1]:3500` while the proxy origin stays `http://localhost:5500`. That is the rig `ui/tests/bus-propagation.test.ts` uses.
 
-Locally, `pnpm dev` also starts the [account-bus](/account-bus) signaling server on port 5520; without it a partitioned iframe can only reach contexts in its own partition.
+Locally, `pnpm dev` also starts the [account-bus](../account-bus/) signaling server on port 5520; without it a partitioned iframe can only reach contexts in its own partition.
 
 Safari private browsing sessions are also ephemeral — data is lost when the window closes.
 
@@ -221,7 +221,7 @@ On the local rig storage is not partitioned at all: `localhost:3500` and `localh
 The cluster started by `pnpm dev:cluster:start` allows every origin, so this only bites a Bee node
 you run by hand: it has to allow the **identity UI's** origin (`http://localhost:5500` in
 development), because Bee requests are made by the Swarm ID iframe rather than by the app embedding
-it. See [Using Your Own Bee Node](/own-bee-node).
+it. See [Using Your Own Bee Node](../own-bee-node/).
 
 ### Bee Cluster Won't Start
 

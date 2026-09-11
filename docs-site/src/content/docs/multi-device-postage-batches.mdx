@@ -13,7 +13,7 @@ Everything here is derived purely from Swarm primitives (chunks, single-owner ch
 epoch feeds) and a handful of deterministic key derivations. This layer is the record
 everything else defers to, and it needs **no server, no coordinator, and no shared mutable
 state other than what lives on Swarm itself**. The contexts of one account that are open at the same time also
-share the [account bus](/account-bus), which shortens every wait described below to about
+share the [account bus](../account-bus/), which shortens every wait described below to about
 one round trip; it never replaces the protocol here, and a port can leave it out.
 
 ## Two independent systems
@@ -32,7 +32,7 @@ independent mechanisms:
 They are independent: account-state sync would be needed even with one batch per device,
 and the partition lease would be needed even if account state never changed. A device
 that holds a partition lease is also the device permitted to publish account state (the
-"partition gate", below). The [account bus](/account-bus) cuts across both: it carries a
+"partition gate", below). The [account bus](../account-bus/) cuts across both: it carries a
 snapshot to live peers ahead of the feed, and lets a waiting device ask a live holder for
 its partition instead of polling for it.
 
@@ -41,7 +41,7 @@ its partition instead of polling for it.
 All cross-device addressing derives from the account's **derivation key** (`derivationKey`),
 a 32-byte secret stored on the account and held by every device. Two devices interoperate
 **if and only if they derive the same keys from the same derivation key.** Where the
-derivation key itself comes from is on [Key Derivation](/key-derivation).
+derivation key itself comes from is on [Key Derivation](../key-derivation/).
 
 The primitive is `deriveSecret(key, context)`:
 
@@ -444,7 +444,7 @@ refresh).
 - **Case B — second device.** Partition 0 is live-held; take partition 1, seed its counter
   from its partition-state feed (zero if never published).
 - **Case C — third+ device, turn-taking.** All `PARTITION_COUNT` partitions are held. The
-  new device asks the live holders for a slot over the [account bus](/account-bus) each
+  new device asks the live holders for a slot over the [account bus](../account-bus/) each
   round; exactly one idle holder answers, releases, and the waiter claims the freed
   partition in about one round trip, resuming from the published counter. Without a live
   answer it waits (`SLOT_WAIT_TIMEOUT_MS`, polling every `LEASE_REFRESH_MS`) for a holder
@@ -532,7 +532,7 @@ survive.
   create the account from the result.
 - **Refresh** (a device that already has the account): fold from Swarm and merge the result
   into the local account with the same rules, without publishing anything back.
-- **A peer's bus message**: an `account-delta` on the [account bus](/account-bus) is folded
+- **A peer's bus message**: an `account-delta` on the [account bus](../account-bus/) is folded
   with the same rules, so live peers converge in about a round trip. A change folded from a
   peer is never published back at it.
 

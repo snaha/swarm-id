@@ -59,7 +59,7 @@ The session resolved a postage batch **and** its signer key **and** built a work
 
 **Custom Node**
 
-The user has configured a custom Bee node URL in the identity provider's network settings. When a custom node is set, the subsidised gateway is **silently disabled**, so that uploads go to the user's chosen node. That node must allow the identity UI's origin — see [Using Your Own Bee Node](/own-bee-node).
+The user has configured a custom Bee node URL in the identity provider's network settings. When a custom node is set, the subsidised gateway is **silently disabled**, so that uploads go to the user's chosen node. That node must allow the identity UI's origin — see [Using Your Own Bee Node](../own-bee-node/).
 
 The check is an exact inequality against the default gateway URL, and it runs in two places: once when the dApp identifies itself to the proxy, and again whenever network settings arrive or change. The second matters for a storage-partitioned session, whose settings are handed over by the connect popup _after_ the dApp has identified itself. Reverting to the default URL does not re-enable a gateway already dropped — that takes a dApp reload.
 
@@ -115,7 +115,7 @@ To provide a subsidised gateway for your dApp:
 2. Purchase a postage stamp with sufficient depth and amount for your expected usage
 3. Deploy a gateway proxy (such as [swarm-gateway](https://github.com/ethersphere/swarm-gateway)) in front of your Bee node that automatically injects the postage stamp header for uploads
 4. Expose the gateway via HTTPS
-5. Allow the identity UI's origin in the gateway's CORS configuration — uploads are made by the Swarm ID iframe, not by the dApps you serve, so their origins are not the ones that appear. See [Using Your Own Bee Node](/own-bee-node#why-the-iframes-origin-is-the-one-that-matters)
+5. Allow the identity UI's origin in the gateway's CORS configuration — uploads are made by the Swarm ID iframe, not by the dApps you serve, so their origins are not the ones that appear. See [Using Your Own Bee Node](../own-bee-node/#why-the-iframes-origin-is-the-one-that-matters)
 
 The gateway proxy intercepts upload requests and adds the required postage stamp header, so clients can upload without providing their own stamp.
 

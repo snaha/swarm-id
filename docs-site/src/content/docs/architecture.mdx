@@ -63,7 +63,7 @@ Runs inside the hidden iframe on the trusted domain. It:
 - holds the dApp's secret and the postage stamps that dApp may spend
 - signs and sends every Bee request, and reports progress and connection changes back to the page
 - validates every message from the page before acting on it
-- is a peer on the [account bus](/account-bus), so a revoke or a rename made elsewhere reaches it while it is open
+- is a peer on the [account bus](../account-bus/), so a revoke or a rename made elsewhere reaches it while it is open
 
 ### Connect popup
 
@@ -80,7 +80,7 @@ The rest of the trusted domain: account creation from a recovery phrase, the key
 
 ## Keys
 
-Every key derives from the account's recovery phrase. The phrase gives a wallet whose private key is the **master key** and whose address is the account id. The master key stays in the identity UI, encrypted at rest under the access method. From it come the per-dApp secrets and a stored `derivationKey`, and from that the Swarm encryption key, the backup signer that owns every feed, the postage signer, the sharing key, and the account bus keys. The full tree, with every context string, is on [Key Derivation](/key-derivation).
+Every key derives from the account's recovery phrase. The phrase gives a wallet whose private key is the **master key** and whose address is the account id. The master key stays in the identity UI, encrypted at rest under the access method. From it come the per-dApp secrets and a stored `derivationKey`, and from that the Swarm encryption key, the backup signer that owns every feed, the postage signer, the sharing key, and the account bus keys. The full tree, with every context string, is on [Key Derivation](../key-derivation/).
 
 A dApp's secret is `HMAC-SHA256(masterKey, appOrigin)`:
 
@@ -95,7 +95,7 @@ The identity UI keeps the account in the trusted domain's local storage: the enc
 
 A dApp page cannot read any of this: the iframe is a different origin. What isolates apps from each other is the origin boundary plus the per-app secret, not storage partitioning.
 
-Where the browser partitions the iframe away from the trusted domain's storage, the iframe gets its own store. The connect popup hands it the account's synced view (stamps and signer keys, never the vault) and the iframe keeps the session in its own partition, so a reload does not repeat the handshake. That iframe is a full writer and a peer on the [account bus](/account-bus), which is how a revoke or a rename made anywhere else still reaches it while it is open.
+Where the browser partitions the iframe away from the trusted domain's storage, the iframe gets its own store. The connect popup hands it the account's synced view (stamps and signer keys, never the vault) and the iframe keeps the session in its own partition, so a reload does not repeat the handshake. That iframe is a full writer and a peer on the [account bus](../account-bus/), which is how a revoke or a rename made anywhere else still reaches it while it is open.
 
 ## Message Protocol
 
@@ -132,7 +132,7 @@ Everything between a dApp page and its iframe is postMessage, validated with Zod
 | ----------- | ------------------------------------------------------------------------------------------------------------------ |
 | `setSecret` | the derived app secret and the account view, sent through `window.opener` when the iframe's storage is partitioned |
 
-The [account bus](/account-bus) has its own message kinds: account snapshots, partition handover and presence. They travel between the account's live contexts rather than between a page and its iframe.
+The [account bus](../account-bus/) has its own message kinds: account snapshots, partition handover and presence. They travel between the account's live contexts rather than between a page and its iframe.
 
 ## Where WebSocket is used
 
@@ -148,14 +148,14 @@ A build with no signaling URL configured runs the bus over `BroadcastChannel` on
 
 ## Backup and Recovery
 
-Three ways an account's state survives a device: an encrypted `.swarmid` file, the account's own feeds on Swarm, and live propagation over the [account bus](/account-bus).
+Three ways an account's state survives a device: an encrypted `.swarmid` file, the account's own feeds on Swarm, and live propagation over the [account bus](../account-bus/).
 
 ### The `.swarmid` file
 
 A JSON object with a plaintext header and an encrypted payload:
 
 - **Header**: `version`, `accountName`, `exportedAt`. No key material and no account type, since every account is a recovery-phrase account
-- **Payload**: the account state snapshot (connected apps and postage stamps, plus account metadata), encrypted with AES-GCM-256 under the backup file key from [Key Derivation](/key-derivation). App connections are kept in the payload so that a restored account keeps them
+- **Payload**: the account state snapshot (connected apps and postage stamps, plus account metadata), encrypted with AES-GCM-256 under the backup file key from [Key Derivation](../key-derivation/). App connections are kept in the payload so that a restored account keeps them
 
 ### Export
 
@@ -182,7 +182,7 @@ When a device signs in to an account it has never seen, it rebuilds the account 
 3. Read each device's own **state feed**, which holds that device's latest full view of the account
 4. Fold those views into one account with last-writer-wins rules and tombstones
 
-The per-device feeds and the fold are described on [Postage Batch Sharing](/multi-device-postage-batches#account-state-sync).
+The per-device feeds and the fold are described on [Postage Batch Sharing](../multi-device-postage-batches/#account-state-sync).
 
 ## Security Considerations
 

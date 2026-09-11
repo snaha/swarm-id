@@ -63,7 +63,7 @@ Creates a new SwarmIdClient instance.
 | `options.metadata.icon`         | `string`                         | No       | Application icon as a data URL (SVG or PNG, max 4KB)                                                                                                                                                 |
 | `options.buttonConfig`          | `ButtonConfig`                   | No       | Button configuration for the authentication UI                                                                                                                                                       |
 | `options.containerId`           | `string`                         | No       | ID of container element to place iframe in (optional)                                                                                                                                                |
-| `options.subsidisedGatewayUrl`  | `string`                         | No       | URL of a subsidised gateway for uploads without user's postage stamp. See [Subsidised Gateway](/subsidised-gateway) for details.                                                                     |
+| `options.subsidisedGatewayUrl`  | `string`                         | No       | URL of a subsidised gateway for uploads without user's postage stamp. See [Subsidised Gateway](../subsidised-gateway/) for details.                                                                  |
 
 **Throws:** `Error` if the provided app metadata is invalid
 
@@ -391,8 +391,8 @@ Synchronous accessor for the current connection state. Populated by the proxy as
 | Property                    | Type                                            | Description                                                                                                                                                                             |
 | --------------------------- | ----------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `canUpload`                 | `boolean`                                       | Whether the user can upload data                                                                                                                                                        |
-| `uploadMode`                | `"user-stamp" \| "subsidised" \| "unavailable"` | How uploads will be handled. See [Upload Availability](/subsidised-gateway#upload-availability-truth-table)                                                                             |
-| `uploadUnavailableReason`   | `"no-stamp" \| "stamper-failed" \| undefined`   | Why `uploadMode` is `"unavailable"`; absent whenever uploads work. See [Why Uploads Are Unavailable](/subsidised-gateway#why-uploads-are-unavailable)                                   |
+| `uploadMode`                | `"user-stamp" \| "subsidised" \| "unavailable"` | How uploads will be handled. See [Upload Availability](../subsidised-gateway/#upload-availability-truth-table)                                                                          |
+| `uploadUnavailableReason`   | `"no-stamp" \| "stamper-failed" \| undefined`   | Why `uploadMode` is `"unavailable"`; absent whenever uploads work. See [Why Uploads Are Unavailable](../subsidised-gateway/#why-uploads-are-unavailable)                                |
 | `storagePartitioned`        | `boolean \| undefined`                          | `true` when the browser gave the proxy iframe its own partitioned store (Safari ITP, strict privacy settings). Reported for UI messaging; it does **not** decide whether you can upload |
 | `identity`                  | `object \| undefined`                           | The connected identity details (if authenticated)                                                                                                                                       |
 | `identity.id`               | `string`                                        | Unique identifier for the identity                                                                                                                                                      |
@@ -1757,7 +1757,7 @@ interface AccountStateSnapshot {
 
 ### `restoreAccountFromSwarm(bee, masterKey, ethereumAddress, credentialId)`
 
-Rebuild account state from Swarm on a device that has never seen the account. Derives the keys, reads the account's device roster, reads every device's latest state feed, and folds them into one snapshot; see [Postage Batch Sharing](/multi-device-postage-batches#account-state-sync).
+Rebuild account state from Swarm on a device that has never seen the account. Derives the keys, reads the account's device roster, reads every device's latest state feed, and folds them into one snapshot; see [Postage Batch Sharing](../multi-device-postage-batches/#account-state-sync).
 
 **Parameters:**
 
@@ -1782,7 +1782,7 @@ interface RestoreAccountResult {
 
 ## Key Derivation
 
-The full tree, with every context string, is on [Key Derivation](/key-derivation). Every function below takes and returns 64-character hex strings unless noted.
+The full tree, with every context string, is on [Key Derivation](../key-derivation/). Every function below takes and returns 64-character hex strings unless noted.
 
 | Function                                        | Derives                                                                       |
 | ----------------------------------------------- | ----------------------------------------------------------------------------- |
