@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   type PurchaseStampOptions,
   type StampPurchaseHandle,
+  buildWidgetUrl,
   openStampPurchaseWidget,
   parseBatchEvent,
 } from './multichain-widget'
@@ -29,6 +30,27 @@ function makeEvent(overrides: Record<string, unknown> = {}): Record<string, unkn
     ...overrides,
   }
 }
+
+describe('buildWidgetUrl', () => {
+  it('hands the form’s depth and amount to the popup as its defaults (#632)', () => {
+    const url = new URL(buildWidgetUrl(DESTINATION, { depth: 21, amount: 10453363201n }))
+    expect(url.origin).toBe(WIDGET_ORIGIN)
+    expect(url.searchParams.get('mode')).toBe('batch')
+    expect(url.searchParams.get('destination')).toBe(DESTINATION)
+    expect(url.searchParams.get('depth')).toBe('21')
+    expect(url.searchParams.get('amount')).toBe('10453363201')
+    // One halving, like our lane labels (#566).
+    expect(url.searchParams.get('reserved-slots')).toBe('1')
+    expect(url.searchParams.has('mocked')).toBe(false)
+  })
+
+  it('omits the defaults it does not have', () => {
+    const url = new URL(buildWidgetUrl(DESTINATION, {}, true))
+    expect(url.searchParams.has('depth')).toBe(false)
+    expect(url.searchParams.has('amount')).toBe(false)
+    expect(url.searchParams.get('mocked')).toBe('true')
+  })
+})
 
 describe('parseBatchEvent', () => {
   it('parses a structured-clone object payload', () => {

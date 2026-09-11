@@ -29,6 +29,7 @@ import {
   LEASE_SKEW_MARGIN_MS,
   LEASE_TTL_MS,
   MIN_USABLE_BATCH_DEPTH,
+  MIN_USABLE_PARTITION_CAPACITY,
   mergeChunk,
   serializeUint16Array,
   serializeUint32Array,
@@ -279,20 +280,21 @@ describe("per-bucket reservation constants", () => {
   })
 })
 
-describe("MIN_USABLE_BATCH_DEPTH (#538)", () => {
-  it("is the smallest depth whose partition lane holds more than one chunk", () => {
+describe("MIN_USABLE_BATCH_DEPTH (#538, #566)", () => {
+  it("is the smallest depth whose partition lane is worth buying", () => {
     expect(
       partitionCapacity(MIN_USABLE_BATCH_DEPTH, PARTITION_COUNT),
-    ).toBeGreaterThan(1)
+    ).toBeGreaterThanOrEqual(MIN_USABLE_PARTITION_CAPACITY)
     expect(
       partitionCapacity(MIN_USABLE_BATCH_DEPTH - 1, PARTITION_COUNT),
-    ).toBeLessThanOrEqual(1)
+    ).toBeLessThan(MIN_USABLE_PARTITION_CAPACITY)
   })
 
-  it("rules out depth 17 (no data slot at all) and 18 (exactly one)", () => {
+  it("rules out 17 (no data slot), 18 (exactly one) and 19 (three: ~1 MB before a bucket fills)", () => {
     expect(partitionCapacity(17, PARTITION_COUNT)).toBe(0)
     expect(partitionCapacity(18, PARTITION_COUNT)).toBe(1)
-    expect(MIN_USABLE_BATCH_DEPTH).toBe(19)
+    expect(partitionCapacity(19, PARTITION_COUNT)).toBe(3)
+    expect(MIN_USABLE_BATCH_DEPTH).toBe(20)
   })
 
   it("leaves a bucket with room once its first data chunk lands", () => {

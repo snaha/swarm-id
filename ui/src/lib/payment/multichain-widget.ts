@@ -6,8 +6,11 @@
  * Integrates with the Ethersphere multichain widget for purchasing postage
  * stamps. The widget popup handles the cross-chain crypto payment and the
  * on-chain batch creation, then posts the result back via postMessage. This is
- * the same proven settlement path the legacy UI uses — the URL only carries the
- * batch-owner `destination`; chain / token / amount are chosen inside the popup.
+ * the same proven settlement path the legacy UI uses. The URL carries the
+ * batch-owner `destination` and, as defaults the popup opens on, the `depth` and
+ * per-chunk `amount` the form asked for (#632); chain / token, and the final
+ * size and lifespan, are chosen inside the popup, and the `batch` event reports
+ * what was actually bought.
  */
 import { strip0x } from '$lib/crypto/hex'
 
@@ -47,11 +50,11 @@ export interface PurchaseStampOptions {
   mocked?: boolean // For testing - simulate the settlement instead of paying
   mockPopup?: boolean // For testing - also open the widget's `?mocked=true` popup
   mockError?: boolean // For testing - simulate error instead of success
-  // For testing - the depth to fabricate. The real widget picks the depth
-  // itself, which is why there is no plain `depth` option; the mock takes the
-  // size the user asked for so the drive it leaves behind is the one they
-  // chose, rather than always a 600 MB one.
-  mockDepth?: number
+  // The size and lifespan the form asked for, handed to the popup as its
+  // defaults — the user can still change them there. The mock settles on them
+  // as-is, so the drive it leaves behind is the one that was chosen.
+  depth?: number
+  amount?: bigint
 }
 
 /** How long to keep listening for a trailing `batch` message after the popup
@@ -68,15 +71,35 @@ const MOCK_BATCH_AMOUNT = '10000000000'
 const MS_PER_SECOND = 1_000
 const HEX_RADIX = 16
 
-/** Build the widget URL with parameters. */
-function buildWidgetUrl(destination: string, mocked?: boolean): string {
+/** The popup's defaults, when the form has them. */
+interface BatchDefaults {
+  depth?: number
+  amount?: bigint
+}
+
+/** Build the widget URL with parameters. Exported for its test. */
+export function buildWidgetUrl(
+  destination: string,
+  { depth, amount }: BatchDefaults,
+  mocked?: boolean,
+): string {
   const params = new URLSearchParams({
     mode: 'batch',
     destination,
     intent: 'postage-batch',
-    'reserved-slots': '2',
+    // The widget implements this as a depth shift on the capacity it shows —
+    // `n` halves the label n times — so 1 is the closest it gets to our labels,
+    // which are a lane of half the slots (#566, `driveEffectiveBytes`). With 2
+    // the popup said 111 MB for a batch we label ~650 MB (#632).
+    'reserved-slots': '1',
   })
 
+  if (depth !== undefined) {
+    params.set('depth', String(depth))
+  }
+  if (amount !== undefined) {
+    params.set('amount', amount.toString())
+  }
   if (mocked) {
     params.set('mocked', 'true')
   }
@@ -307,7 +330,8 @@ export function openStampPurchaseWidget(options: PurchaseStampOptions): StampPur
     mocked,
     mockPopup,
     mockError,
-    mockDepth,
+    depth,
+    amount,
   } = options
 
   // Mocked mode (the /dev toggle): settle locally without a real cross-chain
@@ -318,7 +342,11 @@ export function openStampPurchaseWidget(options: PurchaseStampOptions): StampPur
   // Either way the settlement is simulated after a short, visible delay.
   if (mocked) {
     const popup = mockPopup
-      ? window.open(buildWidgetUrl(destination, true), 'stamp-purchase', POPUP_FEATURES)
+      ? window.open(
+          buildWidgetUrl(destination, { depth, amount }, true),
+          'stamp-purchase',
+          POPUP_FEATURES,
+        )
       : undefined
     const mockTimer = setTimeout(() => {
       popup?.close()
@@ -333,8 +361,8 @@ export function openStampPurchaseWidget(options: PurchaseStampOptions): StampPur
       settle(onSuccess, onError, {
         event: 'batch',
         batchId,
-        depth: mockDepth ?? MOCK_BATCH_DEPTH,
-        amount: MOCK_BATCH_AMOUNT,
+        depth: depth ?? MOCK_BATCH_DEPTH,
+        amount: amount?.toString() ?? MOCK_BATCH_AMOUNT,
         blockNumber: '0x' + Math.floor(Date.now() / MS_PER_SECOND).toString(HEX_RADIX),
       })
     }, MOCK_DELAY_MS)
@@ -348,7 +376,7 @@ export function openStampPurchaseWidget(options: PurchaseStampOptions): StampPur
     }
   }
 
-  const url = buildWidgetUrl(destination)
+  const url = buildWidgetUrl(destination, { depth, amount })
   const popup = window.open(url, 'stamp-purchase', POPUP_FEATURES)
 
   if (!popup) {

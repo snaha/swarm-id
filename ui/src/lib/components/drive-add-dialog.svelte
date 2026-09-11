@@ -358,16 +358,21 @@
         mocked: devSettingsStore.data.mockStampEnabled,
         mockPopup: devSettingsStore.data.mockStampPopup,
         mockError: devSettingsStore.data.mockStampResult === 'error',
-        // Only the mock can honour this — the real widget picks the size itself.
-        mockDepth: depthValue === '' ? undefined : Number(depthValue),
+        // The form's choice, as the popup's defaults (#632). `amountPerChunk`
+        // is unset when the chain price never loaded; the popup then opens on
+        // its own lifespan, as it does everywhere for size when the depth is
+        // not one it offers (18–25) or the lifespan not one it takes (1–365
+        // days) — the widget clamps both rather than refusing.
+        depth: depthValue === '' ? undefined : Number(depthValue),
+        amount: amountPerChunk,
         onSuccess: (batch) => {
           if (!attempt.current) {
             return
           }
-          // The size/lifespan actually bought are chosen INSIDE the widget —
-          // the form's selection is only a pre-payment estimate. Derive the
-          // lifespan from what settled (funded blocks × block time); when the
-          // chain price never loaded it stays unknown rather than wrong.
+          // The size/lifespan actually bought are confirmed INSIDE the widget —
+          // the form's selection is only its default. Derive the lifespan from
+          // what settled (funded blocks × block time); when the chain price
+          // never loaded it stays unknown rather than wrong.
           const ttl =
             currentPrice === undefined
               ? undefined

@@ -281,12 +281,12 @@ export async function addDrive(
   await dialog.getByRole('combobox').nth(1).selectOption({ index: 1 })
   // ...and an explicit lifespan, rather than the dialog's default of a YEAR. A
   // drive costs `amountPerChunk << depth`, so both halves matter, and
-  // `DRIVE_FUNDING` is a fixed 3 BZZ: a year at this size is ~7.9 BZZ, so the
+  // `DRIVE_FUNDING` is a fixed 3 BZZ: a year at this size is ~15.8 BZZ, so the
   // prefunded suites would open the payment screens they exist to avoid and
   // then fail waiting for a drive that never settles.
   //
-  // 30 days sits between two bounds: ~0.65 BZZ leaves
-  // room inside the 3 BZZ float, and it clears the 7-day
+  // 30 days sits between two bounds: ~1.3 BZZ leaves room inside the 3 BZZ
+  // float, and it clears the 7-day
   // `EXPIRES_SOON_THRESHOLD_SECONDS` by a wide margin. A drive bought AT that
   // threshold reads "expires soon" the moment it settles, which quietly adds a
   // second drive to the home page's attention count.

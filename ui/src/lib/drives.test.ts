@@ -1,6 +1,6 @@
 // Copyright 2026 The Swarm Authors. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
-import { BatchId, PrivateKey } from '@ethersphere/bee-js'
+import { BatchId, PrivateKey, RedundancyLevel, Utils } from '@ethersphere/bee-js'
 import { MIN_USABLE_BATCH_DEPTH, type PostageStamp } from '@snaha/swarm-id'
 import { describe, expect, it } from 'vitest'
 
@@ -8,6 +8,7 @@ import {
   DRIVE_SIZE_BREAKPOINTS,
   accountNeedsStorageAttention,
   describeDrive,
+  driveEffectiveBytes,
   driveNeedsAttention,
   drivesNeedingAttention,
   formatBytes,
@@ -242,12 +243,34 @@ describe('soonestDriveExpiry / accountNeedsStorageAttention', () => {
   })
 })
 
+describe('driveEffectiveBytes', () => {
+  it('is what a single writer fits into a batch one depth smaller — one partition lane (#566)', () => {
+    expect(driveEffectiveBytes(21)).toBe(
+      Utils.getStampEffectiveBytes(20, true, RedundancyLevel.OFF),
+    )
+    // Encrypted, no erasure coding — not the one-argument table with medium
+    // erasure coding baked in.
+    expect(driveEffectiveBytes(21)).not.toBe(Utils.getStampEffectiveBytes(20))
+  })
+
+  it('labels every size on offer, and the drive card, the same way', () => {
+    for (const [depth, bytes] of DRIVE_SIZE_BREAKPOINTS) {
+      expect(bytes).toBe(driveEffectiveBytes(depth))
+    }
+    expect(describeDrive(makeDrive({ depth: 21 })).sizeLabel).toBe(
+      formatBytes(driveEffectiveBytes(21)),
+    )
+  })
+})
+
 describe('DRIVE_SIZE_BREAKPOINTS', () => {
-  it('starts at the smallest usable depth, dropping 17 and 18 (#538)', () => {
+  it('starts at the smallest usable depth, dropping 17, 18 (#538) and 19 (#566)', () => {
     const depths = DRIVE_SIZE_BREAKPOINTS.map(([depth]) => depth)
     expect(depths).not.toContain(17)
     expect(depths).not.toContain(18)
+    expect(depths).not.toContain(19)
     expect(depths[0]).toBe(MIN_USABLE_BATCH_DEPTH)
+    expect(MIN_USABLE_BATCH_DEPTH).toBe(20)
   })
 
   it('lists the remaining sizes smallest first', () => {
