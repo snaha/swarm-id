@@ -76,14 +76,6 @@ envs:
   - key: PUBLIC_BUS_SIGNALING_URL
     value: 'wss://swarm-id.snaha.net/bus'
 
-  # Overrides the committed Reown Cloud project id that offers WalletConnect in
-  # the wallet picker (ui/src/lib/crypto/wallet-connect.ts). Left empty this
-  # deployment uses that default, which is the intended setup — set a value only
-  # to point this deployment at a different Reown project, and register
-  # swarm-id.snaha.net on it first.
-  - key: PUBLIC_WALLETCONNECT_PROJECT_ID
-    value: ''
-
   - key: NODE_ENV
     value: production
 

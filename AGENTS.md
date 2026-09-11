@@ -140,6 +140,6 @@ DigitalOcean (`deploy-do.yml`, push to main) keeps the canonical domains:
 - **Demo**: https://swarm-demo.snaha.net, run against swarm-id.snaha.net
 - **Account-bus signaling (`signaling/`)**: wss://swarm-id.snaha.net/bus, the `bus-signaling` service
   of the same app; baked into the UI build as `PUBLIC_BUS_SIGNALING_URL`
-- **WalletConnect**: the Reown Cloud project id that offers WalletConnect in the wallet picker is
-  committed (`ui/src/lib/crypto/wallet-connect.ts`) — it is public by construction, since the UI
-  build bakes it into the client bundle either way. `PUBLIC_WALLETCONNECT_PROJECT_ID` overrides it
+- **WalletConnect**: the Reown Cloud project id is committed (`ui/src/lib/crypto/wallet-connect.ts`)
+  and needs no deployment config — it is public by construction, since the UI build bakes it into
+  the client bundle either way
