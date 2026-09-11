@@ -21,8 +21,8 @@ type RpcAnswer =
   | { result: unknown }
   | { error: { code: number; message: string } }
 
-/** The `eth_estimateGas` requests the mock saw, in order. */
-const estimated: Array<Record<string, unknown>> = []
+/** The `eth_estimateGas` params the mock saw, in order: `[tx, blockTag]`. */
+const estimated: Array<[Record<string, unknown>, string]> = []
 
 /** Answers every JSON-RPC call by method and records the raw sends. */
 function mockRpc(estimate: RpcAnswer): string[] {
@@ -40,7 +40,7 @@ function mockRpc(estimate: RpcAnswer): string[] {
       sent.push(params[0])
     }
     if (method === "eth_estimateGas") {
-      estimated.push(params[0])
+      estimated.push([params[0], params[1]])
     }
     return new Response(
       JSON.stringify({ jsonrpc: "2.0", id, ...answers[method] }),
@@ -80,11 +80,18 @@ describe("sendBundle gas", () => {
     const sent = mockRpc({ result: "0x100000" })
     await expect(extend()).resolves.toBe(TX_HASH)
     expect(sentGas(sent)).toBe((0x100000n * 5n) / 4n)
-    // A type-4 estimate, of the same self-call the bundle will send.
-    expect(estimated[0]).toMatchObject({
-      to: estimated[0].from,
+    // A type-4 estimate of the very self-call the bundle sends, simulated at
+    // the transaction's own nonce against the pending state so the
+    // authorization (signed for nonce + 1) applies in the simulation too.
+    const [request, blockTag] = estimated[0]
+    const signed = parseTransaction(sent[0] as `0x${string}`)
+    expect(request).toMatchObject({
+      to: request.from,
+      data: signed.data,
+      nonce: "0x5",
       authorizationList: [{ address: settings.addresses.eip7702Delegate }],
     })
+    expect(blockTag).toBe("pending")
   })
 
   it("falls back to the fixed cap when the RPC cannot estimate a type-4 transaction", async () => {

@@ -54,10 +54,17 @@ const BUNDLE_GAS = 1_200_000n
  * when the RPC cannot estimate a transaction with an `authorizationList` —
  * type-4 `eth_estimateGas` support is uneven across Gnosis RPCs. A simulated
  * REVERT is not that: it is the real failure, surfaced before anything is sent.
+ *
+ * Simulated at the transaction's own `nonce` against the PENDING state: the
+ * authorization is signed for `nonce + 1`, and a simulation at `latest` with a
+ * transaction in flight would skip it — a 7702 nonce mismatch is a skip, not a
+ * revert — run the self-call against a bare EOA, and answer with a limit the
+ * real transaction then exhausts.
  */
 async function bundleGas(
   from: `0x${string}`,
   data: `0x${string}`,
+  nonce: number,
   authorization: SignedAuthorization,
   settings: MultichainSettings,
   rpcProvider: RollingValueProvider<string>,
@@ -67,7 +74,9 @@ async function bundleGas(
       account: from,
       to: from,
       data,
+      nonce,
       authorizationList: [authorization],
+      blockTag: "pending",
     })
     return withGasMargin(estimate)
   } catch (error) {
@@ -170,6 +179,7 @@ async function sendBundle(
       gas: await bundleGas(
         account.address,
         data,
+        nonce,
         authorization,
         settings,
         rpcProvider,
