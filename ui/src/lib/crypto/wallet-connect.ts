@@ -29,10 +29,10 @@ import type { Chain } from 'viem'
  * Same shape as `busSignalingUrl` in `$lib/bus-signaling-url`: a committed
  * default with the environment able to override it.
  *
- * Empty leaves the picker injected-only, rather than offering a WalletConnect
- * that cannot complete a connection.
+ * Empty would leave the picker injected-only, rather than offering a
+ * WalletConnect that cannot complete a connection.
  */
-export const DEFAULT_PROJECT_ID = ''
+export const DEFAULT_PROJECT_ID = '26aa4608b06ec5ebd013b57900b550e6'
 
 /**
  * The options we pass, declared here rather than imported.
