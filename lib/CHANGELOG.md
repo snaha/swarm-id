@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.4.1](https://github.com/snaha/swarm-id/compare/v0.4.0...v0.4.1) (2026-09-11)
+
+
+### Bug Fixes
+
+* **bus:** type the signaling wire protocol from one shared schema ([#719](https://github.com/snaha/swarm-id/issues/719)) ([7a7acbc](https://github.com/snaha/swarm-id/commit/7a7acbc054dd1685a41ed2cd314245e5498b883f))
+* **lib:** announce every lease release through one coordinator hook ([#701](https://github.com/snaha/swarm-id/issues/701)) ([d7f91da](https://github.com/snaha/swarm-id/commit/d7f91daa5bd5a8807d1969f4d76306e463a1ccb3))
+* **lib:** do not republish a peer’s delta the shell folded in this window ([#713](https://github.com/snaha/swarm-id/issues/713)) ([6481ed6](https://github.com/snaha/swarm-id/commit/6481ed650be82cbc0b710fae2db8b3ff96e91374))
+* **lib:** typecheck and lint the test files ([#710](https://github.com/snaha/swarm-id/issues/710)) ([733c525](https://github.com/snaha/swarm-id/commit/733c525562c56511575d5daf256d233dd091e98e))
+* **ui:** honest drive sizes, and the widget opens on the form's size and lifespan ([#721](https://github.com/snaha/swarm-id/issues/721)) ([f3ba180](https://github.com/snaha/swarm-id/commit/f3ba180c0d2cf26ed3a5a73cdff5cef269ec58e1))
+* **ui:** refresh the accounts store on same-window writes by another manager ([#716](https://github.com/snaha/swarm-id/issues/716)) ([4711a50](https://github.com/snaha/swarm-id/commit/4711a500193ba861d75665349383291089e8044e))
+
 ## [0.4.0](https://github.com/snaha/swarm-id/compare/v0.3.0...v0.4.0) (2026-09-07)
 
 
