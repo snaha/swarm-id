@@ -171,7 +171,7 @@
 <td><code dir="auto">options.subsidisedGatewayUrl</code></td>
 <td><code dir="auto">string</code></td>
 <td>No</td>
-<td>URL of a subsidised gateway for uploads without user’s postage stamp. See <a href="/subsidised-gateway">Subsidised Gateway</a> for details.</td>
+<td>URL of a subsidised gateway for uploads without user’s postage stamp. See <a href="../subsidised-gateway/">Subsidised Gateway</a> for details.</td>
 </tr>
 </tbody>
 </table>
@@ -451,12 +451,12 @@
 <tr>
 <td><code dir="auto">uploadMode</code></td>
 <td><code dir="auto">"user-stamp" | "subsidised" | "unavailable"</code></td>
-<td>How uploads will be handled. See <a href="/subsidised-gateway#upload-availability-truth-table">Upload Availability</a></td>
+<td>How uploads will be handled. See <a href="../subsidised-gateway/#upload-availability-truth-table">Upload Availability</a></td>
 </tr>
 <tr>
 <td><code dir="auto">uploadUnavailableReason</code></td>
 <td><code dir="auto">"no-stamp" | "stamper-failed" | undefined</code></td>
-<td>Why <code dir="auto">uploadMode</code> is <code dir="auto">"unavailable"</code>; absent whenever uploads work. See <a href="/subsidised-gateway#why-uploads-are-unavailable">Why Uploads Are Unavailable</a></td>
+<td>Why <code dir="auto">uploadMode</code> is <code dir="auto">"unavailable"</code>; absent whenever uploads work. See <a href="../subsidised-gateway/#why-uploads-are-unavailable">Why Uploads Are Unavailable</a></td>
 </tr>
 <tr>
 <td><code dir="auto">storagePartitioned</code></td>
@@ -2920,7 +2920,7 @@
 <hr>
 <div class="sl-heading-wrapper level-h2"><h2 id="account-restoration">Account Restoration</h2><a class="sl-anchor-link" href="#account-restoration"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 1 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 0 0-1.42-1.42m8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 1 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 0 0 0 1.42 1 1 0 0 0 1.42 0l3.88-3.89a4.49 4.49 0 0 0 0-6.33M8.83 15.17a1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.92-4.92a1 1 0 1 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42"></path></svg></span><span class="sr-only" data-pagefind-ignore>Section titled “Account Restoration”</span></a></div>
 <div class="sl-heading-wrapper level-h3"><h3 id="restoreaccountfromswarmbee-masterkey-ethereumaddress-credentialid"><code dir="auto">restoreAccountFromSwarm(bee, masterKey, ethereumAddress, credentialId)</code></h3><a class="sl-anchor-link" href="#restoreaccountfromswarmbee-masterkey-ethereumaddress-credentialid"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 1 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 0 0-1.42-1.42m8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 1 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 0 0 0 1.42 1 1 0 0 0 1.42 0l3.88-3.89a4.49 4.49 0 0 0 0-6.33M8.83 15.17a1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.92-4.92a1 1 0 1 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42"></path></svg></span><span class="sr-only" data-pagefind-ignore>Section titled “restoreAccountFromSwarm(bee, masterKey, ethereumAddress, credentialId)”</span></a></div>
-<p>Rebuild account state from Swarm on a device that has never seen the account. Derives the keys, reads the account’s device roster, reads every device’s latest state feed, and folds them into one snapshot; see <a href="/multi-device-postage-batches#account-state-sync">Postage Batch Sharing</a>.</p>
+<p>Rebuild account state from Swarm on a device that has never seen the account. Derives the keys, reads the account’s device roster, reads every device’s latest state feed, and folds them into one snapshot; see <a href="../multi-device-postage-batches/#account-state-sync">Postage Batch Sharing</a>.</p>
 <p><strong>Parameters:</strong></p>
 <table>
 <thead>
@@ -2957,7 +2957,7 @@
 <div class="sl-heading-wrapper level-h3"><h3 id="types-3">Types</h3><a class="sl-anchor-link" href="#types-3"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 1 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 0 0-1.42-1.42m8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 1 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 0 0 0 1.42 1 1 0 0 0 1.42 0l3.88-3.89a4.49 4.49 0 0 0 0-6.33M8.83 15.17a1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.92-4.92a1 1 0 1 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42"></path></svg></span><span class="sr-only" data-pagefind-ignore>Section titled “Types”</span></a></div>
 <div class="expressive-code"><figure class="frame not-content"><figcaption class="header"></figcaption><pre data-language="typescript"><code><div class="ec-line"><div class="code"><span style="--0:#C792EA;--1:#8844AE">interface</span><span style="--0:#D6DEEB;--1:#403F53"> RestoreAccountResult {</span></div></div><div class="ec-line"><div class="code"><span class="indent"><span style="--0:#D6DEEB;--1:#403F53">  </span></span><span style="--0:#D6DEEB;--1:#403F53">snapshot</span><span style="--0:#7FDBCA;--1:#096E72">:</span><span style="--0:#D6DEEB;--1:#403F53"> </span><span style="--0:#FFCB8B;--1:#111111">AccountStateSnapshot</span></div></div><div class="ec-line"><div class="code"><span class="indent"><span style="--0:#D6DEEB;--1:#403F53">  </span></span><span style="--0:#D6DEEB;--1:#403F53">derivationKey</span><span style="--0:#7FDBCA;--1:#096E72">:</span><span style="--0:#D6DEEB;--1:#403F53"> </span><span style="--0:#C5E478;--1:#3B61B0">string</span></div></div><div class="ec-line"><div class="code"><span class="indent"><span style="--0:#D6DEEB;--1:#403F53">  </span></span><span style="--0:#D6DEEB;--1:#403F53">credentialId</span><span style="--0:#7FDBCA;--1:#096E72">:</span><span style="--0:#D6DEEB;--1:#403F53"> </span><span style="--0:#C5E478;--1:#3B61B0">string</span></div></div><div class="ec-line"><div class="code"><span style="--0:#D6DEEB;--1:#403F53">}</span></div></div></code></pre><div class="copy"><div aria-live="polite"></div><button title="Copy to clipboard" data-copied="Copied!" data-code="interface RestoreAccountResult {  snapshot: AccountStateSnapshot  derivationKey: string  credentialId: string}"><div></div></button></div></figure></div>
 <div class="sl-heading-wrapper level-h2"><h2 id="key-derivation">Key Derivation</h2><a class="sl-anchor-link" href="#key-derivation"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 1 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 0 0-1.42-1.42m8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 1 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 0 0 0 1.42 1 1 0 0 0 1.42 0l3.88-3.89a4.49 4.49 0 0 0 0-6.33M8.83 15.17a1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.92-4.92a1 1 0 1 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42"></path></svg></span><span class="sr-only" data-pagefind-ignore>Section titled “Key Derivation”</span></a></div>
-<p>The full tree, with every context string, is on <a href="/key-derivation">Key Derivation</a>. Every function below takes and returns 64-character hex strings unless noted.</p>
+<p>The full tree, with every context string, is on <a href="../key-derivation/">Key Derivation</a>. Every function below takes and returns 64-character hex strings unless noted.</p>
 <table>
 <thead>
 <tr>
