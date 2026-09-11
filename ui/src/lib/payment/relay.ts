@@ -14,7 +14,13 @@
  * registry, and the delivery is an off-chain solver paying out of its own
  * inventory on real Gnosis. See `payment-rail.ts` for what stands in locally.
  */
-import { type Execute, MAINNET_RELAY_API, createClient, getClient } from '@relayprotocol/relay-sdk'
+import {
+  type Execute,
+  MAINNET_RELAY_API,
+  convertViemChainToRelayChain,
+  createClient,
+  getClient,
+} from '@relayprotocol/relay-sdk'
 import { withIdleTimeout, withTimeout } from '@snaha/swarm-id'
 import { createWalletClient, custom } from 'viem'
 import { arbitrum, base, gnosis, mainnet, optimism, polygon } from 'viem/chains'
@@ -60,10 +66,38 @@ const PAYMENT_CHAINS = WALLET_CHAINS
 
 let initialized = false
 
-/** The shared Relay client (public mainnet API — no key, as in the widget). */
+/**
+ * The shared Relay client (public mainnet API — no key, as in the widget).
+ *
+ * **It must send no referrer.** `/quote/v2` refuses any request that names one
+ * without a key — `401 UNAUTHORIZED_QUOTE`, message "Please provide an api
+ * key" — and the SDK puts `client.source` in the body of every quote, so a
+ * source here is every payment failing at the price screen. A key is not the
+ * way out: it would have to ship in the client bundle, which the SDK's own docs
+ * tell you not to do (they ask for a proxy instead).
+ *
+ * So the source is set and then cleared, rather than never passed: left unset,
+ * the SDK invents one from `location.hostname` and warns that we should have
+ * supplied one — the same 401, with a console warning on top. Any non-empty
+ * string does; ours names us, for the day attribution is worth a key. Two SDK
+ * internals hold the shape up, and a major bump is where to re-read them:
+ * `getQuote` sends `client.source` as the referrer, and `configure()` replaces
+ * it only with a truthy value — so a second `createClient` would put it back.
+ *
+ * **The chains are ours because the SDK's own list is Ethereum alone.** That is
+ * not a slow path, it is a wall: `executeSteps` looks the source chain up there
+ * and throws `Unable to find chain` before anything is signed, so every source
+ * chain but Ethereum — Base, Arbitrum, Optimism, Polygon, and the Gnosis assets
+ * this rail carries — failed at Pay outright.
+ */
 function relayClient() {
   if (!initialized) {
-    createClient({ baseApiUrl: MAINNET_RELAY_API, source: 'swarm-id' })
+    const client = createClient({
+      baseApiUrl: MAINNET_RELAY_API,
+      source: 'swarm-id',
+      chains: PAYMENT_CHAINS.map(convertViemChainToRelayChain),
+    })
+    client.source = undefined
     initialized = true
   }
   return getClient()

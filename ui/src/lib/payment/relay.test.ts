@@ -11,7 +11,7 @@ import { gnosisMainnetSettings } from '@swarm-id/multichain'
 import { gnosis } from 'viem/chains'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
-import { type EthereumProvider, NATIVE_CURRENCY } from '$lib/payment/payment-rail'
+import { type EthereumProvider, NATIVE_CURRENCY, WALLET_CHAINS } from '$lib/payment/payment-rail'
 
 import { PAYMENT_TOKENS, relayRail } from './relay'
 
@@ -29,10 +29,35 @@ const execute = vi.fn((_options: ExecuteOptions) => new Promise<void>(() => unde
 /** A `getQuote` that never prices anything. */
 const getQuote = vi.fn(() => new Promise<never>(() => undefined))
 
+/** As much of the SDK's client as the rail configures. */
+interface Client {
+  source?: string
+  chains?: { id: number }[]
+}
+/** The one client the SDK hands out, so what the rail left on it can be read. */
+const client: Client & { actions: { execute: typeof execute; getQuote: typeof getQuote } } = {
+  actions: { execute, getQuote },
+}
+/**
+ * The SDK's own fallback, mirrored: given no source it takes the page's
+ * hostname — which is a referrer like any other, and the same 401. Without this
+ * a rail that simply omitted the source would pass the test below while failing
+ * in a browser.
+ */
+const HOSTNAME_SOURCE = 'localhost'
+const createClient = vi.fn((options: Client) => {
+  client.source = options.source || HOSTNAME_SOURCE
+  client.chains = options.chains
+  return client
+})
+
+// Every value here is reached through a closure: the factory is hoisted above
+// the declarations above it, so naming one directly reads it before it exists.
 vi.mock('@relayprotocol/relay-sdk', () => ({
   MAINNET_RELAY_API: 'https://api.relay.link',
-  createClient: () => undefined,
-  getClient: () => ({ actions: { execute, getQuote } }),
+  convertViemChainToRelayChain: (chain: { id: number }) => ({ id: chain.id }),
+  createClient: (options: Client) => createClient(options),
+  getClient: () => client,
 }))
 
 const TEN_MINUTES_MS = 600_000
@@ -263,6 +288,57 @@ describe('relay quote', () => {
     // Nothing has been signed at this point, so the user is simply asked to try
     // again rather than warned about money in flight.
     await expect(priced).rejects.toThrow(/try again/)
+  })
+})
+
+/**
+ * What the rail leaves on the SDK's client, which is what every request it
+ * makes carries.
+ */
+describe('the relay client', () => {
+  /** Ask for a price, to make the rail build its client. The quote itself never
+   * comes back (the mock above), and is not what this is about. */
+  function configureClient() {
+    void relayRail
+      .quote({
+        chainId: 8453,
+        currency: NATIVE_CURRENCY,
+        user: '0xpayer',
+        recipient: '0xowner',
+        xdaiWei: 60_000_000_000_000_000n,
+        bzzPlur: 1_000_000_000n,
+        gasXdaiWei: 1_000_000_000_000_000n,
+      })
+      .catch(() => undefined)
+  }
+
+  /**
+   * The regression: Relay answers a quote that names a referrer with 401
+   * "Please provide an api key", so a source left on the client is every
+   * payment failing at the price screen.
+   */
+  it('names no source, since a quote that names one needs an api key', () => {
+    configureClient()
+    expect(client.source).toBeUndefined()
+  })
+
+  /** Without these the SDK knows Ethereum alone, and polls a deposit's receipt
+   * through the wallet — a WalletConnect round-trip every few seconds. */
+  it('declares every chain a payment can be signed on', () => {
+    configureClient()
+    expect(client.chains?.map((chain) => chain.id)).toEqual(WALLET_CHAINS.map((chain) => chain.id))
+  })
+
+  /** One client per page: the SDK keeps a singleton, and a second `createClient`
+   * would reconfigure it — putting the source back. Counted from wherever this
+   * test found things, since the rail builds its client once per module and
+   * whichever test ran first paid for it. */
+  it('builds no second client for a second quote', () => {
+    configureClient()
+    const built = createClient.mock.calls.length
+    configureClient()
+    configureClient()
+    expect(createClient.mock.calls.length).toBe(built)
   })
 })
 

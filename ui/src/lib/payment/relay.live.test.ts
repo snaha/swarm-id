@@ -23,10 +23,11 @@
  * cannot be reached — an outage is not our bug — and FAILS when the API answers
  * with a shape we do not handle, or refuses a route we offer, which is.
  */
+import { TimeoutError } from '@snaha/swarm-id'
 import { beforeAll, describe, expect, it } from 'vitest'
 
 import { WALLET_CHAINS, displayAmount, displayUsd } from './payment-rail'
-import { PAYMENT_TOKENS } from './relay'
+import { PAYMENT_TOKENS, relayRail } from './relay'
 
 const RELAY_QUOTE_URL = 'https://api.relay.link/quote'
 const GNOSIS_CHAIN_ID = 100
@@ -280,6 +281,50 @@ describe('Relay quote contract', () => {
     // No steps means nothing for the user to sign and a payment that silently
     // never happens.
     expect(quoted.steps?.length).toBeGreaterThan(0)
+  })
+
+  /**
+   * The same route once more, quoted the way the APP quotes it — through the
+   * rail, so through the SDK.
+   *
+   * Everything above builds the request itself, which is what lets it pin the
+   * wire shape; the blind spot that leaves is the SDK adding something of its
+   * own. It does: `createClient`'s source travels as `referrer`, and Relay
+   * answers a quote naming one with 401 "Please provide an api key". Every pair
+   * here was green while no payment in the app could be priced at all.
+   *
+   * Gated on the sweep, like the checks above it: Relay answered the raw
+   * request, so it is up, so a refusal of this one is ours. `unreachable`
+   * cannot be read off the error instead — the SDK turns a dead connection into
+   * the same `APIError`, status 500, that it gives a 401 whose body carries no
+   * status of its own.
+   */
+  it('quotes through the rail, the request the app actually sends', async (context) => {
+    if (!quoted) {
+      return
+    }
+    let priced
+    try {
+      priced = await relayRail.quote({
+        chainId: BASE_CHAIN_ID,
+        currency: NATIVE,
+        user: PAYER_ADDRESS,
+        recipient: OWNER_ADDRESS,
+        xdaiWei: BigInt(XDAI_OUT_WEI),
+        bzzPlur: 1_000_000_000n,
+        gasXdaiWei: 1_000_000_000_000_000n,
+      })
+    } catch (error) {
+      // The rail's own deadline, the one failure that is not ours: Relay was up
+      // for the sweep and did not answer this in half a minute. The sweep skips
+      // on its own timeout too.
+      if (error instanceof TimeoutError) {
+        context.skip()
+        return
+      }
+      throw error
+    }
+    expect(Number(priced.amountFormatted), 'priced in the source token').toBeGreaterThan(0)
   })
 
   describe('every pair the picker offers still routes to Gnosis', () => {
