@@ -23,10 +23,11 @@
  * cannot be reached — an outage is not our bug — and FAILS when the API answers
  * with a shape we do not handle, or refuses a route we offer, which is.
  */
+import { TimeoutError } from '@snaha/swarm-id'
 import { beforeAll, describe, expect, it } from 'vitest'
 
 import { WALLET_CHAINS, displayAmount, displayUsd } from './payment-rail'
-import { PAYMENT_TOKENS } from './relay'
+import { PAYMENT_TOKENS, relayRail } from './relay'
 
 const RELAY_QUOTE_URL = 'https://api.relay.link/quote'
 const GNOSIS_CHAIN_ID = 100
@@ -315,5 +316,42 @@ describe('Relay quote contract', () => {
         expect(outcome.quote.steps?.length, 'something for the wallet to sign').toBeGreaterThan(0)
       })
     }
+  })
+})
+
+/**
+ * The same route again, quoted the way the APP quotes it — through the rail, so
+ * through the SDK.
+ *
+ * The sweep above builds the request itself, which is what lets it pin the wire
+ * shape, and the blind spot that leaves is the SDK adding something of its own.
+ * It does: `createClient`'s source travels as `referrer`, and Relay answers any
+ * quote naming one with 401 "Please provide an api key". Every pair above was
+ * green while no payment in the app could be priced at all.
+ */
+describe('the rail quoting through the SDK', () => {
+  it('is a request Relay accepts', async (context) => {
+    let priced
+    try {
+      priced = await relayRail.quote({
+        chainId: BASE_CHAIN_ID,
+        currency: NATIVE,
+        user: PAYER_ADDRESS,
+        recipient: OWNER_ADDRESS,
+        xdaiWei: BigInt(XDAI_OUT_WEI),
+        bzzPlur: 1_000_000_000n,
+        gasXdaiWei: 1_000_000_000_000_000n,
+      })
+    } catch (error) {
+      // The rail's own deadline is the one failure that is not ours: Relay did
+      // not answer in time, which is the `unreachable` case the sweep skips on.
+      // Anything else is a request it REFUSED, and that is the defect.
+      if (error instanceof TimeoutError) {
+        context.skip()
+        return
+      }
+      throw error
+    }
+    expect(Number(priced.amountFormatted), 'priced in the source token').toBeGreaterThan(0)
   })
 })

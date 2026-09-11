@@ -10,7 +10,7 @@
   import ArrowRight from '@lucide/svelte/icons/arrow-right'
   import LoaderCircle from '@lucide/svelte/icons/loader-circle'
   import Wallet from '@lucide/svelte/icons/wallet'
-  import { TimeoutError, jsonRpcCall, withTimeout } from '@snaha/swarm-id'
+  import { TimeoutError, jsonRpcCall } from '@snaha/swarm-id'
   import { encodeFunctionData, erc20Abi, formatUnits } from 'viem'
 
   import { createAttemptTracker } from '$lib/attempt'
@@ -321,8 +321,7 @@
 
       screen = 'configure'
       // After the guard, like everything else here: a connect cancelled at the
-      // network prompt reads nothing. Through the wallet's own RPC, since the
-      // switch has just run.
+      // network prompt reads nothing.
       void readBalances()
       void refreshQuote()
     } catch (caught) {
@@ -339,36 +338,28 @@
 
   const balanceKey = (chain: number | string, token: string) => `${chain}:${token}`
 
-  /** The chain the wallet itself is on, or undefined for one that cannot say. */
-  async function walletChainId(): Promise<number | undefined> {
-    try {
-      const hex = await provider?.request({ method: 'eth_chainId' })
-      return typeof hex === 'string' ? Number(BigInt(hex)) : undefined
-    } catch {
-      return undefined
-    }
-  }
-
   /**
    * Read what the wallet holds of every token on the selected chain, one slot
    * per token. Fire-and-forget from the events that move what it holds: the
    * switch (at connect, and on a chain change), a new account, the wallet's
    * own chain change, and a failed attempt that may still have spent.
    *
-   * Through the wallet's RPC when the wallet is on that chain — the figures
-   * MetaMask itself would show — and through the chain's own endpoint
-   * otherwise, so a refused network switch still shows correct numbers rather
-   * than ones from whatever chain the wallet is parked on.
+   * Through the chain's own endpoint, never the wallet's. It is the same chain
+   * state either way, and a WalletConnect wallet serves a read by relaying it
+   * to the user's phone: one round-trip per token, fired together, each given
+   * up on at the deadline above. A WalletConnect session cannot process the
+   * response to a request that is no longer waiting, so its relay redelivers
+   * each one for the rest of the session — the console fills with "emitting
+   * session_request:… without any listeners", and the prompts that matter, the
+   * network switch and the payment itself, queue behind the redeliveries.
    */
   async function readBalances() {
     const address = walletAddress
-    const walletProvider = provider
     const chain = rail.chains.find((candidate) => String(candidate.id) === chainId)
     if (!address || !chain) {
       return
     }
     const rpcUrl = chain.rpcUrls.default.http[0]
-    const viaWallet = walletProvider !== undefined && (await walletChainId()) === chain.id
     await Promise.all(
       rail.tokens(chain.id).map(async (token) => {
         const call =
@@ -389,18 +380,9 @@
                 ],
               }
         try {
-          // Both paths on the same deadline: an unbounded wallet read leaves a
-          // pending promise behind on every chain change.
-          const result =
-            viaWallet && walletProvider
-              ? await withTimeout(
-                  walletProvider.request(call),
-                  BALANCE_TIMEOUT_MS,
-                  'The wallet did not report a balance.',
-                )
-              : await jsonRpcCall<string>(rpcUrl, call.method, call.params, {
-                  timeoutMs: BALANCE_TIMEOUT_MS,
-                })
+          const result = await jsonRpcCall<string>(rpcUrl, call.method, call.params, {
+            timeoutMs: BALANCE_TIMEOUT_MS,
+          })
           // The account can change while the read is in flight; a figure filed
           // under another account's key would be worse than none.
           if (typeof result === 'string' && result !== '0x' && walletAddress === address) {
@@ -437,13 +419,12 @@
   /**
    * Walk the wallet to the newly selected chain right away rather than only at
    * Pay: the network prompt then happens while the user is still weighing the
-   * choice, and the balances can come from the wallet's own RPC. A refusal is
-   * not fatal — `pay()` asks again — so the switch is offered, not enforced.
+   * choice rather than after they have committed to it. A refusal is not fatal
+   * — `pay()` asks again — so the switch is offered, not enforced.
    *
-   * The one balance read a chain change gets, deliberately this one: it runs
-   * after the wallet has moved, so it reads through the wallet's own RPC rather
-   * than the chain's endpoint. A second read from `refreshQuote` would race it
-   * for the same figures with no rule about which won.
+   * The one balance read a chain change gets, deliberately this one: a second
+   * read from `refreshQuote` would race it for the same figures with no rule
+   * about which won.
    *
    * Outside any attempt guard, deliberately: it runs beside the re-price the
    * picker fires with it, which owns the attempt, and a figure landing after a
