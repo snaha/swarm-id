@@ -347,16 +347,14 @@
    * Through the chain's own endpoint, never the wallet's: the same chain state
    * either way, and one path instead of two.
    *
-   * That reverses #534, which read through the wallet wherever the wallet was
-   * on the selected chain — the figures the wallet itself shows. What it costs
-   * over WalletConnect is why: every read is a relay round-trip to the user's
-   * phone, one per token, fired together and given up on at the deadline above.
-   * A session cannot process the response to a request that is no longer
-   * waiting, and a Safari session paying from Gnosis logged one such response
-   * ("emitting session_request:… without any listeners") every second or so for
-   * the rest of its life. These reads are the only burst of parallel wallet
-   * requests this dialog makes, which is what points at them; that they were
-   * the abandoned ones was not proven.
+   * Reversing #534, which read through the wallet wherever it was on the
+   * selected chain, for the figures the wallet itself shows. Over WalletConnect
+   * every read is a relay round-trip to the user's phone — one per token, fired
+   * together, given up on at the deadline above — and a session left holding
+   * responses nobody is waiting for redelivers them for the rest of its life.
+   * (Seen on Safari paying from Gnosis. These are the only parallel wallet
+   * reads this dialog makes, which is what points at them; that they were the
+   * abandoned ones was not proven.)
    */
   async function readBalances() {
     const address = walletAddress

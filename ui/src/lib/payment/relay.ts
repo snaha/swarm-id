@@ -86,8 +86,9 @@ let initialized = false
  *
  * **The chains are ours because the SDK's own list is Ethereum alone.** That is
  * not a slow path, it is a wall: `executeSteps` looks the source chain up there
- * and throws `Unable to find chain` before anything is signed, so every other
- * source chain — Base, Arbitrum, Optimism, Polygon — failed at Pay outright.
+ * and throws `Unable to find chain` before anything is signed, so every source
+ * chain but Ethereum — Base, Arbitrum, Optimism, Polygon, and the Gnosis assets
+ * this rail carries — failed at Pay outright.
  */
 function relayClient() {
   if (!initialized) {

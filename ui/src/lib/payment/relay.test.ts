@@ -330,11 +330,15 @@ describe('the relay client', () => {
   })
 
   /** One client per page: the SDK keeps a singleton, and a second `createClient`
-   * would reconfigure it — putting the source back. */
-  it('is built once', () => {
+   * would reconfigure it — putting the source back. Counted from wherever this
+   * test found things, since the rail builds its client once per module and
+   * whichever test ran first paid for it. */
+  it('builds no second client for a second quote', () => {
+    configureClient()
+    const built = createClient.mock.calls.length
     configureClient()
     configureClient()
-    expect(createClient).toHaveBeenCalledTimes(1)
+    expect(createClient.mock.calls.length).toBe(built)
   })
 })
 
