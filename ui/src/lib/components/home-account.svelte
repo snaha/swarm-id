@@ -6,6 +6,7 @@
 <script lang="ts">
   import type { Component } from 'svelte'
 
+  import { PublicKey } from '@ethersphere/bee-js'
   import ChevronDown from '@lucide/svelte/icons/chevron-down'
   import ChevronRight from '@lucide/svelte/icons/chevron-right'
   import ChevronsUpDown from '@lucide/svelte/icons/chevrons-up-down'
@@ -20,7 +21,7 @@
   import LoaderCircle from '@lucide/svelte/icons/loader-circle'
   import RefreshCw from '@lucide/svelte/icons/refresh-cw'
   import Wallet from '@lucide/svelte/icons/wallet'
-  import { type AccessMethod, deriveSharingKey } from '@snaha/swarm-id'
+  import { type AccessMethod, deriveSharingKey, uint8ArrayToHex } from '@snaha/swarm-id'
 
   import { createAttemptTracker } from '$lib/attempt'
   import AccountAvatar from '$lib/components/account-avatar.svelte'
@@ -71,11 +72,16 @@
   let bannerInfoShown = $state(false)
   let addDriveOpen = $state(false)
   let keysDetailOpen = $state(false)
+  let sharingDetailOpen = $state(false)
   let signingOut = $state(false)
   let deleting = $state(false)
   // Reveals cache only their derived display value — never the raw seed, which
   // is zeroed the moment each ceremony finishes with it (issue #412).
   let revealedPrivateKey = $state<string | undefined>(undefined)
+  // No unlock for this one: it derives from `derivationKey`, which sits in
+  // plaintext in storage while signed in, so a dialog would only pretend to
+  // guard it. The mask is a shoulder-surfing courtesy, nothing more.
+  let sharingKeyShown = $state(false)
   let revealedPhrase = $state<string[] | undefined>(undefined)
   // Seed held only across the change-method two-step ceremony; zeroed after.
   let changeMethodSeed: Uint8Array | undefined
@@ -100,8 +106,11 @@
   const AccessIcon: Component = $derived(
     access.type === 'passkey' ? Fingerprint : access.type === 'eth-wallet' ? Wallet : KeyRound,
   )
-  const publicKeyDisplay = $derived(prefix0x(account.publicKey))
-  const sharingKeyDisplay = $derived(prefix0x(deriveSharingKey(account.derivationKey).publicKey))
+  const publicKeyDisplay = $derived(account.publicKey)
+  const sharingKey = $derived(deriveSharingKey(account.derivationKey))
+  const sharingKeyDisplay = $derived(sharingKey.publicKey)
+  const sharingAddress = $derived(new PublicKey(sharingKey.publicKey).address().toChecksum())
+  const sharingPrivateKeyDisplay = $derived(prefix0x(uint8ArrayToHex(sharingKey.secret)))
   const newPasswordValid = $derived(isNewPasswordValid(newPassword, verifyNewPassword))
 
   const unlockTitle = $derived(
@@ -295,6 +304,87 @@
   </div>
 {/snippet}
 
+{#snippet keyRow(label: string, description: string, value: string, what: string)}
+  <div class="bg-muted flex flex-col gap-1 rounded-md p-4">
+    {@render keyBlock(label, description)}
+    <div class="flex items-center gap-2">
+      <p class="min-w-0 flex-1 text-sm break-all">{value}</p>
+      <Button
+        variant="ghost"
+        size="icon"
+        class="size-7 shrink-0"
+        aria-label="Copy {what.toLowerCase()}"
+        onclick={() => copyText(value, what)}
+      >
+        <Copy />
+      </Button>
+    </div>
+  </div>
+{/snippet}
+
+{#snippet secretRow(
+  label: string,
+  description: string,
+  revealed: string | undefined,
+  what: string,
+  onreveal: () => void,
+)}
+  <div class="bg-muted flex flex-col gap-1 rounded-md p-4">
+    {@render keyBlock(label, description)}
+    <div class="flex items-center gap-2">
+      {#if revealed}
+        <p class="min-w-0 flex-1 text-sm break-all">{revealed}</p>
+        <Button
+          variant="ghost"
+          size="icon"
+          class="size-7 shrink-0"
+          aria-label="Copy {what.toLowerCase()}"
+          onclick={() => copyText(revealed, what)}
+        >
+          <Copy />
+        </Button>
+      {:else}
+        <p class="min-w-0 flex-1 text-sm break-all select-none">{MASKED_KEY}</p>
+        <Button
+          variant="ghost"
+          size="icon"
+          class="size-7 shrink-0"
+          aria-label="Reveal {what.toLowerCase()}"
+          onclick={onreveal}
+        >
+          <Eye />
+        </Button>
+      {/if}
+    </div>
+  </div>
+{/snippet}
+
+{#snippet keyCardHeader(
+  title: string,
+  address: string,
+  what: string,
+  open: boolean,
+  ontoggle: () => void,
+)}
+  <p class="px-4 pt-4 text-sm font-bold">{title}</p>
+  <div class="flex h-12 w-full items-center gap-2 px-4">
+    <p class="flex-1 truncate text-sm">{truncateAddress(address)}</p>
+    <Button variant="ghost" size="sm" onclick={() => copyText(address, what)}>
+      <Copy />
+      Copy
+    </Button>
+    <Button
+      variant="ghost"
+      size="icon"
+      class="-mr-2 size-7"
+      aria-label={open ? `Hide ${title.toLowerCase()} keys` : `Show ${title.toLowerCase()} keys`}
+      onclick={ontoggle}
+    >
+      <ChevronsUpDown />
+    </Button>
+  </div>
+{/snippet}
+
 <div class="flex w-full flex-col gap-6">
   {#if isLocal}
     <!-- Local account banner: no stamps yet, so the account is view-only. -->
@@ -357,122 +447,77 @@
     {/if}
   </div>
 
-  <!-- Address & keys -->
+  <!-- Keys & addresses -->
   <div class="flex w-full flex-col gap-3">
     {@render sectionHeader(
       'keys',
-      'Address & keys',
-      "Your account's address, public key, and private key.",
+      'Keys & addresses',
+      "Your account's cryptographic identifiers and data sharing keys.",
     )}
     {#if expanded.keys}
-      <div class="pl-5">
+      <div class="flex flex-col gap-3 pl-5">
         <div class="border-border flex w-full flex-col rounded-lg border">
-          <div class="flex h-12 w-full items-center gap-2 px-4">
-            <p class="flex-1 truncate text-sm">{truncateAddress(account.id.toChecksum())}</p>
-            <Button
-              variant="ghost"
-              size="sm"
-              onclick={() => copyText(account.id.toChecksum(), 'Address')}
-            >
-              <Copy />
-              Copy
-            </Button>
-            <Button
-              variant="ghost"
-              size="icon"
-              class="-mr-2 size-7"
-              aria-label={keysDetailOpen ? 'Hide keys' : 'Show keys'}
-              onclick={() => (keysDetailOpen = !keysDetailOpen)}
-            >
-              <ChevronsUpDown />
-            </Button>
-          </div>
-
+          {@render keyCardHeader(
+            'Account identity',
+            account.id.toChecksum(),
+            'Address',
+            keysDetailOpen,
+            () => (keysDetailOpen = !keysDetailOpen),
+          )}
           {#if keysDetailOpen}
-            <div class="bg-muted mx-1 mb-1 flex flex-col gap-4 rounded-md p-4">
-              <div class="flex flex-col gap-1">
-                {@render keyBlock('Address', 'The unique identifier for your Swarm ID.')}
-                <div class="flex items-center gap-2">
-                  <p class="min-w-0 flex-1 text-sm break-all">{account.id.toChecksum()}</p>
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    class="size-7 shrink-0"
-                    aria-label="Copy address"
-                    onclick={() => copyText(account.id.toChecksum(), 'Address')}
-                  >
-                    <Copy />
-                  </Button>
-                </div>
-              </div>
+            <div class="mx-1 mb-1 flex flex-col gap-1">
+              {@render keyRow(
+                'Address',
+                'The unique identifier for your Swarm ID.',
+                account.id.toChecksum(),
+                'Address',
+              )}
+              {@render keyRow(
+                'Public key',
+                'Can be used for establishing secure, private communication.',
+                publicKeyDisplay,
+                'Public key',
+              )}
+              {@render secretRow(
+                'Private key',
+                'Grants full control over your account. Never share it.',
+                revealedPrivateKey,
+                'Private key',
+                () => (unlockTarget = 'private-key'),
+              )}
+            </div>
+          {/if}
+        </div>
 
-              <div class="flex flex-col gap-1">
-                {@render keyBlock('Public key', 'Identifies the account. Pairs with the address.')}
-                <div class="flex items-center gap-2">
-                  <p class="min-w-0 flex-1 text-sm break-all">{publicKeyDisplay}</p>
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    class="size-7 shrink-0"
-                    aria-label="Copy public key"
-                    onclick={() => copyText(publicKeyDisplay, 'Public key')}
-                  >
-                    <Copy />
-                  </Button>
-                </div>
-              </div>
-
-              <div class="flex flex-col gap-1">
-                {@render keyBlock(
-                  'Sharing key',
-                  'Other people grant you access with this key. It is the same in every app.',
-                )}
-                <div class="flex items-center gap-2">
-                  <p class="min-w-0 flex-1 text-sm break-all">{sharingKeyDisplay}</p>
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    class="size-7 shrink-0"
-                    aria-label="Copy sharing key"
-                    onclick={() => copyText(sharingKeyDisplay, 'Sharing key')}
-                  >
-                    <Copy />
-                  </Button>
-                </div>
-              </div>
-
-              <div class="flex flex-col gap-1">
-                {@render keyBlock(
-                  'Private key',
-                  'Grants full control over your account. Never share it.',
-                )}
-                <div class="flex items-center gap-2">
-                  {#if revealedPrivateKey}
-                    <p class="min-w-0 flex-1 text-sm break-all">{revealedPrivateKey}</p>
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      class="size-7 shrink-0"
-                      aria-label="Copy private key"
-                      onclick={() =>
-                        revealedPrivateKey && copyText(revealedPrivateKey, 'Private key')}
-                    >
-                      <Copy />
-                    </Button>
-                  {:else}
-                    <p class="min-w-0 flex-1 text-sm break-all select-none">{MASKED_KEY}</p>
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      class="size-7 shrink-0"
-                      aria-label="Reveal private key"
-                      onclick={() => (unlockTarget = 'private-key')}
-                    >
-                      <Eye />
-                    </Button>
-                  {/if}
-                </div>
-              </div>
+        <div class="border-border flex w-full flex-col rounded-lg border">
+          {@render keyCardHeader(
+            'Data sharing',
+            sharingAddress,
+            'Sharing address',
+            sharingDetailOpen,
+            () => (sharingDetailOpen = !sharingDetailOpen),
+          )}
+          {#if sharingDetailOpen}
+            <div class="mx-1 mb-1 flex flex-col gap-1">
+              {@render keyRow(
+                'Sharing address',
+                'The unique identifier for your data sharing key.',
+                sharingAddress,
+                'Sharing address',
+              )}
+              {@render keyRow(
+                'Sharing public key',
+                'Used by apps to securely share data with each other.',
+                sharingKeyDisplay,
+                'Sharing public key',
+              )}
+              {@render secretRow(
+                'Sharing private key',
+                'Grants access to shared data. Never share it.',
+                sharingKeyShown ? sharingPrivateKeyDisplay : undefined,
+                'Sharing private key',
+                () => (sharingKeyShown = true),
+              )}
             </div>
           {/if}
         </div>
