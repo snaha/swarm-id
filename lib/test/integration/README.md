@@ -26,8 +26,11 @@ pnpm dev:cluster:start   # start queen + 3 full workers (Docker)
 pnpm --filter @snaha/swarm-id test:integration
 ```
 
-The suite is **skipped automatically** when no cluster is reachable at
-`http://localhost:1633`, so it never breaks a local unit-test run.
+The suite **fails** when no cluster is reachable at `http://localhost:1633`,
+naming the command to start one. It is a precondition, not a condition: `pnpm
+test` is the command that runs without services, and a run that checked nothing
+must not be able to report the same colour as a run that did. Nothing here is
+skipped, so a local unit-test run is unaffected either way.
 
 It is not optional in CI: `integration-tests.yml` starts a cluster and runs
 `pnpm --filter @snaha/swarm-id test:integration` on every push to `main` and
@@ -39,6 +42,8 @@ every pull request touching `lib/**`, so these tests gate merges like any other.
   live outside `src/`, so the default unit-test run does not pick them up and the
   rollup build does not bundle them. They **are** typechecked, linted and
   formatted with the rest of the package (`tsconfig.check.json`, `eslint.config.js`).
+  Being opt-in to _run_ is what lets them be unconditional: the two commands
+  differ by what they require, not by what they silently decline to check.
 - `cluster.ts` provides helpers: cluster reachability, buying/reusing a usable
   postage stamp, and building a bee-js `Stamper` from the queen's well-known
   dev key (uploads in Node without the browser-only proxy machinery).
@@ -46,6 +51,17 @@ every pull request touching `lib/**`, so these tests gate merges like any other.
   postage stamp before any test file runs and shares its batch id with every
   file via `provide`/`inject`. This makes the ~minute-long stamp warmup a
   one-time cost for the whole run instead of per file.
+- `gateway.ts` then starts upstream's `ethersphere/gateway-proxy` in front of
+  the same queen, stamping with that same batch, and stops it when the run
+  ends. That covers **subsidised mode** — the one upload path the library does
+  not stamp itself, where it POSTs bare chunks and SOCs and the gateway injects
+  `swarm-postage-batch-id`. Mocking that contract would only ever confirm our
+  own assumptions back to us, so the real server runs.
+
+  It needs nothing beyond Docker, which the cluster already requires — so with
+  a cluster up, a gateway that will not start is a real breakage, and the setup
+  **fails**, exactly as a missing cluster does. Nothing in this suite skips: a
+  skip reports a breakage in the one colour CI cannot tell from success.
 
 ### Adding a new integration test file
 
@@ -53,11 +69,9 @@ Reuse the shared stamp — do not buy your own:
 
 ```ts
 import { inject, beforeAll } from "vitest"
-import { isClusterReachable, createClusterContext } from "./cluster"
+import { createClusterContext } from "./cluster"
 
-const clusterReachable = await isClusterReachable()
-
-describe.skipIf(!clusterReachable)("my feature", () => {
+describe("my feature", () => {
   let bee, target
   beforeAll(() => {
     ;({ bee, target } = createClusterContext(inject("clusterBatchId")))
@@ -72,11 +86,13 @@ independent and can run in any order against the shared node.
 ## Next steps
 
 Covered so far: plain and encrypted data round-trips (`round-trip.test.ts`),
-chunk-boundary sizes (`data-sizes.test.ts`), and large plain uploads read back
-through Bee's native `/bytes` as an interop proof (`large-plain-upload.test.ts`).
+chunk-boundary sizes (`data-sizes.test.ts`), large plain uploads read back
+through Bee's native `/bytes` as an interop proof (`large-plain-upload.test.ts`),
+and subsidised-gateway mode — plain, multi-chunk, and SOC
+(`subsidised-round-trip.test.ts`).
 
-Natural extensions: SOC, sequential/epoch feeds, ACT, manifests, and
-subsidised-gateway mode. These need network push and retrieval to work, which is
-why they waited on a multi-node cluster; `dev:cluster:start` has run queen + 3
-full workers with public reachability since bee-compose 0.1.4, so the original
-blocker is gone and the gap is just unwritten tests.
+Natural extensions: sequential/epoch feeds, ACT, and manifests. These need
+network push and retrieval to work, which is why they waited on a multi-node
+cluster; `dev:cluster:start` has run queen + 3 full workers with public
+reachability since bee-compose 0.1.4, so the original blocker is gone and the
+gap is just unwritten tests.
