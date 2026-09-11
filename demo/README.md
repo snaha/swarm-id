@@ -8,7 +8,7 @@ This demo shows how to integrate the Swarm ID library into a dApp for authentica
 
 ## Files
 
-- **src/routes/** - SvelteKit pages (main demo, feeds, SOC, storage, access control)
+- **src/routes/** - SvelteKit pages (main demo, account, feeds, SOC, storage, access control, Safari check)
 - **src/lib/stores/** - Svelte 5 stores (client, log, sidebar)
 - **src/lib/components/** - Shared UI components
 - **svelte.config.js** - SvelteKit config with `@sveltejs/adapter-static`
@@ -71,15 +71,17 @@ import { SwarmIdClient } from '@snaha/swarm-id'
 const client = new SwarmIdClient({
   iframeOrigin: proxyOrigin,
   iframePath: '/proxy',
-  timeout: 60000,
+  timeout: 600000, // 10 minutes, so a large file upload is not cut short
+  subsidisedGatewayUrl, // undefined unless the demo's gateway toggle is on
   onConnectionChange: (info) => {
     // Handle connection/auth status changes
   },
   metadata: {
     name: 'Swarm ID Demo',
-    description: 'Demo application showcasing Swarm ID authentication',
+    description: 'Demo application showcasing Swarm ID authentication and Bee API operations',
     icon: BEE_ICON,
   },
+  buttonConfig: { connectText: 'Connect to Swarm', disconnectText: 'Disconnect' },
   containerId: 'swarm-id-button',
 })
 
@@ -101,7 +103,8 @@ The identity management (authentication, key derivation, storage) is handled by 
 
 ```javascript
 const data = new TextEncoder().encode('Hello, Swarm!')
-const result = await client.uploadData('your-postage-batch-id', data)
+// No batch id: the proxy picks the stamp the connected account has for this app.
+const result = await client.uploadData(data, { encrypt: true })
 console.log('Reference:', result.reference)
 ```
 
@@ -159,4 +162,4 @@ pnpm build:swarm-demo
 
 ## License
 
-ISC
+Apache-2.0 — see [LICENSE](../LICENSE).

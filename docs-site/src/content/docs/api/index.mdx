@@ -63,7 +63,7 @@ Creates a new SwarmIdClient instance.
 | `options.metadata.icon`         | `string`                         | No       | Application icon as a data URL (SVG or PNG, max 4KB)                                                                                                                                                 |
 | `options.buttonConfig`          | `ButtonConfig`                   | No       | Button configuration for the authentication UI                                                                                                                                                       |
 | `options.containerId`           | `string`                         | No       | ID of container element to place iframe in (optional)                                                                                                                                                |
-| `options.subsidisedGatewayUrl`  | `string`                         | No       | URL of a subsidised gateway for uploads without user's postage stamp. See [Subsidised Gateway](/subsidised-gateway) for details.                                                                     |
+| `options.subsidisedGatewayUrl`  | `string`                         | No       | URL of a subsidised gateway for uploads without user's postage stamp. See [Subsidised Gateway](../subsidised-gateway/) for details.                                                                  |
 
 **Throws:** `Error` if the provided app metadata is invalid
 
@@ -361,6 +361,25 @@ console.log('User logged out')
 
 ---
 
+### `deriveAppSecret(label)`
+
+Derive 32 bytes of app material from this dApp's secret and a label of the dApp's choosing. The same account, dApp and label give the same bytes on every device, and nobody without the account can guess them. Use it to seed a feed topic or other app material without exposing the app's public key.
+
+**Parameters:**
+
+| Parameter | Type     | Description                                             |
+| --------- | -------- | ------------------------------------------------------- |
+| `label`   | `string` | Domain separator chosen by the app, e.g. `"state-feed"` |
+
+**Returns:** `Promise<Uint8Array>` — the derived 32 bytes
+
+**Throws:** `Error` if the client is not initialized or not authenticated
+
+```typescript
+const seed = await client.deriveAppSecret('state-feed')
+const topic = keccak256(seed) // a stable feed topic nobody else can compute
+```
+
 ### `connectionInfo` (property)
 
 Synchronous accessor for the current connection state. Populated by the proxy as soon as it is ready and refreshed automatically whenever any of the derived fields change (identity rename, default-stamp change, account migration, postage stamp purchased, auth transitions). Subscribe to `onConnectionChange` to react to updates.
@@ -372,8 +391,8 @@ Synchronous accessor for the current connection state. Populated by the proxy as
 | Property                    | Type                                            | Description                                                                                                                                                                             |
 | --------------------------- | ----------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `canUpload`                 | `boolean`                                       | Whether the user can upload data                                                                                                                                                        |
-| `uploadMode`                | `"user-stamp" \| "subsidised" \| "unavailable"` | How uploads will be handled. See [Upload Availability](/subsidised-gateway#upload-availability-truth-table)                                                                             |
-| `uploadUnavailableReason`   | `"no-stamp" \| "stamper-failed" \| undefined`   | Why `uploadMode` is `"unavailable"`; absent whenever uploads work. See [Why Uploads Are Unavailable](/subsidised-gateway#why-uploads-are-unavailable)                                   |
+| `uploadMode`                | `"user-stamp" \| "subsidised" \| "unavailable"` | How uploads will be handled. See [Upload Availability](../subsidised-gateway/#upload-availability-truth-table)                                                                          |
+| `uploadUnavailableReason`   | `"no-stamp" \| "stamper-failed" \| undefined`   | Why `uploadMode` is `"unavailable"`; absent whenever uploads work. See [Why Uploads Are Unavailable](../subsidised-gateway/#why-uploads-are-unavailable)                                |
 | `storagePartitioned`        | `boolean \| undefined`                          | `true` when the browser gave the proxy iframe its own partitioned store (Safari ITP, strict privacy settings). Reported for UI messaging; it does **not** decide whether you can upload |
 | `identity`                  | `object \| undefined`                           | The connected identity details (if authenticated)                                                                                                                                       |
 | `identity.id`               | `string`                                        | Unique identifier for the identity                                                                                                                                                      |
@@ -479,7 +498,7 @@ Gets information about the Bee node configuration.
 
 This method retrieves the current Bee node's operating mode and feature flags. Use this to determine if deferred uploads are required (dev mode) or if direct uploads are available (production modes).
 
-**Returns:** `Promise<NodeInfo>` - The node info object
+**Returns:** `Promise<{ beeMode, chequebookEnabled, swapEnabled }>` — an inline object; there is no exported `NodeInfo` type
 
 | Property            | Type      | Description                                                         |
 | ------------------- | --------- | ------------------------------------------------------------------- |
@@ -1404,8 +1423,18 @@ console.log('New History Reference:', result.historyReference)
 
 Revokes access from grantees by removing them from the ACT.
 
-:::caution
-Revoking grantees performs **key rotation**. This means all references change — you must use the new `encryptedReference` and `historyReference` returned by this method for future operations. Previously revoked users may still have cached copies of old data.
+:::caution[Revocation is forward-only]
+Revoking a grantee **does not take back access to content already published**. While they were
+granted, they held the access key, and the reference lives in immutable history — so a former
+grantee can still decrypt everything published before the revocation. What revocation stops is
+access to content published _after_ it.
+
+The `encryptedReference` is deliberately **not** re-encrypted and comes back unchanged. Rotating it
+would mean re-encrypting the same content under a new key, which leaks the keystream to exactly the
+people being revoked ([#496](https://github.com/snaha/swarm-id/issues/496)).
+
+If content must become unreadable to a former grantee, it has to be re-uploaded as new content
+under a new ACT.
 :::
 
 **Parameters:**
@@ -1422,12 +1451,12 @@ Revoking grantees performs **key rotation**. This means all references change �
 
 **Returns:** `Promise<ActRevokeGranteesResult>`
 
-| Property               | Type     | Description                                   |
-| ---------------------- | -------- | --------------------------------------------- |
-| `encryptedReference`   | `string` | **New** encrypted reference (due to rotation) |
-| `historyReference`     | `string` | **New** history reference                     |
-| `granteeListReference` | `string` | Reference to the updated grantee list         |
-| `actReference`         | `string` | The ACT reference                             |
+| Property               | Type     | Description                                                  |
+| ---------------------- | -------- | ------------------------------------------------------------ |
+| `encryptedReference`   | `string` | The content reference, **unchanged** — see the caution above |
+| `historyReference`     | `string` | **New** history reference, without the revoked entries       |
+| `granteeListReference` | `string` | Reference to the updated grantee list                        |
+| `actReference`         | `string` | The ACT reference                                            |
 
 **Throws:**
 
@@ -1443,10 +1472,12 @@ const revokeKeys = [
 ]
 
 const result = await client.actRevokeGrantees(historyReference, encryptedReference, revokeKeys)
-console.log('New History Reference:', result.historyReference)
-console.log('New Encrypted Reference:', result.encryptedReference)
-// All references are new due to key rotation
-// Update your stored references!
+
+// The history reference is new — store it, and use it for everything from here on.
+console.log('New history reference:', result.historyReference)
+
+// The content reference is the same one you passed in. It is not re-encrypted.
+console.log('Content reference unchanged:', result.encryptedReference === encryptedReference) // true
 ```
 
 ---
@@ -1494,7 +1525,6 @@ import type {
   Avatar,
   AvatarSource,
   PostageBatch,
-  NodeInfo,
   AppMetadata,
   ButtonConfig,
   RequestOptions,
@@ -1514,9 +1544,9 @@ import type {
   FeedWriter,
   SequentialFeedReader,
   SequentialFeedWriter,
-  EpochFeedUploadResult,
-  EpochFeedDownloadReferenceResult,
-  EpochFeedDownloadPayloadResult,
+  SequentialFeedPayloadResult,
+  SequentialFeedReferenceResult,
+  SequentialFeedUploadResult,
 
   // ACT types
   ActUploadOptions,
@@ -1599,31 +1629,22 @@ The same seed always produces the same image, so it is safe to render on every `
 
 Functions for creating and reading encrypted `.swarmid` backup files. Exported from `@snaha/swarm-id`.
 
-### `createEncryptedExport(account, identities, connectedApps, postageStamps, swarmEncryptionKeyHex)`
+### `createEncryptedExport(account, swarmEncryptionKeyHex)`
 
-Create a fully encrypted `.swarmid` export object. Serializes account data, derives an AES-GCM-256 key from the `swarmEncryptionKey` (which is itself derived from the account's stored `derivationKey`), encrypts the payload, and builds a header with account metadata.
+Create a fully encrypted `.swarmid` export object. Serializes the account's state (connected apps, postage stamps, metadata), derives an AES-GCM-256 key from the `swarmEncryptionKey` (itself derived from the account's stored `derivationKey`), encrypts the payload, and builds a header with the account name and export time. App connections are kept in the encrypted payload so that a restored account keeps them.
 
 **Parameters:**
 
-| Parameter               | Type             | Description                                                                                            |
-| ----------------------- | ---------------- | ------------------------------------------------------------------------------------------------------ |
-| `account`               | `Account`        | The account to export                                                                                  |
-| `identities`            | `Identity[]`     | Account identities                                                                                     |
-| `connectedApps`         | `ConnectedApp[]` | Connected applications (`appSecret` is stripped)                                                       |
-| `postageStamps`         | `PostageStamp[]` | Postage stamps                                                                                         |
-| `swarmEncryptionKeyHex` | `string`         | Hex-encoded swarm encryption key (derived from `account.derivationKey` via `deriveSwarmEncryptionKey`) |
+| Parameter               | Type              | Description                                                                                            |
+| ----------------------- | ----------------- | ------------------------------------------------------------------------------------------------------ |
+| `account`               | `SignedInAccount` | The signed-in account to export                                                                        |
+| `swarmEncryptionKeyHex` | `string`          | Hex-encoded swarm encryption key (derived from `account.derivationKey` via `deriveSwarmEncryptionKey`) |
 
 **Returns:** `Promise<EncryptedSwarmIdExport>`
 
 ```typescript
 const swarmEncryptionKey = await deriveSwarmEncryptionKey(account.derivationKey)
-const exported = await createEncryptedExport(
-  account,
-  identities,
-  connectedApps,
-  postageStamps,
-  swarmEncryptionKey,
-)
+const exported = await createEncryptedExport(account, swarmEncryptionKey)
 // Save as .swarmid file
 const blob = new Blob([JSON.stringify(exported)], { type: 'application/json' })
 ```
@@ -1645,13 +1666,13 @@ Decrypt an encrypted `.swarmid` export and return the parsed account state snaps
 const swarmEncryptionKey = await deriveSwarmEncryptionKey(account.derivationKey)
 const result = await decryptEncryptedExport(fileData, swarmEncryptionKey)
 if (result.success) {
-  const { identities, connectedApps, postageStamps } = result.data
+  const { connectedApps, postageStamps } = result.data
 }
 ```
 
 ### `parseEncryptedExportHeader(data)`
 
-Parse and validate just the encrypted export header without decrypting. Useful for reading account metadata (name, type, export date) before attempting decryption.
+Parse and validate just the encrypted export header without decrypting. Useful for reading the account name and export date before attempting decryption.
 
 **Parameters:**
 
@@ -1702,24 +1723,23 @@ Shared serialization for account state used by both file export and Swarm sync.
 
 ### `serializeAccountStateSnapshot(input)`
 
-Serialize account data into a plain object suitable for JSON encoding. Strips `appSecret` from connected apps.
+Serialize account data into a plain object suitable for JSON encoding.
 
 **Parameters:**
 
-| Parameter             | Type              | Description                           |
-| --------------------- | ----------------- | ------------------------------------- |
-| `input.accountId`     | `string`          | Account ID (hex)                      |
-| `input.metadata`      | `AccountMetadata` | Account metadata                      |
-| `input.identities`    | `Identity[]`      | Account identities                    |
-| `input.connectedApps` | `ConnectedApp[]`  | Connected apps (`appSecret` stripped) |
-| `input.postageStamps` | `PostageStamp[]`  | Postage stamps                        |
-| `input.timestamp`     | `number`          | Snapshot timestamp                    |
+| Parameter             | Type              | Description        |
+| --------------------- | ----------------- | ------------------ |
+| `input.accountId`     | `string`          | Account ID (hex)   |
+| `input.metadata`      | `AccountMetadata` | Account metadata   |
+| `input.connectedApps` | `ConnectedApp[]`  | Connected apps     |
+| `input.postageStamps` | `PostageStamp[]`  | Postage stamps     |
+| `input.timestamp`     | `number`          | Snapshot timestamp |
 
 **Returns:** `Record<string, unknown>`
 
 ### `deserializeAccountStateSnapshot(data)`
 
-Deserialize and validate an account state snapshot. Any `appSecret` injected in the raw data is stripped by the Zod schema.
+Deserialize and validate an account state snapshot against the Zod schema.
 
 **Parameters:**
 
@@ -1737,9 +1757,8 @@ interface AccountStateSnapshot {
   timestamp: number
   accountId: string
   metadata: AccountMetadata
-  identities: SerializedIdentity[]
-  connectedApps: ExportedConnectedApp[] // no appSecret
-  postageStamps: SerializedPostageStamp[]
+  connectedApps: ConnectedApp[]
+  postageStamps: PostageStamp[]
 }
 ```
 
@@ -1749,7 +1768,7 @@ interface AccountStateSnapshot {
 
 ### `restoreAccountFromSwarm(bee, masterKey, ethereumAddress, credentialId)`
 
-Restore account state from Swarm using passkey authentication result. Derives keys, looks up the epoch feed, downloads and decrypts the latest snapshot.
+Rebuild account state from Swarm on a device that has never seen the account. Derives the keys, reads the account's device roster, reads every device's latest state feed, and folds them into one snapshot; see [Postage Batch Sharing](../multi-device-postage-batches/#account-state-sync).
 
 **Parameters:**
 
@@ -1774,16 +1793,26 @@ interface RestoreAccountResult {
 
 ## Key Derivation
 
-### `derivePostageSignerKey(derivationKey, identityId?)`
+The full tree, with every context string, is on [Key Derivation](../key-derivation/). Every function below takes and returns 64-character hex strings unless noted.
 
-Derive a deterministic postage batch signer key from the account's derivation key. When `identityId` is provided, derives a unique signer key for that identity; otherwise derives an account-level signer key.
+| Function                                        | Derives                                                                       |
+| ----------------------------------------------- | ----------------------------------------------------------------------------- |
+| `deriveSecret(keyHex, context)`                 | `HMAC-SHA256(bytes(keyHex), utf8(context))`, the primitive under all of these |
+| `deriveAccountDerivationKey(masterKey)`         | `derivationKey`, the key stored on the account                                |
+| `deriveSwarmEncryptionKey(derivationKey)`       | the key that encrypts everything the account writes to Swarm                  |
+| `derivePostageSignerKey(derivationKey)`         | the key that owns and stamps with the account's postage batches               |
+| `deriveSharingKey(derivationKey)`               | `{ secret, publicKey }`, the account-wide ACT sharing key (synchronous)       |
+| `deriveBusContext(derivationKey)`               | `{ topic, encryptionKey }` for the account bus                                |
+| `deriveBackupEncryptionKey(swarmEncryptionKey)` | the AES-GCM-256 `CryptoKey` for `.swarmid` files                              |
+| `backupKeyToPrivateKey(backupKeyHex)`           | the backup signer as a bee-js `PrivateKey`                                    |
+
+### `derivePostageSignerKey(derivationKey)`
 
 **Parameters:**
 
-| Parameter       | Type                  | Description                                       |
-| --------------- | --------------------- | ------------------------------------------------- |
-| `derivationKey` | `string`              | Account derivation key (64-char hex)              |
-| `identityId`    | `string \| undefined` | Optional identity ID for per-identity signer keys |
+| Parameter       | Type     | Description                          |
+| --------------- | -------- | ------------------------------------ |
+| `derivationKey` | `string` | Account derivation key (64-char hex) |
 
 **Returns:** `Promise<string>` — 32-byte signer key as hex string
 
@@ -1791,10 +1820,6 @@ Derive a deterministic postage batch signer key from the account's derivation ke
 import { derivePostageSignerKey } from '@snaha/swarm-id'
 import { PrivateKey } from '@ethersphere/bee-js'
 
-// Account-level signer key
 const signerKeyHex = await derivePostageSignerKey(account.derivationKey)
 const signerKey = new PrivateKey(signerKeyHex)
-
-// Identity-specific signer key
-const identitySignerKeyHex = await derivePostageSignerKey(account.derivationKey, identity.id)
 ```

@@ -31,10 +31,10 @@ Two properties hold throughout:
 ## Position in the stack
 
 ```
-  drive-extend-dialog.svelte / drive-resize-dialog.svelte     phases: form | pending | error
-  drive-add-dialog.svelte                                     (branch on funding.pending first)
-        │                                                     … + unconfirmed, on the widget path
-        ▼
+  drive-extend-dialog.svelte / drive-resize-dialog.svelte   phases: form | pending | success | error
+  drive-add-dialog.svelte                                   … + method, before anything reads the
+        │                                                   chain, and unconfirmed on the widget
+        ▼                                                   path (funding.pending branches first)
   drive-operation.ts ── FundingNeed ──▶ funding-request.svelte.ts ──▶ payment-dialog.svelte
         │                                    │  resolvePaymentRail()      (rail-agnostic screens)
         │                                    ▼                                    │
@@ -51,12 +51,27 @@ Two methods, in this order:
 
 | Method                                     | What it is                                                            | Offered for            |
 | ------------------------------------------ | --------------------------------------------------------------------- | ---------------------- |
-| `Pay with crypto (<widget host>)`          | the external widget popup, which settles and creates the batch itself | buying a drive         |
+| `Pay with crypto (fund.bzz.limo)`          | the external widget popup, which settles and creates the batch itself | buying a drive         |
 | `Pay with crypto (built in, experimental)` | everything the rest of this document describes                        | buy, extend and resize |
 
 **The widget leads, and is selected by default.** It is the settlement path the legacy UI has used
 all along; the built-in engine beside it is new, has not been through a mainnet season, and says so
 in its own label.
+
+**The label is not the host.** The popup is opened on `https://swarmbucks.eth.limo/`
+(`WIDGET_BASE_URL`); `fund.bzz.limo` is an older deployment of the same widget, kept in
+`ALLOWED_ORIGINS` so a redeploy of either keeps posting messages we accept, and kept in the
+user-facing label and copy. Wherever this document says "the widget", the origin is
+swarmbucks.eth.limo.
+
+**Buying asks the question in the add-drive dialog, not at the funding seam.** Proceed goes to a
+`method` phase of the dialog's own, before any chain read: `runPurchase` opens with the contract's
+constraints and the owner's balance, and each of those can end the purchase — one by throwing, the
+other by covering the cost — with the question still unasked
+([#619](https://github.com/snaha/swarm-id/issues/619)). `payment-dialog.svelte` keeps a method
+screen too, since the seam is where extend and resize would raise it, but the add dialog hands it
+`initialMethod="built-in"` so it opens already on the built-in method; extend and resize pass no
+`onUseWidget`, so the widget is not among their options at all.
 
 The widget's UI is neither forked nor embedded — it is React, and it is reached as a popup on its own
 origin. Two properties of it decide where it can be offered at all:
@@ -75,8 +90,13 @@ answers by opening the popup. Nothing has been spent at that point: the funding 
 `beforeSpend` and before the first spending transaction, so abandoning there costs nothing. The error
 is its own type precisely so no generic catch reads a deliberate change of method as a cancel.
 
-Because the widget picks the size and lifespan **inside** the popup, the add-drive form's selection is
-only a pre-payment estimate on that path; the real lifespan is derived from the amount that settled.
+The form's selection travels to the popup as its **defaults** (`buildWidgetUrl`,
+[#632](https://github.com/snaha/swarm-id/issues/632)): alongside the batch owner's `destination`
+the URL carries `depth` and the per-chunk `amount` — omitted when the chain price never loaded, and
+clamped by the widget to the sizes and lifespans it offers — plus `reserved-slots=1`, because the
+widget renders capacity as a depth shift and `2` had it label a batch we call ~650 MB as 111 MB.
+They are only defaults: the size and lifespan are still confirmed **inside** the popup, so the
+recorded lifespan is derived from the amount the `batch` event reports rather than from the form.
 The method screen says so.
 
 ## The rail seam
@@ -111,9 +131,10 @@ all of them):
 - **The dev rail** (`ui/src/lib/dev/local-payment-rail.ts`) — only off mainnet, in a dev build, with
   a local source chain answering. See [Dev and testing](#dev-and-testing).
 
-Source chains mirror the widget's: Ethereum, Polygon, Optimism, Arbitrum, Base, Gnosis. Token lists
-are a static table per chain (native plus the obvious stablecoin); Relay's chain/currency metadata
-call buys nothing for a six-chain, two-token picker. Gnosis is the one chain where the two tables
+Source chains mirror the widget's, in the order the picker shows them (`WALLET_CHAINS`): Ethereum,
+Base, Arbitrum, Optimism, Polygon, Gnosis. Token lists are a static table per chain (native plus the
+obvious stablecoin); Relay's chain/currency metadata call buys nothing for a six-chain, two-token
+picker. Gnosis is the one chain where the two tables
 meet, and its dollar tokens are two different contracts: Relay carries **USDC.e** (`0x2a22…`,
 Circle's bridged token), the direct rail the older Omnibridge **USDC** (`0xDDAf…`) that the swap side
 transacts in. Both rows reach the picker, so they are named apart — one label for two contracts sends
@@ -178,15 +199,17 @@ arrive without a screen, a signature and a record of who paid.
 side. `swapDelivered` lives here too, turning delivered xDAI into the BZZ the operation needs.
 
 1. From the operation: `plurNeeded` (per-chunk amount `<< depth`) → `bzzNeeded` (1 BZZ = 1e16 PLUR).
-2. `quoteXdaiInForBzzOut(bzzNeeded)` from `@swarm-id/multichain` (Sushi V3 `quoteExactOutputSingle`),
+2. `quoteXdaiInForBzzOut(bzzNeeded)` from `@swarm-id/multichain` — Sushi V3 via `bestExactOutput`,
+   which prices the direct pool (`quoteExactOutputSingle`) and the USDC route (`quoteExactOutput`)
+   and keeps the cheaper, see [Slippage, routing and liquidity](#slippage-routing-and-liquidity) —
    × 1.2 (`SWAP_BUFFER_NUMERATOR` / `_DENOMINATOR`), mirroring the widget's 20% buffer. The swap
    executes exact-**input**, so the buffer is spent buying BZZ rather than left over: the surplus
    lands as BZZ at the owner address and the next operation's funds check consumes it.
-3. Add `GAS_BUDGET_XDAI = 0.005` (approve + topUp + increaseDepth at 1 gwei, with headroom) minus the
-   owner address's existing xDAI, floored at 0 — **plus `SWAP_GAS_XDAI = 0.002` whenever a swap will
-   run**. The swap is signed by the owner key and pays for itself out of the same balance, before any
-   of the operations the gas budget covers; without that term the swap spends the budget back down and
-   the funds re-check immediately afterwards rejects a payment that in fact succeeded.
+3. Add `GAS_BUDGET_XDAI_WEI = 0.005` (approve + topUp + increaseDepth at 1 gwei, with headroom) minus
+   the owner address's existing xDAI, floored at 0 — **plus `SWAP_GAS_XDAI_WEI = 0.002` whenever a
+   swap will run**. The swap is signed by the owner key and pays for itself out of the same balance,
+   before any of the operations the gas budget covers; without that term the swap spends the budget
+   back down and the funds re-check immediately afterwards rejects a payment that in fact succeeded.
    The balance behind both this term and the surplus below is read **live, here**, never taken from
    the `FundingNeed`: the need is captured once, before the first payment screen, and every re-price
    after a failed attempt reuses it — so a gas leg that landed and then failed to swap was charged
@@ -223,17 +246,19 @@ and wait, or fail when there is none. `payment-dialog.svelte` owns the screens a
                  ┌ no rail → throw: there is no route, and no free settlement
                  │
 FundingNeed ─────┤        ┌ widget → UseWidgetError → the add dialog opens the popup
-                 └ rail → method
+                 └ rail → method   (add arrives on `built in`; extend/resize list only it)
                           └ built in → quote → connecting → configure (chain/token/quote) →
                              switching → approving → relaying → resolve()
                              → back into the engine: swap → approve → topUp [→ increaseDepth]
 ```
 
 **The dialog opens before anything is priced.** The pending request carries the need and its rail,
-not a quote: the default method is settled entirely by the widget and needs nothing from
+not a quote: the widget method is settled entirely inside the popup and needs nothing from
 `quoteFunding`, so pricing ahead of the choice held an empty dialog behind an RPC round-trip nobody
-had asked for. The built-in method prices itself the moment it is chosen — or, on extend and resize
-where it is the only method listed, the moment the dialog opens.
+had asked for. The built-in method prices itself the moment it is chosen — which today is the moment
+this dialog opens, in every flow that reaches it: extend and resize list no other method, and a
+purchase has already chosen in the add dialog and arrives with `initialMethod="built-in"`. Only a
+chooser left sitting on the widget prices nothing.
 
 Two consequences of moving that quote:
 
@@ -259,24 +284,29 @@ independent quotes of the same need drift as the pool moves.
   guard (spend-must-record, with the standard comment), so the flow finishes even if the dialog
   unmounts; the drive record lands via the engine's reconcile. The settlement handed back to
   `resolve()` is likewise not attempt-gated — see [Cancelling a payment](#cancelling-a-payment).
-- Steps map to progress labels on one card — "Cross-swap xDAI on Relay" → "Swapping xDAI to BZZ" →
-  "Extending lifespan" / "Increasing size".
+- Steps map to progress labels on one card: the rail's own while it delivers ("Cross-swap xDAI on
+  Relay", `relay.ts`), then the operation's (`describeStep` in `funding-request.svelte.ts`) —
+  "Waiting for the payment…" across the funding seam and the swap that ends it, then "Extending the
+  lifespan…" / "Paying for the larger size…" / "Buying the drive…", and "Increasing the drive size…"
+  for a resize's depth step.
 - Chain switching requests `wallet_switchEthereumChain` when the selected chain differs from the
-  wallet's; while pending, the balance shows "–" and the button spins. A wallet that answers "I have
+  wallet's; while pending the pay screen gives way to a wait — "Check your wallet", "Confirm the
+  network change in your wallet" — cancellable like every other one. A wallet that answers "I have
   no such chain" is offered `wallet_addEthereumChain` and then asked to **switch again** — adding is
   not switching, and the wallets that do only the first would otherwise have the payment signed on
   whichever network was there before.
 
 In the drive dialogs, "payment" is not a phase. A pending funding request is already distinct state
-(`funding.pending`) and the dialogs branch on it before their own `form | pending | error`. Proceed
-runs the engine preflight and funds check; a shortfall raises the payment screens as dialog-sized
-cards, not a popup; once funds land the engine continues to `pending`, then success or error. On
-open, the engine's chain-truth reconciliation runs first.
+(`funding.pending`) and the dialogs branch on it before their own
+`form | pending | success | error`. Proceed runs the engine preflight and funds check; a shortfall
+raises the payment screens as dialog-sized cards, not a popup; once funds land the engine continues
+to `pending`, then `success` or `error`. On open, the engine's chain-truth reconciliation runs first.
 
-The add-drive dialog carries one phase more, and only the widget path reaches it: `unconfirmed`, for
-a popup that closed without a recognised `batch` message. That is genuinely ambiguous — the purchase
-may have gone through and its message been missed — so it is neither a success nor a cancel, and the
-copy tells the user not to pay again without checking.
+The add-drive dialog carries two phases more: `method`, which every purchase passes through on its
+way out of the form (above), and `unconfirmed`, which only the widget path reaches — a popup that
+closed without a recognised `batch` message. That one is genuinely ambiguous — the purchase may have
+gone through and its message been missed — so it is neither a success nor a cancel, and the copy
+tells the user not to pay again without checking.
 
 ## Slippage, routing and liquidity
 
@@ -337,10 +367,10 @@ So:
   carries none of a large trade's price impact, so the estimate reads slightly low for big resizes;
   the 5% refusal bounds how far off it can be, and every screen prefixes it with "~".
 - Those estimates are all a per-chunk amount `<< depth`, and the **depth is the chain's** —
-  `previewResize`'s `currentDepth` in the resize dialog, `chainDepth()` once per open in both. A
-  record lagging a resize that landed in a lost session is out by a factor of two for each step it
-  missed, which is also what the engine would then charge. Only the depth is fetched; the per-chunk
-  amount re-derives locally, so nothing here costs an RPC per keystroke.
+  `previewResize`'s `currentDepth` in the resize dialog, `reconciledChainDepth` once per open in
+  both. A record lagging a resize that landed in a lost session is out by a factor of two for each
+  step it missed, which is also what the engine would then charge. Only the depth is fetched; the
+  per-chunk amount re-derives locally, so nothing here costs an RPC per keystroke.
 
 ## Failure handling
 
@@ -485,7 +515,8 @@ with them (bee-compose #28, in 0.3.0) — testing a token payment otherwise star
 with trading for the token, on the very pools the test is about.
 
 A green local run therefore says nothing about the bridged rail. `relay.live.test.ts` contract-tests
-Relay's **quote** against the live API (`pnpm test:live` in CI) — the only thing that catches our
+Relay's **quote** against the live API (`pnpm --filter @swarm-id/ui test:live`, which CI runs from
+`./ui`; the root `pnpm test:live` is `lib/`'s own live suite) — the only thing that catches our
 request or response mapping drifting from theirs. Everything downstream of it — routing, the real
 step model, delivery, refunds — has no automated coverage; it has been verified by hand, with a real
 cross-chain payment carried end to end on the production rail. An automated canary is tracked in
@@ -519,7 +550,6 @@ than assumes; whether Relay's own solver does is what the canary has to establis
   planned here.
 - **Retiring either method.** Which one eventually wins is a decision for after the built-in engine
   has a mainnet season behind it; until then both are shipped and the older one leads.
-- Fiat payment. The method dropdown reserves the slot.
 
 ## Files and tests
 
@@ -533,7 +563,7 @@ than assumes; whether Relay's own solver does is what the canary has to establis
 | `ui/src/lib/payment/bzz-price.ts`              | BZZ→USD rate for the dialogs' cost estimates |
 | `ui/src/lib/payment/funding-request.svelte.ts` | `createFundingRequester`, `PendingPayment`   |
 | `ui/src/lib/components/payment-dialog.svelte`  | the method chooser and payment screens       |
-| `ui/src/lib/payment/multichain-widget.ts`      | the widget popup and its messages            |
+| `ui/src/lib/payment/multichain-widget.ts`      | the widget popup's URL and its messages      |
 | `ui/src/lib/dev/local-payment-rail.ts`         | local stand-in rail                          |
 
 - Units: `funding.test.ts` (the quote's arithmetic, `priceImpactRefusal`, and which figure
@@ -543,6 +573,6 @@ than assumes; whether Relay's own solver does is what the canary has to establis
   each kind of cancel — the widget choice included — does to a payment already in flight),
   `multichain-widget.test.ts` (the widget's message parsing, which is the untrusted half of that
   path), `local-payment-rail.test.ts`, `relay.test.ts` (the delivery bound).
-- Live contract test: `relay.live.test.ts` (`pnpm test:live`).
+- Live contract test: `relay.live.test.ts` (`pnpm --filter @swarm-id/ui test:live`).
 - E2E: `ui/tests/payment-rail.test.ts` (payment screens end to end),
   `ui/tests/drive-onchain.test.ts` (the engine's flows).

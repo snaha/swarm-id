@@ -1,5 +1,7 @@
 Identity Management PoC\#1 Requirements
 
+Status: **historical.** These are the original PoC#1 requirements (added to the repo 2026-06-23, [#367](https://github.com/snaha/swarm-id/pull/367)); parts of them were never built — per-session key creation was a nice-to-have and does not exist — and others landed differently: the "BeeJS PR or a separate library" became `@snaha/swarm-id`. For the project's current scope and architecture see [`AGENTS.md`](../AGENTS.md) and [`README.md`](../README.md).
+
 # User Stories
 
 The use case is “gateway usage with gated content”. As a basic setup we assume the following:

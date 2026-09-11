@@ -62,7 +62,8 @@ export type AccountStateSnapshotResult =
  * `createdAt`, NEVER a fresh `Date.now()`: re-stamping an unchanged name /
  * default-stamp / settings on every publish would let a device that never
  * touched the field clobber a peer's genuine concurrent edit under per-field
- * LWW (§9.3). `createdAt` is identical across devices and predates every edit,
+ * LWW (docs/Account-State.md, "Convergence rules"). `createdAt` is identical
+ * across devices and predates every edit,
  * so any real change still wins.
  *
  * `defaultPostageStampBatchID` may be absent: an account with no drives is a

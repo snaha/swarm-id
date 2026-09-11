@@ -3,224 +3,205 @@ title: Architecture
 description: Understanding how Swarm ID works
 ---
 
-Swarm ID uses an OAuth-style popup authentication flow. The proxy iframe reads the trusted domain's first-party store whenever the embedding page is **same-site** with it (ports do not affect _site_, so `swarm-demo.snaha.net` embedding `swarm-id.snaha.net` is same-site, as is anything on `localhost`). Where the two are genuinely cross-site, or the browser partitions regardless — Safari's Intelligent Tracking Prevention, or strict privacy settings elsewhere — the connect popup hands the iframe the account's upload credentials directly, so uploads keep working. See [#277](https://github.com/snaha/swarm-id/issues/277) for the background.
+Swarm ID uses a popup sign-in flow in the style of OAuth. The proxy iframe reads the trusted domain's own storage whenever the page embedding it is **same-site** with it. Ports do not affect the site, so `swarm-demo.snaha.net` embedding `swarm-id.snaha.net` is same-site, and so is anything on `localhost`. Where the two are cross-site, or the browser partitions storage regardless (Safari's Intelligent Tracking Prevention, strict privacy settings elsewhere), the connect popup hands the iframe the account's upload credentials directly, so uploads keep working. See [#277](https://github.com/snaha/swarm-id/issues/277) for the background.
 
 :::note[Confirmed on real Safari]
-The whole path **is** confirmed on real Safari (iOS 18.7 / Safari 26.6): ITP partitions the iframe, the connect popup's `postMessage` through `window.opener` reaches it, the session builds a working stamper from the handed-over view, and a chunk uploads and reads back byte-identical. A handover that carries no account view is refused rather than establishing a session that could neither upload nor be told it had been revoked, and `ConnectionInfo.uploadUnavailableReason` says which of the remaining causes a connected session hit.
+The whole path is confirmed on real Safari (iOS 18.7 / Safari 26.6): ITP partitions the iframe, the connect popup's `postMessage` through `window.opener` reaches it, the session builds a working stamper from the handed-over view, and a chunk uploads and reads back byte for byte. A handover that carries no account view is refused rather than starting a session that could neither upload nor be told it had been revoked, and `ConnectionInfo.uploadUnavailableReason` says which of the remaining causes a connected session hit.
 
-A private window passes the same checks — sessions there are still discarded when the window closes, by design. Unrun: whether a dormant account's partitioned storage survives ITP's ~30-day eviction window ([#570](https://github.com/snaha/swarm-id/issues/570)).
+A private window passes the same checks; its sessions are still discarded when the window closes, by design. Not yet checked on a device: whether a dormant account's partitioned storage survives ITP's roughly 30-day eviction window ([#664](https://github.com/snaha/swarm-id/issues/664)).
 :::
 
 ## System Overview
 
-The architecture consists of three main components:
-
-```
-┌─────────────────────────────────────────────────────────────┐
-│  Your dApp (e.g., https://my-dapp.com)                      │
-│  ┌────────────────────────────────────────────────────┐     │
-│  │ SwarmIdClient                                      │     │
-│  │                                                    │     │
-│  │  ┌─────────────────────────────────────────────┐   │     │
-│  │  │ Hidden iframe (https://swarm-id.snaha.net)  │   │     │
-│  │  │                                             │   │     │
-│  │  │ SwarmIdProxy                                │   │     │
-│  │  │   - Stores app-specific secret              │   │     │
-│  │  │   - Proxies Bee API calls                   │   │     │
-│  │  └─────────────────────────────────────────────┘   │     │
-│  └────────────────────────────────────────────────────┘     │
-│                           │                                 │
-│                           │ Opens popup                     │
-│                           ↓                                 │
-│  ┌────────────────────────────────────────────────────┐     │
-│  │ Auth Popup (https://swarm-id.snaha.net)            │     │
-│  │                                                    │     │
-│  │ Auth Popup (SvelteKit /connect route)               │     │
-│  │   - Stores master key (first-party context)        │     │
-│  │   - Derives app-specific secrets                   │     │
-│  │   - Sends secret to iframe via postMessage         │     │
-│  └────────────────────────────────────────────────────┘     │
-└─────────────────────────────────────────────────────────────┘
+```text
+┌───────────────────────────────────────────────────────────────────┐
+│ Your dApp page  (https://my-dapp.example)                         │
+│                                                                   │
+│  SwarmIdClient                                                    │
+│   ┌─────────────────────────────────────────────────────────────┐ │
+│   │ Hidden iframe  (https://swarm-id.snaha.net/proxy)           │ │
+│   │                                                             │ │
+│   │ SwarmIdProxy                                                │ │
+│   │  - holds this dApp's secret and the stamps it may spend     │ │
+│   │  - signs and sends every Bee request for the dApp           │ │
+│   │  - a peer on the account bus                                │ │
+│   └─────────────────────────────────────────────────────────────┘ │
+│     ▲ postMessage, both ways, every message validated             │
+│     │                                                             │
+│  connect() / the iframe's own button  ──────────▶  window.open    │
+└───────────────────────────────────────────────────────────────────┘
+                                                          │
+                                                          ▼
+   ┌────────────────────────────────────────────────────────────────┐
+   │ Connect popup  (https://swarm-id.snaha.net/connect)            │
+   │                                                                │
+   │  - unlocks the account: passkey, Ethereum wallet, or password  │
+   │  - derives this dApp's secret from the master key              │
+   │  - same-site: writes the connection to the shared store,       │
+   │    and the iframe picks it up from a storage event             │
+   │  - partitioned: posts the secret and the account view to       │
+   │    the iframe through window.opener                            │
+   └────────────────────────────────────────────────────────────────┘
 ```
 
 ## Components
 
 ### SwarmIdClient
 
-The main library used by parent dApp windows. It:
+The library a dApp page uses. It:
 
-- Creates and embeds a hidden iframe from the trusted domain
-- Provides authentication UI (login button, status)
-- Exposes methods for Bee operations (upload, download, etc.)
-- Communicates with the iframe via postMessage
+- creates and embeds a hidden iframe from the trusted domain
+- offers a connect button inside the iframe, or a `connect()` method for a custom UI
+- exposes the Bee operations: upload, download, chunks, single-owner chunks, feeds, GSOC and ACT
+- talks to the iframe only through postMessage
 
 ### SwarmIdProxy
 
 Runs inside the hidden iframe on the trusted domain. It:
 
-- Receives app-specific secrets from the auth popup
-- Stores secrets in partitioned localStorage
-- Proxies Bee API calls with authentication
-- Validates all incoming messages from the parent
+- authenticates from the shared store when the embedding page is same-site, or from the popup's handover when storage is partitioned
+- holds the dApp's secret and the postage stamps that dApp may spend
+- signs and sends every Bee request, and reports progress and connection changes back to the page
+- validates every message from the page before acting on it
+- is a peer on the [account bus](../account-bus/), so a revoke or a rename made elsewhere reaches it while it is open
 
-### Auth Popup
+### Connect popup
 
-The authentication popup is implemented as a SvelteKit route (`/connect`) in the identity management UI. It:
+The `/connect` route of the identity UI. It:
 
-- Manages the master key in first-party localStorage
-- Derives app-specific secrets using HMAC-SHA256
-- Sends secrets to the iframe via postMessage
-- Provides the authentication UI (Passkey/WebAuthn and SIWE flows)
+- unlocks the account with its access method: a passkey, an Ethereum wallet, or a password
+- derives the dApp's secret from the master key
+- writes the connection to the shared store, or posts it to the iframe when storage is partitioned
+- records the dApp under the account's connected apps, with the session length from the account's settings
 
-## Key Hierarchy
+### The identity UI
 
-All cryptographic keys are derived from a single master key produced during Passkey or SIWE authentication:
+The rest of the trusted domain: account creation from a recovery phrase, the keystore, drives (postage batches), connected apps, devices, backup and restore, and the developer tools at `/dev`.
 
-```
-Master Key (from Passkey/SIWE challenge)
-├─> App-Specific Secret (HMAC-SHA256 with app origin)
-│       ├─> Low-stakes keys (feed, session) → shared with apps
-│       └─> High-stakes keys (stamps, ACT) → never shared
-├─> derivationKey (HMAC-SHA256 with "derivation-key", persisted in account)
-│       ├─> swarmEncryptionKey (HMAC-SHA256 with "swarm-encryption")
-│       │       ├─> backup AES key (HMAC-SHA256 with "swarm-id-backup-encryption-v1")
-│       │       │       └─> AES-GCM-256 CryptoKey (for .swarmid encryption)
-│       │       └─> backup feed key (HMAC-SHA256 with "backup-key")
-│       │               └─> backup private key (for Swarm epoch feed owner)
-│       └─> postageSignerKey (HMAC-SHA256 with "postage-signer" or "postage-signer:{identityId}")
-│               └─> PrivateKey for signing postage batch chunks
-```
+## Keys
 
-### App Secret Derivation
+Every key derives from the account's recovery phrase. The phrase gives a wallet whose private key is the **master key** and whose address is the account id. The master key stays in the identity UI, encrypted at rest under the access method. From it come the per-dApp secrets and a stored `derivationKey`, and from that the Swarm encryption key, the backup signer that owns every feed, the postage signer, the sharing key, and the account bus keys. The full tree, with every context string, is on [Key Derivation](../key-derivation/).
 
-```typescript
-// Pseudocode for key derivation
-appSecret = HMAC - SHA256(masterKey, appOrigin)
-```
+A dApp's secret is `HMAC-SHA256(masterKey, appOrigin)`:
 
-This ensures:
+- **Deterministic**: the same account always gives the same dApp the same secret
+- **Unique per app**: two dApps never share one
+- **No cross-app leakage**: one dApp's secret says nothing about another's
+- **Master key protection**: the master key never leaves the trusted domain
 
-- **Deterministic** - Same master key + app origin always produces the same secret
-- **Unique per app** - Each app gets a different secret
-- **No cross-app leakage** - Knowing one app's secret doesn't reveal others
-- **Master key protection** - The master key never leaves the trusted domain
+## Storage
 
-## Storage Partitioning
+The identity UI keeps the account in the trusted domain's local storage: the encrypted vault, the account record with its connected apps, stamps and devices, and settings. A proxy iframe on a same-site page reads that same store. Every same-site dApp therefore shares one store, and the proxy keeps one session per dApp origin in it.
 
-Modern browsers partition storage by `(iframe-origin, parent-origin)`. This means:
+A dApp page cannot read any of this: the iframe is a different origin. What isolates apps from each other is the origin boundary plus the per-app secret, not storage partitioning.
 
-- An iframe from `swarm-id.snaha.net` embedded in `app-a.com` has different storage than the same iframe embedded in `app-b.com`
-- This provides browser-enforced isolation between apps
-- Even if an app is compromised, it can't access other apps' secrets
-
-Where the browser also partitions the iframe away from the trusted domain's own storage (Safari's ITP, or any cross-site embedding), the connect popup hands the iframe the account's synced projection directly and the iframe keeps it under its own partition. It is a full writer there, and a peer on the [account bus](/account-bus), which is how a revoke or a rename made anywhere else still reaches it while it is open.
+Where the browser partitions the iframe away from the trusted domain's storage, the iframe gets its own store. The connect popup hands it the account's synced view (stamps and signer keys, never the vault) and the iframe keeps the session in its own partition, so a reload does not repeat the handshake. That iframe is a full writer and a peer on the [account bus](../account-bus/), which is how a revoke or a rename made anywhere else still reaches it while it is open.
 
 ## Message Protocol
 
-All cross-origin communication uses postMessage with Zod validation:
+Everything between a dApp page and its iframe is postMessage, validated with Zod on both sides. The message kinds:
 
-### Parent → Iframe Messages
+### Page to iframe
 
-| Message          | Purpose                             |
-| ---------------- | ----------------------------------- |
-| `parentIdentify` | Identify parent to iframe           |
-| `checkAuth`      | Check authentication status         |
-| `requestAuth`    | Request authentication (open popup) |
-| `uploadData`     | Upload data to Swarm                |
-| `downloadData`   | Download data from Swarm            |
+| Group   | Messages                                                                                                                                                                                                                                                                          |
+| ------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Session | `parentIdentify`, `checkAuth`, `connect`, `disconnect`, `isConnected`, `deriveAppSecret`                                                                                                                                                                                          |
+| Node    | `getNodeInfo`, `getPostageBatch`                                                                                                                                                                                                                                                  |
+| Data    | `uploadData`, `downloadData`, `uploadFile`, `downloadFile`, `uploadChunk`, `downloadChunk`                                                                                                                                                                                        |
+| SOC     | `socUpload`, `socDownload`, `socRawUpload`, `socRawDownload`, `socGetOwner`                                                                                                                                                                                                       |
+| Feeds   | `epochFeedUploadReference`, `epochFeedDownloadReference`, `seqFeedUploadReference`, `seqFeedDownloadReference`, `seqFeedUploadPayload`, `seqFeedDownloadPayload`, `seqFeedUploadRawPayload`, `seqFeedDownloadRawPayload`, `seqFeedGetOwner`, `feedGetOwner`, `createFeedManifest` |
+| GSOC    | `gsocMine`, `gsocSend`                                                                                                                                                                                                                                                            |
+| ACT     | `actUploadData`, `actDownloadData`, `actAddGrantees`, `actGetGrantees`, `actRevokeGrantees`                                                                                                                                                                                       |
 
-### Iframe → Parent Messages
+### Iframe to page
 
-| Message                | Purpose                  |
-| ---------------------- | ------------------------ |
-| `proxyReady`           | Iframe is initialized    |
-| `authStatusResponse`   | Authentication status    |
-| `authSuccess`          | Authentication completed |
-| `uploadDataResponse`   | Upload result            |
-| `downloadDataResponse` | Download result          |
-| `error`                | Error occurred           |
+| Message                 | Purpose                                                                    |
+| ----------------------- | -------------------------------------------------------------------------- |
+| `proxyReady`            | the iframe is initialised                                                  |
+| `initError`             | the iframe could not initialise                                            |
+| `authStatusResponse`    | answer to `checkAuth`                                                      |
+| `authSuccess`           | a session was established                                                  |
+| `connectionInfoChanged` | the dApp-visible connection state changed                                  |
+| `uploadProgress`        | progress of an upload in flight                                            |
+| `…Response`             | one response kind per request kind above, for example `uploadDataResponse` |
+| `error`                 | a request failed                                                           |
 
-### Popup → Iframe Messages
+### Popup to iframe
 
-| Message     | Purpose                          |
-| ----------- | -------------------------------- |
-| `setSecret` | Send derived app-specific secret |
+| Message     | Purpose                                                                                                            |
+| ----------- | ------------------------------------------------------------------------------------------------------------------ |
+| `setSecret` | the derived app secret and the account view, sent through `window.opener` when the iframe's storage is partitioned |
 
-The [account bus](/account-bus) has its own message kinds — account snapshots, partition handover, presence — that travel between the account's live contexts rather than between a page and its iframe.
+The [account bus](../account-bus/) has its own message kinds: account snapshots, partition handover and presence. They travel between the account's live contexts rather than between a page and its iframe.
 
-## Backup & Recovery
+## Where WebSocket is used
 
-Swarm ID supports account backup via encrypted `.swarmid` files, automatic Swarm-based sync, and live propagation between open contexts over the [account bus](/account-bus).
+Three places, and nowhere else. Bee reads and writes, the popup handshake, and the page-to-iframe protocol are all HTTP or postMessage.
 
-### .swarmid File Format
+| Use                            | Endpoint                                                                   | When                                                                                                                                                                                                                                     |
+| ------------------------------ | -------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Chunk upload stream to Bee** | the Bee node's `/chunks/stream`, with `http` swapped for `ws`              | only when an upload passes `useWebSocket: true`. The iframe stamps each chunk itself and keeps up to 32 chunks in flight, waiting for Bee's acknowledgement of each. The default upload path is HTTP with 8 chunks in flight             |
+| **Account bus signaling**      | `wss://swarm-id.snaha.net/bus` in production, `ws://localhost:5520` in dev | whenever an account context needs to reach peers outside its own storage partition. The socket carries join, signal and relay frames; after a WebRTC data channel is up, messages go peer to peer and the socket only relays what cannot |
+| **The signaling server**       | `signaling/`, the `bus-signaling` service on DigitalOcean                  | the server side of the row above. It forwards frames between the sockets of one room and stores nothing                                                                                                                                  |
 
-Each `.swarmid` file is a JSON object with two parts:
+A build with no signaling URL configured runs the bus over `BroadcastChannel` only.
 
-1. **Plaintext header** — account metadata visible without decryption (account name, export timestamp, account type, and type-specific fields)
-2. **Encrypted payload** — AES-GCM-256 encrypted `AccountStateSnapshot` containing identities, connected apps, and postage stamps
+## Backup and Recovery
 
-Header fields vary by account type:
+Three ways an account's state survives a device: an encrypted `.swarmid` file, the account's own feeds on Swarm, and live propagation over the [account bus](../account-bus/).
 
-| Account Type | Extra Header Fields |
-| ------------ | ------------------- |
-| **Passkey**  | `credentialId`      |
-| **Ethereum** | `ethereumAddress`   |
-| **Agent**    | _(none)_            |
+### The `.swarmid` file
 
-During Ethereum account import, the user must re-enter their secret seed. The master key is re-derived from `secretSeed + publicKey` — key material is never stored in the backup header.
+A JSON object with a plaintext header and an encrypted payload:
 
-### Export Flow
+- **Header**: `version`, `accountName`, `exportedAt`. No key material and no account type, since every account is a recovery-phrase account
+- **Payload**: the account state snapshot (connected apps and postage stamps, plus account metadata), encrypted with AES-GCM-256 under the backup file key from [Key Derivation](../key-derivation/). App connections are kept in the payload so that a restored account keeps them
 
-Export requires **no re-authentication** — the `derivationKey` is already persisted in the account. The flow:
+### Export
 
-1. Serialize account state via `serializeAccountStateSnapshot()` (strips `appSecret`)
-2. Derive `swarmEncryptionKey` from `derivationKey` via HMAC-SHA256 with context `"swarm-encryption"`
-3. Derive AES-GCM-256 key: `swarmEncryptionKey` → HMAC-SHA256 with context `"swarm-id-backup-encryption-v1"`
-4. Encrypt with random 12-byte IV
-5. Build header with account metadata + ciphertext
+No re-authentication is needed: `derivationKey` is stored on the account, and the file key derives from it.
 
-### Import Flow
+1. Serialize the account state (`serializeAccountStateSnapshot`)
+2. Derive `swarmEncryptionKey` from `derivationKey`, then the file key from that
+3. Encrypt with a random 12-byte IV
+4. Write the header and the ciphertext
 
-Import **requires authentication** to re-derive the encryption key:
+### Import
 
-1. Parse the plaintext header to identify account type and metadata
-2. User authenticates (passkey or wallet) to obtain `masterKey`
-3. Derive `derivationKey` → `swarmEncryptionKey` → `backupKey` → AES-GCM-256 key
-4. Decrypt and validate the payload via `deserializeAccountStateSnapshot()`
+1. Parse the header to show the account name and export time
+2. The user enters the recovery phrase, which gives the master key and `derivationKey` again
+3. Derive the file key and decrypt
+4. Validate the payload (`deserializeAccountStateSnapshot`) and create the account on this device
 
-### Swarm Restore Flow
+### Restore from Swarm
 
-When a passkey auth succeeds on a new device with no local account:
+When a device signs in to an account it has never seen, it rebuilds the account from Swarm:
 
-1. Derive `derivationKey` from `masterKey`
-2. Derive `swarmEncryptionKey` from `derivationKey`
-3. Derive `backupKey` → epoch feed owner private key
-4. Build feed topic from account ID
-5. Look up latest epoch feed entry in Swarm
-6. Download and decrypt the account snapshot
+1. Derive `derivationKey`, `swarmEncryptionKey` and the backup signer from the master key
+2. Read the account's **device roster**, an append-only feed that lists every device that ever joined
+3. Read each device's own **state feed**, which holds that device's latest full view of the account
+4. Fold those views into one account with last-writer-wins rules and tombstones
 
-### Security: appSecret Exclusion
-
-The `appSecret` field is structurally excluded from `ExportedConnectedAppSchemaV1`. Even if raw data contains an `appSecret`, Zod strips it during parsing. App secrets are re-derived on-demand from the master key — they are never stored in backups.
+The per-device feeds and the fold are described on [Postage Batch Sharing](../multi-device-postage-batches/#account-state-sync).
 
 ## Security Considerations
 
-### What's Protected
+### What is protected
 
-- **Master key** - Only stored in first-party context on trusted domain
-- **App secrets** - Derived per-app, stored in partitioned storage
-- **Cross-app isolation** - Browser-enforced through storage partitioning
+- **Master key**: only in the identity UI, encrypted at rest under the access method
+- **App secrets**: derived per dApp; a dApp's page never sees another dApp's
+- **Cross-app isolation**: the iframe's storage is on a different origin from every dApp page
 
-### Attack Vectors Mitigated
+### Attack vectors mitigated
 
-- **XSS in dApp** - Can't access master key (different origin)
-- **Malicious dApp** - Only gets its own derived secret
-- **Man-in-the-middle** - HTTPS required for all communication
-- **Message spoofing** - All messages validated with Zod schemas
+- **XSS in a dApp**: cannot reach the master key or another dApp's secret; the iframe is a different origin
+- **Malicious dApp**: only gets the secret derived for its own origin
+- **Man in the middle**: HTTPS is required for every deployment
+- **Message spoofing**: every message is validated against a schema, and the iframe answers only its own parent
 
 ### Recommendations
 
-- Always use HTTPS in production
-- Validate the `iframeOrigin` matches your trusted domain
+- Use HTTPS in production
+- Check that `iframeOrigin` is the trusted domain you expect
 - Keep the trusted domain secure and audited
-- Use Content Security Policy to restrict iframe embedding
+- Use a Content Security Policy to restrict who may embed the iframe

@@ -62,6 +62,15 @@ Per-bucket slot layout (`K = 2`, `slotsPerBucket = 16` shown):
 - **Per-partition data capacity** = `floor(slotsPerBucket / K) − 1` (the `−1` is the
   partition's reserved slot). For `depth = 20, K = 2`: `16/2 − 1 = 7` data values per
   partition per bucket.
+- **Minimum worth buying.** The same formula sets the purchase floor. A partition's bucket
+  lane must hold at least `MIN_USABLE_PARTITION_CAPACITY = 4` data chunks, and
+  `MIN_USABLE_BATCH_DEPTH` is the smallest depth that reaches it — **20** for
+  `BUCKET_DEPTH = 16, K = 2` (depth 17 has no data slot at all, 18 exactly one, 19 three;
+  20 gives 7, ~66 MB). It is searched from `partitionCapacity` rather than written out, so
+  it follows `BUCKET_DEPTH`, `PARTITION_COUNT` and the reserved-slot term. The floor is 4
+  because at capacity 1 the first chunk written to a bucket already fills that lane and the
+  batch reports 100% used while effectively empty (#538), and at 3 some bucket fills after
+  ~1 MB of uniformly placed chunks — a drive too small to be worth its purchase (#566).
 
 Because reserved slots are partition-indexed, partition 0 and partition 1 can both place a
 reserved chunk in the _same_ bucket without colliding (slots 0 and 1).
@@ -355,17 +364,17 @@ that feeds the rival set. The beacon is a correctness mechanism; the heartbeat i
   deploy, and the data at risk overlaps the unclean-crash slots already accepted above. A
   future wire-format change must bump the topic domain (`…-v2`) instead of reusing v1.
 
-## Key constants (in `lib/src/utils/batch-utilization.ts`)
+## Key constants (in `lib/src/utils/batch-utilization.ts` unless noted)
 
-| Constant                            | Value       | Meaning                                       |
-| ----------------------------------- | ----------- | --------------------------------------------- |
-| `BUCKET_DEPTH`                      | 16          | → 65,536 buckets                              |
-| `PARTITION_COUNT` (`K`)             | 2           | partitions sharing each bucket's slots        |
-| `DATA_COUNTER_START`                | `= K` (2)   | first data slot; reserved slots are `[0, K)`  |
-| `UTILIZATION_SLOTS_PER_BUCKET`      | 2           | reserved slots per bucket (one per partition) |
-| `LEASE_TTL_MS` / `LEASE_REFRESH_MS` | 30 s / 10 s | lock-SOC lease lifetime / heartbeat           |
-| `IDLE_YIELD_MS`                     | 30 s        | idle-before-yield, so peers can take a slot   |
-| `STATE_POINTER_EPOCH_MS`            | 30 s        | rotation period of the state-pointer SOC      |
+| Constant                            | Value       | Meaning                                                                                                                         |
+| ----------------------------------- | ----------- | ------------------------------------------------------------------------------------------------------------------------------- |
+| `BUCKET_DEPTH`                      | 16          | → 65,536 buckets                                                                                                                |
+| `PARTITION_COUNT` (`K`)             | 2           | partitions sharing each bucket's slots                                                                                          |
+| `DATA_COUNTER_START`                | `= K` (2)   | first data slot; reserved slots are `[0, K)`                                                                                    |
+| `UTILIZATION_SLOTS_PER_BUCKET`      | 2           | reserved slots per bucket (one per partition)                                                                                   |
+| `LEASE_TTL_MS` / `LEASE_REFRESH_MS` | 30 s / 10 s | lock-SOC lease lifetime / heartbeat — `LEASE_TTL_MS` is defined in `lib/src/sync/timing-constants.ts` and only re-exported here |
+| `IDLE_YIELD_MS`                     | 30 s        | idle-before-yield, so peers can take a slot                                                                                     |
+| `STATE_POINTER_EPOCH_MS`            | 30 s        | rotation period of the state-pointer SOC — defined in `lib/src/sync/partition-state.ts` (`= INTENT_EPOCH_MS`)                   |
 
 ## 13. History (so future readers aren't misled)
 

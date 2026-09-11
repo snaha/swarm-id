@@ -3,53 +3,50 @@ title: Introduction
 description: Cross-browser identity management for Swarm dApps
 ---
 
-Swarm ID is a cross-browser compatible authentication and identity management system for Swarm dApps. It provides an OAuth-style popup authentication flow that works across Chrome, Firefox, and Safari without requiring browser extensions or the Storage Access API. Where a browser partitions the proxy iframe's storage — Safari's ITP above all — the connect popup hands the iframe its credentials directly; see [Safari limitations](/architecture/) for what is confirmed on a real device and what is not.
+Swarm ID is an authentication and identity management system for Swarm dApps. It gives a dApp a popup sign-in flow, in the style of OAuth, that works in Chrome, Firefox and Safari without a browser extension and without the Storage Access API. Where a browser partitions the proxy iframe's storage, Safari above all, the connect popup hands the iframe its credentials directly; see [Architecture](./architecture/) for what is confirmed on a real device.
 
 ## Key Features
 
-- **Cross-Browser Compatible** - Works in Chrome, Firefox, and Safari without extensions
-- **Secure by Design** - Master key never leaves the trusted domain
-- **App-Specific Secrets** - Each app gets a unique derived secret via HMAC-SHA256
-- **Storage Partitioning** - Browser-enforced isolation between apps
-- **No Extension Required** - Pure web-based implementation
-- **Account Backup & Recovery** - Encrypted `.swarmid` file export/import and Swarm-based account restoration
-- **Live Multi-Device Propagation** - Changes reach the account's open tabs, iframes, and devices in a round trip over the [account bus](/account-bus)
+- **Works in every major browser** - Chrome, Firefox and Safari, with no extension
+- **One secret, many keys** - every key derives from the account's recovery phrase; see [Key Derivation](./key-derivation/)
+- **Master key stays home** - the master key never leaves the trusted domain
+- **One secret per app** - each dApp gets its own derived secret, so two apps never share one
+- **Three ways to unlock** - a passkey, an Ethereum wallet, or a password
+- **Backup and recovery** - an encrypted `.swarmid` file, plus restoration from Swarm on a new device
+- **Drives** - postage batches bought in the app, shared by all of the account's devices
+- **Live propagation** - a change reaches the account's open tabs, iframes and devices in about a round trip over the [account bus](./account-bus/)
 
 ## How It Works
 
-The system uses three main components:
+Three parts:
 
-1. **Trusted Domain** - A trusted domain (`swarm-id.snaha.net`) hosts authentication UI and keystore management
-2. **OAuth-style Popup** - dApps trigger authentication popups that derive app-specific secrets from a master key
-3. **Iframe Proxy** - Hidden iframe handles secure communication and proxies Bee API calls with partitioned storage
+1. **Trusted domain** - `swarm-id.snaha.net` hosts the identity UI, the keystore, and the two pages below
+2. **Connect popup** - opened from a dApp, it unlocks the account and derives that dApp's secret
+3. **Proxy iframe** - hidden in the dApp page, it holds the secret and makes every Bee request on the dApp's behalf
 
-### Authentication Flow
+### Connecting a dApp
 
-1. A dApp embeds a hidden iframe from the trusted domain
-2. When authentication is needed, a popup opens on the trusted domain
-3. User authenticates (creates or unlocks their identity)
-4. A unique secret is derived for that specific dApp using HMAC-SHA256
-5. The secret is sent to the iframe via postMessage
-6. The iframe stores the secret in partitioned localStorage
-7. All subsequent Bee API calls use this secret
+1. The dApp page embeds a hidden iframe from the trusted domain
+2. The user clicks connect, and a popup opens on the trusted domain
+3. The user creates an account or unlocks the existing one
+4. The popup derives a secret for that dApp's origin from the master key
+5. The secret reaches the iframe. When the dApp page and the trusted domain are same-site, the popup writes it to the shared store and the iframe picks it up from a storage event. When the browser partitions the iframe's storage, the popup posts it to the iframe through `window.opener` instead, together with the stamps the dApp may spend
+6. From then on the iframe signs and sends every Bee request for that dApp
 
 ## Security Model
 
-The architecture provides strong security guarantees:
-
-- **Master key isolation** - The master key is stored only in first-party context (popup window on the trusted domain)
-- **App-specific secrets** - Secrets are derived deterministically using HMAC-SHA256 key derivation
-- **Browser-enforced partitioning** - Storage is partitioned per `(iframe-origin, parent-origin)` pair
-- **Message validation** - All postMessage communication is validated with Zod schemas
+- **Master key isolation** - the master key lives only in the identity UI, encrypted at rest under the account's access method
+- **Deterministic app secrets** - HMAC-SHA256 of the master key and the dApp's origin
+- **Origin isolation** - the dApp page cannot read the iframe's storage; they are different origins
+- **Validated messages** - every postMessage is checked against a Zod schema before anything acts on it
 
 ## Live Demos
-
-The applications are deployed and available at:
 
 - **Demo App**: [swarm-demo.snaha.net](https://swarm-demo.snaha.net)
 - **Identity UI**: [swarm-id.snaha.net](https://swarm-id.snaha.net)
 
 ## Next Steps
 
-- [Quick Start Guide](/getting-started) - Get up and running in minutes
-- [Architecture Overview](/architecture) - Deep dive into the system design, including backup & recovery
+- [Quick Start](./getting-started/) - integrate the library in a few steps
+- [Architecture](./architecture/) - how the pieces fit, the message protocol, and where WebSocket is used
+- [Key Derivation](./key-derivation/) - every key and where it comes from

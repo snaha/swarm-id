@@ -5,18 +5,33 @@ description: Get Swarm ID integrated into your dApp
 
 Get Swarm ID integrated into your dApp in just a few steps.
 
+import { Tabs, TabItem } from '@astrojs/starlight/components'
+
 ## Installation
 
+<Tabs syncKey="pkg">
+  <TabItem label="pnpm">
+
 ```bash
-# Using pnpm (recommended)
 pnpm add @snaha/swarm-id
+```
 
-# Using npm
+  </TabItem>
+  <TabItem label="npm">
+
+```bash
 npm install @snaha/swarm-id
+```
 
-# Using yarn
+  </TabItem>
+  <TabItem label="yarn">
+
+```bash
 yarn add @snaha/swarm-id
 ```
+
+  </TabItem>
+</Tabs>
 
 ## Basic Usage
 
@@ -129,15 +144,17 @@ Open http://localhost:3500 — that's it!
 
 - Demo app runs on port 3500
 - Identity UI runs on port 5500
+- The account bus signaling server runs on port 5520
 - No HTTPS, certificates, or custom domains required (`localhost` is a [secure context](https://developer.mozilla.org/en-US/docs/Web/Security/Secure_Contexts))
 
-For advanced setup (local Bee cluster, SSH tunnels for real-domain testing, known dev keys), see the [Local Development guide](/local-development).
+For advanced setup (local Bee cluster, SSH tunnels for real-domain testing, known dev keys), see the [Local Development guide](../local-development/).
 
 ## Import & Export
 
-The library also supports account backup and recovery via encrypted `.swarmid` files and Swarm-based restoration. See the [Architecture Overview](/architecture#backup--recovery) for details on the file format and flows, and the [API Reference](/api#backup-encryption) for function documentation.
+The library also supports account backup and recovery via encrypted `.swarmid` files and Swarm-based restoration. See [Architecture](../architecture/#backup-and-recovery) for the file format and flows, and the [API Reference](../api/#backup-encryption) for the functions.
 
 ## Next Steps
 
-- [Architecture Overview](/architecture) - Understand how Swarm ID works
-- [API Reference](/api) - Detailed API documentation
+- [Architecture](../architecture/) - Understand how Swarm ID works
+- [Key Derivation](../key-derivation/) - Every key the account uses and where it comes from
+- [API Reference](../api/) - Detailed API documentation

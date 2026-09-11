@@ -6,7 +6,7 @@ Web-based identity and key management for decentralized applications on the Swar
 
 Where the two are genuinely cross-site, or the browser partitions regardless (Safari ITP, strict privacy settings), the iframe gets its own partitioned store and the connect popup hands it the account's synced projection (stamps incl. signer keys) instead — uploads keep working, and the session is kept in that partition's own store until it is disconnected or its 30 days are up ([#635](https://github.com/snaha/swarm-id/issues/635)), rather than re-handshaking on every page load ([#277](https://github.com/snaha/swarm-id/issues/277), [docs/Account-Bus.md](docs/Account-Bus.md)). That handover needs the popup to be opened **by the iframe**, so `window.opener` points back at it: the proxy's own auth button always does this, and `SwarmIdClient.connect()` does it whenever the iframe cannot prove its store is shared — it asks the storage, not the user agent ([#613](https://github.com/snaha/swarm-id/issues/613), `lib/src/utils/storage-probe.ts`).
 
-**Verified on real Safari** ([#584](https://github.com/snaha/swarm-id/issues/584)): measured on iOS 18.7 / Safari 26.6 against the DO deployment, ITP partitions the iframe, the `window.opener` handover reaches it, the hydrated view builds a working stamper (`uploadMode: user-stamp`), and a chunk uploads and reads back byte-identical. The device id also held across a reload. A **Safari private window** passes the same five checks, upload included; its partitioned store is still discarded when the window closes, which is by design. Still unrun on a device: the ~30-day eviction horizon ([#664](https://github.com/snaha/swarm-id/issues/664)) — two loads in one sitting says nothing about it.
+**Verified on real Safari** ([#584](https://github.com/snaha/swarm-id/issues/584)): measured on iOS 18.7 / Safari 26.6 against the DO deployment, ITP partitions the iframe, the `window.opener` handover reaches it, the hydrated view builds a working stamper (`uploadMode: user-stamp`), and a chunk uploads and reads back byte-identical. The device id also held across a reload. A **Safari private window** passes the same five checks, upload included; its partitioned store is still discarded when the window closes, which is by design. Still unrun on a device: the ~30-day eviction horizon ([#659](https://github.com/snaha/swarm-id/issues/659)) — two loads in one sitting says nothing about it.
 
 ## Project status
 
@@ -26,14 +26,20 @@ rather than kept beside the new one. `0.x` says the same thing to anyone consumi
 
 ### Authentication
 
-- **Passkey/WebAuthn**: Browser-native credential flow
-- **SIWE (Sign-In with Ethereum)**: For existing wallet users
-- Both produce signed challenges as entropy for key generation
+There is exactly one kind of account: a BIP-39 seed account. What used to be distinct account
+types are now just ways of protecting that seed, held in the device-local vault
+(`LocalVaultSchemaV1`) as one of three **access methods**:
+
+- **Passkey/WebAuthn**: browser-native credential
+- **Ethereum wallet**: a signature from an existing wallet
+- **Password**
+
+The master key is derived from the seed entropy, not from a signed challenge.
 
 ### Key Hierarchy
 
 ```
-Master Key (from Passkey/SIWE challenge)
+Master Key (from the account's BIP-39 seed entropy)
     ├─> App-Specific Secret (HMAC-SHA256 with app origin)
     │       ├─> Low-stakes keys (feed, session) → shared with apps
     │       └─> High-stakes keys (stamps, ACT) → never shared, apps request signing
@@ -54,7 +60,9 @@ Master Key (from Passkey/SIWE challenge)
 - **demo/**: Demo dApp showing library integration
 - **docs-site/** ([AGENTS.md](docs-site/AGENTS.md)): Starlight (Astro) documentation website
 - **signaling/**: `@swarm-id/signaling` — account-bus signaling and relay server
+- **multichain/**: `@swarm-id/multichain` — postage contract writes, cross-chain funding, the local solver
 - **eslint-rules/**: `@swarm-id/eslint-rules` — the license-header lint rules every package shares
+- **scripts/**: `swarm-id-scripts` — one-off benchmarks, outside the pnpm workspace
 
 Each package's own `AGENTS.md` holds what applies inside it, and is deliberately not repeated
 here: two copies of a rule is one copy that goes stale. `CLAUDE.md` imports them so they load
@@ -64,9 +72,9 @@ with this file.
 
 ```bash
 pnpm install          # Install dependencies
-pnpm dev              # Start the identity UI (:5500) + demo (:3500) against it
+pnpm dev              # Identity UI (:5500) + demo (:3500) + bus signaling (:5520)
 pnpm build            # Build everything
-pnpm check:all        # All CI checks (format, lint, typecheck, knip)
+pnpm check:all        # All CI checks (format, lint, typecheck, test, knip)
 pnpm clean            # Clean build outputs
 ```
 
@@ -74,11 +82,12 @@ pnpm clean            # Clean build outputs
 
 ## IMPORTANT: Pre-commit Requirements
 
-Before committing, you MUST pass `pnpm check:all` which runs filtered checks across packages:
+Before committing, you MUST pass `pnpm check:all`. It runs the repo-wide `format:check`, then each
+package's own `check:all` in order:
 
-- **`@snaha/swarm-id`**: `format:check`, `lint`, `typecheck`, `test`
-- **`@swarm-id/ui`**: `lint` (includes license headers), `check`, `knip`
-- **`@swarm-id/demo`**: `lint`, `check`, `knip`, `test`
+- **`@swarm-id/eslint-rules`**: `typecheck`
+- **`@snaha/swarm-id`**, **`@swarm-id/multichain`**, **`@swarm-id/signaling`**: `format:check`, `lint`, `typecheck`, `test`
+- **`@swarm-id/ui`**, **`@swarm-id/demo`**: `lint` (includes license headers), `check`, `knip`, `test`
 
 ## Code Style
 
@@ -106,13 +115,17 @@ Before committing, you MUST pass `pnpm check:all` which runs filtered checks acr
   `@snaha/swarm-id`) — never a hand-rolled `fetch` + envelope read. Reach for a null-tolerant
   variant only where `null` is a real outcome. A deadline rejects with `TimeoutError`, as above,
   and every rejection from them names the endpoint, so `error.message` can be shown as-is.
-  `@swarm-id/multichain` keeps a verbatim copy of the envelope checks; change one, change both.
+  `@swarm-id/multichain` keeps its own copy of the envelope checks (`multichain/src/json-rpc.ts`)
+  so the package stays self-contained; `checkedResult` and `requireValue` are still identical, the
+  rest has diverged. Changing an envelope check here means checking whether it applies there too.
 
 ## Testing
 
 - Unit tests (`*.test.ts`): Vitest
-- Component tests (`*.ct.spec.ts`): Playwright
-- E2E tests (`tests/*.test.ts`): Playwright
+- E2E and browser tests (`tests/*.test.ts` in `ui/` and `demo/`): Playwright
+- Integration tests against a local Bee cluster (`lib/test/integration/`): Vitest, run in CI by
+  `integration-tests.yml`
+- Live tests against a real Bee (`lib/test/live/`, `ui/`'s `test:live`): Vitest/Playwright, opt-in
 
 ## Version control conventions
 
