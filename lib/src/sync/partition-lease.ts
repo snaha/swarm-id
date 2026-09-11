@@ -77,7 +77,7 @@ import {
   type StatePointerLookup,
 } from "./partition-state"
 
-/** Default guard time δ for the lock protocol (iteration-2 doc § δ tuning). */
+/** Default guard time δ for the lock protocol (Postage-Batch-Partitioning.md §7). */
 export const PARTITION_LOCK_GUARD_MS = 2000
 
 /** True when a 64-byte reference is the all-zero sentinel (a never-written

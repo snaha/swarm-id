@@ -1,5 +1,7 @@
 # Session Keys Research Report: Technical Approaches for SwarmID
 
+Status: **historical.** A research report on possible session-key approaches (added to the repo 2026-06-23, [#367](https://github.com/snaha/swarm-id/pull/367)); none of the approaches it evaluates is implemented, session keys do not exist in the codebase, and no current design record supersedes it.
+
 ## Executive Summary
 
 This report analyzes technical approaches for implementing **Session Keys** in SwarmID - temporary cryptographic keys that are time-bound, revokable, and act as proxies for a Persona's authority. The challenge is significant because Swarm's content-addressed storage is inherently **immutable**, making time-based access and revocation non-trivial.
@@ -509,15 +511,15 @@ contract SessionKeyRegistry {
 
 The following existing files in SwarmID are relevant to session key implementation:
 
-| File                                     | Relevance                                          |
-| ---------------------------------------- | -------------------------------------------------- |
-| `lib/src/proxy/act/index.ts`             | ACT implementation, grantee management, revocation |
-| `lib/src/proxy/act/history.ts`           | Time-based history with reversed timestamps        |
-| `lib/src/proxy/act/crypto.ts`            | ECDH key derivation, CTR encryption                |
-| `lib/src/proxy/feeds/epochs/`            | Epoch-based feed system for time-indexed updates   |
-| `lib/src/proxy/upload-encrypted-data.ts` | SOC creation and signing                           |
-| `lib/src/proxy/download-data.ts`         | SOC verification and decryption                    |
-| `lib/src/utils/ttl.ts`                   | TTL calculation utilities                          |
+| File                             | Relevance                                          |
+| -------------------------------- | -------------------------------------------------- |
+| `lib/src/proxy/act/index.ts`     | ACT implementation, grantee management, revocation |
+| `lib/src/proxy/act/history.ts`   | Time-based history with reversed timestamps        |
+| `lib/src/proxy/act/crypto.ts`    | ECDH key derivation, CTR encryption                |
+| `lib/src/proxy/feeds/epochs/`    | Epoch-based feed system for time-indexed updates   |
+| `lib/src/proxy/upload.ts`        | SOC creation and signing                           |
+| `lib/src/proxy/download-data.ts` | SOC verification and decryption                    |
+| `lib/src/utils/ttl.ts`           | TTL calculation utilities                          |
 
 ---
 
@@ -530,4 +532,4 @@ The following existing files in SwarmID are relevant to session key implementati
 - [Time-Based Direct Revocable CP-ABE](https://eprint.iacr.org/2018/330.pdf)
 - [Blockchain-enabled supervised secure data sharing](https://journalofcloudcomputing.springeropen.com/articles/10.1186/s13677-023-00575-8)
 - [Time-lock encryption overview (Gwern)](https://gwern.net/self-decrypting)
-- [The Book of Swarm](../The-Book-of-Swarm.txt) - Swarm protocol documentation
+- [The Book of Swarm](../The-Book-of-Swarm.pdf) - Swarm protocol documentation (also published at [papers.ethswarm.org](https://papers.ethswarm.org/))

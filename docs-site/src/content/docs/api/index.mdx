@@ -498,7 +498,7 @@ Gets information about the Bee node configuration.
 
 This method retrieves the current Bee node's operating mode and feature flags. Use this to determine if deferred uploads are required (dev mode) or if direct uploads are available (production modes).
 
-**Returns:** `Promise<NodeInfo>` - The node info object
+**Returns:** `Promise<{ beeMode, chequebookEnabled, swapEnabled }>` — an inline object; there is no exported `NodeInfo` type
 
 | Property            | Type      | Description                                                         |
 | ------------------- | --------- | ------------------------------------------------------------------- |
@@ -1423,8 +1423,18 @@ console.log('New History Reference:', result.historyReference)
 
 Revokes access from grantees by removing them from the ACT.
 
-:::caution
-Revoking grantees performs **key rotation**. This means all references change — you must use the new `encryptedReference` and `historyReference` returned by this method for future operations. Previously revoked users may still have cached copies of old data.
+:::caution[Revocation is forward-only]
+Revoking a grantee **does not take back access to content already published**. While they were
+granted, they held the access key, and the reference lives in immutable history — so a former
+grantee can still decrypt everything published before the revocation. What revocation stops is
+access to content published _after_ it.
+
+The `encryptedReference` is deliberately **not** re-encrypted and comes back unchanged. Rotating it
+would mean re-encrypting the same content under a new key, which leaks the keystream to exactly the
+people being revoked ([#496](https://github.com/snaha/swarm-id/issues/496)).
+
+If content must become unreadable to a former grantee, it has to be re-uploaded as new content
+under a new ACT.
 :::
 
 **Parameters:**
@@ -1441,12 +1451,12 @@ Revoking grantees performs **key rotation**. This means all references change �
 
 **Returns:** `Promise<ActRevokeGranteesResult>`
 
-| Property               | Type     | Description                                   |
-| ---------------------- | -------- | --------------------------------------------- |
-| `encryptedReference`   | `string` | **New** encrypted reference (due to rotation) |
-| `historyReference`     | `string` | **New** history reference                     |
-| `granteeListReference` | `string` | Reference to the updated grantee list         |
-| `actReference`         | `string` | The ACT reference                             |
+| Property               | Type     | Description                                                  |
+| ---------------------- | -------- | ------------------------------------------------------------ |
+| `encryptedReference`   | `string` | The content reference, **unchanged** — see the caution above |
+| `historyReference`     | `string` | **New** history reference, without the revoked entries       |
+| `granteeListReference` | `string` | Reference to the updated grantee list                        |
+| `actReference`         | `string` | The ACT reference                                            |
 
 **Throws:**
 
@@ -1462,10 +1472,12 @@ const revokeKeys = [
 ]
 
 const result = await client.actRevokeGrantees(historyReference, encryptedReference, revokeKeys)
-console.log('New History Reference:', result.historyReference)
-console.log('New Encrypted Reference:', result.encryptedReference)
-// All references are new due to key rotation
-// Update your stored references!
+
+// The history reference is new — store it, and use it for everything from here on.
+console.log('New history reference:', result.historyReference)
+
+// The content reference is the same one you passed in. It is not re-encrypted.
+console.log('Content reference unchanged:', result.encryptedReference === encryptedReference) // true
 ```
 
 ---
@@ -1513,7 +1525,6 @@ import type {
   Avatar,
   AvatarSource,
   PostageBatch,
-  NodeInfo,
   AppMetadata,
   ButtonConfig,
   RequestOptions,
@@ -1533,9 +1544,9 @@ import type {
   FeedWriter,
   SequentialFeedReader,
   SequentialFeedWriter,
-  EpochFeedUploadResult,
-  EpochFeedDownloadReferenceResult,
-  EpochFeedDownloadPayloadResult,
+  SequentialFeedPayloadResult,
+  SequentialFeedReferenceResult,
+  SequentialFeedUploadResult,
 
   // ACT types
   ActUploadOptions,

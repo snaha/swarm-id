@@ -27,13 +27,18 @@ pnpm --filter @snaha/swarm-id test:integration
 ```
 
 The suite is **skipped automatically** when no cluster is reachable at
-`http://localhost:1633`, so it never breaks the default unit-test run
-(`pnpm test`) or CI.
+`http://localhost:1633`, so it never breaks a local unit-test run.
+
+It is not optional in CI: `integration-tests.yml` starts a cluster and runs
+`pnpm --filter @snaha/swarm-id test:integration` on every push to `main` and
+every pull request touching `lib/**`, so these tests gate merges like any other.
 
 ## How it works
 
 - Tests run under a dedicated config (`lib/vitest.integration.config.ts`) and
-  live outside `src/`, so they are opt-in and excluded from build/typecheck/lint.
+  live outside `src/`, so the default unit-test run does not pick them up and the
+  rollup build does not bundle them. They **are** typechecked, linted and
+  formatted with the rest of the package (`tsconfig.check.json`, `eslint.config.js`).
 - `cluster.ts` provides helpers: cluster reachability, buying/reusing a usable
   postage stamp, and building a bee-js `Stamper` from the queen's well-known
   dev key (uploads in Node without the browser-only proxy machinery).
@@ -66,8 +71,12 @@ independent and can run in any order against the shared node.
 
 ## Next steps
 
-Covered so far: plain + encrypted data round-trips and chunk-boundary sizes.
+Covered so far: plain and encrypted data round-trips (`round-trip.test.ts`),
+chunk-boundary sizes (`data-sizes.test.ts`), and large plain uploads read back
+through Bee's native `/bytes` as an interop proof (`large-plain-upload.test.ts`).
+
 Natural extensions: SOC, sequential/epoch feeds, ACT, manifests, and
-subsidised-gateway mode. (SOC/feed retrieval needs a multi-node cluster or
-deferred + local reads — the single-queen dev cluster stalls on network
-push/retrieval for those.)
+subsidised-gateway mode. These need network push and retrieval to work, which is
+why they waited on a multi-node cluster; `dev:cluster:start` has run queen + 3
+full workers with public reachability since bee-compose 0.1.4, so the original
+blocker is gone and the gap is just unwritten tests.

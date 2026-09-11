@@ -7,21 +7,23 @@ funded postage batch.
 
 These are **opt-in** and **never run in CI**. They have their own Vitest config
 (`lib/vitest.live.config.ts`) and npm script (`test:live`), separate from both the
-default mocked unit suite (`pnpm test`) and the local-cluster `pnpm test:integration`.
+default mocked unit suite (`pnpm --filter @snaha/swarm-id test`) and the local-cluster
+`pnpm --filter @snaha/swarm-id test:integration`.
 
 ## What it covers
 
-| File                                   | Scenario                                                                           |
-| -------------------------------------- | ---------------------------------------------------------------------------------- |
-| `per-device-sync.test.ts`              | 2 devices: per-device feeds converge; stamp/device tombstones; §7 invariant        |
-| `per-device-sync-3.test.ts`            | 3 devices: append-only roster (no clobber); fold-latency report                    |
-| `partition-acquire-3.test.ts`          | 3 devices race for 2 partitions; idle-then-reacquire → no dual-acquire             |
-| `rename-clobber.test.ts`               | a never-renamed device must not clobber a peer's account rename                    |
-| `single-device-acquire-upload.test.ts` | timings: 1 device, clean acquire → SOC upload → publish wall times                 |
-| `multi-device-acquire-upload.test.ts`  | timings: 2 devices, per-device acquire + SOC upload + publish                      |
-| `three-device-acquire-handoff.test.ts` | timings: 3 devices, K=2, full p1 handoff cycle B→C→B (A holds p0 throughout)       |
-| `second-upload-delay.test.ts`          | timings: held-lease re-validation throttle (when a 2nd upload pays a gateway read) |
-| `upload-cost-breakdown.test.ts`        | timings: held-lease upload phase breakdown (op vs publish)                         |
+| File                                   | Scenario                                                                                              |
+| -------------------------------------- | ----------------------------------------------------------------------------------------------------- |
+| `per-device-sync.test.ts`              | 2 devices: per-device feeds converge; stamp delete propagates; device removal then resurrection       |
+| `per-device-sync-3.test.ts`            | 3 devices: append-only roster (no clobber); fold-latency report                                       |
+| `partition-acquire-3.test.ts`          | 3 devices race for 2 partitions; idle-then-reacquire → no dual-acquire                                |
+| `rename-clobber.test.ts`               | a never-renamed device must not clobber a peer's account rename                                       |
+| `single-device-acquire-upload.test.ts` | timings: 1 device, clean acquire → SOC upload → publish wall times                                    |
+| `multi-device-acquire-upload.test.ts`  | timings: 2 devices, per-device acquire + SOC upload + publish                                         |
+| `three-device-acquire-handoff.test.ts` | timings: 3 devices, K=2, full p1 handoff cycle B→C→B (A holds p0 throughout)                          |
+| `second-upload-delay.test.ts`          | timings: held-lease re-validation throttle (when a 2nd upload pays a gateway read)                    |
+| `upload-cost-breakdown.test.ts`        | timings: held-lease upload phase breakdown (op vs publish)                                            |
+| `fold-latency.test.ts`                 | timings: 10 sequential `foldAccountFromSwarm` runs on a 2-device account (wall time + Bee read count) |
 
 The deterministic, always-on guards for the same logic are the mocked tests in
 `lib/src/sync/*.test.ts` (run in CI). This suite is the live counterpart.
@@ -37,6 +39,10 @@ The deterministic, always-on guards for the same logic are the mocked tests in
 
    `SIGNER_KEY` is the batch owner's **private key** — keep `.env` local and
    treat the batch/key as disposable.
+
+   Two knobs the template does not list, both read by `env.ts` with defaults:
+   `KEEPALIVE_EVERY_MS` (lease keep-alive cadence, default `10000`) and
+   `ACQUIRE_RUNS` (how many times the acquire benchmarks repeat, default `1`).
 
 2. Run:
 

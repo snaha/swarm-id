@@ -170,12 +170,19 @@ devices is the **published partition state** (below), not the cache.
 
 ## Lock SOCs
 
-A **single-owner chunk (SOC)** per partition is the cross-device authority for "who holds
-this partition right now." All of an account's devices share the `backupSigner`, so any of
-them can write any partition's lock SOC; concurrent writers are ordered by a fencing token.
+A **single-owner chunk (SOC)** per `(batch, partition)` is the cross-device authority for "who
+holds this lane right now." All of an account's devices share the `backupSigner`, so any of
+them can write any lane's lock SOC; concurrent writers are ordered by a fencing token.
+
+The batch id is part of the identifier, not just the partition. A lane's slot space is computed
+_within_ a batch, and the state riding on it is published per batch, so keying the lock on the
+partition alone made lane `p` of batch X and lane `p` of batch Y the same chunk address — two
+coordinators that share no slot would take turns anyway. Per-app stamp overrides put two live
+coordinators on two batches without any multi-batch feature, so this is reachable in normal use
+([#589](https://github.com/snaha/swarm-id/issues/589)).
 
 ```text
-identifier = keccak256( utf8("swarm-id-partition-lock-v1:" + partition) )
+identifier = keccak256( utf8("swarm-id-partition-lock-v1:" + batchIdHex + ":" + partition) )
 owner      = backupSigner address
 SOC address = keccak256( identifier ‖ owner )            // 32 bytes
 encryption = swarmEncryptionKey
@@ -416,33 +423,45 @@ The reference orchestrator is `PartitionLease`. Constants:
 | `PRESENCE_MAX_AGE_MS`     | 180 000 ms | A device unheard this long leaves the rival set (three throttled beats).  |
 | `KNOWN_DEVICE_MAX_AGE_MS` | 30 min     | A device that signed in this recently counts as a rival even with no bus. |
 
-`acquire(partitionCount)`:
+`acquire(snapshot)`, where `snapshot` is `{ partitionCount }`, returning
+`{ partition, partitionCount, localCounter, isReadOnly, lockPayload? }`:
 
 1. If `partitionCount ≤ 1` → legacy single-device, no lease.
-2. `refreshFromSwarm` — read every partition's lock SOC, record the live (unexpired,
-   non-released) holders.
+2. Read, **concurrently**: every partition's lock SOC, the per-device intent and presence
+   beacons, the device-independent occupancy beacon, and a speculative state pointer. The extra
+   channels catch a live peer that has not yet written a lock.
 3. Choose the partition we already hold, else the lowest free/expired one
    (`pickFreeOrExpired`). If every partition has a live foreign holder → **read-only**.
-4. `claimPartition` — read the partition-state feed to seed the counter, then run the
-   lock acquire/verify protocol. On `acquired`, bind the counter to the stamper; on
-   `blocked`/`lost-race`, fall back to read-only.
+4. `claimPartition` — seed the counter from the partition state, then run the lock
+   acquire/verify protocol. A contended fresh claim first runs an **intent round**; a device that
+   is demonstrably alone takes a solo-clean fast path that skips the guard window. On `acquired`,
+   bind the counter to the stamper; on `blocked`/`lost-race`, fall back to read-only.
 
-`refresh()` re-runs the lock protocol on the held partition to bump `leasedUntil`; returns
-false (lease lost) on `blocked`/`lost-race`/`aborted` (a refresh that overlaps an
-in-flight `release()` aborts before writing, so it cannot mint a ghost claim the fenced
-release would refuse to clear). `release(localCounter)` publishes the final counter to
-the partition-state feed, then writes the generation-fenced release sentinel (see
-"Release protocol" above) — skipped entirely when the lock no longer carries the claim
-being released. `adoptIfLive()`/`hydrate()`/`serialize()` let a reload re-adopt a
-still-valid lease from a local cache without a Swarm round-trip (re-validated on the next
-refresh).
+The whole call is bounded by `PARTITION_LEASE_ACQUIRE_TIMEOUT_MS` (45 s), within which a slot wait
+is bounded by `SLOT_WAIT_TIMEOUT_MS` (30 s).
+
+`refresh()` re-runs the lock protocol on the held partition to bump `leasedUntil` and heartbeats
+the state pointer. It returns a `LeaseRefreshOutcome`, not a boolean:
+
+- **`held`** — still ours.
+- **`lost`** — `blocked`, `lost-race` or `aborted`. (A refresh that overlaps an in-flight
+  `release()` aborts before writing, so it cannot mint a ghost claim the fenced release would
+  refuse to clear.)
+- **`displaced`** — a foreign beacon carries an earlier generation, so another device has a better
+  claim. The coordinator handles this differently from a plain loss.
+  `release(localCounter)` publishes the final counter to
+  the partition state and its pointer, then writes the generation-fenced release sentinel (see
+  "Release protocol" above) — skipped entirely when the lock no longer carries the claim
+  being released. `adoptIfLive()`/`hydrate()`/`serialize()` let a reload re-adopt a
+  still-valid lease from a local cache without a Swarm round-trip (re-validated on the next
+  refresh).
 
 ### The four cases
 
 - **Case A — first device, fresh batch.** No lock SOC, no partition-state. Take partition
   0, seed a zero counter.
 - **Case B — second device.** Partition 0 is live-held; take partition 1, seed its counter
-  from its partition-state feed (zero if never published).
+  from its published partition state (zero if never published).
 - **Case C — third+ device, turn-taking.** All `PARTITION_COUNT` partitions are held. The
   new device asks the live holders for a slot over the [account bus](../account-bus/) each
   round; exactly one idle holder answers, releases, and the waiter claims the freed
@@ -555,7 +574,8 @@ To interoperate with the reference implementation, an external client must:
    context-as-UTF-8). The `backupSigner` address is the owner of everything.
 2. **Generate a stable per-install `deviceId`** (UUID) and the `tiebreaker`
    (`keccak256(deviceId)[0:8]`).
-3. **Implement the lock-SOC protocol**: identifier hash, SOC address, encrypted JSON
+3. **Implement the lock-SOC protocol**: the identifier hash over **batch id and partition**
+   (not the partition alone), SOC address, encrypted JSON
    payload, the read → guard (2 s) → verify acquire flow, the intent beacons, generation
    fencing, and the
    **generation-fenced** `""` release sentinel — the sentinel carries the released

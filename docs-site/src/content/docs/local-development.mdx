@@ -294,14 +294,20 @@ Your VPS (nginx + HTTPS)              Your Local Machine
 # Terminal 1: Start demo server
 pnpm dev:demo
 
-# Terminal 2: Start SvelteKit dev server with allowed hosts
-VITE_ADDITIONAL_SERVER_ALLOWED_HOSTS=id.yourdomain.com pnpm dev:ui
+# Terminal 2: Start the SvelteKit dev server
+pnpm dev:ui
 
 # Terminal 3: Open SSH tunnel
 ssh -R 18080:localhost:3500 -R 5500:localhost:5500 user@your-vps
 ```
 
-The `VITE_ADDITIONAL_SERVER_ALLOWED_HOSTS` environment variable is required when accessing the Vite dev server through a foreign hostname. Without it, Vite will reject requests from the tunneled domain.
+:::caution[Vite rejects a foreign Host header]
+Vite's dev server answers only hosts it recognises, so a request arriving from nginx with
+`Host: id.yourdomain.com` is refused with **"Blocked request. This host is not allowed."** — and
+`ui/vite.config.ts` configures no `server.allowedHosts`. There is no environment variable for it
+either: add the hostname to `server.allowedHosts` in `ui/vite.config.ts` for the duration of the
+test.
+:::
 
 ### Access the Demo
 

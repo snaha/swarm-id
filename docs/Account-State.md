@@ -32,19 +32,31 @@ a device that was closed reads when it comes back.
 
 ## The account document
 
-`Account` (`lib/src/types.ts` / `schemas.ts`), serialized by `serializeAccount`:
+The document splits in two, and the split is the model:
 
-| Field                                           | Notes                                                                                                                               |
-| ----------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
-| `id`, `name`, `type`, `createdAt`               | `type` ∈ passkey / ethereum / agent (+ type-specific fields, e.g. `credentialId`)                                                   |
-| `derivationKey`, `publicKey`                    | `derivationKey` is the shared account key every device holds (see Assumptions)                                                      |
-| `devices: Device[]`                             | each: `deviceId, name, createdAt, lastSignedInAt`, tombstone `removedAt?`                                                           |
-| `connectedApps: ConnectedApp[]`                 | each: app fields, optional `postageStampBatchID` + its own `postageStampBatchIDAt` clock, `disconnectedAt?`, tombstone `revokedAt?` |
-| `postageStamps: PostageStamp[]`                 | account-owned set; each: stamp fields + `createdAt`, tombstone `deletedAt?`                                                         |
-| `defaultPostageStampBatchID`                    | the account's default batch (stores account data; default for app uploads)                                                          |
-| `settings`                                      | e.g. `appSessionDuration`                                                                                                           |
-| `accountNameAt`, `defaultStampAt`, `settingsAt` | **per-field LWW clocks** for the three scalars above (optional; fall back to `lastModified`)                                        |
-| `partitionCount`, `lastModified`                | partition count for the shared batch; local modified clock                                                                          |
+- **`SyncedAccountSchemaV1`** (`lib/src/schemas.ts`) — the **portable** projection: every field that
+  may travel off the device, and nothing device-local. This is what the device-state feeds and the
+  account bus carry, and what a backup file holds.
+- **`LocalAccountSchemaV1`** (`schemas.ts`) — what **localStorage** holds, a union of two arms:
+  _signed-in_ is the synced projection plus the device-local vault (`access` + `encryptedSeed`);
+  _signed-out_ is the minimal remnant (display fields + vault + `signedOutAt`), its synced state
+  surviving only as the encrypted `encryptedState` blob. `Account` (`schemas.ts`) is that union's
+  type — narrow it with `isSignedOutAccount`.
+
+The vault never leaves the device, so it is no part of what syncs. The table below is the **synced**
+projection; `serializeAccount` writes it plus the local tail to storage.
+
+| Field                                           | Notes                                                                                                                                                                                                                                                                    |
+| ----------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `id`, `name`, `createdAt`                       | there is exactly one kind of account — a BIP-39 seed account, no `type` discriminant. **How** the seed is protected on this device is the vault's `access` (`AccessMethodSchemaV1`: `passkey` / `eth-wallet` / `password`), which is device-local and therefore not here |
+| `derivationKey`, `publicKey`                    | `derivationKey` is the shared account key every device holds (see Assumptions)                                                                                                                                                                                           |
+| `devices: Device[]`                             | each: `deviceId, name, createdAt, lastSignedInAt`, rename clock `nameUpdatedAt?`, tombstone `removedAt?`                                                                                                                                                                 |
+| `connectedApps: ConnectedApp[]`                 | each: app fields, optional `postageStampBatchID` + its own `postageStampBatchIDAt` clock, `disconnectedAt?`, tombstone `revokedAt?`                                                                                                                                      |
+| `postageStamps: PostageStamp[]`                 | account-owned set; each: stamp fields + `createdAt`, node-state edit clock `updatedAt?` (dilute / top-up), rename clock `nameUpdatedAt?`, tombstone `deletedAt?`                                                                                                         |
+| `defaultPostageStampBatchID`                    | the account's default batch (stores account data; default for app uploads)                                                                                                                                                                                               |
+| `settings`                                      | e.g. `appSessionDuration`                                                                                                                                                                                                                                                |
+| `accountNameAt`, `defaultStampAt`, `settingsAt` | **per-field LWW clocks** for the three scalars above (optional; fall back to the account's `createdAt` — never a fresh timestamp, which would let a device that never touched the field clobber a peer's edit)                                                           |
+| `partitionCount`, `lastModified`                | partition count for the shared batch; local modified clock                                                                                                                                                                                                               |
 
 Collections converge by **per-entry tombstones** (`removedAt` / `revokedAt` / `deletedAt`); the three
 scalars converge by **per-field LWW** using their `*At` clocks. Tombstones are kept in the document (so a
@@ -74,9 +86,18 @@ user and already holds `derivationKey`. Payloads are encrypted with the swarm en
 `ROSTER_TOPIC_PREFIX = "swarm-id-roster-v1"`, a **sequential append-only** feed. Each device appends ONLY
 its own `Device` record at the next free index, so a concurrent announce can never clobber a peer's entry
 (worst case: two devices race the same fresh index; one append is re-added on its next sync). `readRoster`
-scans in **parallel windows** (`ROSTER_SCAN_WINDOW`), folding the present entries by `deviceId` via
+scans in **parallel windows**, folding the present entries by `deviceId` via
 `mergeDevicesList` and skipping a transient gateway hole inside a window (only a fully-empty window means
-end-of-feed). `ensureInRoster` appends only when the device is absent or its `removedAt` state changed —
+end-of-feed). A **cold** scan (restore, first-ever fold) probes a full `ROSTER_SCAN_WINDOW` (16) as its
+stop margin. A **warm** one reads the memoised known length `[0..known)` as one window — all expected
+hits, so cheap — and probes only `ROSTER_TAIL_PROBES` (2) slots past it to spot new appends: absent-slot
+probes are the expensive kind (Bee has no fast authoritative 404), and a transient 404 in the tail can at
+worst delay discovering a _brand-new_ device until the next fold, never drop a known one
+([#400](https://github.com/snaha/swarm-id/issues/400)). The memo is a monotonic lower bound (the roster is
+append-only, so a once-seen length can never overshoot), mirrored to localStorage where available so a
+page reload's first fold is warm too.
+
+`ensureInRoster` appends only when the device is absent or its `removedAt` state changed —
 keeping the roster a rare, membership-only write. (Replaced an earlier mutable registry doc that a caching
 gateway could clobber.)
 
@@ -131,15 +152,16 @@ immutables come from any view.
 
 | Collection     | Merge function       | Recency clock                                               | Tombstone   |
 | -------------- | -------------------- | ----------------------------------------------------------- | ----------- |
-| postage stamps | `mergePostageStamps` | `deletedAt ?? createdAt`                                    | `deletedAt` |
+| postage stamps | `mergePostageStamps` | `max(deletedAt ?? 0, updatedAt ?? 0, createdAt)`            | `deletedAt` |
 | devices        | `mergeDevicesList`   | `max(removedAt ?? 0, lastSignedInAt)`                       | `removedAt` |
 | connected apps | `mergeConnectedApps` | `max(revokedAt ?? 0, disconnectedAt ?? 0, lastConnectedAt)` | `revokedAt` |
 
 Last-writer-wins by recency; tombstones are retained and a later activity with a larger clock resurrects an
 entry (e.g. a removed device re-signing in). The recency clock is built from the fields that state
-membership, never from a general "last edit" one: a device's name (`nameUpdatedAt`), a stamp's name, and
-an app's drive pointer (`postageStampBatchIDAt`) each ride their own clock and overlay onto the winner,
-because each is an edit that says nothing about whether the entry still belongs. Ranking a connected app
+membership — or that act on the thing itself, as a stamp's `updatedAt` does (a dilute or top-up on the
+batch) — never from a general "last edit" one: a device's name and a stamp's name (each `nameUpdatedAt`)
+and an app's drive pointer (`postageStampBatchIDAt`) each ride their own clock and overlay onto the
+winner, because each is an edit that says nothing about whether the entry still belongs. Ranking a connected app
 on one clock every write bumped let a drive picked on a stale copy outrank a revoke made elsewhere and
 restore the credential it had cleared ([#681](https://github.com/snaha/swarm-id/issues/681)). Scalars (`accountName`, `defaultPostageStampBatchID`,
 `settings`) converge by per-field LWW on their `*At` clocks, so concurrent changes to _different_ scalars

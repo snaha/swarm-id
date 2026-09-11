@@ -21,14 +21,16 @@ The identity UI is a SvelteKit SPA.
 - **Local env**: `.env.example` → `.env` (gitignored) documents the `PUBLIC_*` build vars; both have
   working defaults, so an empty `.env` is fine
 - **Dev mock stamp purchase** (`/dev` → Chain tab, backed by `src/lib/stores/dev-settings.svelte.ts`):
-  toggles that make the product **Add drive** flow settle a mocked postage batch instead of a real
-  cross-chain payment. "Open widget popup" **off** simulates locally with **no `window.open`** — the
+  toggles that make the **Add drive** flow's _widget_ payment method settle a mocked postage batch
+  instead of a real cross-chain payment. They apply to that method only — the built-in engine
+  never reads them and always buys for real. "Open widget popup" **off** simulates locally with **no `window.open`** — the
   only mode that works where popups are blocked (headless previews) or the widget origin is offline;
-  **on** also opens the widget's `?mocked=true` popup. "Outcome" picks success vs. a failed
+  **on** also opens the `fund.bzz.limo?mocked=true` popup. "Outcome" picks success vs. a failed
   purchase. Settings persist in localStorage (`dev-mock-stamp-*`) and are read by
   `drive-add-dialog.svelte`; production leaves them off.
 - **Hex helpers**: byte⇄hex conversion comes from the lib — `uint8ArrayToHex`/`hexToUint8Array`
   from `@snaha/swarm-id` (0x-tolerant, throws on malformed input); `src/lib/crypto/hex.ts` keeps
   only `strip0x`/`prefix0x` to move between bare hex (how the lib and shared records store it)
   and the `0x`-prefixed form (derived keys, display). For an address use `new EthAddress(value)`
-  (parse) and `.toChecksum()` (EIP-55 display) rather than raw string juggling.
+  (parse) and `.toChecksum()` (EIP-55 display) rather than raw string juggling — `EthAddress` comes
+  from `@ethersphere/bee-js`, not from the lib.

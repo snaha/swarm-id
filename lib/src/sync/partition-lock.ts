@@ -9,14 +9,17 @@
  * them can write the SOC; concurrent writers are ordered deterministically by
  * a (timestampMs, tiebreaker) fencing token.
  *
- *   identifier = keccak256("swarm-id-partition-lock-v1:" || partition)
+ *   identifier = keccak256("swarm-id-partition-lock-v1:" || batchIdHex || ":" || partition)
  *   owner       = backup signer (shared across the account's devices)
  *   encryption  = swarmEncryptionKey
  *
- * The identifier only carries the partition number — domain separation
- * across accounts comes from the per-account `owner` (derived from each
- * account's `derivationKey`), so the SOC address still differs per account
- * without needing accountId in the identifier hash.
+ * The identifier carries the batch and the partition, but not the account —
+ * domain separation across accounts comes from the per-account `owner`
+ * (derived from each account's `derivationKey`), so the SOC address still
+ * differs per account without accountId in the hash. The batch IS in there:
+ * keying on the partition alone made lane p of batch X and lane p of batch Y
+ * one address, so two coordinators sharing no slot took turns anyway (#589).
+ * See `makePartitionLockIdentifier` in `../utils/lock-soc`.
  *
  * Protocol (acquire / takeover / refresh):
  *   1. Read the lock SOC.

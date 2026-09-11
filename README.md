@@ -11,12 +11,14 @@ Cross-browser compatible authentication and identity management for Swarm dApps.
 - **[demo/](./demo/)** — Demo dApp with library integration examples
 - **[docs-site/](./docs-site/)** — Starlight (Astro) documentation website
 - **[signaling/](./signaling/README.md)** — `@swarm-id/signaling` account-bus signaling and relay server
+- **[multichain/](./multichain/README.md)** — `@swarm-id/multichain` postage contract writes, cross-chain funding, local solver
+- **[eslint-rules/](./eslint-rules/)** — `@swarm-id/eslint-rules` shared license-header lint rules
 
 ## Architecture
 
 The project uses an OAuth-style popup authentication flow over shared localStorage — no Storage Access API and no browser extension. The proxy iframe reads the trusted domain's first-party store while the embedding page is same-site, which covers the local rig and both deployments; where the two are cross-site, or the browser partitions regardless (Safari's ITP, strict privacy settings elsewhere), the connect popup hands the iframe the account's upload credentials directly instead, so uploads keep working ([Account bus](./docs/Account-Bus.md)). That path is confirmed on real Safari, upload included (iOS 18.7 / Safari 26.6), see [Safari limitations](#safari-limitations).
 
-**Key Innovation**: The popup-based authentication allows dApps to securely derive app-specific secrets from a master identity, with browser-enforced storage partitioning providing cross-app isolation.
+**Key Innovation**: The popup-based authentication allows dApps to securely derive app-specific secrets from a master identity. Cross-app isolation comes from the derivation itself — every secret is an HMAC-SHA256 of the master key over the app's own origin, so one app cannot reach another's — not from storage partitioning, which the flow is designed to work with or without.
 
 [Architecture deep-dive →](https://swarm.snaha.net/docs/architecture)
 
@@ -104,12 +106,13 @@ Open http://localhost:3500 - that's it!
 ### Development Mode (with hot reload)
 
 ```bash
-# Start the full stack (identity UI :5500 + demo :3500 against it)
+# Start the full stack (identity UI :5500 + demo :3500 + bus signaling :5520)
 pnpm dev
 
 # Or start individually
 pnpm dev:ui          # Identity UI on port 5500
 pnpm dev:demo        # Demo on port 3500, connected to the identity UI (:5500)
+pnpm dev:signaling   # Account-bus signaling server on port 5520
 pnpm dev:lib         # Library watch mode (rebuilds on changes)
 ```
 
@@ -177,7 +180,7 @@ atomic transaction. The baked snapshot cannot carry it — a state dump only kee
 wrote — so locally they run one at a time until something splices the delegate in, which `/dev` →
 **Chain** → **Create drive to test with** does.
 
-That is the payment dialog's **built-in** method. The other one, `Pay with crypto (<widget host>)` —
+That is the payment dialog's **built-in** method. The other one, `Pay with crypto (fund.bzz.limo)` —
 the default when buying a drive — settles on Gnosis **mainnet** only, so locally there is nothing for
 it to settle against: pick the built-in method to pay on the local chain, or turn on `/dev` →
 **Chain** → **Simulated purchase**, which stands in for the widget with a fabricated batch so that
@@ -229,7 +232,8 @@ id it already serves ("network already exists"), so the offer cannot repair it f
 real Gnosis network from MetaMask first (or select the local RPC by hand in that network's menu),
 and add it back when you are done. The fake mainnet has no such trap — 31337 collides with nothing.
 
-Then, once: open the UI → **Settings** → **Network settings** → **Use local** → **Save**.
+Then, once: open the UI's **`/dev`** page and pick **Use local** from the header menu. (It lives
+there rather than in **Network settings**, which ships to production.)
 
 **Where the solver fits.** The browser signs the deposit and then waits for money it does not
 control, exactly as it waits on Relay; `multichain/src/local-solver.ts` is what watches the source
@@ -272,6 +276,10 @@ tools would be spending real money.
 ├── ui/                   # Identity UI (SvelteKit + Tailwind v4 + shadcn-svelte style)
 ├── demo/                 # Demo app (SvelteKit)
 ├── signaling/            # Account-bus signaling and relay server (ws)
+├── multichain/           # Postage contract writes, cross-chain funding, local solver
+├── eslint-rules/         # Shared license-header lint rules
+├── scripts/              # One-off benchmarks (outside the pnpm workspace)
+├── docs/                 # Design records
 └── docs-site/            # Documentation website (Starlight/Astro)
 ```
 
@@ -300,7 +308,7 @@ Safari's Intelligent Tracking Prevention (ITP) partitions storage for third-part
 >
 > A **private window** was measured separately and passes the same five checks, upload included — a fresh device id each time, as expected, since the private partition is discarded when the window closes.
 >
-> One thing no run has settled, and it is not claimed here: the **eviction horizon** — two loads in one sitting says nothing about whether a dormant account's partitioned storage survives ITP's ~30-day window ([#570](https://github.com/snaha/swarm-id/issues/570)).
+> One thing no run has settled, and it is not claimed here: the **eviction horizon** — two loads in one sitting says nothing about whether a dormant account's partitioned storage survives ITP's ~30-day window ([#659](https://github.com/snaha/swarm-id/issues/659)).
 
 What remains regardless:
 

@@ -38,9 +38,10 @@ half-open peer into `peer-left`.
 server only sends it for a topic it would refuse identically next time. A socket that never sent
 its join frame gets `4408` instead, precisely so it is not read that way.
 `1013` (try again later) is transient and the client backs off with jitter; `4408` is the join
-timeout. The exact values and the reasoning behind each live in
+timeout. The close codes and the frame schemas live in
 [`src/protocol.ts`](./src/protocol.ts), the one source of truth for both ends of the wire: the
-server and the client transport in `lib` import the same module.
+server and the client transport in `lib` import the same module. The capacity limits and
+timers above are the server's own, in [`src/server.ts`](./src/server.ts).
 
 ## Running it
 
@@ -48,6 +49,15 @@ server and the client transport in `lib` import the same module.
 PORT=5520 pnpm --filter @swarm-id/signaling start   # what `pnpm dev` runs alongside the UI and demo
 pnpm --filter @swarm-id/signaling test
 ```
+
+Two environment variables:
+
+| Variable          | Default | Effect                                                                                                                         |
+| ----------------- | ------- | ------------------------------------------------------------------------------------------------------------------------------ |
+| `PORT`            | `8080`  | Listen port. `pnpm dev` sets `5520`; the DigitalOcean app spec sets its `http_port` to the default.                            |
+| `ALLOWED_ORIGINS` | unset   | Comma-separated origin allowlist. When set, a WebSocket upgrade whose `Origin` is not listed is refused. Unset means no check. |
+
+Production sets `ALLOWED_ORIGINS` to `https://swarm-id.snaha.net` in `.do/swarm-id-app.yaml`.
 
 The UI reaches it through `PUBLIC_BUS_SIGNALING_URL` (baked in at build time); in dev it falls
 back to `ws://localhost:5520`. In production it is the `bus-signaling` service of

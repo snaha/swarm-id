@@ -311,7 +311,9 @@ export const SyncedAccountSchemaV1 = z.object({
     .optional(),
   // Per-field LWW clocks for the scalar account fields, so a concurrent change to
   // a *different* scalar on another device is not dropped wholesale, and a peer's
-  // change propagates on refresh. Absent → fall back to `lastModified`/`createdAt`.
+  // change propagates on refresh. Absent → fall back to the account's `createdAt`,
+  // never a fresh timestamp: a device that never touched the field must not be
+  // able to clobber a peer that did.
   accountNameAt: z.number().optional(),
   defaultStampAt: z.number().optional(),
   settingsAt: z.number().optional(),

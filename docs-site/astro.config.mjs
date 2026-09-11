@@ -6,12 +6,16 @@
 import { defineConfig } from 'astro/config'
 import starlight from '@astrojs/starlight'
 
-// Support PR preview base paths via environment variable
-const base = process.env.BASE_URL || '/'
-
 export default defineConfig({
   site: 'https://swarm.snaha.net/docs',
-  base,
+  // Deployments pass their own base on the command line — `--base /docs/` for
+  // main, `--base /docs/pr-N/` for a preview (deploy-main-pages.yml,
+  // deploy-preview.yml). This default is the one `pnpm dev:docs` runs on.
+  //
+  // Links between pages must stay relative (`../architecture/`), never
+  // root-absolute: Astro does not rewrite a `/architecture` href for the base,
+  // so one would 404 everywhere but local dev.
+  base: '/',
   integrations: [
     starlight({
       title: 'Swarm ID',

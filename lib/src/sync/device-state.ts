@@ -15,7 +15,8 @@
  * (`device-roster.ts`), not here; account-level immutables (publicKey, createdAt,
  * partitionCount) ride this robust per-device feed so the fold reconstructs them
  * without a shared doc. Scalar account fields carry per-field LWW clocks so a
- * concurrent change to a different scalar on another device is not dropped (§9.3).
+ * concurrent change to a different scalar on another device is not dropped
+ * (docs/Account-State.md, "Convergence rules").
  */
 
 import {
@@ -121,7 +122,8 @@ export interface FoldedAccount {
  * STABLE `createdAt` — NEVER a fresh `Date.now()`. Re-stamping an unchanged
  * name / default-stamp / settings with a new timestamp on every publish would
  * let a device that never touched the field clobber a peer's genuine concurrent
- * edit under per-field LWW (§9.3). `createdAt` is identical across devices and
+ * edit under per-field LWW (docs/Account-State.md, "Convergence rules").
+ * `createdAt` is identical across devices and
  * predates every edit, so any real change always wins.
  */
 export function accountStateToDeviceView(

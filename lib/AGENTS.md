@@ -1,23 +1,31 @@
 # Library Core (`lib/`)
 
-- **SwarmIdClient** (`swarm-id-client.ts`) — dApp-side: embeds hidden iframe, creates auth buttons, proxies Bee API calls
+- **SwarmIdClient** (`swarm-id-client.ts`) — dApp-side: embeds the hidden iframe, forwards `buttonConfig` for the proxy to render the auth button, proxies Bee API calls
 - **SwarmIdProxy** (`swarm-id-proxy.ts`) — iframe-side: reads auth from the trusted domain's shared localStorage when the embedding page is same-site, or from the connect popup's handover when the browser partitions its storage; signs operations; a peer on the account bus either way
 
 ## Message Protocol
 
-All cross-origin communication via `postMessage` with Zod validation:
+All cross-origin communication via `postMessage` with Zod validation.
 
-- **Parent → Iframe**: `parentIdentify`, `checkAuth`, `requestAuth`, `uploadData`, `downloadData`
-- **Iframe → Parent**: `proxyReady`, `authStatusResponse`, `authSuccess`, `uploadDataResponse`, `error`
+The full unions live in `types.ts` (`ParentToIframeMessageSchema`, `IframeToParentMessageSchema`,
+`PopupToIframeMessageSchema`) — 37 and 42 members, one `…Response` per request. The ones worth
+knowing by name:
+
+- **Parent → Iframe**: `parentIdentify`, `checkAuth`, `connect`, `disconnect`, `uploadData`,
+  `downloadData`, `deriveAppSecret`
+- **Iframe → Parent**: `proxyReady`, `initError`, `authStatusResponse`, `authSuccess`,
+  `connectResponse`, `connectionInfoChanged` (what `initialize()` awaits), `uploadDataResponse`,
+  `error`
+- **Popup → Iframe**: `setSecret` — the partitioned handover, below
 
 Two authentication paths, decided by the storage probe (`utils/storage-probe.ts`):
 
 - **Unpartitioned**: popup writes to localStorage → storage event fires in the iframe → the iframe authenticates from shared storage.
-- **Partitioned**: popup → `window.opener.postMessage(setSecret)` with the account's synced projection → `handlePopupMessage` hydrates an in-memory account view and keeps the handover under `partitionSessionStorageKey(parentOrigin)` — one session per dApp origin, since the store is shared by every same-site dApp (#671) — so a reload restores it. No storage event ever fires on this path.
+- **Partitioned**: popup → `window.opener.postMessage(setSecret)` with the account's synced projection → `handlePopupMessage` hydrates an in-memory account view and keeps the handover under `partitionSessionStorageKey(parentOrigin)` — one session per dApp origin, since the store is shared by every same-site dApp (#671) — so a reload restores it. The popup's first-party write never reaches the iframe as a storage event here. Events from the partition's own store still fire, and the proxy ignores them for a partitioned session rather than letting one reset it to defaults (#580, #677).
 
 ## Account bus (`bus/`)
 
-Live contexts of one account (proxy iframes across partitions and devices, the SwarmID tab) also talk over the account bus — `BroadcastChannel` inside a partition, an encrypted WebRTC/relay mesh via the signaling server across them. Message kinds (`bus/messages.ts`, Zod-validated on receive): `account-delta` (a snapshot, LWW-folded like a feed payload), `lease-request` / `lease-claim` / `lease-released` (partition handover fast path, scoped to one batch — a lane is `(batchId, partition)`), `presence` (20 s liveness beat feeding the rival set), and `utilization-updated` (local transport only). Durable truth stays in storage and the Swarm feeds; the bus only makes live peers converge fast. Design: `docs/Account-Bus.md`.
+Live contexts of one account (proxy iframes across partitions and devices, the SwarmID tab) also talk over the account bus — `BroadcastChannel` inside a partition, an encrypted WebRTC/relay mesh via the signaling server across them. Message kinds (`bus/messages.ts`, Zod-validated on receive): `account-delta` (a snapshot, LWW-folded like a feed payload), `lease-request` / `lease-claim` / `lease-released` (partition handover fast path, scoped to one batch — a lane is `(batchId, partition)`), `presence` (20 s liveness beat feeding the rival set), and `utilization-updated` (local transport only). Durable truth stays in storage and the Swarm feeds; the bus only makes live peers converge fast. Design: [`../docs/Account-Bus.md`](../docs/Account-Bus.md).
 
 ## Testing
 

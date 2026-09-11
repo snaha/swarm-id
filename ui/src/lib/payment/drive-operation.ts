@@ -352,7 +352,7 @@ export class SizeIncreasePendingError extends Error {
  * top-up sized against the grown figure. Resuming instead would need the target
  * depth persisted on the record: chain state cannot tell a batch topped up for a
  * pending resize from one that always held that balance. See
- * docs/Drive-Payment-Flow.md §6.6.
+ * docs/Drive-Payment-Flow.md, "Resize partial failure".
  */
 export async function runResize(options: ResizeOptions): Promise<void> {
   const { account, drive, newDepth, keepLifespan, requestFunding, beforeSpend, onStep } = options
@@ -427,7 +427,7 @@ export async function runResize(options: ResizeOptions): Promise<void> {
       // With a top-up behind it the drive is intact but longer-lived, and a
       // retry re-prices against that and charges again — which is what
       // `SizeIncreasePendingError` says, in a neutral tone, because nothing was
-      // lost (#392, §6.6). With no top-up — a resize that lets the lifespan
+      // lost (#392; docs/Drive-Payment-Flow.md, "Resize partial failure"). With no top-up — a resize that lets the lifespan
       // shorten — nothing was paid and nothing grew, so saying so would tell
       // the user their money went somewhere it did not.
       if (plan.topUpAmount === 0n) {
