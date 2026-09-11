@@ -681,11 +681,8 @@ function refresh(): void {
 
 if (browser) {
   // Refresh on writes this store did not make: another tab's (sign-in, app
-  // connect, stamp purchase) through the `storage` event, and another manager
-  // instance's in THIS window — the proxy iframe's Disconnect, when the
-  // identity UI runs inside it. The `storage` event alone missed the latter,
-  // so the in-memory entry kept its secret and the next peer delta restored
-  // it over the Disconnect (#712).
+  // connect, stamp purchase), and another manager instance's in THIS window —
+  // the proxy iframe's Disconnect, when the identity UI runs inside it (#712).
   storageManager.subscribe(refresh)
 }
 

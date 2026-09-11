@@ -2,15 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 /**
  * The store hears writes made in its OWN window by another storage manager
- * instance — the proxy iframe's, when the identity UI runs inside it.
- *
- * The proxy's Disconnect writes the shared document through its own manager.
- * The browser's `storage` event never fires in the window that wrote, so a
- * store refreshing only on that event kept the pre-disconnect entry in memory,
- * secret included. The next peer delta then read that stale copy as "ours",
- * handed the secret back, and persisted the reconnected entry over the
- * Disconnect — which the proxy took as a live session again and re-acquired
- * its partition (#712).
+ * instance — the proxy iframe's, when the identity UI runs inside it (#712).
  */
 import { EthAddress } from '@ethersphere/bee-js'
 import {
