@@ -12,9 +12,13 @@ The identity UI is a SvelteKit SPA.
   `pnpm --filter @swarm-id/ui format` auto-inserts them
 - **`BASE_PATH`** env var sets the SvelteKit base path at build time (`/id` in deployments)
 - **Wallet picker** (`src/lib/crypto/onboard.ts`): injected wallets always, plus WalletConnect when
-  `PUBLIC_WALLETCONNECT_PROJECT_ID` is set — the only route on a browser with no wallet extension
-  (Safari, mobile). Never pass the module a blank project id: it throws, and it throws at import
-  of a module every wallet page loads. Go through `walletConnectOptions`
+  there is a project id — the only route on a browser with no wallet extension (Safari, mobile).
+  The id is a committed `DEFAULT_PROJECT_ID` (`crypto/wallet-connect.ts`), not a secret, with
+  `PUBLIC_WALLETCONNECT_PROJECT_ID` overriding it — same shape as `busSignalingUrl`. Never pass the
+  module a blank id: it throws, at import of a module every wallet page loads. Go through
+  `walletConnectOptions`
+- **Local env**: `.env.example` → `.env` (gitignored) documents the `PUBLIC_*` build vars; both have
+  working defaults, so an empty `.env` is fine
 - **Dev mock stamp purchase** (`/dev` → Chain tab, backed by `src/lib/stores/dev-settings.svelte.ts`):
   toggles that make the product **Add drive** flow settle a mocked postage batch instead of a real
   cross-chain payment. "Open widget popup" **off** simulates locally with **no `window.open`** — the

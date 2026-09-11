@@ -14,6 +14,27 @@
 import type { Chain } from 'viem'
 
 /**
+ * The project the app connects with unless a build overrides it — committed on
+ * purpose, and empty until one is registered.
+ *
+ * A Reown project id is not a secret. SvelteKit bakes every `PUBLIC_*` var into
+ * the client bundle, so whatever is configured ships to anyone who opens the
+ * page; withholding it from the repo protects nothing. What actually guards the
+ * project is its origin allowlist — the relay answers 403 to a request from an
+ * origin the project does not name — so a committed id cannot be pointed at
+ * someone else's site. Keeping it out of the repo would instead cost a setup
+ * step on every dev machine and a configured value in every deployment, which
+ * is how a picker silently ends up injected-only in one of them.
+ *
+ * Same shape as `busSignalingUrl` in `$lib/bus-signaling-url`: a committed
+ * default with the environment able to override it.
+ *
+ * Empty leaves the picker injected-only, rather than offering a WalletConnect
+ * that cannot complete a connection.
+ */
+export const DEFAULT_PROJECT_ID = ''
+
+/**
  * The options we pass, declared here rather than imported.
  *
  * `@web3-onboard/walletconnect` does not export its own `WalletConnectOptions`
@@ -31,9 +52,10 @@ export interface WalletConnectOptions {
 /**
  * Options for the WalletConnect module, or `undefined` for "do not register it".
  *
- * @param projectId Reown Cloud project id, from `PUBLIC_WALLETCONNECT_PROJECT_ID`.
- *   Blank or absent leaves the wallet picker injected-only, which is where it
- *   was before this existed.
+ * @param projectId Reown Cloud project id from `PUBLIC_WALLETCONNECT_PROJECT_ID`,
+ *   overriding {@link DEFAULT_PROJECT_ID}. Blank or absent falls back to that;
+ *   blank on both leaves the wallet picker injected-only, which is where it was
+ *   before this existed.
  * @param dappUrl This origin. Some wallets (MetaMask among them) refuse a
  *   connection whose metadata carries no url, and the library falls back to
  *   `appMetadata.explore`, which we do not set.
@@ -44,7 +66,7 @@ export function walletConnectOptions(
   dappUrl: string | undefined,
   chains: Chain[],
 ): WalletConnectOptions | undefined {
-  const trimmed = projectId?.trim()
+  const trimmed = projectId?.trim() || DEFAULT_PROJECT_ID.trim()
   if (!trimmed) {
     return undefined
   }
