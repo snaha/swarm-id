@@ -9,12 +9,7 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
-import {
-  BatchId,
-  PrivateKey,
-  type Bee,
-  type Stamper,
-} from "@ethersphere/bee-js"
+import { BatchId, PrivateKey, type Stamper } from "@ethersphere/bee-js"
 import {
   INTENT_EPOCH_MS,
   INTENT_LIVENESS_GRACE_MS,
@@ -102,7 +97,7 @@ describe("makePartitionIntentIdentifier", () => {
 describe("readPartitionIntent / writePartitionIntent round-trip", () => {
   it("returns undefined when the intent was never written", async () => {
     const read = await readPartitionIntent({
-      bee: bee as unknown as Bee,
+      bee: bee,
       backupSigner: BACKUP_SIGNER,
       swarmEncryptionKey: TEST_ENC_KEY,
       batchId: TEST_BATCH_ID,
@@ -115,7 +110,7 @@ describe("readPartitionIntent / writePartitionIntent round-trip", () => {
 
   it("reads back the exact payload that was written", async () => {
     await writePartitionIntent({
-      bee: bee as unknown as Bee,
+      bee: bee,
       stamper,
       backupSigner: BACKUP_SIGNER,
       swarmEncryptionKey: TEST_ENC_KEY,
@@ -126,7 +121,7 @@ describe("readPartitionIntent / writePartitionIntent round-trip", () => {
       generation: gen(1000, DEVICE_A),
     })
     const read = await readPartitionIntent({
-      bee: bee as unknown as Bee,
+      bee: bee,
       backupSigner: BACKUP_SIGNER,
       swarmEncryptionKey: TEST_ENC_KEY,
       batchId: TEST_BATCH_ID,
@@ -146,7 +141,7 @@ describe("readPartitionIntent / writePartitionIntent round-trip", () => {
       () => new Promise(() => {}) as never,
     )
     const read = await readPartitionIntent({
-      bee: bee as unknown as Bee,
+      bee: bee,
       backupSigner: BACKUP_SIGNER,
       swarmEncryptionKey: TEST_ENC_KEY,
       batchId: TEST_BATCH_ID,
@@ -169,7 +164,7 @@ describe("readPartitionIntent — a transient 5xx is not 'no intent'", () => {
   // dual-acquire through. A 5xx is retried once; a 404 is genuine absence.
   it("retries once on a 5xx and returns the payload on the retry", async () => {
     await writePartitionIntent({
-      bee: bee as unknown as Bee,
+      bee: bee,
       stamper,
       backupSigner: BACKUP_SIGNER,
       swarmEncryptionKey: TEST_ENC_KEY,
@@ -193,7 +188,7 @@ describe("readPartitionIntent — a transient 5xx is not 'no intent'", () => {
     }) as never)
 
     const read = await readPartitionIntent({
-      bee: bee as unknown as Bee,
+      bee: bee,
       backupSigner: BACKUP_SIGNER,
       swarmEncryptionKey: TEST_ENC_KEY,
       batchId: TEST_BATCH_ID,
@@ -219,7 +214,7 @@ describe("readPartitionIntent — a transient 5xx is not 'no intent'", () => {
     }) as never)
 
     const read = await readPartitionIntent({
-      bee: bee as unknown as Bee,
+      bee: bee,
       backupSigner: BACKUP_SIGNER,
       swarmEncryptionKey: TEST_ENC_KEY,
       batchId: TEST_BATCH_ID,
@@ -235,7 +230,7 @@ describe("readPartitionIntent — a transient 5xx is not 'no intent'", () => {
 
 describe("resolveIntentRound", () => {
   const common = () => ({
-    bee: bee as unknown as Bee,
+    bee: bee,
     stamper,
     backupSigner: BACKUP_SIGNER,
     swarmEncryptionKey: TEST_ENC_KEY,
@@ -301,7 +296,7 @@ describe("resolveIntentRound", () => {
   it("loses to a rival advertising an earlier (smaller) generation", async () => {
     // DEVICE_A advertised first (smaller timestamp) in the same epoch.
     await writePartitionIntent({
-      bee: bee as unknown as Bee,
+      bee: bee,
       stamper,
       backupSigner: BACKUP_SIGNER,
       swarmEncryptionKey: TEST_ENC_KEY,
@@ -323,7 +318,7 @@ describe("resolveIntentRound", () => {
 
   it("wins over a rival advertising a later (greater) generation", async () => {
     await writePartitionIntent({
-      bee: bee as unknown as Bee,
+      bee: bee,
       stamper,
       backupSigner: BACKUP_SIGNER,
       swarmEncryptionKey: TEST_ENC_KEY,
@@ -346,7 +341,7 @@ describe("resolveIntentRound", () => {
   it("sees a rival's intent from the previous epoch bucket (boundary)", async () => {
     // DEVICE_A advertised in the previous bucket; DEVICE_B contends now.
     await writePartitionIntent({
-      bee: bee as unknown as Bee,
+      bee: bee,
       stamper,
       backupSigner: BACKUP_SIGNER,
       swarmEncryptionKey: TEST_ENC_KEY,
@@ -390,7 +385,7 @@ describe("resolveIntentRound", () => {
   it("polls across a guard window and yields to a live beacon", async () => {
     // A live holder beacon (leasedUntil > now) for DEVICE_A on this partition.
     await writePartitionIntent({
-      bee: bee as unknown as Bee,
+      bee: bee,
       stamper,
       backupSigner: BACKUP_SIGNER,
       swarmEncryptionKey: TEST_ENC_KEY,
@@ -417,7 +412,7 @@ describe("resolveIntentRound", () => {
     // only its previous-bucket beacon (TTL lapsed seconds ago) is retrievable. It
     // must still count as a live holder, or both devices bind the partition.
     await writePartitionIntent({
-      bee: bee as unknown as Bee,
+      bee: bee,
       stamper,
       backupSigner: BACKUP_SIGNER,
       swarmEncryptionKey: TEST_ENC_KEY,
@@ -441,7 +436,7 @@ describe("resolveIntentRound", () => {
 
   it("wins over a beacon whose leasedUntil lapsed BEYOND the liveness grace", async () => {
     await writePartitionIntent({
-      bee: bee as unknown as Bee,
+      bee: bee,
       stamper,
       backupSigner: BACKUP_SIGNER,
       swarmEncryptionKey: TEST_ENC_KEY,
@@ -482,7 +477,7 @@ describe("resolveIntentRound", () => {
     // DEVICE_A's lingering presence beacon after it released this partition: a
     // live beacon (leasedUntil > now) carrying the released claim's generation.
     await writePartitionIntent({
-      bee: bee as unknown as Bee,
+      bee: bee,
       stamper,
       backupSigner: BACKUP_SIGNER,
       swarmEncryptionKey: TEST_ENC_KEY,
@@ -509,7 +504,7 @@ describe("resolveIntentRound", () => {
     // A different device legitimately claimed the partition AFTER the release we
     // observed — its beacon outranks the watermark and must still beat us.
     await writePartitionIntent({
-      bee: bee as unknown as Bee,
+      bee: bee,
       stamper,
       backupSigner: BACKUP_SIGNER,
       swarmEncryptionKey: TEST_ENC_KEY,

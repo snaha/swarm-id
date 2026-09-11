@@ -10,7 +10,6 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest"
 import { Binary } from "cafe-utility"
 import { PrivateKey } from "@ethersphere/bee-js"
-import type { Bee } from "@ethersphere/bee-js"
 import { SyncEpochFinder } from "./finder"
 import { AsyncEpochFinder } from "./async-finder"
 import { BasicEpochUpdater } from "./updater"
@@ -130,7 +129,7 @@ describe("Epoch Feeds Integration", () => {
     topic = createTestTopic()
     stamper = createMockStamper()
     // `UploadTarget` still wants the whole client — the updater uploads.
-    target = { mode: "stamper", bee: bee as unknown as Bee, stamper }
+    target = { mode: "stamper", bee: bee, stamper }
     mockFetch(store, signer.publicKey().address())
   })
 

@@ -18,7 +18,6 @@
  */
 
 import { describe, it, expect } from "vitest"
-import type { Bee } from "@ethersphere/bee-js"
 import { uploadData, type UploadTarget } from "./upload"
 import { downloadDataWithChunkAPI } from "./download-data"
 import {
@@ -49,9 +48,9 @@ function makeData(length: number): Uint8Array {
   return data
 }
 
-function setup(): { bee: Bee; target: UploadTarget } {
+function setup(): { bee: MockBee; target: UploadTarget } {
   const store = new MockChunkStore()
-  const bee = new MockBee(store) as unknown as Bee
+  const bee = new MockBee(store)
   const target: UploadTarget = {
     mode: "stamper",
     bee,
