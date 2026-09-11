@@ -121,6 +121,10 @@ jobs:
           ORIGIN: https://swarm.snaha.net
           PUBLIC_APP_DOMAIN: https://swarm.snaha.net/demo/pr-${{ github.event.number }}
           PUBLIC_ID_DOMAIN: https://swarm.snaha.net/id/pr-${{ github.event.number }}
+          # Enables WalletConnect in the wallet picker, so a browser with no
+          # wallet extension (Safari, and mobile generally) can still pay.
+          # Unset leaves the picker injected-only rather than failing the build.
+          PUBLIC_WALLETCONNECT_PROJECT_ID: ${{ secrets.WALLETCONNECT_PROJECT_ID }}
         run: pnpm --filter @swarm-id/ui build
 
       - name: Create 404.html for SPA routing

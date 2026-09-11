@@ -76,6 +76,15 @@ envs:
   - key: PUBLIC_BUS_SIGNALING_URL
     value: 'wss://swarm-id.snaha.net/bus'
 
+  # Baked into the UI build: the Reown Cloud (formerly WalletConnect Cloud)
+  # project id that enables WalletConnect in the wallet picker, so a browser
+  # with no wallet extension can still pay. Left empty the picker is
+  # injected-only, exactly as it was before WalletConnect was offered — so an
+  # unset value degrades rather than breaking the build. Register
+  # swarm-id.snaha.net on the project before setting it.
+  - key: PUBLIC_WALLETCONNECT_PROJECT_ID
+    value: ''
+
   - key: NODE_ENV
     value: production
 

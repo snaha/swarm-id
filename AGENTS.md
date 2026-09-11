@@ -140,3 +140,5 @@ DigitalOcean (`deploy-do.yml`, push to main) keeps the canonical domains:
 - **Demo**: https://swarm-demo.snaha.net, run against swarm-id.snaha.net
 - **Account-bus signaling (`signaling/`)**: wss://swarm-id.snaha.net/bus, the `bus-signaling` service
   of the same app; baked into the UI build as `PUBLIC_BUS_SIGNALING_URL`
+- **WalletConnect**: `PUBLIC_WALLETCONNECT_PROJECT_ID` (a Reown Cloud project id) is baked into the
+  UI build to offer WalletConnect in the wallet picker; unset, the picker is injected-only
