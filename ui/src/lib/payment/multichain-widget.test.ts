@@ -12,7 +12,7 @@ import {
 
 const BATCH_ID = 'ab'.repeat(32)
 const DESTINATION = '0x45a1502382541Cd610CC9068e88727426b696293'
-const WIDGET_ORIGIN = 'https://swarmbucks.eth.limo'
+const WIDGET_ORIGIN = 'https://fund.bzz.limo'
 // Mirrors the widget's own timers; kept in step by the fake-timer advances below.
 const CLOSE_POLL_MS = 500
 const CLOSE_GRACE_MS = 1_500

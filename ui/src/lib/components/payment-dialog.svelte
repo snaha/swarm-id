@@ -29,6 +29,7 @@
   import {
     BUILT_IN_LABEL,
     type PaymentMethod,
+    WIDGET_CONTINUE_LABEL,
     WIDGET_EXPLAINER,
     WIDGET_LABEL,
   } from '$lib/payment/payment-method'
@@ -720,7 +721,7 @@
           {builtInRefusal || WIDGET_EXPLAINER}
         </p>
         <Button class="w-full" onclick={() => onUseWidget?.()}>
-          Continue to fund.bzz.limo
+          {WIDGET_CONTINUE_LABEL}
           <ArrowRight />
         </Button>
       {:else if builtInRefusal}
