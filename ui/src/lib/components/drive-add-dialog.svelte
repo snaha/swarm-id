@@ -44,6 +44,7 @@
     BUILT_IN_EXPLAINER,
     BUILT_IN_LABEL,
     type PaymentMethod,
+    WIDGET_CONTINUE_LABEL,
     WIDGET_EXPLAINER,
     WIDGET_LABEL,
   } from '$lib/payment/payment-method'
@@ -324,9 +325,7 @@
   /**
    * Buy the drive through the multichain-widget popup, which settles the payment
    * and creates the batch itself and hands back the finished thing. Nothing
-   * here goes near the rail or the on-chain engine. (The popup is served from
-   * `swarmbucks.eth.limo` since this PR — the UI copy elsewhere still says
-   * `fund.bzz.limo`, which is the older deployment of the same widget.)
+   * here goes near the rail or the on-chain engine.
    */
   async function purchaseWithWidget(attempt: Attempt) {
     // Release whatever is still open before taking a new handle. Every route in
@@ -513,7 +512,7 @@
          screen: the same route reached from either place must read as the same
          route. -->
     <Button class="w-full" onclick={startPurchase}>
-      {method === 'widget' ? 'Continue to fund.bzz.limo' : 'Continue'}
+      {method === 'widget' ? WIDGET_CONTINUE_LABEL : 'Continue'}
       <ArrowRight />
     </Button>
   </Dialog>

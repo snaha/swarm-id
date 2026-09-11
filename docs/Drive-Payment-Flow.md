@@ -12,7 +12,7 @@ and signs **one** transaction. Everything after that — cross-chain delivery of
 address, the Gnosis-side xDAI→BZZ swap, and the postage operations themselves — runs in `ui/`, signed
 by the owner key.
 
-That is the **built-in** method, and it is new. The fund.bzz.limo popup it was written to replace is
+That is the **built-in** method, and it is new. The widget popup it was written to replace is
 still offered beside it, still the default, and still the proven path — see
 [The method chooser](#the-method-chooser).
 
@@ -51,7 +51,7 @@ Two methods, in this order:
 
 | Method                                     | What it is                                                            | Offered for            |
 | ------------------------------------------ | --------------------------------------------------------------------- | ---------------------- |
-| `Pay with crypto (fund.bzz.limo)`          | the external widget popup, which settles and creates the batch itself | buying a drive         |
+| `Pay with crypto (<widget host>)`          | the external widget popup, which settles and creates the batch itself | buying a drive         |
 | `Pay with crypto (built in, experimental)` | everything the rest of this document describes                        | buy, extend and resize |
 
 **The widget leads, and is selected by default.** It is the settlement path the legacy UI has used
@@ -230,7 +230,7 @@ FundingNeed ─────┤        ┌ widget → UseWidgetError → the add 
 ```
 
 **The dialog opens before anything is priced.** The pending request carries the need and its rail,
-not a quote: the default method is settled entirely by fund.bzz.limo and needs nothing from
+not a quote: the default method is settled entirely by the widget and needs nothing from
 `quoteFunding`, so pricing ahead of the choice held an empty dialog behind an RPC round-trip nobody
 had asked for. The built-in method prices itself the moment it is chosen — or, on extend and resize
 where it is the only method listed, the moment the dialog opens.
@@ -383,7 +383,7 @@ amount the rail was asked to deliver is the amount `swapDelivered` then spends.
 ### Cancelling a payment
 
 Before anything is signed, Cancel is exactly what it says: the request is rejected with
-`PaymentCancelledError` and the drive dialog returns to its form. Choosing fund.bzz.limo travels the
+`PaymentCancelledError` and the drive dialog returns to its form. Choosing the widget travels the
 same wire and is deliberately **not** the same thing: it rejects with `UseWidgetError`, so the add
 dialog opens the popup instead of returning to a form the user did not ask for.
 
@@ -440,7 +440,7 @@ copy that currently promises otherwise, in
 ## Dev and testing
 
 **Locally only one method really settles, and it is the built-in one over the direct rail.**
-fund.bzz.limo settles on Gnosis mainnet against the mainnet PostageStamp; pointed at a local chain it
+The widget settles on Gnosis mainnet against the mainnet PostageStamp; pointed at a local chain it
 has nothing to settle on. Relay cannot be reproduced locally either — it is an intent/solver network,
 so quotes come from a hosted API and deliveries from off-chain solvers paying out on real Gnosis. So
 everything below — and every chain-bound test — exercises the built-in path over the direct rail, and
@@ -514,7 +514,7 @@ than assumes; whether Relay's own solver does is what the canary has to establis
 
 ## Out of scope
 
-- **Extending or resizing through fund.bzz.limo.** Its ABI cannot, so those dialogs list one method.
+- **Extending or resizing through the widget.** Its ABI cannot, so those dialogs list one method.
   Contributing `mode=topup` upstream to `ethersphere/multichain-widget` would change that, and is not
   planned here.
 - **Retiring either method.** Which one eventually wins is a decision for after the built-in engine
@@ -533,7 +533,7 @@ than assumes; whether Relay's own solver does is what the canary has to establis
 | `ui/src/lib/payment/bzz-price.ts`              | BZZ→USD rate for the dialogs' cost estimates |
 | `ui/src/lib/payment/funding-request.svelte.ts` | `createFundingRequester`, `PendingPayment`   |
 | `ui/src/lib/components/payment-dialog.svelte`  | the method chooser and payment screens       |
-| `ui/src/lib/payment/multichain-widget.ts`      | the fund.bzz.limo popup and its messages     |
+| `ui/src/lib/payment/multichain-widget.ts`      | the widget popup and its messages            |
 | `ui/src/lib/dev/local-payment-rail.ts`         | local stand-in rail                          |
 
 - Units: `funding.test.ts` (the quote's arithmetic, `priceImpactRefusal`, and which figure

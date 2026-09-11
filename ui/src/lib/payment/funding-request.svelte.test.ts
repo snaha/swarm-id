@@ -206,7 +206,7 @@ describe('createFundingRequester', () => {
   })
 
   /**
-   * Choosing fund.bzz.limo abandons the engine operation — nothing is signed
+   * Choosing the widget abandons the engine operation — nothing is signed
    * at the method screen — but it is not a cancel: the add-drive dialog is
    * expected to open the widget on the back of it, and reading it as a cancel
    * would drop the user on a form with no popup and no explanation.

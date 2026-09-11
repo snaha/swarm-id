@@ -15,15 +15,19 @@
 import { strip0x } from '$lib/crypto/hex'
 
 // The deployment carrying the `window.opener` fix (ethersphere/multichain-widget
-// 85eb9c37) — without it the widget posts every event to `window.parent`, which
-// in a popup is the popup itself, so nothing ever reaches us (#342). The older
-// origins stay allowed so a later redeploy of either keeps working.
-const WIDGET_BASE_URL = 'https://swarmbucks.eth.limo/'
-const ALLOWED_ORIGINS = [
-  'https://swarmbucks.eth.limo',
-  'https://fund.bzz.limo',
-  'https://fund.ethswarm.org',
-]
+// 85eb9c37 — without it the widget posts every event to `window.parent`, which
+// in a popup is the popup itself, so nothing ever reaches us, #342) and the
+// `depth`/`amount` defaults (ethersphere/multichain-widget#10, #632). The other
+// origins stay allowed so a redeploy of either keeps working. The host is
+// named nowhere else: every label derives it from here (#612).
+const WIDGET_BASE_URL = 'https://fund.bzz.limo/'
+/** The popup's host as the UI names it, so copy cannot drift from the URL. */
+export const WIDGET_HOST = new URL(WIDGET_BASE_URL).host
+/** The popup's origin, which its events arrive from. Exported for the test. */
+export const WIDGET_ORIGIN = new URL(WIDGET_BASE_URL).origin
+// The base is allowed by construction: moving it to a fourth host and
+// forgetting this list would silently drop every event the popup posts.
+const ALLOWED_ORIGINS = [WIDGET_ORIGIN, 'https://swarmbucks.eth.limo', 'https://fund.ethswarm.org']
 const POPUP_FEATURES = 'popup,width=500,height=700'
 
 /** Batch event posted by the multichain widget once a purchase settles. */

@@ -13,7 +13,7 @@
  *
  * The exceptions are the cases about the route itself: the two failures, one per
  * method — an unreachable chain for the built-in engine, and the /dev mock's
- * error outcome for fund.bzz.limo, which settles on mainnet and can be reached
+ * error outcome for the widget, which settles on mainnet and can be reached
  * here no other way — and the two about choosing, which check that the question
  * is put whatever the owner address holds (#619) and that the seam's own screen
  * opens on the answer.
@@ -167,7 +167,7 @@ test('a funded account is still asked which payment method to use', async ({ pag
   await page.getByRole('button', { name: 'Proceed' }).click()
 
   // Both routes on offer, and the purchase not yet started.
-  await expect(dialog.getByRole('button', { name: 'Continue to fund.bzz.limo' })).toBeVisible()
+  await expect(dialog.getByRole('button', { name: /^Continue to / })).toBeVisible()
   await expect(dialog.locator('option', { hasText: 'built in' })).toHaveCount(1)
   expect((await storedDrives(page)).live).toHaveLength(0)
 
@@ -253,7 +253,7 @@ test('an unfunded built-in purchase opens the payment screens on the method alre
   // And the way out of a built-in leg that cannot price or pay: switch here,
   // and the purchase carries on through the widget rather than ending.
   await method.selectOption('widget')
-  await page.getByRole('button', { name: 'Continue to fund.bzz.limo' }).click()
+  await page.getByRole('button', { name: /^Continue to / }).click()
 
   await expect(page.getByText('Mock error: Purchase failed')).toBeVisible({
     timeout: DRIVE_SETTLE_TIMEOUT_MS,

@@ -8,6 +8,7 @@
  */
 import type { FundingNeed, OperationStep, RequestFunding } from '$lib/payment/drive-operation'
 import { type FundingQuote, swapDelivered } from '$lib/payment/funding'
+import { WIDGET_HOST } from '$lib/payment/multichain-widget'
 import type { PaymentRail } from '$lib/payment/payment-rail'
 import { resolvePaymentRail } from '$lib/payment/resolve-rail'
 import type { Account } from '$lib/types'
@@ -52,7 +53,7 @@ export class PaymentCancelledError extends Error {
 }
 
 /**
- * The user chose to pay through the fund.bzz.limo widget rather than the
+ * The user chose to pay through the widget rather than the
  * built-in engine. Typed, and deliberately NOT a `PaymentCancelledError`: the
  * engine operation is abandoned with nothing spent, but the purchase is going
  * ahead by another route, and a dialog that read this as a cancel would drop
@@ -60,7 +61,7 @@ export class PaymentCancelledError extends Error {
  */
 export class UseWidgetError extends Error {
   constructor() {
-    super('Paying through fund.bzz.limo instead.')
+    super(`Paying through ${WIDGET_HOST} instead.`)
     this.name = 'UseWidgetError'
   }
 }
@@ -105,7 +106,7 @@ export type CancelOptions =
    */
   | { reason: 'payment-unconfirmed'; error: Error }
   /**
-   * The method screen handed the payment to the fund.bzz.limo widget. Nothing
+   * The method screen handed the payment to the widget. Nothing
    * is signed at that point — the seam is raised before any spend — so the
    * engine operation is let go, and the caller takes over from the widget.
    */

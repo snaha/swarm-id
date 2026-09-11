@@ -16,7 +16,7 @@ import {
 } from './helpers'
 
 // This suite buys through the built-in engine, which is a real on-chain
-// purchase — the /dev mock stands in for the fund.bzz.limo method alone, and
+// purchase — the /dev mock stands in for the widget method alone, and
 // nothing here chooses it — so it needs a chain.
 const chainUp = await chainReachable()
 test.skip(!chainUp, 'requires a local chain (pnpm dev:local)')

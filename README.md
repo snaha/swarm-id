@@ -177,7 +177,7 @@ atomic transaction. The baked snapshot cannot carry it — a state dump only kee
 wrote — so locally they run one at a time until something splices the delegate in, which `/dev` →
 **Chain** → **Create drive to test with** does.
 
-That is the payment dialog's **built-in** method. The other one, `Pay with crypto (fund.bzz.limo)` —
+That is the payment dialog's **built-in** method. The other one, `Pay with crypto (<widget host>)` —
 the default when buying a drive — settles on Gnosis **mainnet** only, so locally there is nothing for
 it to settle against: pick the built-in method to pay on the local chain, or turn on `/dev` →
 **Chain** → **Simulated purchase**, which stands in for the widget with a fabricated batch so that

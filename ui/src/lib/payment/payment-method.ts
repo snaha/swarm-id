@@ -1,5 +1,6 @@
 // Copyright 2026 The Swarm Authors. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
+import { WIDGET_HOST } from '$lib/payment/multichain-widget'
 
 /**
  * The two ways a drive can be paid for, named once.
@@ -15,12 +16,13 @@
  */
 export type PaymentMethod = 'widget' | 'built-in'
 
-export const WIDGET_LABEL = 'Pay with crypto (fund.bzz.limo)'
+export const WIDGET_LABEL = `Pay with crypto (${WIDGET_HOST})`
 export const BUILT_IN_LABEL = 'Pay with crypto (built in, experimental)'
+/** The button that hands the payment to the popup, the same from either dialog. */
+export const WIDGET_CONTINUE_LABEL = `Continue to ${WIDGET_HOST}`
 
 /** Why the size and lifespan on the form are only a starting point on this route. */
-export const WIDGET_EXPLAINER =
-  'fund.bzz.limo opens in a popup. The size and lifespan from the form are passed along as its starting point where the popup supports that; check them there before paying — the drive gets what you buy in the popup.'
+export const WIDGET_EXPLAINER = `${WIDGET_HOST} opens in a popup with the size and lifespan from the form as its defaults. Confirm or change them there — the drive gets what you buy in the popup.`
 
 /** What the built-in engine will ask for next, said before it is chosen. */
 export const BUILT_IN_EXPLAINER =

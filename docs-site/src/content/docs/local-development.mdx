@@ -73,8 +73,8 @@ Everything that talks to the Gnosis-side chain, acting on the account selected a
   paid drive operations (extend, resize) also use — buys for real, against whichever chain the app is
   pointed at. Locally that is the baked dev chain, so the same code path as mainnet runs on a chain
   whose funds are worth nothing. See [Paying for a Drive](#paying-for-a-drive). The other method,
-  **fund.bzz.limo**, settles on mainnet only; locally the simulated purchase below stands in for it.
-- **Simulated purchase** — makes the **fund.bzz.limo** method of **Add drive** settle a mocked batch
+  **the widget**, settles on mainnet only; locally the simulated purchase below stands in for it.
+- **Simulated purchase** — makes the **widget** method of **Add drive** settle a mocked batch
   instead of a real cross-chain payment. That widget only settles on mainnet, so this is what makes
   that method reachable locally at all. The batch it leaves behind is fabricated, which is why extend
   and resize cannot act on it. Nothing here touches the built-in method.
@@ -150,7 +150,7 @@ Where the chain carries the EIP-7702 delegate, as Gnosis mainnet does, the posta
 atomic transaction; the baked snapshot cannot carry it, so locally they run one at a time until
 **Create drive to test with** splices it in.
 
-That is the payment dialog's **built-in** method. The other one, **fund.bzz.limo** — the method
+That is the payment dialog's **built-in** method. The other one, **the widget** — the method
 offered first when buying a drive — settles on Gnosis mainnet only and has nothing to settle against
 here, so either pick the built-in method or turn on the **Simulated purchase** toggles described
 above.
