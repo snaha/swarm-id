@@ -13,9 +13,11 @@ import injectedModule from '@web3-onboard/injected-wallets'
 import walletConnectModule from '@web3-onboard/walletconnect'
 
 import { browser } from '$app/environment'
+import { asset } from '$app/paths'
 
 import { env } from '$env/dynamic/public'
 
+import { SWARM_MARK_SVG } from '$lib/components/swarm-mark'
 import { walletConnectOptions } from '$lib/crypto/wallet-connect'
 import { devWalletChains } from '$lib/payment/dev-funding'
 import { WALLET_CHAINS } from '$lib/payment/payment-rail'
@@ -77,6 +79,16 @@ const chains = [
 const appMetadata = {
   name: 'Swarm ID',
   description: 'The identity system for Swarm',
+  // Without an icon, onboard draws a question mark beside the wallet on its
+  // "Connecting to …" screen. It renders the value inline when it is markup,
+  // so the mark goes in as an SVG string rather than a URL.
+  icon: SWARM_MARK_SVG,
+  // WalletConnect sends both fields to the wallet as its `icons` array, which
+  // takes URLs — the markup above is not one, so the approval sheet is branded
+  // only from here, and only by a wallet that reads past the first entry. The
+  // URL cannot go in `icon` instead: Coinbase base64s that field into a data
+  // URI, and a URL there makes a broken one.
+  logo: browser ? `${window.location.origin}${asset('/favicon.png')}` : undefined,
   recommendedInjectedWallets: [
     { name: 'Coinbase', url: 'https://wallet.coinbase.com/' },
     { name: 'MetaMask', url: 'https://metamask.io' },
