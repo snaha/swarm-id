@@ -21,14 +21,16 @@
  */
 
 import { RollingValueProvider, System } from "cafe-utility"
-import { encodeFunctionData } from "viem"
+import { BaseError, ExecutionRevertedError, encodeFunctionData } from "viem"
+import type { SignedAuthorization } from "viem"
 import { privateKeyToAccount } from "viem/accounts"
 import { ACCOUNT_7702_ABI, ERC20_ABI, POSTAGE_STAMP_ABI } from "./abi"
 import { jsonRpc } from "./fetch"
+import { withGasMargin } from "./gas"
 import { getGasPrice, getTransactionCount, getTransactionReceipt } from "./rpc"
 import type { CreateBatchResult } from "./postage-write"
 import type { MultichainSettings } from "./settings"
-import { walletClientFor } from "./chain"
+import { publicClientFor, walletClientFor } from "./chain"
 import { withFeeTooLowRetry } from "./write-retry"
 
 /** One call inside the bundle. */
@@ -39,11 +41,54 @@ interface BundledCall {
 }
 
 /**
- * Covers approve + topUp + increaseDepth together. Measured at ~420k for the
- * full resize bundle on a real batch; the headroom absorbs `increaseDepth`'s
- * internal expired-batch sweep, whose cost varies with the chain's backlog.
+ * Fallback cap for a node that cannot estimate a type-4 transaction. Measured
+ * at ~420k for the full resize bundle on a real batch, but every PostageStamp
+ * write first sweeps expired batches, and on a backlogged dev chain that put
+ * `createBatch` at 1.37M — so the estimate in `bundleGas` is the primary path
+ * and this only stands in where the RPC cannot provide one.
  */
 const BUNDLE_GAS = 1_200_000n
+
+/**
+ * Estimate with the sequential path's margin, falling back to the fixed cap
+ * when the RPC cannot estimate a transaction with an `authorizationList` —
+ * type-4 `eth_estimateGas` support is uneven across Gnosis RPCs. A simulated
+ * REVERT is not that: it is the real failure, surfaced before anything is sent.
+ *
+ * Simulated at the transaction's own `nonce` against the PENDING state: the
+ * authorization is signed for `nonce + 1`, and a simulation at `latest` with a
+ * transaction in flight would skip it — a 7702 nonce mismatch is a skip, not a
+ * revert — run the self-call against a bare EOA, and answer with a limit the
+ * real transaction then exhausts.
+ */
+async function bundleGas(
+  from: `0x${string}`,
+  data: `0x${string}`,
+  nonce: number,
+  authorization: SignedAuthorization,
+  settings: MultichainSettings,
+  rpcProvider: RollingValueProvider<string>,
+): Promise<bigint> {
+  try {
+    const estimate = await publicClientFor(settings, rpcProvider).estimateGas({
+      account: from,
+      to: from,
+      data,
+      nonce,
+      authorizationList: [authorization],
+      blockTag: "pending",
+    })
+    return withGasMargin(estimate)
+  } catch (error) {
+    if (
+      error instanceof BaseError &&
+      error.walk((cause) => cause instanceof ExecutionRevertedError)
+    ) {
+      throw error
+    }
+    return BUNDLE_GAS
+  }
+}
 
 export interface ExtendBundleOptions {
   /** The batch owner's key — authority, sender and `msg.sender` alike. */
@@ -118,6 +163,11 @@ async function sendBundle(
       address: settings.addresses.eip7702Delegate,
       nonce: nonce + 1,
     })
+    const data = encodeFunctionData({
+      abi: ACCOUNT_7702_ABI,
+      functionName: "executeBatch",
+      args: [calls],
+    })
     const serializedTransaction = await account.signTransaction({
       type: "eip7702",
       chainId: settings.chainId,
@@ -125,12 +175,15 @@ async function sendBundle(
       // To ITSELF: the delegate's code runs in the EOA's context, which is what
       // keeps `msg.sender` the batch owner throughout.
       to: account.address,
-      data: encodeFunctionData({
-        abi: ACCOUNT_7702_ABI,
-        functionName: "executeBatch",
-        args: [calls],
-      }),
-      gas: BUNDLE_GAS,
+      data,
+      gas: await bundleGas(
+        account.address,
+        data,
+        nonce,
+        authorization,
+        settings,
+        rpcProvider,
+      ),
       maxFeePerGas: await getGasPrice(settings, rpcProvider),
       maxPriorityFeePerGas: 0n,
       nonce,
