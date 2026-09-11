@@ -1,1 +1,1 @@
-export const env={"PUBLIC_WALLETCONNECT_PROJECT_ID":"","PUBLIC_ID_DOMAIN":"https://swarm.snaha.net/id/pr-729","PUBLIC_APP_DOMAIN":"https://swarm.snaha.net/demo/pr-729"}
+export const env={"PUBLIC_ID_DOMAIN":"https://swarm.snaha.net/id/pr-729","PUBLIC_APP_DOMAIN":"https://swarm.snaha.net/demo/pr-729"}
