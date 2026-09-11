@@ -42,10 +42,10 @@ jobs:
       needs-lib: ${{ steps.changes.outputs.id == 'true' || steps.changes.outputs.demo == 'true' }}
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Detect changed paths
-        uses: dorny/paths-filter@v3
+        uses: dorny/paths-filter@v4
         id: changes
         with:
           filters: |
@@ -66,15 +66,15 @@ jobs:
     if: needs.detect-changes.outputs.needs-lib == 'true'
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Set up pnpm
-        uses: pnpm/action-setup@v4
+        uses: pnpm/action-setup@v6
         with:
           run_install: false
 
       - name: Set up Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v7
         with:
           node-version: 24
           cache: 'pnpm'
@@ -86,7 +86,7 @@ jobs:
         run: pnpm build:lib
 
       - name: Upload workspace
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: workspace-main
           path: |
@@ -102,21 +102,21 @@ jobs:
     if: needs.detect-changes.outputs.id == 'true'
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Set up pnpm
-        uses: pnpm/action-setup@v4
+        uses: pnpm/action-setup@v6
         with:
           run_install: false
 
       - name: Set up Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v7
         with:
           node-version: 24
           cache: 'pnpm'
 
       - name: Download workspace
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: workspace-main
           path: .
@@ -136,7 +136,7 @@ jobs:
         run: cp ui/build/index.html ui/build/404.html
 
       - name: Upload identity UI artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: id-build-main
           path: ui/build
@@ -149,21 +149,21 @@ jobs:
     if: needs.detect-changes.outputs.demo == 'true'
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Set up pnpm
-        uses: pnpm/action-setup@v4
+        uses: pnpm/action-setup@v6
         with:
           run_install: false
 
       - name: Set up Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v7
         with:
           node-version: 24
           cache: 'pnpm'
 
       - name: Download workspace
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: workspace-main
           path: .
@@ -178,7 +178,7 @@ jobs:
         run: pnpm --filter @swarm-id/demo build
 
       - name: Upload demo artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: demo-build-main
           path: demo/build
@@ -191,15 +191,15 @@ jobs:
     if: needs.detect-changes.outputs.docs == 'true'
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Set up pnpm
-        uses: pnpm/action-setup@v4
+        uses: pnpm/action-setup@v6
         with:
           run_install: false
 
       - name: Set up Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v7
         with:
           node-version: 24
           cache: 'pnpm'
@@ -218,7 +218,7 @@ jobs:
           echo '<!DOCTYPE html><html><head><meta http-equiv="refresh" content="0;url=/docs/"></head></html>' > docs-site/dist-root/index.html
 
       - name: Upload docs artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: docs-build-main
           path: docs-site/dist-root
@@ -240,14 +240,14 @@ jobs:
 
       - name: Download identity UI artifact
         if: needs.build-id.result == 'success'
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: id-build-main
           path: build-root/id
 
       - name: Download demo artifact
         if: needs.build-demo.result == 'success'
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: demo-build-main
           path: build-root/demo
@@ -255,7 +255,7 @@ jobs:
       # Docs artifact already contains docs/ plus the root redirect index.html.
       - name: Download docs artifact
         if: needs.build-docs.result == 'success'
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: docs-build-main
           path: build-root
