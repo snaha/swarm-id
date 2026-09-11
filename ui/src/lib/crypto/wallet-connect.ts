@@ -14,23 +14,25 @@
 import type { Chain } from 'viem'
 
 /**
- * The project the app connects with unless a build overrides it — committed on
- * purpose, and empty until one is registered.
+ * The Reown project the app connects with unless a build overrides it,
+ * committed on purpose.
  *
- * A Reown project id is not a secret. SvelteKit bakes every `PUBLIC_*` var into
- * the client bundle, so whatever is configured ships to anyone who opens the
- * page; withholding it from the repo protects nothing. What actually guards the
- * project is its origin allowlist — the relay answers 403 to a request from an
- * origin the project does not name — so a committed id cannot be pointed at
- * someone else's site. Keeping it out of the repo would instead cost a setup
- * step on every dev machine and a configured value in every deployment, which
- * is how a picker silently ends up injected-only in one of them.
+ * A project id is not a secret. SvelteKit bakes every `PUBLIC_*` var into the
+ * client bundle, so whatever is configured ships to anyone who opens the page;
+ * withholding it from the repo protects nothing, and would cost a setup step on
+ * every dev machine and a configured value in every deployment — which is how a
+ * picker silently ends up injected-only in one of them. Same shape as
+ * `busSignalingUrl` in `$lib/bus-signaling-url`.
  *
- * Same shape as `busSignalingUrl` in `$lib/bus-signaling-url`: a committed
- * default with the environment able to override it.
+ * What keeps a committed id from being someone else's free relay quota is the
+ * allowlist on the Reown project, which must name every origin that serves this
+ * app and nothing else. That is dashboard state this file cannot assert, so it
+ * is the thing to re-check when an origin is added — a new deployment or a
+ * developer on a port other than 5500 reads as a blank QR code rather than an
+ * error ([#732](https://github.com/snaha/swarm-id/issues/732)).
  *
- * Empty would leave the picker injected-only, rather than offering a
- * WalletConnect that cannot complete a connection.
+ * Empty is still handled: it leaves the picker injected-only rather than
+ * offering a WalletConnect that cannot complete a connection.
  */
 export const DEFAULT_PROJECT_ID = '26aa4608b06ec5ebd013b57900b550e6'
 
