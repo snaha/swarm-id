@@ -1,0 +1,128 @@
+---
+title: Key Derivation
+description: Every key Swarm ID uses, where it comes from, and which ones ever leave the trusted domain
+---
+
+Every key in Swarm ID comes from one secret: the account's recovery phrase. This page lists
+each derived key, the input it is computed from, and what it is for. The multi-device
+protocol on [Postage Batch Sharing](/multi-device-postage-batches) and the
+[account bus](/account-bus) both build on the keys below.
+
+## The one primitive
+
+Almost every step is the same function, `deriveSecret` in `lib/src/utils/key-derivation.ts`:
+
+```text
+deriveSecret(key, context) = hex( HMAC-SHA256( bytes_from_hex(key), utf8(context) ) )
+```
+
+The key is a hex string decoded to bytes; the context is a plain string encoded as UTF-8.
+The output is 32 bytes as hex. Where an AES key is needed, the same HMAC output is imported
+as a non-extractable AES-GCM-256 key (`deriveAesGcmKey`).
+
+## From the recovery phrase to the master key
+
+An account starts as a BIP-39 recovery phrase of 12 or 24 words. The phrase is turned into
+an Ethereum wallet on the standard derivation path (`viem`'s `mnemonicToAccount`):
+
+| Value                  | What it is                                                 |
+| ---------------------- | ---------------------------------------------------------- |
+| **master key**         | that wallet's private key                                  |
+| **account id**         | that wallet's address                                      |
+| **account public key** | that wallet's compressed public key, stored on the account |
+
+The master key is never stored as such. What the device keeps is the phrase's entropy,
+encrypted with AES-GCM under a key that the account's **access method** produces:
+
+| Access method       | How the seed-encryption key is made                                                 |
+| ------------------- | ----------------------------------------------------------------------------------- |
+| **Passkey**         | The WebAuthn PRF extension, evaluated on a salt bound to the identity UI's hostname |
+| **Ethereum wallet** | A signature over a fixed message, combined with a random salt stored on the device  |
+| **Password**        | PBKDF2-SHA256 with 600,000 iterations and a random salt stored on the device        |
+
+That encrypted seed and the access record together are the device's **vault**. The vault
+never leaves the device and never enters a backup or a Swarm feed. Signing out keeps the
+vault, so signing back in only takes the access method again. Changing the access method
+re-encrypts the same seed under a new key.
+
+## The derivation tree
+
+```text
+recovery phrase (BIP-39)
+└─ master key  (wallet private key; address = account id)
+   ├─ app secret            = deriveSecret(master, appOrigin)           one per dApp origin
+   │  └─ app material       = deriveSecret(appSecret, label)            client.deriveAppSecret(label)
+   └─ derivationKey         = deriveSecret(master, "derivation-key")    stored on the account
+      ├─ swarmEncryptionKey = deriveSecret(derivationKey, "swarm-encryption")
+      │  ├─ backupKey       = deriveSecret(swarmEncryptionKey, "backup-key")
+      │  │  └─ backup signer  secp256k1 key; its address owns every feed and lock chunk
+      │  └─ backup file key = AES-GCM key from (swarmEncryptionKey, "swarm-id-backup-encryption-v1")
+      ├─ postageSignerKey   = deriveSecret(derivationKey, "postage-signer")
+      ├─ sharing key        = deriveSecret(derivationKey, "act-sharing")
+      ├─ bus topic          = deriveSecret(derivationKey, "swarm-id/account-bus/topic/v1")
+      └─ bus envelope key   = AES-GCM key from (derivationKey, "swarm-id/account-bus/encryption/v1")
+```
+
+### App secret
+
+`deriveSecret(masterKey, appOrigin)`, computed in the connect popup when the user approves a
+dApp. The origin is the dApp page's origin, so the same account always gives the same dApp
+the same secret, and two dApps never share one. It is the only key that is handed to a
+dApp's proxy iframe, and it is what the iframe authenticates with. A dApp can derive further
+material of its own from it with `client.deriveAppSecret(label)`; the popup and the master key
+are not involved in that.
+
+### derivationKey
+
+`deriveSecret(masterKey, "derivation-key")`, computed once and stored on the account. It
+exists so that everything below it can be derived again without unlocking the vault. Every
+device of the account holds it, which is what lets them all write the same feeds.
+
+### swarmEncryptionKey and the backup signer
+
+`swarmEncryptionKey` encrypts everything the account writes to Swarm: the per-device account
+feeds, the partition lock chunks, the intent beacons, and the utilization counters. From it,
+`backupKey` is turned into a secp256k1 private key, the **backup signer**. Its address is the
+owner of every feed and every single-owner chunk in the multi-device protocol. Two accounts
+with the same topic still write to different addresses, because the owner differs.
+
+The `.swarmid` backup file is encrypted with an AES-GCM-256 key derived from
+`swarmEncryptionKey` under the context `swarm-id-backup-encryption-v1`. Importing a backup
+therefore needs the recovery phrase, from which the whole chain is recomputed.
+
+### postageSignerKey
+
+`deriveSecret(derivationKey, "postage-signer")`. The key that owns postage batches bought
+through the identity UI and that signs the stamps on every chunk uploaded with them.
+
+### Sharing key
+
+`deriveSecret(derivationKey, "act-sharing")`. The account-wide key other people grant ACT
+access to when they mean the person rather than one of their apps. Its public half is
+`sharingPublicKey` on `ConnectionInfo`, and it is shown on the Keys & addresses screen.
+
+### Account bus topic and envelope key
+
+Both come from `derivationKey` through two separate contexts. The topic names the account's
+room on the signaling server without being linkable to the account id, and the envelope key
+encrypts every bus message end to end. The server sees a room name and ciphertext, nothing
+else.
+
+## What leaves the trusted domain
+
+| Material                                     | Who receives it                                                   |
+| -------------------------------------------- | ----------------------------------------------------------------- |
+| master key, recovery phrase, vault           | nobody; they stay in the identity UI's own storage                |
+| app secret                                   | that one dApp's proxy iframe, which is also on the trusted domain |
+| account view (stamps, signer keys, no vault) | a proxy iframe whose storage the browser has partitioned          |
+| app material from `deriveAppSecret`          | the dApp page that asked for it                                   |
+
+The proxy iframe is served from the trusted domain, so a dApp page cannot read its storage.
+What the dApp gets is what it asks the iframe for through `SwarmIdClient`.
+
+## Porting
+
+An implementation on another platform interoperates with this one exactly when it derives
+the same keys from the same recovery phrase. The two things to get right are the primitive
+above, including which input is hex bytes and which is UTF-8, and the context strings, which
+are listed verbatim in the tree.

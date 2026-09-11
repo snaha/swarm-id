@@ -44,18 +44,18 @@ reach from there already converges through storage events.
 ## How a message travels
 
 ```text
-newcomer                         signaling server                       existing peer
-   │ ── WSS connect ───────────────────▶ │                                    │
-   │ ── {join, topic} ─────────────────▶ │                                    │
-   │ ◀── {welcome, peerId, peers[]} ──── │ ── {peer-joined, peerId} ────────▶ │
-   │ ── {signal, to, offer} ───────────▶ │ ──────────────────────────────────▶ │
-   │ ◀────────────────────────────────── │ ◀── {signal, to, answer} ────────── │
-   │ ◀──── ICE candidates both ways, forwarded the same way ─────────────────▶ │
-   │                                                                          │
-   │ ═══════════ RTCDataChannel: encrypted messages, direct ════════════════ │
-   │                                                                          │
-   │ ── {relay, to, ciphertext} ───────▶ │ ── {relay, from, ciphertext} ────▶ │
-   │         (fallback per peer, whenever no channel is open to that peer)    │
+  newcomer                     signaling server                   existing peer
+   │  WSS connect ───────────────────▶ │                                      │
+   │  {join, topic} ─────────────────▶ │                                      │
+   │ ◀──── {welcome, peerId, peers[]}  │  {peer-joined, peerId} ────────────▶ │
+   │  {signal, to, offer} ───────────▶ │ ───────────────────────────────────▶ │
+   │ ◀──────────────────────────────── │ ◀───────────── {signal, to, answer}  │
+   │ ◀───────── ICE candidates both ways, forwarded by the server ──────────▶ │
+   │                                   │                                      │
+   │ ═══════════ RTCDataChannel: encrypted messages, peer to peer ═══════════ │
+   │                                   │                                      │
+   │  {relay, to, ciphertext} ───────▶ │  {relay, from, ciphertext} ────────▶ │
+   │      (fallback per peer, whenever no channel is open to that peer)       │
 ```
 
 1. **Join.** The context opens a WebSocket and names its room in the first frame. The server
@@ -89,7 +89,7 @@ account is dropped even there.
 
 ## Presence and liveness
 
-Every context beats a `presence` message on joining and every 20 seconds. A receiver notes the
+Every context sends a `presence` message on joining and every 20 seconds. A receiver notes the
 time it heard each device and forgets one it has not heard for three minutes — three beats at
 the once-a-minute cadence a browser throttles a hidden tab's timers to, so a backgrounded but
 live device does not flap out of the set. That in-memory set is the liveness signal:
@@ -111,7 +111,7 @@ never settles, even on a single device.
 - **Not a mailbox.** A message reaches the peers that are in the room now. A dApp partition that
   is closed when an app is revoked learns about it when it next overlaps with a live peer, or
   from the one-time read of the account's published state it does on restore.
-- **Not the source of truth.** Every message either shortcuts a wait the durable protocol would
+- **Not the record.** Every message either shortcuts a wait the durable protocol would
   have resolved anyway, or carries state the durable stores already hold.
 - **Not replay-protected yet** ([#604](https://github.com/snaha/swarm-id/issues/604)). The lease
   messages are bounded by their own guards; a replayed delta or presence is inert.

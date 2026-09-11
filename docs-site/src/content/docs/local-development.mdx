@@ -42,11 +42,17 @@ lists the rest.
 
 Once the cluster is running, these endpoints are available:
 
-| Service        | URL                      |
-| -------------- | ------------------------ |
-| Queen Bee API  | `http://localhost:1633`  |
-| Worker 1 API   | `http://localhost:16331` |
-| Blockchain RPC | `http://localhost:9545`  |
+| Service                              | URL                      |
+| ------------------------------------ | ------------------------ |
+| Queen Bee API                        | `http://localhost:1633`  |
+| Worker 1 API                         | `http://localhost:16331` |
+| Blockchain RPC (fake Gnosis)         | `http://localhost:9545`  |
+| Fake source chain (`pnpm dev:local`) | `http://localhost:31337` |
+| Account bus signaling                | `ws://localhost:5520`    |
+
+`pnpm dev:local` also starts a fake source chain (an Anvil instance with chain id 31337) and the
+local solver that stands in for Relay, so a payment from another chain can be rehearsed end to
+end; see [Paying for a Drive](#paying-for-a-drive).
 
 Every node in the cluster allows all CORS origins, so the identity UI can talk to
 `http://localhost:1633` as soon as it is up. A Bee node you run yourself instead needs the identity
@@ -60,10 +66,9 @@ A menu in the page header switches the whole app between the local endpoints and
 
 ### Overview Tab
 
-- **Endpoint Status** — Live indicators showing connectivity to local Bee endpoints
-- **Test Connect Flow** — Quick link to test the authentication flow with the demo app
-- **Local Data Summary** — Shows counts of accounts, identities, connected apps, and stamps
-- **Clear All Data** — Wipes all local storage (accounts, identities, stamps)
+- **Endpoints these tools use** — the Bee node, the cluster worker (a second node, for checking that a chunk replicated off the node that took it), the Gnosis Chain RPC, and the fake Ethereum mainnet RPC, each with a live indicator
+- **Test connect flow** — a link to the demo app on port 3500 to run the connect flow against this identity UI
+- **Local data** — counts of the accounts, connections, and stamps on this device, with **Clear accounts** and **Clear everything** buttons
 
 ### Chain Tab
 
@@ -102,7 +107,7 @@ Everything that talks to the Bee node:
 
 ### Devices Tab
 
-The devices registered to the selected account, which partitions each currently holds, and an **Online** badge for every device heard on the [account bus](/account-bus) within the last minute. The rows re-derive every 5 s, so a peer shows up about one presence beat (20 s) after it joins.
+The devices registered to the selected account, which partitions each currently holds, and an **Online** badge for every device heard on the [account bus](/account-bus) in the last three minutes. The rows refresh every 5 s, so a peer shows up about one presence message (20 s) after it joins.
 
 ## Getting a Postage Batch
 
@@ -178,11 +183,14 @@ Reach for `pnpm dev:local:fresh` when the chain has drifted — every purchase t
 thin BZZ pool, and a fresh start restores the baked snapshot. It also wipes node state, so drives
 created earlier will point at batches that no longer exist; clear the UI's site data too.
 
-Paying from a chain other than Gnosis is not supported yet. See
+Paying from a chain other than Gnosis goes through Relay, which only exists on mainnet. Locally the
+fake source chain and the local solver started by `pnpm dev:local` stand in for it: the wallet
+deposits on the fake source chain, and the solver delivers to the batch owner on the local Gnosis
+chain out of its faucet. See
 [docs/Drive-Payment-Flow.md](https://github.com/snaha/swarm-id/blob/main/docs/Drive-Payment-Flow.md)
 for the full design.
 
-## Common Gotchas
+## Common Problems
 
 ### Stamp Not Usable After Purchase
 
@@ -224,13 +232,13 @@ it. See [Using Your Own Bee Node](/own-bee-node).
 
 ### Library Changes Not Reflected
 
-If you modify code in `lib/`, you need to rebuild:
+The identity UI and the demo dev servers import the library's source directly, so an edit in
+`lib/src` shows up on the next reload without a build. Two things still need a restart of
+`pnpm dev`: switching branches, and running `pnpm build:lib`. Either can leave the dev server's
+module graph stale, which shows up as a missing export that plainly exists in the file.
 
-```bash
-cd lib && pnpm build
-# Or for continuous rebuilding:
-cd lib && pnpm build:watch
-```
+A build (`pnpm build:lib`) is only needed for the built demo and for anything that consumes the
+published package.
 
 ## Development Tips
 
