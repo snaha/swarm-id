@@ -106,9 +106,9 @@
   const AccessIcon: Component = $derived(
     access.type === 'passkey' ? Fingerprint : access.type === 'eth-wallet' ? Wallet : KeyRound,
   )
-  const publicKeyDisplay = $derived(prefix0x(account.publicKey))
+  const publicKeyDisplay = $derived(account.publicKey)
   const sharingKey = $derived(deriveSharingKey(account.derivationKey))
-  const sharingKeyDisplay = $derived(prefix0x(sharingKey.publicKey))
+  const sharingKeyDisplay = $derived(sharingKey.publicKey)
   const sharingAddress = $derived(new PublicKey(sharingKey.publicKey).address().toChecksum())
   const sharingPrivateKeyDisplay = $derived(prefix0x(uint8ArrayToHex(sharingKey.secret)))
   const newPasswordValid = $derived(isNewPasswordValid(newPassword, verifyNewPassword))
