@@ -1,19 +1,56 @@
 // Copyright 2026 The Swarm Authors. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 /**
- * Web3-Onboard instance for selecting and connecting an injected wallet.
+ * Web3-Onboard instance for selecting and connecting a wallet.
  *
  * Using @web3-onboard (rather than a bare `window.ethereum`) lets the user pick
- * a wallet when several are installed.
+ * a wallet when several are installed — and lets a wallet that injects nothing
+ * be offered at all, which is the only kind some browsers have.
  */
+import coinbaseModule from '@web3-onboard/coinbase'
 import Onboard from '@web3-onboard/core'
 import injectedModule from '@web3-onboard/injected-wallets'
+import walletConnectModule from '@web3-onboard/walletconnect'
 
+import { browser } from '$app/environment'
+
+import { env } from '$env/dynamic/public'
+
+import { walletConnectOptions } from '$lib/crypto/wallet-connect'
 import { devWalletChains } from '$lib/payment/dev-funding'
 import { WALLET_CHAINS } from '$lib/payment/payment-rail'
 
 const injected = injectedModule()
-const wallets = [injected]
+// WalletConnect, where the build has a project id for it. Injected wallets
+// reach only browsers a wallet ships an extension for: Safari has neither
+// MetaMask nor Coinbase Wallet, and on iOS there is no injected provider
+// outside a wallet's own in-app browser, so without this the picker can be
+// empty and the built-in payment method unreachable. WalletConnect needs
+// nothing installed in the browser — a QR code on desktop, a deep link on
+// mobile — so it is the route that exists everywhere.
+//
+// `dappUrl` is this origin rather than a configured one: it is what the wallet
+// shows the user as who is asking, and a build serving several origins
+// (deployments and per-PR previews alike) must name the one they are on.
+const walletConnect = walletConnectOptions(
+  env.PUBLIC_WALLETCONNECT_PROJECT_ID,
+  browser ? window.location.origin : undefined,
+  WALLET_CHAINS,
+)
+// Coinbase Wallet's own SDK, which like WalletConnect needs nothing installed:
+// it reaches the phone app directly. Narrower than WalletConnect — one wallet,
+// not any of them — so it is offered beside it rather than instead of it, and
+// listed first because a named wallet is a clearer choice than a generic QR
+// code to someone who has that wallet.
+//
+// `reloadOnDisconnect` is deprecated and the module reads it only to decide
+// whether to warn, so passing it silences a deprecation warning that otherwise
+// fires on every connect (it defaults to `true`, which trips the module's own
+// check even when nothing is passed). `false` is also what this app would want
+// if the option were still live: reloading the page out from under a disconnect
+// would discard whatever dialog the user is in the middle of.
+const coinbase = coinbaseModule({ supportedWalletType: 'all', reloadOnDisconnect: false })
+const wallets = [injected, coinbase, ...(walletConnect ? [walletConnectModule(walletConnect)] : [])]
 // Every chain onboard has to know about, or it reports the user's network as
 // unsupported. That covers two different callers: `eth-wallet.ts`'s
 // wallet-secured unlock, which only signs a plain message and stays on

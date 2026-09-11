@@ -60,8 +60,10 @@
     "@scure/bip39": "1.6.0",
     "@snaha/swarm-id": "workspace:*",
     "@swarm-id/multichain": "workspace:*",
+    "@web3-onboard/coinbase": "^2.4.2",
     "@web3-onboard/core": "^2.24.1",
     "@web3-onboard/injected-wallets": "^2.11.3",
+    "@web3-onboard/walletconnect": "^2.6.3",
     "viem": "^2.55.10"
   }
 }

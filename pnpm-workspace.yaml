@@ -17,6 +17,9 @@ allowBuilds:
   sharp: true
   # es5-ext has a noisy postinstall (sponsorship message); not required to build.
   es5-ext: false
+  # @reown/appkit (via @web3-onboard/walletconnect) postinstalls a script that only
+  # warns about mismatched @reown/* versions; nothing is built.
+  '@reown/appkit': false
 
 # pnpm holds new releases back for a cooling-off period as a supply-chain guard,
 # and 0.3.0 was published the same day this landed. It is ours (snaha/bee-compose)
