@@ -19,7 +19,6 @@ This is useful for:
 
 - **Onboarding new users** who don't have BZZ tokens yet
 - **Free-tier applications** where the operator covers storage costs
-- **Users whose browser partitions storage** and whose session was handed no stamp of its own
 
 ## Configuration
 
@@ -67,10 +66,6 @@ The check is an exact inequality against the default gateway URL, and it runs in
 
 The dApp passed a `subsidisedGatewayUrl` when creating the SwarmIdClient.
 
-**Storage partitioning is not one of the axes.** When the browser partitions storage (Safari ITP), the proxy iframe cannot **read** the user's postage stamps or Bee node setting out of the trusted domain's localStorage. Since [#277](https://github.com/snaha/swarm-id/issues/277) it does not have to: the connect popup hands both over directly. A partitioned session with a drive is therefore an ordinary `user-stamp` session — confirmed on real Safari, iOS 18.7 / Safari 26.6 ([#584](https://github.com/snaha/swarm-id/issues/584)). `ConnectionInfo.storagePartitioned` is still reported, for UI messaging; it does not decide whether you can upload.
-
-A handover that arrives **without** the account view is refused outright, so there is no half-session to account for here: the session either has the account's own stamps to fall back from, or it was never established.
-
 ### Why Uploads Are Unavailable
 
 When `uploadMode` is `unavailable`, `ConnectionInfo.uploadUnavailableReason` names the **first** thing that stopped the session, not the last symptom:
@@ -101,7 +96,7 @@ if (info.canUpload) {
 
 ## Priority Rules
 
-1. **User's own stamp** — Whenever the session resolved one, partitioned or not, it is the stamp that is used
+1. **User's own stamp** — Whenever the session resolved one, it is the stamp that is used
 2. **Custom Bee node** — If the user has configured a custom Bee node, the subsidised gateway is disabled (even if configured)
 3. **Subsidised gateway** — Used as a fallback when no user stamp is available
 
