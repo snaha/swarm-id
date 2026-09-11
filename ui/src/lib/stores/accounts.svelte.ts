@@ -9,7 +9,6 @@ import {
   type LocalVault,
   type PostageStamp,
   PostageStampSchemaV1,
-  STORAGE_KEY_ACCOUNTS,
   type SyncedAccount,
   createAccountsStorageManager,
   isSignedOutAccount,
@@ -681,11 +680,10 @@ function refresh(): void {
 }
 
 if (browser) {
-  // Cross-tab refresh: another tab mutating the account document (sign-in,
-  // app connect, stamp purchase) updates this tab's reactive state too.
-  window.addEventListener('storage', (event) => {
-    if (event.key === STORAGE_KEY_ACCOUNTS) refresh()
-  })
+  // Refresh on writes this store did not make: another tab's (sign-in, app
+  // connect, stamp purchase), and another manager instance's in THIS window —
+  // the proxy iframe's Disconnect, when the identity UI runs inside it (#712).
+  storageManager.subscribe(refresh)
 }
 
 function toEthAddress(id: string | EthAddress): EthAddress | undefined {

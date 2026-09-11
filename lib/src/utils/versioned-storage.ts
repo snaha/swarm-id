@@ -171,9 +171,11 @@ export class VersionedStorageManager<T> {
   }
 
   /**
-   * Subscribe to storage change events from other windows/tabs
-   * The browser's storage event fires when localStorage changes in OTHER windows,
-   * making this useful for cross-window synchronization.
+   * Subscribe to writes to this key that this instance did not make: other
+   * windows' through the browser's `storage` event, and other manager
+   * instances' in THIS window through the `swarm-id-storage-write` event that
+   * `save()` and `clear()` dispatch — the `storage` event never fires in the
+   * window that wrote. This instance's own writes are skipped.
    *
    * @param listener - Callback function that receives the updated data
    * @returns Unsubscribe function to remove the listener
