@@ -29,9 +29,10 @@ import { stampWorkerDev } from '../lib/dev/vite-stamp-worker.js'
  * own `$lib` alias resolves the specifier first and ours would never see it —
  * the alias plugin re-resolves what it rewrote with `skipSelf`, so a `pre`
  * plugin does get the absolute path, which is what the pattern matches. The
- * route's two files keep their ids and are handed the stub's SOURCE instead:
- * SvelteKit looks a route's component up in the Vite manifest by its source
- * path, and a redirected id is simply not there.
+ * route's page keeps its id and is handed the stub's SOURCE instead: SvelteKit
+ * looks a route's component up in the Vite manifest by its source path, and a
+ * redirected id is simply not there. (Its `+page.ts` needs no swap — it
+ * carries only `prerender = false`, and imports nothing.)
  *
  * Verify with a build, not by reading: CI greps the built assets for markers
  * that sit on the leak path (`resolveLocalRail` → the local rail → the solver
@@ -48,16 +49,10 @@ function stubDevOnlyModules(): Plugin {
   const seamStub = fileURLToPath(
     new URL('./src/lib/payment/dev-funding.production.ts', import.meta.url),
   )
-  const routeStubs = [
-    {
-      pattern: /[/\\]src[/\\]routes[/\\]dev[/\\]\+page\.ts$/,
-      stub: fileURLToPath(new URL('./src/routes/dev/page.production.ts', import.meta.url)),
-    },
-    {
-      pattern: /[/\\]src[/\\]routes[/\\]dev[/\\]\+page\.svelte$/,
-      stub: fileURLToPath(new URL('./src/routes/dev/page.production.svelte', import.meta.url)),
-    },
-  ]
+  const routePage = /[/\\]src[/\\]routes[/\\]dev[/\\]\+page\.svelte$/
+  const routeStub = fileURLToPath(
+    new URL('./src/routes/dev/page.production.svelte', import.meta.url),
+  )
   return {
     name: 'swarm-id:stub-dev-only-modules',
     enforce: 'pre',
@@ -70,8 +65,7 @@ function stubDevOnlyModules(): Plugin {
       return seam.test(id) ? seamStub : undefined
     },
     load(id) {
-      const hit = routeStubs.find(({ pattern }) => pattern.test(id))
-      return hit ? readFileSync(hit.stub, 'utf8') : undefined
+      return routePage.test(id) ? readFileSync(routeStub, 'utf8') : undefined
     },
   }
 }
