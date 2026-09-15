@@ -1,1 +1,0 @@
-import{f as r,a as t}from"../chunks/5kbcTJzU.js";import"../chunks/Cw2d6XIY.js";import{n as a}from"../chunks/D4AXzXjS.js";const n=!1,l=Object.freeze(Object.defineProperty({__proto__:null,prerender:n},Symbol.toStringTag,{value:"Module"}));var p=r("<h1>404</h1> <p>Not Found</p>",1);function i(e){var o=p();a(2),t(e,o)}export{i as component,l as universal};
