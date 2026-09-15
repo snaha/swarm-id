@@ -33,11 +33,14 @@ import { hexToUint8Array } from "../utils/hex"
  * The slice of a Bee client that reading chunks needs.
  *
  * Everything that only downloads — the feed finders and the chunk readers
- * here — takes this rather than a whole `Bee`, so the signature says which of
- * the client's surface the caller actually depends on. `url` is there for the
+ * here — takes this rather than a whole `Bee`, so a test can hand in a
+ * store-backed mock without casting, and the signature says which of the
+ * client's surface the caller actually depends on. `url` is there for the
  * log lines only.
  */
-export type ChunkDownloader = Pick<Bee, "chunk" | "url">
+export type ChunkDownloader = Pick<Bee, "url"> & {
+  chunk: Pick<Bee["chunk"], "download">
+}
 
 function readSpan(spanBytes: Uint8Array): number {
   const view = new DataView(

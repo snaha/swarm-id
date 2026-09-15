@@ -17,7 +17,7 @@ const tag = (uid: number): Tag => ({
   startedAt: "",
 })
 
-/** A `MockBee` whose `tag.create` is a spy the test scripts and counts. */
+/** A `MockBee` whose `tag.create` is a spy the test can script and count. */
 function beeWithTagSpy() {
   const bee = new MockBee()
   const createTag = vi.spyOn(bee.tag, "create")
