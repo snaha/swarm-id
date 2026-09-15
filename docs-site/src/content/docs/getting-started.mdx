@@ -41,6 +41,9 @@ import { SwarmIdClient } from '@snaha/swarm-id'
 // 1. Create the client
 const client = new SwarmIdClient({
   iframeOrigin: 'https://swarm-id.snaha.net',
+  // A new account has no drive yet. This lets it upload anyway — see the note
+  // below the example.
+  subsidisedGatewayUrl: 'https://api.gateway.ethswarm.org/',
   metadata: {
     name: 'My dApp',
     description: 'A demo Swarm application',
@@ -74,6 +77,15 @@ if (info.identity && info.canUpload) {
 // 6. Cleanup when done
 client.destroy()
 ```
+
+:::note[Every new account starts without a drive]
+A drive (a postage batch) is what pays for uploads, and a freshly created Swarm ID has none. So without a subsidised gateway, the first upload of every first-time user fails: `canUpload` is `false` and `uploadUnavailableReason` is `'no-stamp'`. Downloads and key derivation work regardless.
+
+Two ways to handle it, and most dApps do both:
+
+- **Pass `subsidisedGatewayUrl`.** Uploads from accounts with no drive then go through that gateway, which stamps them (`uploadMode` becomes `'subsidised'`). The public gateway at `https://api.gateway.ethswarm.org/` works for development and demos — see [Using the public gateway](../subsidised-gateway/#using-the-public-gateway) for its limits.
+- **Send the user to add a drive.** When `uploadUnavailableReason === 'no-stamp'`, link to the identity site (`https://swarm-id.snaha.net`, Storage tab). Once the user has a drive, the session uses it in preference to any gateway.
+  :::
 
 ## Configuration Options
 

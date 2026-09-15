@@ -108,6 +108,23 @@ The public gateway at `https://api.gateway.ethswarm.org/` works as a subsidised 
 
 This ensures users retain control over their uploads while providing a fallback for those without stamps.
 
+## Using the public gateway
+
+The Swarm Foundation runs a public gateway that stamps uploads for anyone:
+
+```typescript
+const client = new SwarmIdClient({
+  iframeOrigin: 'https://swarm-id.snaha.net',
+  subsidisedGatewayUrl: 'https://api.gateway.ethswarm.org/',
+  metadata: { name: 'My App' },
+})
+```
+
+This is what the demo uses, and it is the quickest way to let a first-time user upload during development, a demo, or a hackathon. Two things to know before shipping with it:
+
+- **It is shared and rate limited**, on the operator's terms, with no guarantee for your traffic. Production dApps should run their own gateway (below) or expect users to hold a drive.
+- **Its CORS allow-list is short.** Uploads carry only the headers it accepts, so options meant for the user's own node do not reach it; see the notes on `pin` and `tag` in the [API reference](../api/). A gateway you run yourself, or a bare Bee node, accepts every Swarm header.
+
 ## Running a Subsidised Gateway
 
 To provide a subsidised gateway for your dApp:
