@@ -1,7 +1,7 @@
 # @swarm-id/ui
 
 Identity & key management UI for the Swarm network — the trusted-domain SPA that hosts the
-keystore UI and management (it superseded the removed legacy `swarm-ui/` package).
+keystore UI and management.
 
 Design source: Figma file `FavekByQemhpaWZ5KZ6mlU` ("SwarmID MVP Copy").
 

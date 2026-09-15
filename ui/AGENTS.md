@@ -28,6 +28,15 @@ The identity UI is a SvelteKit SPA.
   **on** also opens the `fund.bzz.limo?mocked=true` popup. "Outcome" picks success vs. a failed
   purchase. Settings persist in localStorage (`dev-mock-stamp-*`) and are read by
   `drive-add-dialog.svelte`; production leaves them off.
+- **Dev-only code reaches production code through one seam**, `src/lib/payment/dev-funding.ts`,
+  which `vite build` swaps for `dev-funding.production.ts` (a `pre` plugin in `vite.config.ts` —
+  a `resolve.alias` would never see the specifier, SvelteKit's `$lib` alias resolves it first).
+  Never import `$lib/dev/*` or `@swarm-id/multichain/dev` from anything outside the `/dev` route:
+  `import.meta.env.DEV` only kills the branch, the imports are static and those modules have
+  top-level side effects, so Rollup ships them — the local rail, the anvil cheat codes and the
+  dev faucet key — in every chunk that reaches them. Verify with a build, not by reading: CI
+  greps the built assets for three canaries after `pnpm build` and allows a match only in the
+  `/dev` route's own chunk.
 - **Hex helpers**: byte⇄hex conversion comes from the lib — `uint8ArrayToHex`/`hexToUint8Array`
   from `@snaha/swarm-id` (0x-tolerant, throws on malformed input); `src/lib/crypto/hex.ts` keeps
   only `strip0x`/`prefix0x` to move between bare hex (how the lib and shared records store it)

@@ -73,6 +73,7 @@ with this file.
 ```bash
 pnpm install          # Install dependencies
 pnpm dev              # Identity UI (:5500) + demo (:3500) + bus signaling (:5520)
+pnpm dev:local        # …plus the Bee cluster, both chains and the payment solver
 pnpm build            # Build everything
 pnpm check:all        # All CI checks (format, lint, typecheck, test, knip)
 pnpm clean            # Clean build outputs
@@ -88,6 +89,10 @@ package's own `check:all` in order:
 - **`@swarm-id/eslint-rules`**: `typecheck`
 - **`@snaha/swarm-id`**, **`@swarm-id/multichain`**, **`@swarm-id/signaling`**: `format:check`, `lint`, `typecheck`, `test`
 - **`@swarm-id/ui`**, **`@swarm-id/demo`**: `lint` (includes license headers), `check`, `knip`, `test`
+
+Chain-backed suites are NOT in `check:all` — they need a chain running, and skip themselves
+without one: `pnpm test:fork` (needs `pnpm dev:chain:detach`) and
+`pnpm --filter @swarm-id/ui test:e2e` (needs `pnpm dev:local`).
 
 ## Code Style
 
