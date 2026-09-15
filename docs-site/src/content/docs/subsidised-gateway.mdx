@@ -94,6 +94,12 @@ if (info.canUpload) {
 }
 ```
 
+## What the gateway path ignores
+
+In subsidised mode the upload carries no `pin` and no `tag`, whatever the call passed. Pinning means "keep this on the local node", and the node is the operator's, not the user's: the reference gateway proxy strips `Swarm-Pin` by default, and the public gateway's CORS preflight rejects the header outright, which a browser reports only as `Failed to fetch`. Both options apply as usual when the session uploads with the user's own stamp.
+
+The public gateway at `https://api.gateway.ethswarm.org/` works as a subsidised gateway for development. Its CORS allow-list is short — `Content-Type`, `Swarm-Encrypt`, `Swarm-Postage-Batch-Id`, `Swarm-Postage-Stamp`, `Swarm-Deferred-Upload`, `Swarm-Collection`, `Swarm-Index-Document` — so a request carrying any other Swarm header fails before it leaves the browser. A Bee node of your own allows every Swarm header.
+
 ## Priority Rules
 
 1. **User's own stamp** — Whenever the session resolved one, it is the stamp that is used

@@ -160,6 +160,7 @@ export interface UploadProgress {
 }
 
 export interface UploadOptions {
+  /** Pin on the user's own node. Ignored on a subsidised gateway (#752). */
   pin?: boolean
   encrypt?: boolean
   encryptManifest?: boolean

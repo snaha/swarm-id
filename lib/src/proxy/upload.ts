@@ -113,7 +113,7 @@ export interface UploadDataOptions {
    * (≤ 4096 bytes); larger data throws — pass true instead.
    */
   encryptionKey?: Uint8Array | true
-  /** Pin the uploaded data */
+  /** Pin the uploaded data (stamper mode only; a subsidised gateway never sees it, #752) */
   pin?: boolean
   /** Use deferred upload mode */
   deferred?: boolean
@@ -147,7 +147,7 @@ export interface UploadDataResult {
 export interface UploadSOCOptions {
   /** Encryption key: undefined = plain SOC, Uint8Array = use this key, true = auto-generate */
   encryptionKey?: Uint8Array | true
-  /** Pin the uploaded SOC */
+  /** Pin the uploaded SOC (stamper mode only; a subsidised gateway never sees it, #752) */
   pin?: boolean
   /** Use deferred upload mode */
   deferred?: boolean
@@ -173,7 +173,7 @@ export interface UploadSOCResult {
  * Options for single chunk upload
  */
 export interface UploadChunkOptions {
-  /** Pin the uploaded chunk */
+  /** Pin the uploaded chunk (stamper mode only; a subsidised gateway never sees it, #752) */
   pin?: boolean
   /** Use deferred upload mode */
   deferred?: boolean
@@ -282,7 +282,7 @@ async function uploadStampedChunkViaHttp(
 async function uploadChunkViaSubsidisedGatewayInternal(
   gatewayUrl: string,
   chunkData: Uint8Array,
-  options?: { pin?: boolean; deferred?: boolean },
+  options?: { deferred?: boolean },
 ): Promise<{ reference: string }> {
   const url = `${normalizeUrl(gatewayUrl)}/chunks`
 
@@ -292,9 +292,6 @@ async function uploadChunkViaSubsidisedGatewayInternal(
 
   if (options?.deferred !== undefined) {
     headers["swarm-deferred-upload"] = options.deferred.toString()
-  }
-  if (options?.pin !== undefined) {
-    headers["swarm-pin"] = options.pin.toString()
   }
 
   const response = await fetch(url, {
@@ -594,7 +591,7 @@ async function uploadDataPlain(
 
   if (isSubsidisedTarget(target)) {
     // Subsidised gateway mode
-    const uploadOptions = { pin: options?.pin, deferred: options?.deferred }
+    const uploadOptions = { deferred: options?.deferred }
 
     for (const chunk of chunks) {
       await uploadChunkViaSubsidisedGatewayInternal(
@@ -708,7 +705,7 @@ async function uploadDataEncrypted(
 
   if (isSubsidisedTarget(target)) {
     // Subsidised gateway mode
-    const uploadOptions = { pin: options?.pin, deferred: options?.deferred }
+    const uploadOptions = { deferred: options?.deferred }
 
     for (const chunk of chunksToUpload) {
       await uploadChunkViaSubsidisedGatewayInternal(
@@ -905,9 +902,6 @@ export async function uploadSOC(
     if (options?.deferred !== undefined) {
       headers["swarm-deferred-upload"] = options.deferred.toString()
     }
-    if (options?.pin !== undefined) {
-      headers["swarm-pin"] = options.pin.toString()
-    }
 
     const response = await fetch(url, {
       method: "POST",
@@ -945,9 +939,6 @@ export async function uploadSOC(
     if (tag) headers["swarm-tag"] = tag.toString()
     if (options?.deferred !== undefined) {
       headers["swarm-deferred-upload"] = options.deferred.toString()
-    }
-    if (options?.pin !== undefined) {
-      headers["swarm-pin"] = options.pin.toString()
     }
 
     const response = await fetch(url, {
@@ -990,10 +981,7 @@ export async function uploadChunk(
     return uploadChunkViaSubsidisedGatewayInternal(
       target.gatewayUrl,
       chunkData,
-      {
-        pin: options?.pin,
-        deferred: options?.deferred,
-      },
+      { deferred: options?.deferred },
     )
   } else {
     const { bee, stamper } = target
