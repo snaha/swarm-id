@@ -189,6 +189,17 @@ export interface BatchWriteCoordinatorDeps {
  */
 export const PEER_YIELD_MIN_IDLE_MS = 3000
 
+/**
+ * A `lease-released` reaches a waiter over the bus well before the released
+ * slot's sentinel write is readable from its node, so the scan it wakes often
+ * still reads the old holder (#724). Rather than sleep out a poll interval on
+ * that — or re-ask, which draws a fresh request id nobody can stand down
+ * against, so a second holder yields for the same waiter — the wait re-scans
+ * this many times at this interval, asking nobody.
+ */
+export const ANNOUNCED_RESCAN_INTERVAL_MS = 1500
+export const ANNOUNCED_RESCAN_ROUNDS = 3
+
 /** One slot-wait's poll state. Scoped to the wait rather than the coordinator
  *  because waits overlap: `ensureLease` races this loop against a timeout and
  *  cannot cancel the loser, so a detached wait's timer and its exit must not
@@ -202,14 +213,17 @@ type SlotWaitState = {
    *  is no sleep to wake, and the scan it interrupts already read the state
    *  from before the release. */
   maybeFree: boolean
-  /** Whether the sticky flag has already bought a round. Every round
-   *  re-broadcasts a `lease-request`, and its answer re-arms the flag, so
-   *  skipping the sleep unconditionally turns this into one full acquire per
-   *  bus round-trip — with every round making another holder drop a
-   *  partition. One skip is the mid-acquire case this exists for; a second in
-   *  the same wait means the releases aren't reaching us, and hammering the
-   *  network won't change that. */
-  fastRoundUsed: boolean
+  /** Short re-scans still owed to the announced release: its sentinel write
+   *  may take a few seconds to become readable from this node (#724), and
+   *  asking again in the meantime only makes another holder yield. */
+  rescansLeft: number
+  /** Whether an announcement has already bought its window. Every round past
+   *  the window re-broadcasts a `lease-request`, and its answer would re-arm
+   *  the window, so an unbounded one turns this into one holder dropped per
+   *  bus round-trip. One window is the announced-but-not-yet-readable case
+   *  this exists for; needing a second in the same wait means the releases
+   *  aren't reaching us, and hammering the network won't change that. */
+  rescanWindowUsed: boolean
 }
 
 export class BatchWriteCoordinator {
@@ -695,7 +709,11 @@ export class BatchWriteCoordinator {
     // Fresh state per wait: a wake left over from an earlier one says nothing
     // about this one, and this one's must not be clobbered by an earlier one
     // still running detached.
-    const state: SlotWaitState = { maybeFree: false, fastRoundUsed: false }
+    const state: SlotWaitState = {
+      maybeFree: false,
+      rescansLeft: 0,
+      rescanWindowUsed: false,
+    }
     this.slotWait = state
     try {
       await this.pollForSlot(deadline, epoch, state)
@@ -724,36 +742,47 @@ export class BatchWriteCoordinator {
           this.deps.accountId,
         )
       }
-      // Ask live holders to yield (re-broadcast every round — idempotent),
-      // then sleep the poll interval, waking early on `notifySlotMaybeFree`.
-      this.deps.onSlotWait?.()
-      const skipSleep = state.maybeFree && !state.fastRoundUsed
+      const scanPredatesAnnouncement = state.maybeFree
       state.maybeFree = false
-      if (skipSleep) {
+      if (scanPredatesAnnouncement) {
         // A holder announced a release while we were mid-`acquire()`, so the
         // scan above ran against the state BEFORE it let go. Go straight back
         // round rather than sleeping out an interval we already know is stale.
-        // Not a busy loop: only a real peer announcement sets the flag, this
-        // spends it once per wait, and every iteration pays a full network
+        // Not a busy loop: only a real peer announcement sets the flag, it is
+        // armed once per wait, and every iteration pays a full network
         // acquire, bounded by `deadline`.
-        state.fastRoundUsed = true
+      } else if (state.rescansLeft > 0) {
+        // The scan ran AFTER the announcement and still saw the old holder:
+        // the sentinel is on its way, not yet readable here. Look again
+        // shortly, and ask nobody — a repeat ask is a fresh request id, and
+        // the holder that already yielded cannot stand the others down
+        // against it (#724).
+        state.rescansLeft--
+        await this.sleepUntilWoken(state, ANNOUNCED_RESCAN_INTERVAL_MS)
       } else {
-        await new Promise<void>((resolve) => {
-          const wake = () => {
-            clearTimeout(timer)
-            state.wake = undefined
-            // Consumed by this wake — it is the reason we are awake.
-            state.maybeFree = false
-            resolve()
-          }
-          const timer = setTimeout(wake, LEASE_REFRESH_MS)
-          state.wake = wake
-        })
+        // Ask live holders to yield (re-broadcast every round — idempotent),
+        // then sleep the poll interval, waking early on `notifySlotMaybeFree`.
+        this.deps.onSlotWait?.()
+        await this.sleepUntilWoken(state, LEASE_REFRESH_MS)
       }
       // Checked between the sleep and the next acquire: a fresh `acquire()`
       // call would capture the bumped epoch as its own baseline and commit.
       if (this.leaseEpoch !== epoch) return
     }
+  }
+
+  private sleepUntilWoken(state: SlotWaitState, ms: number): Promise<void> {
+    return new Promise<void>((resolve) => {
+      const wake = () => {
+        clearTimeout(timer)
+        state.wake = undefined
+        // Consumed by this wake — it is the reason we are awake.
+        state.maybeFree = false
+        resolve()
+      }
+      const timer = setTimeout(wake, ms)
+      state.wake = wake
+    })
   }
 
   /**
@@ -1195,7 +1224,7 @@ export class BatchWriteCoordinator {
     )
     // `teardown()` can land during the release write above; it has already
     // announced this partition itself, and a second `lease-released` would
-    // only burn a waiter's sticky fast round against a slot it just took.
+    // only burn a waiter's one re-scan window against a slot it just took.
     if (yieldedPartition !== undefined && !this.disposed) {
       this.deps.onLeaseReleased?.(yieldedPartition, requestId)
     }
@@ -1209,7 +1238,13 @@ export class BatchWriteCoordinator {
   notifySlotMaybeFree(): void {
     const state = this.slotWait
     if (!state) return
-    state.maybeFree = true
+    if (!state.rescanWindowUsed) {
+      state.rescanWindowUsed = true
+      state.maybeFree = true
+      state.rescansLeft = ANNOUNCED_RESCAN_ROUNDS
+    }
+    // A later announcement still cuts the current sleep short; it just buys
+    // no further rounds (see `SlotWaitState.rescanWindowUsed`).
     state.wake?.()
   }
 

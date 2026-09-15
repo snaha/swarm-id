@@ -44,6 +44,8 @@ vi.mock("../utils/batch-write-lock", () => ({
 }))
 
 import {
+  ANNOUNCED_RESCAN_INTERVAL_MS,
+  ANNOUNCED_RESCAN_ROUNDS,
   BatchWriteCoordinator,
   PartitionContendedError,
   PEER_YIELD_MIN_IDLE_MS,
@@ -263,7 +265,12 @@ type Internals = {
   acquireWithSlotWait: () => Promise<void>
   pauseLeaseBackgroundWork: () => void
   slotWait:
-    | { wake?: () => void; maybeFree: boolean; fastRoundUsed: boolean }
+    | {
+        wake?: () => void
+        maybeFree: boolean
+        rescansLeft: number
+        rescanWindowUsed: boolean
+      }
     | undefined
 }
 
@@ -1715,21 +1722,85 @@ describe("BatchWriteCoordinator — bus-accelerated leases (docs/Account-Bus.md)
     }
   })
 
-  // Every round re-broadcasts a `lease-request`, and its answer re-arms the
-  // flag — so an unconditional skip is one full acquire per bus round-trip,
-  // each one making another holder drop its partition. The skip is what the
-  // mid-acquire window costs, once.
-  it("skips the poll sleep at most once per wait", async () => {
+  // The answer to a request lands over the bus well before the released
+  // slot's sentinel write is readable, so the round it wakes often reads the
+  // OLD holder and ends read-only again (#724). Sleeping out the poll interval
+  // on that is the 17 s outlier; re-asking is worse — a fresh request id that
+  // nobody can stand down against, so a second holder yields too.
+  it("re-scans a stale read after an announced release without asking again", async () => {
     vi.useFakeTimers()
     try {
-      const gate = makeGatedLease()
-      leaseController.lease = gate.lease
+      const leaseOpts: Parameters<typeof makeLease>[0] = {
+        acquireResult: {
+          partition: undefined,
+          partitionCount: 4,
+          isReadOnly: true,
+        },
+      }
+      const lease = makeLease(leaseOpts)
+      leaseController.lease = lease
+      const onSlotWait = vi.fn()
       const coordinator = new BatchWriteCoordinator(
         makeDeps({
           stamper: makeStamper(
             [],
           ) as unknown as BatchWriteCoordinatorDeps["stamper"],
           mode: "oneshot",
+          onSlotWait,
+        }),
+      )
+      const internals = coordinator as unknown as Internals
+
+      let settled = false
+      const inFlight = internals.acquireWithSlotWait().then(() => {
+        settled = true
+      })
+      await vi.advanceTimersByTimeAsync(0)
+      expect(lease.acquire).toHaveBeenCalledTimes(1)
+      expect(onSlotWait).toHaveBeenCalledTimes(1)
+
+      // A holder answered: the wake re-scans at once, and reads the old holder.
+      coordinator.notifySlotMaybeFree()
+      await vi.advanceTimersByTimeAsync(0)
+      expect(lease.acquire).toHaveBeenCalledTimes(2)
+      expect(settled).toBe(false)
+
+      // The sentinel is readable a moment later: the next short re-scan finds
+      // the slot, and no second request went out in between.
+      leaseOpts.acquireResult = {
+        partition: 2,
+        partitionCount: 4,
+        localCounter: new Uint32Array(8),
+        isReadOnly: false,
+      }
+      await vi.advanceTimersByTimeAsync(ANNOUNCED_RESCAN_INTERVAL_MS)
+      expect(lease.acquire).toHaveBeenCalledTimes(3)
+      expect(settled).toBe(true)
+      expect(onSlotWait).toHaveBeenCalledTimes(1)
+      await inFlight
+      expect(coordinator.currentPartition).toBe(2)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  // Each round re-broadcasts a `lease-request`, and its answer re-arms the
+  // wake — so a window per announcement would be one holder dropped per bus
+  // round-trip. One announcement buys one bounded window per wait; after it,
+  // only the poll interval (and its re-ask) moves the wait on.
+  it("the re-scan window is bounded and bought once per wait", async () => {
+    vi.useFakeTimers()
+    try {
+      const gate = makeGatedLease()
+      leaseController.lease = gate.lease
+      const onSlotWait = vi.fn()
+      const coordinator = new BatchWriteCoordinator(
+        makeDeps({
+          stamper: makeStamper(
+            [],
+          ) as unknown as BatchWriteCoordinatorDeps["stamper"],
+          mode: "oneshot",
+          onSlotWait,
         }),
       )
       const internals = coordinator as unknown as Internals
@@ -1738,20 +1809,33 @@ describe("BatchWriteCoordinator — bus-accelerated leases (docs/Account-Bus.md)
       await vi.advanceTimersByTimeAsync(0)
       expect(gate.acquire).toHaveBeenCalledTimes(1)
 
-      // Round 1: announced while mid-acquire — the scan that just ran was
-      // stale, so the sleep is skipped and round 2 starts at once.
+      // Announced while mid-acquire — the scan that just ran was stale, so
+      // round 2 starts at once.
       coordinator.notifySlotMaybeFree()
       await gate.letGo()
       expect(gate.acquire).toHaveBeenCalledTimes(2)
+      // Nothing was asked yet: the announcement pre-empted round 1's ask.
+      expect(onSlotWait).not.toHaveBeenCalled()
 
-      // Round 2: announced the same way, but this wait has spent its skip.
+      // Announced the same way again: this wait has spent its window, so the
+      // remaining short re-scans run out on the clock, then the poll resumes.
       coordinator.notifySlotMaybeFree()
       await gate.letGo()
       expect(gate.acquire).toHaveBeenCalledTimes(2)
+      for (let round = 3; round <= 2 + ANNOUNCED_RESCAN_ROUNDS; round++) {
+        await vi.advanceTimersByTimeAsync(ANNOUNCED_RESCAN_INTERVAL_MS)
+        expect(gate.acquire).toHaveBeenCalledTimes(round)
+        await gate.letGo()
+      }
+      // The window ran out on a stale read: the poll resumes, ask included.
+      expect(onSlotWait).toHaveBeenCalledTimes(1)
+      const exhausted = 2 + ANNOUNCED_RESCAN_ROUNDS
 
       // Only the poll interval moves it on now.
+      await vi.advanceTimersByTimeAsync(ANNOUNCED_RESCAN_INTERVAL_MS)
+      expect(gate.acquire).toHaveBeenCalledTimes(exhausted)
       await vi.advanceTimersByTimeAsync(LEASE_REFRESH_MS)
-      expect(gate.acquire).toHaveBeenCalledTimes(3)
+      expect(gate.acquire).toHaveBeenCalledTimes(exhausted + 1)
 
       coordinator.teardown()
       await gate.letGo()

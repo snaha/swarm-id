@@ -340,10 +340,15 @@ Each landed as its own PR chain, in this order:
    The waiter's wake is **sticky for one round** (#582): the answer usually lands during the
    `acquire()` at the top of the poll loop — it is a reply to the request that loop
    broadcast one line earlier — where there is no sleep to wake and the scan it interrupts
-   read the state from before the release. The flag lives on a per-wait state object, so a
-   wait left running detached by `ensureLease`'s timeout race cannot clear the live one's,
-   and it skips at most one sleep per wait (each round re-broadcasts, so an unconditional
-   skip would be one acquire per bus round-trip).
+   read the state from before the release. The announcement also outruns the released
+   slot's sentinel write, so the round it wakes often still reads the old holder (#724); the
+   wait then re-scans a few times at a short interval (`ANNOUNCED_RESCAN_INTERVAL_MS` ×
+   `ANNOUNCED_RESCAN_ROUNDS`) **without re-asking** — a repeat ask is a fresh request id the
+   holder that already yielded cannot stand the others down against, so a second one would
+   yield for the same waiter. The state lives on a per-wait object, so a wait left running
+   detached by `ensureLease`'s timeout race cannot clear the live one's, and one announcement
+   buys one window per wait (each round past it re-broadcasts, so an unbounded window would
+   be one holder dropped per bus round-trip).
 
 5. **The SwarmID tab as a bus peer** (#608, #610, #631): it publishes a delta on every account
    mutation, and folds a peer's into **shared storage**
@@ -392,7 +397,7 @@ Each landed as its own PR chain, in this order:
   | --------------------- | ------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
   | `lease-request`       | yes                | an idle holder releases its lane — two stamped Swarm writes — and re-acquires on its next upload. **The only durable cost.**                                                        |
   | `lease-claim`         | yes                | stands other holders down for that round; the waiter falls back to its 10 s poll                                                                                                    |
-  | `lease-released`      | yes                | wakes a waiter early: one extra read round, and #593 spends the sticky wake once                                                                                                    |
+  | `lease-released`      | yes                | wakes a waiter early: one extra read round, and one re-scan window per wait (#593, #724)                                                                                            |
   | `presence`            | yes                | the receiver stamps its own clock, so a replay keeps a departed device in the rival set for the 3-minute window — one absent intent read, and indefinitely if replayed on a timer\* |
   | `account-delta`       | yes                | inert up to the one bounded echo described above\*                                                                                                                                  |
   | `utilization-updated` | **no**             | published `localOnly`, so it never leaves the device and a relay never sees it                                                                                                      |
