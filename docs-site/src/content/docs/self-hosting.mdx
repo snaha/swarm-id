@@ -1,0 +1,56 @@
+---
+title: Self-Hosting the Identity UI
+description: Serve Swarm ID same-site with your dApp, and what that costs
+---
+
+The identity UI is a static SvelteKit build under Apache-2.0, and nothing in it is bound
+to `swarm-id.snaha.net`. A dApp can serve its own copy. The reason to do it is the browser's
+notion of **site**: a dApp on `app.example.com` embedding an identity UI on
+`id.example.com` is same-site, so the proxy iframe reads the identity origin's first-party
+storage directly. No storage partitioning, no popup handover, no third browser context on
+first run. This is how the canonical deployment already runs: `swarm-demo.snaha.net`
+embeds `swarm-id.snaha.net`, both under `snaha.net`.
+
+## What it takes
+
+1. Build `ui/` with `BASE_PATH` set to the path you serve it from (the hosted deployments
+   use `/id`), and `PUBLIC_BUS_SIGNALING_URL` pointing at a
+   [signaling server](../account-bus/) you run, or leave it unset to run without
+   cross-device sync.
+2. Serve the build from a subdomain of your dApp's site, over HTTPS, with the same
+   registrable domain. Ports do not affect site; the scheme and the registrable domain do.
+3. Point your `SwarmIdClient` at it with `iframeOrigin`.
+4. If you use a subsidised gateway or your own Bee node, allow the **identity origin** in
+   its CORS configuration, not the dApp's: the iframe is what uploads. See
+   [Using Your Own Bee Node](../own-bee-node/).
+
+## What it keeps
+
+The property that makes the design honest survives intact. A different **origin** keeps
+its own storage, so the dApp's JavaScript still cannot read the seed. Passkeys registered
+on the identity subdomain work from the dApp under one RP ID.
+
+## What it costs
+
+- **You become the identity provider.** Passkeys bind to the RP ID, so accounts created on
+  your origin are different credentials from ones on `swarm-id.snaha.net`. A user cannot
+  bring an existing Swarm ID to your app, or take the one they made with you elsewhere.
+  Recovery phrases still export and import, but that is a manual migration, not a shared
+  identity.
+- **Backup and recovery are yours.** Every support question about a lost account lands
+  with you.
+- **You track a security-critical fork.** Seed vaults and key derivation move fast in this
+  repository. Bugs there lose data irrecoverably, and a copy that falls behind does not get
+  the fixes.
+
+Weigh the onboarding win against that ownership downgrade rather than assuming it wins.
+For a dApp whose users already have a Swarm ID, or who will use several dApps, the hosted
+identity is the better answer; the partitioned path works on every current browser, and
+the connect popup is one window.
+
+## What it does not change
+
+Nothing about the data. Identity and storage are separate layers: ciphertext goes from the
+browser to the Swarm network through a Bee API, addressed by content hash and kept alive
+by the user's postage batch. Gateways are entry points, not storage. Self-hosting the
+identity UI moves where the seed lives; the blobs are already where they should be.

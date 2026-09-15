@@ -60,7 +60,11 @@ await client.initialize()
 // The iframe will show a connect/disconnect button automatically
 
 // 3b. Option B: Manual authentication with connect()
-// Opens the authentication page in a new window/tab (useful for custom UI)
+// Opens the authentication page in a new window/tab (useful for custom UI).
+// Works whether or not the browser partitions the iframe's storage: the
+// client picks the transport. Keep the iframe mounted for the life of the
+// page — destroying it (say, by unmounting its container on sign-in) leaves
+// the popup with nothing to hand the session to.
 await client.connect()
 
 // 4. Read current connection state synchronously
@@ -112,11 +116,14 @@ const result = await client.uploadData(data)
 // Upload with encryption
 const result = await client.uploadData(data, { encrypt: true })
 
-// Upload with progress tracking
-const result = await client.uploadData(data, {}, (progress) => {
-  console.log(`${progress.percent}% uploaded`)
+// Upload with progress tracking: `onProgress` is an upload option, and
+// progress is counted in chunks
+const result = await client.uploadData(data, {
+  onProgress: (progress) => console.log(`${progress.processed}/${progress.total} chunks`),
 })
 ```
+
+Retrieve what `uploadData` stored with `downloadData`, or from a gateway at `/bytes/<reference>`. It is raw bytes with no manifest, so `downloadFile` and `/bzz/<reference>/` cannot resolve it.
 
 ### Download Data
 
@@ -130,6 +137,8 @@ const data = await client.downloadData(encryptedReference)
 
 ### File Operations
 
+`uploadFile` wraps the bytes in a manifest that carries the filename, so its reference is read back with `downloadFile`, or from a gateway at `/bzz/<reference>/`. The two pairs do not cross.
+
 ```typescript
 // Upload a file
 const result = await client.uploadFile(file, 'myfile.txt')
@@ -138,6 +147,10 @@ const result = await client.uploadFile(file, 'myfile.txt')
 const fileData = await client.downloadFile(reference)
 console.log(fileData.name, fileData.data)
 ```
+
+## A batch you were given
+
+A postage batch (a **drive** in the identity UI) is not an identity. If someone hands you a batch id and the private key that owns it, as hackathon gift codes do, create or sign in to a Swarm ID however you like, then attach the batch: **Storage → Add drive → Use existing batch**, with the batch id and the signer key. From then on every dApp the account connects can upload with it. On a new device, an existing account is restored from its recovery phrase; the batch comes back with it.
 
 ## Local Development
 

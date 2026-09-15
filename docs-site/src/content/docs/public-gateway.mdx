@@ -1,0 +1,54 @@
+---
+title: The Public Gateway
+description: What api.gateway.ethswarm.org offers a client, and what it does not
+---
+
+The Swarm Foundation runs a public gateway that any client can read from and, within
+limits, write through. Swarm ID uses it as the default Bee endpoint and as the value most
+dApps pass for `subsidisedGatewayUrl` during development. It is not a Bee node, and four of
+the six teams at one hackathon lost time finding that out one endpoint at a time. This page
+is the list.
+
+## Two hosts, two different things
+
+| Host                               | What it is                                                                                                | Unresolvable address                                          | Uploads  |
+| ---------------------------------- | --------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------- | -------- |
+| `https://api.gateway.ethswarm.org` | The **API** gateway: a proxy in front of Bee nodes, with Bee's API paths. This is what Swarm ID talks to. | `400` / `404`                                                 | accepted |
+| `https://gateway.ethswarm.org`     | The **web** gateway: a website for browsing content.                                                      | `200` with an HTML shell, for any address, all-zeros included | `405`    |
+
+Verification links, health checks and anything a program reads belong on the API gateway.
+A client that reads the web gateway cannot tell a missing reference from a found one: both
+are a 200 with `text/html`.
+
+## What the API gateway answers
+
+Measured on 2026-09-15; the gateway is operated by the Swarm Foundation and may change.
+
+| Request                                            | Answer                                                                                                                                                                               |
+| -------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `POST /bytes` or `POST /bzz` with no stamp headers | `201`. The gateway stamps the upload with **its own** batch. This is what `subsidisedGatewayUrl` relies on.                                                                          |
+| `POST /bytes` with `swarm-postage-batch-id`        | `201`, but the id is **ignored** and the gateway's batch is spent. A user's own batch cannot be used this way.                                                                       |
+| `POST /bytes` with `swarm-postage-stamp`           | `400`: the gateway insists on `swarm-postage-batch-id`, which it then ignores.                                                                                                       |
+| `POST /chunks` with an envelope-stamped chunk      | `201`, and the **user's** batch is spent. The only way to spend your own batch through the gateway, and what Swarm ID does for every upload in `user-stamp` mode.                    |
+| `GET /bytes/<reference>`                           | The raw bytes an `uploadData` call stored.                                                                                                                                           |
+| `GET /bzz/<reference>/`                            | Resolves a **manifest**: what `uploadFile` and folder uploads produce. A raw-bytes reference here answers `308` to the trailing-slash form and then `404`.                           |
+| `GET /stamps`, `GET /stamps/<id>`                  | `404`. There are no stamp endpoints, so `getPostageBatch()` cannot refresh `usable` or `exists` from the node here and returns the stored snapshot.                                  |
+| `GET /node`                                        | `404`. `getNodeInfo()` fails against the public gateway; see below.                                                                                                                  |
+| CORS preflight                                     | A short allow-list. `Swarm-Pin`, `Swarm-Tag` and the ACT headers are refused, which a browser reports only as `Failed to fetch`. Swarm ID sends none of them on the subsidised path. |
+
+## What that means for a dApp
+
+- **Do not gate anything on `getNodeInfo()`.** It exists to detect a dev-mode Bee node,
+  where deferred uploads are required. On the public gateway it fails, and the right
+  response is to keep the default, which is what the demo does. Nothing about `deferred`
+  is needed against the public gateway.
+- **Pair the retrieval path with the upload method.** `uploadData` → `/bytes/<ref>` or
+  `downloadData`; `uploadFile` → `/bzz/<ref>/` or `downloadFile`. See the
+  [API reference](../api/) for the same rule on each method.
+- **Never put an encrypted reference in a gateway URL.** The 128-hex reference from an
+  encrypted upload contains the decryption key. A URL sends it to a third-party server,
+  which is the one place guaranteed to be logged. Fetch encrypted content through
+  `downloadData`, which decrypts in the browser.
+- **It is shared and rate limited**, on the operator's terms. Use it for development, demos
+  and hackathons; run your own [subsidised gateway](../subsidised-gateway/) or expect users
+  to hold a drive before shipping.

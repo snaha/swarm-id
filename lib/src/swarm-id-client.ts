@@ -1044,6 +1044,10 @@ export class SwarmIdClient {
   /**
    * Gets information about the Bee node configuration.
    *
+   * Needs a real Bee node: the public gateway has no `/node` endpoint, so this
+   * rejects there. Do not gate uploads on it — it exists to detect a dev-mode
+   * node, where deferred uploads are required.
+   *
    * This method retrieves the current Bee node's operating mode and feature flags.
    * Use this to determine if deferred uploads are required (dev mode) or if direct
    * uploads are available (production modes).
@@ -1100,6 +1104,10 @@ export class SwarmIdClient {
 
   /**
    * Uploads raw binary data to the Swarm network.
+   *
+   * Read the returned reference back with {@link downloadData}, or from a
+   * gateway at `/bytes/<reference>`. It carries no manifest, so
+   * {@link downloadFile} and `/bzz/` cannot resolve it.
    *
    * The data is uploaded using the authenticated user's postage stamp.
    * Progress can be tracked via the optional callback.
@@ -1203,7 +1211,9 @@ export class SwarmIdClient {
   }
 
   /**
-   * Downloads raw binary data from the Swarm network.
+   * Downloads raw binary data from the Swarm network: the counterpart of
+   * {@link uploadData}. Pass an encrypted (128-hex) reference here rather
+   * than putting it in a gateway URL — it contains the decryption key.
    *
    * @param reference - The Swarm reference (hash) of the data to download.
    *                    Can be 64 hex chars (32 bytes) or 128 hex chars (64 bytes for encrypted)
@@ -1292,7 +1302,9 @@ export class SwarmIdClient {
   // ============================================================================
 
   /**
-   * Uploads a file to the Swarm network.
+   * Uploads a file to the Swarm network, wrapped in a manifest that carries
+   * its name and content type. Read the reference back with
+   * {@link downloadFile}, or from a gateway at `/bzz/<reference>/`.
    *
    * Accepts either a File object (from file input) or raw Uint8Array data.
    * When using a File object, the filename is automatically extracted unless
@@ -1414,7 +1426,10 @@ export class SwarmIdClient {
   }
 
   /**
-   * Downloads a file from the Swarm network.
+   * Downloads a file from the Swarm network: the counterpart of
+   * {@link uploadFile}. It resolves a manifest, so a reference produced by
+   * {@link uploadData} fails here inside the manifest parser; use
+   * {@link downloadData} for those.
    *
    * Returns both the file data and its original filename (if available).
    * For manifest references, an optional path can be specified to retrieve

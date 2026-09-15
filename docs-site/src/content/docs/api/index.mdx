@@ -446,19 +446,19 @@ Returns information about the postage stamp associated with the connected identi
 
 **Returns:** `Promise<PostageBatch | undefined>` - The postage batch info, or `undefined` if none is configured
 
-| Property        | Type                  | Description                      |
-| --------------- | --------------------- | -------------------------------- |
-| `batchID`       | `string`              | The batch ID (64 hex characters) |
-| `utilization`   | `number`              | Current utilization percentage   |
-| `usable`        | `boolean`             | Whether the batch is usable      |
-| `label`         | `string`              | Human-readable label             |
-| `depth`         | `number`              | Batch depth                      |
-| `amount`        | `string`              | Batch amount                     |
-| `bucketDepth`   | `number`              | Bucket depth                     |
-| `blockNumber`   | `number`              | Block number when created        |
-| `immutableFlag` | `boolean`             | Whether the batch is immutable   |
-| `exists`        | `boolean`             | Whether the batch exists         |
-| `batchTTL`      | `number \| undefined` | Time-to-live in seconds          |
+| Property        | Type                  | Description                                                                                                                                                                                                      |
+| --------------- | --------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `batchID`       | `string`              | The batch ID (64 hex characters)                                                                                                                                                                                 |
+| `utilization`   | `number`              | Bee's fill count of the fullest bucket, **not** a percentage. Usage is `utilization / 2^(depth - bucketDepth)`; a batch stops accepting uploads when one bucket fills, before the nominal `2^depth × 4096` bytes |
+| `usable`        | `boolean`             | Whether the batch is usable                                                                                                                                                                                      |
+| `label`         | `string`              | Human-readable label                                                                                                                                                                                             |
+| `depth`         | `number`              | Batch depth                                                                                                                                                                                                      |
+| `amount`        | `string`              | Batch amount                                                                                                                                                                                                     |
+| `bucketDepth`   | `number`              | Bucket depth                                                                                                                                                                                                     |
+| `blockNumber`   | `number`              | Block number when created                                                                                                                                                                                        |
+| `immutableFlag` | `boolean`             | Whether the batch is immutable                                                                                                                                                                                   |
+| `exists`        | `boolean`             | Whether the batch exists                                                                                                                                                                                         |
+| `batchTTL`      | `number \| undefined` | Time-to-live in seconds                                                                                                                                                                                          |
 
 **Throws:**
 
@@ -506,7 +506,7 @@ if (connected) {
 
 ### `getNodeInfo()`
 
-Gets information about the Bee node configuration.
+Gets information about the Bee node configuration. Needs a real Bee node: the [public gateway](../public-gateway/) has no `/node` endpoint and this call fails there. Do not gate uploads on it; its purpose is to detect a dev-mode node, where deferred uploads are required.
 
 This method retrieves the current Bee node's operating mode and feature flags. Use this to determine if deferred uploads are required (dev mode) or if direct uploads are available (production modes).
 
@@ -543,7 +543,7 @@ if (nodeInfo.beeMode === 'dev') {
 
 ### `uploadData(data, options?, requestOptions?)`
 
-Uploads raw binary data to the Swarm network.
+Uploads raw binary data to the Swarm network. The reference it returns is read back with [`downloadData`](#downloaddatareference-options-requestoptions), or from a gateway at `/bytes/<reference>`; it carries no manifest, so `downloadFile` and `/bzz/` cannot resolve it.
 
 The data is uploaded using the authenticated user's postage stamp. Progress can be tracked via the `options.onProgress` callback.
 
@@ -593,7 +593,7 @@ console.log('Reference:', result.reference)
 
 ### `downloadData(reference, options?, requestOptions?)`
 
-Downloads raw binary data from the Swarm network.
+Downloads raw binary data from the Swarm network: the counterpart of [`uploadData`](#uploaddatadata-options-requestoptions). Pass an encrypted (128-hex) reference here rather than putting it in a gateway URL, since the reference contains the decryption key.
 
 **Parameters:**
 
@@ -634,7 +634,7 @@ console.log('Downloaded:', text)
 
 ### `uploadFile(file, name?, options?, requestOptions?)`
 
-Uploads a file to the Swarm network.
+Uploads a file to the Swarm network, wrapped in a manifest that carries its name and content type. The reference is read back with [`downloadFile`](#downloadfilereference-path-options-requestoptions), or from a gateway at `/bzz/<reference>/`.
 
 Accepts either a File object (from file input) or raw Uint8Array data. When using a File object, the filename is automatically extracted unless explicitly overridden.
 
@@ -675,7 +675,7 @@ const result = await client.uploadFile(data, 'document.pdf')
 
 ### `downloadFile(reference, path?, options?, requestOptions?)`
 
-Downloads a file from the Swarm network.
+Downloads a file from the Swarm network: the counterpart of [`uploadFile`](#uploadfilefile-name-options-requestoptions). It resolves a manifest, so a reference from `uploadData` fails here inside the manifest parser; use `downloadData` for those.
 
 Returns both the file data and its original filename (if available). For manifest references, an optional path can be specified to retrieve a specific file from the manifest.
 
