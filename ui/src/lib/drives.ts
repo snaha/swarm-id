@@ -1,7 +1,12 @@
 // Copyright 2026 The Swarm Authors. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 import { RedundancyLevel, Utils } from '@ethersphere/bee-js'
-import { MIN_USABLE_BATCH_DEPTH, PARTITION_COUNT, type PostageStamp } from '@snaha/swarm-id'
+import {
+  MIN_USABLE_BATCH_DEPTH,
+  PARTITION_COUNT,
+  type PostageStamp,
+  remainingLifespanSeconds,
+} from '@snaha/swarm-id'
 
 /**
  * Pure presentation helpers that turn a {@link PostageStamp} (a "drive") into
@@ -193,23 +198,7 @@ export function driveDisplayName(drive: PostageStamp): string {
   return drive.name?.trim() || `Drive ${drive.batchID.toHex().slice(0, FALLBACK_NAME_HEX_CHARS)}`
 }
 
-/**
- * The drive's remaining lifespan (seconds) at `now`: the stored `batchTTL`
- * snapshot aged by the time elapsed since it was measured — `updatedAt` (set
- * whenever a node operation rewrites `batchTTL`), else `createdAt` (purchase /
- * attach measures it too). Negative once the drive has expired; `undefined`
- * when the TTL was never known.
- */
-export function remainingLifespanSeconds(
-  drive: PostageStamp,
-  now = Date.now(),
-): number | undefined {
-  if (drive.batchTTL === undefined) {
-    return undefined
-  }
-  const measuredAt = drive.updatedAt ?? drive.createdAt
-  return drive.batchTTL - Math.max(0, Math.floor((now - measuredAt) / MS_PER_SECOND))
-}
+export { remainingLifespanSeconds }
 
 /** Format an epoch-ms instant as `YYYY-MM-DD` (the design's date style). Formats
  * in UTC so a date-only label is stable across timezones (and doesn't shift a day

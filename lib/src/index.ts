@@ -633,3 +633,8 @@ export {
   stampsReachableByApp,
   collectAccountStampBatchIds,
 } from "./utils/postage-stamp-association"
+export {
+  remainingLifespanSeconds,
+  isStampExpired,
+  type StampLifetimeFields,
+} from "./utils/stamp-lifespan"

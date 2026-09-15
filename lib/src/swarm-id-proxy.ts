@@ -99,6 +99,7 @@ import {
   resolveStampForApp,
   stampsReachableByApp,
 } from "./utils/postage-stamp-association"
+import { isStampExpired } from "./utils/stamp-lifespan"
 import {
   accountStateToDeviceView,
   foldAccount,
@@ -382,6 +383,12 @@ export class SwarmIdProxy {
   private presence = new PresenceTracker()
   private presenceTimer: ReturnType<typeof setInterval> | undefined
   private subsidisedGatewayUrl: string | undefined
+  /**
+   * The resolved stamp's stored lifetime has run out (#745). Kept beside
+   * `postageBatchId` so every consumer of "is there a usable stamp" reads one
+   * answer; recomputed wherever the stamp is.
+   */
+  private stampExpired = false
   /**
    * The write path (lock + partition lease + stamp flush) for the current
    * account+batch. Constructed in `initializeStamper` once the stamper and
@@ -702,6 +709,7 @@ export class SwarmIdProxy {
 
     this.postageBatchId = nextBatchId
     this.signerKey = nextSignerKey
+    this.stampExpired = stamp !== undefined && isStampExpired(stamp)
     this.stamper = undefined
     this.stamperAccountFingerprint = undefined
 
@@ -736,10 +744,12 @@ export class SwarmIdProxy {
     if (stamp) {
       this.postageBatchId = stamp.batchID.toHex()
       this.signerKey = stamp.signerKey.toHex()
+      this.stampExpired = isStampExpired(stamp)
       await this.initializeStamper(stamp.depth)
     } else {
       this.postageBatchId = undefined
       this.signerKey = undefined
+      this.stampExpired = false
       this.stamper = undefined
       this.stamperAccountFingerprint = undefined
     }
@@ -2344,10 +2354,12 @@ export class SwarmIdProxy {
       if (stamp) {
         this.postageBatchId = stamp.batchID.toHex()
         this.signerKey = stamp.signerKey.toHex()
+        this.stampExpired = isStampExpired(stamp)
         await this.initializeStamper(stamp.depth)
       } else {
         this.postageBatchId = undefined
         this.signerKey = undefined
+        this.stampExpired = false
       }
       return
     }
@@ -3199,6 +3211,13 @@ export class SwarmIdProxy {
     if (this.isSubsidisedModeActive()) {
       return
     }
+    // Refuse here, before the write coordinator: its first stamped write is
+    // the lease claim, and a refused claim reads as partition contention (#745).
+    if (this.stampExpired) {
+      throw new Error(
+        "The account's drive has expired. Renew it or add another in Swarm ID before uploading.",
+      )
+    }
     // NB: the multi-device "all partitions held" case is NOT checked here.
     // It's deferred to the coordinator's `withWrite`, which runs a fresh
     // acquisition attempt (with slot-wait) under the write lock and then throws
@@ -3216,7 +3235,8 @@ export class SwarmIdProxy {
    */
   private isSubsidisedModeActive(): boolean {
     return (
-      (!this.postageBatchId || !this.signerKey) && !!this.subsidisedGatewayUrl
+      (!this.postageBatchId || !this.signerKey || this.stampExpired) &&
+      !!this.subsidisedGatewayUrl
     )
   }
 
@@ -3318,7 +3338,12 @@ export class SwarmIdProxy {
     // - Subsidised mode is the fallback when no user stamp is usable.
     let uploadMode: "user-stamp" | "subsidised" | "unavailable" = "unavailable"
     if (this.authenticated && this.appSecret) {
-      if (this.postageBatchId && this.signerKey && this.stamper) {
+      if (
+        this.postageBatchId &&
+        this.signerKey &&
+        this.stamper &&
+        !this.stampExpired
+      ) {
         uploadMode = "user-stamp"
       } else if (this.subsidisedGatewayUrl) {
         uploadMode = "subsidised"
@@ -3353,6 +3378,7 @@ export class SwarmIdProxy {
   private uploadUnavailableReason(): UploadUnavailableReason | undefined {
     if (!this.authenticated || !this.appSecret) return undefined
     if (!this.postageBatchId || !this.signerKey) return "no-stamp"
+    if (this.stampExpired) return "stamp-expired"
     // The stamp resolved and the write path still did not build:
     // `initializeStamper` logs and returns rather than throwing, so this is the
     // only place that difference survives to the dApp.

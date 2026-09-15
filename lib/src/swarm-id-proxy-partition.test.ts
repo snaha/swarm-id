@@ -629,6 +629,30 @@ describe("SwarmIdProxy partitioned write enablement", () => {
     expect(last.uploadUnavailableReason).toBe("stamper-failed")
   })
 
+  // #745: an expired drive still resolves, and the stamper still builds from
+  // its stored record, so nothing on that path said it could not stamp. The
+  // first refused write then read as partition contention on a real phone.
+  it("reports stamp-expired when the only drive's lifetime has run out", async () => {
+    const account = makeSyncedAccount()
+    const [stamp] = account.postageStamps
+    const challenge = await startPartitionedConnect()
+    await sendSetSecret(challenge, {
+      account: serializeSyncedAccount({
+        ...account,
+        postageStamps: [
+          { ...stamp, batchTTL: 60, updatedAt: Date.now() - 120_000 },
+        ],
+      }),
+    })
+
+    const infos = messagesOfType("connectionInfoChanged")
+    const last = infos[infos.length - 1]
+    expect(last.storagePartitioned).toBe(true)
+    expect(last.canUpload).toBe(false)
+    expect(last.uploadMode).toBe("unavailable")
+    expect(last.uploadUnavailableReason).toBe("stamp-expired")
+  })
+
   it("becomes a first-class writer when the payload carries the synced account", async () => {
     const account = makeSyncedAccount()
     const challenge = await startPartitionedConnect()

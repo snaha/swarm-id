@@ -158,8 +158,9 @@ async function updatePostageStampInfo(generation: number) {
       }
       // A freshly bought batch reports usable=false until it warms up on
       // chain (~30s) — re-poll until it flips so the UI catches up without
-      // a reload.
-      if (batch.usable) {
+      // a reload. An expired batch is unusable for good: nothing to wait for.
+      const expired = batch.batchTTL !== undefined && batch.batchTTL <= 0
+      if (batch.usable || expired) {
         stampPollAttempts = 0
       } else if (stampPollAttempts < STAMP_USABLE_POLL_MAX_ATTEMPTS) {
         stampPollAttempts++
@@ -191,6 +192,8 @@ function uploadUnavailableDescription(info: ConnectionInfo): string {
       return 'this account has no drive, so there is no postage stamp to upload with'
     case 'stamper-failed':
       return 'a postage stamp resolved but the write path would not build'
+    case 'stamp-expired':
+      return 'the account’s drive has expired — renew it or add another in Swarm ID'
     default:
       return 'no postage stamp available'
   }
