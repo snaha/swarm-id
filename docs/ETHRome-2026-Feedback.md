@@ -1,6 +1,6 @@
 # ETHRome 2026: what integrators told us
 
-Five teams integrated Swarm ID over the weekend of 12–14 September 2026. Four wrote about
+Six teams integrated Swarm ID over the weekend of 12–14 September 2026. Five wrote about
 it; one only left comments in code. Each claim below was checked against the code, the
 docs, and the live gateways on 15 September, and is marked accordingly. Where it held up,
 an issue exists; where it was already known, the existing issue is linked; where it was
@@ -14,6 +14,7 @@ wrong, it says why, because two of the wrong beliefs were held by more than one 
 | healthsend        | [docs/identity-and-onboarding.md](https://github.com/limone-eth/healthsend/blob/main/docs/identity-and-onboarding.md) | 0.4.1                      |
 | agent-memory-mesh | [src/swarm.mjs](https://github.com/LevRoz630/agent-memory-mesh/blob/master/src/swarm.mjs) (comments only)             | none: bee-js 13.1 directly |
 | Vespro            | [swarm/notes.md](https://github.com/fac3m4n/vespro/blob/main/swarm/notes.md)                                          | 0.4.1                      |
+| gitkiv            | [SWARM_ID.md](https://github.com/robdgs/gitkiv/blob/main/SWARM_ID.md)                                                 | 0.4.1                      |
 
 ## What worked
 
@@ -125,7 +126,22 @@ used the wrong host altogether.
   by healthsend as a browser-storage grant step and became the centrepiece of their
   onboarding critique ([#768](https://github.com/snaha/swarm-id/issues/768)).
 
-### 6. Two audiences we do not serve yet
+### 6. Folders: the method that does not exist, and the two exports that do not fit
+
+gitkiv needed to upload a folder and found no method for it
+([#750](https://github.com/snaha/swarm-id/issues/750)), so they built the manifest by hand.
+Their first attempt combined two public exports, `saveMantarayTree` and
+`client.uploadChunk`, and produced "an upload that reports success, a receipt that looks
+fine, and a 404 forever". Verified as a contract mismatch: the first hands its callback a
+finished chunk and computes the address locally; the second treats its input as a payload
+and wraps it again. Every node is stored under a different address from the one the tree
+believes, and nothing fails until retrieval
+([#774](https://github.com/snaha/swarm-id/issues/774)). There is no public client method
+that uploads a finished chunk, so the first export cannot be used correctly from a dApp at
+all. They also found reading a folder back through `downloadFile`'s client-side manifest
+walk intermittently 500ing where a gateway resolved it instantly, which is unverified here.
+
+### 7. Two audiences we do not serve yet
 
 - **Agents and servers.** agent-memory-mesh did not use the library at all: "an
   iframe-based browser passkey flow, unusable from a server". They then rebuilt the
@@ -169,9 +185,12 @@ Issues: [#751](https://github.com/snaha/swarm-id/issues/751) · [#752](https://g
 [#767](https://github.com/snaha/swarm-id/issues/767) · [#768](https://github.com/snaha/swarm-id/issues/768) ·
 [#769](https://github.com/snaha/swarm-id/issues/769) · [#770](https://github.com/snaha/swarm-id/issues/770) ·
 [#771](https://github.com/snaha/swarm-id/issues/771) · [#772](https://github.com/snaha/swarm-id/issues/772) ·
+[#774](https://github.com/snaha/swarm-id/issues/774) · (opened by hand before this review:
+[#750](https://github.com/snaha/swarm-id/issues/750)) ·
 upstream [ethersphere/gateway-proxy#533](https://github.com/ethersphere/gateway-proxy/issues/533).
 
-Comments added to existing issues: [#524](https://github.com/snaha/swarm-id/issues/524)
+Comments added to existing issues: [#750](https://github.com/snaha/swarm-id/issues/750)
+(gitkiv's hand-built folder upload), [#524](https://github.com/snaha/swarm-id/issues/524)
 (bee-js audit findings and a consumer on 13.x), [#745](https://github.com/snaha/swarm-id/issues/745)
 (the phone run), [#752](https://github.com/snaha/swarm-id/issues/752) (upstream follow-up).
 
