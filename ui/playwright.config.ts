@@ -37,6 +37,13 @@ const SERIAL_SPEC = '**/drive-onchain-serial.test.ts'
  * an ordinary chromium project cannot give it — see `PARTITIONING_ARGS`.
  */
 const PARTITIONED_SPEC = '**/bus-propagation.test.ts'
+/**
+ * The delegated connect() popup under a REAL popup blocker (#751). Needs
+ * Google Chrome: Playwright's bundled Chromium never blocks a popup, with or
+ * without `--disable-popup-blocking`, so on it this spec would pass vacuously —
+ * which its first test refuses to do.
+ */
+const POPUP_BLOCKER_SPEC = '**/popup-blocker.test.ts'
 
 /**
  * The three-device partition scenarios: minutes of TTL and idle waits by
@@ -102,7 +109,7 @@ export default defineConfig({
   projects: [
     {
       name: 'chromium',
-      testIgnore: [SERIAL_SPEC, PARTITIONED_SPEC, DEVICES_SPEC],
+      testIgnore: [SERIAL_SPEC, PARTITIONED_SPEC, DEVICES_SPEC, POPUP_BLOCKER_SPEC],
       use: CHROMIUM,
     },
     {
@@ -111,6 +118,23 @@ export default defineConfig({
       use: {
         ...CHROMIUM,
         launchOptions: { args: [...CHROMIUM_ARGS, ...PARTITIONING_ARGS] },
+      },
+    },
+    {
+      name: 'chrome-popup-blocked',
+      testMatch: POPUP_BLOCKER_SPEC,
+      use: {
+        ...CHROMIUM,
+        channel: 'chrome',
+        launchOptions: {
+          // Playwright adds the flag on its own; `ignoreDefaultArgs` is what
+          // actually removes it.
+          ignoreDefaultArgs: ['--disable-popup-blocking'],
+          args: [
+            ...CHROMIUM_ARGS.filter((arg) => arg !== '--disable-popup-blocking'),
+            ...PARTITIONING_ARGS,
+          ],
+        },
       },
     },
     {
