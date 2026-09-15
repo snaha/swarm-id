@@ -42,25 +42,25 @@ const FOLD_RUNS = 10
  * (roster SOCs, epoch-finder probes, and `downloadDataWithChunkAPI` blobs).
  *
  * bee-js 13 puts both behind namespaces, so the proxy intercepts the namespace
- * property and hands back a wrapper around it. Trapping the old flat method
- * names would count nothing: they no longer exist on `Bee`.
+ * property and hands back an object inheriting from it with the read method
+ * overridden — the namespaces are class instances, so a spread copy would
+ * lose their other methods. Trapping the old flat method names would count
+ * nothing: they no longer exist on `Bee`.
  */
 function withReadCounter(bee: Bee): { bee: Bee; counter: { reads: number } } {
   const counter = { reads: 0 }
   const proxied = new Proxy(bee, {
     get(target, prop) {
       if (prop === "chunk") {
-        return {
-          ...target.chunk,
+        return Object.assign(Object.create(target.chunk), {
           download: (...args: Parameters<Bee["chunk"]["download"]>) => {
             counter.reads++
             return target.chunk.download(...args)
           },
-        }
+        })
       }
       if (prop === "soc") {
-        return {
-          ...target.soc,
+        return Object.assign(Object.create(target.soc), {
           makeReader: (...args: Parameters<Bee["soc"]["makeReader"]>) => {
             const reader = target.soc.makeReader(...args)
             return {
@@ -71,7 +71,7 @@ function withReadCounter(bee: Bee): { bee: Bee; counter: { reads: number } } {
               },
             }
           },
-        }
+        })
       }
       // Bind methods to the real instance so bee-js internals (private state)
       // keep working through the proxy.

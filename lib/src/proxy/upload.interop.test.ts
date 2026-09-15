@@ -62,7 +62,7 @@ function setup(): {
 /** Compute the canonical root reference for a payload via bee-js. */
 async function canonicalRootHex(data: Uint8Array): Promise<string> {
   const root = await ChunkSplitter.root(data)
-  return uint8ArrayToHex(root.hash().toUint8Array())
+  return root.hash().toHex()
 }
 
 /**
@@ -83,7 +83,7 @@ async function seedCanonicalTree(
     for (const { chunk } of batch) {
       chunkCount++
       const chunkData = chunk.build().slice(0, SPAN_SIZE + chunk.writer.cursor)
-      await store.put(uint8ArrayToHex(chunk.hash().toUint8Array()), chunkData)
+      await store.put(chunk.hash().toHex(), chunkData)
     }
     return []
   })
@@ -94,7 +94,7 @@ async function seedCanonicalTree(
   // callback for the root too — `ChunkSplitter` does not.)
   chunkCount++
   const rootData = root.build().slice(0, SPAN_SIZE + root.writer.cursor)
-  const rootHex = uint8ArrayToHex(root.hash().toUint8Array())
+  const rootHex = root.hash().toHex()
   await store.put(rootHex, rootData)
   return { rootHex, chunkCount }
 }

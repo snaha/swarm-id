@@ -39,7 +39,7 @@ import {
   PLAIN_REFS_PER_CHUNK,
 } from "./chunking"
 import { ChunkUploadStream } from "./chunk-upload-stream"
-import { marshalEnvelope } from "./stamp-marshal"
+import { convertEnvelopeToMarshaledStamp } from "@ethersphere/core-sdk"
 import type { ChunkReference, UploadProgress } from "./types"
 import type { StampWorkerPool } from "./stamp-worker-pool"
 import { tryCreateTag } from "../utils/tag"
@@ -196,26 +196,9 @@ export interface UploadChunkResult {
 // ============================================================================
 
 /**
- * Stamp chunk data by address and return the envelope.
- *
- * `_chunkData` is unused — bee-js 13's `Stamper.stamp` takes the address alone
- * — but stays in the signature to match `StampChunkFn` and the worker pool.
- */
-function stampChunkData(
-  stamper: Stamper,
-  _chunkData: Uint8Array,
-  address: Uint8Array,
-): EnvelopeWithBatchId {
-  return stamper.stamp(address)
-}
-
-/**
  * Async stamp function - abstraction over sync Stamper and parallel StampWorkerPool.
  */
-type StampChunkFn = (
-  chunkData: Uint8Array,
-  address: Uint8Array,
-) => Promise<EnvelopeWithBatchId>
+type StampChunkFn = (address: Uint8Array) => Promise<EnvelopeWithBatchId>
 
 /**
  * Create a StampChunkFn from a Stamper and optional worker pool.
@@ -225,10 +208,9 @@ function makeStampFn(
   workerPool?: StampWorkerPool,
 ): StampChunkFn {
   if (workerPool) {
-    return (chunkData, address) => workerPool.stampChunkData(chunkData, address)
+    return (address) => workerPool.stampChunkData(address)
   }
-  return (chunkData, address) =>
-    Promise.resolve(stampChunkData(stamper, chunkData, address))
+  return (address) => Promise.resolve(stamper.stamp(address))
 }
 
 // ============================================================================
@@ -290,7 +272,7 @@ async function uploadStampedChunkViaHttp(
   options: UploadOptions,
   requestOptions?: BeeRequestOptions,
 ): Promise<void> {
-  const envelope = await stamp(chunkData, address)
+  const envelope = await stamp(address)
   await bee.chunk.upload(envelope, chunkData, options, requestOptions)
 }
 
@@ -381,8 +363,11 @@ async function uploadStampedChunkViaWebSocket(
   chunkData: Uint8Array,
   address: Uint8Array,
 ): Promise<void> {
-  const envelope = await stamp(chunkData, address)
-  const stamped = Binary.concatBytes(marshalEnvelope(envelope), chunkData)
+  const envelope = await stamp(address)
+  const stamped = Binary.concatBytes(
+    convertEnvelopeToMarshaledStamp(envelope).toUint8Array(),
+    chunkData,
+  )
   await stream.uploadChunk(stamped)
 }
 
@@ -950,7 +935,7 @@ export async function uploadSOC(
 
     const envelope = stamper.stamp(socAddressBytes)
 
-    const stampHex = Binary.uint8ArrayToHex(marshalEnvelope(envelope))
+    const stampHex = convertEnvelopeToMarshaledStamp(envelope).toHex()
     const url = `${bee.url}/soc/${owner.toHex()}/${identifier.toHex()}?sig=${signature.toHex()}`
 
     const headers: Record<string, string> = {

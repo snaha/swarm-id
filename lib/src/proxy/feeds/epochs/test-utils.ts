@@ -77,7 +77,8 @@ export class MockBee extends Bee {
   constructor(store?: MockChunkStore) {
     super("http://localhost:1633")
     this.store = store || new MockChunkStore()
-    this.chunk.download = (reference) => this.downloadChunk(String(reference))
+    this.chunk.download = (reference) =>
+      this.downloadChunk(new Reference(reference).toHex())
     this.chunk.upload = (_stamp, data) => this.uploadChunk(data)
     this.tag.create = () => this.createTag()
   }

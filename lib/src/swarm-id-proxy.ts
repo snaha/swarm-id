@@ -67,6 +67,7 @@ import {
   Identifier,
   Topic,
   NULL_ADDRESS,
+  MantarayNode as BeeMantarayNode,
 } from "@ethersphere/bee-js"
 import { MantarayNode } from "@ethersphere/core-sdk"
 import { makeContentAddressedChunk } from "./chunk"
@@ -92,7 +93,6 @@ import { StampWorkerPool } from "./proxy/stamp-worker-pool"
 import {
   loadMantarayTreeWithChunkAPI,
   saveMantarayTree,
-  getDocsMetadata,
 } from "./proxy/mantaray"
 import { createFeedManifestDirect } from "./proxy/feed-manifest"
 import {
@@ -3853,7 +3853,9 @@ export class SwarmIdProxy {
         targetPath = path
       } else {
         // No path: get index document from manifest metadata
-        const { indexDocument } = getDocsMetadata(manifest)
+        const { indexDocument } = new BeeMantarayNode(
+          manifest,
+        ).getDocsMetadata()
         if (!indexDocument) {
           throw new Error(
             "Manifest does not contain an index document reference",
@@ -5364,7 +5366,7 @@ export class SwarmIdProxy {
       )
 
       // Step 2: Get the index document path from manifest metadata
-      const { indexDocument } = getDocsMetadata(manifest)
+      const { indexDocument } = new BeeMantarayNode(manifest).getDocsMetadata()
       if (!indexDocument) {
         throw new Error("Manifest does not contain an index document reference")
       }

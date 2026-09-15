@@ -79,7 +79,7 @@ function createMockTarget(): UploadTarget {
 // Compute content hash using Swarm's BMT algorithm (same as MantarayNode)
 async function computeContentHash(data: Uint8Array): Promise<string> {
   const rootNode = await ChunkSplitter.root(data)
-  return toHex(rootNode.hash().toUint8Array())
+  return rootNode.hash().toHex()
 }
 
 // Create a content-addressed storage mock for uploads

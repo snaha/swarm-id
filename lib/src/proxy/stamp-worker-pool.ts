@@ -35,6 +35,7 @@ interface WorkerHandle {
 
 const DEFAULT_WORKER_COUNT = 4
 const WORKER_INIT_TIMEOUT_MS = 5_000
+const NANOSECONDS_PER_MILLISECOND = 1_000_000n
 
 export class StampWorkerPool {
   private workers: WorkerHandle[]
@@ -154,15 +155,12 @@ export class StampWorkerPool {
   }
 
   /**
-   * Stamp chunk data using parallel worker signing.
+   * Stamp a chunk address using parallel worker signing.
    *
    * Bucket assignment happens on the main thread (fast, sequential).
    * ECDSA signing is dispatched to a worker (slow, parallel).
    */
-  async stampChunkData(
-    _chunkData: Uint8Array,
-    address: Uint8Array,
-  ): Promise<EnvelopeWithBatchId> {
+  async stampChunkData(address: Uint8Array): Promise<EnvelopeWithBatchId> {
     // 1. Bucket assignment (main thread) — replicates Stamper.stamp() logic
     const bucket = (address[0] << 8) | address[1]
     const height = this.buckets[bucket]
@@ -177,10 +175,11 @@ export class StampWorkerPool {
     indexView.setUint32(0, bucket, false)
     indexView.setUint32(4, height, false)
 
-    // Build timestamp (8 bytes): uint64 BE of Date.now()
+    // Build timestamp (8 bytes): uint64 BE in nanoseconds — the unit Bee and
+    // core-sdk's `Stamper` use, and what Bee compares on an index collision
     const timestamp = new Uint8Array(8)
     const tsView = new DataView(timestamp.buffer)
-    const now = BigInt(Date.now())
+    const now = BigInt(Date.now()) * NANOSECONDS_PER_MILLISECOND
     tsView.setBigUint64(0, now, false)
 
     // 2. Construct signing message (80 bytes)
