@@ -77,19 +77,20 @@ jobs:
         working-directory: ./ui
         run: pnpm build
 
-      # The dev funding seam is only worth anything if the swap actually holds,
-      # and reading the source cannot tell you: a static import survives a dead
-      # `import.meta.env.DEV` branch. Only the built assets know. `/dev` keeps
-      # its own copy on purpose, so its route chunk is the one allowed match —
-      # that ONE chunk, found here by a marker rather than whitelisting every
-      # route chunk, because a leak into a production route lands in exactly
-      # such a chunk too.
+      # The build swaps the dev funding seam and the `/dev` route for inert
+      # stubs (`stubDevOnlyModules` in `vite.config.ts`), and that is only worth
+      # anything if the swaps actually hold. Reading the source cannot tell
+      # you: a static import survives a dead `import.meta.env.DEV` branch. Only
+      # the built assets know, and no chunk may carry any of these markers.
       #
-      # Three markers, because `anvil_setBalance` alone is not on the leak path:
+      # Four markers, because `anvil_setBalance` alone is not on the leak path:
       # it reaches the bundle through `mintSourceEth`, which `resolveLocalRail`
       # never calls, so it tree-shakes away while the rail itself ships. The
       # source chain's URL and the local solver's address cannot — the rail is
-      # built out of them. None of the three collides with anything else in the
+      # built out of them. The fourth is a label of the `/dev` page itself,
+      # which imports the dev tree directly: the route swap is what keeps it
+      # out, and a leak of the page would carry the label whether or not the
+      # rail came with it. None of the four collides with anything else in the
       # bundle (viem's chain registry does carry a bare `31337`, hence the port
       # being matched as part of the URL).
       #
@@ -116,23 +117,16 @@ jobs:
           require_canary 'anvil_setBalance' 'src/lib/dev/local-payment-rail.ts' "sourceRpc('anvil_setBalance'"
           require_canary 'localhost:31337' 'src/lib/dev/local-payment-rail.ts' "DEFAULT_SOURCE_RPC_URL = 'http://localhost:31337'"
           require_canary 'a0ee7a142d267c1f36714e4a8f75612f20a79720' '../multichain/src/local-solver-protocol.ts' 'LOCAL_SOLVER_ADDRESS = "0xa0ee7a142d267c1f36714e4a8f75612f20a79720"'
+          require_canary 'Create drive to test with' 'src/routes/dev/+page.svelte' 'Create drive to test with'
           if [ "$stale" -ne 0 ]; then
             exit 1
           fi
-          canaries='anvil_setBalance|localhost:31337|a0ee7a142d267c1f36714e4a8f75612f20a79720'
-          dev_chunk=$(grep -rlF 'swarm-id-dev-source-rpc' build/_app/immutable/nodes || true)
-          found=$(printf '%s' "$dev_chunk" | grep -c . || true)
-          if [ "$found" -ne 1 ]; then
-            echo "::error::Expected exactly one /dev route chunk carrying the marker swarm-id-dev-source-rpc under build/_app/immutable/nodes, found $found:"
-            echo "${dev_chunk:-(none)}"
-            echo "None means the dev tree was hoisted into a shared chunk because a production route now imports it — which is the leak this check exists for. More than one means the marker is no longer /dev-only; pick a new one from the /dev page."
-            exit 1
-          fi
-          leaked=$(grep -rlE "$canaries" build | grep -vxF "$dev_chunk" || true)
+          canaries='anvil_setBalance|localhost:31337|a0ee7a142d267c1f36714e4a8f75612f20a79720|Create drive to test with'
+          leaked=$(grep -rlE "$canaries" build || true)
           if [ -n "$leaked" ]; then
             echo "::error::Dev-only code reached the shipped bundle:"
             echo "$leaked"
-            echo "Production code must reach dev helpers only through \$lib/payment/dev-funding, which the build swaps for its inert stub."
+            echo "Production code must reach dev helpers only through \$lib/payment/dev-funding, and the /dev route ships only as its 404 stub — both swapped in by stubDevOnlyModules (vite.config.ts)."
             exit 1
           fi
 
