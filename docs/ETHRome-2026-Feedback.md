@@ -1,7 +1,7 @@
 # ETHRome 2026: what integrators told us
 
-Six teams integrated Swarm ID over the weekend of 12–14 September 2026. Five wrote about
-it; one only left comments in code. Each claim below was checked against the code, the
+Seven teams integrated Swarm ID over the weekend of 12–14 September 2026. Five wrote
+about it, one only left comments in code, and one reported nothing at all. Each claim below was checked against the code, the
 docs, and the live gateways on 15 September, and is marked accordingly. Where it held up,
 an issue exists; where it was already known, the existing issue is linked; where it was
 wrong, it says why, because two of the wrong beliefs were held by more than one team.
@@ -15,6 +15,7 @@ wrong, it says why, because two of the wrong beliefs were held by more than one 
 | agent-memory-mesh | [src/swarm.mjs](https://github.com/LevRoz630/agent-memory-mesh/blob/master/src/swarm.mjs) (comments only)             | none: bee-js 13.1 directly |
 | Vespro            | [swarm/notes.md](https://github.com/fac3m4n/vespro/blob/main/swarm/notes.md)                                          | 0.4.1                      |
 | gitkiv            | [SWARM_ID.md](https://github.com/robdgs/gitkiv/blob/main/SWARM_ID.md)                                                 | 0.4.1                      |
+| ShadowBid         | [README](https://github.com/EdordoPng/shadowbid) (no friction reported)                                               | 0.4.1                      |
 
 ## What worked
 
@@ -64,6 +65,11 @@ after the parent's click, and the handover completed
 their own iframe being destroyed: healthsend rendered the button container only in the
 signed-out branch, so signing in unmounted it and every later popup had a dead opener.
 Apiritivo's README says "never recreate the iframe" for the same reason.
+
+ShadowBid is the counter-example nobody wrote up: it drives `connect()` from its own
+button, cross-site from the identity origin, gates uploads on `canUpload`, and reads back
+through the API gateway's `/bytes/<ref>`, and reported no friction at all. It is the
+integration the docs should describe.
 
 - The e2e rig could never observe this because every project disabled popup blocking, and
   Playwright's bundled Chromium never blocks a popup even without the flag. Fixed in
