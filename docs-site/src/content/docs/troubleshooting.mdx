@@ -1,0 +1,124 @@
+---
+title: Troubleshooting
+description: The errors integrators hit most, by the message they see, with the cause and the fix.
+---
+
+One entry per symptom, quoted the way the browser or the library reports it, so a search for
+the message lands here. Each entry gives the cause and the fix; the reasoning is on the page it
+links to.
+
+### `Failed to fetch` on an upload through the public gateway
+
+**Cause.** A request header outside the gateway's short CORS allow-list — `Swarm-Pin`, `Swarm-Tag`
+or the ACT headers. The browser refuses the request at the preflight and reports nothing more
+specific.
+
+**Fix.** Do not pass `pin: true` (or tags, or ACT options) on the subsidised path. Swarm ID
+sends none of them there. See [The Public Gateway](../public-gateway/).
+
+### `Request timeout after 30000ms`
+
+**Cause.** One of two things, and the message does not say which.
+
+- The client's default `timeout` (30 s) bounds the whole request, uploads included. A file of a
+  few MB over a testnet or the public gateway takes longer.
+- The upload is direct (`deferred: false`, the default) against a Bee node in dev mode, which
+  serves only deferred uploads and never answers a direct one.
+
+**Fix.** For the first, pass a longer timeout in the third argument:
+`client.uploadFile(file, {}, { timeout: 600_000 })`, or set `timeout` on the client. For the
+second, ask the node with `getNodeInfo()` and set `deferred` from `beeMode === 'dev'`. See
+[Using Your Own Bee Node](../own-bee-node/#a-node-in-dev-mode).
+
+### `No partition available — all slots are held by other devices.` on a single device
+
+**Cause.** The first stamped write was refused by the node — the drive has expired, or the node
+does not know the batch — and the write coordinator read the refusal as contention from another
+device.
+
+**Fix.** Check the drive: `getPostageBatch()` reports its expiry, and `connectionInfo.canUpload`
+with `uploadUnavailableReason` say whether the session can stamp at all. A batch the node has not
+ingested yet needs a moment after purchase. See the
+[upload availability table](../subsidised-gateway/#upload-availability-truth-table).
+
+### Signed in, and every upload fails
+
+**Cause.** `connectionInfo.identity` being set does not mean the session can upload. A fresh
+Swarm ID has no drive, so without a `subsidisedGatewayUrl` every first-time user's upload fails.
+
+**Fix.** Gate uploads on `connectionInfo.canUpload`, and show `uploadUnavailableReason` when it is
+false: `no-stamp` is the user's to fix (attach or buy a drive), `stamper-failed` is a bug to
+report. Pass the public gateway as `subsidisedGatewayUrl` for a free tier. See
+[Quick Start](../getting-started/#a-batch-you-were-given).
+
+### `Iframe not initialized` after sign-in
+
+**Cause.** The element the button container lives in was unmounted — typically rendered only
+in the signed-out branch of the UI — which destroyed the proxy iframe with it. Every later call
+has no iframe to talk to, and a later popup has no opener.
+
+**Fix.** Keep the container mounted for the life of the page, in every state. See
+[Quick Start](../getting-started/#basic-usage).
+
+### `Failed to open authentication popup`
+
+**Cause.** The browser blocked the popup: `connect()` was not called from a user gesture, or a
+blocker is on.
+
+**Fix.** Call `connect()` synchronously from the click handler, or render the iframe's own
+button. The client opens the popup from the iframe or the page as the storage situation
+requires, so a dApp's own button works on partitioned storage too.
+
+### `[SwarmIdClient] Rejected message from unauthorized origin`, several times a second
+
+**Cause.** Window messages from React DevTools, Vite or Next.js HMR, warned about before the
+client checks whether the message even came from its iframe.
+
+**Fix.** Nothing on your side; the warning is noise ([#759](https://github.com/snaha/swarm-id/issues/759)).
+A real origin problem shows as the iframe never becoming ready, not as this line.
+
+### `308` and then `404` on `/bzz/<reference>/`
+
+**Cause.** A raw-bytes reference — the output of `uploadData` — asked of the manifest endpoint.
+
+**Fix.** Retrieve `uploadData` output at `/bytes/<reference>` or with `downloadData`; `/bzz` and
+`downloadFile` are for `uploadFile` output. See [The Public Gateway](../public-gateway/).
+
+### `getNodeInfo()` fails
+
+**Cause.** The public gateway has no `/node` endpoint.
+
+**Fix.** Do not gate anything on it. It exists to detect a dev-mode node; against the public
+gateway keep the default `deferred`. See [The Public Gateway](../public-gateway/).
+
+### `ReferenceError: window is not defined` at import
+
+**Cause.** The package is browser-only and touches `window` when it is imported. A top-level
+import in a file that renders on the server (Next.js App Router, SvelteKit with SSR) runs it there.
+
+**Fix.** Import from a client-only module, or use a dynamic `import()` guarded on
+`typeof window !== 'undefined'`. See [Quick Start](../getting-started/#basic-usage).
+
+### A session approved on `localhost` is gone behind a tunnel or on a preview URL
+
+**Cause.** The app secret is derived from the dApp's origin, and a tunnel hostname or a preview
+deployment is a different origin — so a different dApp, with a different secret and different
+derived keys.
+
+**Fix.** Expected. Settle the production origin before anything derived from the app secret is
+used as an identity. See [Key Derivation](../key-derivation/#app-secret).
+
+### The proxy iframe rejects every message behind ngrok
+
+**Cause.** The dev server's own origin guard, not Swarm ID: Next.js refuses dev requests from an
+origin other than `localhost` unless the host is listed.
+
+**Fix.** Add the tunnel host to `allowedDevOrigins` (Next.js) or the equivalent. See
+[Local Development](../local-development/#tunnels).
+
+### A proxy error with nothing to branch on
+
+Every failure crosses the bridge as one string today — status, Bee's error body and the cause
+are flattened away ([#761](https://github.com/snaha/swarm-id/issues/761)). Until that lands,
+the browser's network tab holds the response the message dropped: the failing URL and the
+status are there.
