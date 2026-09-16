@@ -19,13 +19,15 @@
   import UserUnfollowLine from '$lib/components/icons/user-unfollow-line.svelte'
   import ProductPage from '$lib/components/product-page.svelte'
   import SettingsMenu from '$lib/components/settings-menu.svelte'
-  import SignBackInDialog, {
-    checkStorageDescription,
-  } from '$lib/components/sign-back-in-dialog.svelte'
+  import SignBackInDialog from '$lib/components/sign-back-in-dialog.svelte'
   import SwarmWordmark from '$lib/components/swarm-wordmark.svelte'
   import { Button } from '$lib/components/ui/button'
   import { Tabs } from '$lib/components/ui/tabs'
-  import { drivesNeedingAttention } from '$lib/drives'
+  import {
+    type DriveAttention,
+    driveAttentionDescription,
+    drivesNeedingAttention,
+  } from '$lib/drives'
   import routes from '$lib/routes'
   import { accountsStore } from '$lib/stores/accounts.svelte'
   import { sessionStore } from '$lib/stores/session.svelte'
@@ -40,13 +42,15 @@
 
   /** Shows the create/import choice while other accounts exist on the device. */
   let addingAccount = $state(false)
-  // Deep-linkable (`/?tab=drives`) — the "Check storage" actions land here.
+  // Deep-linkable (`/?tab=drives`) — the drive-attention actions land here.
   const initialTab = page.url.searchParams.get('tab')
   let tab = $state(TABS.some((t) => t.value === initialTab) ? (initialTab as string) : 'apps')
   /** Signed-out account being unlocked to sign back in. */
   let signingBackIn = $state<Account | undefined>(undefined)
-  /** Signed-out account being unlocked to check its storage. */
-  let checkingStorage = $state<Account | undefined>(undefined)
+  /** Signed-out account being unlocked to see the drive needing attention,
+   * with the reason the row showed — recomputing it here could come back
+   * empty and leave the dialog with nothing to say. */
+  let checkingDrive = $state<{ account: Account; attention: DriveAttention } | undefined>(undefined)
 
   const accounts = $derived(accountsStore.accounts)
   // The active session's account, if any: with one the page IS the app
@@ -79,13 +83,13 @@
   }
 
   /**
-   * Storage warning on a chooser row: open that account's Storage tab. A
+   * Drive warning on a chooser row: open that account's Storage tab. A
    * signed-out account signs back in first — its drives only exist in the
    * encrypted snapshot.
    */
-  function checkStorage(chosen: Account) {
+  function checkDrive(chosen: Account, attention: DriveAttention) {
     if (chosen.isSignedOut) {
-      checkingStorage = chosen
+      checkingDrive = { account: chosen, attention }
       return
     }
     sessionStore.setCurrentAccount(chosen.id)
@@ -172,7 +176,7 @@
             {accounts}
             badge={signedOutBadge}
             onselect={select}
-            oncheckstorage={checkStorage}
+            oncheckdrive={checkDrive}
           />
 
           <Button variant="outline" size="sm" class="w-full" onclick={notImplemented}>
@@ -214,17 +218,17 @@
   />
 {/if}
 
-<!-- Check storage on a signed-out row: sign back in (restoring the drives
+<!-- The drive warning on a signed-out row: sign back in (restoring the drives
      from the snapshot), then land on the Storage tab. -->
-{#if checkingStorage}
+{#if checkingDrive}
   <SignBackInDialog
-    account={checkingStorage}
-    description={checkStorageDescription(checkingStorage)}
+    account={checkingDrive.account}
+    description={driveAttentionDescription(checkingDrive.attention, 'home')}
     onsignedin={(restored) => {
       sessionStore.setCurrentAccount(restored.id)
       tab = 'drives'
-      checkingStorage = undefined
+      checkingDrive = undefined
     }}
-    onclose={() => (checkingStorage = undefined)}
+    onclose={() => (checkingDrive = undefined)}
   />
 {/if}

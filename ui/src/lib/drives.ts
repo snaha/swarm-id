@@ -244,13 +244,28 @@ export function soonestDriveExpiry(stamps: PostageStamp[], now = Date.now()): nu
 }
 
 /**
- * Whether the account should carry the "Check storage" warning. Signed in:
- * any live drive needs attention. Signed out: the flag captured at sign-out
- * (storage full / already expiring), or the stored soonest expiry has since
- * drifted inside the expires-soon window — the warning develops over time
- * even though the stamps are unreadable.
+ * Why an account's drives want the user's attention, and — when it is a
+ * lifespan running out — WHEN. A discriminated union rather than a bare
+ * boolean so the chooser row can name the drive's actual state instead of
+ * pointing vaguely at "storage".
  */
-export function accountNeedsStorageAttention(
+export type DriveAttention = { reason: 'expiring'; expiry: number } | { reason: 'full' }
+
+/** Where a check-the-drive sign-in was started from. The connect popup adds
+ * that the connection itself is not blocked on the errand — the row action
+ * sits next to a pending connect request and must not read as a step. */
+export type DriveAttentionContext = 'connect' | 'home'
+
+/**
+ * Why the account should carry the drive warning in a chooser row, or
+ * `undefined` when it should not. Signed in: the live drives decide — a
+ * lifespan inside the expires-soon window wins over a full one, because it is
+ * the case that carries a date. Signed out: the soonest expiry captured at
+ * sign-out, which keeps developing while the stamps themselves are locked in
+ * the encrypted snapshot, else the captured flag — which by then can only
+ * mean a full drive, since an expiring one would have left an expiry.
+ */
+export function accountDriveAttention(
   account: {
     stamps: PostageStamp[]
     isSignedOut: boolean
@@ -258,15 +273,51 @@ export function accountNeedsStorageAttention(
     soonestDriveExpiry?: number
   },
   now = Date.now(),
-): boolean {
+): DriveAttention | undefined {
   if (account.isSignedOut) {
-    return (
-      account.storageWarning === true ||
-      (account.soonestDriveExpiry !== undefined &&
-        account.soonestDriveExpiry - now <= EXPIRES_SOON_THRESHOLD_SECONDS * MS_PER_SECOND)
-    )
+    const captured = account.soonestDriveExpiry
+    if (
+      captured !== undefined &&
+      captured - now <= EXPIRES_SOON_THRESHOLD_SECONDS * MS_PER_SECOND
+    ) {
+      return { reason: 'expiring', expiry: captured }
+    }
+    return account.storageWarning === true ? { reason: 'full' } : undefined
   }
-  return drivesNeedingAttention(account, now) > 0
+  const expiringSoon = account.stamps.filter(
+    (drive) => describeDrive(drive, now).status === 'expires-soon',
+  )
+  const expiry = soonestDriveExpiry(expiringSoon, now)
+  if (expiry !== undefined) {
+    return { reason: 'expiring', expiry }
+  }
+  return drivesNeedingAttention(account, now) > 0 ? { reason: 'full' } : undefined
+}
+
+/**
+ * The chooser row's action label. It names the drive and its state, so the
+ * button reads as an errand about the user's Swarm storage and not as a
+ * browser-storage permission step in the connect flow. Deliberately short and
+ * of a fixed width: the label sits in a slot overlaying the row's right edge,
+ * and a date here would widen it past what the row reserves. The date belongs
+ * to the dialog behind the button, and to the Storage tab it lands on.
+ */
+export function driveAttentionLabel(attention: DriveAttention): string {
+  return attention.reason === 'expiring' ? 'Drive expiring' : 'Drive full'
+}
+
+/** The unlock prompt behind that action: what is wrong, which of the Storage
+ * tab's remedies fixes it, and — in the connect popup — that the connection
+ * is not waiting on any of it. */
+export function driveAttentionDescription(
+  attention: DriveAttention,
+  context: DriveAttentionContext,
+): string {
+  const state =
+    attention.reason === 'expiring'
+      ? `A drive expires on ${formatYmd(attention.expiry)}. Sign in to extend its lifespan.`
+      : 'A drive is full. Sign in to increase its size.'
+  return context === 'connect' ? `${state} Connecting does not wait for this.` : state
 }
 
 export function describeDrive(drive: PostageStamp, now = Date.now()): DriveDisplay {

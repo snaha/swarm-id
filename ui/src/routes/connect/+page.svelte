@@ -17,12 +17,11 @@
   import AppIcon from '$lib/components/app-icon.svelte'
   import UserAddFill from '$lib/components/icons/user-add-fill.svelte'
   import UserUnfollowLine from '$lib/components/icons/user-unfollow-line.svelte'
-  import SignBackInDialog, {
-    checkStorageDescription,
-  } from '$lib/components/sign-back-in-dialog.svelte'
+  import SignBackInDialog from '$lib/components/sign-back-in-dialog.svelte'
   import { Button } from '$lib/components/ui/button'
   import UnlockDialog from '$lib/components/unlock-dialog.svelte'
   import { completeConnect, reuseConnection } from '$lib/connect-handshake'
+  import { type DriveAttention, driveAttentionDescription } from '$lib/drives'
   import routes from '$lib/routes'
   import { accountsStore } from '$lib/stores/accounts.svelte'
   import { connectStore } from '$lib/stores/connect.svelte'
@@ -33,8 +32,10 @@
   let missingRequest = $state(false)
   /** Account being unlocked to approve the connection. */
   let unlocking = $state<Account | undefined>(undefined)
-  /** Signed-out account being unlocked to check its storage. */
-  let checkingStorage = $state<Account | undefined>(undefined)
+  /** Signed-out account being unlocked to see the drive needing attention,
+   * with the reason the row showed — recomputing it here could come back
+   * empty and leave the dialog with nothing to say. */
+  let checkingDrive = $state<{ account: Account; attention: DriveAttention } | undefined>(undefined)
   /** Shows the create/import choice while other accounts exist on the device. */
   let addingAccount = $state(false)
 
@@ -112,14 +113,16 @@
   }
 
   /**
-   * Storage warning on a row: open that account's Storage tab in a NEW
+   * Drive warning on a row: open that account's Storage tab in a NEW
    * window — navigating this popup away would lose the connect request
-   * (held in memory, dropped on navigation by design). A signed-out account
-   * signs back in first: its drives only exist in the encrypted snapshot.
+   * (held in memory, dropped on navigation by design). The connect request
+   * therefore survives the errand, which is what the dialog's copy promises.
+   * A signed-out account signs back in first: its drives only exist in the
+   * encrypted snapshot.
    */
-  function checkStorage(account: Account) {
+  function checkDrive(account: Account, attention: DriveAttention) {
     if (account.isSignedOut) {
-      checkingStorage = account
+      checkingDrive = { account, attention }
       return
     }
     sessionStore.setCurrentAccount(account.id)
@@ -171,7 +174,7 @@
                 <AccountList
                   accounts={previouslyUsed}
                   onselect={select}
-                  oncheckstorage={checkStorage}
+                  oncheckdrive={checkDrive}
                 />
               </div>
             {/if}
@@ -185,7 +188,7 @@
                   accounts={otherAccounts}
                   badge={(account) => (account.isSignedOut ? 'Signed out' : undefined)}
                   onselect={select}
-                  oncheckstorage={checkStorage}
+                  oncheckdrive={checkDrive}
                 />
               </div>
             {/if}
@@ -244,18 +247,18 @@
   {/if}
 {/if}
 
-<!-- Check storage on a signed-out row: sign back in (restoring the drives
+<!-- The drive warning on a signed-out row: sign back in (restoring the drives
      from the snapshot), then open the Storage tab in a new window so this
      popup keeps its connect request. -->
-{#if checkingStorage}
+{#if checkingDrive}
   <SignBackInDialog
-    account={checkingStorage}
-    description={checkStorageDescription(checkingStorage)}
+    account={checkingDrive.account}
+    description={driveAttentionDescription(checkingDrive.attention, 'connect')}
     onsignedin={(restored) => {
       sessionStore.setCurrentAccount(restored.id)
       window.open(resolve(routes.ROOT) + '?tab=drives', '_blank')
-      checkingStorage = undefined
+      checkingDrive = undefined
     }}
-    onclose={() => (checkingStorage = undefined)}
+    onclose={() => (checkingDrive = undefined)}
   />
 {/if}

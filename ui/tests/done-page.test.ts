@@ -193,20 +193,22 @@ test('connect flow shows the done screen variants and closes the popup', async (
   await page.getByRole('button', { name: 'Check your storage' }).click()
   await expect(page.getByText('Your drives')).toBeVisible()
 
-  // The connect chooser shows the destructive "Check storage" action on the
-  // account row instead of any badge; pressing it opens the Storage tab.
+  // The connect chooser shows the destructive drive action on the account row
+  // instead of any badge, labelled with the drive's state — never "storage",
+  // which reads as a browser-storage permission step here (#768). The drive
+  // was filled, not aged, so it is the "full" wording.
   // (Disconnect first — with a live session the demo has no Connect button.)
   await page.goto(DEMO_URL)
   await accountButton.click()
   await page.getByRole('button', { name: 'Disconnect', exact: true }).click()
   popup = await openConnectPopup(page)
-  const checkStorage = popup.getByRole('button', { name: 'Check storage' })
-  await expect(checkStorage).toBeVisible()
+  const checkDrive = popup.getByRole('button', { name: 'Drive full' })
+  await expect(checkDrive).toBeVisible()
   // Press near the top edge: a pressed-state transform that shifts the button
   // out from under the pointer would swallow this click (regression guard).
   // Storage opens in a NEW window; the connect popup keeps its request.
   const storagePagePromise = popup.waitForEvent('popup')
-  await checkStorage.click({ position: { x: 20, y: 4 } })
+  await checkDrive.click({ position: { x: 20, y: 4 } })
   const storagePage = await storagePagePromise
   await expect(storagePage.getByText('Your drives')).toBeVisible()
   await expect(storagePage.getByText('1 drive needs attention.')).toBeVisible()
