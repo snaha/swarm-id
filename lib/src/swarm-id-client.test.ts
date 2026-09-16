@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, it, expect, vi, beforeEach } from "vitest"
-import type { Mock } from "vitest"
+import type { Mock, MockInstance } from "vitest"
 import { SwarmIdClient } from "./swarm-id-client"
 import type { ConnectionInfo, IframeToParentMessage } from "./types"
 import { generatedAvatar } from "./utils/avatar"
@@ -393,7 +393,7 @@ describe("SwarmIdClient window message filtering", () => {
   let client: SwarmIdClient
   let listener: (event: unknown) => void
   let contentWindow: object
-  let warn: Mock
+  let warn: MockInstance<typeof console.warn>
 
   /** The listener the constructor registered on `window`. */
   function registeredMessageListener(): (event: unknown) => void {
@@ -408,8 +408,7 @@ describe("SwarmIdClient window message filtering", () => {
 
   beforeEach(() => {
     vi.restoreAllMocks()
-    warn = vi.fn()
-    vi.stubGlobal("console", { ...console, warn })
+    warn = vi.spyOn(console, "warn").mockImplementation(() => {})
     vi.stubGlobal("window", {
       addEventListener: vi.fn(),
       removeEventListener: vi.fn(),
