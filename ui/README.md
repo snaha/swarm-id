@@ -43,8 +43,10 @@ pnpm --filter @swarm-id/ui format      # prettier --write + eslint --fix
 `test:e2e` starts the UI (`:5500`), the demo (`:3500`) and the bus signaling server (`:5520`)
 itself and drives them with Playwright. First run locally needs the browser once:
 `pnpm --filter @swarm-id/ui exec playwright install chromium` (CI installs it the same way, on a
-plain `ubuntu-latest` runner). Append `--ui` for the interactive runner, or a path
-(e.g. `tests/home.test.ts`) to run a single spec.
+plain `ubuntu-latest` runner). The `chrome-popup-blocked` project runs on the installed Google
+Chrome (`channel: 'chrome'`), because the bundled Chromium never blocks a popup: without Chrome
+on the machine that project fails at launch rather than passing quietly. Append `--ui` for the
+interactive runner, or a path (e.g. `tests/home.test.ts`) to run a single spec.
 
 The drive and payment suites additionally need a chain: global setup stocks per-worker faucets
 from `CHAIN_RPC_URL`, and **without it those suites skip silently** rather than fail. To run them,
