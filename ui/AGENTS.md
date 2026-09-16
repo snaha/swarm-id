@@ -14,7 +14,7 @@ The identity UI is a SvelteKit SPA.
 - **Wallet picker** (`src/lib/crypto/onboard.ts`): injected wallets, Coinbase Wallet, and
   WalletConnect when there is a project id. The last two need nothing installed and are the only
   routes on a browser with no wallet extension (Safari, mobile)
-- **WalletConnect project id**: a committed `DEFAULT_PROJECT_ID` (`crypto/wallet-connect.ts`), not
+- **WalletConnect project id**: a committed `DEFAULT_PROJECT_ID` (`src/lib/crypto/wallet-connect.ts`), not
   configured per environment; `PUBLIC_WALLETCONNECT_PROJECT_ID` overrides it and so picks which
   Reown project, never whether the picker offers WalletConnect. Never pass the module a blank id:
   it throws, at import of a module every wallet page loads. Go through `walletConnectOptions`
