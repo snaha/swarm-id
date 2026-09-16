@@ -98,7 +98,7 @@ if (info.canUpload) {
 
 In subsidised mode the upload carries no `pin` and no `tag`, whatever the call passed. Pinning means "keep this on the local node", and the node is the operator's, not the user's: the reference gateway proxy strips `Swarm-Pin` by default, and the public gateway's CORS preflight rejects the header outright, which a browser reports only as `Failed to fetch`. Both options apply as usual when the session uploads with the user's own stamp.
 
-The public gateway at `https://api.gateway.ethswarm.org/` works as a subsidised gateway for development. Its CORS allow-list is short — `Content-Type`, `Swarm-Encrypt`, `Swarm-Postage-Batch-Id`, `Swarm-Postage-Stamp`, `Swarm-Deferred-Upload`, `Swarm-Collection`, `Swarm-Index-Document` — so a request carrying any other Swarm header fails before it leaves the browser. A Bee node of your own allows every Swarm header.
+The [public gateway](#using-the-public-gateway) is where this bites in practice: its CORS allow-list is short, and a request carrying any other Swarm header fails before it leaves the browser. A Bee node of your own allows every Swarm header.
 
 ## Priority Rules
 
@@ -120,10 +120,10 @@ const client = new SwarmIdClient({
 })
 ```
 
-This is what the demo uses, and it is the quickest way to let a first-time user upload during development, a demo, or a hackathon. Two things to know before shipping with it:
+This is the gateway behind the demo's "Use subsidised gateway" toggle (off by default), and it is the quickest way to let a first-time user upload during development, a demo, or a hackathon. Two things to know before shipping with it:
 
 - **It is shared and rate limited**, on the operator's terms, with no guarantee for your traffic. Production dApps should run their own gateway (below) or expect users to hold a drive.
-- **Its CORS allow-list is short.** Uploads carry only the headers it accepts, so options meant for the user's own node do not reach it; see the notes on `pin` and `tag` in the [API reference](../api/). A gateway you run yourself, or a bare Bee node, accepts every Swarm header.
+- **Its CORS allow-list is short** — `Content-Type`, `Swarm-Encrypt`, `Swarm-Postage-Batch-Id`, `Swarm-Postage-Stamp`, `Swarm-Deferred-Upload`, `Swarm-Collection`, `Swarm-Index-Document` — so a request carrying any other Swarm header fails before it leaves the browser, as a bare `Failed to fetch`. That is why the subsidised path drops `pin` and `tag` ([above](#what-the-gateway-path-ignores); the `pin` and `tag` rows of the [API reference](../api/) say the same). A gateway you run yourself, or a bare Bee node, accepts every Swarm header.
 
 ## Running a Subsidised Gateway
 
