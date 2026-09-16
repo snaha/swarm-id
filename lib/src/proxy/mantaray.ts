@@ -147,6 +147,54 @@ export async function saveMantarayTree(
 }
 
 /**
+ * bee-js's own wording when the version hash at the head of a node does not
+ * match — the one failure every non-manifest chunk produces, whatever its
+ * size. bee-js throws a plain `Error` for it, so the text is the only handle
+ * there is; if bee-js rewords it, the translation below simply stops firing
+ * and the raw message surfaces again.
+ */
+const INVALID_VERSION_HASH_MESSAGE =
+  "MantarayNode#unmarshal invalid version hash"
+
+/**
+ * What a person can act on when the root of a "file" download is not a
+ * manifest at all.
+ */
+const NO_MANIFEST_MESSAGE =
+  "This reference has no manifest: it was uploaded with uploadData, so download it with downloadData."
+
+/**
+ * Unmarshal the root node of a manifest, translating the one parse failure
+ * that means "this reference is not a manifest".
+ *
+ * Uploads and downloads come in pairs, and both downloads take a plain
+ * string reference: handing a `uploadData` reference to a file download
+ * type-checks, and lands here. Only the root is translated — a root that
+ * fails to parse is routinely just plain data, while a child that fails to
+ * parse is a manifest with a corrupt node, which is a different problem and
+ * keeps its own error.
+ */
+function unmarshalRootManifest(
+  rootData: Uint8Array,
+  rootReference: string,
+): MantarayNode {
+  try {
+    return MantarayNode.unmarshalFromData(
+      rootData,
+      hexToUint8Array(rootReference),
+    )
+  } catch (error) {
+    if (
+      error instanceof Error &&
+      error.message === INVALID_VERSION_HASH_MESSAGE
+    ) {
+      throw new Error(NO_MANIFEST_MESSAGE)
+    }
+    throw error
+  }
+}
+
+/**
  * Load a Mantaray tree using only the chunk API.
  *
  * This avoids /bytes and supports encrypted references.
@@ -163,10 +211,7 @@ export async function loadMantarayTreeWithChunkAPI(
     undefined,
     requestOptions,
   )
-  const root = MantarayNode.unmarshalFromData(
-    rootData,
-    hexToUint8Array(rootReference),
-  )
+  const root = unmarshalRootManifest(rootData, rootReference)
 
   async function loadRecursively(node: MantarayNode): Promise<void> {
     for (const fork of node.forks.values()) {
