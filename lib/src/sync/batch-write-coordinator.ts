@@ -60,7 +60,7 @@ import type { StampWorkerPool } from "../proxy/stamp-worker-pool"
 /** Hard cap on the acquire path (including any wait-for-slot retry). */
 const PARTITION_LEASE_ACQUIRE_TIMEOUT_MS = 45000
 /** Max time the acquire spends polling for a slot when all are held. */
-const SLOT_WAIT_TIMEOUT_MS = 30000
+export const SLOT_WAIT_TIMEOUT_MS = 30000
 
 /**
  * Thrown by `withWrite` in `wait: "skip"` mode when every partition is held by
@@ -736,14 +736,21 @@ export class BatchWriteCoordinator {
       // slot we'd never be able to use.
       if (this.disposed) return
       if (!this.readOnly) return
-      if (Date.now() + LEASE_REFRESH_MS > deadline) {
+      const scanPredatesAnnouncement = state.maybeFree
+      state.maybeFree = false
+      // Headroom is the step that comes next, not always a full poll: an
+      // announcement landing late in the budget still gets its short re-scans.
+      const headroomMs = scanPredatesAnnouncement
+        ? 0
+        : state.rescansLeft > 0
+          ? ANNOUNCED_RESCAN_INTERVAL_MS
+          : LEASE_REFRESH_MS
+      if (Date.now() + headroomMs > deadline) {
         throw new PartitionContendedError(
           "No partition available — all slots are held by other devices.",
           this.deps.accountId,
         )
       }
-      const scanPredatesAnnouncement = state.maybeFree
-      state.maybeFree = false
       if (scanPredatesAnnouncement) {
         // A holder announced a release while we were mid-`acquire()`, so the
         // scan above ran against the state BEFORE it let go. Go straight back

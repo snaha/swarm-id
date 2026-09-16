@@ -48,6 +48,7 @@ import {
   ANNOUNCED_RESCAN_ROUNDS,
   BatchWriteCoordinator,
   PartitionContendedError,
+  SLOT_WAIT_TIMEOUT_MS,
   PEER_YIELD_MIN_IDLE_MS,
   isDisplaced,
   type BatchWriteCoordinatorDeps,
@@ -1777,6 +1778,60 @@ describe("BatchWriteCoordinator — bus-accelerated leases (docs/Account-Bus.md)
       expect(lease.acquire).toHaveBeenCalledTimes(3)
       expect(settled).toBe(true)
       expect(onSlotWait).toHaveBeenCalledTimes(1)
+      await inFlight
+      expect(coordinator.currentPartition).toBe(2)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  // The deadline guard sizes its headroom to the step that comes next. An
+  // announcement landing with less than a poll interval left — but more than
+  // a re-scan — must get its short re-scans, not a throw sized for the poll.
+  it("a late announcement still gets its short re-scans before the deadline", async () => {
+    vi.useFakeTimers()
+    try {
+      const leaseOpts: Parameters<typeof makeLease>[0] = {
+        acquireResult: {
+          partition: undefined,
+          partitionCount: 4,
+          isReadOnly: true,
+        },
+      }
+      const lease = makeLease(leaseOpts)
+      leaseController.lease = lease
+      const coordinator = new BatchWriteCoordinator(
+        makeDeps({
+          stamper: makeStamper(
+            [],
+          ) as unknown as BatchWriteCoordinatorDeps["stamper"],
+          mode: "oneshot",
+          onSlotWait: vi.fn(),
+        }),
+      )
+      const internals = coordinator as unknown as Internals
+
+      const inFlight = internals.acquireWithSlotWait()
+      await vi.advanceTimersByTimeAsync(0)
+      expect(lease.acquire).toHaveBeenCalledTimes(1)
+
+      // Two full polls in, the wait is mid-sleep with 8 s of budget left when
+      // the announcement lands: a full poll no longer fits, a re-scan does.
+      const lateBy =
+        SLOT_WAIT_TIMEOUT_MS - LEASE_REFRESH_MS + ANNOUNCED_RESCAN_INTERVAL_MS
+      await vi.advanceTimersByTimeAsync(lateBy)
+      expect(lease.acquire).toHaveBeenCalledTimes(3)
+      coordinator.notifySlotMaybeFree()
+      await vi.advanceTimersByTimeAsync(0)
+      expect(lease.acquire).toHaveBeenCalledTimes(4)
+
+      leaseOpts.acquireResult = {
+        partition: 2,
+        partitionCount: 4,
+        localCounter: new Uint32Array(8),
+        isReadOnly: false,
+      }
+      await vi.advanceTimersByTimeAsync(ANNOUNCED_RESCAN_INTERVAL_MS)
       await inFlight
       expect(coordinator.currentPartition).toBe(2)
     } finally {
