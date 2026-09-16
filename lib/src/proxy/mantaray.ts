@@ -23,6 +23,11 @@ export type UploadCallback = (
  *
  * This mirrors MantarayNode.saveRecursively() but allows custom upload logic
  * and uses Bee's returned references to avoid address mismatches.
+ *
+ * This is the variant that is safe to use from outside the proxy: the callback
+ * receives a marshaled node payload and hands back the reference it was stored
+ * under, so any uploader that wraps a payload in a chunk of its own fits,
+ * `SwarmIdClient.uploadChunk` included.
  */
 export async function saveMantarayTreeRecursively(
   node: MantarayNode,
@@ -62,7 +67,8 @@ export interface SaveMantarayOptions {
 /**
  * Upload callback for saveMantarayTree
  *
- * @param chunkData - The ready-to-upload chunk data
+ * @param chunkData - A finished content-addressed chunk, span header included;
+ *   it must be stored exactly as given, not wrapped in another chunk
  * @param isRoot - Whether this is the root node
  * @returns Upload result with optional tag UID
  */
@@ -74,11 +80,22 @@ export type MantarayUploadCallback = (
 /**
  * Save a Mantaray tree by uploading bottom-up with unified encryption support
  *
+ * Proxy-internal, and deliberately not part of the package's public API.
+ *
  * Creates CAC or encrypted CAC internally based on encrypt option.
  * Returns 64-byte reference (address + key) when encrypted, 32-byte otherwise.
  *
+ * `uploadFn` receives a finished content-addressed chunk built here, span
+ * header included, and each node's address is computed locally from those same
+ * bytes. The callback must therefore store them as-is: an uploader that treats
+ * its argument as a payload and wraps it in a new chunk stores every node under
+ * a different address than the tree records, which fails silently and leaves the
+ * returned root reference pointing at nothing. `SwarmIdClient.uploadChunk` wraps
+ * its input that way and cannot be used here; no public client method accepts a
+ * finished chunk. Outside the proxy, use `saveMantarayTreeRecursively` instead.
+ *
  * @param node - Root Mantaray node to save
- * @param uploadFn - Callback to upload each chunk (receives ready-to-upload data)
+ * @param uploadFn - Callback that uploads each finished chunk verbatim
  * @param options - Optional settings (encrypt: boolean)
  * @returns Root reference and optional tag UID
  */
