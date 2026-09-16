@@ -99,7 +99,11 @@ import {
   resolveStampForApp,
   stampsReachableByApp,
 } from "./utils/postage-stamp-association"
-import { isStampExpired } from "./utils/stamp-lifespan"
+import {
+  isStampExpired,
+  sameStampLifetime,
+  type StampLifetimeFields,
+} from "./utils/stamp-lifespan"
 import {
   accountStateToDeviceView,
   foldAccount,
@@ -384,11 +388,18 @@ export class SwarmIdProxy {
   private presenceTimer: ReturnType<typeof setInterval> | undefined
   private subsidisedGatewayUrl: string | undefined
   /**
-   * The resolved stamp's stored lifetime has run out (#745). Kept beside
-   * `postageBatchId` so every consumer of "is there a usable stamp" reads one
-   * answer; recomputed wherever the stamp is.
+   * The resolved stamp's stored lifetime fields (#745), set wherever the
+   * stamp is. Expiry is derived from them on every read, so a tab left open
+   * past the drive's lifetime refuses its own writes rather than letting Bee
+   * refuse the lease claim.
    */
-  private stampExpired = false
+  private stampLifetime: StampLifetimeFields | undefined
+
+  private get stampExpired(): boolean {
+    return (
+      this.stampLifetime !== undefined && isStampExpired(this.stampLifetime)
+    )
+  }
   /**
    * The write path (lock + partition lease + stamp flush) for the current
    * account+batch. Constructed in `initializeStamper` once the stamper and
@@ -702,14 +713,16 @@ export class SwarmIdProxy {
     if (
       nextBatchId === this.postageBatchId &&
       nextSignerKey === this.signerKey &&
-      nextAccountFingerprint === this.stamperAccountFingerprint
+      nextAccountFingerprint === this.stamperAccountFingerprint &&
+      // A renewal keeps the batch and the key and moves only the lifetime.
+      sameStampLifetime(stamp, this.stampLifetime)
     ) {
       return
     }
 
     this.postageBatchId = nextBatchId
     this.signerKey = nextSignerKey
-    this.stampExpired = stamp !== undefined && isStampExpired(stamp)
+    this.stampLifetime = stamp
     this.stamper = undefined
     this.stamperAccountFingerprint = undefined
 
@@ -744,12 +757,12 @@ export class SwarmIdProxy {
     if (stamp) {
       this.postageBatchId = stamp.batchID.toHex()
       this.signerKey = stamp.signerKey.toHex()
-      this.stampExpired = isStampExpired(stamp)
+      this.stampLifetime = stamp
       await this.initializeStamper(stamp.depth)
     } else {
       this.postageBatchId = undefined
       this.signerKey = undefined
-      this.stampExpired = false
+      this.stampLifetime = undefined
       this.stamper = undefined
       this.stamperAccountFingerprint = undefined
     }
@@ -2354,12 +2367,12 @@ export class SwarmIdProxy {
       if (stamp) {
         this.postageBatchId = stamp.batchID.toHex()
         this.signerKey = stamp.signerKey.toHex()
-        this.stampExpired = isStampExpired(stamp)
+        this.stampLifetime = stamp
         await this.initializeStamper(stamp.depth)
       } else {
         this.postageBatchId = undefined
         this.signerKey = undefined
-        this.stampExpired = false
+        this.stampLifetime = undefined
       }
       return
     }
@@ -3172,6 +3185,7 @@ export class SwarmIdProxy {
     }
     this.stamper = undefined
     this.stamperAccountFingerprint = undefined
+    this.stampLifetime = undefined
     this.pendingLaneUpdates.clear()
     this.storagePartitioned = false
     this.partitionAccount = undefined

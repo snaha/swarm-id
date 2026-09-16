@@ -49,3 +49,19 @@ export function isStampExpired(
   const remaining = remainingLifespanSeconds(stamp, now)
   return remaining !== undefined && remaining <= 0
 }
+
+/**
+ * Whether two records would age to the same lifetime — the check a refresh
+ * needs to notice a renewal of the SAME batch, which moves only `batchTTL`
+ * and `updatedAt`.
+ */
+export function sameStampLifetime(
+  a: StampLifetimeFields | undefined,
+  b: StampLifetimeFields | undefined,
+): boolean {
+  if (a === undefined || b === undefined) return a === b
+  return (
+    a.batchTTL === b.batchTTL &&
+    (a.updatedAt ?? a.createdAt) === (b.updatedAt ?? b.createdAt)
+  )
+}

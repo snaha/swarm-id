@@ -35,7 +35,9 @@ export function resolveStampForApp(
   for (const batchId of candidates) {
     if (!batchId) continue
     // Skip deleted stamps (tombstones): a deleted default/override must fall
-    // through to the next candidate, same as a missing one.
+    // through to the next candidate, same as a missing one. An EXPIRED stamp
+    // deliberately does not: it can be renewed, and falling through would
+    // silently charge a drive the user never picked for this app (#745).
     const stamp = stamps.find((s) => !s.deletedAt && s.batchID.equals(batchId))
     if (stamp) return stamp
   }

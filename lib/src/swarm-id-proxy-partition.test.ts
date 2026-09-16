@@ -1548,6 +1548,79 @@ describe("SwarmIdProxy partitioned write enablement", () => {
       }
     })
 
+    // #745 review: a renewal (top-up) keeps the batch id and the signer key
+    // and only moves `batchTTL` / `updatedAt`, so a refresh guard keyed on the
+    // batch alone keeps refusing uploads until a full reload — the very
+    // remediation the error message tells the user to try.
+    it("lifts the refusal when a delta renews the same expired drive", async () => {
+      const account = makeSyncedAccount()
+      const [stamp] = account.postageStamps
+      const challenge = await startPartitionedConnect()
+      await sendSetSecret(challenge, {
+        account: serializeSyncedAccount({
+          ...account,
+          postageStamps: [
+            { ...stamp, batchTTL: 60, updatedAt: Date.now() - 120_000 },
+          ],
+        }),
+      })
+      await awaitBusJoin()
+      const busChannel = new BroadcastChannel(accountChannelName)
+      try {
+        let infos = messagesOfType("connectionInfoChanged")
+        expect(infos[infos.length - 1].uploadUnavailableReason).toBe(
+          "stamp-expired",
+        )
+
+        busChannel.postMessage(
+          accountDelta({
+            postageStamps: [{ ...stamp, batchTTL: 600, updatedAt: Date.now() }],
+          }),
+        )
+        await vi.waitFor(() => {
+          infos = messagesOfType("connectionInfoChanged")
+          expect(infos[infos.length - 1].canUpload).toBe(true)
+        })
+        expect(infos[infos.length - 1].uploadMode).toBe("user-stamp")
+      } finally {
+        busChannel.close()
+      }
+    })
+
+    // #745 review: expiry is a function of the clock, not of the last
+    // resolution event. A tab left open past the drive's lifetime must refuse
+    // the write itself rather than let Bee refuse the lease claim.
+    it("refuses an upload once the drive's lifetime runs out in an open session", async () => {
+      const account = makeSyncedAccount()
+      const [stamp] = account.postageStamps
+      const challenge = await startPartitionedConnect()
+      await sendSetSecret(challenge, {
+        account: serializeSyncedAccount({
+          ...account,
+          postageStamps: [{ ...stamp, batchTTL: 60, updatedAt: Date.now() }],
+        }),
+      })
+      const internals = proxy as unknown as {
+        ensureCanUpload(): void
+        buildConnectionInfo(): {
+          canUpload: boolean
+          uploadUnavailableReason?: string
+        }
+      }
+      expect(() => internals.ensureCanUpload()).not.toThrow()
+      expect(internals.buildConnectionInfo().canUpload).toBe(true)
+
+      vi.setSystemTime(Date.now() + 61_000)
+      try {
+        expect(() => internals.ensureCanUpload()).toThrow(/expired/)
+        const info = internals.buildConnectionInfo()
+        expect(info.canUpload).toBe(false)
+        expect(info.uploadUnavailableReason).toBe("stamp-expired")
+      } finally {
+        vi.useRealTimers()
+      }
+    })
+
     // The stored session (#635) is written at the handover, so without a
     // re-save the fold above lives only in memory: the next reload comes back
     // on the tombstoned stamp and its superseded signer key, and uploads with

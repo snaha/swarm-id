@@ -2,7 +2,11 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, it, expect } from "vitest"
-import { isStampExpired, remainingLifespanSeconds } from "./stamp-lifespan"
+import {
+  isStampExpired,
+  remainingLifespanSeconds,
+  sameStampLifetime,
+} from "./stamp-lifespan"
 
 const NOW = 2_000_000_000_000
 const MINUTE_MS = 60_000
@@ -37,5 +41,20 @@ describe("isStampExpired", () => {
     expect(
       isStampExpired({ batchTTL: 60, createdAt: NOW - MINUTE_MS }, NOW),
     ).toBe(true)
+  })
+})
+
+describe("sameStampLifetime", () => {
+  const stamp = { batchTTL: 60, createdAt: NOW - MINUTE_MS }
+
+  it("is true for records that age the same way, and for two absences", () => {
+    expect(sameStampLifetime(stamp, { ...stamp })).toBe(true)
+    expect(sameStampLifetime(undefined, undefined)).toBe(true)
+  })
+
+  it("notices a renewal: same batch, new TTL or a later measurement", () => {
+    expect(sameStampLifetime(stamp, { ...stamp, batchTTL: 600 })).toBe(false)
+    expect(sameStampLifetime(stamp, { ...stamp, updatedAt: NOW })).toBe(false)
+    expect(sameStampLifetime(stamp, undefined)).toBe(false)
   })
 })
