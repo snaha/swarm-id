@@ -389,6 +389,108 @@ describe("SwarmIdClient request seam", () => {
   })
 })
 
+describe("SwarmIdClient window message filtering", () => {
+  let client: SwarmIdClient
+  let listener: (event: unknown) => void
+  let contentWindow: object
+  let warn: Mock
+
+  /** The listener the constructor registered on `window`. */
+  function registeredMessageListener(): (event: unknown) => void {
+    const registration = vi
+      .mocked(window.addEventListener)
+      .mock.calls.find(([type]) => type === "message")
+    if (!registration) {
+      throw new Error("no message listener was registered")
+    }
+    return registration[1] as unknown as (event: unknown) => void
+  }
+
+  beforeEach(() => {
+    vi.restoreAllMocks()
+    warn = vi.fn()
+    vi.stubGlobal("console", { ...console, warn })
+    vi.stubGlobal("window", {
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+      parent: { postMessage: vi.fn() },
+      location: { origin: "https://localhost" },
+      open: vi.fn(),
+    })
+    vi.stubGlobal("document", {
+      createElement: vi.fn().mockReturnValue({
+        style: {},
+        onload: null,
+        onerror: null,
+        src: "",
+        contentWindow: { postMessage: vi.fn() },
+      }),
+      body: { appendChild: vi.fn(), removeChild: vi.fn() },
+    })
+
+    client = new SwarmIdClient({
+      iframeOrigin: "https://swarm-id.example.com",
+      metadata: { name: "Test App", description: "A test application" },
+    })
+    listener = registeredMessageListener()
+    contentWindow = { postMessage: vi.fn() }
+    internals(client).iframe = { style: {}, contentWindow }
+  })
+
+  // Every page carries message traffic of its own — devtools, HMR, wallet
+  // extensions — and none of it was ever addressed to this client.
+  it("drops a message from another window silently", () => {
+    listener({
+      origin: "http://localhost:5173",
+      source: { postMessage: vi.fn() },
+      data: { type: "webpackHotUpdate" },
+    })
+
+    expect(warn).not.toHaveBeenCalled()
+  })
+
+  it("drops a message silently before the iframe exists", () => {
+    internals(client).iframe = undefined
+
+    listener({
+      origin: "http://localhost:5173",
+      source: { postMessage: vi.fn() },
+      data: { type: "proxyInitialized" },
+    })
+
+    expect(warn).not.toHaveBeenCalled()
+  })
+
+  // From our own iframe, so the mismatch is ours to report: the frame is
+  // serving something other than the configured identity origin.
+  it("warns about a wrong origin from our iframe's window", () => {
+    listener({
+      origin: "https://evil.example.com",
+      source: contentWindow,
+      data: { type: "proxyReady" },
+    })
+
+    expect(warn).toHaveBeenCalledWith(
+      expect.stringContaining("unauthorized origin"),
+      "https://evil.example.com",
+    )
+  })
+
+  it("warns about a message from our iframe that fails validation", () => {
+    listener({
+      origin: "https://swarm-id.example.com",
+      source: contentWindow,
+      data: { type: "notAMessageWeKnow" },
+    })
+
+    expect(warn).toHaveBeenCalledWith(
+      expect.stringContaining("Invalid message format"),
+      expect.anything(),
+      expect.anything(),
+    )
+  })
+})
+
 describe("SwarmIdClient init-timeout timers (#421)", () => {
   // A distinctive value so the init timers are identifiable by delay.
   const INIT_TIMEOUT = 12345

@@ -370,40 +370,36 @@ export class SwarmIdClient {
    */
   private setupMessageListener(): void {
     this.messageListener = (event: MessageEvent) => {
-      // Handle proxyInitialized BEFORE any validation to avoid race condition
-      // This message is sent immediately when iframe loads and uses wildcard origin
+      // Source first, and silently: `window` carries every message the page
+      // sends itself — devtools, HMR, wallet extensions — and none of it was
+      // addressed to this client, so dropping it is routine rather than a
+      // security event and must not reach the console. Before the iframe
+      // exists there is no window a message of ours could have come from.
+      // This is also what keeps a sibling or parent frame on the identity
+      // origin from spoofing a push event like `connectionInfoChanged` or
+      // `authSuccess`.
+      if (!this.iframe || event.source !== this.iframe.contentWindow) {
+        return
+      }
+
+      // `proxyInitialized` is sent the moment the iframe loads, with a
+      // wildcard target origin, so it is answered before the origin check.
       if (event.data?.type === "proxyInitialized") {
-        // Security: Verify message is from OUR iframe (not another window/iframe)
-        if (this.iframe && event.source === this.iframe.contentWindow) {
-          if (this.proxyInitializedResolve) {
-            this.proxyInitializedResolve()
-            this.proxyInitializedResolve = undefined // Prevent double resolution
-          }
-        } else {
-          console.warn(
-            "[SwarmIdClient] Rejected proxyInitialized from unknown source",
-          )
+        if (this.proxyInitializedResolve) {
+          this.proxyInitializedResolve()
+          this.proxyInitializedResolve = undefined // Prevent double resolution
         }
         return
       }
 
-      // Validate origin (extract just origin part, ignoring any path in iframeOrigin)
+      // Our own iframe with an origin other than the configured identity one
+      // is worth reporting: the frame is serving something unexpected.
+      // (Extract just the origin part, ignoring any path in iframeOrigin.)
       const expectedOrigin = new URL(this.iframeOrigin).origin
       if (event.origin !== expectedOrigin) {
         console.warn(
           "[SwarmIdClient] Rejected message from unauthorized origin:",
           event.origin,
-        )
-        return
-      }
-
-      // Security: also verify the source is OUR iframe, not a sibling/parent
-      // frame served from the same origin. Without this check, push events
-      // like `connectionInfoChanged` / `authSuccess` could be spoofed by any
-      // co-origin window.
-      if (this.iframe && event.source !== this.iframe.contentWindow) {
-        console.warn(
-          "[SwarmIdClient] Rejected message from unexpected source window",
         )
         return
       }
