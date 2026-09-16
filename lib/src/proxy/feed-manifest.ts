@@ -1,7 +1,8 @@
 // Copyright 2026 The Swarm Authors. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { MantarayNode, NULL_ADDRESS } from "@ethersphere/bee-js"
+import { NULL_ADDRESS } from "@ethersphere/bee-js"
+import { MantarayNode } from "@ethersphere/core-sdk"
 import type { UploadOptions } from "@ethersphere/bee-js"
 import {
   makeEncryptedContentAddressedChunk,

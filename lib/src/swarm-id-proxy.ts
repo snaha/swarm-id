@@ -66,9 +66,10 @@ import {
   PrivateKey,
   Identifier,
   Topic,
-  MantarayNode,
   NULL_ADDRESS,
+  MantarayNode as BeeMantarayNode,
 } from "@ethersphere/bee-js"
+import { MantarayNode } from "@ethersphere/core-sdk"
 import { makeContentAddressedChunk } from "./chunk"
 import { AccountBus, BroadcastChannelTransport } from "./bus/account-bus"
 import { SignalingTransport } from "./bus/signaling-transport"
@@ -3390,7 +3391,7 @@ export class SwarmIdProxy {
     message: IsConnectedMessage,
     event: MessageEvent,
   ): Promise<void> {
-    const connected = await this.bee.isConnected()
+    const connected = await this.bee.connectivity.isConnected()
 
     this.postMessage(event, {
       type: "isConnectedResponse",
@@ -3404,7 +3405,7 @@ export class SwarmIdProxy {
     event: MessageEvent,
   ): Promise<void> {
     try {
-      const nodeInfo = await this.bee.getNodeInfo()
+      const nodeInfo = await this.bee.status.getNodeInfo()
 
       this.postMessage(event, {
         type: "getNodeInfoResponse",
@@ -3852,7 +3853,9 @@ export class SwarmIdProxy {
         targetPath = path
       } else {
         // No path: get index document from manifest metadata
-        const { indexDocument } = manifest.getDocsMetadata()
+        const { indexDocument } = new BeeMantarayNode(
+          manifest,
+        ).getDocsMetadata()
         if (!indexDocument) {
           throw new Error(
             "Manifest does not contain an index document reference",
@@ -3953,7 +3956,7 @@ export class SwarmIdProxy {
 
     try {
       // Download chunk using bee-js (returns Uint8Array directly)
-      const data = await this.bee.downloadChunk(
+      const data = await this.bee.chunk.download(
         reference,
         options,
         requestOptions,
@@ -3977,7 +3980,11 @@ export class SwarmIdProxy {
     const { requestId, targetOverlay, identifier, proximity } = message
 
     try {
-      const signer = this.bee.gsocMine(targetOverlay, identifier, proximity)
+      const signer = this.bee.messaging.gsocMine(
+        targetOverlay,
+        identifier,
+        proximity,
+      )
 
       this.postMessage(event, {
         type: "gsocMineResponse",
@@ -5359,7 +5366,7 @@ export class SwarmIdProxy {
       )
 
       // Step 2: Get the index document path from manifest metadata
-      const { indexDocument } = manifest.getDocsMetadata()
+      const { indexDocument } = new BeeMantarayNode(manifest).getDocsMetadata()
       if (!indexDocument) {
         throw new Error("Manifest does not contain an index document reference")
       }

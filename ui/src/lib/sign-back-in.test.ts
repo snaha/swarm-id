@@ -28,15 +28,16 @@ vi.mock('@snaha/swarm-id', async (importOriginal) => ({
   foldAccountFromSwarm: vi.fn(),
 }))
 
-// `signBackIn`'s fallback probes reachability via `new Bee(url).isConnected()`.
+// `signBackIn`'s fallback probes reachability via
+// `new Bee(url).connectivity.isConnected()`.
 let beeConnected = true
 vi.mock('@ethersphere/bee-js', async (importOriginal) => {
   const original = await importOriginal<typeof import('@ethersphere/bee-js')>()
   return {
     ...original,
     Bee: class {
-      isConnected(): Promise<boolean> {
-        return Promise.resolve(beeConnected)
+      connectivity = {
+        isConnected: (): Promise<boolean> => Promise.resolve(beeConnected),
       }
     },
   }

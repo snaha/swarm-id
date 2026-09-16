@@ -209,7 +209,7 @@ async function readRosterEntry(opts: {
   let refBytes: Uint8Array
   try {
     const soc = await withTimeout(
-      opts.bee.makeSOCReader(opts.owner).download(identifier),
+      opts.bee.soc.makeReader(opts.owner).download(identifier),
       ROSTER_READ_TIMEOUT_MS,
       "roster read timed out",
     )

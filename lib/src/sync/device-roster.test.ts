@@ -73,16 +73,18 @@ function fakeBee(presentIndices: Set<number>, probed?: number[]) {
     identToIndex.set(rosterIdentifier(topic, BigInt(i)).toHex(), i)
   }
   return {
-    makeSOCReader: () => ({
-      download: async (identifier: { toHex(): string }) => {
-        const index = identToIndex.get(identifier.toHex())
-        if (index !== undefined) probed?.push(index)
-        if (index === undefined || !presentIndices.has(index)) {
-          throw notFound404()
-        }
-        return { payload: { toUint8Array: () => refForIndex(index) } }
-      },
-    }),
+    soc: {
+      makeReader: () => ({
+        download: async (identifier: { toHex(): string }) => {
+          const index = identToIndex.get(identifier.toHex())
+          if (index !== undefined) probed?.push(index)
+          if (index === undefined || !presentIndices.has(index)) {
+            throw notFound404()
+          }
+          return { payload: { toUint8Array: () => refForIndex(index) } }
+        },
+      }),
+    },
   }
 }
 
@@ -177,29 +179,31 @@ function fakeBeeWithSlow(opts: {
   const calls = new Map<number, number>()
   const state = { readCount: 0 }
   const bee = {
-    makeSOCReader: () => ({
-      download: (identifier: { toHex(): string }) => {
-        const index = identToIndex.get(identifier.toHex())
-        if (index === undefined) throw notFound404()
-        state.readCount++
-        const n = (calls.get(index) ?? 0) + 1
-        calls.set(index, n)
-        if (index === opts.alwaysSlow) return new Promise(() => {}) // never settles
-        if (index === opts.slowOnce && n === 1) return new Promise(() => {})
-        // A 5xx is inconclusive, like a timeout — the scan must not read it as
-        // a confirmed-empty slot.
-        if (index === opts.alwaysServerError) throw serverError500()
-        if (index === opts.serverErrorOnce && n === 1) throw serverError500()
-        const present =
-          opts.present.has(index) ||
-          index === opts.slowOnce ||
-          index === opts.serverErrorOnce
-        if (!present) throw notFound404() // clean 404 → end of feed
-        return Promise.resolve({
-          payload: { toUint8Array: () => refForIndex(index) },
-        })
-      },
-    }),
+    soc: {
+      makeReader: () => ({
+        download: (identifier: { toHex(): string }) => {
+          const index = identToIndex.get(identifier.toHex())
+          if (index === undefined) throw notFound404()
+          state.readCount++
+          const n = (calls.get(index) ?? 0) + 1
+          calls.set(index, n)
+          if (index === opts.alwaysSlow) return new Promise(() => {}) // never settles
+          if (index === opts.slowOnce && n === 1) return new Promise(() => {})
+          // A 5xx is inconclusive, like a timeout — the scan must not read it as
+          // a confirmed-empty slot.
+          if (index === opts.alwaysServerError) throw serverError500()
+          if (index === opts.serverErrorOnce && n === 1) throw serverError500()
+          const present =
+            opts.present.has(index) ||
+            index === opts.slowOnce ||
+            index === opts.serverErrorOnce
+          if (!present) throw notFound404() // clean 404 → end of feed
+          return Promise.resolve({
+            payload: { toUint8Array: () => refForIndex(index) },
+          })
+        },
+      }),
+    },
   }
   return {
     get readCount() {
@@ -343,12 +347,14 @@ describe("readRoster / ensureInRoster — inconclusive is not empty", () => {
       throw serverError500()
     })
     const bee = {
-      makeSOCReader: () => ({
-        download: async () => {
-          throw serverError500()
-        },
-      }),
-      downloadChunk,
+      soc: {
+        makeReader: () => ({
+          download: async () => {
+            throw serverError500()
+          },
+        }),
+      },
+      chunk: { download: downloadChunk },
     }
     await ensureInRoster({
       bee: bee as never,
@@ -405,18 +411,22 @@ describe("readRoster — /soc absence probe on an inconclusive /chunks read (#45
     vi.stubGlobal("fetch", fetchSpy)
     const bee = {
       url: BEE_URL,
-      makeSOCReader: () => ({
-        download: async (identifier: { toHex(): string }) => {
-          const index = identToIndex.get(identifier.toHex())
-          if (index === undefined || !opts.chunksPresent?.has(index)) {
-            throw serverError500() // small cluster: absent chunk = 500, never 404
-          }
-          return { payload: { toUint8Array: () => refForIndex(index) } }
-        },
-      }),
-      downloadChunk: vi.fn(async () => {
-        throw serverError500()
-      }),
+      soc: {
+        makeReader: () => ({
+          download: async (identifier: { toHex(): string }) => {
+            const index = identToIndex.get(identifier.toHex())
+            if (index === undefined || !opts.chunksPresent?.has(index)) {
+              throw serverError500() // small cluster: absent chunk = 500, never 404
+            }
+            return { payload: { toUint8Array: () => refForIndex(index) } }
+          },
+        }),
+      },
+      chunk: {
+        download: vi.fn(async () => {
+          throw serverError500()
+        }),
+      },
     }
     return { bee, fetchSpy }
   }
@@ -482,7 +492,7 @@ describe("readRoster — /soc absence probe on an inconclusive /chunks read (#45
       device: makeDevice(0),
       target: { mode: "subsidised" } as never, // append stops before uploading
     })
-    expect(bee.downloadChunk).toHaveBeenCalled()
+    expect(bee.chunk.download).toHaveBeenCalled()
   })
 
   it("folds a device the /chunks blip hid when /soc serves the slot (200)", async () => {

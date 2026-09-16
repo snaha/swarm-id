@@ -215,7 +215,7 @@ export class SyncEpochFinder implements EpochFinder {
     )
 
     // Download chunk
-    const chunkData = await this.bee.downloadChunk(
+    const chunkData = await this.bee.chunk.download(
       address.toHex(),
       undefined,
       requestOptions,

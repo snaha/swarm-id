@@ -18,7 +18,7 @@
   },
   "devDependencies": {
     "@eslint/js": "10.0.1",
-    "@ethersphere/bee-js": "^11.1.1",
+    "@ethersphere/bee-js": "^13.0.0",
     "@snaha/swarm-id": "workspace:*",
     "@sveltejs/adapter-static": "3.0.10",
     "@sveltejs/kit": "2.50.1",

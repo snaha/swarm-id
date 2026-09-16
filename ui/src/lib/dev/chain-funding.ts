@@ -361,7 +361,7 @@ async function waitForNodeToSeeBatch(beeNodeUrl: string, blockNumber: string): P
   let consecutiveFailures = 0
   while (Date.now() < deadline) {
     try {
-      const { lastSyncedBlock } = await bee.getStatus()
+      const { lastSyncedBlock } = await bee.status.get()
       if (lastSyncedBlock >= target) {
         return
       }

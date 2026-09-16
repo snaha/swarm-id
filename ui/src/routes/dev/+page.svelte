@@ -891,7 +891,7 @@
         await sleep(Math.max(0, checkpoint - prev))
         prev = checkpoint
         try {
-          await withTimeout(bee.downloadChunk(addr), SELF_CHECK_READ_TIMEOUT_MS, 'read timed out')
+          await withTimeout(bee.chunk.download(addr), SELF_CHECK_READ_TIMEOUT_MS, 'read timed out')
           foundMs = Date.now() - t0
           break
         } catch (error) {

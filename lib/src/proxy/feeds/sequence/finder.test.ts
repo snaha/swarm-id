@@ -43,16 +43,18 @@ function fakeBee(opts: {
   const calls = new Map<number, number>()
   const state = { downloads: 0 }
   const bee = {
-    downloadChunk: async (hex: string) => {
-      state.downloads++
-      const index = addrToIndex.get(hex.toLowerCase())
-      if (index === undefined) throw notFound500()
-      const n = (calls.get(index) ?? 0) + 1
-      calls.set(index, n)
-      const fails = opts.failTimes?.get(index) ?? 0
-      if (n <= fails) throw notFound500()
-      if (!opts.present.has(index)) throw notFound500()
-      return new Uint8Array(32)
+    chunk: {
+      download: async (hex: string) => {
+        state.downloads++
+        const index = addrToIndex.get(hex.toLowerCase())
+        if (index === undefined) throw notFound500()
+        const n = (calls.get(index) ?? 0) + 1
+        calls.set(index, n)
+        const fails = opts.failTimes?.get(index) ?? 0
+        if (n <= fails) throw notFound500()
+        if (!opts.present.has(index)) throw notFound500()
+        return new Uint8Array(32)
+      },
     },
   }
   return {

@@ -38,7 +38,9 @@ import { hexToUint8Array } from "../utils/hex"
  * client's surface the caller actually depends on. `url` is there for the
  * log lines only.
  */
-export type ChunkDownloader = Pick<Bee, "downloadChunk" | "url">
+export type ChunkDownloader = Pick<Bee, "url"> & {
+  chunk: Pick<Bee["chunk"], "download">
+}
 
 function readSpan(spanBytes: Uint8Array): number {
   const view = new DataView(
@@ -212,7 +214,7 @@ async function downloadAndProcessChunk(
   const addressHex = Binary.uint8ArrayToHex(ref.address)
   let rawChunk: Uint8Array
   try {
-    rawChunk = await bee.downloadChunk(addressHex, undefined, requestOptions)
+    rawChunk = await bee.chunk.download(addressHex, undefined, requestOptions)
   } catch (error) {
     console.error(
       `[DownloadData] chunk fetch failed addr=${addressHex} encrypted=${ref.encryptionKey !== undefined} bee.url=${bee.url}:`,
@@ -446,7 +448,7 @@ export async function downloadSOC(
   const id = new Identifier(identifier)
   const socAddress = makeSocAddress(id, ownerAddress)
 
-  const data = await bee.downloadChunk(
+  const data = await bee.chunk.download(
     socAddress.toHex(),
     undefined,
     requestOptions,
@@ -470,7 +472,7 @@ export async function downloadEncryptedSOC(
       ? hexToUint8Array(encryptionKey)
       : encryptionKey
 
-  const data = await bee.downloadChunk(
+  const data = await bee.chunk.download(
     socAddress.toHex(),
     undefined,
     requestOptions,

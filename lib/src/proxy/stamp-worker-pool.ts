@@ -13,11 +13,12 @@
  */
 
 import type { Stamper, EnvelopeWithBatchId, BatchId } from "@ethersphere/bee-js"
+import { EthAddress, Signature } from "@ethersphere/bee-js"
 import { Binary } from "cafe-utility"
 import type {
   StampWorkerReadyResponse,
   StampWorkerSignedResponse,
-} from "./stamp-worker"
+} from "./stamp-worker-handler"
 
 // Imported at build time via virtual module (see rollup.config.js)
 import stampWorkerCode from "virtual:stamp-worker-code"
@@ -34,6 +35,7 @@ interface WorkerHandle {
 
 const DEFAULT_WORKER_COUNT = 4
 const WORKER_INIT_TIMEOUT_MS = 5_000
+const NANOSECONDS_PER_MILLISECOND = 1_000_000n
 
 export class StampWorkerPool {
   private workers: WorkerHandle[]
@@ -153,14 +155,18 @@ export class StampWorkerPool {
   }
 
   /**
-   * Stamp chunk data using parallel worker signing.
+   * Stamp a chunk address using parallel worker signing.
    *
    * Bucket assignment happens on the main thread (fast, sequential).
    * ECDSA signing is dispatched to a worker (slow, parallel).
+   *
+   * Takes the same `timestampMs` as core-sdk's `Stamper.stamp`, and produces
+   * the same envelope for the same inputs — `stamp-worker-pool.test.ts` holds
+   * the two to that, field by field.
    */
   async stampChunkData(
-    _chunkData: Uint8Array,
     address: Uint8Array,
+    timestampMs: number = Date.now(),
   ): Promise<EnvelopeWithBatchId> {
     // 1. Bucket assignment (main thread) — replicates Stamper.stamp() logic
     const bucket = (address[0] << 8) | address[1]
@@ -176,11 +182,15 @@ export class StampWorkerPool {
     indexView.setUint32(0, bucket, false)
     indexView.setUint32(4, height, false)
 
-    // Build timestamp (8 bytes): uint64 BE of Date.now()
+    // Build timestamp (8 bytes): uint64 BE in nanoseconds — the unit Bee and
+    // core-sdk's `Stamper` use, and what Bee compares on an index collision
     const timestamp = new Uint8Array(8)
     const tsView = new DataView(timestamp.buffer)
-    const now = BigInt(Date.now())
-    tsView.setBigUint64(0, now, false)
+    tsView.setBigUint64(
+      0,
+      BigInt(timestampMs) * NANOSECONDS_PER_MILLISECOND,
+      false,
+    )
 
     // 2. Construct signing message (80 bytes)
     const message = Binary.concatBytes(
@@ -198,8 +208,8 @@ export class StampWorkerPool {
     return {
       batchId: this.batchId,
       index,
-      issuer: this.issuer,
-      signature,
+      issuer: new EthAddress(this.issuer),
+      signature: new Signature(signature),
       timestamp,
     }
   }

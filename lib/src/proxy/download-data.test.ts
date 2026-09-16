@@ -106,7 +106,7 @@ describe("downloadDataWithChunkAPI console hygiene", () => {
 
     const { reference, decryptionKeyHex } = await uploadEncrypted(target, data)
 
-    vi.spyOn(bee, "downloadChunk").mockRejectedValue(new Error("fetch failed"))
+    vi.spyOn(bee.chunk, "download").mockRejectedValue(new Error("fetch failed"))
 
     const spies = spyOnConsole()
     await expect(downloadDataWithChunkAPI(bee, reference)).rejects.toThrow(

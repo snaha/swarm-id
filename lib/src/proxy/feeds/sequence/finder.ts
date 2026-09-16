@@ -69,7 +69,7 @@ export class SyncSequentialFinder implements SequentialFinder {
     // only if real gateways prove one insufficient.
     for (let attempt = 0; attempt < 2; attempt++) {
       try {
-        await this.bee.downloadChunk(
+        await this.bee.chunk.download(
           Binary.uint8ArrayToHex(address.toUint8Array()),
           undefined,
           requestOptions,

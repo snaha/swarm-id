@@ -39,7 +39,7 @@ import {
   PLAIN_REFS_PER_CHUNK,
 } from "./chunking"
 import { ChunkUploadStream } from "./chunk-upload-stream"
-import { marshalEnvelope } from "./stamp-marshal"
+import { convertEnvelopeToMarshaledStamp } from "@ethersphere/core-sdk"
 import type { ChunkReference, UploadProgress } from "./types"
 import type { StampWorkerPool } from "./stamp-worker-pool"
 import { tryCreateTag } from "../utils/tag"
@@ -196,49 +196,9 @@ export interface UploadChunkResult {
 // ============================================================================
 
 /**
- * Simple Uint8ArrayWriter - minimal stub required by Stamper interface.
- * The Stamper interface requires a writer field but never calls it during stamp().
- */
-class SimpleUint8ArrayWriter {
-  cursor: number = 0
-  buffer: Uint8Array
-
-  constructor(buffer: Uint8Array) {
-    this.buffer = buffer
-  }
-
-  write(_reader: unknown): number {
-    throw new Error("SimpleUint8ArrayWriter.write() not implemented")
-  }
-
-  max(): number {
-    return this.buffer.length
-  }
-}
-
-/**
- * Stamp chunk data by address and return the envelope.
- */
-function stampChunkData(
-  stamper: Stamper,
-  chunkData: Uint8Array,
-  address: Uint8Array,
-): EnvelopeWithBatchId {
-  return stamper.stamp({
-    hash: () => address,
-    build: () => chunkData,
-    span: 0n,
-    writer: new SimpleUint8ArrayWriter(chunkData),
-  })
-}
-
-/**
  * Async stamp function - abstraction over sync Stamper and parallel StampWorkerPool.
  */
-type StampChunkFn = (
-  chunkData: Uint8Array,
-  address: Uint8Array,
-) => Promise<EnvelopeWithBatchId>
+type StampChunkFn = (address: Uint8Array) => Promise<EnvelopeWithBatchId>
 
 /**
  * Create a StampChunkFn from a Stamper and optional worker pool.
@@ -248,10 +208,9 @@ function makeStampFn(
   workerPool?: StampWorkerPool,
 ): StampChunkFn {
   if (workerPool) {
-    return (chunkData, address) => workerPool.stampChunkData(chunkData, address)
+    return (address) => workerPool.stampChunkData(address)
   }
-  return (chunkData, address) =>
-    Promise.resolve(stampChunkData(stamper, chunkData, address))
+  return (address) => Promise.resolve(stamper.stamp(address))
 }
 
 // ============================================================================
@@ -313,8 +272,8 @@ async function uploadStampedChunkViaHttp(
   options: UploadOptions,
   requestOptions?: BeeRequestOptions,
 ): Promise<void> {
-  const envelope = await stamp(chunkData, address)
-  await bee.uploadChunk(envelope, chunkData, options, requestOptions)
+  const envelope = await stamp(address)
+  await bee.chunk.upload(envelope, chunkData, options, requestOptions)
 }
 
 /**
@@ -404,8 +363,11 @@ async function uploadStampedChunkViaWebSocket(
   chunkData: Uint8Array,
   address: Uint8Array,
 ): Promise<void> {
-  const envelope = await stamp(chunkData, address)
-  const stamped = Binary.concatBytes(marshalEnvelope(envelope), chunkData)
+  const envelope = await stamp(address)
+  const stamped = Binary.concatBytes(
+    convertEnvelopeToMarshaledStamp(envelope).toUint8Array(),
+    chunkData,
+  )
   await stream.uploadChunk(stamped)
 }
 
@@ -971,15 +933,9 @@ export async function uploadSOC(
     const { bee, stamper } = target
     const tag = options?.tag ?? (await tryCreateTag(bee))
 
-    const envelope = stamper.stamp({
-      hash: () => socAddressBytes,
-      build: () => socBody,
-      span: 0n,
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      writer: undefined as any,
-    })
+    const envelope = stamper.stamp(socAddressBytes)
 
-    const stampHex = Binary.uint8ArrayToHex(marshalEnvelope(envelope))
+    const stampHex = convertEnvelopeToMarshaledStamp(envelope).toHex()
     const url = `${bee.url}/soc/${owner.toHex()}/${identifier.toHex()}?sig=${signature.toHex()}`
 
     const headers: Record<string, string> = {
