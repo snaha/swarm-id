@@ -58,6 +58,15 @@ Every node in the cluster allows all CORS origins, so the identity UI can talk t
 `http://localhost:1633` as soon as it is up. A Bee node you run yourself instead needs the identity
 UI's origin allowed explicitly — see [Using Your Own Bee Node](../own-bee-node/).
 
+### Tunnels
+
+Behind a tunnel (ngrok, Cloudflare Tunnel), the dApp's origin is the tunnel hostname, not
+`localhost`: the identity UI sees a different dApp and derives a different
+[app secret](../key-derivation/#app-secret), so a session approved on `localhost` does not carry
+over. Some dev servers also refuse cross-origin requests from anything but `localhost` — Next.js
+needs the tunnel host in `allowedDevOrigins` — and the symptom is the proxy iframe rejecting
+every message rather than anything about the tunnel.
+
 ## Developer Tools (/dev)
 
 The Identity UI includes a Developer Tools page at `http://localhost:5500/dev` with utilities for testing and debugging.

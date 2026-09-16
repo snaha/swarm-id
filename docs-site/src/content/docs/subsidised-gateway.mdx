@@ -148,3 +148,6 @@ Monitor your stamp's utilization and balance. When a stamp is depleted, uploads 
 - Uploads are still signed by the user's app key for feeds and SOCs
 - Consider rate limiting on your gateway to prevent abuse
 - The gateway URL is visible in the client configuration
+- Uploads through your gateway persist only as long as the batch it stamps with. The client
+  cannot read that lifetime, so state it to your users, and top the batch up before it lapses
+  if their content is meant to stay

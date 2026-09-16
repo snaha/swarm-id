@@ -506,7 +506,7 @@ if (connected) {
 
 ### `getNodeInfo()`
 
-Gets information about the Bee node configuration. Needs a real Bee node: the [public gateway](../public-gateway/) has no `/node` endpoint and this call fails there. Do not gate uploads on it; its purpose is to detect a dev-mode node, where deferred uploads are required.
+Gets information about the Bee node configuration. Needs a real Bee node: the [public gateway](../public-gateway/) has no `/node` endpoint and this call fails there. Do not gate uploads on it; its purpose is to detect a dev-mode node, where deferred uploads are required. Nothing else tells you: a direct upload against a dev-mode node does not fail with a mode error, it waits out the request timeout and rejects with `Request timeout after 30000ms`.
 
 This method retrieves the current Bee node's operating mode and feature flags. Use this to determine if deferred uploads are required (dev mode) or if direct uploads are available (production modes).
 
@@ -549,19 +549,19 @@ The data is uploaded using the authenticated user's postage stamp. Progress can 
 
 **Parameters:**
 
-| Parameter                       | Type                     | Required | Description                                                                            |
-| ------------------------------- | ------------------------ | -------- | -------------------------------------------------------------------------------------- |
-| `data`                          | `Uint8Array`             | Yes      | The binary data to upload                                                              |
-| `options`                       | `UploadOptions`          | No       | Upload configuration                                                                   |
-| `options.pin`                   | `boolean`                | No       | Whether to pin the data locally (defaults to `false`; ignored on a subsidised gateway) |
-| `options.encrypt`               | `boolean`                | No       | Whether to encrypt the data (defaults to `false`)                                      |
-| `options.tag`                   | `number`                 | No       | Tag ID for tracking upload progress (ignored on a subsidised gateway)                  |
-| `options.deferred`              | `boolean`                | No       | Whether to use deferred upload (defaults to `false`)                                   |
-| `options.onProgress`            | `(progress) => void`     | No       | Callback for tracking upload progress                                                  |
-| `requestOptions`                | `RequestOptions`         | No       | Request configuration                                                                  |
-| `requestOptions.timeout`        | `number`                 | No       | Request timeout in milliseconds                                                        |
-| `requestOptions.headers`        | `Record<string, string>` | No       | Custom headers                                                                         |
-| `requestOptions.endlesslyRetry` | `boolean`                | No       | Whether to retry endlessly                                                             |
+| Parameter                       | Type                     | Required | Description                                                                                                                                                                                                                                                      |
+| ------------------------------- | ------------------------ | -------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `data`                          | `Uint8Array`             | Yes      | The binary data to upload                                                                                                                                                                                                                                        |
+| `options`                       | `UploadOptions`          | No       | Upload configuration                                                                                                                                                                                                                                             |
+| `options.pin`                   | `boolean`                | No       | Whether to pin the data locally (defaults to `false`; ignored on a subsidised gateway)                                                                                                                                                                           |
+| `options.encrypt`               | `boolean`                | No       | Whether to encrypt the data (defaults to `false`). The 128-hex reference then contains the decryption key: a capability, not an address — see [Quick Start](../getting-started/#upload-data)                                                                     |
+| `options.tag`                   | `number`                 | No       | Tag ID for tracking upload progress (ignored on a subsidised gateway)                                                                                                                                                                                            |
+| `options.deferred`              | `boolean`                | No       | Whether to use deferred upload (defaults to `false`). A Bee node in dev mode serves only deferred uploads, and a direct upload against one fails as a request timeout, not as a mode error — see [`getNodeInfo`](#getnodeinfo). Not needed on the public gateway |
+| `options.onProgress`            | `(progress) => void`     | No       | Callback for tracking upload progress                                                                                                                                                                                                                            |
+| `requestOptions`                | `RequestOptions`         | No       | Request configuration                                                                                                                                                                                                                                            |
+| `requestOptions.timeout`        | `number`                 | No       | Request timeout in milliseconds. Overrides the client's default (30 s), which bounds the whole upload; a file of a few MB over a testnet or the public gateway needs more, passed in this third argument                                                         |
+| `requestOptions.headers`        | `Record<string, string>` | No       | Custom headers                                                                                                                                                                                                                                                   |
+| `requestOptions.endlesslyRetry` | `boolean`                | No       | Whether to retry endlessly                                                                                                                                                                                                                                       |
 
 **Returns:** `Promise<UploadResult>`
 
@@ -640,15 +640,15 @@ Accepts either a File object (from file input) or raw Uint8Array data. When usin
 
 **Parameters:**
 
-| Parameter                       | Type                     | Required | Description                                           |
-| ------------------------------- | ------------------------ | -------- | ----------------------------------------------------- |
-| `file`                          | `File \| Uint8Array`     | Yes      | The file to upload                                    |
-| `name`                          | `string`                 | No       | Filename (extracted from File object if not provided) |
-| `options`                       | `UploadOptions`          | No       | Upload configuration (see `uploadData`)               |
-| `requestOptions`                | `RequestOptions`         | No       | Request configuration                                 |
-| `requestOptions.timeout`        | `number`                 | No       | Request timeout in milliseconds                       |
-| `requestOptions.headers`        | `Record<string, string>` | No       | Custom headers                                        |
-| `requestOptions.endlesslyRetry` | `boolean`                | No       | Whether to retry endlessly                            |
+| Parameter                       | Type                     | Required | Description                                                                                                                                                                                              |
+| ------------------------------- | ------------------------ | -------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `file`                          | `File \| Uint8Array`     | Yes      | The file to upload                                                                                                                                                                                       |
+| `name`                          | `string`                 | No       | Filename (extracted from File object if not provided)                                                                                                                                                    |
+| `options`                       | `UploadOptions`          | No       | Upload configuration (see `uploadData`)                                                                                                                                                                  |
+| `requestOptions`                | `RequestOptions`         | No       | Request configuration                                                                                                                                                                                    |
+| `requestOptions.timeout`        | `number`                 | No       | Request timeout in milliseconds. Overrides the client's default (30 s), which bounds the whole upload; a file of a few MB over a testnet or the public gateway needs more, passed in this third argument |
+| `requestOptions.headers`        | `Record<string, string>` | No       | Custom headers                                                                                                                                                                                           |
+| `requestOptions.endlesslyRetry` | `boolean`                | No       | Whether to retry endlessly                                                                                                                                                                               |
 
 **Returns:** `Promise<UploadResult>` - Contains `reference` and optional `tagUid`
 

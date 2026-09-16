@@ -35,6 +35,11 @@ yarn add @snaha/swarm-id
 
 ## Basic Usage
 
+The package is browser-only and touches `window` when it is imported, not only when a client is
+constructed. In a framework that renders on a server (Next.js App Router, SvelteKit with SSR,
+Nuxt), import it from a client-only module or with a dynamic `import()` guarded on
+`typeof window !== 'undefined'`; a bare top-level import breaks the server render.
+
 ```typescript
 import { SwarmIdClient } from '@snaha/swarm-id'
 
@@ -124,6 +129,14 @@ const result = await client.uploadData(data, {
 ```
 
 Retrieve what `uploadData` stored with `downloadData`, or from a gateway at `/bytes/<reference>`. It is raw bytes with no manifest, so `downloadFile` and `/bzz/<reference>/` cannot resolve it.
+
+**An encrypted reference is a capability, not an address.** The 128-hex reference from
+`{ encrypt: true }` contains the decryption key, so whoever holds it can read the content.
+Treat it as a secret: never put it in a public index, an on-chain record or a gateway URL.
+If something public has to point at the content, publish a hash of the reference and hand the
+reference itself to the reader over a channel you trust. Every encrypted chunk is padded to
+4 KB and its span is encrypted, so the exact byte length is hidden, but the number of chunks
+is not; if the size of a payload alone says something, pad or bucket it before upload.
 
 ### Download Data
 
