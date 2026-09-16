@@ -169,7 +169,7 @@ export class SwarmIdClient {
    * @param options - Configuration options for the client
    * @param options.iframeOrigin - The origin URL where the Swarm ID proxy iframe is hosted
    * @param options.iframePath - The path to the proxy iframe (defaults to "/proxy")
-   * @param options.timeout - Request timeout in milliseconds (defaults to 30000)
+   * @param options.timeout - Request timeout in milliseconds (defaults to 30000). Bounds each call's whole round trip through the iframe; a call's own `requestOptions.timeout` replaces it for that call
    * @param options.onConnectionChange - Callback invoked when the dApp-visible ConnectionInfo changes (identity, stamp, account type, auth)
    * @param options.popupMode - How to display the authentication popup: "popup" or "window" (defaults to "window")
    * @param options.metadata - Application metadata shown to users during authentication
@@ -569,11 +569,17 @@ export class SwarmIdClient {
         requestId: string
       },
   >(message: TRequest): Promise<TResponse> {
+    // A per-call `requestOptions.timeout` bounds this whole round trip, not
+    // only the Bee request the proxy makes with it: a caller raising it for a
+    // large upload must not be cut off at the constructor default (#775).
+    const timeout =
+      (message as { requestOptions?: RequestOptions }).requestOptions
+        ?.timeout ?? this.timeout
     return new Promise((resolve, reject) => {
       const timeoutId = setTimeout(() => {
         this.pendingRequests.delete(message.requestId)
-        reject(new Error(`Request timeout after ${this.timeout}ms`))
-      }, this.timeout)
+        reject(new Error(`Request timeout after ${timeout}ms`))
+      }, timeout)
 
       this.pendingRequests.set(message.requestId, {
         resolve,
@@ -1119,7 +1125,7 @@ export class SwarmIdClient {
    * @param options.tag - Tag ID for tracking upload progress
    * @param options.deferred - Whether to use deferred upload (defaults to false)
    * @param options.onProgress - Optional callback for tracking upload progress
-   * @param requestOptions - Optional request configuration (timeout, headers, endlesslyRetry)
+   * @param requestOptions - Optional request configuration (timeout, headers, endlesslyRetry). `timeout` replaces the client default for this call's whole round trip, not only the Bee request
    * @returns A promise resolving to the upload result
    * @returns return.reference - The Swarm reference (hash) of the uploaded data
    * @returns return.tagUid - The tag UID if a tag was created
@@ -1224,7 +1230,7 @@ export class SwarmIdClient {
    * @param options.actPublisher - ACT publisher for encrypted content
    * @param options.actHistoryAddress - ACT history address for encrypted content
    * @param options.actTimestamp - ACT timestamp for encrypted content
-   * @param requestOptions - Optional request configuration (timeout, headers, endlesslyRetry)
+   * @param requestOptions - Optional request configuration (timeout, headers, endlesslyRetry). `timeout` replaces the client default for this call's whole round trip, not only the Bee request
    * @returns A promise resolving to the downloaded data as a Uint8Array
    * @throws {Error} If the client is not initialized
    * @throws {Error} If the reference is not found
@@ -1317,7 +1323,7 @@ export class SwarmIdClient {
    * @param options.encrypt - Whether to encrypt the file (defaults to false)
    * @param options.tag - Tag ID for tracking upload progress
    * @param options.deferred - Whether to use deferred upload (defaults to false)
-   * @param requestOptions - Optional request configuration (timeout, headers, endlesslyRetry)
+   * @param requestOptions - Optional request configuration (timeout, headers, endlesslyRetry). `timeout` replaces the client default for this call's whole round trip, not only the Bee request
    * @returns A promise resolving to the upload result
    * @returns return.reference - The Swarm reference (hash) of the uploaded file
    * @returns return.tagUid - The tag UID if a tag was created
@@ -1444,7 +1450,7 @@ export class SwarmIdClient {
    * @param options.actPublisher - ACT publisher for encrypted content
    * @param options.actHistoryAddress - ACT history address for encrypted content
    * @param options.actTimestamp - ACT timestamp for encrypted content
-   * @param requestOptions - Optional request configuration (timeout, headers, endlesslyRetry)
+   * @param requestOptions - Optional request configuration (timeout, headers, endlesslyRetry). `timeout` replaces the client default for this call's whole round trip, not only the Bee request
    * @returns A promise resolving to the file data object
    * @returns return.name - The filename
    * @returns return.data - The file contents as a Uint8Array
@@ -1508,7 +1514,7 @@ export class SwarmIdClient {
    * @param options.encrypt - Whether to encrypt the chunk (defaults to false)
    * @param options.tag - Tag ID for tracking upload progress
    * @param options.deferred - Whether to use deferred upload (defaults to false)
-   * @param requestOptions - Optional request configuration (timeout, headers, endlesslyRetry)
+   * @param requestOptions - Optional request configuration (timeout, headers, endlesslyRetry). `timeout` replaces the client default for this call's whole round trip, not only the Bee request
    * @returns A promise resolving to the upload result
    * @returns return.reference - The Swarm reference (hash) of the uploaded chunk
    * @throws {Error} If the client is not initialized
@@ -1563,7 +1569,7 @@ export class SwarmIdClient {
    * @param options.actPublisher - ACT publisher for encrypted content
    * @param options.actHistoryAddress - ACT history address for encrypted content
    * @param options.actTimestamp - ACT timestamp for encrypted content
-   * @param requestOptions - Optional request configuration (timeout, headers, endlesslyRetry)
+   * @param requestOptions - Optional request configuration (timeout, headers, endlesslyRetry). `timeout` replaces the client default for this call's whole round trip, not only the Bee request
    * @returns A promise resolving to the chunk data as a Uint8Array
    * @throws {Error} If the client is not initialized
    * @throws {Error} If the reference is not found
@@ -1606,7 +1612,7 @@ export class SwarmIdClient {
    * Returns an object for reading single owner chunks (SOC).
    *
    * @param ownerAddress - Ethereum address of the SOC owner
-   * @param requestOptions - Optional request configuration (timeout, headers, endlesslyRetry)
+   * @param requestOptions - Optional request configuration (timeout, headers, endlesslyRetry). `timeout` replaces the client default for this call's whole round trip, not only the Bee request
    * @returns SOCReader with `download` (encrypted) and `rawDownload` (unencrypted)
    * @throws {Error} If the client is not initialized
    * @throws {Error} If the request times out
@@ -1682,7 +1688,7 @@ export class SwarmIdClient {
    * Uploads are encrypted by default. Use `rawUpload` for unencrypted SOCs.
    *
    * @param signer - Optional SOC signer private key. If omitted, the proxy uses the app signer.
-   * @param requestOptions - Optional request configuration (timeout, headers, endlesslyRetry)
+   * @param requestOptions - Optional request configuration (timeout, headers, endlesslyRetry). `timeout` replaces the client default for this call's whole round trip, not only the Bee request
    * @returns SOCWriter with `upload`, `rawUpload`, `download`, and `rawDownload`
    * @throws {Error} If the client is not initialized
    * @throws {Error} If the request times out
@@ -1844,7 +1850,7 @@ export class SwarmIdClient {
    * @param options - Feed reader options
    * @param options.topic - Feed topic (32 bytes)
    * @param options.owner - Optional feed owner address
-   * @param requestOptions - Optional request configuration (timeout, headers, endlesslyRetry)
+   * @param requestOptions - Optional request configuration (timeout, headers, endlesslyRetry). `timeout` replaces the client default for this call's whole round trip, not only the Bee request
    * @returns FeedReader with `getOwner`, `downloadReference`, and `downloadPayload`
    * @throws {Error} If the client is not initialized
    * @throws {Error} If the request times out
@@ -2001,7 +2007,7 @@ export class SwarmIdClient {
    * @param options - Feed writer options
    * @param options.topic - Feed topic (32 bytes)
    * @param options.signer - Optional feed signer private key. If omitted, the proxy uses the app signer.
-   * @param requestOptions - Optional request configuration (timeout, headers, endlesslyRetry)
+   * @param requestOptions - Optional request configuration (timeout, headers, endlesslyRetry). `timeout` replaces the client default for this call's whole round trip, not only the Bee request
    * @returns FeedWriter with `getOwner`, `downloadReference`, `downloadPayload`, `uploadPayload`, and `uploadReference`
    * @throws {Error} If the client is not initialized
    * @throws {Error} If the request times out
@@ -2328,7 +2334,7 @@ export class SwarmIdClient {
    * @param options - Sequential feed reader options
    * @param options.topic - Feed topic (32 bytes)
    * @param options.owner - Optional feed owner address
-   * @param requestOptions - Optional request configuration (timeout, headers, endlesslyRetry)
+   * @param requestOptions - Optional request configuration (timeout, headers, endlesslyRetry). `timeout` replaces the client default for this call's whole round trip, not only the Bee request
    * @returns SequentialFeedReader with payload/reference download helpers
    */
   makeSequentialFeedReader(
@@ -2482,7 +2488,7 @@ export class SwarmIdClient {
    * @param options - Sequential feed writer options
    * @param options.topic - Feed topic (32 bytes)
    * @param options.signer - Optional signer private key. If omitted, proxy uses app signer.
-   * @param requestOptions - Optional request configuration (timeout, headers, endlesslyRetry)
+   * @param requestOptions - Optional request configuration (timeout, headers, endlesslyRetry). `timeout` replaces the client default for this call's whole round trip, not only the Bee request
    * @returns SequentialFeedWriter with payload/reference upload helpers
    */
   makeSequentialFeedWriter(
@@ -2882,7 +2888,7 @@ export class SwarmIdClient {
    * @param identifier - The GSOC identifier
    * @param data - The message data to send
    * @param options - Optional upload configuration
-   * @param requestOptions - Optional request configuration (timeout, headers, endlesslyRetry)
+   * @param requestOptions - Optional request configuration (timeout, headers, endlesslyRetry). `timeout` replaces the client default for this call's whole round trip, not only the Bee request
    * @returns A promise resolving to the upload result with reference and optional tagUid
    * @throws {Error} If the client is not initialized
    * @throws {Error} If the user is not authenticated
@@ -2948,7 +2954,7 @@ export class SwarmIdClient {
    * @param options.tag - Tag ID for tracking upload progress
    * @param options.deferred - Whether to use deferred upload (defaults to false)
    * @param options.onProgress - Optional callback for tracking upload progress
-   * @param requestOptions - Optional request configuration (timeout, headers, endlesslyRetry)
+   * @param requestOptions - Optional request configuration (timeout, headers, endlesslyRetry). `timeout` replaces the client default for this call's whole round trip, not only the Bee request
    * @returns A promise resolving to the ACT upload result
    * @returns return.encryptedReference - The encrypted reference that must be stored with the ACT
    * @returns return.actReference - The Swarm reference (hash) of the ACT manifest
@@ -3062,7 +3068,7 @@ export class SwarmIdClient {
    * @param historyReference - The history reference from actUploadData
    * @param publisherPubKey - The publisher's compressed public key from actUploadData
    * @param timestamp - Optional timestamp to look up a specific ACT version
-   * @param requestOptions - Optional request configuration (timeout, headers, endlesslyRetry)
+   * @param requestOptions - Optional request configuration (timeout, headers, endlesslyRetry). `timeout` replaces the client default for this call's whole round trip, not only the Bee request
    * @returns A promise resolving to the decrypted data as a Uint8Array
    * @throws {Error} If the client is not initialized
    * @throws {Error} If the user is not authorized to decrypt the ACT
@@ -3117,7 +3123,7 @@ export class SwarmIdClient {
    *
    * @param historyReference - The current history reference
    * @param grantees - Array of new grantee public keys as compressed hex strings
-   * @param requestOptions - Optional request configuration (timeout, headers, endlesslyRetry)
+   * @param requestOptions - Optional request configuration (timeout, headers, endlesslyRetry). `timeout` replaces the client default for this call's whole round trip, not only the Bee request
    * @returns A promise resolving to the new references
    * @returns return.historyReference - The new history reference after adding grantees
    * @returns return.granteeListReference - The new grantee list reference
@@ -3183,7 +3189,7 @@ export class SwarmIdClient {
    * @param historyReference - The current history reference
    * @param encryptedReference - The current encrypted reference
    * @param revokeGrantees - Array of grantee public keys to revoke as compressed hex strings
-   * @param requestOptions - Optional request configuration (timeout, headers, endlesslyRetry)
+   * @param requestOptions - Optional request configuration (timeout, headers, endlesslyRetry). `timeout` replaces the client default for this call's whole round trip, not only the Bee request
    * @returns A promise resolving to the new references after revocation
    * @returns return.encryptedReference - The content reference, unchanged
    * @returns return.historyReference - The new history reference after revocation
@@ -3246,7 +3252,7 @@ export class SwarmIdClient {
    * as it is encrypted with the publisher's key.
    *
    * @param historyReference - The history reference
-   * @param requestOptions - Optional request configuration (timeout, headers, endlesslyRetry)
+   * @param requestOptions - Optional request configuration (timeout, headers, endlesslyRetry). `timeout` replaces the client default for this call's whole round trip, not only the Bee request
    * @returns A promise resolving to an array of grantee public keys as compressed hex strings
    * @throws {Error} If the client is not initialized
    * @throws {Error} If the user is not the publisher

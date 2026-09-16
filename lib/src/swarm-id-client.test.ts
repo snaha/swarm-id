@@ -346,6 +346,36 @@ describe("SwarmIdClient request seam", () => {
     await expect(promise).resolves.toEqual(data)
   })
 
+  // #775 review: `requestOptions.timeout` used to reach only the Bee request
+  // inside the iframe, while the client's own round-trip timer kept the
+  // constructor default — so a per-call value above 30 s still rejected at
+  // 30 s, with the same message the caller had just tried to escape.
+  it("a per-call requestOptions.timeout bounds the whole round trip", async () => {
+    const DEFAULT_CLIENT_TIMEOUT_MS = 30_000
+    const PER_CALL_TIMEOUT_MS = 60_000
+    vi.useFakeTimers()
+    try {
+      let settled: unknown
+      client
+        .downloadData("a".repeat(64), undefined, {
+          timeout: PER_CALL_TIMEOUT_MS,
+        })
+        .catch((error: unknown) => {
+          settled = error
+        })
+      await vi.advanceTimersByTimeAsync(DEFAULT_CLIENT_TIMEOUT_MS)
+      expect(settled).toBeUndefined()
+      await vi.advanceTimersByTimeAsync(
+        PER_CALL_TIMEOUT_MS - DEFAULT_CLIENT_TIMEOUT_MS,
+      )
+      expect(String(settled)).toContain(
+        `Request timeout after ${PER_CALL_TIMEOUT_MS}ms`,
+      )
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
   it("getPostageBatch rejects on a proxy error message", async () => {
     const promise = client.getPostageBatch()
 

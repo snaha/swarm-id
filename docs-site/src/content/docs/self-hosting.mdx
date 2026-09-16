@@ -27,8 +27,9 @@ embeds `swarm-id.snaha.net`, both under `snaha.net`.
 ## What it keeps
 
 The property that makes the design honest survives intact. A different **origin** keeps
-its own storage, so the dApp's JavaScript still cannot read the seed. Passkeys registered
-on the identity subdomain work from the dApp under one RP ID.
+its own storage, so the dApp's JavaScript still cannot read the seed. Passkeys are
+unaffected either way: the ceremony runs in the identity origin's own popup, so they work
+from the dApp on any deployment. What same-site adds is storage, not credentials.
 
 ## What it costs
 
