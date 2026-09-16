@@ -183,6 +183,9 @@ export class SwarmIdClient {
    * @param options.buttonConfig.backgroundColor - Background color for buttons (optional)
    * @param options.buttonConfig.color - Text color for buttons (optional)
    * @param options.buttonConfig.borderRadius - Border radius for buttons and iframe (optional)
+   * @param options.buttonConfig.fontFamily - CSS font-family for the button, so it can match the embedding page; a font stack falls back as usual (optional)
+   * @param options.buttonConfig.fontSize - CSS font-size for the button (optional)
+   * @param options.buttonConfig.fontWeight - CSS font-weight for the button (optional)
    * @param options.containerId - ID of container element to place iframe in (optional)
    * @throws {Error} If the provided app metadata is invalid
    */

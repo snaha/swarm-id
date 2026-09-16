@@ -191,6 +191,9 @@ interface ButtonConfig {
   backgroundColor?: string
   color?: string
   borderRadius?: string
+  fontFamily?: string
+  fontSize?: string
+  fontWeight?: string
 }
 ```
 
@@ -210,6 +213,9 @@ const client = new SwarmIdClient({
     backgroundColor: '#4CAF50',
     color: 'white',
     borderRadius: '8px',
+    fontFamily: 'Inter, system-ui, sans-serif',
+    fontSize: '15px',
+    fontWeight: '500',
   },
   onConnectionChange: (info) => {
     console.log('Connection changed:', info.identity?.name, 'canUpload=', info.canUpload)
@@ -229,12 +235,17 @@ await client.initialize()
 | `backgroundColor` | `string` | No       | Background color for buttons         | `#dd7200` (connect), `#666` (disconnect) |
 | `color`           | `string` | No       | Text color for buttons               | `white`                                  |
 | `borderRadius`    | `string` | No       | Border radius for buttons and iframe | `0`                                      |
+| `fontFamily`      | `string` | No       | CSS `font-family` for the button     | the iframe's own font                    |
+| `fontSize`        | `string` | No       | CSS `font-size` for the button       | `14px`                                   |
+| `fontWeight`      | `string` | No       | CSS `font-weight` for the button     | `600`                                    |
 
 **Notes:**
 
 - Button configuration is passed directly to the constructor, not via postMessage
 - The `borderRadius` property affects both the buttons and the iframe container
 - Colors should be valid CSS color strings (e.g., `'#FF0000'`, `'rgb(255, 0, 0)'`, `'red'`)
+- The typography properties are the only way to make the button match the page's type: the button is painted inside the cross-origin iframe, where the page's own CSS cannot reach it
+- `fontFamily` takes a CSS font stack and falls back the way a stack always does — the browser reads it left to right and takes the first family that resolves. It resolves against the IFRAME, so name web-safe or system families (a font the page loads itself is not available inside the iframe)
 - Text properties support plain text or emoji combinations
 - The configuration applies to both authentication states (connect/disconnect)
 

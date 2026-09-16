@@ -3492,8 +3492,15 @@ export class SwarmIdProxy {
     button.style.border = "none"
     button.style.borderRadius = config.borderRadius || "0"
     button.style.padding = "0"
-    button.style.fontSize = "14px"
-    button.style.fontWeight = "600"
+    button.style.fontSize = config.fontSize || "14px"
+    button.style.fontWeight = config.fontWeight || "600"
+    // No default: left unset the button keeps the font the iframe gives it.
+    // Forcing `inherit` here would inherit the IFRAME's font, not the parent
+    // page's, so it would change the look without getting any closer to the
+    // embedding page. A stack the dApp does pass falls back as usual.
+    if (config.fontFamily) {
+      button.style.fontFamily = config.fontFamily
+    }
 
     // Click handler
     button.addEventListener("click", () => {

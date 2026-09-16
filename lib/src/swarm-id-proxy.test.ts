@@ -24,6 +24,7 @@ import { DEFAULT_BEE_NODE_URL } from "./schemas"
 import { SwarmIdProxy } from "./swarm-id-proxy"
 import { deriveSecret, uint8ArrayToHex } from "./utils/key-derivation"
 import { STORAGE_KEY_NETWORK_SETTINGS } from "./types"
+import type { ButtonConfig } from "./types"
 
 /**
  * A view of the proxy that admits to the private members these tests drive.
@@ -329,5 +330,82 @@ describe("SwarmIdProxy honours a Bee URL change mid-session (#515)", () => {
     fireStorage(STORAGE_KEY_NETWORK_SETTINGS)
 
     expect(BeeMock.mock.calls.length).toBe(callsAfterConstruction)
+  })
+})
+
+// The button is painted INSIDE the cross-origin iframe, so `buttonConfig` is
+// the only channel the embedding page has for styling it (#779).
+describe("SwarmIdProxy auth button typography (#779)", () => {
+  type ButtonInternals = {
+    buttonConfig: ButtonConfig | undefined
+    authButtonContainer: unknown
+    showAuthButton: () => void
+  }
+
+  type FakeButton = {
+    style: Record<string, string>
+    textContent: string
+    disabled: boolean
+  }
+
+  let proxy: SwarmIdProxy
+
+  beforeEach(() => {
+    vi.restoreAllMocks()
+
+    vi.stubGlobal("window", {
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+      parent: { postMessage: vi.fn() },
+      location: { origin: "https://id.example.com" },
+    })
+    vi.stubGlobal("document", {
+      createElement: vi.fn(() => ({
+        style: {} as Record<string, string>,
+        textContent: "",
+        disabled: false,
+        addEventListener: vi.fn(),
+      })),
+    })
+
+    proxy = new SwarmIdProxy()
+  })
+
+  /** Render the button with `config` and hand back the styles it carries. */
+  const render = (config: ButtonConfig): Record<string, string> => {
+    const buttons: FakeButton[] = []
+    const internal = proxy as unknown as ButtonInternals
+    internal.buttonConfig = config
+    internal.authButtonContainer = {
+      innerHTML: "stale",
+      appendChild: (button: FakeButton) => buttons.push(button),
+    }
+
+    internal.showAuthButton()
+
+    expect(buttons).toHaveLength(1)
+    return buttons[0].style
+  }
+
+  it("applies fontFamily, fontSize and fontWeight to the button", () => {
+    const style = render({
+      fontFamily: "Inter, system-ui, sans-serif",
+      fontSize: "18px",
+      fontWeight: "300",
+    })
+
+    expect(style.fontFamily).toBe("Inter, system-ui, sans-serif")
+    expect(style.fontSize).toBe("18px")
+    expect(style.fontWeight).toBe("300")
+  })
+
+  it("keeps the built-in size and weight, and no font-family, when unset", () => {
+    const style = render({ backgroundColor: "#000" })
+
+    expect(style.fontSize).toBe("14px")
+    expect(style.fontWeight).toBe("600")
+    // Deliberately unset rather than `inherit`: inheriting would pick up the
+    // IFRAME's font, which is no closer to the embedding page.
+    expect(style.fontFamily).toBeUndefined()
   })
 })

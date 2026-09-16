@@ -778,6 +778,9 @@ export const ButtonConfigSchema = z
     backgroundColor: z.string().optional(),
     color: z.string().optional(),
     borderRadius: z.string().optional(),
+    fontFamily: z.string().optional(),
+    fontSize: z.string().optional(),
+    fontWeight: z.string().optional(),
   })
   .optional()
 
@@ -788,6 +791,14 @@ export interface ButtonConfig {
   backgroundColor?: string // Default: "#dd7200" (connect), "#666" (disconnect)
   color?: string // Default: "white"
   borderRadius?: string // Default: "0", applied to iframe
+  // Typography, so the button can match the embedding page: the button is
+  // painted inside the cross-origin iframe, where the page's own CSS cannot
+  // reach it. A font stack falls back the way it always does — the browser
+  // reads it left to right and takes the first family that resolves, which
+  // here means the first one available to the IFRAME, not to the parent page.
+  fontFamily?: string // CSS font-family. Default: the iframe's own font
+  fontSize?: string // CSS font-size. Default: "14px"
+  fontWeight?: string // CSS font-weight. Default: "600"
 }
 
 // ============================================================================
