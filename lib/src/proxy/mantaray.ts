@@ -188,7 +188,7 @@ function unmarshalRootManifest(
       error instanceof Error &&
       error.message === INVALID_VERSION_HASH_MESSAGE
     ) {
-      throw new Error(NO_MANIFEST_MESSAGE)
+      throw new Error(NO_MANIFEST_MESSAGE, { cause: error })
     }
     throw error
   }
