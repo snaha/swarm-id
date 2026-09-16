@@ -166,6 +166,11 @@ is needed against the public gateway.</li>
 encrypted upload contains the decryption key. A URL sends it to a third-party server,
 which is the one place guaranteed to be logged. Fetch encrypted content through
 <code dir="auto">downloadData</code>, which decrypts in the browser.</li>
+<li><strong>Retention is not stated.</strong> Content the gateway stamps with its own batch lives as long as
+that batch does, on the operator’s terms, and the client cannot read that lifetime (there
+is no <code dir="auto">/stamps</code>). Do not point an on-chain commitment at gateway-funded content you could
+not re-upload; anything that must outlive a demo belongs on the user’s own drive, whose
+expiry <code dir="auto">getPostageBatch()</code> reports.</li>
 <li><strong>It is shared and rate limited</strong>, on the operator’s terms. Use it for development, demos
 and hackathons; run your own <a href="../subsidised-gateway/">subsidised gateway</a> or expect users
 to hold a drive before shipping.</li>

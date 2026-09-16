@@ -605,7 +605,7 @@
 <div class="expressive-code"><figure class="frame not-content"><figcaption class="header"></figcaption><pre data-language="typescript"><code><div class="ec-line"><div class="code"><span style="--0:#C792EA;--1:#8844AE">const </span><span style="--0:#82AAFF;--1:#3B61B0">connected</span><span style="--0:#C792EA;--1:#8844AE"> = await </span><span style="--0:#D6DEEB;--1:#403F53">client</span><span style="--0:#C792EA;--1:#8844AE">.</span><span style="--0:#82AAFF;--1:#3B61B0">isBeeConnected</span><span style="--0:#D6DEEB;--1:#403F53">()</span></div></div><div class="ec-line"><div class="code"><span style="--0:#C792EA;--1:#8844AE">if</span><span style="--0:#D6DEEB;--1:#403F53"> (connected) {</span></div></div><div class="ec-line"><div class="code"><span class="indent"><span style="--0:#D6DEEB;--1:#403F53">  </span></span><span style="--0:#D6DEEB;--1:#403F53">console</span><span style="--0:#C792EA;--1:#8844AE">.</span><span style="--0:#82AAFF;--1:#3B61B0">log</span><span style="--0:#D6DEEB;--1:#403F53">(</span><span style="--0:#D9F5DD;--1:#111111">'</span><span style="--0:#ECC48D;--1:#984E4D">Bee node is online</span><span style="--0:#D9F5DD;--1:#111111">'</span><span style="--0:#D6DEEB;--1:#403F53">)</span></div></div><div class="ec-line"><div class="code"><span style="--0:#D6DEEB;--1:#403F53">} </span><span style="--0:#C792EA;--1:#8844AE">else</span><span style="--0:#D6DEEB;--1:#403F53"> {</span></div></div><div class="ec-line"><div class="code"><span class="indent"><span style="--0:#D6DEEB;--1:#403F53">  </span></span><span style="--0:#D6DEEB;--1:#403F53">console</span><span style="--0:#C792EA;--1:#8844AE">.</span><span style="--0:#82AAFF;--1:#3B61B0">log</span><span style="--0:#D6DEEB;--1:#403F53">(</span><span style="--0:#D9F5DD;--1:#111111">'</span><span style="--0:#ECC48D;--1:#984E4D">Bee node is offline</span><span style="--0:#D9F5DD;--1:#111111">'</span><span style="--0:#D6DEEB;--1:#403F53">)</span></div></div><div class="ec-line"><div class="code"><span style="--0:#D6DEEB;--1:#403F53">}</span></div></div></code></pre><div class="copy"><div aria-live="polite"></div><button title="Copy to clipboard" data-copied="Copied!" data-code="const connected = await client.isBeeConnected()if (connected) {  console.log(&#x27;Bee node is online&#x27;)} else {  console.log(&#x27;Bee node is offline&#x27;)}"><div></div></button></div></figure></div>
 <hr>
 <div class="sl-heading-wrapper level-h3"><h3 id="getnodeinfo"><code dir="auto">getNodeInfo()</code></h3><a class="sl-anchor-link" href="#getnodeinfo"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 1 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 0 0-1.42-1.42m8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 1 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 0 0 0 1.42 1 1 0 0 0 1.42 0l3.88-3.89a4.49 4.49 0 0 0 0-6.33M8.83 15.17a1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.92-4.92a1 1 0 1 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42"></path></svg></span><span class="sr-only" data-pagefind-ignore>Section titled “getNodeInfo()”</span></a></div>
-<p>Gets information about the Bee node configuration. Needs a real Bee node: the <a href="../public-gateway/">public gateway</a> has no <code dir="auto">/node</code> endpoint and this call fails there. Do not gate uploads on it; its purpose is to detect a dev-mode node, where deferred uploads are required.</p>
+<p>Gets information about the Bee node configuration. Needs a real Bee node: the <a href="../public-gateway/">public gateway</a> has no <code dir="auto">/node</code> endpoint and this call fails there. Do not gate uploads on it; its purpose is to detect a dev-mode node, where deferred uploads are required. Nothing else tells you: a direct upload against a dev-mode node does not fail with a mode error, it waits out the request timeout and rejects with <code dir="auto">Request timeout after 30000ms</code>.</p>
 <p>This method retrieves the current Bee node’s operating mode and feature flags. Use this to determine if deferred uploads are required (dev mode) or if direct uploads are available (production modes).</p>
 <p><strong>Returns:</strong> <code dir="auto">Promise&lt;{ beeMode, chequebookEnabled, swapEnabled }&gt;</code> — an inline object; there is no exported <code dir="auto">NodeInfo</code> type</p>
 <table>
@@ -680,7 +680,7 @@
 <td><code dir="auto">options.encrypt</code></td>
 <td><code dir="auto">boolean</code></td>
 <td>No</td>
-<td>Whether to encrypt the data (defaults to <code dir="auto">false</code>)</td>
+<td>Whether to encrypt the data (defaults to <code dir="auto">false</code>). The 128-hex reference then contains the decryption key: a capability, not an address — see <a href="../getting-started/#upload-data">Quick Start</a></td>
 </tr>
 <tr>
 <td><code dir="auto">options.tag</code></td>
@@ -692,7 +692,7 @@
 <td><code dir="auto">options.deferred</code></td>
 <td><code dir="auto">boolean</code></td>
 <td>No</td>
-<td>Whether to use deferred upload (defaults to <code dir="auto">false</code>)</td>
+<td>Whether to use deferred upload (defaults to <code dir="auto">false</code>). A Bee node in dev mode serves only deferred uploads, and a direct upload against one fails as a request timeout, not as a mode error — see <a href="#getnodeinfo"><code dir="auto">getNodeInfo</code></a>. Not needed on the public gateway</td>
 </tr>
 <tr>
 <td><code dir="auto">options.onProgress</code></td>
@@ -710,7 +710,7 @@
 <td><code dir="auto">requestOptions.timeout</code></td>
 <td><code dir="auto">number</code></td>
 <td>No</td>
-<td>Request timeout in milliseconds</td>
+<td>Request timeout in milliseconds. Overrides the client’s default (30 s), which bounds the whole upload; a file of a few MB over a testnet or the public gateway needs more, passed in this third argument</td>
 </tr>
 <tr>
 <td><code dir="auto">requestOptions.headers</code></td>
@@ -897,7 +897,7 @@
 <td><code dir="auto">requestOptions.timeout</code></td>
 <td><code dir="auto">number</code></td>
 <td>No</td>
-<td>Request timeout in milliseconds</td>
+<td>Request timeout in milliseconds. Overrides the client’s default (30 s), which bounds the whole upload; a file of a few MB over a testnet or the public gateway needs more, passed in this third argument</td>
 </tr>
 <tr>
 <td><code dir="auto">requestOptions.headers</code></td>
