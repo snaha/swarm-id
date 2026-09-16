@@ -940,6 +940,9 @@ export async function uploadSOC(
     if (options?.deferred !== undefined) {
       headers["swarm-deferred-upload"] = options.deferred.toString()
     }
+    if (options?.pin !== undefined) {
+      headers["swarm-pin"] = options.pin.toString()
+    }
 
     const response = await fetch(url, {
       method: "POST",
