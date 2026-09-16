@@ -111,7 +111,7 @@
 <td><code dir="auto">options.timeout</code></td>
 <td><code dir="auto">number</code></td>
 <td>No</td>
-<td>Request timeout in milliseconds (defaults to <code dir="auto">30000</code>)</td>
+<td>Request timeout in milliseconds (defaults to <code dir="auto">30000</code>). Bounds each call’s whole round trip through the iframe; a call’s own <code dir="auto">requestOptions.timeout</code> replaces it for that call</td>
 </tr>
 <tr>
 <td><code dir="auto">options.initializationTimeout</code></td>
@@ -710,7 +710,7 @@
 <td><code dir="auto">requestOptions.timeout</code></td>
 <td><code dir="auto">number</code></td>
 <td>No</td>
-<td>Request timeout in milliseconds. Overrides the client’s default (30 s), which bounds the whole upload; a file of a few MB over a testnet or the public gateway needs more, passed in this third argument</td>
+<td>Request timeout in milliseconds for this call. Replaces the client’s default (30 s) for the whole upload — the round trip through the iframe as well as the Bee request; a file of a few MB over a testnet or the public gateway needs more, here or in <code dir="auto">new SwarmIdClient({ timeout })</code></td>
 </tr>
 <tr>
 <td><code dir="auto">requestOptions.headers</code></td>
@@ -897,7 +897,7 @@
 <td><code dir="auto">requestOptions.timeout</code></td>
 <td><code dir="auto">number</code></td>
 <td>No</td>
-<td>Request timeout in milliseconds. Overrides the client’s default (30 s), which bounds the whole upload; a file of a few MB over a testnet or the public gateway needs more, passed in this third argument</td>
+<td>Request timeout in milliseconds for this call. Replaces the client’s default (30 s) for the whole upload — the round trip through the iframe as well as the Bee request; a file of a few MB over a testnet or the public gateway needs more, here or in <code dir="auto">new SwarmIdClient({ timeout })</code></td>
 </tr>
 <tr>
 <td><code dir="auto">requestOptions.headers</code></td>
