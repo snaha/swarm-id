@@ -125,6 +125,8 @@ export default defineConfig({
       testMatch: POPUP_BLOCKER_SPEC,
       use: {
         ...CHROMIUM,
+        // Needs Google Chrome installed (hosted runners ship it): headless
+        // Chrome blocks a gesture-less popup, the bundled Chromium never does.
         channel: 'chrome',
         launchOptions: {
           // Playwright adds the flag on its own; `ignoreDefaultArgs` is what
