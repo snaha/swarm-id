@@ -51,8 +51,8 @@ function delay(ms: number): Promise<void> {
 }
 
 /**
- * Check whether the local queen Bee node is reachable. Used to skip the
- * cluster test suite when no cluster is running.
+ * Check whether the local queen Bee node is reachable. Read once in
+ * `global-setup.ts`, which refuses the run without one — nothing here skips.
  */
 export async function isClusterReachable(
   url: string = QUEEN_URL,
