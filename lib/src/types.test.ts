@@ -4,6 +4,7 @@
 import { describe, it, expect } from "vitest"
 
 import {
+  ButtonConfigSchema,
   DownloadOptionsSchema,
   IframeToParentMessageSchema,
   ParentToIframeMessageSchema,
@@ -153,5 +154,42 @@ describe("connectionInfoChanged identity (#230)", () => {
     // Every identity has an avatar; the proxy is the only writer and always
     // sends one, so a message without it is malformed rather than legacy.
     expect(() => IframeToParentMessageSchema.parse(MESSAGE)).toThrow()
+  })
+})
+
+describe("ButtonConfigSchema typography (#779)", () => {
+  const TYPOGRAPHY = {
+    fontFamily: "Inter, system-ui, sans-serif",
+    fontSize: "18px",
+    fontWeight: "300",
+  }
+
+  it("accepts the typography fields", () => {
+    expect(ButtonConfigSchema.parse(TYPOGRAPHY)).toEqual(TYPOGRAPHY)
+  })
+
+  it("accepts a numeric fontWeight, which is how CSS weights are written", () => {
+    // A TypeScript caller is stopped at compile time; a plain-JS one would
+    // otherwise reach `sendMessage` and fail as "Invalid message format".
+    expect(ButtonConfigSchema.parse({ fontWeight: 500 })).toEqual({
+      fontWeight: 500,
+    })
+  })
+
+  it("leaves them optional", () => {
+    expect(ButtonConfigSchema.parse({ color: "white" })).toEqual({
+      color: "white",
+    })
+  })
+
+  it("carries them to the iframe on parentIdentify rather than stripping them", () => {
+    const parsed = ParentToIframeMessageSchema.parse({
+      type: "parentIdentify",
+      requestId: "r1",
+      metadata: { name: "Test App" },
+      buttonConfig: { connectText: "Connect", ...TYPOGRAPHY },
+    })
+
+    expect(parsed).toMatchObject({ buttonConfig: TYPOGRAPHY })
   })
 })
