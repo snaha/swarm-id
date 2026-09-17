@@ -17,8 +17,10 @@
  * Uploads and downloads also come in pairs — `uploadData` with `downloadData`,
  * `uploadFile` with `downloadFile` — but both downloads take a plain string
  * reference, so crossing the pairs compiles and only breaks at runtime, inside
- * the Mantaray parser. The rest of these tests pin the readable error that
- * replaces that failure, and pin that every other failure is left alone.
+ * the Mantaray parser — which rejects plain bytes two different ways depending
+ * on how many of them there are. The rest of these tests pin the readable
+ * error that replaces both failures, and pin that every other failure is left
+ * alone.
  */
 
 import { describe, it, expect, vi, afterEach } from "vitest"
@@ -56,9 +58,15 @@ function makeManifest(): MantarayNode {
   return manifest
 }
 
+/** The smallest payload a node header can occupy; below it the parser bails early. */
+const MANTARAY_HEADER_SIZE = 64
+
 /** Upload plain bytes the way `uploadData` would, and return the reference. */
-async function uploadPlainData(target: UploadTarget): Promise<string> {
-  const data = new TextEncoder().encode("plain bytes, no manifest here")
+async function uploadPlainData(
+  target: UploadTarget,
+  byteLength: number,
+): Promise<string> {
+  const data = new Uint8Array(byteLength).fill("x".charCodeAt(0))
   const { reference } = await uploadData(target, data)
   return reference
 }
@@ -105,26 +113,36 @@ describe("loadMantarayTreeWithChunkAPI", () => {
     vi.restoreAllMocks()
   })
 
-  it("names the matching download when the reference has no manifest", async () => {
-    const { bee, target } = setup()
-    const reference = await uploadPlainData(target)
+  // Short of a header the parser reports "data too short"; past it, the header
+  // it does read is not Mantaray's and it reports "invalid version hash". Both
+  // mean the same thing to the caller.
+  it.each([
+    ["shorter than a node header", MANTARAY_HEADER_SIZE - 1],
+    ["long enough to hold one", MANTARAY_HEADER_SIZE * 2],
+  ])(
+    "names the matching download for plain bytes %s",
+    async (_case, byteLength) => {
+      const { bee, target } = setup()
+      const reference = await uploadPlainData(target, byteLength)
 
-    const error = await loadMantarayTreeWithChunkAPI(bee, reference).then(
-      () => undefined,
-      (reason: unknown) => reason,
-    )
+      const error = await loadMantarayTreeWithChunkAPI(bee, reference).then(
+        () => undefined,
+        (reason: unknown) => reason,
+      )
 
-    expect(error).toBeInstanceOf(Error)
-    const message = (error as Error).message
-    expect(message).toContain("No manifest")
-    expect(message).toContain("uploadData")
-    expect(message).toContain("downloadData")
-    expect(message).not.toContain("MantarayNode#unmarshal")
-  })
+      expect(error).toBeInstanceOf(Error)
+      const message = (error as Error).message
+      expect(message).toContain("No manifest")
+      expect(message).toContain("uploadData")
+      expect(message).toContain("downloadData")
+      expect(message).not.toContain("MantarayNode#unmarshal")
+      expect((error as Error).cause).toBeInstanceOf(Error)
+    },
+  )
 
   it("leaves a chunk fetch failure untouched", async () => {
     const { bee, target } = setup()
-    const reference = await uploadPlainData(target)
+    const reference = await uploadPlainData(target, MANTARAY_HEADER_SIZE * 2)
 
     const networkError = new Error("fetch failed: ECONNREFUSED 127.0.0.1:1633")
     vi.spyOn(bee, "downloadChunk").mockRejectedValue(networkError)

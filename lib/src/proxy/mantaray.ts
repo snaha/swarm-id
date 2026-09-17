@@ -147,25 +147,29 @@ export async function saveMantarayTree(
 }
 
 /**
- * bee-js's own wording when the version hash at the head of a node does not
- * match — the one failure every non-manifest chunk produces, whatever its
- * size. bee-js throws a plain `Error` for it, so the text is the only handle
- * there is; if bee-js rewords it, the translation below simply stops firing
- * and the raw message surfaces again.
+ * How the Mantaray parser says the bytes it was handed are not a node at all:
+ * too short to hold a header, or a header that is not Mantaray's. Matched on
+ * the tail, because the prefix has been reworded once already — bee-js threw
+ * `MantarayNode#unmarshal …`, core-sdk throws `MantarayNode#unmarshalFromData
+ * …` (#705) — and both throw a plain `Error`, so the text is the only handle
+ * there is. Reword the tails too and the translation below simply stops
+ * firing, leaving the raw message to surface again.
  */
-const INVALID_VERSION_HASH_MESSAGE =
-  "MantarayNode#unmarshal invalid version hash"
+const NOT_A_MANIFEST_MESSAGES = ["invalid version hash", "data too short"]
 
 /**
- * What a person can act on when the root of a "file" download is not a
- * manifest at all.
+ * What a person can act on when the root of a manifest download is not a
+ * manifest at all. It states what is true wherever the load is reached from,
+ * and names the pair only as the likely cause: `handleDownloadFile` is the
+ * crossed-pairs case, but `handleActDownloadData` builds its own manifest and
+ * a non-manifest root there means something else went wrong.
  */
 const NO_MANIFEST_MESSAGE =
-  "This reference has no manifest: it was uploaded with uploadData, so download it with downloadData."
+  "No manifest at this reference; a reference from uploadData needs downloadData."
 
 /**
- * Unmarshal the root node of a manifest, translating the one parse failure
- * that means "this reference is not a manifest".
+ * Unmarshal the root node of a manifest, translating the parse failures that
+ * mean "this reference is not a manifest".
  *
  * Uploads and downloads come in pairs, and both downloads take a plain
  * string reference: handing a `uploadData` reference to a file download
@@ -186,7 +190,7 @@ function unmarshalRootManifest(
   } catch (error) {
     if (
       error instanceof Error &&
-      error.message === INVALID_VERSION_HASH_MESSAGE
+      NOT_A_MANIFEST_MESSAGES.some((tail) => error.message.endsWith(tail))
     ) {
       throw new Error(NO_MANIFEST_MESSAGE, { cause: error })
     }
