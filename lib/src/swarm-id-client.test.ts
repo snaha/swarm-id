@@ -452,6 +452,71 @@ describe("SwarmIdClient request seam", () => {
     }
   })
 
+  // #750: the folder API takes what bee-js takes — a FileList, File[], or
+  // `{ path, file }` pairs — and ships `{ path, data, contentType }` so the
+  // proxy builds the manifest. A File's own path comes from webkitdirectory.
+  it("uploadFiles normalizes File[] and { path, file } pairs into one message", async () => {
+    const picked = new File(["<h1>hi</h1>"], "index.html", {
+      type: "text/html",
+    })
+    Object.defineProperty(picked, "webkitRelativePath", {
+      value: "site/index.html",
+    })
+    const named = {
+      path: "assets/a.bin",
+      file: new Blob([new Uint8Array([1, 2])]),
+    }
+
+    const promise = client.uploadFiles([picked, named], {
+      indexDocument: "index.html",
+      onProgress: () => {},
+    })
+    await vi.waitFor(() => expect(postMessage).toHaveBeenCalledTimes(1))
+    const sent = lastPostedMessage()
+    expect(sent).toMatchObject({
+      type: "uploadFiles",
+      options: { indexDocument: "index.html" },
+      enableProgress: true,
+    })
+    expect(sent.options).not.toHaveProperty("onProgress")
+    expect(sent.files).toEqual([
+      {
+        path: "index.html",
+        data: new TextEncoder().encode("<h1>hi</h1>"),
+        contentType: "text/html",
+      },
+      {
+        path: "assets/a.bin",
+        data: new Uint8Array([1, 2]),
+        contentType: undefined,
+      },
+    ])
+
+    const reference = "b".repeat(128)
+    deliver({
+      type: "uploadFilesResponse",
+      requestId: sent.requestId,
+      reference,
+    })
+    await expect(promise).resolves.toEqual({ reference, tagUid: undefined })
+  })
+
+  it("listFiles returns the proxy's entries", async () => {
+    const reference = "c".repeat(64)
+    const entries = [
+      {
+        path: "index.html",
+        reference: "d".repeat(64),
+        contentType: "text/html",
+      },
+    ]
+    const promise = client.listFiles(reference)
+    const sent = lastPostedMessage()
+    expect(sent).toMatchObject({ type: "listFiles", reference })
+    deliver({ type: "listFilesResponse", requestId: sent.requestId, entries })
+    await expect(promise).resolves.toEqual(entries)
+  })
+
   it("getPostageBatch rejects on a proxy error message", async () => {
     const promise = client.getPostageBatch()
 

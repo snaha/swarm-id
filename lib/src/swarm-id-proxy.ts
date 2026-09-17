@@ -11,6 +11,8 @@ import type {
   DeriveAppSecretMessage,
   UploadFileMessage,
   DownloadFileMessage,
+  UploadFilesMessage,
+  ListFilesMessage,
   UploadChunkMessage,
   DownloadChunkMessage,
   IsConnectedMessage,
@@ -94,6 +96,7 @@ import {
   loadMantarayTreeWithChunkAPI,
   saveMantarayTree,
 } from "./proxy/mantaray"
+import { uploadCollection, listCollection } from "./proxy/collection"
 import { createFeedManifestDirect } from "./proxy/feed-manifest"
 import {
   resolveStampForApp,
@@ -2236,6 +2239,14 @@ export class SwarmIdProxy {
         await this.handleDownloadFile(message, event)
         break
 
+      case "uploadFiles":
+        await this.handleUploadFiles(message, event)
+        break
+
+      case "listFiles":
+        await this.handleListFiles(message, event)
+        break
+
       case "uploadChunk":
         await this.handleUploadChunk(message, event)
         break
@@ -3948,6 +3959,65 @@ export class SwarmIdProxy {
         event,
         requestId,
         error instanceof Error ? error.message : "Download failed",
+      )
+    }
+  }
+
+  /** A folder as one manifest (#750); the Swarm-specific part is `uploadCollection`. */
+  private async handleUploadFiles(
+    message: UploadFilesMessage,
+    event: MessageEvent,
+  ): Promise<void> {
+    const { requestId, files, options, requestOptions, enableProgress } =
+      message
+
+    try {
+      this.ensureCanUpload()
+      const onProgress = this.createProgressCallback(
+        event,
+        requestId,
+        enableProgress,
+      )
+      const tag = options?.tag ?? (await tryCreateTag(this.bee))
+
+      const result = await this.withModeAwareWriteLock(undefined, (target) =>
+        uploadCollection(target, files, {
+          ...options,
+          tag,
+          onProgress,
+          requestOptions,
+        }),
+      )
+
+      this.postMessage(event, {
+        type: "uploadFilesResponse",
+        requestId,
+        reference: result.reference,
+        tagUid: result.tagUid,
+      })
+    } catch (error) {
+      this.sendErrorToParent(
+        event,
+        requestId,
+        error instanceof Error ? error.message : "Upload failed",
+      )
+    }
+  }
+
+  private async handleListFiles(
+    message: ListFilesMessage,
+    event: MessageEvent,
+  ): Promise<void> {
+    const { requestId, reference, requestOptions } = message
+
+    try {
+      const entries = await listCollection(this.bee, reference, requestOptions)
+      this.postMessage(event, { type: "listFilesResponse", requestId, entries })
+    } catch (error) {
+      this.sendErrorToParent(
+        event,
+        requestId,
+        error instanceof Error ? error.message : "Listing failed",
       )
     }
   }

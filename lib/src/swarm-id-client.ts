@@ -10,6 +10,10 @@ import type {
   UploadResult,
   FileData,
   UploadOptions,
+  UploadFilesOptions,
+  CollectionFileInput,
+  CollectionEntry,
+  UploadProgress,
   ActUploadOptions,
   DownloadOptions,
   RequestOptions,
@@ -85,6 +89,7 @@ import {
 import { EthAddress, Identifier, PrivateKey, Topic } from "@ethersphere/bee-js"
 import { generatedAvatar } from "./utils/avatar"
 import { uint8ArrayToHex } from "./utils/hex"
+import { collectionPath } from "./utils/collection"
 import { buildAuthUrl } from "./utils/url"
 import { withTimeout } from "./utils/promise"
 
@@ -1516,6 +1521,150 @@ export class SwarmIdClient {
       name: response.name,
       data: new Uint8Array(response.data),
     }
+  }
+
+  /**
+   * Uploads a folder as one manifest (#750): a fork per file with its path and
+   * content type, served by a gateway at `/bzz/<reference>/<path>`. Takes
+   * what bee-js takes — the `FileList` of a `webkitdirectory` input or a
+   * dropped directory, a `File[]`, or `{ path, file }` pairs for a folder the
+   * app assembled itself. A `File`'s path is its `webkitRelativePath` minus
+   * the picked folder's own name, or its name.
+   *
+   * Content is encrypted unless `options.encrypt` is `false`, and the
+   * manifest too — a 64-byte root reference — unless `options.encrypt` or
+   * `options.encryptManifest` is `false`. Name `options.indexDocument` for
+   * the bare `/bzz/<reference>/` to serve a file. Read a folder back with
+   * {@link listFiles} and {@link downloadData} per entry, or one file with
+   * {@link downloadFile} and its path.
+   *
+   * Every file is read into memory before the upload starts; for folders
+   * larger than that, upload the files with {@link uploadData} and build the
+   * manifest with `@ethersphere/core-sdk`.
+   *
+   * @param files - The folder's files
+   * @param options - Optional upload configuration; `onProgress` counts files
+   * @param requestOptions - Optional request configuration (timeout, headers, endlesslyRetry). `timeout` replaces the client default for this call's whole round trip, not only the Bee request
+   * @returns A promise resolving to the upload result
+   * @returns return.reference - The Swarm reference of the manifest
+   * @returns return.tagUid - The tag UID if a tag was created
+   * @throws {Error} If the client is not initialized
+   * @throws {Error} If the user is not authenticated or cannot upload
+   * @throws {Error} If the request times out
+   *
+   * @example
+   * ```typescript
+   * // <input type="file" webkitdirectory>
+   * const { reference } = await client.uploadFiles(input.files, {
+   *   indexDocument: 'index.html',
+   * })
+   * // or assembled by the app
+   * await client.uploadFiles([{ path: 'a/b.txt', file: new Blob(['hi']) }])
+   * ```
+   */
+  async uploadFiles(
+    files: FileList | Iterable<File | CollectionFileInput>,
+    options?: UploadFilesOptions,
+    requestOptions?: RequestOptions,
+  ): Promise<UploadResult> {
+    this.ensureReady()
+    const requestId = this.generateRequestId()
+    const { onProgress, ...serializableOptions } = options ?? {}
+
+    const entries = await Promise.all(
+      Array.from(files, async (item) => {
+        const { path, file } =
+          item instanceof File
+            ? { path: collectionPath(item), file: item }
+            : item
+        return {
+          path,
+          data: new Uint8Array(await file.arrayBuffer()),
+          contentType: file.type || undefined,
+        }
+      }),
+    )
+
+    const stopProgress = this.listenForProgress(requestId, onProgress)
+    try {
+      const response = await this.sendRequest<{
+        type: "uploadFilesResponse"
+        requestId: string
+        reference: Reference
+        tagUid?: number
+      }>({
+        type: "uploadFiles",
+        requestId,
+        files: entries,
+        options: serializableOptions,
+        requestOptions,
+        enableProgress: !!onProgress,
+      })
+      return { reference: response.reference, tagUid: response.tagUid }
+    } finally {
+      stopProgress()
+    }
+  }
+
+  /**
+   * Lists the files of a manifest uploaded with {@link uploadFiles} (or any
+   * manifest): each entry's path, content type, and the reference of its
+   * content, which {@link downloadData} reads.
+   *
+   * @param reference - The Swarm reference of the manifest
+   * @param requestOptions - Optional request configuration (timeout, headers, endlesslyRetry)
+   * @returns A promise resolving to the entries, the index-document fork excluded
+   * @throws {Error} If the client is not initialized
+   * @throws {Error} If the reference is not a manifest or is not found
+   * @throws {Error} If the request times out
+   *
+   * @example
+   * ```typescript
+   * for (const { path, reference } of await client.listFiles(root)) {
+   *   const data = await client.downloadData(reference)
+   * }
+   * ```
+   */
+  async listFiles(
+    reference: Reference,
+    requestOptions?: RequestOptions,
+  ): Promise<CollectionEntry[]> {
+    this.ensureReady()
+    const requestId = this.generateRequestId()
+    const response = await this.sendRequest<{
+      type: "listFilesResponse"
+      requestId: string
+      entries: CollectionEntry[]
+    }>({ type: "listFiles", requestId, reference, requestOptions })
+    return response.entries
+  }
+
+  /**
+   * Forward the proxy's `uploadProgress` messages for one request to a
+   * callback. Returns the function that stops listening; a no-op without a
+   * callback.
+   */
+  private listenForProgress(
+    requestId: string,
+    onProgress: ((progress: UploadProgress) => void) | undefined,
+  ): () => void {
+    if (!onProgress) return () => {}
+    const listener = (event: MessageEvent) => {
+      if (event.origin !== new URL(this.iframeOrigin).origin) return
+      try {
+        const message = IframeToParentMessageSchema.parse(event.data)
+        if (
+          message.type === "uploadProgress" &&
+          message.requestId === requestId
+        ) {
+          onProgress({ total: message.total, processed: message.processed })
+        }
+      } catch {
+        // Ignore invalid messages
+      }
+    }
+    window.addEventListener("message", listener)
+    return () => window.removeEventListener("message", listener)
   }
 
   // ============================================================================

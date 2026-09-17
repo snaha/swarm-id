@@ -29,6 +29,10 @@ export {
 // Hex address utility
 export { hexAddress } from "./utils/hex"
 
+// The path a picked file has inside its folder (#750), for a dApp that builds
+// `uploadFiles`' `{ path, file }` pairs itself
+export { collectionPath } from "./utils/collection"
+
 // Account avatars — `SwarmIdClient.getAvatar()` resolves the one to render;
 // the generator is exported for callers that want the SVG inline
 export { generatedAvatar, generatedAvatarSvg } from "./utils/avatar"
@@ -295,6 +299,9 @@ export type {
   FileData,
   PostageBatch,
   UploadOptions,
+  UploadFilesOptions,
+  CollectionFileInput,
+  CollectionEntry,
   ActUploadOptions,
   SOCReader,
   SOCWriter,
