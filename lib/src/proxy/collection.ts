@@ -34,13 +34,26 @@ export interface UploadCollectionOptions {
   requestOptions?: BeeRequestOptions
 }
 
+/**
+ * What `uploadFile` and `uploadFiles` encrypt: everything by default, so the
+ * root reference carries a key. `encryptManifest: false` bares the manifest
+ * over encrypted content; `encrypt: false` bares everything — a plain manifest
+ * over plain content is the only shape a bare-manifest reader can use.
+ */
+export function manifestEncryption(
+  options: { encrypt?: boolean; encryptManifest?: boolean } | undefined,
+): { content: boolean; manifest: boolean } {
+  const content = options?.encrypt !== false
+  return { content, manifest: content && options?.encryptManifest !== false }
+}
+
 export async function uploadCollection(
   target: UploadTarget,
   files: CollectionFile[],
   options?: UploadCollectionOptions,
 ): Promise<{ reference: string; tagUid?: number }> {
-  const encryptContent = options?.encrypt !== false
-  const encryptManifest = encryptContent && options?.encryptManifest !== false
+  const { content: encryptContent, manifest: encryptManifest } =
+    manifestEncryption(options)
   const chunkOptions = {
     pin: options?.pin,
     deferred: options?.deferred,

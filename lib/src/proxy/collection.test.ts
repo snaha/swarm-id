@@ -9,7 +9,11 @@
 
 import { describe, it, expect } from "vitest"
 import { MantarayNode as BeeMantarayNode } from "@ethersphere/bee-js"
-import { uploadCollection, listCollection } from "./collection"
+import {
+  uploadCollection,
+  listCollection,
+  manifestEncryption,
+} from "./collection"
 import { loadMantarayTreeWithChunkAPI } from "./mantaray"
 import { downloadDataWithChunkAPI } from "./download-data"
 import type { UploadTarget } from "./upload"
@@ -123,5 +127,23 @@ describe("uploadCollection", () => {
       { total: 3, processed: 2 },
       { total: 3, processed: 3 },
     ])
+  })
+})
+
+// The one rule `uploadFile` and `uploadFiles` share: encrypted all the way by
+// default, `encryptManifest: false` bares the root, `encrypt: false` bares
+// everything.
+describe("manifestEncryption", () => {
+  it.each([
+    [undefined, { content: true, manifest: true }],
+    [{}, { content: true, manifest: true }],
+    [{ encryptManifest: false }, { content: true, manifest: false }],
+    [{ encrypt: false }, { content: false, manifest: false }],
+    [
+      { encrypt: false, encryptManifest: true },
+      { content: false, manifest: false },
+    ],
+  ])("%o → %o", (options, expected) => {
+    expect(manifestEncryption(options)).toEqual(expected)
   })
 })

@@ -96,7 +96,11 @@ import {
   loadMantarayTreeWithChunkAPI,
   saveMantarayTree,
 } from "./proxy/mantaray"
-import { uploadCollection, listCollection } from "./proxy/collection"
+import {
+  uploadCollection,
+  listCollection,
+  manifestEncryption,
+} from "./proxy/collection"
 import { createFeedManifestDirect } from "./proxy/feed-manifest"
 import {
   resolveStampForApp,
@@ -3829,12 +3833,12 @@ export class SwarmIdProxy {
       const manifestResult = await this.withModeAwareWriteLock(
         { useWorkers, workerCount },
         async (target) => {
-          // Step 1: Upload file content
-          // Encrypted by default (unless encrypt=false) - encryption is client-side
-          const shouldEncryptContent = options?.encrypt !== false
+          // Step 1: Upload file content — encrypted by default, like the
+          // manifest below (the rule is `manifestEncryption`)
+          const encryption = manifestEncryption(options)
 
           const contentUpload = await uploadData(target, data, {
-            encryptionKey: shouldEncryptContent ? true : undefined,
+            encryptionKey: encryption.content ? true : undefined,
             pin: options?.pin,
             deferred: options?.deferred,
             tag: uploadTag,
@@ -3868,7 +3872,7 @@ export class SwarmIdProxy {
               })
               return { tagUid: isRoot ? uploadTag : undefined }
             },
-            { encrypt: options?.encryptManifest === true },
+            { encrypt: encryption.manifest },
           )
 
           return result
