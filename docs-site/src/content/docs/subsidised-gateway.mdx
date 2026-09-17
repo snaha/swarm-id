@@ -98,7 +98,7 @@ if (info.canUpload) {
 
 In subsidised mode the upload carries no `pin` and no `tag`, whatever the call passed. Pinning means "keep this on the local node", and the node is the operator's, not the user's: the reference gateway proxy strips `Swarm-Pin` by default, and the public gateway's CORS preflight rejects the header outright, which a browser reports only as `Failed to fetch`. Both options apply as usual when the session uploads with the user's own stamp.
 
-The [public gateway](#using-the-public-gateway) is where this bites in practice: its CORS allow-list is short, and a request carrying any other Swarm header fails before it leaves the browser. A Bee node of your own allows every Swarm header.
+The [public gateway](#using-the-public-gateway) is where this bites in practice: its CORS allow-list is short, and a request carrying a Swarm header outside that list fails before it leaves the browser. A Bee node of your own allows every Swarm header.
 
 ## Priority Rules
 
