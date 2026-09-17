@@ -12,19 +12,6 @@
   with `allowEmpty`. Other restore errors (e.g. network unreachable) surface
   in the unlock dialog for a retry.
 -->
-<script lang="ts" module>
-  import { formatYmd } from '$lib/drives'
-
-  /** Unlock prompt for a check-storage sign-in, surfacing the expiry captured
-   * at sign-out when there is one. */
-  export function checkStorageDescription(account: { soonestDriveExpiry?: number }): string {
-    const expiry = account.soonestDriveExpiry
-    return expiry !== undefined
-      ? `A drive may expire around ${formatYmd(expiry)}. Sign in to check your storage.`
-      : 'Sign in to check your storage.'
-  }
-</script>
-
 <script lang="ts">
   import { Button } from '$lib/components/ui/button'
   import { Dialog } from '$lib/components/ui/dialog'
@@ -34,7 +21,7 @@
 
   interface Props {
     account: Account
-    /** Overrides the standard unlock prompt (e.g. the check-storage flow). */
+    /** Overrides the standard unlock prompt (e.g. the drive-attention flow). */
     description?: string
     /** Called with the restored live account and the entropy that unlocked it
      * (the connect flow completes the app handshake with it); the caller

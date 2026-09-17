@@ -6,8 +6,10 @@ import { describe, expect, it } from 'vitest'
 
 import {
   DRIVE_SIZE_BREAKPOINTS,
-  accountNeedsStorageAttention,
+  accountDriveAttention,
   describeDrive,
+  driveAttentionDescription,
+  driveAttentionLabel,
   driveEffectiveBytes,
   driveNeedsAttention,
   drivesNeedingAttention,
@@ -205,7 +207,7 @@ describe('drivesNeedingAttention', () => {
   })
 })
 
-describe('soonestDriveExpiry / accountNeedsStorageAttention', () => {
+describe('soonestDriveExpiry / accountDriveAttention', () => {
   const measuredAt = Date.UTC(2026, 8, 21)
   const DAY_MS = DAY * 1000
 
@@ -224,22 +226,79 @@ describe('soonestDriveExpiry / accountNeedsStorageAttention', () => {
     expect(soonestDriveExpiry([makeDrive({ batchTTL: undefined })], measuredAt)).toBeUndefined()
   })
 
-  it('warns for a signed-out account via the captured flag', () => {
+  it('is undefined for an account whose drives are fine', () => {
+    const account = { stamps: [makeDrive()], isSignedOut: false }
+    expect(accountDriveAttention(account, measuredAt)).toBeUndefined()
+    expect(accountDriveAttention({ stamps: [], isSignedOut: true }, measuredAt)).toBeUndefined()
+  })
+
+  it('reads a signed-out captured flag with no near expiry as a full drive', () => {
     const account = { stamps: [], isSignedOut: true, storageWarning: true }
-    expect(accountNeedsStorageAttention(account, measuredAt)).toBe(true)
+    expect(accountDriveAttention(account, measuredAt)).toEqual({ reason: 'full' })
   })
 
   it('develops the signed-out warning as the stored expiry approaches', () => {
     const expiry = measuredAt + 30 * DAY_MS
     const account = { stamps: [], isSignedOut: true, soonestDriveExpiry: expiry }
-    expect(accountNeedsStorageAttention(account, measuredAt)).toBe(false)
-    expect(accountNeedsStorageAttention(account, expiry - 6 * DAY_MS)).toBe(true)
-    expect(accountNeedsStorageAttention(account, expiry + DAY_MS)).toBe(true) // past expiry: still warn
+    expect(accountDriveAttention(account, measuredAt)).toBeUndefined()
+    // Hedged: a sign-out estimate, which another device may have moved since.
+    expect(accountDriveAttention(account, expiry - 6 * DAY_MS)).toEqual({
+      reason: 'may-expire',
+      expiry,
+    })
+  })
+
+  it('stops warning once the captured expiry is past, as the signed-in path does', () => {
+    const expiry = measuredAt + 30 * DAY_MS
+    const account = { stamps: [], isSignedOut: true, soonestDriveExpiry: expiry }
+    expect(accountDriveAttention(account, expiry + DAY_MS)).toBeUndefined()
+    // A captured full flag still stands on its own once the expiry has run out.
+    expect(accountDriveAttention({ ...account, storageWarning: true }, expiry + DAY_MS)).toEqual({
+      reason: 'full',
+    })
   })
 
   it('uses the live drive state for signed-in accounts', () => {
     const account = { stamps: [makeDrive({ utilization: 1 })], isSignedOut: false }
-    expect(accountNeedsStorageAttention(account, measuredAt)).toBe(true)
+    expect(accountDriveAttention(account, measuredAt)).toEqual({ reason: 'full' })
+  })
+
+  it('reports the soonest EXPIRING drive, not a full one that outlives it', () => {
+    const account = {
+      stamps: [
+        makeDrive({ utilization: 1 }), // full, but 90 days of life left
+        makeDrive({ batchTTL: 6 * DAY }),
+        makeDrive({ batchTTL: 3 * DAY }), // the one the label must name
+      ],
+      isSignedOut: false,
+    }
+    expect(accountDriveAttention(account, measuredAt)).toEqual({
+      reason: 'expiring',
+      expiry: measuredAt + 3 * DAY_MS,
+    })
+  })
+
+  it('labels and describes each reason, naming the drive rather than "storage" (#768)', () => {
+    const expiring = { reason: 'expiring', expiry: Date.UTC(2026, 9, 2) } as const
+    // The label is fixed-width — the row slot reserves for it — so the date
+    // only ever shows in the description behind it.
+    expect(driveAttentionLabel(expiring)).toBe('Drive expiring')
+    expect(driveAttentionLabel({ ...expiring, reason: 'may-expire' })).toBe('Drive expiring')
+    expect(driveAttentionLabel({ reason: 'full' })).toBe('Drive full')
+    expect(driveAttentionDescription(expiring, 'home')).toBe(
+      'A drive expires on 2026-10-02. Sign in to extend its lifespan.',
+    )
+    // The sign-out estimate hedges: only the live drives can state a date.
+    expect(driveAttentionDescription({ ...expiring, reason: 'may-expire' }, 'home')).toBe(
+      'A drive may expire around 2026-10-02. Sign in to check it.',
+    )
+    expect(driveAttentionDescription({ reason: 'full' }, 'home')).toBe(
+      'A drive is full. Sign in to increase its size.',
+    )
+    // Only the connect popup promises that the connection is not held up.
+    expect(driveAttentionDescription({ reason: 'full' }, 'connect')).toBe(
+      'A drive is full. Sign in to increase its size. Connecting does not wait for this.',
+    )
   })
 })
 

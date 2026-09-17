@@ -90,7 +90,7 @@ test('sign out keeps only the encrypted remnant and signs back in from it', asyn
   await expect(page.getByText(/^Drive [0-9a-f]{4}$/)).toBeVisible()
 })
 
-test('the storage warning survives sign-out and outranks the badge', async ({ page }) => {
+test('the drive warning survives sign-out and outranks the badge', async ({ page }) => {
   test.setTimeout(CHAIN_TEST_TIMEOUT_MS)
   await createAccountWithDrive(page)
 
@@ -108,14 +108,15 @@ test('the storage warning survives sign-out and outranks the badge', async ({ pa
   await signOut(page)
 
   // The warning wins the badge slot; "Signed out" is gone once its toast
-  // auto-dismisses.
-  const checkStorage = page.getByRole('button', { name: 'Check storage' })
-  await expect(checkStorage).toBeVisible()
+  // auto-dismisses. The remnant kept a 30-day expiry, well outside the
+  // expires-soon window, so the drive is flagged as full and not as expiring.
+  const checkDrive = page.getByRole('button', { name: 'Drive full' })
+  await expect(checkDrive).toBeVisible()
   await expect(page.getByText('Signed out')).not.toBeVisible({ timeout: 10000 })
 
-  // Checking storage on a signed-out account signs it back in first.
-  await checkStorage.click({ position: { x: 20, y: 4 } })
-  await expect(page.getByText(/check your storage/i)).toBeVisible()
+  // Checking the drive on a signed-out account signs it back in first.
+  await checkDrive.click({ position: { x: 20, y: 4 } })
+  await expect(page.getByText('A drive is full. Sign in to increase its size.')).toBeVisible()
   await page.getByRole('textbox', { name: 'Account password' }).fill(PASSWORD)
   await page.getByRole('button', { name: 'Confirm' }).click()
 
