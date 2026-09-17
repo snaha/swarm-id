@@ -1,5 +1,27 @@
 # Changelog
 
+## [0.5.0](https://github.com/snaha/swarm-id/compare/v0.4.1...v0.5.0) (2026-09-17)
+
+
+### ⚠ BREAKING CHANGES
+
+* **lib:** keep saveMantarayTree internal to the proxy ([#789](https://github.com/snaha/swarm-id/issues/789))
+* **deps:** update to bee-js 13 ([#705](https://github.com/snaha/swarm-id/issues/705))
+
+### Features
+
+* **deps:** update to bee-js 13 ([#705](https://github.com/snaha/swarm-id/issues/705)) ([c35d58e](https://github.com/snaha/swarm-id/commit/c35d58ed7735514a4eda5baf364763fc9cb4a6f4))
+* **lib:** let buttonConfig set the connect button's typeface ([#788](https://github.com/snaha/swarm-id/issues/788)) ([c4e82c8](https://github.com/snaha/swarm-id/commit/c4e82c8e839515bba79c6629b3a922cf1d1ea470))
+
+
+### Bug Fixes
+
+* **lib:** an expired drive no longer reports the session as able to upload ([#755](https://github.com/snaha/swarm-id/issues/755)) ([e39c35b](https://github.com/snaha/swarm-id/commit/e39c35b7c134d65f49d709e8c5529802e52b1355))
+* **lib:** drop foreign window messages without warning ([#787](https://github.com/snaha/swarm-id/issues/787)) ([125f9bf](https://github.com/snaha/swarm-id/commit/125f9bf48f34d08cae63c00ba7d128f439a02e31))
+* **lib:** keep saveMantarayTree internal to the proxy ([#789](https://github.com/snaha/swarm-id/issues/789)) ([3280a77](https://github.com/snaha/swarm-id/commit/3280a776da0235655c5472c29f0bc5ad88da8a71))
+* **lib:** omit Swarm-Pin on the subsidised gateway path ([#754](https://github.com/snaha/swarm-id/issues/754)) ([68b7164](https://github.com/snaha/swarm-id/commit/68b7164e205a521a4862e90e79910e62d3929a76))
+* **lib:** re-scan a stale lock read after an announced release, without re-asking ([#777](https://github.com/snaha/swarm-id/issues/777)) ([34c8d82](https://github.com/snaha/swarm-id/commit/34c8d82ea9abd8ebf85dc79f672fd65ea05986a7))
+
 ## [0.4.1](https://github.com/snaha/swarm-id/compare/v0.4.0...v0.4.1) (2026-09-11)
 
 
