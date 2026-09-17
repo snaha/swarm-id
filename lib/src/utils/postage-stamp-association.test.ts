@@ -39,6 +39,23 @@ describe("resolveStampForApp", () => {
     expect(result?.batchID.toHex()).toBe(TEST_BATCH_ID_HEX)
   })
 
+  // Deliberate: expiry does not repoint spending. A tombstone is gone for
+  // good, so its pointer falls through; an expired drive can be renewed, and
+  // silently charging another drive is not what the user chose for this app.
+  it("does not fall through past an expired override", () => {
+    const expired = createPostageStamp({
+      batchID: appBatch,
+      batchTTL: 60,
+      updatedAt: Date.now() - 120_000,
+    })
+    const result = resolveStampForApp(
+      { postageStampBatchID: appBatch },
+      { defaultPostageStampBatchID: accountBatch },
+      [accountStamp, expired],
+    )
+    expect(result?.batchID.toHex()).toBe(TEST_BATCH_ID_2_HEX)
+  })
+
   it("uses the account default when the app has no override", () => {
     const result = resolveStampForApp(
       { postageStampBatchID: undefined },

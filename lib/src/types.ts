@@ -635,10 +635,15 @@ export type UploadMode = z.infer<typeof UploadModeSchema>
  * - `stamper-failed` — the stamp resolved and the stamper still did not build.
  *   `initializeStamper` logs and returns rather than throwing, so without this
  *   the symptom is indistinguishable from having no stamp at all.
+ * - `stamp-expired` — the stamp resolved, but its stored lifetime has run out
+ *   (#745). The stamper builds from the record regardless, so without this the
+ *   session claimed `user-stamp` and the first refused write surfaced as
+ *   partition contention.
  */
 export const UploadUnavailableReasonSchema = z.enum([
   "no-stamp",
   "stamper-failed",
+  "stamp-expired",
 ])
 
 export type UploadUnavailableReason = z.infer<

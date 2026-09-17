@@ -179,6 +179,14 @@ function writerPath(input: CheckInput): CheckResult {
         detail:
           'The stamp resolved and the stamper still would not build — the write path broke inside the partitioned iframe. This is the real failure this test exists to catch.',
       }
+    case 'stamp-expired':
+      return {
+        id,
+        title,
+        verdict: 'unknown',
+        detail:
+          'The account’s drive has expired, so the session refuses to stamp and the writer path was never exercised. Renew the drive or add another on the identity site, then run this again.',
+      }
     default:
       // Not red: `uploadUnavailableReason` is optional on the wire, so an older
       // identity deployment sends `unavailable` without one and this branch is
