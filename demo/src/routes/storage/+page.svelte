@@ -8,9 +8,12 @@
   import DownloadSection from '$lib/components/download-section.svelte'
   import FileUploadSection from '$lib/components/file-upload-section.svelte'
   import FileDownloadSection from '$lib/components/file-download-section.svelte'
+  import FolderUploadSection from '$lib/components/folder-upload-section.svelte'
+  import FolderListSection from '$lib/components/folder-list-section.svelte'
 
   let downloadReference = $state('')
   let fileDownloadReference = $state('')
+  let folderReference = $state('')
 
   function handleUploadResult(reference: string) {
     downloadReference = reference
@@ -35,4 +38,7 @@
 
   <FileUploadSection onUploadResult={handleFileUploadResult} />
   <FileDownloadSection bind:reference={fileDownloadReference} />
+
+  <FolderUploadSection onUploadResult={(reference) => (folderReference = reference)} />
+  <FolderListSection bind:reference={folderReference} />
 </div>
