@@ -15,7 +15,8 @@
  */
 
 import { describe, it, expect } from "vitest"
-import { MantarayNode, NULL_ADDRESS } from "@ethersphere/bee-js"
+import { NULL_ADDRESS } from "@ethersphere/bee-js"
+import { MantarayNode } from "@ethersphere/core-sdk"
 import {
   saveMantarayTree,
   saveMantarayTreeRecursively,
