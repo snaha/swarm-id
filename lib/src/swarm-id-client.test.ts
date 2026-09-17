@@ -376,6 +376,82 @@ describe("SwarmIdClient request seam", () => {
     }
   })
 
+  // The other direction: "replaces", not "extends" — a per-call value BELOW
+  // the client default has to fire at its own value, not wait for 30 s.
+  it("a per-call timeout below the client default fires at its own value", async () => {
+    const PER_CALL_TIMEOUT_MS = 5_000
+    vi.useFakeTimers()
+    try {
+      let settled: unknown
+      client
+        .downloadData("a".repeat(64), undefined, {
+          timeout: PER_CALL_TIMEOUT_MS,
+        })
+        .catch((error: unknown) => {
+          settled = error
+        })
+      await vi.advanceTimersByTimeAsync(PER_CALL_TIMEOUT_MS)
+      expect(String(settled)).toContain(
+        `Request timeout after ${PER_CALL_TIMEOUT_MS}ms`,
+      )
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  // A value `setTimeout` cannot honour must not become an instant rejection.
+  // Zero means "no timeout" to Bee, which is where this option went before it
+  // also bound the round trip; taken literally it would do the opposite.
+  it.each([
+    ["zero", 0],
+    ["a negative", -1],
+  ])(
+    "keeps the client default for %s per-call timeout",
+    async (_label, timeout) => {
+      const DEFAULT_CLIENT_TIMEOUT_MS = 30_000
+      vi.useFakeTimers()
+      try {
+        let settled: unknown
+        client
+          .downloadData("a".repeat(64), undefined, { timeout })
+          .catch((error: unknown) => {
+            settled = error
+          })
+        await vi.advanceTimersByTimeAsync(1)
+        expect(settled).toBeUndefined()
+        await vi.advanceTimersByTimeAsync(DEFAULT_CLIENT_TIMEOUT_MS)
+        expect(String(settled)).toContain(
+          `Request timeout after ${DEFAULT_CLIENT_TIMEOUT_MS}ms`,
+        )
+      } finally {
+        vi.useRealTimers()
+      }
+    },
+  )
+
+  // Past the 32-bit timer ceiling `setTimeout` wraps and fires almost at
+  // once, so "as long as it takes" would become "immediately".
+  it("clamps a per-call timeout past the timer ceiling to the ceiling", async () => {
+    const MAX_TIMER_DELAY_MS = 2 ** 31 - 1
+    vi.useFakeTimers()
+    try {
+      let settled: unknown
+      client
+        .downloadData("a".repeat(64), undefined, { timeout: 2 ** 31 })
+        .catch((error: unknown) => {
+          settled = error
+        })
+      await vi.advanceTimersByTimeAsync(MAX_TIMER_DELAY_MS - 1)
+      expect(settled).toBeUndefined()
+      await vi.advanceTimersByTimeAsync(1)
+      expect(String(settled)).toContain(
+        `Request timeout after ${MAX_TIMER_DELAY_MS}ms`,
+      )
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
   it("getPostageBatch rejects on a proxy error message", async () => {
     const promise = client.getPostageBatch()
 

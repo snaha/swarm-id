@@ -89,6 +89,8 @@ import { buildAuthUrl } from "./utils/url"
 import { withTimeout } from "./utils/promise"
 
 const DEFAULT_TIMEOUT_MS = 30000
+/** The largest delay `setTimeout` honours; past it, it fires almost at once. */
+const MAX_TIMER_DELAY_MS = 2 ** 31 - 1
 const DEFAULT_INITIALIZATION_TIMEOUT_MS = 30000
 
 /**
@@ -572,9 +574,9 @@ export class SwarmIdClient {
     // A per-call `requestOptions.timeout` bounds this whole round trip, not
     // only the Bee request the proxy makes with it: a caller raising it for a
     // large upload must not be cut off at the constructor default (#775).
-    const timeout =
-      (message as { requestOptions?: RequestOptions }).requestOptions
-        ?.timeout ?? this.timeout
+    const timeout = this.roundTripTimeout(
+      (message as { requestOptions?: RequestOptions }).requestOptions?.timeout,
+    )
     return new Promise((resolve, reject) => {
       const timeoutId = setTimeout(() => {
         this.pendingRequests.delete(message.requestId)
@@ -589,6 +591,25 @@ export class SwarmIdClient {
 
       this.sendMessage(message)
     })
+  }
+
+  /**
+   * The round-trip bound for one call, from its own `requestOptions.timeout`.
+   *
+   * Only a value `setTimeout` can honour is taken. Zero and negatives mean
+   * "no timeout" to Bee, which is where this option went before it also bound
+   * the round trip — taken literally here they would reject on the next tick,
+   * the opposite of what the caller asked, so they fall back to the client
+   * default and still reach Bee unchanged. A value past the 32-bit timer
+   * ceiling means "as long as it takes", and `setTimeout` would wrap it into
+   * firing almost at once, so it clamps to the ceiling instead. `Infinity` and
+   * `NaN` never get this far: `z.number()` rejects them on the way out.
+   */
+  private roundTripTimeout(perCall: number | undefined): number {
+    if (perCall === undefined || perCall <= 0) {
+      return this.timeout
+    }
+    return Math.min(perCall, MAX_TIMER_DELAY_MS)
   }
 
   /**
@@ -2781,7 +2802,7 @@ export class SwarmIdClient {
    * @param options - Optional configuration
    * @param options.owner - Feed owner address; if omitted, uses app signer
    * @param options.uploadOptions - Upload configuration (pin, deferred, etc.)
-   * @param requestOptions - Request configuration (timeout, headers)
+   * @param requestOptions - Request configuration (timeout, headers). `timeout` replaces the client default for this call's whole round trip, not only the Bee request
    * @returns Promise resolving to the manifest reference
    * @throws {Error} If the client is not initialized
    * @throws {Error} If no owner is provided and no app signer is available
