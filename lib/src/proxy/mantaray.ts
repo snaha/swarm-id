@@ -26,8 +26,10 @@ export type UploadCallback = (
  *
  * This is the variant that is safe to use from outside the proxy: the callback
  * receives a marshaled node payload and hands back the reference it was stored
- * under, so any uploader that wraps a payload in a chunk of its own fits,
- * `SwarmIdClient.uploadChunk` included.
+ * under, so any uploader that wraps a payload in a chunk of its own fits.
+ * `SwarmIdClient.uploadData` is the one to reach for — `uploadChunk` fits the
+ * contract too, but a node payload over its 4 KB chunk limit (a wide directory)
+ * fails there, which is why the demo's feed upload uses `uploadData`.
  */
 export async function saveMantarayTreeRecursively(
   node: MantarayNode,
