@@ -1342,11 +1342,17 @@ export class SwarmIdClient {
    * When using a File object, the filename is automatically extracted unless
    * explicitly overridden.
    *
+   * Content is encrypted unless `options.encrypt` is `false`, and the
+   * manifest too — a 64-byte reference that carries the key — unless
+   * `options.encrypt` or `options.encryptManifest` is `false`. The same rule
+   * as {@link uploadFiles}.
+   *
    * @param file - The file to upload (File object or Uint8Array)
    * @param name - Optional filename (extracted from File object if not provided)
    * @param options - Optional upload configuration
    * @param options.pin - Whether to pin the file locally (defaults to false; ignored on a subsidised gateway)
-   * @param options.encrypt - Whether to encrypt the file (defaults to false)
+   * @param options.encrypt - Whether to encrypt the file content (defaults to true); `false` also leaves the manifest plain
+   * @param options.encryptManifest - Whether to encrypt the manifest too (defaults to true); `false` gives a 32-byte reference over encrypted content
    * @param options.tag - Tag ID for tracking upload progress
    * @param options.deferred - Whether to use deferred upload (defaults to false)
    * @param requestOptions - Optional request configuration (timeout, headers, endlesslyRetry). `timeout` replaces the client default for this call's whole round trip, not only the Bee request
