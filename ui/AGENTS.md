@@ -14,12 +14,13 @@ The identity UI is a SvelteKit SPA.
 - **Wallet picker** (`src/lib/crypto/onboard.ts`): injected wallets, Coinbase Wallet, and
   WalletConnect when there is a project id. The last two need nothing installed and are the only
   routes on a browser with no wallet extension (Safari, mobile)
-- **WalletConnect project id**: a committed `DEFAULT_PROJECT_ID` (`crypto/wallet-connect.ts`), not a
-  secret, with `PUBLIC_WALLETCONNECT_PROJECT_ID` overriding it — same shape as `busSignalingUrl`.
-  Never pass the module a blank id: it throws, at import of a module every wallet page loads. Go
-  through `walletConnectOptions`
-- **Local env**: `.env.example` → `.env` (gitignored) documents the `PUBLIC_*` build vars; both have
-  working defaults, so an empty `.env` is fine
+- **WalletConnect project id**: a committed `DEFAULT_PROJECT_ID` (`src/lib/crypto/wallet-connect.ts`), not
+  configured per environment; `PUBLIC_WALLETCONNECT_PROJECT_ID` overrides it and so picks which
+  Reown project, never whether the picker offers WalletConnect. Never hand
+  `@web3-onboard/walletconnect` a blank id: it throws, at import of a module every wallet page
+  loads. Go through `walletConnectOptions`, which returns `undefined` instead
+- **Local env**: `.env.example` → `.env` (gitignored) documents the `PUBLIC_*` build vars; both are
+  optional, so an empty `.env` is fine for dev
 - **Dev mock stamp purchase** (`/dev` → Chain tab, backed by `src/lib/stores/dev-settings.svelte.ts`):
   toggles that make the **Add drive** flow's _widget_ payment method settle a mocked postage batch
   instead of a real cross-chain payment. They apply to that method only — the built-in engine
