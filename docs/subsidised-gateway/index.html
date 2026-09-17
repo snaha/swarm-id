@@ -165,6 +165,10 @@
 <td><code dir="auto">stamper-failed</code></td>
 <td>The stamp resolved, but the write path did not build. The only place that difference reaches the dApp.</td>
 </tr>
+<tr>
+<td><code dir="auto">stamp-expired</code></td>
+<td>The stamp resolved, but its stored lifetime has run out. The session refuses to stamp with it; with a subsidised gateway configured, uploads fall back to the gateway instead.</td>
+</tr>
 </tbody>
 </table>
 <p>The reason is <code dir="auto">undefined</code> while the session is unauthenticated, and while <code dir="auto">canUpload</code> is <code dir="auto">true</code>.</p>
