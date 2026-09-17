@@ -12,19 +12,13 @@
  */
 
 import { describe, it, expect, vi, afterEach } from "vitest"
-import {
-  PrivateKey,
-  Identifier,
-  BatchId,
-  type Bee,
-  type Stamper,
-} from "@ethersphere/bee-js"
+import { PrivateKey, Identifier } from "@ethersphere/bee-js"
 import { uploadChunk, uploadData, uploadSOC, type UploadTarget } from "./upload"
+import { MockBee, createMockStamper } from "./feeds/epochs/test-utils"
 
 const GATEWAY = "https://gateway.example"
 const TARGET: UploadTarget = { mode: "subsidised", gatewayUrl: GATEWAY }
 const REFERENCE = "ab".repeat(32)
-const SIGNATURE_LENGTH = 65
 const TAG_UID = 7
 
 const signer = new PrivateKey(new Uint8Array(32).fill(1))
@@ -48,16 +42,8 @@ function sentHeaders(fetchMock: ReturnType<typeof vi.fn>): string[] {
   )
 }
 
-function stamperTarget(bee: Partial<Bee>): UploadTarget {
-  const stamper = {
-    stamp: () => ({
-      batchId: new BatchId(REFERENCE),
-      index: new Uint8Array(8),
-      timestamp: new Uint8Array(8),
-      signature: new Uint8Array(SIGNATURE_LENGTH),
-    }),
-  } as unknown as Stamper
-  return { mode: "stamper", bee: bee as Bee, stamper }
+function stamperTarget(bee: MockBee): UploadTarget {
+  return { mode: "stamper", bee, stamper: createMockStamper() }
 }
 
 afterEach(() => {
@@ -105,7 +91,7 @@ describe("subsidised uploads omit swarm-pin", () => {
 describe("stamper uploads keep swarm-pin", () => {
   it("on a SOC", async () => {
     const fetchMock = stubFetch()
-    const target = stamperTarget({ url: "http://bee.example" })
+    const target = stamperTarget(new MockBee())
     await uploadSOC(target, signer, identifier, new Uint8Array(16), {
       pin: true,
       tag: TAG_UID,
@@ -115,14 +101,15 @@ describe("stamper uploads keep swarm-pin", () => {
     expect(init.headers).toMatchObject({ "swarm-pin": "true" })
   })
 
-  it("on a chunk, through bee.uploadChunk's options", async () => {
-    const uploadChunkMock = vi.fn(async () => ({ reference: REFERENCE }))
-    const target = stamperTarget({
-      uploadChunk: uploadChunkMock as unknown as Bee["uploadChunk"],
-    })
-    await uploadChunk(target, new Uint8Array(16), { pin: true })
-    expect(uploadChunkMock).toHaveBeenCalledTimes(1)
-    const [, , options] = uploadChunkMock.mock.calls[0] as unknown[]
+  it("on a chunk, through bee.chunk.upload's options", async () => {
+    const bee = new MockBee()
+    const chunkUpload = vi.fn(bee.chunk.upload)
+    bee.chunk.upload = chunkUpload
+
+    await uploadChunk(stamperTarget(bee), new Uint8Array(16), { pin: true })
+
+    expect(chunkUpload).toHaveBeenCalledTimes(1)
+    const [, , options] = chunkUpload.mock.calls[0]
     expect(options).toMatchObject({ pin: true })
   })
 })
