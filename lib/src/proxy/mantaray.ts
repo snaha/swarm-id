@@ -147,6 +147,58 @@ export async function saveMantarayTree(
 }
 
 /**
+ * How the Mantaray parser says the bytes it was handed are not a node at all:
+ * too short to hold a header, or a header that is not Mantaray's. Matched on
+ * the tail, because the prefix has been reworded once already — bee-js threw
+ * `MantarayNode#unmarshal …`, core-sdk throws `MantarayNode#unmarshalFromData
+ * …` (#705) — and both throw a plain `Error`, so the text is the only handle
+ * there is. Reword the tails too and the translation below simply stops
+ * firing, leaving the raw message to surface again.
+ */
+const NOT_A_MANIFEST_MESSAGES = ["invalid version hash", "data too short"]
+
+/**
+ * What a person can act on when the root of a manifest download is not a
+ * manifest at all. It states what is true wherever the load is reached from,
+ * and names the pair only as the likely cause: `handleDownloadFile` is the
+ * crossed-pairs case, but `handleActDownloadData` builds its own manifest and
+ * a non-manifest root there means something else went wrong.
+ */
+const NO_MANIFEST_MESSAGE =
+  "No manifest at this reference; a reference from uploadData needs downloadData."
+
+/**
+ * Unmarshal the root node of a manifest, translating the parse failures that
+ * mean "this reference is not a manifest".
+ *
+ * Uploads and downloads come in pairs, and both downloads take a plain
+ * string reference: handing a `uploadData` reference to a file download
+ * type-checks, and lands here. Only the root is translated — a root that
+ * fails to parse is routinely just plain data, while a child that fails to
+ * parse is a manifest with a corrupt node, which is a different problem and
+ * keeps its own error.
+ */
+function unmarshalRootManifest(
+  rootData: Uint8Array,
+  rootReference: string,
+): MantarayNode {
+  try {
+    return MantarayNode.unmarshalFromData(
+      rootData,
+      hexToUint8Array(rootReference),
+    )
+  } catch (error) {
+    if (
+      error instanceof Error &&
+      NOT_A_MANIFEST_MESSAGES.some((tail) => error.message.endsWith(tail))
+    ) {
+      throw new Error(NO_MANIFEST_MESSAGE, { cause: error })
+    }
+    throw error
+  }
+}
+
+/**
  * Load a Mantaray tree using only the chunk API.
  *
  * This avoids /bytes and supports encrypted references.
@@ -163,10 +215,7 @@ export async function loadMantarayTreeWithChunkAPI(
     undefined,
     requestOptions,
   )
-  const root = MantarayNode.unmarshalFromData(
-    rootData,
-    hexToUint8Array(rootReference),
-  )
+  const root = unmarshalRootManifest(rootData, rootReference)
 
   async function loadRecursively(node: MantarayNode): Promise<void> {
     for (const fork of node.forks.values()) {
