@@ -305,6 +305,11 @@ async function runInitialize(generation: number) {
         backgroundColor: '#667eea',
         color: 'white',
         borderRadius: '6px',
+        // The page's own stack (app.css): the button is painted inside the
+        // cross-origin iframe, so this is the only way it matches the page.
+        fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif",
+        fontSize: '15px',
+        fontWeight: 600,
       },
       containerId: 'swarm-id-button',
     })

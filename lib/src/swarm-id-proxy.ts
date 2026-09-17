@@ -3493,7 +3493,7 @@ export class SwarmIdProxy {
     button.style.borderRadius = config.borderRadius || "0"
     button.style.padding = "0"
     button.style.fontSize = config.fontSize || "14px"
-    button.style.fontWeight = config.fontWeight || "600"
+    button.style.fontWeight = config.fontWeight?.toString() ?? "600"
     // No default: left unset the button keeps the font the iframe gives it.
     // Forcing `inherit` here would inherit the IFRAME's font, not the parent
     // page's, so it would change the look without getting any closer to the

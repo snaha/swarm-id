@@ -168,6 +168,14 @@ describe("ButtonConfigSchema typography (#779)", () => {
     expect(ButtonConfigSchema.parse(TYPOGRAPHY)).toEqual(TYPOGRAPHY)
   })
 
+  it("accepts a numeric fontWeight, which is how CSS weights are written", () => {
+    // A TypeScript caller is stopped at compile time; a plain-JS one would
+    // otherwise reach `sendMessage` and fail as "Invalid message format".
+    expect(ButtonConfigSchema.parse({ fontWeight: 500 })).toEqual({
+      fontWeight: 500,
+    })
+  })
+
   it("leaves them optional", () => {
     expect(ButtonConfigSchema.parse({ color: "white" })).toEqual({
       color: "white",

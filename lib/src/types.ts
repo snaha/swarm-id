@@ -780,7 +780,7 @@ export const ButtonConfigSchema = z
     borderRadius: z.string().optional(),
     fontFamily: z.string().optional(),
     fontSize: z.string().optional(),
-    fontWeight: z.string().optional(),
+    fontWeight: z.union([z.string(), z.number()]).optional(),
   })
   .optional()
 
@@ -798,7 +798,10 @@ export interface ButtonConfig {
   // here means the first one available to the IFRAME, not to the parent page.
   fontFamily?: string // CSS font-family. Default: the iframe's own font
   fontSize?: string // CSS font-size. Default: "14px"
-  fontWeight?: string // CSS font-weight. Default: "600"
+  // A number too, since that is how a CSS weight is usually written. Without
+  // it a plain-JS caller's `fontWeight: 500` fails outgoing validation at
+  // `initialize()` as a bare "Invalid message format".
+  fontWeight?: string | number // CSS font-weight. Default: "600"
 }
 
 // ============================================================================

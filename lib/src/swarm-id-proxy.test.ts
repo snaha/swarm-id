@@ -399,6 +399,10 @@ describe("SwarmIdProxy auth button typography (#779)", () => {
     expect(style.fontWeight).toBe("300")
   })
 
+  it("renders a numeric fontWeight as the CSS string it has to be", () => {
+    expect(render({ fontWeight: 500 }).fontWeight).toBe("500")
+  })
+
   it("keeps the built-in size and weight, and no font-family, when unset", () => {
     const style = render({ backgroundColor: "#000" })
 
