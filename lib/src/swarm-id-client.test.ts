@@ -460,6 +460,27 @@ describe("SwarmIdClient window message filtering", () => {
     expect(warn).not.toHaveBeenCalled()
   })
 
+  // The other direction: a filter that dropped everything would pass every
+  // rejection test above, so one message has to be shown getting through.
+  it("handles a valid message from our iframe at the expected origin", () => {
+    expect(internals(client).ready).toBe(false)
+
+    listener({
+      origin: "https://swarm-id.example.com",
+      source: contentWindow,
+      data: {
+        type: "proxyReady",
+        authenticated: false,
+        parentOrigin: "https://localhost",
+        storageShared: true,
+      },
+    })
+
+    expect(warn).not.toHaveBeenCalled()
+    expect(internals(client).ready).toBe(true)
+    expect(internals(client).storageShared).toBe(true)
+  })
+
   // From our own iframe, so the mismatch is ours to report: the frame is
   // serving something other than the configured identity origin.
   it("warns about a wrong origin from our iframe's window", () => {
