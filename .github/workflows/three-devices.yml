@@ -85,12 +85,23 @@ jobs:
       # The same image cache as the integration job: images only, never
       # volumes, so the chain state baked into the image is always fresh —
       # which is also what keeps the worker faucet stocked for every run.
+      # Keyed on the bee-compose version, the only thing the images are built
+      # from, so a lockfile touched for anything else still hits.
+      - name: Resolve the cluster version
+        id: bee-compose
+        # Guarded: an empty version would leave the key `bee-images--v1`, which
+        # every run would share and no run would notice.
+        run: |
+          version=$(pnpm -s dev:cluster --version)
+          test -n "$version" || { echo "::error::bee-compose printed no version"; exit 1; }
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
       - name: Cache Bee cluster images
         id: bee-images
         uses: actions/cache@v6
         with:
           path: /tmp/bee-images
-          key: bee-images-${{ hashFiles('pnpm-lock.yaml') }}-v1
+          key: bee-images-${{ steps.bee-compose.outputs.version }}-v1
 
       - name: Load cached cluster images
         if: steps.bee-images.outputs.cache-hit == 'true'
@@ -99,7 +110,18 @@ jobs:
           docker images --filter 'reference=bee-compose:*'
 
       - name: Start Bee cluster
+        if: steps.bee-images.outputs.cache-hit == 'true'
         run: pnpm dev:cluster:start
+
+      # On a miss, `up` builds the images itself and labels the containers it
+      # creates with the build digest rather than the image id it reads for an
+      # image it finds — so the workers' `up` takes the queen and the chain for
+      # outdated and recreates them seconds into their boot, after which the
+      # cluster takes ~15 min to serve a direct upload. `--pull` builds every
+      # image before either `up`, so both find theirs the way a hit does.
+      - name: Build and start Bee cluster
+        if: steps.bee-images.outputs.cache-hit != 'true'
+        run: pnpm dev:cluster:start --pull
 
       - name: Save cluster images to cache
         if: steps.bee-images.outputs.cache-hit != 'true'
@@ -109,23 +131,12 @@ jobs:
           echo "Saving images: $imgs"
           docker save $imgs -o /tmp/bee-images/cluster.tar
 
-      - name: Wait for queen node to be ready
-        run: |
-          for i in $(seq 1 40); do
-            if curl -fsS http://localhost:1633/readiness 2>/dev/null | grep -q '"status":"ready"'; then
-              echo "Queen node is ready"
-              exit 0
-            fi
-            restarts=$(docker inspect -f '{{.RestartCount}}' bee-compose-queen 2>/dev/null || echo 0)
-            if [ "${restarts:-0}" -ge 3 ]; then
-              echo "::error::Queen node is crash-looping (RestartCount=$restarts)"
-              exit 1
-            fi
-            echo "Waiting for queen node... ($i/40, restarts=${restarts:-0})"
-            sleep 3
-          done
-          echo "::error::Queen node did not become ready in time"
-          exit 1
+      # Readiness is a served direct upload, not the queen's /readiness: the
+      # suite's every write is one, and a cold cluster answers them 30 s late.
+      - name: Wait for the cluster to serve uploads
+        run: bash .github/scripts/wait-for-cluster.sh
+        env:
+          CLUSTER_WAIT_MINUTES: 15
 
       # The identity UI, the demo and the signaling server are started by the
       # suite's own config (`webServer`), the way `pnpm dev` starts them.
