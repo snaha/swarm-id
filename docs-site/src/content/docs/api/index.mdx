@@ -717,6 +717,92 @@ const url = URL.createObjectURL(blob)
 
 ---
 
+### `uploadFiles(files, options?, requestOptions?)`
+
+Uploads a folder as one manifest: a fork per file with its path and content type, which a gateway serves at `/bzz/<reference>/<path>`. Takes what bee-js takes — the `FileList` of an `<input type="file" webkitdirectory>` or a dropped directory, a `File[]`, or `{ path, file }` pairs for a folder the app assembled itself. A `File`'s path is its `webkitRelativePath` with the picked folder's own name removed, or its name. Which files to include is the app's decision; the library uploads what it is given.
+
+Read a folder back with [`listFiles`](#listfilesreference-requestoptions) and [`downloadData`](#downloaddatareference-options-requestoptions) per entry, or one file with [`downloadFile`](#downloadfilereference-path-options-requestoptions) and its path.
+
+Every file is read into memory before the upload starts. For folders larger than that, upload the files with `uploadData` and build the manifest with `@ethersphere/core-sdk`'s `MantarayNode`.
+
+**Parameters:**
+
+| Parameter                 | Type                                                 | Required | Description                                                                                                                                                                                    |
+| ------------------------- | ---------------------------------------------------- | -------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `files`                   | `FileList \| Iterable<File \| { path, file: Blob }>` | Yes      | The folder's files                                                                                                                                                                             |
+| `options`                 | `UploadFilesOptions`                                 | No       | Upload configuration                                                                                                                                                                           |
+| `options.encrypt`         | `boolean`                                            | No       | Encrypt the file content (defaults to `true`). `false` also leaves the manifest plain                                                                                                          |
+| `options.encryptManifest` | `boolean`                                            | No       | Encrypt the manifest too, so the root reference carries the key (defaults to `true`). `false` gives a 32-byte root reference whose manifest anyone can read, while the content stays encrypted |
+| `options.indexDocument`   | `string`                                             | No       | The file the bare `/bzz/<reference>/` serves (`website-index-document`), e.g. `index.html`                                                                                                     |
+| `options.errorDocument`   | `string`                                             | No       | The file served for a path that is not in the folder (`website-error-document`)                                                                                                                |
+| `options.pin`             | `boolean`                                            | No       | Pin on the user's own node (defaults to `false`; ignored on a subsidised gateway)                                                                                                              |
+| `options.deferred`        | `boolean`                                            | No       | Whether to use deferred upload (defaults to `false`); see [`uploadData`](#uploaddatadata-options-requestoptions)                                                                               |
+| `options.tag`             | `number`                                             | No       | Tag ID for tracking upload progress                                                                                                                                                            |
+| `options.onProgress`      | `(progress) => void`                                 | No       | Called once per file with `{ total, processed }`                                                                                                                                               |
+| `requestOptions`          | `RequestOptions`                                     | No       | Request configuration; `timeout` bounds the whole upload, see [`uploadFile`](#uploadfilefile-name-options-requestoptions)                                                                      |
+
+**Returns:** `Promise<UploadResult>` - Contains `reference` (the manifest's) and optional `tagUid`
+
+**Throws:**
+
+- `Error` if the client is not initialized
+- `Error` if the user is not authenticated or cannot upload
+- `Error` if the request times out
+
+**Example:**
+
+```typescript
+// <input type="file" webkitdirectory>
+const { reference } = await client.uploadFiles(input.files, {
+  indexDocument: 'index.html',
+})
+// served at https://<gateway>/bzz/<reference>/
+
+// a folder the app assembled
+await client.uploadFiles([
+  { path: 'index.html', file: new Blob([html], { type: 'text/html' }) },
+  { path: 'assets/app.js', file: new Blob([js], { type: 'text/javascript' }) },
+])
+```
+
+---
+
+### `listFiles(reference, requestOptions?)`
+
+Lists the files of a manifest — one uploaded with [`uploadFiles`](#uploadfilesfiles-options-requestoptions), or any other. Each entry carries the path, the content type, and the reference of the file's content, which `downloadData` reads. The index-document fork is not an entry.
+
+**Parameters:**
+
+| Parameter        | Type             | Required | Description                         |
+| ---------------- | ---------------- | -------- | ----------------------------------- |
+| `reference`      | `string`         | Yes      | The Swarm reference of the manifest |
+| `requestOptions` | `RequestOptions` | No       | Request configuration               |
+
+**Returns:** `Promise<CollectionEntry[]>`
+
+| Property      | Type     | Description                                                |
+| ------------- | -------- | ---------------------------------------------------------- |
+| `path`        | `string` | The file's path inside the folder                          |
+| `reference`   | `string` | The reference of its content, for `downloadData`           |
+| `contentType` | `string` | Its `Content-Type` metadata, when the manifest records one |
+
+**Throws:**
+
+- `Error` if the client is not initialized
+- `Error` if the reference is not a manifest or is not found
+- `Error` if the request times out
+
+**Example:**
+
+```typescript
+for (const { path, reference } of await client.listFiles(root)) {
+  const data = await client.downloadData(reference)
+  console.log(path, data.length)
+}
+```
+
+---
+
 ## Chunk Methods
 
 ### `uploadChunk(data, options?, requestOptions?)`
