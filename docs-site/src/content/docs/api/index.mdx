@@ -537,19 +537,19 @@ The data is uploaded using the authenticated user's postage stamp. Progress can 
 
 **Parameters:**
 
-| Parameter                       | Type                     | Required | Description                                           |
-| ------------------------------- | ------------------------ | -------- | ----------------------------------------------------- |
-| `data`                          | `Uint8Array`             | Yes      | The binary data to upload                             |
-| `options`                       | `UploadOptions`          | No       | Upload configuration                                  |
-| `options.pin`                   | `boolean`                | No       | Whether to pin the data locally (defaults to `false`) |
-| `options.encrypt`               | `boolean`                | No       | Whether to encrypt the data (defaults to `false`)     |
-| `options.tag`                   | `number`                 | No       | Tag ID for tracking upload progress                   |
-| `options.deferred`              | `boolean`                | No       | Whether to use deferred upload (defaults to `false`)  |
-| `options.onProgress`            | `(progress) => void`     | No       | Callback for tracking upload progress                 |
-| `requestOptions`                | `RequestOptions`         | No       | Request configuration                                 |
-| `requestOptions.timeout`        | `number`                 | No       | Request timeout in milliseconds                       |
-| `requestOptions.headers`        | `Record<string, string>` | No       | Custom headers                                        |
-| `requestOptions.endlesslyRetry` | `boolean`                | No       | Whether to retry endlessly                            |
+| Parameter                       | Type                     | Required | Description                                                                            |
+| ------------------------------- | ------------------------ | -------- | -------------------------------------------------------------------------------------- |
+| `data`                          | `Uint8Array`             | Yes      | The binary data to upload                                                              |
+| `options`                       | `UploadOptions`          | No       | Upload configuration                                                                   |
+| `options.pin`                   | `boolean`                | No       | Whether to pin the data locally (defaults to `false`; ignored on a subsidised gateway) |
+| `options.encrypt`               | `boolean`                | No       | Whether to encrypt the data (defaults to `false`)                                      |
+| `options.tag`                   | `number`                 | No       | Tag ID for tracking upload progress (ignored on a subsidised gateway)                  |
+| `options.deferred`              | `boolean`                | No       | Whether to use deferred upload (defaults to `false`)                                   |
+| `options.onProgress`            | `(progress) => void`     | No       | Callback for tracking upload progress                                                  |
+| `requestOptions`                | `RequestOptions`         | No       | Request configuration                                                                  |
+| `requestOptions.timeout`        | `number`                 | No       | Request timeout in milliseconds                                                        |
+| `requestOptions.headers`        | `Record<string, string>` | No       | Custom headers                                                                         |
+| `requestOptions.endlesslyRetry` | `boolean`                | No       | Whether to retry endlessly                                                             |
 
 **Returns:** `Promise<UploadResult>`
 
@@ -1096,16 +1096,16 @@ Creates a sequential feed writer for updating and reading a topic. If `signer` i
 
 **Sequential upload options (`options`):**
 
-| Option            | Type                         | Required | Description                                                  |
-| ----------------- | ---------------------------- | -------- | ------------------------------------------------------------ |
-| `index`           | `number \| string \| bigint` | No       | Feed index to write (0..2^64-1); defaults to next index      |
-| `at`              | `number \| string \| bigint` | No       | Unix timestamp (seconds); used when `hasTimestamp` is true   |
-| `hasTimestamp`    | `boolean`                    | No       | Whether payloads include a timestamp prefix (default `true`) |
-| `lookupTimeoutMs` | `number`                     | No       | Timeout (ms) for sequential index lookups (default 2000)     |
-| `pin`             | `boolean`                    | No       | Whether to pin the data locally                              |
-| `encrypt`         | `boolean`                    | No       | Whether to encrypt the data                                  |
-| `tag`             | `number`                     | No       | Tag ID for tracking upload progress                          |
-| `deferred`        | `boolean`                    | No       | Whether to use deferred upload                               |
+| Option            | Type                         | Required | Description                                                           |
+| ----------------- | ---------------------------- | -------- | --------------------------------------------------------------------- |
+| `index`           | `number \| string \| bigint` | No       | Feed index to write (0..2^64-1); defaults to next index               |
+| `at`              | `number \| string \| bigint` | No       | Unix timestamp (seconds); used when `hasTimestamp` is true            |
+| `hasTimestamp`    | `boolean`                    | No       | Whether payloads include a timestamp prefix (default `true`)          |
+| `lookupTimeoutMs` | `number`                     | No       | Timeout (ms) for sequential index lookups (default 2000)              |
+| `pin`             | `boolean`                    | No       | Whether to pin the data locally (ignored on a subsidised gateway)     |
+| `encrypt`         | `boolean`                    | No       | Whether to encrypt the data                                           |
+| `tag`             | `number`                     | No       | Tag ID for tracking upload progress (ignored on a subsidised gateway) |
+| `deferred`        | `boolean`                    | No       | Whether to use deferred upload                                        |
 
 **Example:**
 
@@ -1275,20 +1275,20 @@ The data is encrypted using ACT (Access Control Tries) and can only be downloade
 
 **Parameters:**
 
-| Parameter                       | Type                     | Required | Description                                                                         |
-| ------------------------------- | ------------------------ | -------- | ----------------------------------------------------------------------------------- |
-| `data`                          | `Uint8Array`             | Yes      | The binary data to upload                                                           |
-| `grantees`                      | `string[]`               | Yes      | Array of compressed public keys (66 hex chars each)                                 |
-| `options`                       | `ActUploadOptions`       | No       | Upload configuration                                                                |
-| `options.pin`                   | `boolean`                | No       | Whether to pin the data locally (defaults to `false`)                               |
-| `options.tag`                   | `number`                 | No       | Tag ID for tracking upload progress                                                 |
-| `options.deferred`              | `boolean`                | No       | Whether to use deferred upload (defaults to `false`)                                |
-| `options.onProgress`            | `(progress) => void`     | No       | Callback for tracking upload progress                                               |
-| `options.publisher`             | `"app" \| "identity"`    | No       | Key that publishes: this origin's app key (default) or the account-wide sharing key |
-| `requestOptions`                | `RequestOptions`         | No       | Request configuration                                                               |
-| `requestOptions.timeout`        | `number`                 | No       | Request timeout in milliseconds                                                     |
-| `requestOptions.headers`        | `Record<string, string>` | No       | Custom headers                                                                      |
-| `requestOptions.endlesslyRetry` | `boolean`                | No       | Whether to retry endlessly                                                          |
+| Parameter                       | Type                     | Required | Description                                                                            |
+| ------------------------------- | ------------------------ | -------- | -------------------------------------------------------------------------------------- |
+| `data`                          | `Uint8Array`             | Yes      | The binary data to upload                                                              |
+| `grantees`                      | `string[]`               | Yes      | Array of compressed public keys (66 hex chars each)                                    |
+| `options`                       | `ActUploadOptions`       | No       | Upload configuration                                                                   |
+| `options.pin`                   | `boolean`                | No       | Whether to pin the data locally (defaults to `false`; ignored on a subsidised gateway) |
+| `options.tag`                   | `number`                 | No       | Tag ID for tracking upload progress (ignored on a subsidised gateway)                  |
+| `options.deferred`              | `boolean`                | No       | Whether to use deferred upload (defaults to `false`)                                   |
+| `options.onProgress`            | `(progress) => void`     | No       | Callback for tracking upload progress                                                  |
+| `options.publisher`             | `"app" \| "identity"`    | No       | Key that publishes: this origin's app key (default) or the account-wide sharing key    |
+| `requestOptions`                | `RequestOptions`         | No       | Request configuration                                                                  |
+| `requestOptions.timeout`        | `number`                 | No       | Request timeout in milliseconds                                                        |
+| `requestOptions.headers`        | `Record<string, string>` | No       | Custom headers                                                                         |
+| `requestOptions.endlesslyRetry` | `boolean`                | No       | Whether to retry endlessly                                                             |
 
 **Returns:** `Promise<ActUploadResult>`
 

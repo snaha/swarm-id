@@ -1107,7 +1107,7 @@ export class SwarmIdClient {
    *
    * @param data - The binary data to upload as a Uint8Array
    * @param options - Optional upload configuration
-   * @param options.pin - Whether to pin the data locally (defaults to false)
+   * @param options.pin - Whether to pin the data locally (defaults to false; ignored on a subsidised gateway)
    * @param options.encrypt - Whether to encrypt the data (defaults to false)
    * @param options.tag - Tag ID for tracking upload progress
    * @param options.deferred - Whether to use deferred upload (defaults to false)
@@ -1302,7 +1302,7 @@ export class SwarmIdClient {
    * @param file - The file to upload (File object or Uint8Array)
    * @param name - Optional filename (extracted from File object if not provided)
    * @param options - Optional upload configuration
-   * @param options.pin - Whether to pin the file locally (defaults to false)
+   * @param options.pin - Whether to pin the file locally (defaults to false; ignored on a subsidised gateway)
    * @param options.encrypt - Whether to encrypt the file (defaults to false)
    * @param options.tag - Tag ID for tracking upload progress
    * @param options.deferred - Whether to use deferred upload (defaults to false)
@@ -1490,7 +1490,7 @@ export class SwarmIdClient {
    *
    * @param data - The chunk data to upload (should be exactly 4KB for optimal storage)
    * @param options - Optional upload configuration
-   * @param options.pin - Whether to pin the chunk locally (defaults to false)
+   * @param options.pin - Whether to pin the chunk locally (defaults to false; ignored on a subsidised gateway)
    * @param options.encrypt - Whether to encrypt the chunk (defaults to false)
    * @param options.tag - Tag ID for tracking upload progress
    * @param options.deferred - Whether to use deferred upload (defaults to false)
@@ -2930,7 +2930,7 @@ export class SwarmIdClient {
    * @param options - Optional upload configuration
    * @param options.publisher - `"app"` (default) publishes with this origin's app key; `"identity"`
    *   publishes with the account-wide sharing key, so any of the user's apps can manage the grantees later
-   * @param options.pin - Whether to pin the data locally (defaults to false)
+   * @param options.pin - Whether to pin the data locally (defaults to false; ignored on a subsidised gateway)
    * @param options.tag - Tag ID for tracking upload progress
    * @param options.deferred - Whether to use deferred upload (defaults to false)
    * @param options.onProgress - Optional callback for tracking upload progress
