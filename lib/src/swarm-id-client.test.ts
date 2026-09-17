@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, it, expect, vi, beforeEach } from "vitest"
-import type { Mock } from "vitest"
+import type { Mock, MockInstance } from "vitest"
 import { SwarmIdClient } from "./swarm-id-client"
 import type { ConnectionInfo, IframeToParentMessage } from "./types"
 import { generatedAvatar } from "./utils/avatar"
@@ -386,6 +386,128 @@ describe("SwarmIdClient request seam", () => {
       error: "Not authenticated. Please login first.",
     })
     await expect(promise).rejects.toThrow("Not authenticated")
+  })
+})
+
+describe("SwarmIdClient window message filtering", () => {
+  let client: SwarmIdClient
+  let listener: (event: unknown) => void
+  let contentWindow: object
+  let warn: MockInstance<typeof console.warn>
+
+  /** The listener the constructor registered on `window`. */
+  function registeredMessageListener(): (event: unknown) => void {
+    const registration = vi
+      .mocked(window.addEventListener)
+      .mock.calls.find(([type]) => type === "message")
+    if (!registration) {
+      throw new Error("no message listener was registered")
+    }
+    return registration[1] as unknown as (event: unknown) => void
+  }
+
+  beforeEach(() => {
+    vi.restoreAllMocks()
+    warn = vi.spyOn(console, "warn").mockImplementation(() => {})
+    vi.stubGlobal("window", {
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+      parent: { postMessage: vi.fn() },
+      location: { origin: "https://localhost" },
+      open: vi.fn(),
+    })
+    vi.stubGlobal("document", {
+      createElement: vi.fn().mockReturnValue({
+        style: {},
+        onload: null,
+        onerror: null,
+        src: "",
+        contentWindow: { postMessage: vi.fn() },
+      }),
+      body: { appendChild: vi.fn(), removeChild: vi.fn() },
+    })
+
+    client = new SwarmIdClient({
+      iframeOrigin: "https://swarm-id.example.com",
+      metadata: { name: "Test App", description: "A test application" },
+    })
+    listener = registeredMessageListener()
+    contentWindow = { postMessage: vi.fn() }
+    internals(client).iframe = { style: {}, contentWindow }
+  })
+
+  // Every page carries message traffic of its own — devtools, HMR, wallet
+  // extensions — and none of it was ever addressed to this client.
+  it("drops a message from another window silently", () => {
+    listener({
+      origin: "http://localhost:5173",
+      source: { postMessage: vi.fn() },
+      data: { type: "webpackHotUpdate" },
+    })
+
+    expect(warn).not.toHaveBeenCalled()
+  })
+
+  it("drops a message silently before the iframe exists", () => {
+    internals(client).iframe = undefined
+
+    listener({
+      origin: "http://localhost:5173",
+      source: { postMessage: vi.fn() },
+      data: { type: "proxyInitialized" },
+    })
+
+    expect(warn).not.toHaveBeenCalled()
+  })
+
+  // The other direction: a filter that dropped everything would pass every
+  // rejection test above, so one message has to be shown getting through.
+  it("handles a valid message from our iframe at the expected origin", () => {
+    expect(internals(client).ready).toBe(false)
+
+    listener({
+      origin: "https://swarm-id.example.com",
+      source: contentWindow,
+      data: {
+        type: "proxyReady",
+        authenticated: false,
+        parentOrigin: "https://localhost",
+        storageShared: true,
+      },
+    })
+
+    expect(warn).not.toHaveBeenCalled()
+    expect(internals(client).ready).toBe(true)
+    expect(internals(client).storageShared).toBe(true)
+  })
+
+  // From our own iframe, so the mismatch is ours to report: the frame is
+  // serving something other than the configured identity origin.
+  it("warns about a wrong origin from our iframe's window", () => {
+    listener({
+      origin: "https://evil.example.com",
+      source: contentWindow,
+      data: { type: "proxyReady" },
+    })
+
+    expect(warn).toHaveBeenCalledWith(
+      expect.stringContaining("unauthorized origin"),
+      "https://evil.example.com",
+    )
+  })
+
+  it("warns about a message from our iframe that fails validation", () => {
+    listener({
+      origin: "https://swarm-id.example.com",
+      source: contentWindow,
+      data: { type: "notAMessageWeKnow" },
+    })
+
+    expect(warn).toHaveBeenCalledWith(
+      expect.stringContaining("Invalid message format"),
+      expect.anything(),
+      expect.anything(),
+    )
   })
 })
 
