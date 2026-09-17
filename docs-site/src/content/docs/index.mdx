@@ -3,7 +3,7 @@ title: Introduction
 description: Cross-browser identity management for Swarm dApps
 ---
 
-Swarm ID is an authentication and identity management system for Swarm dApps. It gives a dApp a popup sign-in flow, in the style of OAuth, that works in Chrome, Firefox and Safari without a browser extension and without the Storage Access API. Where a browser partitions the proxy iframe's storage, Safari above all, the connect popup hands the iframe its credentials directly; see [Architecture](./architecture/) for what is confirmed on a real device.
+Swarm ID is an authentication and identity management system for Swarm dApps. It gives a dApp a popup sign-in flow, in the style of OAuth, that works in Chrome, Firefox and Safari without a browser extension and without the Storage Access API. Where a browser partitions the proxy iframe's storage, Safari above all, the connect popup hands the iframe its credentials directly. `client.connect()` works either way, from the dApp's own button: the client picks the transport. See [Architecture](./architecture/) for what is confirmed on a real device.
 
 ## Key Features
 

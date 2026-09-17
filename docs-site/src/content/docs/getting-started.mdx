@@ -35,6 +35,11 @@ yarn add @snaha/swarm-id
 
 ## Basic Usage
 
+The package is browser-only and touches `window` when it is imported, not only when a client is
+constructed. In a framework that renders on a server (Next.js App Router, SvelteKit with SSR,
+Nuxt), import it from a client-only module or with a dynamic `import()` guarded on
+`typeof window !== 'undefined'`; a bare top-level import breaks the server render.
+
 ```typescript
 import { SwarmIdClient } from '@snaha/swarm-id'
 
@@ -60,7 +65,11 @@ await client.initialize()
 // The iframe will show a connect/disconnect button automatically
 
 // 3b. Option B: Manual authentication with connect()
-// Opens the authentication page in a new window/tab (useful for custom UI)
+// Opens the authentication page in a new window/tab (useful for custom UI).
+// Works whether or not the browser partitions the iframe's storage: the
+// client picks the transport. Keep the iframe mounted for the life of the
+// page — destroying it (say, by unmounting its container on sign-in) leaves
+// the popup with nothing to hand the session to.
 await client.connect()
 
 // 4. Read current connection state synchronously
@@ -112,11 +121,22 @@ const result = await client.uploadData(data)
 // Upload with encryption
 const result = await client.uploadData(data, { encrypt: true })
 
-// Upload with progress tracking
-const result = await client.uploadData(data, {}, (progress) => {
-  console.log(`${progress.percent}% uploaded`)
+// Upload with progress tracking: `onProgress` is an upload option, and
+// progress is counted in chunks
+const result = await client.uploadData(data, {
+  onProgress: (progress) => console.log(`${progress.processed}/${progress.total} chunks`),
 })
 ```
+
+Retrieve what `uploadData` stored with `downloadData`, or from a gateway at `/bytes/<reference>`. It is raw bytes with no manifest, so `downloadFile` and `/bzz/<reference>/` cannot resolve it.
+
+**An encrypted reference is a capability, not an address.** The 128-hex reference from
+`{ encrypt: true }` contains the decryption key, so whoever holds it can read the content.
+Treat it as a secret: never put it in a public index, an on-chain record or a gateway URL.
+If something public has to point at the content, publish a hash of the reference and hand the
+reference itself to the reader over a channel you trust. Every encrypted chunk is padded to
+4 KB and its span is encrypted, so the exact byte length is hidden, but the number of chunks
+is not; if the size of a payload alone says something, pad or bucket it before upload.
 
 ### Download Data
 
@@ -130,6 +150,8 @@ const data = await client.downloadData(encryptedReference)
 
 ### File Operations
 
+`uploadFile` wraps the bytes in a manifest that carries the filename, so its reference is read back with `downloadFile`, or from a gateway at `/bzz/<reference>/`. The two pairs do not cross.
+
 ```typescript
 // Upload a file
 const result = await client.uploadFile(file, 'myfile.txt')
@@ -138,6 +160,10 @@ const result = await client.uploadFile(file, 'myfile.txt')
 const fileData = await client.downloadFile(reference)
 console.log(fileData.name, fileData.data)
 ```
+
+## A batch you were given
+
+A postage batch (a **drive** in the identity UI) is not an identity. If someone hands you a batch id and the private key that owns it, as hackathon gift codes do, create or sign in to a Swarm ID however you like, then attach the batch: **Storage → Add drive → Use existing batch**, with the batch id and the signer key. From then on every dApp the account connects can upload with it. On a new device, an existing account is restored from its recovery phrase; the batch comes back with it.
 
 ## Local Development
 

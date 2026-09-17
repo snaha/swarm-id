@@ -36,6 +36,8 @@ export default defineConfig({
             { label: 'Architecture', slug: 'architecture' },
             { label: 'Key Derivation', slug: 'key-derivation' },
             { label: 'Subsidised Gateway', slug: 'subsidised-gateway' },
+            { label: 'The Public Gateway', slug: 'public-gateway' },
+            { label: 'Self-Hosting the Identity UI', slug: 'self-hosting' },
             { label: 'Using Your Own Bee Node', slug: 'own-bee-node' },
             { label: 'Local Development', slug: 'local-development' },
           ],

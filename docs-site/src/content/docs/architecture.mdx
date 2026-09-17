@@ -97,6 +97,16 @@ A dApp page cannot read any of this: the iframe is a different origin. What isol
 
 Where the browser partitions the iframe away from the trusted domain's storage, the iframe gets its own store. The connect popup hands it the account's synced view (stamps and signer keys, never the vault) and the iframe keeps the session in its own partition, so a reload does not repeat the handshake. That iframe is a full writer and a peer on the [account bus](../account-bus/), which is how a revoke or a rename made anywhere else still reaches it while it is open.
 
+**The Storage Access API is not part of this, by measurement rather than oversight.** It was
+evaluated and is not called anywhere: on Safari it unlocks unpartitioned _cookies_ only, and
+the non-cookie extension (`requestStorageAccess({ localStorage: true })`, Chrome 125+) has no
+WebKit implementation through Safari 26. `document.hasStorageAccess()` cannot even answer "am I
+partitioned" — it returns `true` inside a frame whose `localStorage` is genuinely partitioned,
+because Chrome partitions storage separately from cookies. So the iframe decides by storage
+instead: the identity site leaves a marker in its first-party store, the iframe reads it back,
+and an absent marker means partitioned (`lib/src/utils/storage-probe.ts`). No prompt is involved,
+and a dApp does not need to request anything on the iframe's behalf.
+
 ## Message Protocol
 
 Everything between a dApp page and its iframe is postMessage, validated with Zod on both sides. The message kinds:

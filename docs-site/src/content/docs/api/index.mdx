@@ -53,7 +53,7 @@ Creates a new SwarmIdClient instance.
 | ------------------------------- | -------------------------------- | -------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `options.iframeOrigin`          | `string`                         | Yes      | The origin URL where the Swarm ID proxy iframe is hosted                                                                                                                                             |
 | `options.iframePath`            | `string`                         | No       | The path to the proxy iframe (defaults to `"/proxy"`)                                                                                                                                                |
-| `options.timeout`               | `number`                         | No       | Request timeout in milliseconds (defaults to `30000`)                                                                                                                                                |
+| `options.timeout`               | `number`                         | No       | Request timeout in milliseconds (defaults to `30000`). Bounds each call's whole round trip through the iframe; a call's own `requestOptions.timeout` replaces it for that call                       |
 | `options.initializationTimeout` | `number`                         | No       | Initialization timeout in milliseconds (defaults to `30000`)                                                                                                                                         |
 | `options.onConnectionChange`    | `(info: ConnectionInfo) => void` | No       | Callback invoked when the dApp-visible connection state changes (identity, app key, postage stamp, account, auth). The current snapshot is also available synchronously via `client.connectionInfo`. |
 | `options.popupMode`             | `"popup" \| "window"`            | No       | How to display the authentication popup (defaults to `"window"`)                                                                                                                                     |
@@ -446,19 +446,19 @@ Returns information about the postage stamp associated with the connected identi
 
 **Returns:** `Promise<PostageBatch | undefined>` - The postage batch info, or `undefined` if none is configured
 
-| Property        | Type                  | Description                      |
-| --------------- | --------------------- | -------------------------------- |
-| `batchID`       | `string`              | The batch ID (64 hex characters) |
-| `utilization`   | `number`              | Current utilization percentage   |
-| `usable`        | `boolean`             | Whether the batch is usable      |
-| `label`         | `string`              | Human-readable label             |
-| `depth`         | `number`              | Batch depth                      |
-| `amount`        | `string`              | Batch amount                     |
-| `bucketDepth`   | `number`              | Bucket depth                     |
-| `blockNumber`   | `number`              | Block number when created        |
-| `immutableFlag` | `boolean`             | Whether the batch is immutable   |
-| `exists`        | `boolean`             | Whether the batch exists         |
-| `batchTTL`      | `number \| undefined` | Time-to-live in seconds          |
+| Property        | Type                  | Description                                                                                                                                                                                                      |
+| --------------- | --------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `batchID`       | `string`              | The batch ID (64 hex characters)                                                                                                                                                                                 |
+| `utilization`   | `number`              | Bee's fill count of the fullest bucket, **not** a percentage. Usage is `utilization / 2^(depth - bucketDepth)`; a batch stops accepting uploads when one bucket fills, before the nominal `2^depth × 4096` bytes |
+| `usable`        | `boolean`             | Whether the batch is usable                                                                                                                                                                                      |
+| `label`         | `string`              | Human-readable label                                                                                                                                                                                             |
+| `depth`         | `number`              | Batch depth                                                                                                                                                                                                      |
+| `amount`        | `string`              | Batch amount                                                                                                                                                                                                     |
+| `bucketDepth`   | `number`              | Bucket depth                                                                                                                                                                                                     |
+| `blockNumber`   | `number`              | Block number when created                                                                                                                                                                                        |
+| `immutableFlag` | `boolean`             | Whether the batch is immutable                                                                                                                                                                                   |
+| `exists`        | `boolean`             | Whether the batch exists                                                                                                                                                                                         |
+| `batchTTL`      | `number \| undefined` | Time-to-live in seconds                                                                                                                                                                                          |
 
 **Throws:**
 
@@ -506,7 +506,7 @@ if (connected) {
 
 ### `getNodeInfo()`
 
-Gets information about the Bee node configuration.
+Gets information about the Bee node configuration. Needs a real Bee node: the [public gateway](../public-gateway/) has no `/node` endpoint and this call fails there. Do not gate uploads on it; its purpose is to detect a dev-mode node, where deferred uploads are required. Nothing else tells you: a direct upload against a dev-mode node does not fail with a mode error, it waits out the request timeout and rejects with `Request timeout after 30000ms`.
 
 This method retrieves the current Bee node's operating mode and feature flags. Use this to determine if deferred uploads are required (dev mode) or if direct uploads are available (production modes).
 
@@ -543,25 +543,25 @@ if (nodeInfo.beeMode === 'dev') {
 
 ### `uploadData(data, options?, requestOptions?)`
 
-Uploads raw binary data to the Swarm network.
+Uploads raw binary data to the Swarm network. The reference it returns is read back with [`downloadData`](#downloaddatareference-options-requestoptions), or from a gateway at `/bytes/<reference>`; it carries no manifest, so `downloadFile` and `/bzz/` cannot resolve it.
 
 The data is uploaded using the authenticated user's postage stamp. Progress can be tracked via the `options.onProgress` callback.
 
 **Parameters:**
 
-| Parameter                       | Type                     | Required | Description                                                                            |
-| ------------------------------- | ------------------------ | -------- | -------------------------------------------------------------------------------------- |
-| `data`                          | `Uint8Array`             | Yes      | The binary data to upload                                                              |
-| `options`                       | `UploadOptions`          | No       | Upload configuration                                                                   |
-| `options.pin`                   | `boolean`                | No       | Whether to pin the data locally (defaults to `false`; ignored on a subsidised gateway) |
-| `options.encrypt`               | `boolean`                | No       | Whether to encrypt the data (defaults to `false`)                                      |
-| `options.tag`                   | `number`                 | No       | Tag ID for tracking upload progress (ignored on a subsidised gateway)                  |
-| `options.deferred`              | `boolean`                | No       | Whether to use deferred upload (defaults to `false`)                                   |
-| `options.onProgress`            | `(progress) => void`     | No       | Callback for tracking upload progress                                                  |
-| `requestOptions`                | `RequestOptions`         | No       | Request configuration                                                                  |
-| `requestOptions.timeout`        | `number`                 | No       | Request timeout in milliseconds                                                        |
-| `requestOptions.headers`        | `Record<string, string>` | No       | Custom headers                                                                         |
-| `requestOptions.endlesslyRetry` | `boolean`                | No       | Whether to retry endlessly                                                             |
+| Parameter                       | Type                     | Required | Description                                                                                                                                                                                                                                                                              |
+| ------------------------------- | ------------------------ | -------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `data`                          | `Uint8Array`             | Yes      | The binary data to upload                                                                                                                                                                                                                                                                |
+| `options`                       | `UploadOptions`          | No       | Upload configuration                                                                                                                                                                                                                                                                     |
+| `options.pin`                   | `boolean`                | No       | Whether to pin the data locally (defaults to `false`; ignored on a subsidised gateway)                                                                                                                                                                                                   |
+| `options.encrypt`               | `boolean`                | No       | Whether to encrypt the data (defaults to `false`). The 128-hex reference then contains the decryption key: a capability, not an address — see [Quick Start](../getting-started/#upload-data)                                                                                             |
+| `options.tag`                   | `number`                 | No       | Tag ID for tracking upload progress (ignored on a subsidised gateway)                                                                                                                                                                                                                    |
+| `options.deferred`              | `boolean`                | No       | Whether to use deferred upload (defaults to `false`). A Bee node in dev mode serves only deferred uploads, and a direct upload against one fails as a request timeout, not as a mode error — see [`getNodeInfo`](#getnodeinfo). Not needed on the public gateway                         |
+| `options.onProgress`            | `(progress) => void`     | No       | Callback for tracking upload progress                                                                                                                                                                                                                                                    |
+| `requestOptions`                | `RequestOptions`         | No       | Request configuration                                                                                                                                                                                                                                                                    |
+| `requestOptions.timeout`        | `number`                 | No       | Request timeout in milliseconds for this call. Replaces the client's default (30 s) for the whole upload — the round trip through the iframe as well as the Bee request; a file of a few MB over a testnet or the public gateway needs more, here or in `new SwarmIdClient({ timeout })` |
+| `requestOptions.headers`        | `Record<string, string>` | No       | Custom headers                                                                                                                                                                                                                                                                           |
+| `requestOptions.endlesslyRetry` | `boolean`                | No       | Whether to retry endlessly                                                                                                                                                                                                                                                               |
 
 **Returns:** `Promise<UploadResult>`
 
@@ -593,24 +593,24 @@ console.log('Reference:', result.reference)
 
 ### `downloadData(reference, options?, requestOptions?)`
 
-Downloads raw binary data from the Swarm network.
+Downloads raw binary data from the Swarm network: the counterpart of [`uploadData`](#uploaddatadata-options-requestoptions). Pass an encrypted (128-hex) reference here rather than putting it in a gateway URL, since the reference contains the decryption key.
 
 **Parameters:**
 
-| Parameter                       | Type                     | Required | Description                               |
-| ------------------------------- | ------------------------ | -------- | ----------------------------------------- |
-| `reference`                     | `string`                 | Yes      | The Swarm reference (64 or 128 hex chars) |
-| `options`                       | `DownloadOptions`        | No       | Download configuration                    |
-| `options.redundancyStrategy`    | `0-3`                    | No       | Strategy for handling redundancy          |
-| `options.fallback`              | `boolean`                | No       | Whether to use fallback retrieval         |
-| `options.timeoutMs`             | `number`                 | No       | Download timeout in milliseconds          |
-| `options.actPublisher`          | `Uint8Array \| string`   | No       | ACT publisher for encrypted content       |
-| `options.actHistoryAddress`     | `Uint8Array \| string`   | No       | ACT history address for encrypted content |
-| `options.actTimestamp`          | `number \| string`       | No       | ACT timestamp for encrypted content       |
-| `requestOptions`                | `RequestOptions`         | No       | Request configuration                     |
-| `requestOptions.timeout`        | `number`                 | No       | Request timeout in milliseconds           |
-| `requestOptions.headers`        | `Record<string, string>` | No       | Custom headers                            |
-| `requestOptions.endlesslyRetry` | `boolean`                | No       | Whether to retry endlessly                |
+| Parameter                       | Type                     | Required | Description                                                                                                                            |
+| ------------------------------- | ------------------------ | -------- | -------------------------------------------------------------------------------------------------------------------------------------- |
+| `reference`                     | `string`                 | Yes      | The Swarm reference (64 or 128 hex chars)                                                                                              |
+| `options`                       | `DownloadOptions`        | No       | Download configuration                                                                                                                 |
+| `options.redundancyStrategy`    | `0-3`                    | No       | Strategy for handling redundancy                                                                                                       |
+| `options.fallback`              | `boolean`                | No       | Whether to use fallback retrieval                                                                                                      |
+| `options.timeoutMs`             | `number`                 | No       | Download timeout in milliseconds, carried in the download options. Not the call's bound — that is `requestOptions.timeout` below       |
+| `options.actPublisher`          | `Uint8Array \| string`   | No       | ACT publisher for encrypted content                                                                                                    |
+| `options.actHistoryAddress`     | `Uint8Array \| string`   | No       | ACT history address for encrypted content                                                                                              |
+| `options.actTimestamp`          | `number \| string`       | No       | ACT timestamp for encrypted content                                                                                                    |
+| `requestOptions`                | `RequestOptions`         | No       | Request configuration                                                                                                                  |
+| `requestOptions.timeout`        | `number`                 | No       | Request timeout in milliseconds for this call. Replaces the client's default (30 s) for the whole round trip, not only the Bee request |
+| `requestOptions.headers`        | `Record<string, string>` | No       | Custom headers                                                                                                                         |
+| `requestOptions.endlesslyRetry` | `boolean`                | No       | Whether to retry endlessly                                                                                                             |
 
 **Returns:** `Promise<Uint8Array>` - The downloaded data
 
@@ -634,21 +634,21 @@ console.log('Downloaded:', text)
 
 ### `uploadFile(file, name?, options?, requestOptions?)`
 
-Uploads a file to the Swarm network.
+Uploads a file to the Swarm network, wrapped in a manifest that carries its name and content type. The reference is read back with [`downloadFile`](#downloadfilereference-path-options-requestoptions), or from a gateway at `/bzz/<reference>/`.
 
 Accepts either a File object (from file input) or raw Uint8Array data. When using a File object, the filename is automatically extracted unless explicitly overridden.
 
 **Parameters:**
 
-| Parameter                       | Type                     | Required | Description                                           |
-| ------------------------------- | ------------------------ | -------- | ----------------------------------------------------- |
-| `file`                          | `File \| Uint8Array`     | Yes      | The file to upload                                    |
-| `name`                          | `string`                 | No       | Filename (extracted from File object if not provided) |
-| `options`                       | `UploadOptions`          | No       | Upload configuration (see `uploadData`)               |
-| `requestOptions`                | `RequestOptions`         | No       | Request configuration                                 |
-| `requestOptions.timeout`        | `number`                 | No       | Request timeout in milliseconds                       |
-| `requestOptions.headers`        | `Record<string, string>` | No       | Custom headers                                        |
-| `requestOptions.endlesslyRetry` | `boolean`                | No       | Whether to retry endlessly                            |
+| Parameter                       | Type                     | Required | Description                                                                                                                                                                                                                                                                              |
+| ------------------------------- | ------------------------ | -------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `file`                          | `File \| Uint8Array`     | Yes      | The file to upload                                                                                                                                                                                                                                                                       |
+| `name`                          | `string`                 | No       | Filename (extracted from File object if not provided)                                                                                                                                                                                                                                    |
+| `options`                       | `UploadOptions`          | No       | Upload configuration (see `uploadData`)                                                                                                                                                                                                                                                  |
+| `requestOptions`                | `RequestOptions`         | No       | Request configuration                                                                                                                                                                                                                                                                    |
+| `requestOptions.timeout`        | `number`                 | No       | Request timeout in milliseconds for this call. Replaces the client's default (30 s) for the whole upload — the round trip through the iframe as well as the Bee request; a file of a few MB over a testnet or the public gateway needs more, here or in `new SwarmIdClient({ timeout })` |
+| `requestOptions.headers`        | `Record<string, string>` | No       | Custom headers                                                                                                                                                                                                                                                                           |
+| `requestOptions.endlesslyRetry` | `boolean`                | No       | Whether to retry endlessly                                                                                                                                                                                                                                                               |
 
 **Returns:** `Promise<UploadResult>` - Contains `reference` and optional `tagUid`
 
@@ -675,21 +675,21 @@ const result = await client.uploadFile(data, 'document.pdf')
 
 ### `downloadFile(reference, path?, options?, requestOptions?)`
 
-Downloads a file from the Swarm network.
+Downloads a file from the Swarm network: the counterpart of [`uploadFile`](#uploadfilefile-name-options-requestoptions). It resolves a manifest, so a reference from `uploadData` fails here inside the manifest parser; use `downloadData` for those.
 
 Returns both the file data and its original filename (if available). For manifest references, an optional path can be specified to retrieve a specific file from the manifest.
 
 **Parameters:**
 
-| Parameter                       | Type                     | Required | Description                                        |
-| ------------------------------- | ------------------------ | -------- | -------------------------------------------------- |
-| `reference`                     | `string`                 | Yes      | The Swarm reference of the file                    |
-| `path`                          | `string`                 | No       | Path within a manifest to retrieve a specific file |
-| `options`                       | `DownloadOptions`        | No       | Download configuration (see `downloadData`)        |
-| `requestOptions`                | `RequestOptions`         | No       | Request configuration                              |
-| `requestOptions.timeout`        | `number`                 | No       | Request timeout in milliseconds                    |
-| `requestOptions.headers`        | `Record<string, string>` | No       | Custom headers                                     |
-| `requestOptions.endlesslyRetry` | `boolean`                | No       | Whether to retry endlessly                         |
+| Parameter                       | Type                     | Required | Description                                                                                                                            |
+| ------------------------------- | ------------------------ | -------- | -------------------------------------------------------------------------------------------------------------------------------------- |
+| `reference`                     | `string`                 | Yes      | The Swarm reference of the file                                                                                                        |
+| `path`                          | `string`                 | No       | Path within a manifest to retrieve a specific file                                                                                     |
+| `options`                       | `DownloadOptions`        | No       | Download configuration (see `downloadData`)                                                                                            |
+| `requestOptions`                | `RequestOptions`         | No       | Request configuration                                                                                                                  |
+| `requestOptions.timeout`        | `number`                 | No       | Request timeout in milliseconds for this call. Replaces the client's default (30 s) for the whole round trip, not only the Bee request |
+| `requestOptions.headers`        | `Record<string, string>` | No       | Custom headers                                                                                                                         |
+| `requestOptions.endlesslyRetry` | `boolean`                | No       | Whether to retry endlessly                                                                                                             |
 
 **Returns:** `Promise<FileData>`
 
@@ -727,14 +727,14 @@ Chunks are the fundamental unit of storage in Swarm (4KB each). This method is u
 
 **Parameters:**
 
-| Parameter                       | Type                     | Required | Description                                                |
-| ------------------------------- | ------------------------ | -------- | ---------------------------------------------------------- |
-| `data`                          | `Uint8Array`             | Yes      | The chunk data (should be exactly 4KB for optimal storage) |
-| `options`                       | `UploadOptions`          | No       | Upload configuration (see `uploadData`)                    |
-| `requestOptions`                | `RequestOptions`         | No       | Request configuration                                      |
-| `requestOptions.timeout`        | `number`                 | No       | Request timeout in milliseconds                            |
-| `requestOptions.headers`        | `Record<string, string>` | No       | Custom headers                                             |
-| `requestOptions.endlesslyRetry` | `boolean`                | No       | Whether to retry endlessly                                 |
+| Parameter                       | Type                     | Required | Description                                                                                                                            |
+| ------------------------------- | ------------------------ | -------- | -------------------------------------------------------------------------------------------------------------------------------------- |
+| `data`                          | `Uint8Array`             | Yes      | The chunk data (should be exactly 4KB for optimal storage)                                                                             |
+| `options`                       | `UploadOptions`          | No       | Upload configuration (see `uploadData`)                                                                                                |
+| `requestOptions`                | `RequestOptions`         | No       | Request configuration                                                                                                                  |
+| `requestOptions.timeout`        | `number`                 | No       | Request timeout in milliseconds for this call. Replaces the client's default (30 s) for the whole round trip, not only the Bee request |
+| `requestOptions.headers`        | `Record<string, string>` | No       | Custom headers                                                                                                                         |
+| `requestOptions.endlesslyRetry` | `boolean`                | No       | Whether to retry endlessly                                                                                                             |
 
 **Returns:** `Promise<UploadResult>` - Contains the `reference` of the uploaded chunk
 
@@ -763,14 +763,14 @@ Retrieves a chunk by its reference hash. This method is useful for low-level ope
 
 **Parameters:**
 
-| Parameter                       | Type                     | Required | Description                                 |
-| ------------------------------- | ------------------------ | -------- | ------------------------------------------- |
-| `reference`                     | `string`                 | Yes      | The Swarm reference of the chunk            |
-| `options`                       | `DownloadOptions`        | No       | Download configuration (see `downloadData`) |
-| `requestOptions`                | `RequestOptions`         | No       | Request configuration                       |
-| `requestOptions.timeout`        | `number`                 | No       | Request timeout in milliseconds             |
-| `requestOptions.headers`        | `Record<string, string>` | No       | Custom headers                              |
-| `requestOptions.endlesslyRetry` | `boolean`                | No       | Whether to retry endlessly                  |
+| Parameter                       | Type                     | Required | Description                                                                                                                            |
+| ------------------------------- | ------------------------ | -------- | -------------------------------------------------------------------------------------------------------------------------------------- |
+| `reference`                     | `string`                 | Yes      | The Swarm reference of the chunk                                                                                                       |
+| `options`                       | `DownloadOptions`        | No       | Download configuration (see `downloadData`)                                                                                            |
+| `requestOptions`                | `RequestOptions`         | No       | Request configuration                                                                                                                  |
+| `requestOptions.timeout`        | `number`                 | No       | Request timeout in milliseconds for this call. Replaces the client's default (30 s) for the whole round trip, not only the Bee request |
+| `requestOptions.headers`        | `Record<string, string>` | No       | Custom headers                                                                                                                         |
+| `requestOptions.endlesslyRetry` | `boolean`                | No       | Whether to retry endlessly                                                                                                             |
 
 **Returns:** `Promise<Uint8Array>` - The chunk data
 
@@ -799,13 +799,13 @@ Creates an SOC reader bound to the given owner address.
 
 **Parameters:**
 
-| Parameter                       | Type                     | Required | Description                       |
-| ------------------------------- | ------------------------ | -------- | --------------------------------- |
-| `ownerAddress`                  | `string`                 | Yes      | Ethereum address of the SOC owner |
-| `requestOptions`                | `RequestOptions`         | No       | Request configuration             |
-| `requestOptions.timeout`        | `number`                 | No       | Request timeout in milliseconds   |
-| `requestOptions.headers`        | `Record<string, string>` | No       | Custom headers                    |
-| `requestOptions.endlesslyRetry` | `boolean`                | No       | Whether to retry endlessly        |
+| Parameter                       | Type                     | Required | Description                                                                                                                            |
+| ------------------------------- | ------------------------ | -------- | -------------------------------------------------------------------------------------------------------------------------------------- |
+| `ownerAddress`                  | `string`                 | Yes      | Ethereum address of the SOC owner                                                                                                      |
+| `requestOptions`                | `RequestOptions`         | No       | Request configuration                                                                                                                  |
+| `requestOptions.timeout`        | `number`                 | No       | Request timeout in milliseconds for this call. Replaces the client's default (30 s) for the whole round trip, not only the Bee request |
+| `requestOptions.headers`        | `Record<string, string>` | No       | Custom headers                                                                                                                         |
+| `requestOptions.endlesslyRetry` | `boolean`                | No       | Whether to retry endlessly                                                                                                             |
 
 **Returns:** `SOCReader`
 
@@ -838,13 +838,13 @@ Creates an SOC writer for uploading and downloading SOCs. If `signer` is omitted
 
 **Parameters:**
 
-| Parameter                       | Type                     | Required | Description                               |
-| ------------------------------- | ------------------------ | -------- | ----------------------------------------- |
-| `signer`                        | `string`                 | No       | Private key hex string for the SOC signer |
-| `requestOptions`                | `RequestOptions`         | No       | Request configuration                     |
-| `requestOptions.timeout`        | `number`                 | No       | Request timeout in milliseconds           |
-| `requestOptions.headers`        | `Record<string, string>` | No       | Custom headers                            |
-| `requestOptions.endlesslyRetry` | `boolean`                | No       | Whether to retry endlessly                |
+| Parameter                       | Type                     | Required | Description                                                                                                                            |
+| ------------------------------- | ------------------------ | -------- | -------------------------------------------------------------------------------------------------------------------------------------- |
+| `signer`                        | `string`                 | No       | Private key hex string for the SOC signer                                                                                              |
+| `requestOptions`                | `RequestOptions`         | No       | Request configuration                                                                                                                  |
+| `requestOptions.timeout`        | `number`                 | No       | Request timeout in milliseconds for this call. Replaces the client's default (30 s) for the whole round trip, not only the Bee request |
+| `requestOptions.headers`        | `Record<string, string>` | No       | Custom headers                                                                                                                         |
+| `requestOptions.endlesslyRetry` | `boolean`                | No       | Whether to retry endlessly                                                                                                             |
 
 **Returns:** `SOCWriter`
 
@@ -917,14 +917,14 @@ Creates a feed reader bound to a topic and optional owner.
 
 **Parameters:**
 
-| Parameter                       | Type                     | Required | Description                                        |
-| ------------------------------- | ------------------------ | -------- | -------------------------------------------------- |
-| `options.topic`                 | `string`                 | Yes      | Feed topic (32-byte hex string)                    |
-| `options.owner`                 | `string`                 | No       | Feed owner address; if omitted, resolved via proxy |
-| `requestOptions`                | `RequestOptions`         | No       | Request configuration                              |
-| `requestOptions.timeout`        | `number`                 | No       | Request timeout in milliseconds                    |
-| `requestOptions.headers`        | `Record<string, string>` | No       | Custom headers                                     |
-| `requestOptions.endlesslyRetry` | `boolean`                | No       | Whether to retry endlessly                         |
+| Parameter                       | Type                     | Required | Description                                                                                                                            |
+| ------------------------------- | ------------------------ | -------- | -------------------------------------------------------------------------------------------------------------------------------------- |
+| `options.topic`                 | `string`                 | Yes      | Feed topic (32-byte hex string)                                                                                                        |
+| `options.owner`                 | `string`                 | No       | Feed owner address; if omitted, resolved via proxy                                                                                     |
+| `requestOptions`                | `RequestOptions`         | No       | Request configuration                                                                                                                  |
+| `requestOptions.timeout`        | `number`                 | No       | Request timeout in milliseconds for this call. Replaces the client's default (30 s) for the whole round trip, not only the Bee request |
+| `requestOptions.headers`        | `Record<string, string>` | No       | Custom headers                                                                                                                         |
+| `requestOptions.endlesslyRetry` | `boolean`                | No       | Whether to retry endlessly                                                                                                             |
 
 **Returns:** `FeedReader`
 
@@ -978,14 +978,14 @@ Creates a feed writer for updating and reading a topic. If `signer` is omitted, 
 
 **Parameters:**
 
-| Parameter                       | Type                     | Required | Description                                |
-| ------------------------------- | ------------------------ | -------- | ------------------------------------------ |
-| `options.topic`                 | `string`                 | Yes      | Feed topic (32-byte hex string)            |
-| `options.signer`                | `string`                 | No       | Private key hex string for the feed signer |
-| `requestOptions`                | `RequestOptions`         | No       | Request configuration                      |
-| `requestOptions.timeout`        | `number`                 | No       | Request timeout in milliseconds            |
-| `requestOptions.headers`        | `Record<string, string>` | No       | Custom headers                             |
-| `requestOptions.endlesslyRetry` | `boolean`                | No       | Whether to retry endlessly                 |
+| Parameter                       | Type                     | Required | Description                                                                                                                            |
+| ------------------------------- | ------------------------ | -------- | -------------------------------------------------------------------------------------------------------------------------------------- |
+| `options.topic`                 | `string`                 | Yes      | Feed topic (32-byte hex string)                                                                                                        |
+| `options.signer`                | `string`                 | No       | Private key hex string for the feed signer                                                                                             |
+| `requestOptions`                | `RequestOptions`         | No       | Request configuration                                                                                                                  |
+| `requestOptions.timeout`        | `number`                 | No       | Request timeout in milliseconds for this call. Replaces the client's default (30 s) for the whole round trip, not only the Bee request |
+| `requestOptions.headers`        | `Record<string, string>` | No       | Custom headers                                                                                                                         |
+| `requestOptions.endlesslyRetry` | `boolean`                | No       | Whether to retry endlessly                                                                                                             |
 
 **Returns:** `FeedWriter`
 
@@ -1139,16 +1139,16 @@ A feed manifest enables accessing the latest feed content via a URL path (e.g., 
 
 **Parameters:**
 
-| Parameter                | Type                     | Required | Description                                     |
-| ------------------------ | ------------------------ | -------- | ----------------------------------------------- |
-| `topic`                  | `string`                 | Yes      | Feed topic (32-byte hex string)                 |
-| `options`                | `object`                 | No       | Configuration options                           |
-| `options.owner`          | `string`                 | No       | Feed owner address; if omitted, uses app signer |
-| `options.feedType`       | `"Sequence" \| "Epoch"`  | No       | Feed type (defaults to `"Sequence"`)            |
-| `options.uploadOptions`  | `UploadOptions`          | No       | Upload configuration (pin, deferred, etc.)      |
-| `requestOptions`         | `RequestOptions`         | No       | Request configuration                           |
-| `requestOptions.timeout` | `number`                 | No       | Request timeout in milliseconds                 |
-| `requestOptions.headers` | `Record<string, string>` | No       | Custom headers                                  |
+| Parameter                | Type                     | Required | Description                                                                                                                            |
+| ------------------------ | ------------------------ | -------- | -------------------------------------------------------------------------------------------------------------------------------------- |
+| `topic`                  | `string`                 | Yes      | Feed topic (32-byte hex string)                                                                                                        |
+| `options`                | `object`                 | No       | Configuration options                                                                                                                  |
+| `options.owner`          | `string`                 | No       | Feed owner address; if omitted, uses app signer                                                                                        |
+| `options.feedType`       | `"Sequence" \| "Epoch"`  | No       | Feed type (defaults to `"Sequence"`)                                                                                                   |
+| `options.uploadOptions`  | `UploadOptions`          | No       | Upload configuration (pin, deferred, etc.)                                                                                             |
+| `requestOptions`         | `RequestOptions`         | No       | Request configuration                                                                                                                  |
+| `requestOptions.timeout` | `number`                 | No       | Request timeout in milliseconds for this call. Replaces the client's default (30 s) for the whole round trip, not only the Bee request |
+| `requestOptions.headers` | `Record<string, string>` | No       | Custom headers                                                                                                                         |
 
 :::caution
 Epoch feed manifests cannot be resolved via the `/bzz` endpoint. Only use `"Sequence"` type for feed manifests you want accessible via URL.
@@ -1229,16 +1229,16 @@ Use the signer obtained from `gsocMine()` to send messages that will be routed t
 
 **Parameters:**
 
-| Parameter                       | Type                     | Required | Description                                                    |
-| ------------------------------- | ------------------------ | -------- | -------------------------------------------------------------- |
-| `signer`                        | `string`                 | Yes      | The mined signer (private key) from `gsocMine()`               |
-| `identifier`                    | `string`                 | Yes      | The identifier for the SOC (must match the one used in mining) |
-| `data`                          | `Uint8Array`             | Yes      | The message data to send                                       |
-| `options`                       | `UploadOptions`          | No       | Upload configuration (see `uploadData`)                        |
-| `requestOptions`                | `RequestOptions`         | No       | Request configuration                                          |
-| `requestOptions.timeout`        | `number`                 | No       | Request timeout in milliseconds                                |
-| `requestOptions.headers`        | `Record<string, string>` | No       | Custom headers                                                 |
-| `requestOptions.endlesslyRetry` | `boolean`                | No       | Whether to retry endlessly                                     |
+| Parameter                       | Type                     | Required | Description                                                                                                                            |
+| ------------------------------- | ------------------------ | -------- | -------------------------------------------------------------------------------------------------------------------------------------- |
+| `signer`                        | `string`                 | Yes      | The mined signer (private key) from `gsocMine()`                                                                                       |
+| `identifier`                    | `string`                 | Yes      | The identifier for the SOC (must match the one used in mining)                                                                         |
+| `data`                          | `Uint8Array`             | Yes      | The message data to send                                                                                                               |
+| `options`                       | `UploadOptions`          | No       | Upload configuration (see `uploadData`)                                                                                                |
+| `requestOptions`                | `RequestOptions`         | No       | Request configuration                                                                                                                  |
+| `requestOptions.timeout`        | `number`                 | No       | Request timeout in milliseconds for this call. Replaces the client's default (30 s) for the whole round trip, not only the Bee request |
+| `requestOptions.headers`        | `Record<string, string>` | No       | Custom headers                                                                                                                         |
+| `requestOptions.endlesslyRetry` | `boolean`                | No       | Whether to retry endlessly                                                                                                             |
 
 **Returns:** `Promise<UploadResult>` - Contains the `reference` of the uploaded chunk
 
@@ -1287,20 +1287,20 @@ The data is encrypted using ACT (Access Control Tries) and can only be downloade
 
 **Parameters:**
 
-| Parameter                       | Type                     | Required | Description                                                                            |
-| ------------------------------- | ------------------------ | -------- | -------------------------------------------------------------------------------------- |
-| `data`                          | `Uint8Array`             | Yes      | The binary data to upload                                                              |
-| `grantees`                      | `string[]`               | Yes      | Array of compressed public keys (66 hex chars each)                                    |
-| `options`                       | `ActUploadOptions`       | No       | Upload configuration                                                                   |
-| `options.pin`                   | `boolean`                | No       | Whether to pin the data locally (defaults to `false`; ignored on a subsidised gateway) |
-| `options.tag`                   | `number`                 | No       | Tag ID for tracking upload progress (ignored on a subsidised gateway)                  |
-| `options.deferred`              | `boolean`                | No       | Whether to use deferred upload (defaults to `false`)                                   |
-| `options.onProgress`            | `(progress) => void`     | No       | Callback for tracking upload progress                                                  |
-| `options.publisher`             | `"app" \| "identity"`    | No       | Key that publishes: this origin's app key (default) or the account-wide sharing key    |
-| `requestOptions`                | `RequestOptions`         | No       | Request configuration                                                                  |
-| `requestOptions.timeout`        | `number`                 | No       | Request timeout in milliseconds                                                        |
-| `requestOptions.headers`        | `Record<string, string>` | No       | Custom headers                                                                         |
-| `requestOptions.endlesslyRetry` | `boolean`                | No       | Whether to retry endlessly                                                             |
+| Parameter                       | Type                     | Required | Description                                                                                                                            |
+| ------------------------------- | ------------------------ | -------- | -------------------------------------------------------------------------------------------------------------------------------------- |
+| `data`                          | `Uint8Array`             | Yes      | The binary data to upload                                                                                                              |
+| `grantees`                      | `string[]`               | Yes      | Array of compressed public keys (66 hex chars each)                                                                                    |
+| `options`                       | `ActUploadOptions`       | No       | Upload configuration                                                                                                                   |
+| `options.pin`                   | `boolean`                | No       | Whether to pin the data locally (defaults to `false`; ignored on a subsidised gateway)                                                 |
+| `options.tag`                   | `number`                 | No       | Tag ID for tracking upload progress (ignored on a subsidised gateway)                                                                  |
+| `options.deferred`              | `boolean`                | No       | Whether to use deferred upload (defaults to `false`)                                                                                   |
+| `options.onProgress`            | `(progress) => void`     | No       | Callback for tracking upload progress                                                                                                  |
+| `options.publisher`             | `"app" \| "identity"`    | No       | Key that publishes: this origin's app key (default) or the account-wide sharing key                                                    |
+| `requestOptions`                | `RequestOptions`         | No       | Request configuration                                                                                                                  |
+| `requestOptions.timeout`        | `number`                 | No       | Request timeout in milliseconds for this call. Replaces the client's default (30 s) for the whole round trip, not only the Bee request |
+| `requestOptions.headers`        | `Record<string, string>` | No       | Custom headers                                                                                                                         |
+| `requestOptions.endlesslyRetry` | `boolean`                | No       | Whether to retry endlessly                                                                                                             |
 
 **Returns:** `Promise<ActUploadResult>`
 
@@ -1354,16 +1354,16 @@ The user must have access (their public key must be in the grantee list) to decr
 
 **Parameters:**
 
-| Parameter                       | Type                     | Required | Description                                          |
-| ------------------------------- | ------------------------ | -------- | ---------------------------------------------------- |
-| `encryptedReference`            | `string`                 | Yes      | The encrypted reference from actUploadData           |
-| `historyReference`              | `string`                 | Yes      | The history reference from actUploadData             |
-| `publisherPubKey`               | `string`                 | Yes      | Publisher's compressed public key from actUploadData |
-| `timestamp`                     | `number`                 | No       | Unix timestamp for historical access (optional)      |
-| `requestOptions`                | `RequestOptions`         | No       | Request configuration                                |
-| `requestOptions.timeout`        | `number`                 | No       | Request timeout in milliseconds                      |
-| `requestOptions.headers`        | `Record<string, string>` | No       | Custom headers                                       |
-| `requestOptions.endlesslyRetry` | `boolean`                | No       | Whether to retry endlessly                           |
+| Parameter                       | Type                     | Required | Description                                                                                                                            |
+| ------------------------------- | ------------------------ | -------- | -------------------------------------------------------------------------------------------------------------------------------------- |
+| `encryptedReference`            | `string`                 | Yes      | The encrypted reference from actUploadData                                                                                             |
+| `historyReference`              | `string`                 | Yes      | The history reference from actUploadData                                                                                               |
+| `publisherPubKey`               | `string`                 | Yes      | Publisher's compressed public key from actUploadData                                                                                   |
+| `timestamp`                     | `number`                 | No       | Unix timestamp for historical access (optional)                                                                                        |
+| `requestOptions`                | `RequestOptions`         | No       | Request configuration                                                                                                                  |
+| `requestOptions.timeout`        | `number`                 | No       | Request timeout in milliseconds for this call. Replaces the client's default (30 s) for the whole round trip, not only the Bee request |
+| `requestOptions.headers`        | `Record<string, string>` | No       | Custom headers                                                                                                                         |
+| `requestOptions.endlesslyRetry` | `boolean`                | No       | Whether to retry endlessly                                                                                                             |
 
 **Returns:** `Promise<Uint8Array>` - The decrypted data
 
@@ -1393,14 +1393,14 @@ This method adds new public keys to the ACT's access list. The encrypted referen
 
 **Parameters:**
 
-| Parameter                       | Type                     | Required | Description                                                         |
-| ------------------------------- | ------------------------ | -------- | ------------------------------------------------------------------- |
-| `historyReference`              | `string`                 | Yes      | The history reference from actUploadData or previous actAddGrantees |
-| `grantees`                      | `string[]`               | Yes      | Array of compressed public keys to add (66 hex chars each)          |
-| `requestOptions`                | `RequestOptions`         | No       | Request configuration                                               |
-| `requestOptions.timeout`        | `number`                 | No       | Request timeout in milliseconds                                     |
-| `requestOptions.headers`        | `Record<string, string>` | No       | Custom headers                                                      |
-| `requestOptions.endlesslyRetry` | `boolean`                | No       | Whether to retry endlessly                                          |
+| Parameter                       | Type                     | Required | Description                                                                                                                            |
+| ------------------------------- | ------------------------ | -------- | -------------------------------------------------------------------------------------------------------------------------------------- |
+| `historyReference`              | `string`                 | Yes      | The history reference from actUploadData or previous actAddGrantees                                                                    |
+| `grantees`                      | `string[]`               | Yes      | Array of compressed public keys to add (66 hex chars each)                                                                             |
+| `requestOptions`                | `RequestOptions`         | No       | Request configuration                                                                                                                  |
+| `requestOptions.timeout`        | `number`                 | No       | Request timeout in milliseconds for this call. Replaces the client's default (30 s) for the whole round trip, not only the Bee request |
+| `requestOptions.headers`        | `Record<string, string>` | No       | Custom headers                                                                                                                         |
+| `requestOptions.endlesslyRetry` | `boolean`                | No       | Whether to retry endlessly                                                                                                             |
 
 **Returns:** `Promise<ActAddGranteesResult>`
 
@@ -1451,15 +1451,15 @@ under a new ACT.
 
 **Parameters:**
 
-| Parameter                       | Type                     | Required | Description                                              |
-| ------------------------------- | ------------------------ | -------- | -------------------------------------------------------- |
-| `historyReference`              | `string`                 | Yes      | The current history reference                            |
-| `encryptedReference`            | `string`                 | Yes      | The current encrypted reference                          |
-| `revokeGrantees`                | `string[]`               | Yes      | Array of compressed public keys to revoke (66 hex chars) |
-| `requestOptions`                | `RequestOptions`         | No       | Request configuration                                    |
-| `requestOptions.timeout`        | `number`                 | No       | Request timeout in milliseconds                          |
-| `requestOptions.headers`        | `Record<string, string>` | No       | Custom headers                                           |
-| `requestOptions.endlesslyRetry` | `boolean`                | No       | Whether to retry endlessly                               |
+| Parameter                       | Type                     | Required | Description                                                                                                                            |
+| ------------------------------- | ------------------------ | -------- | -------------------------------------------------------------------------------------------------------------------------------------- |
+| `historyReference`              | `string`                 | Yes      | The current history reference                                                                                                          |
+| `encryptedReference`            | `string`                 | Yes      | The current encrypted reference                                                                                                        |
+| `revokeGrantees`                | `string[]`               | Yes      | Array of compressed public keys to revoke (66 hex chars)                                                                               |
+| `requestOptions`                | `RequestOptions`         | No       | Request configuration                                                                                                                  |
+| `requestOptions.timeout`        | `number`                 | No       | Request timeout in milliseconds for this call. Replaces the client's default (30 s) for the whole round trip, not only the Bee request |
+| `requestOptions.headers`        | `Record<string, string>` | No       | Custom headers                                                                                                                         |
+| `requestOptions.endlesslyRetry` | `boolean`                | No       | Whether to retry endlessly                                                                                                             |
 
 **Returns:** `Promise<ActRevokeGranteesResult>`
 
@@ -1500,13 +1500,13 @@ Retrieves the list of current grantees for an ACT.
 
 **Parameters:**
 
-| Parameter                       | Type                     | Required | Description                      |
-| ------------------------------- | ------------------------ | -------- | -------------------------------- |
-| `historyReference`              | `string`                 | Yes      | The history reference of the ACT |
-| `requestOptions`                | `RequestOptions`         | No       | Request configuration            |
-| `requestOptions.timeout`        | `number`                 | No       | Request timeout in milliseconds  |
-| `requestOptions.headers`        | `Record<string, string>` | No       | Custom headers                   |
-| `requestOptions.endlesslyRetry` | `boolean`                | No       | Whether to retry endlessly       |
+| Parameter                       | Type                     | Required | Description                                                                                                                            |
+| ------------------------------- | ------------------------ | -------- | -------------------------------------------------------------------------------------------------------------------------------------- |
+| `historyReference`              | `string`                 | Yes      | The history reference of the ACT                                                                                                       |
+| `requestOptions`                | `RequestOptions`         | No       | Request configuration                                                                                                                  |
+| `requestOptions.timeout`        | `number`                 | No       | Request timeout in milliseconds for this call. Replaces the client's default (30 s) for the whole round trip, not only the Bee request |
+| `requestOptions.headers`        | `Record<string, string>` | No       | Custom headers                                                                                                                         |
+| `requestOptions.endlesslyRetry` | `boolean`                | No       | Whether to retry endlessly                                                                                                             |
 
 **Returns:** `Promise<string[]>` - Array of compressed public keys (66 hex chars each)
 

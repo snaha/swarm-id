@@ -76,6 +76,14 @@ the network tab with no usable response. Meanwhile `curl` against the very same 
 sends no `Origin` header, so nothing is checked. If the node answers your terminal but not the
 browser, this setting is the first thing to look at.
 
+## A node in dev mode
+
+`bee start --dev` runs a node with no network, chain or postage, for trying the API. It serves
+only deferred uploads: a direct upload (`deferred: false`, the client's default) is never
+answered and fails as `Request timeout after 30000ms`, which says nothing about the mode. Ask
+the node with `getNodeInfo()` and set `deferred` from `beeMode === 'dev'`, the way the demo
+does. Neither the [local cluster](../local-development/) nor the public gateway is in dev mode.
+
 ## The local development cluster
 
 The [local Bee cluster](../local-development/#starting-the-local-bee-cluster) started by

@@ -72,6 +72,12 @@ dApp's proxy iframe, and it is what the iframe authenticates with. A dApp can de
 material of its own from it with `client.deriveAppSecret(label)`; the popup and the master key
 are not involved in that.
 
+Every origin is a different dApp. `http://localhost:3000`, a tunnel hostname and each preview
+deployment (every `*.vercel.app` preview has a hostname of its own) all derive different
+secrets, so a wallet, key or feed topic derived with `deriveAppSecret` on a preview URL is
+not the one production will see. Settle the production origin before anything derived from
+the app secret is used as an identity or published.
+
 ### derivationKey
 
 `deriveSecret(masterKey, "derivation-key")`, computed once and stored on the account. It
