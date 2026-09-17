@@ -237,16 +237,25 @@ describe('soonestDriveExpiry / accountDriveAttention', () => {
     expect(accountDriveAttention(account, measuredAt)).toEqual({ reason: 'full' })
   })
 
-  it('develops the signed-out warning as the stored expiry approaches, and carries it', () => {
+  it('develops the signed-out warning as the stored expiry approaches', () => {
     const expiry = measuredAt + 30 * DAY_MS
     const account = { stamps: [], isSignedOut: true, soonestDriveExpiry: expiry }
     expect(accountDriveAttention(account, measuredAt)).toBeUndefined()
+    // Hedged: a sign-out estimate, which another device may have moved since.
     expect(accountDriveAttention(account, expiry - 6 * DAY_MS)).toEqual({
-      reason: 'expiring',
+      reason: 'may-expire',
       expiry,
     })
-    // Past expiry: still warn, still with the date.
-    expect(accountDriveAttention(account, expiry + DAY_MS)).toEqual({ reason: 'expiring', expiry })
+  })
+
+  it('stops warning once the captured expiry is past, as the signed-in path does', () => {
+    const expiry = measuredAt + 30 * DAY_MS
+    const account = { stamps: [], isSignedOut: true, soonestDriveExpiry: expiry }
+    expect(accountDriveAttention(account, expiry + DAY_MS)).toBeUndefined()
+    // A captured full flag still stands on its own once the expiry has run out.
+    expect(accountDriveAttention({ ...account, storageWarning: true }, expiry + DAY_MS)).toEqual({
+      reason: 'full',
+    })
   })
 
   it('uses the live drive state for signed-in accounts', () => {
@@ -274,9 +283,14 @@ describe('soonestDriveExpiry / accountDriveAttention', () => {
     // The label is fixed-width — the row slot reserves for it — so the date
     // only ever shows in the description behind it.
     expect(driveAttentionLabel(expiring)).toBe('Drive expiring')
+    expect(driveAttentionLabel({ ...expiring, reason: 'may-expire' })).toBe('Drive expiring')
     expect(driveAttentionLabel({ reason: 'full' })).toBe('Drive full')
     expect(driveAttentionDescription(expiring, 'home')).toBe(
       'A drive expires on 2026-10-02. Sign in to extend its lifespan.',
+    )
+    // The sign-out estimate hedges: only the live drives can state a date.
+    expect(driveAttentionDescription({ ...expiring, reason: 'may-expire' }, 'home')).toBe(
+      'A drive may expire around 2026-10-02. Sign in to check it.',
     )
     expect(driveAttentionDescription({ reason: 'full' }, 'home')).toBe(
       'A drive is full. Sign in to increase its size.',

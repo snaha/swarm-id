@@ -248,8 +248,17 @@ export function soonestDriveExpiry(stamps: PostageStamp[], now = Date.now()): nu
  * lifespan running out — WHEN. A discriminated union rather than a bare
  * boolean so the chooser row can name the drive's actual state instead of
  * pointing vaguely at "storage".
+ *
+ * `expiring` is measured from the account's live drives, so its date is a
+ * fact; `may-expire` comes from the estimate captured at sign-out, which
+ * another device may have moved since, so its copy hedges. Either way the
+ * date is still ahead — an expired drive is not "attention" (see
+ * {@link driveNeedsAttention}), on both paths.
  */
-export type DriveAttention = { reason: 'expiring'; expiry: number } | { reason: 'full' }
+export type DriveAttention =
+  | { reason: 'expiring'; expiry: number }
+  | { reason: 'may-expire'; expiry: number }
+  | { reason: 'full' }
 
 /** Where a check-the-drive sign-in was started from. The connect popup adds
  * that the connection itself is not blocked on the errand — the row action
@@ -264,6 +273,11 @@ export type DriveAttentionContext = 'connect' | 'home'
  * sign-out, which keeps developing while the stamps themselves are locked in
  * the encrypted snapshot, else the captured flag — which by then can only
  * mean a full drive, since an expiring one would have left an expiry.
+ *
+ * Once that captured expiry is behind `now` the warning stops, the way
+ * {@link driveNeedsAttention} already drops an expired drive on the signed-in
+ * path: the estimate has run out, and neither "expires on" nor the remedy
+ * behind it is true of a drive that is gone.
  */
 export function accountDriveAttention(
   account: {
@@ -278,9 +292,10 @@ export function accountDriveAttention(
     const captured = account.soonestDriveExpiry
     if (
       captured !== undefined &&
+      captured > now &&
       captured - now <= EXPIRES_SOON_THRESHOLD_SECONDS * MS_PER_SECOND
     ) {
-      return { reason: 'expiring', expiry: captured }
+      return { reason: 'may-expire', expiry: captured }
     }
     return account.storageWarning === true ? { reason: 'full' } : undefined
   }
@@ -303,7 +318,7 @@ export function accountDriveAttention(
  * to the dialog behind the button, and to the Storage tab it lands on.
  */
 export function driveAttentionLabel(attention: DriveAttention): string {
-  return attention.reason === 'expiring' ? 'Drive expiring' : 'Drive full'
+  return attention.reason === 'full' ? 'Drive full' : 'Drive expiring'
 }
 
 /** The unlock prompt behind that action: what is wrong, which of the Storage
@@ -313,11 +328,19 @@ export function driveAttentionDescription(
   attention: DriveAttention,
   context: DriveAttentionContext,
 ): string {
-  const state =
-    attention.reason === 'expiring'
-      ? `A drive expires on ${formatYmd(attention.expiry)}. Sign in to extend its lifespan.`
-      : 'A drive is full. Sign in to increase its size.'
+  const state = describeAttention(attention)
   return context === 'connect' ? `${state} Connecting does not wait for this.` : state
+}
+
+function describeAttention(attention: DriveAttention): string {
+  switch (attention.reason) {
+    case 'expiring':
+      return `A drive expires on ${formatYmd(attention.expiry)}. Sign in to extend its lifespan.`
+    case 'may-expire':
+      return `A drive may expire around ${formatYmd(attention.expiry)}. Sign in to check it.`
+    case 'full':
+      return 'A drive is full. Sign in to increase its size.'
+  }
 }
 
 export function describeDrive(drive: PostageStamp, now = Date.now()): DriveDisplay {
