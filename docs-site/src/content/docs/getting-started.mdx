@@ -35,10 +35,10 @@ yarn add @snaha/swarm-id
 
 ## Basic Usage
 
-The package is browser-only and touches `window` when it is imported, not only when a client is
-constructed. In a framework that renders on a server (Next.js App Router, SvelteKit with SSR,
-Nuxt), import it from a client-only module or with a dynamic `import()` guarded on
-`typeof window !== 'undefined'`; a bare top-level import breaks the server render.
+The package is browser-only: importing it is harmless, but constructing a client touches
+`window`. In a framework that renders on a server (Next.js App Router, SvelteKit with SSR, Nuxt),
+construct it in code that runs only in the browser — an effect, `onMount`, or a branch on
+`typeof window !== 'undefined'` — not at module scope of a file the server renders.
 
 ```typescript
 import { SwarmIdClient } from '@snaha/swarm-id'
