@@ -112,6 +112,9 @@ for name in $(docker ps --filter 'name=bee-compose-worker-' --format '{{.Names}}
   workers=$((workers + 1))
   wait_ready "${name#bee-compose-}" "http://localhost:1633${name##*-}"
 done
+# With no worker container the connected check passes at 0 and the probe then
+# measures a queen storing its own chunk — fast, and proof of nothing.
+[ "$workers" -gt 0 ] || fail "no bee-compose worker container is running"
 wait_connected "$workers"
 
 batch=$(usable_stamp)

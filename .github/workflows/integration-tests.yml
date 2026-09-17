@@ -49,7 +49,12 @@ jobs:
       # from, so a lockfile touched for anything else still hits.
       - name: Resolve the cluster version
         id: bee-compose
-        run: echo "version=$(pnpm -s dev:cluster --version)" >> "$GITHUB_OUTPUT"
+        # Guarded: an empty version would leave the key `bee-images--v1`, which
+        # every run would share and no run would notice.
+        run: |
+          version=$(pnpm -s dev:cluster --version)
+          test -n "$version" || { echo "::error::bee-compose printed no version"; exit 1; }
+          echo "version=$version" >> "$GITHUB_OUTPUT"
 
       - name: Cache Bee cluster images
         id: bee-images
