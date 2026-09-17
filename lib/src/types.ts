@@ -179,6 +179,49 @@ export interface UploadOptions {
 
 export type RequestOptions = z.infer<typeof RequestOptionsSchema>
 export type DownloadOptions = z.infer<typeof DownloadOptionsSchema>
+
+/**
+ * Options for `uploadFiles` (#750). Content is encrypted unless `encrypt` is
+ * `false`; the manifest — and so the root reference — is encrypted unless
+ * `encrypt` or `encryptManifest` is `false`. `onProgress` counts files.
+ */
+export interface UploadFilesOptions extends Pick<
+  UploadOptions,
+  "pin" | "encrypt" | "encryptManifest" | "tag" | "deferred" | "onProgress"
+> {
+  /** Served for the bare `/bzz/<reference>/` (`website-index-document`) */
+  indexDocument?: string
+  /** Served for a path that is not in the folder (`website-error-document`) */
+  errorDocument?: string
+}
+
+/** One file to upload with `uploadFiles`, when not handing over `File`s */
+export interface CollectionFileInput {
+  /** Path inside the folder, `/`-separated, no leading slash */
+  path: string
+  file: Blob
+}
+
+const UploadFilesOptionsSchema = UploadOptionsObjectSchema.extend({
+  indexDocument: z.string().optional(),
+  errorDocument: z.string().optional(),
+}).optional()
+
+/** One file of a folder, as it crosses the bridge */
+export const CollectionFileSchema = z.object({
+  path: z.string().min(1),
+  data: z.instanceof(Uint8Array),
+  contentType: z.string().optional(),
+})
+export type CollectionFile = z.infer<typeof CollectionFileSchema>
+
+/** One file of a listed folder. `reference` is readable with `downloadData` */
+export const CollectionEntrySchema = z.object({
+  path: z.string(),
+  reference: ReferenceSchema,
+  contentType: z.string().optional(),
+})
+export type CollectionEntry = z.infer<typeof CollectionEntrySchema>
 export interface ActUploadOptions extends UploadOptions {
   beeCompatible?: boolean
   /**
@@ -891,6 +934,22 @@ export const DownloadFileMessageSchema = z.object({
   requestOptions: RequestOptionsSchema,
 })
 
+export const UploadFilesMessageSchema = z.object({
+  type: z.literal("uploadFiles"),
+  requestId: z.string(),
+  files: z.array(CollectionFileSchema),
+  options: UploadFilesOptionsSchema,
+  requestOptions: RequestOptionsSchema,
+  enableProgress: z.boolean().optional(),
+})
+
+export const ListFilesMessageSchema = z.object({
+  type: z.literal("listFiles"),
+  requestId: z.string(),
+  reference: ReferenceSchema,
+  requestOptions: RequestOptionsSchema,
+})
+
 export const UploadChunkMessageSchema = z.object({
   type: z.literal("uploadChunk"),
   requestId: z.string(),
@@ -1183,6 +1242,8 @@ export const ParentToIframeMessageSchema = z.discriminatedUnion("type", [
   DeriveAppSecretMessageSchema,
   UploadFileMessageSchema,
   DownloadFileMessageSchema,
+  UploadFilesMessageSchema,
+  ListFilesMessageSchema,
   UploadChunkMessageSchema,
   DownloadChunkMessageSchema,
   IsConnectedMessageSchema,
@@ -1224,6 +1285,8 @@ export type DeriveAppSecretMessage = z.infer<
 >
 export type UploadFileMessage = z.infer<typeof UploadFileMessageSchema>
 export type DownloadFileMessage = z.infer<typeof DownloadFileMessageSchema>
+export type UploadFilesMessage = z.infer<typeof UploadFilesMessageSchema>
+export type ListFilesMessage = z.infer<typeof ListFilesMessageSchema>
 export type UploadChunkMessage = z.infer<typeof UploadChunkMessageSchema>
 export type DownloadChunkMessage = z.infer<typeof DownloadChunkMessageSchema>
 export type IsConnectedMessage = z.infer<typeof IsConnectedMessageSchema>
@@ -1353,6 +1416,19 @@ export const DownloadFileResponseMessageSchema = z.object({
   requestId: z.string(),
   name: z.string(),
   data: z.instanceof(Uint8Array),
+})
+
+export const UploadFilesResponseMessageSchema = z.object({
+  type: z.literal("uploadFilesResponse"),
+  requestId: z.string(),
+  reference: ReferenceSchema,
+  tagUid: z.number().optional(),
+})
+
+export const ListFilesResponseMessageSchema = z.object({
+  type: z.literal("listFilesResponse"),
+  requestId: z.string(),
+  entries: z.array(CollectionEntrySchema),
 })
 
 export const UploadChunkResponseMessageSchema = z.object({
@@ -1640,6 +1716,8 @@ export const IframeToParentMessageSchema = z.discriminatedUnion("type", [
   DeriveAppSecretResponseMessageSchema,
   UploadFileResponseMessageSchema,
   DownloadFileResponseMessageSchema,
+  UploadFilesResponseMessageSchema,
+  ListFilesResponseMessageSchema,
   UploadChunkResponseMessageSchema,
   DownloadChunkResponseMessageSchema,
   UploadProgressMessageSchema,
@@ -1697,6 +1775,12 @@ export type UploadFileResponseMessage = z.infer<
 >
 export type DownloadFileResponseMessage = z.infer<
   typeof DownloadFileResponseMessageSchema
+>
+export type UploadFilesResponseMessage = z.infer<
+  typeof UploadFilesResponseMessageSchema
+>
+export type ListFilesResponseMessage = z.infer<
+  typeof ListFilesResponseMessageSchema
 >
 export type UploadChunkResponseMessage = z.infer<
   typeof UploadChunkResponseMessageSchema
