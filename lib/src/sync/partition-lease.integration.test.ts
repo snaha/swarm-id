@@ -897,8 +897,15 @@ describe("PartitionLease.acquire — seeds the incremental first publish", () =>
       // (not by forcing an unreadable address, which would break the resume read).
       // The idle-holder-crosses-an-epoch case: the heartbeat's own pointer write
       // would overstamp (evict) the retained chunk at their shared reserved slot.
+      //
+      // The retained chunk's bucket is random (its encryption key is), so the
+      // scan is a geometric draw with mean 65536: it stops at the first hit, and
+      // the bound only matters when it misses. The old bound of 400 000 missed
+      // once in ~450 runs (#796); a million misses once in ~4 million, and a
+      // full scan costs ~16 s, inside the 30 s test timeout.
+      const SCAN_EPOCHS = 1_000_000
       let collidingEpoch: number | undefined
-      for (let e = acquireEpoch + 1; e < acquireEpoch + 400_000; e++) {
+      for (let e = acquireEpoch + 1; e < acquireEpoch + SCAN_EPOCHS; e++) {
         const bucket = toBucket(
           partitionState.statePointerAddress(
             TEST_BATCH_ID,
@@ -912,7 +919,10 @@ describe("PartitionLease.acquire — seeds the incremental first publish", () =>
           break
         }
       }
-      expect(collidingEpoch).toBeDefined()
+      expect(
+        collidingEpoch,
+        `no state-pointer bucket hit ${targetBucket} in ${SCAN_EPOCHS} epochs after ${acquireEpoch}`,
+      ).toBeDefined()
 
       // Resume the partition (full read seeds publishedReferences +
       // lastReferenceHex) without ever uploading.
