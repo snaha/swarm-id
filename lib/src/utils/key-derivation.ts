@@ -53,23 +53,6 @@ export async function deriveSecret(
   return secretHex
 }
 
-/**
- * Generate a random master key for testing/demo purposes
- *
- * In production, this would be derived from a user's mnemonic or
- * imported from an existing identity.
- *
- * @returns A random 32-byte key as a hex string
- */
-export async function generateMasterKey(): Promise<string> {
-  const randomBytes = new Uint8Array(32)
-  crypto.getRandomValues(randomBytes)
-
-  const masterKey = uint8ArrayToHex(randomBytes)
-
-  return masterKey
-}
-
 // Re-export hex utilities for backwards compatibility
 export { hexToUint8Array, uint8ArrayToHex } from "./hex"
 
@@ -77,10 +60,10 @@ export { hexToUint8Array, uint8ArrayToHex } from "./hex"
  * Derive an AES-GCM-256 key from `secretHex` under `context`.
  *
  * The three steps — HMAC to a fresh secret, hex to bytes, import as AES-GCM —
- * are one pipeline with two callers that differ only in their context string:
- * the account backup (`deriveBackupEncryptionKey`) and the bus envelope
- * (`deriveBusContext`). Non-extractable and encrypt/decrypt only, which is the
- * part worth stating once rather than twice (#590).
+ * are one pipeline. Non-extractable and encrypt/decrypt only, which is the
+ * part worth stating once (#590). The bus envelope (`deriveBusContext`) is the
+ * live caller; the `.swarmid` file key is the identity UI's, derived by HKDF
+ * from the recovery-phrase entropy, and never comes through here.
  */
 export async function deriveAesGcmKey(
   secretHex: string,
@@ -94,41 +77,6 @@ export async function deriveAesGcmKey(
     false,
     ["encrypt", "decrypt"],
   )
-}
-
-/**
- * Verify that a derived secret matches the expected value
- *
- * Useful for testing.
- *
- * @param masterKey - Master key hex string
- * @param appOrigin - App origin
- * @param expectedSecret - Expected secret hex string
- * @returns true if the derived secret matches the expected secret
- */
-export async function verifySecret(
-  masterKey: string,
-  appOrigin: string,
-  expectedSecret: string,
-): Promise<boolean> {
-  const derived = await deriveSecret(masterKey, appOrigin)
-  return derived === expectedSecret
-}
-
-/**
- * Derive account backup key from account master key
- *
- * Used for signing account feed updates
- *
- * @param accountMasterKey - Account master key (hex string)
- * @param accountId - Account ID (EthAddress hex string)
- * @returns 32-byte account backup key (as hex string)
- */
-export async function deriveAccountBackupKey(
-  accountMasterKey: string,
-  accountId: string,
-): Promise<string> {
-  return deriveSecret(accountMasterKey, `account:${accountId}`)
 }
 
 /**
@@ -196,13 +144,6 @@ export function deriveSharingKey(derivationKey: string): {
     secret,
     publicKey: new PrivateKey(secret).publicKey().toCompressedHex(),
   }
-}
-
-/**
- * Convert backup key to PrivateKey for feed signing
- */
-export function backupKeyToPrivateKey(backupKeyHex: string): PrivateKey {
-  return new PrivateKey(backupKeyHex)
 }
 
 // Export utility functions for testing

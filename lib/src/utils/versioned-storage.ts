@@ -368,31 +368,3 @@ export function createLocalStorageManager<T>(
     storage: new LocalStorageAdapter(),
   })
 }
-
-/**
- * Create a versioned storage manager with memory storage
- */
-export function createMemoryStorageManager<T>(
-  options: Omit<VersionedStorageOptions<T>, "storage">,
-): VersionedStorageManager<T> {
-  return new VersionedStorageManager({
-    ...options,
-    storage: new MemoryStorageAdapter(),
-  })
-}
-
-/**
- * Create a simple Zod-based parser for a single version
- */
-export function createZodParser<T>(schema: z.ZodType<T[]>): VersionParser<T> {
-  return (data: unknown) => {
-    const result = schema.safeParse(data)
-
-    if (!result.success) {
-      console.error("Parse failed:", result.error.format())
-      return []
-    }
-
-    return result.data
-  }
-}

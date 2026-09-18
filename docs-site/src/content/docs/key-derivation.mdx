@@ -54,9 +54,8 @@ recovery phrase (BIP-39)
    │  └─ app material       = deriveSecret(appSecret, label)            client.deriveAppSecret(label)
    └─ derivationKey         = deriveSecret(master, "derivation-key")    stored on the account
       ├─ swarmEncryptionKey = deriveSecret(derivationKey, "swarm-encryption")
-      │  ├─ backupKey       = deriveSecret(swarmEncryptionKey, "backup-key")
-      │  │  └─ backup signer  secp256k1 key; its address owns every feed and lock chunk
-      │  └─ backup file key = AES-GCM key from (swarmEncryptionKey, "swarm-id-backup-encryption-v1")
+      │  └─ backupKey       = deriveSecret(swarmEncryptionKey, "backup-key")
+      │     └─ backup signer  secp256k1 key; its address owns every feed and lock chunk
       ├─ postageSignerKey   = deriveSecret(derivationKey, "postage-signer")
       ├─ sharing key        = deriveSecret(derivationKey, "act-sharing")
       ├─ bus topic          = deriveSecret(derivationKey, "swarm-id/account-bus/topic/v1")
@@ -92,9 +91,8 @@ feeds, the partition lock chunks, the intent beacons, and the utilization counte
 owner of every feed and every single-owner chunk in the multi-device protocol. Two accounts
 with the same topic still write to different addresses, because the owner differs.
 
-The `.swarmid` backup file is encrypted with an AES-GCM-256 key derived from
-`swarmEncryptionKey` under the context `swarm-id-backup-encryption-v1`. Importing a backup
-therefore needs the recovery phrase, from which the whole chain is recomputed.
+The `.swarmid` backup file is not in this tree: its key comes straight from the recovery-phrase
+entropy by HKDF with a per-file salt, see [Architecture](../architecture/#the-swarmid-file).
 
 ### postageSignerKey
 

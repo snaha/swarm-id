@@ -4,13 +4,10 @@
 // Public API
 export {
   // Account-level key derivation
-  deriveAccountBackupKey,
   deriveAccountDerivationKey,
   deriveSwarmEncryptionKey,
   derivePostageSignerKey,
-  backupKeyToPrivateKey,
 } from "../utils/key-derivation"
-export { serializeAccountState, deserializeAccountState } from "./serialization"
 
 // Snapshot merge primitives (shared by the publish and refresh paths so the
 // rules can't drift — #337).
@@ -25,13 +22,6 @@ export {
 // Sync account
 export { createSyncAccount } from "./sync-account"
 export type { SyncAccountOptions, SyncAccountFunction } from "./sync-account"
-
-// Restore account from Swarm
-export {
-  restoreAccountFromSwarm,
-  SnapshotDataUnavailableError,
-} from "./restore-account"
-export type { RestoreAccountResult } from "./restore-account"
 
 // Phase 3a: per-device snapshot feeds + append-only roster discovery
 export {

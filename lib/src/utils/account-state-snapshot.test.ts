@@ -3,11 +3,8 @@
 
 import { describe, it, expect } from "vitest"
 import { BatchId, PrivateKey } from "@ethersphere/bee-js"
-import {
-  serializeAccountStateSnapshot,
-  deserializeAccountStateSnapshot,
-  AccountStateSnapshotSchemaV1,
-} from "./account-state-snapshot"
+import { serializeAccountStateSnapshot } from "./account-state-snapshot"
+import { AccountStateSnapshotSchemaV1 } from "../schemas"
 import type { SignedInAccount } from "../schemas"
 import {
   TEST_ETH_ADDRESS_HEX,
@@ -63,7 +60,7 @@ describe("round-trip: serialize → JSON → deserialize", () => {
     const serialized = serializeFromAccount(account)
     const json = JSON.stringify(serialized)
     const parsed = JSON.parse(json)
-    const result = deserializeAccountStateSnapshot(parsed)
+    const result = AccountStateSnapshotSchemaV1.safeParse(parsed)
 
     expect(result.success).toBe(true)
     if (!result.success) return
@@ -81,7 +78,7 @@ describe("round-trip: serialize → JSON → deserialize", () => {
     const account = createAccount()
 
     const serialized = serializeFromAccount(account)
-    const result = deserializeAccountStateSnapshot(
+    const result = AccountStateSnapshotSchemaV1.safeParse(
       JSON.parse(JSON.stringify(serialized)),
     )
 
@@ -97,7 +94,7 @@ describe("round-trip: serialize → JSON → deserialize", () => {
     const account = createAccount()
 
     const serialized = serializeFromAccount(account)
-    const result = deserializeAccountStateSnapshot(
+    const result = AccountStateSnapshotSchemaV1.safeParse(
       JSON.parse(JSON.stringify(serialized)),
     )
 
@@ -126,7 +123,7 @@ describe("round-trip: serialize → JSON → deserialize", () => {
     // Simulate file write + read
     const fileContent = JSON.stringify(serialized, undefined, 2)
     const fileData = JSON.parse(fileContent)
-    const result = deserializeAccountStateSnapshot(fileData)
+    const result = AccountStateSnapshotSchemaV1.safeParse(fileData)
 
     expect(result.success).toBe(true)
     if (!result.success) return
@@ -151,7 +148,7 @@ describe("device tracking in metadata", () => {
     const device = createDevice()
     const account = createAccount({ devices: [device] })
     const serialized = serializeFromAccount(account)
-    const result = deserializeAccountStateSnapshot(
+    const result = AccountStateSnapshotSchemaV1.safeParse(
       JSON.parse(JSON.stringify(serialized)),
     )
 
@@ -181,7 +178,7 @@ describe("device tracking in metadata", () => {
       postageStamps: [],
     }
 
-    const result = deserializeAccountStateSnapshot(raw)
+    const result = AccountStateSnapshotSchemaV1.safeParse(raw)
 
     expect(result.success).toBe(true)
     if (!result.success) return
@@ -220,7 +217,7 @@ describe("appSecret in snapshots", () => {
       },
     ]
 
-    const result = deserializeAccountStateSnapshot(raw)
+    const result = AccountStateSnapshotSchemaV1.safeParse(raw)
 
     expect(result.success).toBe(true)
     if (!result.success) return
@@ -237,7 +234,7 @@ describe("edge cases", () => {
   it("should handle empty arrays for connectedApps and postageStamps", () => {
     const account = createAccount()
     const serialized = serializeFromAccount(account)
-    const result = deserializeAccountStateSnapshot(
+    const result = AccountStateSnapshotSchemaV1.safeParse(
       JSON.parse(JSON.stringify(serialized)),
     )
 
@@ -251,7 +248,7 @@ describe("edge cases", () => {
   it("should handle account settings absent", () => {
     const account = createAccount({ settings: undefined })
     const serialized = serializeFromAccount(account)
-    const result = deserializeAccountStateSnapshot(
+    const result = AccountStateSnapshotSchemaV1.safeParse(
       JSON.parse(JSON.stringify(serialized)),
     )
 
@@ -271,7 +268,7 @@ describe("edge cases", () => {
     const serialized = serializeFromAccount(
       createAccount({ connectedApps: [app] }),
     )
-    const result = deserializeAccountStateSnapshot(
+    const result = AccountStateSnapshotSchemaV1.safeParse(
       JSON.parse(JSON.stringify(serialized)),
     )
 
@@ -288,7 +285,7 @@ describe("edge cases", () => {
     const serialized = serializeFromAccount(
       createAccount({ postageStamps: [stamp] }),
     )
-    const result = deserializeAccountStateSnapshot(
+    const result = AccountStateSnapshotSchemaV1.safeParse(
       JSON.parse(JSON.stringify(serialized)),
     )
 
@@ -303,7 +300,7 @@ describe("edge cases", () => {
       defaultPostageStampBatchID: undefined,
     })
     const serialized = serializeFromAccount(account)
-    const result = deserializeAccountStateSnapshot(
+    const result = AccountStateSnapshotSchemaV1.safeParse(
       JSON.parse(JSON.stringify(serialized)),
     )
 
@@ -326,7 +323,7 @@ describe("edge cases", () => {
     })
 
     const serialized = serializeFromAccount(account)
-    const result = deserializeAccountStateSnapshot(
+    const result = AccountStateSnapshotSchemaV1.safeParse(
       JSON.parse(JSON.stringify(serialized)),
     )
 
@@ -348,7 +345,7 @@ describe("invalid data rejection", () => {
     const raw = JSON.parse(JSON.stringify(serialized))
     raw.version = 2
 
-    const result = deserializeAccountStateSnapshot(raw)
+    const result = AccountStateSnapshotSchemaV1.safeParse(raw)
     expect(result.success).toBe(false)
   })
 
@@ -357,7 +354,7 @@ describe("invalid data rejection", () => {
     const raw = JSON.parse(JSON.stringify(serialized))
     delete raw.version
 
-    const result = deserializeAccountStateSnapshot(raw)
+    const result = AccountStateSnapshotSchemaV1.safeParse(raw)
     expect(result.success).toBe(false)
   })
 
@@ -366,7 +363,7 @@ describe("invalid data rejection", () => {
     const raw = JSON.parse(JSON.stringify(serialized))
     delete raw.accountId
 
-    const result = deserializeAccountStateSnapshot(raw)
+    const result = AccountStateSnapshotSchemaV1.safeParse(raw)
     expect(result.success).toBe(false)
   })
 
@@ -375,7 +372,7 @@ describe("invalid data rejection", () => {
     const raw = JSON.parse(JSON.stringify(serialized))
     delete raw.metadata
 
-    const result = deserializeAccountStateSnapshot(raw)
+    const result = AccountStateSnapshotSchemaV1.safeParse(raw)
     expect(result.success).toBe(false)
   })
 
@@ -384,7 +381,7 @@ describe("invalid data rejection", () => {
     const raw = JSON.parse(JSON.stringify(serialized))
     raw.accountId = "abc" // too short
 
-    const result = deserializeAccountStateSnapshot(raw)
+    const result = AccountStateSnapshotSchemaV1.safeParse(raw)
     expect(result.success).toBe(false)
   })
 
@@ -417,7 +414,7 @@ describe("invalid data rejection", () => {
       ],
     }
 
-    const result = deserializeAccountStateSnapshot(raw)
+    const result = AccountStateSnapshotSchemaV1.safeParse(raw)
     expect(result.success).toBe(false)
   })
 
@@ -450,7 +447,7 @@ describe("invalid data rejection", () => {
       ],
     }
 
-    const result = deserializeAccountStateSnapshot(raw)
+    const result = AccountStateSnapshotSchemaV1.safeParse(raw)
     expect(result.success).toBe(false)
   })
 
@@ -459,7 +456,7 @@ describe("invalid data rejection", () => {
     const raw = JSON.parse(JSON.stringify(serialized))
     raw.metadata.accountName = 12345
 
-    const result = deserializeAccountStateSnapshot(raw)
+    const result = AccountStateSnapshotSchemaV1.safeParse(raw)
     expect(result.success).toBe(false)
   })
 
@@ -468,22 +465,22 @@ describe("invalid data rejection", () => {
     const raw = JSON.parse(JSON.stringify(serialized))
     raw.connectedApps = "not-an-array"
 
-    const result = deserializeAccountStateSnapshot(raw)
+    const result = AccountStateSnapshotSchemaV1.safeParse(raw)
     expect(result.success).toBe(false)
   })
 
   it("should reject non-object input (string)", () => {
-    const result = deserializeAccountStateSnapshot("not-an-object")
+    const result = AccountStateSnapshotSchemaV1.safeParse("not-an-object")
     expect(result.success).toBe(false)
   })
 
   it("should reject non-object input (number)", () => {
-    const result = deserializeAccountStateSnapshot(42)
+    const result = AccountStateSnapshotSchemaV1.safeParse(42)
     expect(result.success).toBe(false)
   })
 
   it("should reject non-object input (undefined)", () => {
-    const result = deserializeAccountStateSnapshot(undefined)
+    const result = AccountStateSnapshotSchemaV1.safeParse(undefined)
     expect(result.success).toBe(false)
   })
 })
@@ -522,7 +519,7 @@ describe("bee-js type conversions", () => {
       ],
     }
 
-    const result = deserializeAccountStateSnapshot(raw)
+    const result = AccountStateSnapshotSchemaV1.safeParse(raw)
 
     expect(result.success).toBe(true)
     if (!result.success) return

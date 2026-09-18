@@ -73,8 +73,3 @@ export function createEpochUpdater(
 ): EpochUpdater {
   return new BasicEpochUpdater(options.topic, options.signer)
 }
-
-/**
- * @deprecated Use createSyncEpochFinder instead
- */
-export const createEpochFinder = createSyncEpochFinder

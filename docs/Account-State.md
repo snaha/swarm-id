@@ -133,8 +133,8 @@ partition lease still keeps two devices' writes slot-disjoint on the shared batc
 owner/encryption key → `readRoster` (empty ⇒ `undefined`, i.e. "no backup") → read each non-removed
 device's latest view **in parallel** (`Promise.all`) → `foldAccount(views, rosterDevices)`. Two callers:
 
-- **Restore (a new device signing in)** — `restore-account.ts` `restoreAccountFromSwarm` →
-  `foldedToSnapshot` → an `AccountStateSnapshot` the sign-in/import flow consumes.
+- **Restore (a new device signing in)** — ui `sign-back-in.ts` and the import page →
+  `foldedToSyncedAccount` → the account record the sign-in/import flow stores.
 - **Refresh (an existing device)** — ui `refresh-account-from-swarm.ts` → merge the folded remote
   into the local account (`mergeConnectedApps` / `mergePostageStamps` / `mergeDevicesList` + `mergeDevices`
   to keep self first-class) → `accountsStore.applyRefreshed(...)` with `skipSync`; the three scalars are
@@ -197,7 +197,6 @@ too (#662).
 | `lib/src/sync/device-roster.ts`                | Append-only roster: `readRoster`, `ensureInRoster`                               |
 | `lib/src/sync/fold-account-from-swarm.ts`      | `foldAccountFromSwarm` (roster + parallel device-feed reads)                     |
 | `lib/src/sync/merge-snapshot.ts`               | LWW + tombstone merge primitives                                                 |
-| `lib/src/sync/restore-account.ts`              | `restoreAccountFromSwarm` (new device)                                           |
 | `lib/src/sync/sync-account.ts`                 | Oneshot publish (SwarmID UI)                                                     |
 | `lib/src/swarm-id-proxy.ts`                    | Persistent publish (`runAccountStatePublish`) + triggers                         |
 | `lib/src/utils/storage-managers.ts`            | `serializeAccount` (local persistence)                                           |

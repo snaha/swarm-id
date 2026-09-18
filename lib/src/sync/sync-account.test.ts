@@ -215,7 +215,6 @@ vi.mock("./device-roster", () => ({
 // stub it out with a fixed value.
 vi.mock("../utils/device-id", () => ({
   getOrCreateDeviceId: vi.fn(() => "test-device-self"),
-  getDeviceId: vi.fn(() => "test-device-self"),
   mergeDevices: vi.fn((existing: unknown[]) => existing),
   detectDeviceName: vi.fn(() => "Test Device"),
 }))

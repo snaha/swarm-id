@@ -465,29 +465,6 @@ export type AccountStateSnapshot = z.infer<typeof AccountStateSnapshotSchemaV1>
 // ============================================================================
 
 /**
- * An account is "local" when its default drive (`defaultPostageStampBatchID`) is
- * not a usable postage batch — it cannot pay for uploads, so it is effectively
- * view-only and has nothing to sync. "Local" is purely this runtime predicate;
- * it is NOT a stored field or account `type`.
- *
- * The default batch counts as a valid drive when it is set, `exists` on-chain,
- * is `usable` (synced enough to upload against), and is not tombstoned. An
- * account with no default, or whose default is freshly-purchased-but-not-yet-
- * usable, therefore reads as local.
- */
-export function isLocalAccount(account: SignedInAccount): boolean {
-  const batchID = account.defaultPostageStampBatchID
-  if (batchID === undefined) return true
-  const stamp = account.postageStamps.find((s) => s.batchID.equals(batchID))
-  return !(
-    stamp !== undefined &&
-    stamp.exists &&
-    stamp.usable &&
-    stamp.deletedAt === undefined
-  )
-}
-
-/**
  * An account is "signed out" on this device when `signedOutAt` is set: the
  * synced data was stripped from disk, but the encrypted vault survives, so the
  * user signs back in with the existing access method (which re-derives and

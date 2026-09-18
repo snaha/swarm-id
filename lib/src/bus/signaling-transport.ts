@@ -22,10 +22,7 @@ import type { ClientMessage } from "@swarm-id/signaling/protocol"
 
 import type { BusTransport } from "./account-bus"
 import type { BusMessageInput } from "./messages"
-import {
-  encryptBackupPayload,
-  decryptBackupPayload,
-} from "../utils/backup-encryption"
+import { encryptEnvelope, decryptEnvelope } from "./envelope"
 
 const SignalPayloadSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("offer"), sdp: z.string() }),
@@ -226,7 +223,7 @@ export class SignalingTransport implements BusTransport {
 
   private async deliver(message: BusMessageInput): Promise<void> {
     if (this.peers.size === 0) return
-    const ciphertext = await encryptBackupPayload(
+    const ciphertext = await encryptEnvelope(
       JSON.stringify(message),
       this.options.encryptionKey,
     )
@@ -312,10 +309,7 @@ export class SignalingTransport implements BusTransport {
   ): Promise<void> {
     let plaintext: string
     try {
-      plaintext = await decryptBackupPayload(
-        ciphertext,
-        this.options.encryptionKey,
-      )
+      plaintext = await decryptEnvelope(ciphertext, this.options.encryptionKey)
     } catch {
       // Wrong key or corrupted payload — not for us.
       return

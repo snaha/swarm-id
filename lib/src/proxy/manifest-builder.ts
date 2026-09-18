@@ -358,42 +358,6 @@ export function buildMinimalManifest(
 }
 
 /**
- * Maximum CAC payload size for /bzz/ compatible feed uploads.
- *
- * For the /chunks endpoint to detect SOC correctly, total SOC size must be > 4104 bytes.
- * SOC structure: identifier(32) + signature(65) + span(8) + payload(N)
- * For N=4096: total = 32 + 65 + 8 + 4096 = 4201 bytes > 4104 ✓
- */
-export const MAX_PADDED_PAYLOAD_SIZE = 4096
-
-/**
- * Pad payload to 4096 bytes for SOC detection by /chunks endpoint.
- *
- * The span field in the CAC contains the actual payload size (before padding),
- * so Bee's joiner will only read the actual data and ignore padding.
- *
- * @param payload - Original payload (must be <= 4096 bytes)
- * @returns Padded payload (exactly 4096 bytes)
- */
-export function padPayloadForSOCDetection(payload: Uint8Array): Uint8Array {
-  if (payload.length > MAX_PADDED_PAYLOAD_SIZE) {
-    throw new Error(
-      `Payload too large to pad: ${payload.length} > ${MAX_PADDED_PAYLOAD_SIZE}`,
-    )
-  }
-
-  if (payload.length === MAX_PADDED_PAYLOAD_SIZE) {
-    return payload // Already at max size
-  }
-
-  // Create padded buffer with zeros
-  const padded = new Uint8Array(MAX_PADDED_PAYLOAD_SIZE)
-  padded.set(payload, 0)
-
-  return padded
-}
-
-/**
  * Extract content reference from a minimal mantaray manifest.
  *
  * This is the reverse of buildMinimalManifest() - it parses the manifest

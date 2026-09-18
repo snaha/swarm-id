@@ -24,7 +24,6 @@ import {
   deriveAccountDerivationKey,
   deriveSwarmEncryptionKey,
   deriveSecret,
-  backupKeyToPrivateKey,
 } from "../../src/utils/key-derivation"
 import { foldAccountFromSwarm } from "../../src/sync/fold-account-from-swarm"
 import type { DeviceStateView } from "../../src/sync/device-state"
@@ -144,8 +143,8 @@ export function createContext(): LiveContext {
 
 /**
  * Derive one throwaway account's keys (reader == writer): account id + the
- * backup feed owner/key + the swarm encryption key, exactly as
- * `restoreAccountFromSwarm` does.
+ * backup feed owner/key + the swarm encryption key, exactly as the
+ * identity UI's sign-in does.
  */
 export async function deriveAgentKeys() {
   const masterKeyHex = hex(randomBytes(KEY_BYTES))
@@ -154,7 +153,7 @@ export async function deriveAgentKeys() {
     .address()
   const derivationKey = await deriveAccountDerivationKey(masterKeyHex)
   const swarmEncryptionKey = await deriveSwarmEncryptionKey(derivationKey)
-  const accountKey = backupKeyToPrivateKey(
+  const accountKey = new PrivateKey(
     await deriveSecret(swarmEncryptionKey, "backup-key"),
   )
   return {

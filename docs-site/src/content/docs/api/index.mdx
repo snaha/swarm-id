@@ -1563,11 +1563,8 @@ import type {
   // ACT types
   ActUploadOptions,
 
-  // Backup & Recovery types
-  EncryptedSwarmIdExport,
-  ParseHeaderResult,
+  // Account bus (identity UI internals, below)
   AccountStateSnapshot,
-  RestoreAccountResult,
 } from '@snaha/swarm-id'
 ```
 
@@ -1637,138 +1634,66 @@ The same seed always produces the same image, so it is safe to render on every `
 
 ---
 
-## Backup Encryption
+:::caution[Not a dApp API from here on]
+Everything below this note is imported by the identity UI (the trusted domain) from `@snaha/swarm-id`, and documented here because the package exports it. **A dApp has no use for it and cannot call it**: every function takes the account record, the master key or `derivationKey`, and those never leave the trusted domain. A dApp holds a `SwarmIdClient`, and no message on the wire hands any of them out. The `.swarmid` backup file is written and read by the identity UI alone; see [Architecture](../architecture/#backup-and-recovery).
+:::
 
-Functions for creating and reading encrypted `.swarmid` backup files. Exported from `@snaha/swarm-id`.
+## Account Bus Delta
 
-### `createEncryptedExport(account, swarmEncryptionKeyHex)`
+Used by the identity UI. The [account bus](../account-bus/) is how one account's live contexts (the SwarmID tab, proxy iframes across partitions, other devices) hear about a change before the next Swarm feed read. The identity UI publishes an `account-delta` after every account mutation it makes; the proxy iframe publishes its own from inside the library.
 
-Create a fully encrypted `.swarmid` export object. Serializes the account's state (connected apps, postage stamps, metadata), derives an AES-GCM-256 key from the `swarmEncryptionKey` (itself derived from the account's stored `derivationKey`), encrypts the payload, and builds a header with the account name and export time. App connections are kept in the encrypted payload so that a restored account keeps them.
+### `accountDeltaSnapshot(account)`
 
-**Parameters:**
-
-| Parameter               | Type              | Description                                                                                            |
-| ----------------------- | ----------------- | ------------------------------------------------------------------------------------------------------ |
-| `account`               | `SignedInAccount` | The signed-in account to export                                                                        |
-| `swarmEncryptionKeyHex` | `string`          | Hex-encoded swarm encryption key (derived from `account.derivationKey` via `deriveSwarmEncryptionKey`) |
-
-**Returns:** `Promise<EncryptedSwarmIdExport>`
-
-```typescript
-const swarmEncryptionKey = await deriveSwarmEncryptionKey(account.derivationKey)
-const exported = await createEncryptedExport(account, swarmEncryptionKey)
-// Save as .swarmid file
-const blob = new Blob([JSON.stringify(exported)], { type: 'application/json' })
-```
-
-### `decryptEncryptedExport(encryptedData, swarmEncryptionKeyHex)`
-
-Decrypt an encrypted `.swarmid` export and return the parsed account state snapshot.
+Build the `snapshot` field of an `account-delta` bus message from the account record as the identity UI stores it. The result is the record's state with the per-app session fields removed: `appSecret` and `connectedUntil` on each connected app. They are stripped because one receiver is a proxy iframe embedded by another dApp's page, which must not learn a secret it did not derive itself. The proxy strips the same fields on its side, so the rule exists once.
 
 **Parameters:**
 
-| Parameter               | Type      | Description                                                     |
-| ----------------------- | --------- | --------------------------------------------------------------- |
-| `encryptedData`         | `unknown` | The parsed JSON from a `.swarmid` file                          |
-| `swarmEncryptionKeyHex` | `string`  | Hex-encoded swarm encryption key (derived from `derivationKey`) |
+| Parameter | Type            | Description                                                                                       |
+| --------- | --------------- | ------------------------------------------------------------------------------------------------- |
+| `account` | `SyncedAccount` | The account record from the identity UI's account store, the shape `SyncedAccountSchemaV1` parses |
 
-**Returns:** `Promise<AccountStateSnapshotResult>` — `{ success: true, data: AccountStateSnapshot }` or `{ success: false, error: ZodError }`
+**Returns:** `AccountStateSnapshot` with the session fields stripped, ready to send as `{ type: 'account-delta', snapshot }`
 
 ```typescript
-const swarmEncryptionKey = await deriveSwarmEncryptionKey(account.derivationKey)
-const result = await decryptEncryptedExport(fileData, swarmEncryptionKey)
-if (result.success) {
-  const { connectedApps, postageStamps } = result.data
+import { accountDeltaSnapshot } from '@snaha/swarm-id'
+import type { SyncedAccount } from '@snaha/swarm-id'
+
+function publish(account: SyncedAccount) {
+  bus.publish({ type: 'account-delta', snapshot: accountDeltaSnapshot(account) })
 }
 ```
-
-### `parseEncryptedExportHeader(data)`
-
-Parse and validate just the encrypted export header without decrypting. Useful for reading the account name and export date before attempting decryption.
-
-**Parameters:**
-
-| Parameter | Type      | Description                            |
-| --------- | --------- | -------------------------------------- |
-| `data`    | `unknown` | The parsed JSON from a `.swarmid` file |
-
-**Returns:** `ParseHeaderResult` — `{ success: true, header: EncryptedSwarmIdExport }` or `{ success: false, error: string }`
-
-### `deriveBackupEncryptionKey(swarmEncryptionKeyHex)`
-
-Derive an AES-GCM-256 `CryptoKey` for backup encryption from the `swarmEncryptionKey` (which is itself derived from the stored `derivationKey`). Uses HMAC-SHA256 with context `"swarm-id-backup-encryption-v1"`.
-
-**Parameters:**
-
-| Parameter               | Type     | Description                                                     |
-| ----------------------- | -------- | --------------------------------------------------------------- |
-| `swarmEncryptionKeyHex` | `string` | Hex-encoded swarm encryption key (derived from `derivationKey`) |
-
-**Returns:** `Promise<CryptoKey>`
 
 ### Types
 
 ```typescript
-// There is a single account model (a BIP-39 seed account), so the header
-// carries no account-type discriminant and no key material. Only the account
-// name and timestamps travel in plaintext; on import the user re-enters the
-// recovery phrase, from which the master key (and everything derived from it)
-// is recomputed.
-interface EncryptedSwarmIdExport {
-  version: 1
-  accountName: string
-  exportedAt: number // Unix timestamp
-  ciphertext: string // Base64-encoded encrypted payload
+// The identity UI's stored account record (`SyncedAccountSchemaV1`): the part
+// of an account that is the same on every device. Device-local state (the
+// seed vault, the access methods) is kept beside it, never in it.
+interface SyncedAccount {
+  id: EthAddress // account id
+  name: string
+  createdAt: number
+  derivationKey: string // 64-char hex; every sub-key derives from it
+  publicKey: string // compressed secp256k1, shown to dApps as the identity key
+  defaultPostageStampBatchID?: BatchId
+  devices: Device[]
+  connectedApps: ConnectedApp[]
+  postageStamps: PostageStamp[]
+  settings?: { appSessionDuration?: number }
+  accountNameAt?: number // per-field last-writer-wins clocks
+  defaultStampAt?: number
+  settingsAt?: number
+  lastModified?: number
+  partitionCount?: number // postage-batch slot partitions; absent = 1
 }
 
-// Result of parseEncryptedExportHeader()
-type ParseHeaderResult =
-  | { success: true; header: EncryptedSwarmIdExport }
-  | { success: false; error: string }
-```
-
----
-
-## Account State Snapshots
-
-Shared serialization for account state used by both file export and Swarm sync.
-
-### `serializeAccountStateSnapshot(input)`
-
-Serialize account data into a plain object suitable for JSON encoding.
-
-**Parameters:**
-
-| Parameter             | Type              | Description        |
-| --------------------- | ----------------- | ------------------ |
-| `input.accountId`     | `string`          | Account ID (hex)   |
-| `input.metadata`      | `AccountMetadata` | Account metadata   |
-| `input.connectedApps` | `ConnectedApp[]`  | Connected apps     |
-| `input.postageStamps` | `PostageStamp[]`  | Postage stamps     |
-| `input.timestamp`     | `number`          | Snapshot timestamp |
-
-**Returns:** `Record<string, unknown>`
-
-### `deserializeAccountStateSnapshot(data)`
-
-Deserialize and validate an account state snapshot against the Zod schema.
-
-**Parameters:**
-
-| Parameter | Type      | Description       |
-| --------- | --------- | ----------------- |
-| `data`    | `unknown` | Raw data to parse |
-
-**Returns:** `AccountStateSnapshotResult` — `{ success: true, data: AccountStateSnapshot }` or `{ success: false, error: ZodError }`
-
-### Types
-
-```typescript
+// What an `account-delta` carries, and what a receiver folds into its own
+// account record with the same last-writer-wins rules as a Swarm feed payload
 interface AccountStateSnapshot {
   version: 1
   timestamp: number
   accountId: string
-  metadata: AccountMetadata
+  metadata: AccountMetadata // name, default stamp, public key, settings, devices, clocks
   connectedApps: ConnectedApp[]
   postageStamps: PostageStamp[]
 }
@@ -1776,47 +1701,18 @@ interface AccountStateSnapshot {
 
 ---
 
-## Account Restoration
-
-### `restoreAccountFromSwarm(bee, masterKey, ethereumAddress, credentialId)`
-
-Rebuild account state from Swarm on a device that has never seen the account. Derives the keys, reads the account's device roster, reads every device's latest state feed, and folds them into one snapshot; see [Postage Batch Sharing](../multi-device-postage-batches/#account-state-sync).
-
-**Parameters:**
-
-| Parameter         | Type         | Description                               |
-| ----------------- | ------------ | ----------------------------------------- |
-| `bee`             | `Bee`        | Bee client instance                       |
-| `masterKey`       | `Bytes`      | Master key from passkey authentication    |
-| `ethereumAddress` | `EthAddress` | Account ID from passkey authentication    |
-| `credentialId`    | `string`     | Credential ID from passkey authentication |
-
-**Returns:** `Promise<RestoreAccountResult | undefined>` — `undefined` if no backup found in Swarm
-
-### Types
-
-```typescript
-interface RestoreAccountResult {
-  snapshot: AccountStateSnapshot
-  derivationKey: string
-  credentialId: string
-}
-```
-
 ## Key Derivation
 
-The full tree, with every context string, is on [Key Derivation](../key-derivation/). Every function below takes and returns 64-character hex strings unless noted.
+Used by the identity UI. The full tree, with every context string, is on [Key Derivation](../key-derivation/). Every function below takes and returns 64-character hex strings unless noted.
 
-| Function                                        | Derives                                                                       |
-| ----------------------------------------------- | ----------------------------------------------------------------------------- |
-| `deriveSecret(keyHex, context)`                 | `HMAC-SHA256(bytes(keyHex), utf8(context))`, the primitive under all of these |
-| `deriveAccountDerivationKey(masterKey)`         | `derivationKey`, the key stored on the account                                |
-| `deriveSwarmEncryptionKey(derivationKey)`       | the key that encrypts everything the account writes to Swarm                  |
-| `derivePostageSignerKey(derivationKey)`         | the key that owns and stamps with the account's postage batches               |
-| `deriveSharingKey(derivationKey)`               | `{ secret, publicKey }`, the account-wide ACT sharing key (synchronous)       |
-| `deriveBusContext(derivationKey)`               | `{ topic, encryptionKey }` for the account bus                                |
-| `deriveBackupEncryptionKey(swarmEncryptionKey)` | the AES-GCM-256 `CryptoKey` for `.swarmid` files                              |
-| `backupKeyToPrivateKey(backupKeyHex)`           | the backup signer as a bee-js `PrivateKey`                                    |
+| Function                                  | Derives                                                                       |
+| ----------------------------------------- | ----------------------------------------------------------------------------- |
+| `deriveSecret(keyHex, context)`           | `HMAC-SHA256(bytes(keyHex), utf8(context))`, the primitive under all of these |
+| `deriveAccountDerivationKey(masterKey)`   | `derivationKey`, the key stored on the account                                |
+| `deriveSwarmEncryptionKey(derivationKey)` | the key that encrypts everything the account writes to Swarm                  |
+| `derivePostageSignerKey(derivationKey)`   | the key that owns and stamps with the account's postage batches               |
+| `deriveSharingKey(derivationKey)`         | `{ secret, publicKey }`, the account-wide ACT sharing key (synchronous)       |
+| `deriveBusContext(derivationKey)`         | `{ topic, encryptionKey }` for the account bus                                |
 
 ### `derivePostageSignerKey(derivationKey)`
 
