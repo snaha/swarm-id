@@ -1634,29 +1634,66 @@ The same seed always produces the same image, so it is safe to render on every `
 
 ---
 
-:::note[Identity UI internals from here on]
-The rest of this page is what the identity UI (the trusted domain) imports from `@snaha/swarm-id`. It is exported because the UI is a package like any other, not because a dApp is meant to call it: every function below takes the account object, the master key or `derivationKey`, and those never leave the trusted domain. A dApp only ever holds a `SwarmIdClient`, and no message on the wire hands any of them out. The `.swarmid` backup file is written and read by the identity UI alone; see [Architecture](../architecture/#backup-and-recovery).
+:::caution[Not a dApp API from here on]
+Everything below this note is imported by the identity UI (the trusted domain) from `@snaha/swarm-id`, and documented here because the package exports it. **A dApp has no use for it and cannot call it**: every function takes the account record, the master key or `derivationKey`, and those never leave the trusted domain. A dApp holds a `SwarmIdClient`, and no message on the wire hands any of them out. The `.swarmid` backup file is written and read by the identity UI alone; see [Architecture](../architecture/#backup-and-recovery).
 :::
 
 ## Account Bus Delta
 
-The account bus carries an `account-delta`: the account's state as one snapshot, folded last-writer-wins by every live context of the account. The identity UI publishes one and receives them; the proxy iframe does the same on its own.
+Used by the identity UI. The [account bus](../account-bus/) is how one account's live contexts (the SwarmID tab, proxy iframes across partitions, other devices) hear about a change before the next Swarm feed read. The identity UI publishes an `account-delta` after every account mutation it makes; the proxy iframe publishes its own from inside the library.
 
 ### `accountDeltaSnapshot(account)`
 
-The wire form of a synced account record for an `account-delta` message: the snapshot with the per-app session fields (`appSecret`, `connectedUntil`) stripped, since the receivers include proxy iframes embedded by other dApps.
+Build the `snapshot` field of an `account-delta` bus message from the account record as the identity UI stores it. The result is the record's state with the per-app session fields removed: `appSecret` and `connectedUntil` on each connected app. They are stripped because one receiver is a proxy iframe embedded by another dApp's page, which must not learn a secret it did not derive itself. The proxy strips the same fields on its side, so the rule exists once.
 
-**Returns:** the `snapshot` field of an `account-delta` bus message
+**Parameters:**
+
+| Parameter | Type            | Description                                                                                       |
+| --------- | --------------- | ------------------------------------------------------------------------------------------------- |
+| `account` | `SyncedAccount` | The account record from the identity UI's account store, the shape `SyncedAccountSchemaV1` parses |
+
+**Returns:** `AccountStateSnapshot` with the session fields stripped, ready to send as `{ type: 'account-delta', snapshot }`
+
+```typescript
+import { accountDeltaSnapshot } from '@snaha/swarm-id'
+import type { SyncedAccount } from '@snaha/swarm-id'
+
+function publish(account: SyncedAccount) {
+  bus.publish({ type: 'account-delta', snapshot: accountDeltaSnapshot(account) })
+}
+```
 
 ### Types
 
 ```typescript
-// What a received `account-delta` carries
+// The identity UI's stored account record (`SyncedAccountSchemaV1`): the part
+// of an account that is the same on every device. Device-local state (the
+// seed vault, the access methods) is kept beside it, never in it.
+interface SyncedAccount {
+  id: EthAddress // account id
+  name: string
+  createdAt: number
+  derivationKey: string // 64-char hex; every sub-key derives from it
+  publicKey: string // compressed secp256k1, shown to dApps as the identity key
+  defaultPostageStampBatchID?: BatchId
+  devices: Device[]
+  connectedApps: ConnectedApp[]
+  postageStamps: PostageStamp[]
+  settings?: { appSessionDuration?: number }
+  accountNameAt?: number // per-field last-writer-wins clocks
+  defaultStampAt?: number
+  settingsAt?: number
+  lastModified?: number
+  partitionCount?: number // postage-batch slot partitions; absent = 1
+}
+
+// What an `account-delta` carries, and what a receiver folds into its own
+// account record with the same last-writer-wins rules as a Swarm feed payload
 interface AccountStateSnapshot {
   version: 1
   timestamp: number
   accountId: string
-  metadata: AccountMetadata
+  metadata: AccountMetadata // name, default stamp, public key, settings, devices, clocks
   connectedApps: ConnectedApp[]
   postageStamps: PostageStamp[]
 }
@@ -1666,7 +1703,7 @@ interface AccountStateSnapshot {
 
 ## Key Derivation
 
-The full tree, with every context string, is on [Key Derivation](../key-derivation/). Every function below takes and returns 64-character hex strings unless noted.
+Used by the identity UI. The full tree, with every context string, is on [Key Derivation](../key-derivation/). Every function below takes and returns 64-character hex strings unless noted.
 
 | Function                                  | Derives                                                                       |
 | ----------------------------------------- | ----------------------------------------------------------------------------- |
