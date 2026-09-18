@@ -203,11 +203,9 @@ export {
 // State sync to Swarm
 export {
   // Account-level key derivation
-  deriveAccountBackupKey,
   deriveAccountDerivationKey,
   deriveSwarmEncryptionKey,
   derivePostageSignerKey,
-  backupKeyToPrivateKey,
   // Snapshot merge primitives (shared by publish + refresh)
   mergeSnapshotWithRemote,
   mergeConnectedApps,

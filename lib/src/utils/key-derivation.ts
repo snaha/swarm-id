@@ -116,22 +116,6 @@ export async function verifySecret(
 }
 
 /**
- * Derive account backup key from account master key
- *
- * Used for signing account feed updates
- *
- * @param accountMasterKey - Account master key (hex string)
- * @param accountId - Account ID (EthAddress hex string)
- * @returns 32-byte account backup key (as hex string)
- */
-export async function deriveAccountBackupKey(
-  accountMasterKey: string,
-  accountId: string,
-): Promise<string> {
-  return deriveSecret(accountMasterKey, `account:${accountId}`)
-}
-
-/**
  * Derive account derivation key from account master key
  *
  * A generic 32-byte root key stored on the account, used for deterministically
@@ -196,13 +180,6 @@ export function deriveSharingKey(derivationKey: string): {
     secret,
     publicKey: new PrivateKey(secret).publicKey().toCompressedHex(),
   }
-}
-
-/**
- * Convert backup key to PrivateKey for feed signing
- */
-export function backupKeyToPrivateKey(backupKeyHex: string): PrivateKey {
-  return new PrivateKey(backupKeyHex)
 }
 
 // Export utility functions for testing

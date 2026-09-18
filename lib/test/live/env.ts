@@ -24,7 +24,6 @@ import {
   deriveAccountDerivationKey,
   deriveSwarmEncryptionKey,
   deriveSecret,
-  backupKeyToPrivateKey,
 } from "../../src/utils/key-derivation"
 import { foldAccountFromSwarm } from "../../src/sync/fold-account-from-swarm"
 import type { DeviceStateView } from "../../src/sync/device-state"
@@ -154,7 +153,7 @@ export async function deriveAgentKeys() {
     .address()
   const derivationKey = await deriveAccountDerivationKey(masterKeyHex)
   const swarmEncryptionKey = await deriveSwarmEncryptionKey(derivationKey)
-  const accountKey = backupKeyToPrivateKey(
+  const accountKey = new PrivateKey(
     await deriveSecret(swarmEncryptionKey, "backup-key"),
   )
   return {

@@ -4,11 +4,9 @@
 // Public API
 export {
   // Account-level key derivation
-  deriveAccountBackupKey,
   deriveAccountDerivationKey,
   deriveSwarmEncryptionKey,
   derivePostageSignerKey,
-  backupKeyToPrivateKey,
 } from "../utils/key-derivation"
 
 // Snapshot merge primitives (shared by the publish and refresh paths so the
