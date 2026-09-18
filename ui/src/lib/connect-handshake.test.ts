@@ -9,7 +9,7 @@
  * (#578).
  */
 import { BatchId, EthAddress, PrivateKey } from '@ethersphere/bee-js'
-import { AuthDataSchema, type SyncedAccount } from '@snaha/swarm-id'
+import { AuthDataSchema, type SyncedAccount } from '@snaha/swarm-id/internal'
 import { describe, expect, it } from 'vitest'
 
 import { partitionHandoverAccount } from '$lib/connect-handshake'

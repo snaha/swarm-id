@@ -1,7 +1,7 @@
 // Copyright 2026 The Swarm Authors. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 import type { EthAddress } from '@ethersphere/bee-js'
-import type { SyncedAccount } from '@snaha/swarm-id'
+import type { SyncedAccount } from '@snaha/swarm-id/internal'
 
 const CURRENT_ACCOUNT_KEY = 'swarm-id-current-account-v2'
 

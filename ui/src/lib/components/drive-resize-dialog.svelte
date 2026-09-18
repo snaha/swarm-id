@@ -8,7 +8,7 @@
 
   import ArrowRight from '@lucide/svelte/icons/arrow-right'
   import Info from '@lucide/svelte/icons/info'
-  import type { PostageStamp } from '@snaha/swarm-id'
+  import type { PostageStamp } from '@snaha/swarm-id/internal'
 
   import { createAttemptTracker } from '$lib/attempt'
   import DriveDialogStatus from '$lib/components/drive-dialog-status.svelte'

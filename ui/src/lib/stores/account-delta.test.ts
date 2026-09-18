@@ -15,7 +15,7 @@ import {
   type ConnectedApp,
   type SignedInAccount,
   createAccountsStorageManager,
-} from '@snaha/swarm-id'
+} from '@snaha/swarm-id/internal'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { applyAccountDelta } from './account-delta'

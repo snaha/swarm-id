@@ -14,7 +14,7 @@
     type Account as AccountRecord,
     PARTITION_COUNT,
     deriveAccountDerivationKey,
-  } from '@snaha/swarm-id'
+  } from '@snaha/swarm-id/internal'
 
   import { goto } from '$app/navigation'
   import { resolve } from '$app/paths'

@@ -10,15 +10,15 @@
   import CircleCheckBig from '@lucide/svelte/icons/circle-check-big'
   import Laptop from '@lucide/svelte/icons/laptop'
   import RefreshCw from '@lucide/svelte/icons/refresh-cw'
+  import { hexToUint8Array } from '@snaha/swarm-id'
   import {
     PartitionLease,
     type PartitionLeaseStateSnapshot,
     type SyncedAccount,
     deriveSwarmEncryptionKey,
     getOrCreateDeviceId,
-    hexToUint8Array,
     leaseCacheStorageKey,
-  } from '@snaha/swarm-id'
+  } from '@snaha/swarm-id/internal'
 
   import { browser } from '$app/environment'
 

@@ -5,7 +5,8 @@
  * passkey / wallet / password branching shared by the account-creation access
  * step and the change-method ceremony.
  */
-import { type AccessMethod, uint8ArrayToHex } from '@snaha/swarm-id'
+import { uint8ArrayToHex } from '@snaha/swarm-id'
+import { type AccessMethod } from '@snaha/swarm-id/internal'
 
 import { PASSWORD_KDF_ITERATIONS, deriveKeyFromPassword, randomSalt } from '$lib/crypto/encryption'
 import { deriveWalletKey, requestWalletKeySource } from '$lib/crypto/eth-wallet'

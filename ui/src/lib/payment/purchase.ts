@@ -7,7 +7,7 @@ import {
   type PostageStamp,
   calculateStampAmountForDays,
   derivePostageSignerKey,
-} from '@snaha/swarm-id'
+} from '@snaha/swarm-id/internal'
 
 import { SECONDS_PER_DAY } from '$lib/drives'
 import type { BatchEvent } from '$lib/payment/multichain-widget'

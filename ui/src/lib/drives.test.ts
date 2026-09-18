@@ -1,7 +1,7 @@
 // Copyright 2026 The Swarm Authors. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 import { BatchId, PrivateKey, RedundancyLevel, Utils } from '@ethersphere/bee-js'
-import { MIN_USABLE_BATCH_DEPTH, type PostageStamp } from '@snaha/swarm-id'
+import { MIN_USABLE_BATCH_DEPTH, type PostageStamp } from '@snaha/swarm-id/internal'
 import { describe, expect, it } from 'vitest'
 
 import {

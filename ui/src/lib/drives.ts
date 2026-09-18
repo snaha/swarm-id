@@ -6,7 +6,7 @@ import {
   PARTITION_COUNT,
   type PostageStamp,
   remainingLifespanSeconds,
-} from '@snaha/swarm-id'
+} from '@snaha/swarm-id/internal'
 
 /**
  * Pure presentation helpers that turn a {@link PostageStamp} (a "drive") into

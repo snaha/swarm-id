@@ -10,7 +10,7 @@
   import Plus from '@lucide/svelte/icons/plus'
   import Star from '@lucide/svelte/icons/star'
   import Trash2 from '@lucide/svelte/icons/trash-2'
-  import type { PostageStamp } from '@snaha/swarm-id'
+  import type { PostageStamp } from '@snaha/swarm-id/internal'
 
   import AppIcon from '$lib/components/app-icon.svelte'
   import DriveAddDialog from '$lib/components/drive-add-dialog.svelte'

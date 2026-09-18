@@ -1,7 +1,11 @@
 // Copyright 2026 The Swarm Authors. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 import { BatchId, EthAddress } from '@ethersphere/bee-js'
-import { type PostageStamp, UtilizationAwareStamper, UtilizationStoreDB } from '@snaha/swarm-id'
+import {
+  type PostageStamp,
+  UtilizationAwareStamper,
+  UtilizationStoreDB,
+} from '@snaha/swarm-id/internal'
 
 import { browser } from '$app/environment'
 

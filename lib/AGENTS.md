@@ -1,5 +1,7 @@
 # Library Core (`lib/`)
 
+Two package entries, one build: `@snaha/swarm-id` (`src/index.ts`) is the dApp API — `SwarmIdClient`, its types, a few read-back helpers — and `@snaha/swarm-id/internal` (`src/internal.ts`) is what the identity UI imports: sync, key derivation, the account bus, the proxy. A name goes on `internal.ts` because `ui/` imports it, on `index.ts` because a dApp does; nothing is exported for the lib's own sake, its modules and tests import each other directly (#801).
+
 - **SwarmIdClient** (`swarm-id-client.ts`) — dApp-side: embeds the hidden iframe, forwards `buttonConfig` for the proxy to render the auth button, proxies Bee API calls
 - **SwarmIdProxy** (`swarm-id-proxy.ts`) — iframe-side: reads auth from the trusted domain's shared localStorage when the embedding page is same-site, or from the connect popup's handover when the browser partitions its storage; signs operations; a peer on the account bus either way
 

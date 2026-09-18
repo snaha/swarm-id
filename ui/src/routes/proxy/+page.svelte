@@ -11,7 +11,7 @@
 <script lang="ts">
   import { onMount } from 'svelte'
 
-  import { initProxy } from '@snaha/swarm-id'
+  import { initProxy } from '@snaha/swarm-id/internal'
 
   import { busSignalingUrl } from '$lib/bus-signaling-url'
 

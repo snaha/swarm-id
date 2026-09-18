@@ -6,8 +6,8 @@
 <script lang="ts">
   import { onMount, untrack } from 'svelte'
 
-  import { isSignedOutAccount, markFirstPartyStorage } from '@snaha/swarm-id'
-  import type { SyncedAccount } from '@snaha/swarm-id'
+  import { isSignedOutAccount, markFirstPartyStorage } from '@snaha/swarm-id/internal'
+  import type { SyncedAccount } from '@snaha/swarm-id/internal'
 
   import Toast from '$lib/components/toast.svelte'
   // ponytail: the sync engine lives under `$lib/dev` but operates on real account

@@ -1,7 +1,8 @@
 // Copyright 2026 The Swarm Authors. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 import { type BatchId, Bee, Identifier, PrivateKey, Stamper } from '@ethersphere/bee-js'
-import { SocUploadError, type UploadTarget, uploadSOC, withTimeout } from '@snaha/swarm-id'
+import { withTimeout } from '@snaha/swarm-id'
+import { SocUploadError, type UploadTarget, uploadSOC } from '@snaha/swarm-id/internal'
 
 import { networkSettingsStore } from '$lib/stores/network-settings.svelte'
 
