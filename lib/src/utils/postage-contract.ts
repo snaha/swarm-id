@@ -363,20 +363,6 @@ export async function fetchAuthoritativeBatchTTL(
 }
 
 /**
- * Existence + remaining TTL of a batch, for UI that must tell "this batch does
- * not exist on the configured chain" apart from "we couldn't reach the chain".
- *   - `found` — carries `ttlSeconds` (remaining TTL, or `undefined` when the
- *     price is zero so there is no finite expiry).
- *   - `not-found` — the PostageStamp contract authoritatively has no such batch.
- *   - `unreachable` — neither the contract nor the Bee node could be reached, so
- *     existence is unknown.
- */
-export type BatchResolution =
-  | { status: "found"; ttlSeconds: number | undefined }
-  | { status: "not-found" }
-  | { status: "unreachable" }
-
-/**
  * Resolves a batch's existence and remaining TTL, treating the on-chain contract
  * as the source of truth. A contract `not-found` is authoritative — a Bee node
  * that happens to track the batch cannot override the chain. The Bee node is
@@ -390,33 +376,3 @@ export type BatchResolution =
  * @param localContractAddress - PostageStamp address for a local dev chain; only
  *          honoured against a local RPC (see {@link resolvePostageStampContractAddress}).
  */
-export async function resolveBatchStatus(
-  gnosisRpcUrl: string,
-  beeUrl: string,
-  batchId: string,
-  localContractAddress?: string,
-): Promise<BatchResolution> {
-  const contractAddress = resolvePostageStampContractAddress(
-    gnosisRpcUrl,
-    localContractAddress,
-  )
-  const contract = await fetchOnChainBatchStateResult(
-    gnosisRpcUrl,
-    batchId,
-    contractAddress,
-  )
-  if (contract.status === "found") {
-    return {
-      status: "found",
-      ttlSeconds: calculateContractTTLSeconds(contract.state),
-    }
-  }
-  if (contract.status === "not-found") {
-    return { status: "not-found" }
-  }
-  // Contract read errored — fall back to the Bee node as a second opinion.
-  const beeTtl = await fetchBatchTTL(beeUrl, batchId)
-  return beeTtl !== undefined
-    ? { status: "found", ttlSeconds: beeTtl }
-    : { status: "unreachable" }
-}

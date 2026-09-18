@@ -19,10 +19,8 @@ export type { ProxyConfig } from "./swarm-id-proxy"
 export {
   deriveSecret,
   deriveSharingKey,
-  generateMasterKey,
   hexToUint8Array,
   uint8ArrayToHex,
-  verifySecret,
   utils,
 } from "./utils/key-derivation"
 
@@ -59,10 +57,8 @@ export {
   deriveUtilizationChunkKey,
   NUM_BUCKETS,
   BUCKET_DEPTH,
-  UTILIZATION_SLOTS_PER_BUCKET,
   DATA_COUNTER_START,
   CHUNK_SIZE,
-  DEFAULT_BATCH_DEPTH,
   UINT16_COUNTER_MAX_DEPTH,
   MIN_USABLE_BATCH_DEPTH,
   PARTITION_COUNT,
@@ -133,8 +129,6 @@ export {
   LocalStorageAdapter,
   MemoryStorageAdapter,
   createLocalStorageManager,
-  createMemoryStorageManager,
-  createZodParser,
   VersionedStorageSchema,
 } from "./utils/versioned-storage"
 
@@ -196,7 +190,6 @@ export {
   createSyncEpochFinder,
   createAsyncEpochFinder,
   createEpochUpdater,
-  createEpochFinder, // deprecated alias for createSyncEpochFinder
   MAX_LEVEL,
 } from "./proxy/feeds/epochs"
 
@@ -364,7 +357,6 @@ export {
   LocalVaultSchemaV1,
   AccessMethodSchemaV1,
   PostageStampSchemaV1,
-  isLocalAccount,
   isSignedOutAccount,
 } from "./schemas"
 
@@ -396,7 +388,6 @@ export type {
 // Device ID utilities
 export {
   getOrCreateDeviceId,
-  getDeviceId,
   mergeDevices,
   detectDeviceName,
 } from "./utils/device-id"
@@ -484,7 +475,7 @@ export {
 export type { ActEntry, ActKeyCandidates } from "./proxy/act"
 
 // Constant exports
-export { SWARM_SECRET_PREFIX, STORAGE_CHALLENGE_KEY } from "./types"
+export { STORAGE_CHALLENGE_KEY } from "./types"
 
 // URL building utilities
 export { buildAuthUrl, isHttpUrl } from "./utils/url"
@@ -511,11 +502,8 @@ export {
   buildBzzCompatibleManifest,
   buildBzzManifestNode,
   buildMinimalManifest,
-  extractReferenceFromManifest,
   extractEntryFromManifest,
   extractContentFromFlatManifest,
-  padPayloadForSOCDetection,
-  MAX_PADDED_PAYLOAD_SIZE,
 } from "./proxy/manifest-builder"
 
 export type {
@@ -545,8 +533,6 @@ export {
 export {
   calculateTTLSeconds,
   formatTTL,
-  getBlockTimestamp,
-  calculateExpiryTimestamp,
   fetchSwarmPrice,
   fetchChainState,
   calculateStampAmountForDays,
@@ -571,7 +557,6 @@ export {
   fetchOnChainBatchStateResult,
   fetchBatchTTLFromContract,
   fetchAuthoritativeBatchTTL,
-  resolveBatchStatus,
   resolvePostageStampContractAddress,
   calculateContractTTLSeconds,
   decodeBatches,
@@ -582,14 +567,12 @@ export type {
   OnChainPostageBatch,
   OnChainBatchState,
   OnChainBatchResult,
-  BatchResolution,
 } from "./utils/postage-contract"
 
 // Postage stamp <-> account/app association
 export {
   resolveStampForApp,
   stampsReachableByApp,
-  collectAccountStampBatchIds,
 } from "./utils/postage-stamp-association"
 export {
   remainingLifespanSeconds,

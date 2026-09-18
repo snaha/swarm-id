@@ -6,8 +6,8 @@ import { z } from "zod"
 import {
   VersionedStorageManager,
   MemoryStorageAdapter,
-  createZodParser,
   type StorageAdapter,
+  type VersionParser,
 } from "./versioned-storage"
 
 interface Item {
@@ -15,6 +15,22 @@ interface Item {
 }
 
 const ItemsSchema = z.array(z.object({ name: z.string() }))
+
+/**
+ * Create a simple Zod-based parser for a single version
+ */
+function createZodParser<T>(schema: z.ZodType<T[]>): VersionParser<T> {
+  return (data: unknown) => {
+    const result = schema.safeParse(data)
+
+    if (!result.success) {
+      console.error("Parse failed:", result.error.format())
+      return []
+    }
+
+    return result.data
+  }
+}
 
 function makeManager(
   storage: StorageAdapter,

@@ -25,13 +25,6 @@ export function getOrCreateDeviceId(): string {
 }
 
 /**
- * Get the current device ID without creating one.
- */
-export function getDeviceId(): string | undefined {
-  return localStorage.getItem(DEVICE_ID_KEY) ?? undefined
-}
-
-/**
  * Merge a device list with the current device.
  *
  * Upserts the current device: creates the entry if absent, otherwise leaves it
