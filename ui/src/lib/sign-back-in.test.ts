@@ -8,7 +8,7 @@
  * the caller explicitly allows it.
  */
 import { BatchId, EthAddress, PrivateKey } from '@ethersphere/bee-js'
-import { deriveAccountDerivationKey, foldAccountFromSwarm } from '@snaha/swarm-id'
+import { deriveAccountDerivationKey, foldAccountFromSwarm } from '@snaha/swarm-id/internal'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { strip0x } from './crypto/hex'
@@ -23,8 +23,8 @@ vi.mock('$lib/dev/sync-hooks', () => ({ triggerSync: vi.fn() }))
 vi.mock('$lib/dev/account-refresh', () => ({ noteAccountFolded: vi.fn() }))
 
 // The fold is network I/O — stub it; everything else in the lib stays real.
-vi.mock('@snaha/swarm-id', async (importOriginal) => ({
-  ...(await importOriginal<typeof import('@snaha/swarm-id')>()),
+vi.mock('@snaha/swarm-id/internal', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@snaha/swarm-id/internal')>()),
   foldAccountFromSwarm: vi.fn(),
 }))
 

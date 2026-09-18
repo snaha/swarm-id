@@ -2,587 +2,79 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Swarm ID Library
+ * `@snaha/swarm-id` — what a dApp imports.
  *
- * A TypeScript library for integrating Swarm ID authentication
- * and Bee API operations into dApps.
+ * The identity UI's half (sync, key derivation, the account bus, the proxy)
+ * is `@snaha/swarm-id/internal`; see `internal.ts`. Nothing is exported here
+ * for the lib's own sake: the proxy and the client import their modules
+ * directly, and tests do the same.
  */
 
-// Main client for parent windows
+// The client: embeds the hidden iframe, proxies Bee API calls
 export { SwarmIdClient } from "./swarm-id-client"
 
-// Proxy for iframe
-export { SwarmIdProxy, initProxy } from "./swarm-id-proxy"
-export type { ProxyConfig } from "./swarm-id-proxy"
-
-// Key derivation utilities
-export {
-  deriveSecret,
-  deriveSharingKey,
-  hexToUint8Array,
-  uint8ArrayToHex,
-  utils,
-} from "./utils/key-derivation"
-
-// Hex address utility
-export { hexAddress } from "./utils/hex"
-
-// The path a picked file has inside its folder (#750), for a dApp that builds
-// `uploadFiles`' `{ path, file }` pairs itself
-export { collectionPath } from "./utils/collection"
+export type {
+  ClientOptions,
+  AuthStatus,
+  ConnectionInfo,
+  Avatar,
+  AvatarSource,
+  PostageBatch,
+  AppMetadata,
+  ButtonConfig,
+  RequestOptions,
+  UploadOptions,
+  DownloadOptions,
+  UploadResult,
+  UploadUnavailableReason,
+  FileData,
+  SingleOwnerChunk,
+  SocUploadResult,
+  SocRawUploadResult,
+  SOCReader,
+  SOCWriter,
+  FeedReader,
+  FeedWriter,
+  SequentialFeedReader,
+  SequentialFeedWriter,
+  SequentialFeedPayloadResult,
+  SequentialFeedReferenceResult,
+  SequentialFeedUploadResult,
+  ActUploadOptions,
+  UploadFilesOptions,
+  CollectionFileInput,
+  CollectionEntry,
+} from "./types"
+export type { Reference } from "./schemas"
+export { DEFAULT_BEE_NODE_URL } from "./schemas"
 
 // Account avatars — `SwarmIdClient.getAvatar()` resolves the one to render;
 // the generator is exported for callers that want the SVG inline
 export { generatedAvatar, generatedAvatarSvg } from "./utils/avatar"
 
-// Cross-tab coalescing: run a task at most once per window across same-origin tabs
-export { runCoalescedAcrossTabs } from "./utils/coalesced-task"
-
-// Stamp worker pool for parallel ECDSA signing
-export { StampWorkerPool } from "./proxy/stamp-worker-pool"
-
-// Batch utilization tracking
+// Manifests and mantaray trees, for a dApp that reads a /bzz/ upload back or
+// uploads a directory tree
 export {
-  initializeBatchUtilization,
-  updateAfterWrite,
-  saveUtilizationState,
-  loadUtilizationState,
-  calculateUtilization,
-  toBucket,
-  serializeUint32Array,
-  deserializeUint32Array,
-  serializeUint16Array,
-  deserializeUint16Array,
-  calculateMaxSlotsPerBucket,
-  hasBucketCapacity,
-  UtilizationAwareStamper,
-  PartitionLeaseLostError,
-  getChunkLayout,
-  deriveUtilizationChunkKey,
-  NUM_BUCKETS,
-  BUCKET_DEPTH,
-  DATA_COUNTER_START,
-  CHUNK_SIZE,
-  UINT16_COUNTER_MAX_DEPTH,
-  MIN_USABLE_BATCH_DEPTH,
-  PARTITION_COUNT,
-  LEASE_TTL_MS,
-  LEASE_REFRESH_MS,
-} from "./utils/batch-utilization"
-export type { UtilizationChunkKey } from "./utils/batch-utilization"
-
-// Storage key constants (for cross-frame localStorage listeners)
-export {
-  STORAGE_KEY_ACCOUNTS,
-  STORAGE_KEY_NETWORK_SETTINGS,
-  STORAGE_KEY_LEASE_CACHE_PREFIX,
-  leaseCacheStorageKey,
-} from "./types"
-
-// Partition-lease orchestrator and feeds
-export { PartitionLease } from "./sync/partition-lease"
-export type {
-  AcquireResult,
-  PartitionLeaseSnapshotInputs,
-  PartitionLeaseStateSnapshot,
-  SelfLease,
-  PartitionHolderEntry,
-} from "./sync/partition-lease"
-export {
-  makePartitionStateTopic,
-  readPartitionState,
-  writePartitionState,
-  PartitionStateSchemaV1,
-} from "./sync/partition-state"
-export type { PartitionState } from "./sync/partition-state"
-export {
-  acquirePartitionLock,
-  compareGenerations,
-  makeDeviceTiebreaker,
-  makePartitionLockIdentifier,
-  readPartitionLock,
-  writePartitionLock,
-  lockSocAddress,
-  lockSocBucket,
-  NO_HOLDER_DEVICE_ID,
-} from "./sync/partition-lock"
-export type {
-  AcquirePartitionLockResult,
-  PartitionLockGeneration,
-  PartitionLockPayload,
-} from "./sync/partition-lock"
-export {
-  PartitionLockPayloadSchemaV1,
-  PartitionLockGenerationSchemaV1,
-} from "./schemas"
-
-// Utilization storage (IndexedDB cache)
-export { UtilizationStoreDB } from "./storage/utilization-store"
-
-export type {
-  ChunkCacheEntry,
-  BatchMetadata,
-} from "./storage/utilization-store"
-
-// Debounced utilization uploader
-export { DebouncedUtilizationUploader } from "./storage/debounced-uploader"
-
-// Versioned storage utilities
-export {
-  VersionedStorageManager,
-  LocalStorageAdapter,
-  MemoryStorageAdapter,
-  createLocalStorageManager,
-  VersionedStorageSchema,
-} from "./utils/versioned-storage"
-
-// Storage managers for entities
-export {
-  createAccountsStorageManager,
-  createNetworkSettingsStorageManager,
-  serializeAccount,
-  serializeSyncedAccount,
-  serializeConnectedApp,
-  serializePostageStamp,
-  serializeNetworkSettings,
-} from "./utils/storage-managers"
-
-// Storage manager types
-export type { NetworkSettingsStorageManager } from "./utils/storage-managers"
-
-// The account bus's `account-delta` payload, as the identity UI receives it
-export type { AccountStateSnapshot } from "./utils/account-state-snapshot"
-
-// Account bus (docs/Account-Bus.md). The proxy constructs its own; these
-// exports are for the SwarmID UI to publish and consume account-deltas
-// (#608) — the UI is where a revoke happens, and it lives in a different
-// storage partition from the dApp iframe it has to reach, so it needs the
-// signaling transport, not the BroadcastChannel one. `"."` is the only
-// subpath `lib/package.json` exposes, so there is no other way in.
-export {
-  AccountBus,
-  BroadcastChannelTransport,
-  busChannelName,
-} from "./bus/account-bus"
-export type { BusTransport, PublishOptions } from "./bus/account-bus"
-export { SignalingTransport } from "./bus/signaling-transport"
-export { deriveBusContext } from "./bus/bus-context"
-export type { BusContext } from "./bus/bus-context"
-// `restoreLocalSessionFields` is half of the same rule as `accountDeltaSnapshot`
-// — the publisher strips the per-context session fields, so every receiver puts
-// its own back after the merge. The receive schema strips them independently,
-// so a consumer that skips this blanks its own app sessions.
-export {
-  accountDeltaSnapshot,
-  restoreLocalSessionFields,
-} from "./bus/account-delta"
-export type { BusMessage, BusMessageInput } from "./bus/messages"
-export {
-  PresenceTracker,
-  PRESENCE_INTERVAL_MS,
-  PRESENCE_MAX_AGE_MS,
-} from "./bus/presence"
-
-// Epoch-based feeds - implementations
-export {
-  EpochIndex,
-  SyncEpochFinder,
-  AsyncEpochFinder,
-  BasicEpochUpdater,
-  lca,
-  next,
-  createSyncEpochFinder,
-  createAsyncEpochFinder,
-  createEpochUpdater,
-  MAX_LEVEL,
-} from "./proxy/feeds/epochs"
-
-// State sync to Swarm
-export {
-  // Account-level key derivation
-  deriveAccountDerivationKey,
-  deriveSwarmEncryptionKey,
-  derivePostageSignerKey,
-  // Snapshot merge primitives (shared by publish + refresh)
-  mergeSnapshotWithRemote,
-  mergeConnectedApps,
-  mergePostageStamps,
-  mergeDevicesList,
-  snapshotContainsContribution,
-  // Sync account
-  createSyncAccount,
-  // Phase 3a: per-device snapshot feeds + append-only roster discovery
-  deviceStateTopic,
-  writeDeviceState,
-  publishDeviceState,
-  readLatestDeviceState,
-  foldAccount,
-  deserializeDeviceState,
-  DeviceStateSnapshotSchemaV1,
-  DEVICE_STATE_TOPIC_PREFIX,
-  rosterTopic,
-  readRoster,
-  ensureInRoster,
-  ROSTER_TOPIC_PREFIX,
-  foldAccountFromSwarm,
-  foldedToSyncedAccount,
-} from "./sync"
-
-// State sync types
-export type {
-  SyncResult,
-  // Sync account types
-  SyncAccountOptions,
-  SyncAccountFunction,
-  // Store interfaces
-  AccountsStoreInterface,
-  PostageStampsStoreInterface,
-  StamperOptions,
-  FlushableStamper,
-  // Phase 3a types
-  DeviceStateSnapshot,
-  DeviceStateView,
-  FoldedAccount,
-  AccountSettings,
-  FoldAccountResult,
-} from "./sync"
-
-// Type exports
-export type {
-  ClientOptions,
-  AuthStatus,
-  UploadResult,
-  FileData,
-  PostageBatch,
-  UploadOptions,
-  UploadFilesOptions,
-  CollectionFileInput,
-  CollectionEntry,
-  ActUploadOptions,
-  SOCReader,
-  SOCWriter,
-  SingleOwnerChunk,
-  SocUploadResult,
-  SocRawUploadResult,
-  FeedReaderOptions,
-  FeedWriterOptions,
-  FeedReader,
-  FeedWriter,
-  SequentialFeedReaderOptions,
-  SequentialFeedWriterOptions,
-  SequentialFeedUpdateOptions,
-  SequentialFeedUploadOptions,
-  SequentialFeedPayloadResult,
-  SequentialFeedReferenceResult,
-  SequentialFeedUploadResult,
-  SequentialFeedReader,
-  SequentialFeedWriter,
-  UploadProgress,
-  RequestOptions,
-  DownloadOptions,
-  ParentToIframeMessage,
-  IframeToParentMessage,
-  PopupToIframeMessage,
-  SetSecretMessage,
-  AuthData,
-  AppMetadata,
-  ButtonConfig,
-  ConnectionInfo,
-  ConnectionIdentity,
-  UploadUnavailableReason,
-  Avatar,
-  AvatarSource,
-  // ACT message types
-  ActUploadDataMessage,
-  ActDownloadDataMessage,
-  ActAddGranteesMessage,
-  ActRevokeGranteesMessage,
-  ActGetGranteesMessage,
-  ActUploadDataResponseMessage,
-  ActDownloadDataResponseMessage,
-  ActAddGranteesResponseMessage,
-  ActRevokeGranteesResponseMessage,
-  ActGetGranteesResponseMessage,
-  ConnectionInfoChangedMessage,
-  DeriveAppSecretMessage,
-  DeriveAppSecretResponseMessage,
-  SocUploadMessage,
-  SocRawUploadMessage,
-  SocDownloadMessage,
-  SocRawDownloadMessage,
-  SocGetOwnerMessage,
-  EpochFeedDownloadReferenceMessage,
-  EpochFeedUploadReferenceMessage,
-  FeedGetOwnerMessage,
-  SequentialFeedGetOwnerMessage,
-  SequentialFeedDownloadPayloadMessage,
-  SequentialFeedDownloadRawPayloadMessage,
-  SequentialFeedDownloadReferenceMessage,
-  SequentialFeedUploadPayloadMessage,
-  SequentialFeedUploadRawPayloadMessage,
-  SequentialFeedUploadReferenceMessage,
-  SocUploadResponseMessage,
-  SocRawUploadResponseMessage,
-  SocDownloadResponseMessage,
-  SocRawDownloadResponseMessage,
-  SocGetOwnerResponseMessage,
-  EpochFeedDownloadReferenceResponseMessage,
-  EpochFeedUploadReferenceResponseMessage,
-  FeedGetOwnerResponseMessage,
-  SequentialFeedGetOwnerResponseMessage,
-  SequentialFeedDownloadPayloadResponseMessage,
-  SequentialFeedDownloadRawPayloadResponseMessage,
-  SequentialFeedDownloadReferenceResponseMessage,
-  SequentialFeedUploadPayloadResponseMessage,
-  SequentialFeedUploadRawPayloadResponseMessage,
-  SequentialFeedUploadReferenceResponseMessage,
-} from "./types"
-
-// Entity types from schemas
-export type {
-  Device,
-  Account,
-  SyncedAccount,
-  SignedInAccount,
-  SignedOutAccount,
-  LocalVault,
-  AccessMethod,
-  ConnectedApp,
-  PostageStamp,
-  AccountMetadata,
-  NetworkSettings,
-} from "./schemas"
-
-// Network settings constants and schema
-export {
-  DeviceSchemaV1,
-  DEFAULT_BEE_NODE_URL,
-  DEFAULT_GNOSIS_RPC_URL,
-  NetworkSettingsSchemaV1,
-  LocalAccountSchemaV1,
-  SyncedAccountSchemaV1,
-  LocalVaultSchemaV1,
-  AccessMethodSchemaV1,
-  PostageStampSchemaV1,
-  isSignedOutAccount,
-} from "./schemas"
-
-// Base validation schemas and types
-export {
-  ReferenceSchema,
-  BatchIdSchema,
-  AddressSchema,
-  PrivateKeySchema,
-  CompressedPublicKeySchema,
-  EncryptionKeySchema,
-  IdentifierSchema,
-  SignatureSchema,
-  TimestampSchema,
-  FeedIndexSchema,
-} from "./schemas"
-export type {
-  Reference,
-  BatchId,
-  Address,
-  PrivateKey,
-  CompressedPublicKey,
-  Identifier,
-  Signature,
-  Timestamp,
-  FeedIndex,
-} from "./schemas"
-
-// Device ID utilities
-export {
-  getOrCreateDeviceId,
-  mergeDevices,
-  detectDeviceName,
-} from "./utils/device-id"
-
-// Batch utilization types
-export type {
-  BatchUtilizationState,
-  ChunkLayout,
-} from "./utils/batch-utilization"
-
-// Versioned storage types
-export type {
-  VersionedStorage,
-  StorageAdapter,
-  VersionParser,
-  Serializer,
-  VersionedStorageOptions,
-} from "./utils/versioned-storage"
-
-// Epoch feed types
-export type {
-  Epoch,
-  EpochFinder,
-  EpochUpdater,
-  EpochFeedOptions,
-  EpochFeedWriterOptions,
-  EpochLookupResult,
-} from "./proxy/feeds/epochs"
-
-// Schema exports (for validation)
-export {
-  UploadOptionsSchema,
-  ActUploadOptionsSchema,
-  RequestOptionsSchema,
-  DownloadOptionsSchema,
-  UploadResultSchema,
-  FileDataSchema,
-  PostageBatchSchema,
-  AuthStatusSchema,
-  ParentToIframeMessageSchema,
-  IframeToParentMessageSchema,
-  PopupToIframeMessageSchema,
-  SetSecretMessageSchema,
-  AuthDataSchema,
-  // ACT message schemas
-  ActUploadDataMessageSchema,
-  ActDownloadDataMessageSchema,
-  ActAddGranteesMessageSchema,
-  ActRevokeGranteesMessageSchema,
-  ActGetGranteesMessageSchema,
-  ActUploadDataResponseMessageSchema,
-  ActDownloadDataResponseMessageSchema,
-  ActAddGranteesResponseMessageSchema,
-  ActRevokeGranteesResponseMessageSchema,
-  ActGetGranteesResponseMessageSchema,
-} from "./types"
-
-// Download data utility
-export { downloadDataWithChunkAPI } from "./proxy/download-data"
-export type { ChunkDownloader } from "./proxy/download-data"
-
-// SOC write/read primitives (used by dev tooling, e.g. the gateway
-// retrievability self-check: write a SOC then read it back).
-export { downloadEncryptedSOC } from "./proxy/download-data"
-export {
-  uploadSOC,
-  SocUploadError,
-  type UploadTarget,
-  type UploadSOCOptions,
-} from "./proxy/upload"
-
-// ACT (Access Control Tries) exports
-export {
-  createActForContent,
-  decryptActReference,
-  addGranteesToAct,
-  revokeGranteesFromAct,
-  getGranteesFromAct,
-  parseCompressedPublicKey,
-  publicKeyFromPrivate,
-  compressPublicKey,
-  publicKeyFromCompressed,
-} from "./proxy/act"
-
-export type { ActEntry, ActKeyCandidates } from "./proxy/act"
-
-// Constant exports
-export { STORAGE_CHALLENGE_KEY } from "./types"
-
-// URL building utilities
-export { buildAuthUrl, isHttpUrl } from "./utils/url"
-
-// Storage-partition probe. The trusted domain's own pages call
-// `markFirstPartyStorage()`; the proxy reads it back to learn which auth
-// transport can reach it (#613). `STORAGE_SHARED_KEY` is deliberately NOT
-// exported: the marker is only trustworthy because the guarded writer is the
-// only thing that sets it, and handing out the raw key invites a write that
-// makes a partitioned frame answer "shared".
-export { isStorageShared, markFirstPartyStorage } from "./utils/storage-probe"
-
-// Promise utilities. `TimeoutError` is exported because it is the discriminator
-// for a deadline anywhere in this library, the chain reads included.
-export {
-  sleep,
-  withTimeout,
-  withIdleTimeout,
-  TimeoutError,
-} from "./utils/promise"
-
-// Manifest builder utilities for /bzz/ feed compatibility
-export {
-  buildBzzCompatibleManifest,
   buildBzzManifestNode,
-  buildMinimalManifest,
-  extractEntryFromManifest,
   extractContentFromFlatManifest,
+  extractEntryFromManifest,
 } from "./proxy/manifest-builder"
-
-export type {
-  BzzCompatibleManifestResult,
-  BzzManifestNodeResult,
-} from "./proxy/manifest-builder"
-
-// Mantaray tree utilities for recursive upload/download
-export {
-  saveMantarayTreeRecursively,
-  loadMantarayTreeWithChunkAPI,
-} from "./proxy/mantaray"
-
+export { saveMantarayTreeRecursively } from "./proxy/mantaray"
 export type { UploadCallback } from "./proxy/mantaray"
 
-// Time and session constants
-export {
-  SECOND,
-  MINUTE,
-  HOUR,
-  DAY,
-  DEFAULT_SESSION_DURATION,
-  appSessionDuration,
-} from "./utils/constants"
+// The path `uploadFiles` gives a `File` picked from a folder
+export { collectionPath } from "./utils/collection"
 
-// TTL calculation and formatting utilities
-export {
-  calculateTTLSeconds,
-  formatTTL,
-  fetchSwarmPrice,
-  fetchChainState,
-  calculateStampAmountForDays,
-  fetchBatchTTL,
-  SWARMSCAN_STATS_URL,
-  GNOSIS_BLOCK_TIME,
-  BLOCKS_PER_DAY,
-} from "./utils/ttl"
-export type { ChainState } from "./utils/ttl"
+// Stamp lifetime display
+export { formatTTL } from "./utils/ttl"
+
+// Byte⇄hex, 0x-tolerant, throws on malformed input
+export { hexToUint8Array, uint8ArrayToHex } from "./utils/hex"
+
+// `withTimeout` and `TimeoutError`: the one way this library bounds a wait,
+// and the discriminator for it anywhere, the chain reads included
+export { withTimeout, TimeoutError } from "./utils/promise"
 
 // Checked JSON-RPC transport — the one contract for "is this an answer?"
-export {
-  jsonRpcCall,
-  jsonRpcBatch,
-  CHAIN_READ_TIMEOUT_MS,
-} from "./utils/json-rpc"
-export type { JsonRpcOptions, JsonRpcRequest } from "./utils/json-rpc"
-
-// On-chain postage batch reads (PostageStamp contract, ground-truth TTL)
-export {
-  fetchOnChainBatchState,
-  fetchOnChainBatchStateResult,
-  fetchBatchTTLFromContract,
-  fetchAuthoritativeBatchTTL,
-  resolvePostageStampContractAddress,
-  calculateContractTTLSeconds,
-  decodeBatches,
-  decodeUint,
-  POSTAGE_STAMP_CONTRACT_ADDRESS,
-} from "./utils/postage-contract"
-export type {
-  OnChainPostageBatch,
-  OnChainBatchState,
-  OnChainBatchResult,
-} from "./utils/postage-contract"
-
-// Postage stamp <-> account/app association
-export {
-  resolveStampForApp,
-  stampsReachableByApp,
-} from "./utils/postage-stamp-association"
-export {
-  remainingLifespanSeconds,
-  isStampExpired,
-  type StampLifetimeFields,
-} from "./utils/stamp-lifespan"
+export { jsonRpcCall, jsonRpcBatch } from "./utils/json-rpc"
+export type { JsonRpcOptions } from "./utils/json-rpc"

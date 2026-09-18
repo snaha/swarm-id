@@ -21,7 +21,8 @@
   import LoaderCircle from '@lucide/svelte/icons/loader-circle'
   import RefreshCw from '@lucide/svelte/icons/refresh-cw'
   import Wallet from '@lucide/svelte/icons/wallet'
-  import { type AccessMethod, deriveSharingKey, uint8ArrayToHex } from '@snaha/swarm-id'
+  import { uint8ArrayToHex } from '@snaha/swarm-id'
+  import { type AccessMethod, deriveSharingKey } from '@snaha/swarm-id/internal'
 
   import { createAttemptTracker } from '$lib/attempt'
   import AccountAvatar from '$lib/components/account-avatar.svelte'

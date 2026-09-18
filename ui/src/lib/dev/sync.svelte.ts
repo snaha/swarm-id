@@ -6,7 +6,7 @@ import {
   type SyncAccountFunction,
   type SyncResult,
   createSyncAccount,
-} from '@snaha/swarm-id'
+} from '@snaha/swarm-id/internal'
 
 import { browser } from '$app/environment'
 

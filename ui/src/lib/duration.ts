@@ -1,6 +1,6 @@
 // Copyright 2026 The Swarm Authors. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
-import { DAY } from '@snaha/swarm-id'
+import { DAY } from '@snaha/swarm-id/internal'
 
 export function daysToMs(days: number): number {
   return days * DAY

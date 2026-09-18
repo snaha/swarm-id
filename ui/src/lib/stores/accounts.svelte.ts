@@ -13,7 +13,7 @@ import {
   createAccountsStorageManager,
   isSignedOutAccount,
   serializePostageStamp,
-} from '@snaha/swarm-id'
+} from '@snaha/swarm-id/internal'
 
 import { browser } from '$app/environment'
 

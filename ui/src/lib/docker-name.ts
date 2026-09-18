@@ -1,6 +1,6 @@
 // Copyright 2026 The Swarm Authors. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
-import { hexAddress } from '@snaha/swarm-id'
+import { hexAddress } from '@snaha/swarm-id/internal'
 
 const adjective = [
   'admiring',
