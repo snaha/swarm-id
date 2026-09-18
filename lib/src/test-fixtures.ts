@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Shared test fixtures for backup-encryption, account-state-snapshot, and sync tests.
+ * Shared test fixtures for envelope, account-state-snapshot, and sync tests.
  */
 import { EthAddress, BatchId, PrivateKey } from "@ethersphere/bee-js"
 import type {

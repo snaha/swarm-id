@@ -195,24 +195,6 @@ export {
   PRESENCE_MAX_AGE_MS,
 } from "./bus/presence"
 
-// Encrypted backup (.swarmid) support
-export {
-  deriveBackupEncryptionKey,
-  encryptBackupPayload,
-  decryptBackupPayload,
-  buildBackupHeader,
-  createEncryptedExport,
-  decryptEncryptedExport,
-  parseEncryptedExportHeader,
-  EncryptedSwarmIdExportSchemaV1,
-} from "./utils/backup-encryption"
-
-export type {
-  EncryptedSwarmIdExport,
-  BackupHeaderWithoutCiphertext,
-  ParseHeaderResult,
-} from "./utils/backup-encryption"
-
 // Epoch-based feeds - implementations
 export {
   EpochIndex,

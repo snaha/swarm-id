@@ -77,10 +77,10 @@ export { hexToUint8Array, uint8ArrayToHex } from "./hex"
  * Derive an AES-GCM-256 key from `secretHex` under `context`.
  *
  * The three steps — HMAC to a fresh secret, hex to bytes, import as AES-GCM —
- * are one pipeline with two callers that differ only in their context string:
- * the account backup (`deriveBackupEncryptionKey`) and the bus envelope
- * (`deriveBusContext`). Non-extractable and encrypt/decrypt only, which is the
- * part worth stating once rather than twice (#590).
+ * are one pipeline. Non-extractable and encrypt/decrypt only, which is the
+ * part worth stating once (#590). The bus envelope (`deriveBusContext`) is the
+ * live caller; the `.swarmid` file key is the identity UI's, derived by HKDF
+ * from the recovery-phrase entropy, and never comes through here.
  */
 export async function deriveAesGcmKey(
   secretHex: string,
