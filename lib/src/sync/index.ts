@@ -25,13 +25,6 @@ export {
 export { createSyncAccount } from "./sync-account"
 export type { SyncAccountOptions, SyncAccountFunction } from "./sync-account"
 
-// Restore account from Swarm
-export {
-  restoreAccountFromSwarm,
-  SnapshotDataUnavailableError,
-} from "./restore-account"
-export type { RestoreAccountResult } from "./restore-account"
-
 // Phase 3a: per-device snapshot feeds + append-only roster discovery
 export {
   deviceStateTopic,

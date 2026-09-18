@@ -9,10 +9,13 @@
  * receiver has to put its own back after the merge.
  */
 
-import { serializeAccountStateSnapshot } from "../utils/account-state-snapshot"
+import {
+  accountToStateSnapshot,
+  serializeAccountStateSnapshot,
+} from "../utils/account-state-snapshot"
 import type { AccountStateSnapshot } from "../utils/account-state-snapshot"
 import { portableConnectedApp } from "../utils/storage-managers"
-import type { ConnectedApp } from "../schemas"
+import type { ConnectedApp, SyncedAccount } from "../schemas"
 import type { AccountDeltaInput } from "./messages"
 
 /**
@@ -36,6 +39,15 @@ import type { AccountDeltaInput } from "./messages"
  * would be the latter.
  */
 export function accountDeltaSnapshot(
+  account: SyncedAccount,
+): AccountDeltaInput["snapshot"] {
+  return accountDeltaFromSnapshot(
+    accountToStateSnapshot(account, account.id.toHex(), Date.now()),
+  )
+}
+
+/** The same wire form from a snapshot already assembled (the proxy's path). */
+export function accountDeltaFromSnapshot(
   snapshot: AccountStateSnapshot,
 ): AccountDeltaInput["snapshot"] {
   const wire = serializeAccountStateSnapshot(snapshot)

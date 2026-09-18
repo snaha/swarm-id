@@ -115,7 +115,7 @@ import type { DeviceStateSnapshot } from "./sync"
 import { mergeDevicesList } from "./sync/merge-snapshot"
 import { foldAccountFromSwarm } from "./sync/fold-account-from-swarm"
 import {
-  accountDeltaSnapshot,
+  accountDeltaFromSnapshot,
   restoreLocalSessionFields,
 } from "./bus/account-delta"
 import { UtilizationAwareStamper } from "./utils/batch-utilization"
@@ -2770,7 +2770,7 @@ export class SwarmIdProxy {
     }
     this.bus.publish({
       type: "account-delta",
-      snapshot: accountDeltaSnapshot(snapshot),
+      snapshot: accountDeltaFromSnapshot(snapshot),
     })
   }
 

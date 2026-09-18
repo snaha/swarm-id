@@ -152,8 +152,7 @@ export {
 // Storage manager types
 export type { NetworkSettingsStorageManager } from "./utils/storage-managers"
 
-// Account state snapshot: what the identity UI publishes as an account-delta
-export { accountToStateSnapshot } from "./utils/account-state-snapshot"
+// The account bus's `account-delta` payload, as the identity UI receives it
 export type { AccountStateSnapshot } from "./utils/account-state-snapshot"
 
 // Account bus (docs/Account-Bus.md). The proxy constructs its own; these
@@ -217,9 +216,6 @@ export {
   snapshotContainsContribution,
   // Sync account
   createSyncAccount,
-  // Restore account from Swarm
-  restoreAccountFromSwarm,
-  SnapshotDataUnavailableError,
   // Phase 3a: per-device snapshot feeds + append-only roster discovery
   deviceStateTopic,
   writeDeviceState,
@@ -248,8 +244,6 @@ export type {
   PostageStampsStoreInterface,
   StamperOptions,
   FlushableStamper,
-  // Restore account types
-  RestoreAccountResult,
   // Phase 3a types
   DeviceStateSnapshot,
   DeviceStateView,

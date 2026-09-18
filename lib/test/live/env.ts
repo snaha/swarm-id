@@ -144,8 +144,8 @@ export function createContext(): LiveContext {
 
 /**
  * Derive one throwaway account's keys (reader == writer): account id + the
- * backup feed owner/key + the swarm encryption key, exactly as
- * `restoreAccountFromSwarm` does.
+ * backup feed owner/key + the swarm encryption key, exactly as the
+ * identity UI's sign-in does.
  */
 export async function deriveAgentKeys() {
   const masterKeyHex = hex(randomBytes(KEY_BYTES))

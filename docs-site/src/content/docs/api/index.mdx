@@ -1563,9 +1563,8 @@ import type {
   // ACT types
   ActUploadOptions,
 
-  // Account state (identity UI internals, below)
+  // Account bus (identity UI internals, below)
   AccountStateSnapshot,
-  RestoreAccountResult,
 } from '@snaha/swarm-id'
 ```
 
@@ -1639,19 +1638,20 @@ The same seed always produces the same image, so it is safe to render on every `
 The rest of this page is what the identity UI (the trusted domain) imports from `@snaha/swarm-id`. It is exported because the UI is a package like any other, not because a dApp is meant to call it: every function below takes the account object, the master key or `derivationKey`, and those never leave the trusted domain. A dApp only ever holds a `SwarmIdClient`, and no message on the wire hands any of them out. The `.swarmid` backup file is written and read by the identity UI alone; see [Architecture](../architecture/#backup-and-recovery).
 :::
 
-## Account State Snapshots
+## Account Bus Delta
 
-The account-state snapshot is what the identity UI publishes over the [account bus](../account-bus/) as an `account-delta`, and what the sync coordinator captures before it writes this device's state feed. The serializers behind it are internal to the library.
+The account bus carries an `account-delta`: the account's state as one snapshot, folded last-writer-wins by every live context of the account. The identity UI publishes one and receives them; the proxy iframe does the same on its own.
 
-### `accountToStateSnapshot(account, accountId, timestamp)`
+### `accountDeltaSnapshot(account)`
 
-Assemble a snapshot from a synced account record. `timestamp` becomes both the envelope timestamp and `metadata.lastModified`; a publisher passes `Date.now()`, a caller re-reading an unchanged record passes that record's own `lastModified`.
+The wire form of a synced account record for an `account-delta` message: the snapshot with the per-app session fields (`appSecret`, `connectedUntil`) stripped, since the receivers include proxy iframes embedded by other dApps.
 
-**Returns:** `AccountStateSnapshot`
+**Returns:** the `snapshot` field of an `account-delta` bus message
 
 ### Types
 
 ```typescript
+// What a received `account-delta` carries
 interface AccountStateSnapshot {
   version: 1
   timestamp: number
@@ -1663,33 +1663,6 @@ interface AccountStateSnapshot {
 ```
 
 ---
-
-## Account Restoration
-
-### `restoreAccountFromSwarm(bee, masterKey, ethereumAddress, credentialId)`
-
-Rebuild account state from Swarm on a device that has never seen the account. Derives the keys, reads the account's device roster, reads every device's latest state feed, and folds them into one snapshot; see [Postage Batch Sharing](../multi-device-postage-batches/#account-state-sync).
-
-**Parameters:**
-
-| Parameter         | Type         | Description                               |
-| ----------------- | ------------ | ----------------------------------------- |
-| `bee`             | `Bee`        | Bee client instance                       |
-| `masterKey`       | `Bytes`      | Master key from passkey authentication    |
-| `ethereumAddress` | `EthAddress` | Account ID from passkey authentication    |
-| `credentialId`    | `string`     | Credential ID from passkey authentication |
-
-**Returns:** `Promise<RestoreAccountResult | undefined>` — `undefined` if no backup found in Swarm
-
-### Types
-
-```typescript
-interface RestoreAccountResult {
-  snapshot: AccountStateSnapshot
-  derivationKey: string
-  credentialId: string
-}
-```
 
 ## Key Derivation
 
