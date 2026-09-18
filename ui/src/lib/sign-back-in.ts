@@ -21,7 +21,7 @@ import {
   deriveAccountDerivationKey,
   foldAccountFromSwarm,
   foldedToSyncedAccount,
-} from '@snaha/swarm-id'
+} from '@snaha/swarm-id/internal'
 
 import { strip0x } from '$lib/crypto/hex'
 import { walletFromEntropy } from '$lib/crypto/mnemonic'

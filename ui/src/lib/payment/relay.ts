@@ -21,7 +21,8 @@ import {
   createClient,
   getClient,
 } from '@relayprotocol/relay-sdk'
-import { withIdleTimeout, withTimeout } from '@snaha/swarm-id'
+import { withTimeout } from '@snaha/swarm-id'
+import { withIdleTimeout } from '@snaha/swarm-id/internal'
 import { createWalletClient, custom } from 'viem'
 import { arbitrum, base, gnosis, mainnet, optimism, polygon } from 'viem/chains'
 

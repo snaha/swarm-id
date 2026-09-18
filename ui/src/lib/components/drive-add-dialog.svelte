@@ -10,7 +10,7 @@
   import ArrowLeft from '@lucide/svelte/icons/arrow-left'
   import ArrowRight from '@lucide/svelte/icons/arrow-right'
   import TriangleAlert from '@lucide/svelte/icons/triangle-alert'
-  import { BatchIdSchema, PrivateKeySchema } from '@snaha/swarm-id'
+  import { BatchIdSchema, PrivateKeySchema } from '@snaha/swarm-id/internal'
 
   import { type Attempt, createAttemptTracker } from '$lib/attempt'
   import DriveDialogStatus from '$lib/components/drive-dialog-status.svelte'

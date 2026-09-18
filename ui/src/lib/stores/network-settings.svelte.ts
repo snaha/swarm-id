@@ -1,11 +1,11 @@
 // Copyright 2026 The Swarm Authors. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
+import { DEFAULT_BEE_NODE_URL } from '@snaha/swarm-id'
 import {
-  DEFAULT_BEE_NODE_URL,
   DEFAULT_GNOSIS_RPC_URL,
   type NetworkSettings,
   createNetworkSettingsStorageManager,
-} from '@snaha/swarm-id'
+} from '@snaha/swarm-id/internal'
 
 import { browser } from '$app/environment'
 

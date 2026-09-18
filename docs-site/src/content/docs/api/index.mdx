@@ -1562,9 +1562,6 @@ import type {
 
   // ACT types
   ActUploadOptions,
-
-  // Account bus (identity UI internals, below)
-  AccountStateSnapshot,
 } from '@snaha/swarm-id'
 ```
 
@@ -1634,100 +1631,6 @@ The same seed always produces the same image, so it is safe to render on every `
 
 ---
 
-:::caution[Not a dApp API from here on]
-Everything below this note is imported by the identity UI (the trusted domain) from `@snaha/swarm-id`, and documented here because the package exports it. **A dApp has no use for it and cannot call it**: every function takes the account record, the master key or `derivationKey`, and those never leave the trusted domain. A dApp holds a `SwarmIdClient`, and no message on the wire hands any of them out. The `.swarmid` backup file is written and read by the identity UI alone; see [Architecture](../architecture/#backup-and-recovery).
-:::
+## The identity UI's entry point
 
-## Account Bus Delta
-
-Used by the identity UI. The [account bus](../account-bus/) is how one account's live contexts (the SwarmID tab, proxy iframes across partitions, other devices) hear about a change before the next Swarm feed read. The identity UI publishes an `account-delta` after every account mutation it makes; the proxy iframe publishes its own from inside the library.
-
-### `accountDeltaSnapshot(account)`
-
-Build the `snapshot` field of an `account-delta` bus message from the account record as the identity UI stores it. The result is the record's state with the per-app session fields removed: `appSecret` and `connectedUntil` on each connected app. They are stripped because one receiver is a proxy iframe embedded by another dApp's page, which must not learn a secret it did not derive itself. The proxy strips the same fields on its side, so the rule exists once.
-
-**Parameters:**
-
-| Parameter | Type            | Description                                                                                       |
-| --------- | --------------- | ------------------------------------------------------------------------------------------------- |
-| `account` | `SyncedAccount` | The account record from the identity UI's account store, the shape `SyncedAccountSchemaV1` parses |
-
-**Returns:** `AccountStateSnapshot` with the session fields stripped, ready to send as `{ type: 'account-delta', snapshot }`
-
-```typescript
-import { accountDeltaSnapshot } from '@snaha/swarm-id'
-import type { SyncedAccount } from '@snaha/swarm-id'
-
-function publish(account: SyncedAccount) {
-  bus.publish({ type: 'account-delta', snapshot: accountDeltaSnapshot(account) })
-}
-```
-
-### Types
-
-```typescript
-// The identity UI's stored account record (`SyncedAccountSchemaV1`): the part
-// of an account that is the same on every device. Device-local state (the
-// seed vault, the access methods) is kept beside it, never in it.
-interface SyncedAccount {
-  id: EthAddress // account id
-  name: string
-  createdAt: number
-  derivationKey: string // 64-char hex; every sub-key derives from it
-  publicKey: string // compressed secp256k1, shown to dApps as the identity key
-  defaultPostageStampBatchID?: BatchId
-  devices: Device[]
-  connectedApps: ConnectedApp[]
-  postageStamps: PostageStamp[]
-  settings?: { appSessionDuration?: number }
-  accountNameAt?: number // per-field last-writer-wins clocks
-  defaultStampAt?: number
-  settingsAt?: number
-  lastModified?: number
-  partitionCount?: number // postage-batch slot partitions; absent = 1
-}
-
-// What an `account-delta` carries, and what a receiver folds into its own
-// account record with the same last-writer-wins rules as a Swarm feed payload
-interface AccountStateSnapshot {
-  version: 1
-  timestamp: number
-  accountId: string
-  metadata: AccountMetadata // name, default stamp, public key, settings, devices, clocks
-  connectedApps: ConnectedApp[]
-  postageStamps: PostageStamp[]
-}
-```
-
----
-
-## Key Derivation
-
-Used by the identity UI. The full tree, with every context string, is on [Key Derivation](../key-derivation/). Every function below takes and returns 64-character hex strings unless noted.
-
-| Function                                  | Derives                                                                       |
-| ----------------------------------------- | ----------------------------------------------------------------------------- |
-| `deriveSecret(keyHex, context)`           | `HMAC-SHA256(bytes(keyHex), utf8(context))`, the primitive under all of these |
-| `deriveAccountDerivationKey(masterKey)`   | `derivationKey`, the key stored on the account                                |
-| `deriveSwarmEncryptionKey(derivationKey)` | the key that encrypts everything the account writes to Swarm                  |
-| `derivePostageSignerKey(derivationKey)`   | the key that owns and stamps with the account's postage batches               |
-| `deriveSharingKey(derivationKey)`         | `{ secret, publicKey }`, the account-wide ACT sharing key (synchronous)       |
-| `deriveBusContext(derivationKey)`         | `{ topic, encryptionKey }` for the account bus                                |
-
-### `derivePostageSignerKey(derivationKey)`
-
-**Parameters:**
-
-| Parameter       | Type     | Description                          |
-| --------------- | -------- | ------------------------------------ |
-| `derivationKey` | `string` | Account derivation key (64-char hex) |
-
-**Returns:** `Promise<string>` — 32-byte signer key as hex string
-
-```typescript
-import { derivePostageSignerKey } from '@snaha/swarm-id'
-import { PrivateKey } from '@ethersphere/bee-js'
-
-const signerKeyHex = await derivePostageSignerKey(account.derivationKey)
-const signerKey = new PrivateKey(signerKeyHex)
-```
+Everything above is `@snaha/swarm-id`, the package root, and it is the whole surface a dApp needs: a `SwarmIdClient`, its types, and a few helpers for reading uploads back. The identity UI (the trusted domain) imports its own half of the protocol from `@snaha/swarm-id/internal`: account state sync and the fold, key derivation, the account bus, the proxy iframe. Every function there takes the account record, the master key or `derivationKey`, none of which ever leaves the trusted domain, so a dApp cannot call them and nothing on the wire hands them out. That entry is not documented here; the design pages in the repository (`docs/Account-State.md`, `docs/Account-Bus.md`) and the [Key Derivation](../key-derivation/) page describe what it does.

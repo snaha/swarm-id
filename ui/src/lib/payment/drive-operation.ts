@@ -16,7 +16,7 @@
  * detected and continued rather than repeated.
  */
 import { BatchId, type PrivateKey } from '@ethersphere/bee-js'
-import type { PostageStamp } from '@snaha/swarm-id'
+import type { PostageStamp } from '@snaha/swarm-id/internal'
 import type { MultichainClient } from '@swarm-id/multichain'
 
 import { strip0x } from '$lib/crypto/hex'

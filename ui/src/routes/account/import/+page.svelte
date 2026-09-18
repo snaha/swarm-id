@@ -12,7 +12,7 @@
     deriveAccountDerivationKey,
     foldAccountFromSwarm,
     foldedToSyncedAccount,
-  } from '@snaha/swarm-id'
+  } from '@snaha/swarm-id/internal'
 
   import { goto } from '$app/navigation'
   import { resolve } from '$app/paths'

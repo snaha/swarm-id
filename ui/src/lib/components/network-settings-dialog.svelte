@@ -4,7 +4,8 @@
 -->
 
 <script lang="ts">
-  import { DEFAULT_BEE_NODE_URL, DEFAULT_GNOSIS_RPC_URL, isHttpUrl } from '@snaha/swarm-id'
+  import { DEFAULT_BEE_NODE_URL } from '@snaha/swarm-id'
+  import { DEFAULT_GNOSIS_RPC_URL, isHttpUrl } from '@snaha/swarm-id/internal'
 
   import { Button } from '$lib/components/ui/button'
   import { Dialog } from '$lib/components/ui/dialog'

@@ -28,8 +28,8 @@ import {
   accountDeltaSnapshot,
   deriveBusContext,
   getOrCreateDeviceId,
-} from '@snaha/swarm-id'
-import type { SyncedAccount } from '@snaha/swarm-id'
+} from '@snaha/swarm-id/internal'
+import type { SyncedAccount } from '@snaha/swarm-id/internal'
 
 import { busSignalingUrl } from '$lib/bus-signaling-url'
 import { applyAccountDelta } from '$lib/stores/account-delta'

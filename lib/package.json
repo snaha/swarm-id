@@ -10,6 +10,10 @@
     ".": {
       "import": "./dist/swarm-id.esm.js",
       "types": "./dist/index.d.ts"
+    },
+    "./internal": {
+      "import": "./dist/internal.esm.js",
+      "types": "./dist/internal.d.ts"
     }
   },
   "files": [
