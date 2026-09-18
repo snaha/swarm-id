@@ -4,16 +4,12 @@
 /**
  * Account State Snapshot Module
  *
- * Shared serialization for account state snapshots used by both
- * file export (.swarmid) and Swarm sync flows.
- *
- * appSecret is included in snapshots so that backups preserve app connections.
- * Since the backup is encrypted with the master key (and appSecret is
- * deterministically derivable from it), this doesn't change the threat model.
+ * The in-memory account-state snapshot: what sync captures before building a
+ * device view, and what the account bus carries as an `account-delta`.
+ * `serializeAccountStateSnapshot` is the delta's wire form; the receiver
+ * validates it with `AccountStateSnapshotSchemaV1` (`bus/messages.ts`).
  */
 
-import type { z } from "zod"
-import { AccountStateSnapshotSchemaV1 } from "../schemas"
 import type {
   ConnectedApp,
   PostageStamp,
@@ -26,8 +22,6 @@ import {
   serializePostageStamp,
 } from "./storage-managers"
 
-// Re-export schema and types for consumers
-export { AccountStateSnapshotSchemaV1 } from "../schemas"
 export type { AccountStateSnapshot } from "../schemas"
 
 // ============================================================================
@@ -35,14 +29,6 @@ export type { AccountStateSnapshot } from "../schemas"
 // ============================================================================
 
 const ACCOUNT_STATE_SNAPSHOT_VERSION = 1
-
-// ============================================================================
-// Types
-// ============================================================================
-
-export type AccountStateSnapshotResult =
-  | { success: true; data: AccountStateSnapshot }
-  | { success: false; error: z.ZodError }
 
 // ============================================================================
 // Build
@@ -131,24 +117,4 @@ export function serializeAccountStateSnapshot(input: {
     connectedApps: input.connectedApps.map(serializeConnectedApp),
     postageStamps: input.postageStamps.map(serializePostageStamp),
   }
-}
-
-// ============================================================================
-// Deserialize
-// ============================================================================
-
-/**
- * Deserialize and validate an account state snapshot.
- * Returns a discriminated union: success with parsed data, or failure with Zod error.
- */
-export function deserializeAccountStateSnapshot(
-  data: unknown,
-): AccountStateSnapshotResult {
-  const result = AccountStateSnapshotSchemaV1.safeParse(data)
-
-  if (!result.success) {
-    return { success: false, error: result.error }
-  }
-
-  return { success: true, data: result.data }
 }

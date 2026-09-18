@@ -152,18 +152,9 @@ export {
 // Storage manager types
 export type { NetworkSettingsStorageManager } from "./utils/storage-managers"
 
-// Account state snapshot (shared by file export and Swarm sync)
-export {
-  accountToStateSnapshot,
-  serializeAccountStateSnapshot,
-  deserializeAccountStateSnapshot,
-  AccountStateSnapshotSchemaV1,
-} from "./utils/account-state-snapshot"
-
-export type {
-  AccountStateSnapshot,
-  AccountStateSnapshotResult,
-} from "./utils/account-state-snapshot"
+// Account state snapshot: what the identity UI publishes as an account-delta
+export { accountToStateSnapshot } from "./utils/account-state-snapshot"
+export type { AccountStateSnapshot } from "./utils/account-state-snapshot"
 
 // Account bus (docs/Account-Bus.md). The proxy constructs its own; these
 // exports are for the SwarmID UI to publish and consume account-deltas
@@ -218,8 +209,6 @@ export {
   deriveSwarmEncryptionKey,
   derivePostageSignerKey,
   backupKeyToPrivateKey,
-  serializeAccountState,
-  deserializeAccountState,
   // Snapshot merge primitives (shared by publish + refresh)
   mergeSnapshotWithRemote,
   mergeConnectedApps,

@@ -1641,35 +1641,13 @@ The rest of this page is what the identity UI (the trusted domain) imports from 
 
 ## Account State Snapshots
 
-Shared serialization for account state, used by Swarm sync and the account bus.
+The account-state snapshot is what the identity UI publishes over the [account bus](../account-bus/) as an `account-delta`, and what the sync coordinator captures before it writes this device's state feed. The serializers behind it are internal to the library.
 
-### `serializeAccountStateSnapshot(input)`
+### `accountToStateSnapshot(account, accountId, timestamp)`
 
-Serialize account data into a plain object suitable for JSON encoding.
+Assemble a snapshot from a synced account record. `timestamp` becomes both the envelope timestamp and `metadata.lastModified`; a publisher passes `Date.now()`, a caller re-reading an unchanged record passes that record's own `lastModified`.
 
-**Parameters:**
-
-| Parameter             | Type              | Description        |
-| --------------------- | ----------------- | ------------------ |
-| `input.accountId`     | `string`          | Account ID (hex)   |
-| `input.metadata`      | `AccountMetadata` | Account metadata   |
-| `input.connectedApps` | `ConnectedApp[]`  | Connected apps     |
-| `input.postageStamps` | `PostageStamp[]`  | Postage stamps     |
-| `input.timestamp`     | `number`          | Snapshot timestamp |
-
-**Returns:** `Record<string, unknown>`
-
-### `deserializeAccountStateSnapshot(data)`
-
-Deserialize and validate an account state snapshot against the Zod schema.
-
-**Parameters:**
-
-| Parameter | Type      | Description       |
-| --------- | --------- | ----------------- |
-| `data`    | `unknown` | Raw data to parse |
-
-**Returns:** `AccountStateSnapshotResult` — `{ success: true, data: AccountStateSnapshot }` or `{ success: false, error: ZodError }`
+**Returns:** `AccountStateSnapshot`
 
 ### Types
 

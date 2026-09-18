@@ -10,7 +10,6 @@ export {
   derivePostageSignerKey,
   backupKeyToPrivateKey,
 } from "../utils/key-derivation"
-export { serializeAccountState, deserializeAccountState } from "./serialization"
 
 // Snapshot merge primitives (shared by the publish and refresh paths so the
 // rules can't drift — #337).
