@@ -28,11 +28,11 @@ export type StampRefusal = "stamp-expired" | "stamp-not-usable"
 
 /**
  * The readiness rule. Expiry first, because it is the older and the more
- * specific answer; then what the node last said about the batch (#765): a
- * batch it does not have (`exists: false`) or cannot use yet (`usable: false`
- * — a fresh purchase for its first ~30 s, or one the node never accepted)
- * refuses the first stamped write, which a dApp gating on `canUpload` alone
- * met 30 s later as a timeout.
+ * specific answer; then what the record says about the batch (#765): one the
+ * node does not have (`exists: false`) or cannot use (`usable: false`) has its
+ * first stamped write refused, which a dApp gating on `canUpload` alone met
+ * 30 s later as a timeout. The fields are what the writer last stored — the
+ * chain reconcile on drive open refreshes them — not a live reading.
  */
 export function stampRefusal(
   stamp: StampLifetimeFields,

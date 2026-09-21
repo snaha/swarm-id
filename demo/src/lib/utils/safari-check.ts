@@ -193,7 +193,7 @@ function writerPath(input: CheckInput): CheckResult {
         title,
         verdict: 'unknown',
         detail:
-          'The account’s drive is not usable by the node yet (or at all), so the session refuses to stamp and the writer path was never exercised. A fresh drive takes a moment; otherwise add another on the identity site, then run this again.',
+          'The account’s drive record says the node lacks or cannot use it, so the session refuses to stamp and the writer path was never exercised. Open the drive on the identity site to refresh its record, or add another, then run this again.',
       }
     default:
       // Not red: `uploadUnavailableReason` is optional on the wire, so an older

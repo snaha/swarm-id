@@ -471,7 +471,7 @@ export class Account {
    */
   updateStamp(
     batchID: BatchId,
-    patch: Partial<Pick<PostageStamp, 'depth' | 'amount' | 'batchTTL'>>,
+    patch: Partial<Pick<PostageStamp, 'depth' | 'amount' | 'batchTTL' | 'exists' | 'usable'>>,
   ) {
     const now = Date.now()
     this.postageStamps = this.postageStamps.map((stamp) =>

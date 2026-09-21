@@ -70,12 +70,12 @@ The dApp passed a `subsidisedGatewayUrl` when creating the SwarmIdClient.
 
 When `uploadMode` is `unavailable`, `ConnectionInfo.uploadUnavailableReason` names the **first** thing that stopped the session, not the last symptom:
 
-| Reason             | Meaning                                                                                                                                                                                                                                                                                           |
-| ------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `no-stamp`         | No postage batch or no signer key resolved — most often an account with no drive yet.                                                                                                                                                                                                             |
-| `stamper-failed`   | The stamp resolved, but the write path did not build. The only place that difference reaches the dApp.                                                                                                                                                                                            |
-| `stamp-expired`    | The stamp resolved, but its stored lifetime has run out. The session refuses to stamp with it; with a subsidised gateway configured, uploads fall back to the gateway instead.                                                                                                                    |
-| `stamp-not-usable` | The stamp resolved and is not expired, but its record says the node does not have the batch or cannot use it yet: a fresh purchase for its first ~30 s, or a batch the node never accepted. The identity UI refreshes the record; a dApp can wait for it. Falls back to the gateway the same way. |
+| Reason             | Meaning                                                                                                                                                                                                                                |
+| ------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `no-stamp`         | No postage batch or no signer key resolved — most often an account with no drive yet.                                                                                                                                                  |
+| `stamper-failed`   | The stamp resolved, but the write path did not build. The only place that difference reaches the dApp.                                                                                                                                 |
+| `stamp-expired`    | The stamp resolved, but its stored lifetime has run out. The session refuses to stamp with it; with a subsidised gateway configured, uploads fall back to the gateway instead.                                                         |
+| `stamp-not-usable` | The stamp resolved and is not expired, but its stored record says the node does not have the batch or cannot use it. Opening the drive in the identity UI refreshes the record from the chain. Falls back to the gateway the same way. |
 
 The reason is `undefined` while the session is unauthenticated, and while `canUpload` is `true`.
 

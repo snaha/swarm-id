@@ -3249,7 +3249,7 @@ export class SwarmIdProxy {
     }
     if (this.stampRefusal === "stamp-not-usable") {
       throw new Error(
-        "The account's drive is not usable: the node does not have the batch, or cannot use it yet. A fresh drive takes a moment; otherwise add another in Swarm ID before uploading.",
+        "The account's drive is not usable: its record says the node does not have the batch, or cannot use it. Open the drive in Swarm ID to refresh it, or add another, before uploading.",
       )
     }
     // NB: the multi-device "all partitions held" case is NOT checked here.
