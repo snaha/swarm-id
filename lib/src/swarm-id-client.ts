@@ -1,6 +1,7 @@
 // Copyright 2026 The Swarm Authors. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import { SwarmIdError } from "./errors"
 import type {
   ClientOptions,
   ConnectOptions,
@@ -353,7 +354,9 @@ export class SwarmIdClient {
     await new Promise<void>((resolve, reject) => {
       this.iframe!.onload = () => resolve()
       this.iframe!.onerror = () =>
-        reject(new Error("Failed to load Swarm ID iframe"))
+        reject(
+          new SwarmIdError("init-failed", "Failed to load Swarm ID iframe"),
+        )
 
       // Append to container or body
       if (containerElement) {
@@ -513,7 +516,7 @@ export class SwarmIdClient {
           message.error,
         )
         if (this.readyReject) {
-          this.readyReject(new Error(message.error))
+          this.readyReject(new SwarmIdError("init-failed", message.error))
         }
         break
 
@@ -534,7 +537,7 @@ export class SwarmIdClient {
         if (pending) {
           clearTimeout(pending.timeoutId)
           this.pendingRequests.delete(message.requestId)
-          pending.reject(new Error(message.error))
+          pending.reject(SwarmIdError.fromWire(message))
         }
         break
       }
@@ -594,7 +597,9 @@ export class SwarmIdClient {
     return new Promise((resolve, reject) => {
       const timeoutId = setTimeout(() => {
         this.pendingRequests.delete(message.requestId)
-        reject(new Error(`Request timeout after ${timeout}ms`))
+        reject(
+          new SwarmIdError("timeout", `Request timeout after ${timeout}ms`),
+        )
       }, timeout)
 
       this.pendingRequests.set(message.requestId, {
@@ -3440,7 +3445,7 @@ export class SwarmIdClient {
     // Clear pending requests
     this.pendingRequests.forEach((pending) => {
       clearTimeout(pending.timeoutId)
-      pending.reject(new Error("Client destroyed"))
+      pending.reject(new SwarmIdError("internal", "Client destroyed"))
     })
     this.pendingRequests.clear()
 

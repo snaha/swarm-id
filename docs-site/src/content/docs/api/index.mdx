@@ -1623,6 +1623,50 @@ grantees.forEach((pubKey) => console.log('  -', pubKey))
 
 ---
 
+## Errors
+
+Every rejection a client call produces is a `SwarmIdError`. Its `message` is the text the call always carried; `code` is the stable part to branch on, and where Bee or the gateway answered, the response is there too:
+
+```typescript
+import { SwarmIdError } from '@snaha/swarm-id'
+
+try {
+  await client.uploadData(data)
+} catch (error) {
+  if (!(error instanceof SwarmIdError)) throw error
+  switch (error.code) {
+    case 'not-authenticated':
+      return showConnect()
+    case 'upload-unavailable':
+      // error.reason is the same vocabulary as connectionInfo.uploadUnavailableReason
+      return showNoDrive(error.reason)
+    case 'bee-rejected':
+      return showFailed(`${error.status}: ${error.beeMessage ?? error.message}`)
+    case 'timeout':
+      return retry()
+    default:
+      return showFailed(error.message)
+  }
+}
+```
+
+| Code                  | Meaning                                                                                                                     | Also set                      |
+| --------------------- | --------------------------------------------------------------------------------------------------------------------------- | ----------------------------- |
+| `not-authenticated`   | No session for this origin                                                                                                  |                               |
+| `upload-unavailable`  | The session refuses to stamp; see [Why Uploads Are Unavailable](../subsidised-gateway/#why-uploads-are-unavailable)         | `reason`                      |
+| `partition-contended` | Every partition of the batch is held by other devices and none yielded in time                                              |                               |
+| `lease-lost`          | This device's partition was reclaimed mid-write                                                                             |                               |
+| `bee-rejected`        | Bee or the gateway answered with a non-2xx status. A `404` on `/bzz` and on a chunk mean different things; `url` says which | `status`, `beeMessage`, `url` |
+| `network`             | The request never got a response: DNS, a refused connection, or a CORS preflight the gateway rejected                       |                               |
+| `timeout`             | A deadline ran out: the proxy's on a Bee request, or the client's on the whole round trip (`requestOptions.timeout`)        |                               |
+| `invalid-request`     | The message or an argument failed validation                                                                                |                               |
+| `init-failed`         | The proxy iframe did not come up; `initialize()` rejects with this                                                          |                               |
+| `internal`            | Anything else; the message is preserved                                                                                     |                               |
+
+The instance is built on the client side from the fields the proxy sends — an `Error` posted through the iframe bridge arrives as a plain `Error`, so it never crosses it. A dApp that bundles two copies of the package should branch on `error.code` rather than `instanceof`, which is per copy.
+
+---
+
 ## Types
 
 ```typescript
@@ -1659,6 +1703,10 @@ import type {
 
   // ACT types
   ActUploadOptions,
+
+  // Errors
+  SwarmIdErrorCode,
+  SwarmIdErrorDetails,
 } from '@snaha/swarm-id'
 ```
 

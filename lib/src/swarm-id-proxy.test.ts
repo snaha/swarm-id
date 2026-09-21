@@ -266,7 +266,11 @@ describe("SwarmIdProxy deriveAppSecret (#520)", () => {
 
   it("errors when not authenticated instead of leaking a secret", async () => {
     await derive("topic-seed")
-    expect(lastMessage()).toMatchObject({ type: "error", requestId: "r1" })
+    expect(lastMessage()).toMatchObject({
+      type: "error",
+      requestId: "r1",
+      code: "not-authenticated",
+    })
   })
 })
 

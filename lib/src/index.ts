@@ -71,6 +71,12 @@ export { formatTTL } from "./utils/ttl"
 // Byte⇄hex, 0x-tolerant, throws on malformed input
 export { hexToUint8Array, uint8ArrayToHex } from "./utils/hex"
 
+// Every rejection a client call produces: `code` to branch on, `message` as
+// before, and Bee's status and message where there was a response (#761)
+export { SwarmIdError } from "./errors"
+export type { SwarmIdErrorDetails } from "./errors"
+export type { SwarmIdErrorCode } from "./types"
+
 // `withTimeout` and `TimeoutError`: the one way this library bounds a wait,
 // and the discriminator for it anywhere, the chain reads included
 export { withTimeout, TimeoutError } from "./utils/promise"
