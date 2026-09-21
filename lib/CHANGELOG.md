@@ -1,5 +1,39 @@
 # Changelog
 
+## [0.5.0](https://github.com/snaha/swarm-id/compare/v0.4.1...v0.5.0) (2026-09-21)
+
+
+### ⚠ BREAKING CHANGES
+
+* **lib:** split the package into a dApp entry and an identity-UI entry ([#802](https://github.com/snaha/swarm-id/issues/802))
+* **lib:** delete the exports nothing calls, and mark the identity-UI internals in the API reference ([#800](https://github.com/snaha/swarm-id/issues/800))
+* **lib:** uploadFiles and listFiles — a folder as one manifest ([#797](https://github.com/snaha/swarm-id/issues/797))
+* **lib:** keep saveMantarayTree internal to the proxy ([#789](https://github.com/snaha/swarm-id/issues/789))
+* **deps:** update to bee-js 13 ([#705](https://github.com/snaha/swarm-id/issues/705))
+
+### Features
+
+* **deps:** update to bee-js 13 ([#705](https://github.com/snaha/swarm-id/issues/705)) ([c35d58e](https://github.com/snaha/swarm-id/commit/c35d58ed7735514a4eda5baf364763fc9cb4a6f4))
+* **lib:** let buttonConfig set the connect button's typeface ([#788](https://github.com/snaha/swarm-id/issues/788)) ([c4e82c8](https://github.com/snaha/swarm-id/commit/c4e82c8e839515bba79c6629b3a922cf1d1ea470))
+* **lib:** split the package into a dApp entry and an identity-UI entry ([#802](https://github.com/snaha/swarm-id/issues/802)) ([fc8da63](https://github.com/snaha/swarm-id/commit/fc8da63b229e99246dab57731a0f900a1c8cf4de))
+* **lib:** uploadFiles and listFiles — a folder as one manifest ([#797](https://github.com/snaha/swarm-id/issues/797)) ([bc4b492](https://github.com/snaha/swarm-id/commit/bc4b492487f1ee2a6cce7af459045fecbe3c1b4b))
+
+
+### Bug Fixes
+
+* **lib:** an expired drive no longer reports the session as able to upload ([#755](https://github.com/snaha/swarm-id/issues/755)) ([e39c35b](https://github.com/snaha/swarm-id/commit/e39c35b7c134d65f49d709e8c5529802e52b1355))
+* **lib:** drop foreign window messages without warning ([#787](https://github.com/snaha/swarm-id/issues/787)) ([125f9bf](https://github.com/snaha/swarm-id/commit/125f9bf48f34d08cae63c00ba7d128f439a02e31))
+* **lib:** honour deferred on stamper-mode uploads, and a troubleshooting page ([#784](https://github.com/snaha/swarm-id/issues/784)) ([a696aaf](https://github.com/snaha/swarm-id/commit/a696aafb45a041a41f518c812907b0c9cbe604eb))
+* **lib:** keep saveMantarayTree internal to the proxy ([#789](https://github.com/snaha/swarm-id/issues/789)) ([3280a77](https://github.com/snaha/swarm-id/commit/3280a776da0235655c5472c29f0bc5ad88da8a71))
+* **lib:** omit Swarm-Pin on the subsidised gateway path ([#754](https://github.com/snaha/swarm-id/issues/754)) ([68b7164](https://github.com/snaha/swarm-id/commit/68b7164e205a521a4862e90e79910e62d3929a76))
+* **lib:** re-scan a stale lock read after an announced release, without re-asking ([#777](https://github.com/snaha/swarm-id/issues/777)) ([34c8d82](https://github.com/snaha/swarm-id/commit/34c8d82ea9abd8ebf85dc79f672fd65ea05986a7))
+* **lib:** say which download a reference without a manifest needs ([#790](https://github.com/snaha/swarm-id/issues/790)) ([77f209b](https://github.com/snaha/swarm-id/commit/77f209b6e1f56b473842cc95bcc1092ad44537fe)), closes [#767](https://github.com/snaha/swarm-id/issues/767)
+
+
+### Miscellaneous Chores
+
+* **lib:** delete the exports nothing calls, and mark the identity-UI internals in the API reference ([#800](https://github.com/snaha/swarm-id/issues/800)) ([b773157](https://github.com/snaha/swarm-id/commit/b7731575cc1f3aeab04eff02b5784d06243bed6a))
+
 ## [0.4.1](https://github.com/snaha/swarm-id/compare/v0.4.0...v0.4.1) (2026-09-11)
 
 
