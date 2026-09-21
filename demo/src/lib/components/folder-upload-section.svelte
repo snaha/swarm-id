@@ -67,7 +67,7 @@
           { label: 'Time', value: `${elapsed.toFixed(2)}s` },
         ],
         footnote: encrypt
-          ? 'The reference carries the key; a gateway serves it at /bzz/<reference>/ all the same.'
+          ? 'The reference carries the key: read the folder back with listFiles and downloadFile, never from a gateway URL.'
           : 'Anyone with the reference can read the folder at /bzz/<reference>/.',
       }
       onUploadResult?.(uploadResult.reference)

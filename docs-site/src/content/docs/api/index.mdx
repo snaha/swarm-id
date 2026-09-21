@@ -634,7 +634,7 @@ console.log('Downloaded:', text)
 
 ### `uploadFile(file, name?, options?, requestOptions?)`
 
-Uploads a file to the Swarm network, wrapped in a manifest that carries its name and content type. The reference is read back with [`downloadFile`](#downloadfilereference-path-options-requestoptions), or from a gateway at `/bzz/<reference>/`.
+Uploads a file to the Swarm network, wrapped in a manifest that carries its name and content type. The reference is read back with [`downloadFile`](#downloadfilereference-path-options-requestoptions). A gateway's `/bzz/<reference>/` is only for a plain reference, uploaded with `encrypt: false`: the default one carries the key, which [never goes in a gateway URL](../public-gateway/#what-that-means-for-a-dapp).
 
 Accepts either a File object (from file input) or raw Uint8Array data. When using a File object, the filename is automatically extracted unless explicitly overridden.
 
@@ -723,7 +723,7 @@ const url = URL.createObjectURL(blob)
 
 ### `uploadFiles(files, options?, requestOptions?)`
 
-Uploads a folder as one manifest: a fork per file with its path and content type, which a gateway serves at `/bzz/<reference>/<path>`. Takes what bee-js takes — the `FileList` of an `<input type="file" webkitdirectory>` or a dropped directory, a `File[]`, or `{ path, file }` pairs for a folder the app assembled itself. A `File`'s path is its `webkitRelativePath` with the picked folder's own name removed, or its name. Which files to include is the app's decision; the library uploads what it is given.
+Uploads a folder as one manifest: a fork per file with its path and content type. A gateway serves a plain folder, uploaded with `encrypt: false`, at `/bzz/<reference>/<path>`; the default reference carries the key and stays out of gateway URLs. Takes what bee-js takes — the `FileList` of an `<input type="file" webkitdirectory>` or a dropped directory, a `File[]`, or `{ path, file }` pairs for a folder the app assembled itself. A `File`'s path is its `webkitRelativePath` with the picked folder's own name removed, or its name. Which files to include is the app's decision; the library uploads what it is given.
 
 Read a folder back with [`listFiles`](#listfilesreference-requestoptions) and [`downloadData`](#downloaddatareference-options-requestoptions) per entry, or one file with [`downloadFile`](#downloadfilereference-path-options-requestoptions) and its path.
 
@@ -759,10 +759,13 @@ Every file is read into memory before the upload starts. For folders larger than
 
 ```typescript
 // <input type="file" webkitdirectory>
-const { reference } = await client.uploadFiles(input.files, {
+const { reference } = await client.uploadFiles(input.files)
+
+// a public website: plain, so a gateway serves it at /bzz/<reference>/
+await client.uploadFiles(input.files, {
+  encrypt: false,
   indexDocument: 'index.html',
 })
-// served at https://<gateway>/bzz/<reference>/
 
 // a folder the app assembled
 await client.uploadFiles([

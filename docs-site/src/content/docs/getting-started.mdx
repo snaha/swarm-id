@@ -150,7 +150,7 @@ const data = await client.downloadData(encryptedReference)
 
 ### File Operations
 
-`uploadFile` wraps the bytes in a manifest that carries the filename, so its reference is read back with `downloadFile`, or from a gateway at `/bzz/<reference>/`. The two pairs do not cross.
+`uploadFile` wraps the bytes in a manifest that carries the filename, so its reference is read back with `downloadFile`. The two pairs do not cross. `uploadFile` encrypts by default, and its 128-hex reference carries the key: a gateway's `/bzz/<reference>/` is only for a plain reference, uploaded with `encrypt: false`.
 
 ```typescript
 // Upload a file

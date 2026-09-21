@@ -43,12 +43,13 @@ Measured on 2026-09-15; the gateway is operated by the Swarm Foundation and may 
   response is to keep the default, which is what the demo does. Nothing about `deferred`
   is needed against the public gateway.
 - **Pair the retrieval path with the upload method.** `uploadData` → `/bytes/<ref>` or
-  `downloadData`; `uploadFile` → `/bzz/<ref>/` or `downloadFile`. See the
-  [API reference](../api/) for the same rule on each method.
+  `downloadData`; `uploadFile` → `downloadFile`, or `/bzz/<ref>/` for a plain upload
+  (`encrypt: false`). See the [API reference](../api/) for the same rule on each method.
 - **Never put an encrypted reference in a gateway URL.** The 128-hex reference from an
   encrypted upload contains the decryption key. A URL sends it to a third-party server,
-  which is the one place guaranteed to be logged. Fetch encrypted content through
-  `downloadData`, which decrypts in the browser.
+  which is the one place guaranteed to be logged. `uploadFile` and `uploadFiles` encrypt
+  by default. Fetch encrypted content through `downloadData` or `downloadFile`, which
+  decrypt in the browser.
 - **Retention is not stated.** Content the gateway stamps with its own batch lives as long as
   that batch does, on the operator's terms, and the client cannot read that lifetime (there
   is no `/stamps`). Do not point an on-chain commitment at gateway-funded content you could
