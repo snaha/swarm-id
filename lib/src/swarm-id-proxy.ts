@@ -401,6 +401,8 @@ export class SwarmIdProxy {
    * refuse the lease claim.
    */
   private stampLifetime: StampLifetimeFields | undefined
+  /** Bumped by every `initializeStamper`; an older init sees it move and stops */
+  private stamperInitGeneration = 0
 
   private get stampExpired(): boolean {
     return (
@@ -1766,8 +1768,14 @@ export class SwarmIdProxy {
     // stamper and a coordinator for `batchId: undefined`, and every lease op on
     // it threw (#804). A stale init leaves the session to the refresh that
     // superseded it.
+    // The generation catches a re-init for the SAME stamp — a storage event
+    // during the first init finds no fingerprint yet and inits again — so the
+    // older init yields to the newer one instead of racing it for the fields.
+    const generation = ++this.stamperInitGeneration
     const superseded = (): boolean =>
-      this.postageBatchId !== batchId || this.signerKey !== signerKey
+      this.postageBatchId !== batchId ||
+      this.signerKey !== signerKey ||
+      this.stamperInitGeneration !== generation
 
     // Look up account info for utilization tracking
     const accountInfo = await this.lookupAccountForApp()
@@ -1797,6 +1805,9 @@ export class SwarmIdProxy {
       this.stamperAccountFingerprint = `${accountInfo.owner.toHex()}-${uint8ArrayToHex(accountInfo.encryptionKey)}`
     } catch (error) {
       console.error("[Proxy] Failed to create stamper:", error)
+      // A stale init's create rejects too (its batch was just removed); the
+      // stamper by then is the superseding refresh's, not this init's to clear.
+      if (superseded()) return
       this.stamper = undefined
       this.stamperAccountFingerprint = undefined
       return
