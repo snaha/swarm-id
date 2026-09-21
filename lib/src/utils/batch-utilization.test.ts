@@ -623,6 +623,92 @@ describe("UtilizationAwareStamper partition awareness", () => {
     expect(() => stamper.stamp(makeAddressInBucket(0x99, 1))).not.toThrow()
   })
 
+  it("an invalidated lease still fences data stamps after unbindPartition", async () => {
+    // The teardown ordering: invalidate, then unbind, off the write lock — so
+    // a stamp of an in-flight upload can follow. Unfenced it would land at the
+    // legacy `dataSlot(0, j, 1)` = 1 + j: partition 1's reserved slot and lane.
+    const stamper = await UtilizationAwareStamper.create(
+      TEST_SIGNER_KEY,
+      TEST_BATCH_ID,
+      TEST_DEPTH,
+      makeEmptyCache(),
+      TEST_OWNER,
+      TEST_ENC_KEY,
+    )
+    stamper.bindPartition({
+      partition: 0,
+      partitionCount: PARTITION_COUNT,
+      localCounter: new Uint32Array(NUM_BUCKETS),
+    })
+
+    stamper.invalidateLease()
+    stamper.unbindPartition()
+
+    expect(() => stamper.stamp(makeAddressInBucket(0x9a, 0))).toThrow(
+      PartitionLeaseLostError,
+    )
+    expect(() => stamper.stamp(makeAddressInBucket(0x9a, 1))).toThrow(
+      PartitionLeaseLostError,
+    )
+
+    // The next bind is a fresh lease.
+    stamper.bindPartition({
+      partition: 1,
+      partitionCount: PARTITION_COUNT,
+      localCounter: new Uint32Array(NUM_BUCKETS),
+    })
+    const env = decodeIndex(stamper.stamp(makeAddressInBucket(0x9a, 2)).index)
+    expect(env.slot).toBe(dataSlot(1, 0, PARTITION_COUNT))
+  })
+
+  it("reserved-slot stamps still work on an invalidated, unbound stamper", async () => {
+    // The teardown release publishes the partition state, and writes the lock
+    // SOC sentinel, through exactly this stamper.
+    const stamper = await UtilizationAwareStamper.create(
+      TEST_SIGNER_KEY,
+      TEST_BATCH_ID,
+      TEST_DEPTH,
+      makeEmptyCache(),
+      TEST_OWNER,
+      TEST_ENC_KEY,
+    )
+    const lockSoc = makeAddressInBucket(0x9b, 0)
+    stamper.bindLockSocs([{ partition: 1, address: lockSoc }])
+    stamper.bindPartition({
+      partition: 1,
+      partitionCount: PARTITION_COUNT,
+      localCounter: new Uint32Array(NUM_BUCKETS),
+    })
+    stamper.invalidateLease()
+    stamper.unbindPartition()
+
+    const stateChunk = makeAddressInBucket(0x9b, 1)
+    stamper.markReservedUtilizationChunk(stateChunk, 1)
+    expect(decodeIndex(stamper.stamp(stateChunk).index).slot).toBe(1)
+
+    expect(decodeIndex(stamper.stamp(lockSoc).index).slot).toBe(1)
+
+    const pointerSoc = makeAddressInBucket(0x9b, 2)
+    stamper.reserveIntentSocSlot(pointerSoc, 1)
+    expect(decodeIndex(stamper.stamp(pointerSoc).index).slot).toBe(1)
+  })
+
+  it("invalidateLease on a never-bound stamper leaves legacy stamping alone", async () => {
+    const stamper = await UtilizationAwareStamper.create(
+      TEST_SIGNER_KEY,
+      TEST_BATCH_ID,
+      TEST_DEPTH,
+      makeEmptyCache(),
+      TEST_OWNER,
+      TEST_ENC_KEY,
+    )
+
+    stamper.invalidateLease()
+
+    const env = decodeIndex(stamper.stamp(makeAddressInBucket(0x9c, 0)).index)
+    expect(env.slot).toBe(dataSlot(0, 0, 1))
+  })
+
   it("a locally-lapsed lease fences the next partition-bound stamp (skew margin applied)", async () => {
     // Race B (Postage-Batch-Partitioning.md §12): a holder whose refresh tick
     // can't renew must stop writing when its OWN clock says the lease lapsed —
