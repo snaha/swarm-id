@@ -197,6 +197,15 @@ export class SwarmIdClient {
    * @throws {Error} If the provided app metadata is invalid
    */
   constructor(options: ClientOptions) {
+    // Before anything touches `window`: a server render reached
+    // `setupMessageListener` and threw a bare `ReferenceError` from what, in
+    // the published build, is minified code (#778). Name the package and the
+    // fix instead.
+    if (typeof window === "undefined") {
+      throw new Error(
+        "@snaha/swarm-id runs in the browser only: construct SwarmIdClient in code that runs there (an effect, onMount, or behind `typeof window !== 'undefined'`), not in a server render",
+      )
+    }
     this.iframeOrigin = options.iframeOrigin
     this.iframePath = options.iframePath || "/proxy"
     this.timeout = options.timeout ?? DEFAULT_TIMEOUT_MS
