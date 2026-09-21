@@ -1310,7 +1310,8 @@ export class SwarmIdClient {
   /**
    * Uploads a file to the Swarm network, wrapped in a manifest that carries
    * its name and content type. Read the reference back with
-   * {@link downloadFile}, or from a gateway at `/bzz/<reference>/`.
+   * {@link downloadFile}. A gateway's `/bzz/<reference>/` is only for a plain
+   * reference, uploaded with `encrypt: false`.
    *
    * Accepts either a File object (from file input) or raw Uint8Array data.
    * When using a File object, the filename is automatically extracted unless
@@ -1479,11 +1480,12 @@ export class SwarmIdClient {
 
   /**
    * Uploads a folder as one manifest (#750): a fork per file with its path and
-   * content type, served by a gateway at `/bzz/<reference>/<path>`. Takes
-   * what bee-js takes — the `FileList` of a `webkitdirectory` input or a
-   * dropped directory, a `File[]`, or `{ path, file }` pairs for a folder the
-   * app assembled itself. A `File`'s path is its `webkitRelativePath` minus
-   * the picked folder's own name, or its name.
+   * content type, which a gateway serves at `/bzz/<reference>/<path>` when the
+   * folder is plain (`encrypt: false`). Takes what bee-js takes — the
+   * `FileList` of a `webkitdirectory` input or a dropped directory, a `File[]`,
+   * or `{ path, file }` pairs for a folder the app assembled itself. A `File`'s
+   * path is its `webkitRelativePath` minus the picked folder's own name, or its
+   * name.
    *
    * Content is encrypted unless `options.encrypt` is `false`, and the
    * manifest too — a 64-byte root reference — unless `options.encrypt` or
