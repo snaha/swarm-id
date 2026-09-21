@@ -553,6 +553,114 @@ describe("SwarmIdProxy partitioned write enablement", () => {
     expect(app.lastConnectedAt).toBeGreaterThan(0)
   })
 
+  // `loadAuthData` runs in the identify handler, off the reconcile queue, so a
+  // storage event's `refreshStampFromStorage` runs while `initializeStamper`
+  // is inside an await. It used to read the batch id again afterwards: cleared
+  // in between, the coordinator was built for `batchId: undefined` and every
+  // lease op on it threw (#804).
+  it("drops a stamper init whose stamp was cleared while it awaited", async () => {
+    seedConnectedAccount()
+    const coordinatorsBefore = vi.mocked(BatchWriteCoordinator).mock.results
+      .length
+    let finishCreate: (() => void) | undefined
+    vi.mocked(UtilizationAwareStamper.create).mockImplementationOnce(
+      (_signerKey, batchId) =>
+        new Promise<UtilizationAwareStamper>((resolve) => {
+          finishCreate = () =>
+            resolve(
+              Object.assign(stamperStub, {
+                mock: "stamper",
+                batchId,
+              }) as unknown as UtilizationAwareStamper,
+            )
+        }),
+    )
+    const identified = dispatch(
+      { type: "parentIdentify", requestId: "r1", metadata: { name: "dApp" } },
+      PARENT_ORIGIN,
+      parentWindow,
+    )
+    await vi.waitFor(() => expect(finishCreate).toBeDefined())
+
+    // The drive goes away; the storage event's reconcile clears the stamp.
+    const shell = createAccountsStorageManager()
+    shell.save(
+      shell.load().map((account) => ({
+        ...account,
+        postageStamps: [],
+        defaultPostageStampBatchID: undefined,
+      })),
+    )
+    await flushBus()
+
+    finishCreate!()
+    await identified
+
+    const internals = proxy as unknown as { stamper: unknown }
+    expect(internals.stamper).toBeUndefined()
+    expect(vi.mocked(BatchWriteCoordinator).mock.results).toHaveLength(
+      coordinatorsBefore,
+    )
+  })
+
+  // The branch the guard above does not take: the stale init's create REJECTS
+  // — a batch just removed is the likeliest reason — and its catch used to
+  // clear the stamper the superseding refresh had installed, so the session
+  // reported stamper-failed with a working drive (#805 review).
+  it.each([
+    { drive: "a replaced drive", batch: "dd".repeat(32) },
+    // A storage event during the first init finds no stamper fingerprint yet
+    // and inits the same drive again; the first init is the stale one.
+    { drive: "the same drive", batch: BATCH_ID_HEX },
+  ])(
+    "keeps the superseding refresh's stamper for $drive when the stale init's create rejects",
+    async ({ batch }) => {
+      seedConnectedAccount()
+      let rejectCreate: ((error: Error) => void) | undefined
+      vi.mocked(UtilizationAwareStamper.create).mockImplementationOnce(
+        () =>
+          new Promise<UtilizationAwareStamper>((_resolve, reject) => {
+            rejectCreate = reject
+          }),
+      )
+      const identified = dispatch(
+        { type: "parentIdentify", requestId: "r1", metadata: { name: "dApp" } },
+        PARENT_ORIGIN,
+        parentWindow,
+      )
+      await vi.waitFor(() => expect(rejectCreate).toBeDefined())
+
+      // The reconcile builds a stamper for the drive it finds.
+      const replacement = new BatchId(batch)
+      const shell = createAccountsStorageManager()
+      shell.save(
+        shell.load().map((account) => ({
+          ...account,
+          defaultPostageStampBatchID: replacement,
+          postageStamps: (account as SyncedAccount).postageStamps.map(
+            (stamp) => ({
+              ...stamp,
+              batchID: replacement,
+            }),
+          ),
+        })),
+      )
+      const internals = proxy as unknown as {
+        stamper: { batchId?: BatchId } | undefined
+      }
+      await vi.waitFor(() =>
+        expect(String(internals.stamper?.batchId)).toBe(replacement.toHex()),
+      )
+
+      rejectCreate!(new Error("batch gone"))
+      await identified
+
+      expect(String(internals.stamper?.batchId)).toBe(replacement.toHex())
+      const infos = messagesOfType("connectionInfoChanged")
+      expect(infos[infos.length - 1].uploadUnavailableReason).toBeUndefined()
+    },
+  )
+
   it("refuses a handover that carries no account", async () => {
     const challenge = await startPartitionedConnect()
     await sendSetSecret(challenge, {})
