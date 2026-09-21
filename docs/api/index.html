@@ -1225,6 +1225,7 @@
 <div class="sl-heading-wrapper level-h3"><h3 id="uploadchunkdata-options-requestoptions"><code dir="auto">uploadChunk(data, options?, requestOptions?)</code></h3><a class="sl-anchor-link" href="#uploadchunkdata-options-requestoptions"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 1 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 0 0-1.42-1.42m8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 1 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 0 0 0 1.42 1 1 0 0 0 1.42 0l3.88-3.89a4.49 4.49 0 0 0 0-6.33M8.83 15.17a1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.92-4.92a1 1 0 1 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42"></path></svg></span><span class="sr-only" data-pagefind-ignore>Section titled “uploadChunk(data, options?, requestOptions?)”</span></a></div>
 <p>Uploads a single chunk to the Swarm network.</p>
 <p>Chunks are the fundamental unit of storage in Swarm (4KB each). This method is useful for low-level operations or when implementing custom chunking strategies.</p>
+<p><code dir="auto">data</code> is the chunk’s payload, not a finished chunk: the proxy builds the content-addressed chunk around it (span header, BMT address) and returns that address. A chunk that already carries its span header is wrapped a second time and stored under an address nothing else computes. To store a folder as a manifest, use <a href="#uploadfilesfiles-options-requestoptions"><code dir="auto">uploadFiles</code></a>; to save a Mantaray tree of your own, use <code dir="auto">saveMantarayTreeRecursively</code> with <a href="#uploaddatadata-options-requestoptions"><code dir="auto">uploadData</code></a>, which hands back the reference each node was stored under.</p>
 <p><strong>Parameters:</strong></p>
 <table>
 <thead>
@@ -1240,7 +1241,7 @@
 <td><code dir="auto">data</code></td>
 <td><code dir="auto">Uint8Array</code></td>
 <td>Yes</td>
-<td>The chunk data (should be exactly 4KB for optimal storage)</td>
+<td>The chunk payload, 1 to 4096 bytes</td>
 </tr>
 <tr>
 <td><code dir="auto">options</code></td>
