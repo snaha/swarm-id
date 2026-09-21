@@ -100,8 +100,18 @@ A real origin problem shows as the iframe never becoming ready, not as this line
 
 **Cause.** A raw-bytes reference — the output of `uploadData` — asked of the manifest endpoint.
 
-**Fix.** Retrieve `uploadData` output at `/bytes/<reference>` or with `downloadData`; `/bzz` and
-`downloadFile` are for `uploadFile` output. See [The Public Gateway](../public-gateway/).
+**Fix.** Retrieve `uploadData` output at `/bytes/<reference>` or with `downloadData`. Read
+`uploadFile` output with `downloadFile`: its default reference is 128 hex characters and carries
+the decryption key, which must never go into a gateway URL. `/bzz/<reference>/` is for a plain
+one only (`encrypt: false`). See [The Public Gateway](../public-gateway/).
+
+### `No manifest at this reference; a reference from uploadData needs downloadData.`
+
+**Cause.** The same crossed pair, reached through the library: `downloadFile` given the output of
+`uploadData`.
+
+**Fix.** `downloadData` for `uploadData` output, `downloadFile` for `uploadFile` output. See
+[`downloadData`](../api/#downloaddatareference-options-requestoptions).
 
 ### `getNodeInfo()` fails
 

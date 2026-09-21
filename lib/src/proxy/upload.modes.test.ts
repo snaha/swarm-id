@@ -2,6 +2,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
+ * What each upload mode forwards to Bee.
+ *
  * The subsidised path never sends `Swarm-Pin` (#752): pinning means "keep
  * this on the local node", and the node is the dApp operator's, not the
  * user's — gateway-proxy strips the header by default, and the public
@@ -9,6 +11,8 @@
  *
  * Stamper mode still sends it — the node is the user's own — so the positive
  * half is asserted too, or a header dropped from the wrong branch stays green.
+ * Stamper mode also honours the caller's `deferred`, which every data and
+ * chunk upload hard-coded away from #298 until #784.
  */
 
 import { describe, it, expect, vi, afterEach } from "vitest"
