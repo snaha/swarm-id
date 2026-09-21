@@ -1273,10 +1273,12 @@ export class UtilizationAwareStamper implements Stamper {
 
   /**
    * Circuit breaker for in-flight uploads. Flipped to `true` when the proxy
-   * detects displacement on a refresh tick (or upload-start lease check);
-   * subsequent partition-bound `stamp()` calls throw `PartitionLeaseLostError`
-   * to abort the upload cleanly instead of silently corrupting the peer's
-   * slot space.
+   * detects displacement on a refresh tick (or upload-start lease check), or
+   * tears the lease down; subsequent data `stamp()` calls throw
+   * `PartitionLeaseLostError` to abort the upload cleanly instead of silently
+   * corrupting the peer's slot space. Outlives `unbindPartition` — an unbound
+   * stamper would otherwise stamp the rest of that upload at legacy slots —
+   * and is cleared only by the next `bindPartition`.
    */
   private leaseStale: boolean = false
 
@@ -1528,21 +1530,24 @@ export class UtilizationAwareStamper implements Stamper {
   /**
    * Inverse of `bindPartition` — clears partition slot state on demote.
    * Leaves `lockSocs` intact (still valid for the account; refresh/yield
-   * writes may need them) and clears the lease-stale flag.
+   * writes may need them), and leaves an invalidated lease invalidated: see
+   * `leaseStale`.
    */
   unbindPartition(): void {
     this.partition = undefined
     this.partitionCountValue = 1
-    this.leaseStale = false
     this.leaseValidUntil = undefined
   }
 
   /**
-   * Circuit-break: mark the bound lease as stale. The next partition-bound
-   * `stamp()` call will throw `PartitionLeaseLostError` so an in-flight
-   * upload aborts cleanly mid-stream when a peer takes our partition.
+   * Circuit-break: mark the bound lease as stale. Every data `stamp()` from
+   * here to the next `bindPartition` throws `PartitionLeaseLostError`, so an
+   * in-flight upload aborts cleanly mid-stream when a peer takes our partition
+   * or the lease is torn down under it. No-op when no partition is bound:
+   * there is no lease to lose, and legacy stamping must stay unfenced.
    */
   invalidateLease(): void {
+    if (this.partition === undefined) return
     this.leaseStale = true
   }
 
@@ -1738,19 +1743,20 @@ export class UtilizationAwareStamper implements Stamper {
     }
 
     // Partition lease was reclaimed — abort cleanly before the stamp lands in
-    // slot space the peer now controls. Only meaningful when a partition is
-    // bound (single-device legacy mode has no lease to invalidate). Two
-    // conditions:
+    // slot space the peer now controls. Single-device legacy mode has no lease
+    // to invalidate, so neither condition can hold there. Two conditions:
     //  - `leaseStale`: the refresh tick CONFIRMED a peer took over (write-verify
-    //    failed / displacement beacon seen).
+    //    failed / displacement beacon seen), or the coordinator tore the lease
+    //    down. Holds across the unbind that follows, where the fall-through
+    //    below would stamp at legacy slots.
     //  - `leaseLocallyLapsed()`: this device's own clock says the lease expired
     //    (skew margin applied). Catches the un-renewable case a disjoint-gateway
     //    refresh can't confirm by reading — stops a long op mid-stream the moment
     //    the lease lapses locally, so the data write is fenced to the same skew
     //    bound as the ack (Postage-Batch-Partitioning.md §12, "ack-safe").
     if (
-      this.partition !== undefined &&
-      (this.leaseStale || this.leaseLocallyLapsed())
+      this.leaseStale ||
+      (this.partition !== undefined && this.leaseLocallyLapsed())
     ) {
       throw new PartitionLeaseLostError()
     }

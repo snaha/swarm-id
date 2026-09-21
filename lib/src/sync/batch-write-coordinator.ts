@@ -445,11 +445,10 @@ export class BatchWriteCoordinator {
       }
       // Invalidate BEFORE unbinding (same ordering as the displacement race
       // fix): teardown runs synchronously, off the write lock, so it can land
-      // between two awaits of an in-flight `stamp()`. `unbindPartition` alone
-      // resets `leaseStale=false`, letting that stamp silently fall back to
-      // legacy "any"-pool slot-picking and corrupt a peer's slots; invalidating
-      // first arms the breaker so the in-flight stamp aborts with
-      // `PartitionLeaseLostError` instead.
+      // between two stamps of an in-flight upload. An unbound stamper stamps
+      // at legacy slots, which here are a peer's; `invalidateLease` only arms
+      // on a bound stamper, and the breaker it arms outlives the unbind, so
+      // the rest of that upload aborts with `PartitionLeaseLostError` instead.
       stamper.invalidateLease()
       stamper.unbindPartition()
     }

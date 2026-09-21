@@ -65,6 +65,7 @@ import {
   LEASE_TTL_MS,
   PARTITION_COUNT,
   NUM_BUCKETS,
+  PartitionLeaseLostError,
   getChunkLayout,
   toBucket,
   UtilizationAwareStamper,
@@ -1794,6 +1795,71 @@ describe("PartitionLease.acquire — solo-clean guard skip", () => {
     const result = await lease.acquire({ partitionCount: PARTITION_COUNT })
     expect(result.partition).not.toBeUndefined()
     expect(guardWaits).toEqual([BIG_GUARD_MS])
+  })
+})
+
+describe("PartitionLease.release — after the coordinator's teardown", () => {
+  it("publishes through a stamper that now refuses data stamps", async () => {
+    let metadata: unknown
+    const cache = {
+      getAllChunks: async () => [],
+      putChunk: async () => undefined,
+      getMetadata: async () => metadata,
+      putMetadata: async (next: unknown) => {
+        metadata = next
+      },
+    } as unknown as Parameters<typeof UtilizationAwareStamper.create>[3]
+    const stamper = await UtilizationAwareStamper.create(
+      "11".repeat(32),
+      TEST_BATCH_ID,
+      TEST_BATCH_DEPTH,
+      cache,
+      OWNER,
+      TEST_ENC_KEY,
+    )
+    // The stamper routes the lock SOC by the signer it derives from the
+    // encryption key, so the lease has to write with that signer too.
+    const leaseOpts = {
+      bee,
+      deviceId: DEVICE_A,
+      batchId: TEST_BATCH_ID,
+      batchDepth: TEST_BATCH_DEPTH,
+      swarmEncryptionKey: TEST_ENC_KEY,
+      guardMs: GUARD_MS,
+      intentGuardWindowMs: 0,
+    }
+    const lease = await PartitionLease.fromSwarmEncryptionKey({
+      ...leaseOpts,
+      stamper,
+    })
+    const acquired = await lease.acquire({ partitionCount: PARTITION_COUNT })
+    expect(acquired.partition).toBe(0)
+    stamper.bindPartition({
+      partition: 0,
+      partitionCount: PARTITION_COUNT,
+      localCounter: acquired.localCounter!,
+    })
+    const BUCKET = 0x0123
+    const dataAddress = new Uint8Array(32)
+    dataAddress[0] = BUCKET >> 8
+    dataAddress[1] = BUCKET & 0xff
+    stamper.stamp(dataAddress)
+    const localCounter = stamper.getLocalCounter()!
+
+    // `BatchWriteCoordinator.teardown()`: invalidate, unbind, then release.
+    stamper.invalidateLease()
+    stamper.unbindPartition()
+    await lease.release(localCounter)
+
+    expect(() => stamper.stamp(dataAddress)).toThrow(PartitionLeaseLostError)
+    // A successor finds the partition released, and resumes the counter.
+    const successor = await PartitionLease.fromSwarmEncryptionKey({
+      ...leaseOpts,
+      stamper: createMockStamper(),
+    })
+    const resumed = await successor.acquire({ partitionCount: PARTITION_COUNT })
+    expect(resumed.partition).toBe(0)
+    expect(resumed.localCounter?.[BUCKET]).toBe(1)
   })
 })
 
