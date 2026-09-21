@@ -73,9 +73,10 @@ const CONNECT_TIMEOUT_MS = 60_000
 const UPLOAD_TIMEOUT_MS = 60_000
 /** A bus-accelerated handover is ~one round trip; this is the poll fallback plus margin. */
 const HANDOVER_TIMEOUT_MS = LEASE_REFRESH_MS * 3
-/** A closed tab's slot: its lock lapses at the TTL, its beacon a grace later,
- *  and the waiter polls every refresh interval. */
-const TTL_RECLAIM_TIMEOUT_MS = LEASE_TTL_MS + INTENT_LIVENESS_GRACE_MS + LEASE_REFRESH_MS * 3
+/** How long a slot nobody released stays taken: its lock lapses at the TTL, its
+ *  occupancy beacon a grace later, and a refresh tick acts on it. Nothing a
+ *  waiter does shortens it — a closed tab announces nothing (#676). */
+const TTL_LAPSE_MS = LEASE_TTL_MS + INTENT_LIVENESS_GRACE_MS + LEASE_REFRESH_MS
 /** Past the idle window with the refresh tick that acts on it. */
 const IDLE_WAIT_MS = IDLE_YIELD_MS + LEASE_REFRESH_MS * 2
 /** How an upload fails when no holder answers its slot wait: the wait runs out, or the
@@ -99,6 +100,18 @@ const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
 
 /** The account document and current-account pointer, copied from device A. */
 type Seed = { accounts: string | null; current: string | null }
+
+/**
+ * Skip a scenario that has no subject, and say so where a reviewer looks: a
+ * `::warning::` line is an annotation on the run and the PR's checks tab,
+ * where a skipped scenario is otherwise a green check with the reason in the
+ * log only.
+ */
+function skipScenario(reason: string): never {
+  if (process.env.CI) console.log(`::warning::skipped ${test.info().title}: ${reason}`)
+  test.skip(true, reason)
+  throw new Error(reason) // unreachable: test.skip throws
+}
 
 /**
  * One device: one context, one (or more) demo tabs on it. Everything is read
@@ -297,7 +310,7 @@ class Device {
     } catch (error) {
       const shown = error instanceof Error ? error.message : String(error)
       if (UNANSWERED_WAIT.test(shown)) {
-        test.skip(true, `${this.label}'s slot wait was never answered: holders stayed busy (#707)`)
+        skipScenario(`${this.label}'s slot wait was never answered: holders stayed busy (#707)`)
       }
       throw error
     }
@@ -455,7 +468,7 @@ test.describe('three devices on two partitions', () => {
   const all = () => [A, B, C]
 
   test.beforeAll(async ({ browser }) => {
-    test.setTimeout(TTL_RECLAIM_TIMEOUT_MS * 2 + UPLOAD_TIMEOUT_MS * 3)
+    test.setTimeout(TTL_LAPSE_MS * 2 + UPLOAD_TIMEOUT_MS * 3)
     // Playwright replaces the worker after a failed test and runs this hook
     // again; the drive bought the first time is reused rather than bought
     // again, which is what keeps a run with failures from draining the faucet.
@@ -466,7 +479,7 @@ test.describe('three devices on two partitions', () => {
       // are not: a partition they held stays taken until the TTL and the
       // beacon grace lapse. Three new devices arriving before that find both
       // slots held and every scenario fails for the same reason.
-      await sleep(LEASE_TTL_MS + INTENT_LIVENESS_GRACE_MS + LEASE_REFRESH_MS)
+      await sleep(TTL_LAPSE_MS)
       A = await Device.open(browser, 'A', seed)
       B = await Device.open(browser, 'B', seed)
       C = await Device.open(browser, 'C', seed)
@@ -573,7 +586,7 @@ test.describe('three devices on two partitions', () => {
       if ((await device.partition()) !== undefined && busy >= BUSY_PUBLISHES) {
         // Not idle at all: it spent the window publishing device state to a
         // peer (#707), and every publish is lease activity.
-        test.skip(true, `${device.label} published ${busy}× during the idle window (#707)`)
+        skipScenario(`${device.label} published ${busy}× during the idle window (#707)`)
       }
       await expect.poll(() => device.partition(), { timeout: LEASE_REFRESH_MS * 2 }).toBeUndefined()
     }
@@ -623,11 +636,21 @@ test.describe('three devices on two partitions', () => {
   test('a disconnect releases the partition at once, and a waiting device takes it', async () => {
     for (const device of all()) await device.ensureConnected()
     // Fill both slots: B takes a free one, then C's request makes an idle
-    // holder yield. B may already have idle-yielded by the time C asks, so C
-    // may take B's old slot legitimately; the invariant is the check.
+    // holder yield. The holder that yields may be B rather than A — then B
+    // holds nothing to release, and the scenario has no subject (#798: the
+    // assertion below once compared A's slot with `undefined`). One more
+    // upload puts B back: C, just served, is inside the peer-yield window,
+    // so the idle holder that yields is A.
     await B.uploadAndHoldOrSkip()
     await C.uploadAndHoldOrSkip()
-    await expectNoDualHold(all())
+    if ((await B.partition()) === undefined) await B.uploadAndHoldOrSkip()
+    const before = await expectNoDualHold(all())
+    const pB = before.get('B')
+    if (pB === undefined || before.get('C') === undefined) {
+      skipScenario(
+        `B and C did not both hold before B's disconnect: ${JSON.stringify([...before])}`,
+      )
+    }
 
     // A waits for a slot while B disconnects. The mechanism under test is the
     // teardown release: B's slot is freed at once and its `lease-released`
@@ -635,13 +658,12 @@ test.describe('three devices on two partitions', () => {
     // A's request — is kept out by C having just uploaded (inside the
     // peer-yield window when A asks), and is detected if it happens anyway:
     // a yield is the one release that logs, a teardown release does not.
-    const pB = (await B.partition())!
     const asked = Date.now()
     const aUpload = A.upload()
     await B.disconnect()
     await aUpload
     if (C.yieldedSince(asked)) {
-      test.skip(true, 'C yielded to the request before B’s release could be told apart')
+      skipScenario('C yielded to the request before B’s release could be told apart')
     }
     expect(await A.partition(), 'A did not land on the slot B released').toBe(pB)
     await expectNoDualHold([A, C])
@@ -655,31 +677,36 @@ test.describe('three devices on two partitions', () => {
 
   test('a closed tab never releases: its partition comes back by TTL, and the others end up holding', async () => {
     for (const device of all()) await device.ensureConnected()
-    test.setTimeout(TTL_RECLAIM_TIMEOUT_MS * 2 + UPLOAD_TIMEOUT_MS * 4)
+    test.setTimeout(TTL_LAPSE_MS + UPLOAD_TIMEOUT_MS * 5)
     // C holds a partition and then goes away without a teardown — no release
     // sentinel, no `lease-released`, only a socket close the room notices.
     await C.uploadAndHoldOrSkip()
     await C.close()
 
-    // A and B keep uploading in turn. While C's lock is live only one slot is
-    // free between them and they trade it through yields; once C's lock and
-    // occupancy beacon lapse, a poll finds the second slot and they stop
-    // trading. The end state is the assertion: both hold, distinct, within the
-    // TTL plus the grace.
-    const deadline = Date.now() + TTL_RECLAIM_TIMEOUT_MS
-    let both = false
-    while (Date.now() < deadline && !both) {
+    // Nothing A or B does brings C's slot back sooner, so wait the lapse out
+    // first. Uploading through it instead (#798) spent the budget on trading
+    // the one free slot: an idle release on one side and a cold re-claim on
+    // the other took longer than what was left once C's lock had lapsed — and
+    // when A and B share a home partition the re-claim contends for the same
+    // slot before the other is tried. A and B idle-release meanwhile; a cold
+    // acquire finding C's expired lock is what "comes back by TTL" means.
+    await sleep(TTL_LAPSE_MS)
+    // Each uploads: the first takes a free slot, the second finds the other one
+    // free. One round is the expectation; a second covers an acquire that read
+    // C's lock a beat before it lapsed and waited it out.
+    let held = new Map<string, number | undefined>()
+    for (let round = 0; round < 2; round++) {
       for (const device of [A, B]) {
-        // A slot wait that outlasts the acquire timeout is the expected shape
-        // while C's lock is still live; the next round tries again.
         await device.upload().catch((error: Error) => {
           if (!UNANSWERED_WAIT.test(error.message)) throw error
         })
       }
-      const held = await expectNoDualHold([A, B])
-      both = held.get('A') !== undefined && held.get('B') !== undefined
-      if (!both) await sleep(LEASE_REFRESH_MS)
+      held = await expectNoDualHold([A, B])
+      if (held.get('A') !== undefined && held.get('B') !== undefined) break
     }
-    expect(both, 'A and B never both held after C closed').toBe(true)
+    expect(
+      held.get('A') !== undefined && held.get('B') !== undefined,
+      `A and B never both held after C closed: ${JSON.stringify([...held])}`,
+    ).toBe(true)
   })
 })
