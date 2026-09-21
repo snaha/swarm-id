@@ -1278,6 +1278,14 @@ export class SwarmIdProxy {
     // A held partition is announced through `onLeaseReleased` on the way out.
     this.coordinator?.teardown()
     this.coordinator = undefined
+    // The pool signs for the stamper this coordinator wrote through, and its
+    // workers hold that stamper's signer key.
+    this.terminateStampWorkerPool()
+  }
+
+  private terminateStampWorkerPool(): void {
+    this.stampWorkerPool?.terminate()
+    this.stampWorkerPool = undefined
   }
 
   private static laneKey(
@@ -1919,8 +1927,8 @@ export class SwarmIdProxy {
 
   /**
    * Get or create a StampWorkerPool for parallel signing.
-   * Lazy-initialized on first use and reused across uploads.
-   * If requestedCount differs from the current pool size, the pool is recreated.
+   * Lazy-initialized on first use and reused across uploads, for as long as
+   * it signs for the current stamper and has the requested size.
    */
   private async getOrCreateWorkerPool(
     requestedCount?: number,
@@ -1931,15 +1939,14 @@ export class SwarmIdProxy {
         ? Math.min(navigator.hardwareConcurrency, 8)
         : 4)
 
-    if (this.stampWorkerPool && this.stampWorkerPool.size === desiredCount) {
+    if (
+      this.stampWorkerPool?.size === desiredCount &&
+      this.stampWorkerPool.stamper === this.stamper
+    ) {
       return this.stampWorkerPool
     }
 
-    // Terminate old pool if count changed
-    if (this.stampWorkerPool) {
-      this.stampWorkerPool.terminate()
-      this.stampWorkerPool = undefined
-    }
+    this.terminateStampWorkerPool()
 
     if (!this.signerKey || !this.stamper) return undefined
 

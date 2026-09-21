@@ -9,7 +9,7 @@
  * next free slot. The counter is initialised at `DATA_COUNTER_START` so the
  * first slots of every bucket are reserved as headroom for utilisation
  * chunks that may incidentally land there — utilisation and data chunks
- * share the same slot space via the underlying stamper.
+ * share the same slot space.
  *
  * Per-chunk encryption keys are derived deterministically from the account's
  * `swarmEncryptionKey` plus the chunk index and a small nonce. The nonce is
@@ -19,7 +19,7 @@
  */
 
 import {
-  Stamper,
+  type Stamper,
   BatchId,
   type Bee,
   EthAddress,
@@ -30,6 +30,7 @@ import {
   makeEncryptedContentAddressedChunk,
   type ContentAddressedChunk,
 } from "../chunk"
+import { stamp as stampAtSlot } from "@ethersphere/core-sdk"
 import { Binary } from "cafe-utility"
 import type { UtilizationStoreDB } from "../storage/utilization-store"
 import { uploadChunk, type UploadTarget } from "../proxy/upload"
@@ -812,33 +813,6 @@ export const MIN_USABLE_BATCH_DEPTH = ((): number => {
 })()
 
 // ============================================================================
-// Stamper Integration
-// ============================================================================
-
-/**
- * Convert utilization data counters to Stamper bucket state
- *
- * Each dataCounter[bucket] represents the number of slots used in that bucket.
- * The Stamper's bucket state should start at the next available slot.
- *
- * @param dataCounters - Current utilization counters (65536 buckets)
- * @returns Bucket state array for Stamper (65536 entries)
- */
-export function utilizationToBucketState(
-  dataCounters: Uint32Array,
-): Uint32Array {
-  const bucketState = new Uint32Array(NUM_BUCKETS)
-
-  for (let bucket = 0; bucket < NUM_BUCKETS; bucket++) {
-    // Each counter represents slots used
-    // Stamper should start at the next slot
-    bucketState[bucket] = dataCounters[bucket]
-  }
-
-  return bucketState
-}
-
-// ============================================================================
 // Storage Operations (Async with Cache Hierarchy)
 // ============================================================================
 
@@ -1181,18 +1155,27 @@ export function calculateUtilization(
 // ============================================================================
 
 /**
- * Stamper wrapper that maintains bucket state from utilization data
- *
- * This class wraps the cafe-utility Stamper and:
- * - Loads bucket state from cached utilization data on creation
- * - Tracks which buckets/slots are used during stamping
- * - Provides a flush() method to persist updates back to cache
- *
- * This ensures the Stamper always has accurate knowledge of which
- * buckets/slots are already used, preventing overwrites.
+ * Decides which slot of its bucket a chunk is stamped at. Assigning a slot
+ * spends it, so a stamp has exactly one assigner however many things can sign.
  */
-export class UtilizationAwareStamper implements Stamper {
-  private stamper: Stamper
+export interface SlotAssigner {
+  readonly batchId: BatchId
+  assignSlot(chunkAddress: Uint8Array): number
+}
+
+/**
+ * Stamper that owns slot assignment for a postage batch
+ *
+ * - Loads the per-bucket counters from cached utilization data on creation
+ * - `assignSlot()` decides where a chunk's stamp goes: a reserved slot for the
+ *   lock / intent SOCs and utilisation chunks, otherwise the next slot of this
+ *   device's partition lane, behind the lease fence
+ * - `stamp()` is `assignSlot()` plus core-sdk's stateless signing. Anything
+ *   that signs elsewhere (`StampWorkerPool`) takes its slot from `assignSlot()`
+ *   too, so there is one slot owner whoever signs
+ * - Provides a flush() method to persist updates back to cache
+ */
+export class UtilizationAwareStamper implements Stamper, SlotAssigner {
   private utilizationState: BatchUtilizationState
   private cache: UtilizationStoreDB
   private readonly encryptionKey: Uint8Array
@@ -1201,8 +1184,7 @@ export class UtilizationAwareStamper implements Stamper {
 
   /**
    * Partition this device holds within the shared postage batch. `undefined`
-   * means the legacy single-device path: slot picking is delegated to the
-   * inner bee-js stamper without any per-call coercion, which is the
+   * means the legacy single-device path, stamped as partition 0 of 1: the
    * behaviour for every account created before the partition-lease shipped.
    */
   private partition: number | undefined = undefined
@@ -1309,18 +1291,20 @@ export class UtilizationAwareStamper implements Stamper {
    */
   private protectedStateBuckets = new Map<number, ReadonlySet<number>>()
 
+  readonly signer: PrivateKey
   readonly batchId: BatchId
   readonly depth: number
+  readonly maxSlot: number
 
-  // Delegate Stamper properties to underlying stamper
-  get signer() {
-    return this.stamper.signer
-  }
-  get buckets() {
-    return this.stamper.buckets
-  }
-  get maxSlot() {
-    return this.stamper.maxSlot
+  /**
+   * The next physical data slot per bucket, as core-sdk's `Stamper` means it.
+   * A snapshot: the counters of record are lane-relative (`dataCounters`), so
+   * writing here moves nothing — take a slot with {@link assignSlot}.
+   */
+  get buckets(): Uint32Array {
+    return this.utilizationState.dataCounters.map((j) =>
+      dataSlot(this.partition ?? 0, j, this.partitionCountValue),
+    )
   }
 
   /** Current partition (undefined in single-device legacy mode). */
@@ -1568,7 +1552,7 @@ export class UtilizationAwareStamper implements Stamper {
   }
 
   private constructor(
-    stamper: Stamper,
+    signer: PrivateKey,
     batchId: BatchId,
     depth: number,
     cache: UtilizationStoreDB,
@@ -1576,9 +1560,10 @@ export class UtilizationAwareStamper implements Stamper {
     utilizationState: BatchUtilizationState,
     now: () => number,
   ) {
-    this.stamper = stamper
+    this.signer = signer
     this.batchId = batchId
     this.depth = depth
+    this.maxSlot = calculateMaxSlotsPerBucket(depth)
     this.cache = cache
     this.encryptionKey = encryptionKey
     this.utilizationState = utilizationState
@@ -1607,7 +1592,6 @@ export class UtilizationAwareStamper implements Stamper {
   ): Promise<UtilizationAwareStamper> {
     // Initialize utilization state (always, since owner is now required)
     const utilizationState = initializeBatchUtilization(batchId, depth)
-    let bucketState: Uint32Array
 
     // Try to load utilization state from cache
     try {
@@ -1631,14 +1615,8 @@ export class UtilizationAwareStamper implements Stamper {
       )
     }
 
-    // Convert utilization counters to bucket state
-    bucketState = utilizationToBucketState(utilizationState.dataCounters)
-
-    // Create underlying stamper with bucket state
-    const stamper = Stamper.fromState(privateKey, batchId, bucketState, depth)
-
     const instance = new UtilizationAwareStamper(
-      stamper,
+      new PrivateKey(privateKey),
       batchId,
       depth,
       cache,
@@ -1685,15 +1663,16 @@ export class UtilizationAwareStamper implements Stamper {
   }
 
   /**
-   * Stamp a chunk address (implements Stamper interface)
+   * Pick the slot `chunkAddress` is stamped at within its bucket, and spend it.
    *
-   * Delegates to underlying stamper and tracks which buckets are used.
+   * Synchronous on purpose: callers fire stamps concurrently, and with no await
+   * in here each assignment runs to completion before the next starts. Whoever
+   * signs — {@link stamp} here, a `StampWorkerPool` worker — must take the slot
+   * from this method and nowhere else.
    *
-   * @param chunkAddress - Address of the chunk to stamp
-   * @param timestampMs - Stamp timestamp, defaults to now in the underlying stamper
-   * @returns Envelope with batch ID and signature
+   * @throws PartitionLeaseLostError when the bound partition's lease is gone
    */
-  stamp(chunkAddress: Uint8Array, timestampMs?: number): EnvelopeWithBatchId {
+  assignSlot(chunkAddress: Uint8Array): number {
     // Lock-SOC short-circuit: when stamping our own per-partition lock SOC,
     // overstamp the fixed reserved slot (= partition index, 0 or 1) within
     // its bucket. Doesn't consume new slot budget, doesn't bump our local
@@ -1703,9 +1682,7 @@ export class UtilizationAwareStamper implements Stamper {
       Binary.equals(soc.address, chunkAddress),
     )
     if (lockSoc) {
-      const bucket = toBucket(chunkAddress)
-      this.stamper.buckets[bucket] = lockSoc.partition
-      return this.stamper.stamp(chunkAddress, timestampMs)
+      return lockSoc.partition
     }
 
     // Utilisation-chunk short-circuit: a counter/state chunk overstamps its
@@ -1714,13 +1691,10 @@ export class UtilizationAwareStamper implements Stamper {
     // bumps the counter. The addresses are content-derived (they change as the
     // counter changes), so writers register the current save's addresses via
     // `markReservedUtilizationChunk` before uploading them.
-    const reservedSlot = this.reservedUtilizationChunks?.get(
-      uint8ArrayToHex(chunkAddress),
-    )
+    const addressHex = uint8ArrayToHex(chunkAddress)
+    const reservedSlot = this.reservedUtilizationChunks?.get(addressHex)
     if (reservedSlot !== undefined) {
-      const bucket = toBucket(chunkAddress)
-      this.stamper.buckets[bucket] = reservedSlot
-      return this.stamper.stamp(chunkAddress, timestampMs)
+      return reservedSlot
     }
 
     // Intent-SOC short-circuit: a partition-intent chunk (Phase 2) overstamps
@@ -1728,13 +1702,8 @@ export class UtilizationAwareStamper implements Stamper {
     // data lanes — so it can never collide with user data. Doesn't bump the
     // counter. Not gated by `leaseStale`: the intent round runs before binding,
     // while no lease is held.
-    if (
-      this.intentSoc !== undefined &&
-      this.intentSoc.addressHex === uint8ArrayToHex(chunkAddress)
-    ) {
-      const bucket = toBucket(chunkAddress)
-      this.stamper.buckets[bucket] = this.intentSoc.slot
-      return this.stamper.stamp(chunkAddress, timestampMs)
+    if (this.intentSoc?.addressHex === addressHex) {
+      return this.intentSoc.slot
     }
 
     // Partition lease was reclaimed — abort cleanly before the stamp lands in
@@ -1755,31 +1724,19 @@ export class UtilizationAwareStamper implements Stamper {
       throw new PartitionLeaseLostError()
     }
 
-    // Coerce the bee-js stamper to this device's next slot in its partition's
-    // lane: slot = partitionCount + partition + partitionCount·j, where j is
-    // the per-partition counter. Legacy single-device is partition 0, K=1
-    // (data from slot 1, reserved slot 0). The bee-js `Stamper.buckets` is a
-    // public mutable Uint32Array held by reference — overwriting before each
-    // stamp is sufficient.
-    {
-      const bucket = (chunkAddress[0] << 8) | chunkAddress[1]
-      this.stamper.buckets[bucket] = dataSlot(
-        this.partition ?? 0,
-        this.utilizationState.dataCounters[bucket],
-        this.partitionCountValue,
-      )
-    }
-
-    const envelope = this.stamper.stamp(chunkAddress, timestampMs)
-
-    // Extract bucket from envelope index
-    // The index is 8 bytes: first 4 bytes = bucket (big-endian), last 4 bytes = slot
-    const view = new DataView(
-      envelope.index.buffer,
-      envelope.index.byteOffset,
-      envelope.index.byteLength,
+    // This device's next slot in its partition's lane: slot = partitionCount +
+    // partition + partitionCount·j, where j is the per-partition counter.
+    // Legacy single-device is partition 0, K=1 (data from slot 1, reserved
+    // slot 0).
+    const bucket = toBucket(chunkAddress)
+    const slot = dataSlot(
+      this.partition ?? 0,
+      this.utilizationState.dataCounters[bucket],
+      this.partitionCountValue,
     )
-    const bucket = view.getUint32(0, false) // false = big-endian
+    if (slot >= this.maxSlot) {
+      throw new Error("Bucket is full")
+    }
 
     // Advance the per-partition counter so the next stamp into this bucket
     // lands on this partition's next slot.
@@ -1789,14 +1746,31 @@ export class UtilizationAwareStamper implements Stamper {
     this.dirtyBuckets.add(bucket)
     this.dirty = true
 
-    return envelope
+    return slot
   }
 
   /**
-   * Get bucket state (implements Stamper interface)
+   * Stamp a chunk address (implements Stamper interface)
+   *
+   * @param chunkAddress - Address of the chunk to stamp
+   * @param timestampMs - Stamp timestamp, defaults to now
+   * @returns Envelope with batch ID and signature
+   */
+  stamp(chunkAddress: Uint8Array, timestampMs?: number): EnvelopeWithBatchId {
+    return stampAtSlot(
+      this.signer,
+      this.batchId,
+      chunkAddress,
+      this.assignSlot(chunkAddress),
+      timestampMs,
+    )
+  }
+
+  /**
+   * Get bucket state (implements Stamper interface) — see {@link buckets}.
    */
   getState(): Uint32Array {
-    return this.stamper.getState()
+    return this.buckets
   }
 
   /**
@@ -1915,17 +1889,6 @@ export class UtilizationAwareStamper implements Stamper {
         }
       }
     }
-
-    // Update stamper bucket state to match
-    const bucketState = utilizationToBucketState(
-      this.utilizationState.dataCounters,
-    )
-    this.stamper = Stamper.fromState(
-      this.stamper.signer,
-      this.batchId,
-      bucketState,
-      this.depth,
-    )
 
     // Note: Do NOT clear dirtyBuckets here - those represent local writes
     // that still need to be flushed. Only flush() should clear them.
