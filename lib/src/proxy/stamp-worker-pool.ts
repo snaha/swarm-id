@@ -5,16 +5,18 @@
  * Web Worker pool for parallel stamp signing.
  *
  * Architecture:
- * - Main thread: bucket assignment (fast, stateful, sequential)
- * - Workers: ECDSA signing (slow ~4ms, stateless, parallel)
+ * - Main thread: slot assignment (fast, stateful, sequential)
+ * - Workers: ECDSA signing (slow, stateless, parallel)
  *
- * The pool wraps an existing Stamper's bucket state (same Uint32Array reference)
- * so bucket counters stay synchronized.
+ * The pool only signs. The slot comes from the stamper it was created for — a
+ * `SlotAssigner`'s `assignSlot()`, or a plain core-sdk `Stamper`'s `buckets` —
+ * so a pooled stamp lands where `stamper.stamp()` would have put it.
  */
 
 import type { Stamper, EnvelopeWithBatchId, BatchId } from "@ethersphere/bee-js"
 import { EthAddress, Signature } from "@ethersphere/bee-js"
 import { Binary } from "cafe-utility"
+import type { SlotAssigner } from "../utils/batch-utilization"
 import type {
   StampWorkerReadyResponse,
   StampWorkerSignedResponse,
@@ -36,41 +38,57 @@ interface WorkerHandle {
 const DEFAULT_WORKER_COUNT = 4
 const WORKER_INIT_TIMEOUT_MS = 5_000
 const NANOSECONDS_PER_MILLISECOND = 1_000_000n
+const POOL_TERMINATED_MESSAGE = "Stamp worker pool is terminated"
+
+/** core-sdk's `Stamper#stamp` slot bookkeeping, read off the live `buckets`. */
+function nextBucketSlot(stamper: Stamper, address: Uint8Array): number {
+  const bucket = (address[0] << 8) | address[1]
+  const height = stamper.buckets[bucket]
+  if (height >= stamper.maxSlot) {
+    throw new Error("Bucket is full")
+  }
+  stamper.buckets[bucket] = height + 1
+  return height
+}
 
 export class StampWorkerPool {
   private workers: WorkerHandle[]
   private nextWorker = 0
   private nextId = 0
   private issuer: Uint8Array // 20 bytes
-  private buckets: Uint32Array // ref to stamper.buckets
   private batchId: BatchId
-  private maxSlot: number
+  private assignSlot: (address: Uint8Array) => number
 
   readonly size: number
+  /** The stamper this pool signs for: a pool must not outlive it. */
+  readonly stamper: Stamper | SlotAssigner
 
   private constructor(
     workers: WorkerHandle[],
     issuer: Uint8Array,
-    stamper: Stamper,
+    stamper: Stamper | SlotAssigner,
   ) {
     this.workers = workers
     this.size = workers.length
     this.issuer = issuer
-    this.buckets = stamper.buckets
+    this.stamper = stamper
     this.batchId = stamper.batchId
-    this.maxSlot = stamper.maxSlot
+    this.assignSlot =
+      "assignSlot" in stamper
+        ? (address) => stamper.assignSlot(address)
+        : (address) => nextBucketSlot(stamper, address)
   }
 
   /**
    * Create a worker pool from an existing stamper.
    *
    * @param signerKeyHex - Signer private key as hex (proxy already has this)
-   * @param stamper - Stamper instance (pool shares its bucket state)
+   * @param stamper - Stamper the pool signs for; it stays the slot owner
    * @param workerCount - Number of workers (defaults to 4)
    */
   static async create(
     signerKeyHex: string,
-    stamper: Stamper,
+    stamper: Stamper | SlotAssigner,
     workerCount?: number,
   ): Promise<StampWorkerPool> {
     const count = workerCount ?? DEFAULT_WORKER_COUNT
@@ -157,8 +175,9 @@ export class StampWorkerPool {
   /**
    * Stamp a chunk address using parallel worker signing.
    *
-   * Bucket assignment happens on the main thread (fast, sequential).
-   * ECDSA signing is dispatched to a worker (slow, parallel).
+   * Slot assignment happens on the main thread, before the first await, so
+   * concurrent calls cannot interleave inside it. ECDSA signing is dispatched
+   * to a worker (slow, parallel).
    *
    * Takes the same `timestampMs` as core-sdk's `Stamper.stamp`, and produces
    * the same envelope for the same inputs — `stamp-worker-pool.test.ts` holds
@@ -168,19 +187,20 @@ export class StampWorkerPool {
     address: Uint8Array,
     timestampMs: number = Date.now(),
   ): Promise<EnvelopeWithBatchId> {
-    // 1. Bucket assignment (main thread) — replicates Stamper.stamp() logic
-    const bucket = (address[0] << 8) | address[1]
-    const height = this.buckets[bucket]
-    if (height >= this.maxSlot) {
-      throw new Error("Bucket is full")
+    // Checked before a slot is spent on a stamp nothing will sign
+    if (this.workers.length === 0) {
+      throw new Error(POOL_TERMINATED_MESSAGE)
     }
-    this.buckets[bucket] = height + 1
 
-    // Build index (8 bytes): bucket(4 BE) + height(4 BE)
+    // 1. Slot assignment (main thread) — the stamper's, never the pool's own
+    const bucket = (address[0] << 8) | address[1]
+    const slot = this.assignSlot(address)
+
+    // Build index (8 bytes): bucket(4 BE) + slot(4 BE)
     const index = new Uint8Array(8)
     const indexView = new DataView(index.buffer)
     indexView.setUint32(0, bucket, false)
-    indexView.setUint32(4, height, false)
+    indexView.setUint32(4, slot, false)
 
     // Build timestamp (8 bytes): uint64 BE in nanoseconds — the unit Bee and
     // core-sdk's `Stamper` use, and what Bee compares on an index collision
@@ -224,11 +244,17 @@ export class StampWorkerPool {
   }
 
   /**
-   * Terminate all workers and release resources.
+   * Terminate all workers and release resources. Signs still in flight are
+   * rejected: a terminated worker never answers, and an upload awaiting one
+   * would hang.
    */
   terminate(): void {
     for (const handle of this.workers) {
       handle.worker.terminate()
+      for (const [, p] of handle.pending) {
+        p.reject(new Error(POOL_TERMINATED_MESSAGE))
+      }
+      handle.pending.clear()
     }
     this.workers = []
   }

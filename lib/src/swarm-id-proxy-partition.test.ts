@@ -20,6 +20,33 @@ import {
 // Rollup-only virtual module (see rollup.config.js) — not resolvable in vitest
 vi.mock("virtual:stamp-worker-code", () => ({ default: "" }))
 
+/** A stamp `Worker` that answers `init` and remembers the key it was handed. */
+class FakeStampWorker {
+  static instances: FakeStampWorker[] = []
+  onmessage: ((event: MessageEvent) => void) | undefined
+  onerror: ((event: ErrorEvent) => void) | undefined
+  signerKeyHex: string | undefined
+  terminated = false
+
+  constructor() {
+    FakeStampWorker.instances.push(this)
+  }
+
+  postMessage(message: { type: string; signerKeyHex?: string }): void {
+    if (message.type !== "init") return
+    this.signerKeyHex = message.signerKeyHex
+    queueMicrotask(() =>
+      this.onmessage?.({
+        data: { type: "ready", issuerHex: "00".repeat(20) },
+      } as MessageEvent),
+    )
+  }
+
+  terminate(): void {
+    this.terminated = true
+  }
+}
+
 /**
  * The single stamper the mocked `create` hands back, so a test can move the
  * bound slot lane (`currentPartition` / `partitionCount`) and observe the
@@ -1546,6 +1573,93 @@ describe("SwarmIdProxy partitioned write enablement", () => {
       } finally {
         busChannel.close()
       }
+    })
+
+    // The pool's workers hold the signer key and the pool signs for one
+    // stamper's batch, so it lives exactly as long as that stamper does.
+    describe("the stamp worker pool", () => {
+      const POOL_SIZE = 2
+
+      function getWorkerPool(): Promise<unknown> {
+        const { deps } = vi.mocked(BatchWriteCoordinator).mock.results.at(-1)!
+          .value as {
+          deps: { getWorkerPool: (count?: number) => Promise<unknown> }
+        }
+        return deps.getWorkerPool(POOL_SIZE)
+      }
+
+      beforeEach(() => {
+        FakeStampWorker.instances = []
+        vi.stubGlobal("Worker", FakeStampWorker)
+      })
+
+      it("is rebuilt with the new signer when a delta moves the default stamp", async () => {
+        const busChannel = await hydratedSession()
+        const replacementKey = "ab".repeat(32)
+        try {
+          const first = await getWorkerPool()
+          const firstWorkers = [...FakeStampWorker.instances]
+          expect(firstWorkers).toHaveLength(POOL_SIZE)
+
+          const stamp = makeSyncedAccount().postageStamps[0]
+          const now = Date.now()
+          busChannel.postMessage(
+            accountDelta({
+              defaultPostageStampBatchID: OTHER_BATCH_ID_HEX,
+              defaultStampAt: now,
+              postageStamps: [
+                { ...stamp, deletedAt: now, updatedAt: now },
+                {
+                  ...stamp,
+                  batchID: new BatchId(OTHER_BATCH_ID_HEX),
+                  signerKey: new PrivateKey(replacementKey),
+                  createdAt: now,
+                },
+              ],
+            }),
+          )
+          await vi.waitFor(() =>
+            expect(
+              String(
+                vi.mocked(UtilizationAwareStamper.create).mock.calls.at(-1)![1],
+              ),
+            ).toBe(OTHER_BATCH_ID_HEX),
+          )
+          await vi.waitFor(() =>
+            expect(firstWorkers.every((worker) => worker.terminated)).toBe(
+              true,
+            ),
+          )
+
+          const second = await getWorkerPool()
+
+          expect(second).not.toBe(first)
+          const secondWorkers = FakeStampWorker.instances.slice(POOL_SIZE)
+          expect(secondWorkers).toHaveLength(POOL_SIZE)
+          expect(secondWorkers.map((worker) => worker.signerKeyHex)).toEqual(
+            Array.from({ length: POOL_SIZE }, () => replacementKey),
+          )
+        } finally {
+          busChannel.close()
+        }
+      })
+
+      it("does not keep the signer key in its workers past a disconnect", async () => {
+        const busChannel = await hydratedSession()
+        busChannel.close()
+        await getWorkerPool()
+        expect(FakeStampWorker.instances).toHaveLength(POOL_SIZE)
+
+        await dispatch(
+          { type: "disconnect", requestId: "r-pool" },
+          PARENT_ORIGIN,
+          parentWindow,
+        )
+
+        expect(
+          FakeStampWorker.instances.every((worker) => worker.terminated),
+        ).toBe(true)
+      })
     })
 
     // #745 review: a renewal (top-up) keeps the batch id and the signer key
