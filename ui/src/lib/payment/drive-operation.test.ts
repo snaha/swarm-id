@@ -8,7 +8,7 @@
  * record that would not survive `PostageStampSchemaV1` fails the test.
  */
 import { BatchId, EthAddress, PrivateKey } from '@ethersphere/bee-js'
-import type { PostageStamp } from '@snaha/swarm-id'
+import type { PostageStamp } from '@snaha/swarm-id/internal'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { Account } from '$lib/stores/accounts.svelte'

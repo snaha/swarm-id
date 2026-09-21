@@ -5,7 +5,7 @@
 
 <script lang="ts">
   import Trash2 from '@lucide/svelte/icons/trash-2'
-  import type { PostageStamp } from '@snaha/swarm-id'
+  import type { PostageStamp } from '@snaha/swarm-id/internal'
 
   import { Button } from '$lib/components/ui/button'
   import { Dialog } from '$lib/components/ui/dialog'

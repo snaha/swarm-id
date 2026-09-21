@@ -1,7 +1,7 @@
 // Copyright 2026 The Swarm Authors. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 import { BatchId, PrivateKey } from '@ethersphere/bee-js'
-import { calculateContractTTLSeconds, fetchOnChainBatchStateResult } from '@snaha/swarm-id'
+import { calculateContractTTLSeconds, fetchOnChainBatchStateResult } from '@snaha/swarm-id/internal'
 
 import { strip0x } from '$lib/crypto/hex'
 import { postageChain } from '$lib/payment/chain'

@@ -20,7 +20,7 @@ import {
   deriveSecret,
   serializeSyncedAccount,
   stampsReachableByApp,
-} from '@snaha/swarm-id'
+} from '@snaha/swarm-id/internal'
 
 import { strip0x } from '$lib/crypto/hex'
 import { privateKeyFromEntropy } from '$lib/crypto/mnemonic'

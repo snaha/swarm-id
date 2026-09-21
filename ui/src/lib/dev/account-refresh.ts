@@ -12,7 +12,7 @@
  * store's `storage` listener. Folds apply with `skipSync: true`, so they never
  * re-publish.
  */
-import { runCoalescedAcrossTabs } from '@snaha/swarm-id'
+import { runCoalescedAcrossTabs } from '@snaha/swarm-id/internal'
 
 import { browser } from '$app/environment'
 

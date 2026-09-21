@@ -1,6 +1,6 @@
 // Copyright 2026 The Swarm Authors. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
-import { STORAGE_CHALLENGE_KEY } from '@snaha/swarm-id'
+import { STORAGE_CHALLENGE_KEY } from '@snaha/swarm-id/internal'
 
 /**
  * A dApp connection request, parsed from the URL hash the @snaha/swarm-id

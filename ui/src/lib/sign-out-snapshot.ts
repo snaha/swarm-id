@@ -9,14 +9,13 @@
  * `derivationKey` — in memory at sign-out (no unlock happens there) and
  * re-derived from the seed at sign-back-in — instead of the phrase entropy.
  */
+import { hexToUint8Array, uint8ArrayToHex } from '@snaha/swarm-id'
 import {
   type SyncedAccount,
   SyncedAccountSchemaV1,
-  hexToUint8Array,
   isSignedOutAccount,
   serializeSyncedAccount,
-  uint8ArrayToHex,
-} from '@snaha/swarm-id'
+} from '@snaha/swarm-id/internal'
 
 import { decryptSeed, deriveKeyFromSecret, encryptSeed, randomSalt } from '$lib/crypto/encryption'
 import type { Account } from '$lib/types'

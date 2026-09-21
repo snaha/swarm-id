@@ -17,7 +17,7 @@ import {
   type SignedInAccount,
   type SignedOutAccount,
   createAccountsStorageManager,
-} from '@snaha/swarm-id'
+} from '@snaha/swarm-id/internal'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { Account, accountsStore } from './accounts.svelte'

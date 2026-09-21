@@ -23,7 +23,7 @@ import {
   mergeDevices,
   mergeDevicesList,
   mergePostageStamps,
-} from '@snaha/swarm-id'
+} from '@snaha/swarm-id/internal'
 
 import { accountsStore } from '$lib/stores/accounts.svelte'
 import { networkSettingsStore } from '$lib/stores/network-settings.svelte'

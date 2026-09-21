@@ -28,8 +28,8 @@ import {
   mergeDevicesList,
   mergePostageStamps,
   restoreLocalSessionFields,
-} from '@snaha/swarm-id'
-import type { AccountStateSnapshot } from '@snaha/swarm-id'
+} from '@snaha/swarm-id/internal'
+import type { AccountStateSnapshot } from '@snaha/swarm-id/internal'
 
 import { accountsStore } from '$lib/stores/accounts.svelte'
 

@@ -16,7 +16,7 @@
  * Production code must never import this module.
  */
 import { Bee, BeeResponseError, EthAddress } from '@ethersphere/bee-js'
-import { sleep } from '@snaha/swarm-id'
+import { sleep } from '@snaha/swarm-id/internal'
 import type { MultichainClient } from '@swarm-id/multichain'
 import {
   DEV_FAUCET_ADDRESS,

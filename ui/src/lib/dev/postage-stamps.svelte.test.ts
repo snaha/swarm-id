@@ -16,7 +16,7 @@
  * A stale cached stamper fails on those.
  */
 import { BatchId, EthAddress, PrivateKey } from '@ethersphere/bee-js'
-import type { Account as AccountRecord, PostageStamp } from '@snaha/swarm-id'
+import type { Account as AccountRecord, PostageStamp } from '@snaha/swarm-id/internal'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { accountsStore } from '$lib/stores/accounts.svelte'
@@ -32,8 +32,8 @@ vi.mock('$app/environment', () => ({ browser: true }))
 // construction so it starts from fresh counters (`create()` would otherwise
 // warn its way through a failed open). Everything else — the stamper itself
 // included — stays real, since the depth assertions ride on it.
-vi.mock('@snaha/swarm-id', async (importOriginal) => ({
-  ...(await importOriginal<typeof import('@snaha/swarm-id')>()),
+vi.mock('@snaha/swarm-id/internal', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@snaha/swarm-id/internal')>()),
   UtilizationStoreDB: class {
     getAllChunks = async () => []
     putChunk = async () => undefined
