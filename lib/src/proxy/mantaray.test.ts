@@ -140,6 +140,26 @@ describe("loadMantarayTreeWithChunkAPI", () => {
     },
   )
 
+  it("leaves a child that fails to parse to the parser's own error", async () => {
+    const { bee, target } = setup()
+    const plainReference = await uploadPlainData(
+      target,
+      MANTARAY_HEADER_SIZE * 2,
+    )
+
+    // A root that parses, over children that do not: a corrupt manifest, not
+    // a crossed pair.
+    const manifest = makeManifest()
+    for (const fork of manifest.forks.values()) {
+      fork.node.selfAddress = hexToUint8Array(plainReference)
+    }
+    const { reference } = await uploadData(target, await manifest.marshal())
+
+    await expect(loadMantarayTreeWithChunkAPI(bee, reference)).rejects.toThrow(
+      /invalid version hash$/,
+    )
+  })
+
   it("leaves a chunk fetch failure untouched", async () => {
     const { bee, target } = setup()
     const reference = await uploadPlainData(target, MANTARAY_HEADER_SIZE * 2)

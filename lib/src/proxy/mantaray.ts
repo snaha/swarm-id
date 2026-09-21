@@ -172,7 +172,7 @@ const NO_MANIFEST_MESSAGE =
  * mean "this reference is not a manifest".
  *
  * Uploads and downloads come in pairs, and both downloads take a plain
- * string reference: handing a `uploadData` reference to a file download
+ * string reference: handing an `uploadData` reference to a file download
  * type-checks, and lands here. Only the root is translated — a root that
  * fails to parse is routinely just plain data, while a child that fails to
  * parse is a manifest with a corrupt node, which is a different problem and
