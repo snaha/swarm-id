@@ -2,6 +2,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
+ * What each upload mode forwards to Bee.
+ *
  * The subsidised path never sends `Swarm-Pin` (#752): pinning means "keep
  * this on the local node", and the node is the dApp operator's, not the
  * user's — gateway-proxy strips the header by default, and the public
@@ -9,6 +11,8 @@
  *
  * Stamper mode still sends it — the node is the user's own — so the positive
  * half is asserted too, or a header dropped from the wrong branch stays green.
+ * Stamper mode also honours the caller's `deferred`, which every data and
+ * chunk upload hard-coded away from #298 until #784.
  */
 
 import { describe, it, expect, vi, afterEach } from "vitest"
@@ -111,5 +115,57 @@ describe("stamper uploads keep swarm-pin", () => {
     expect(chunkUpload).toHaveBeenCalledTimes(1)
     const [, , options] = chunkUpload.mock.calls[0]
     expect(options).toMatchObject({ pin: true })
+  })
+})
+
+/**
+ * Stamper mode honours `deferred` (#780 adjacent): a dev-mode Bee serves only
+ * deferred uploads, and the documented remedy is to set the flag from
+ * `getNodeInfo()`. #298 wrote `{ ...options, deferred: false }`, so the
+ * caller's `true` was silently dropped and the upload timed out anyway.
+ */
+describe("stamper uploads honour deferred", () => {
+  function spiedBee(): { bee: MockBee; chunkUpload: ReturnType<typeof vi.fn> } {
+    const bee = new MockBee()
+    const chunkUpload = vi.fn(bee.chunk.upload)
+    bee.chunk.upload = chunkUpload
+    return { bee, chunkUpload }
+  }
+
+  it("on a chunk", async () => {
+    const { bee, chunkUpload } = spiedBee()
+    await uploadChunk(stamperTarget(bee), new Uint8Array(16), {
+      deferred: true,
+    })
+    const [, , options] = chunkUpload.mock.calls[0]
+    expect(options).toMatchObject({ deferred: true })
+  })
+
+  it("on plain data", async () => {
+    const { bee, chunkUpload } = spiedBee()
+    await uploadData(stamperTarget(bee), new Uint8Array(16), {
+      deferred: true,
+    })
+    const [, , options] = chunkUpload.mock.calls[0]
+    expect(options).toMatchObject({ deferred: true })
+  })
+
+  it("on encrypted data", async () => {
+    const { bee, chunkUpload } = spiedBee()
+    await uploadData(stamperTarget(bee), new Uint8Array(16), {
+      deferred: true,
+      encryptionKey: true,
+    })
+    const [, , options] = chunkUpload.mock.calls[0]
+    expect(options).toMatchObject({ deferred: true })
+  })
+
+  it("still defaults to direct", async () => {
+    const { bee, chunkUpload } = spiedBee()
+    await uploadChunk(stamperTarget(bee), new Uint8Array(16))
+    await uploadData(stamperTarget(bee), new Uint8Array(16))
+    for (const [, , options] of chunkUpload.mock.calls) {
+      expect(options).toMatchObject({ deferred: false })
+    }
   })
 })

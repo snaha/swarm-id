@@ -626,7 +626,11 @@ async function uploadDataPlain(
     // Stamper mode
     const { bee, stamper, workerPool } = target
     const tag = options?.tag ?? (await tryCreateTag(bee))
-    const uploadOptions = { ...options, tag, deferred: false }
+    const uploadOptions = {
+      ...options,
+      tag,
+      deferred: options?.deferred ?? false,
+    }
 
     const stamp = makeStampFn(stamper, workerPool)
 
@@ -744,7 +748,11 @@ async function uploadDataEncrypted(
     // Stamper mode
     const { bee, stamper, workerPool } = target
     const tag = options?.tag ?? (await tryCreateTag(bee))
-    const uploadOptions = { ...options, tag, deferred: false }
+    const uploadOptions = {
+      ...options,
+      tag,
+      deferred: options?.deferred ?? false,
+    }
     const stamp = makeStampFn(stamper, workerPool)
 
     // Open WebSocket stream if requested
@@ -996,7 +1004,11 @@ export async function uploadChunk(
       stamp,
       chunkData,
       address.toUint8Array(),
-      { deferred: false, pin: options?.pin, tag: options?.tag },
+      {
+        deferred: options?.deferred ?? false,
+        pin: options?.pin,
+        tag: options?.tag,
+      },
       options?.requestOptions,
     )
 
