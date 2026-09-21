@@ -61,6 +61,14 @@ export async function uploadCollection(
     requestOptions: options?.requestOptions,
   }
 
+  // A repeated path would silently replace its earlier fork: the manifest
+  // would hold fewer files than were sent while progress still counted them all.
+  const paths = new Set<string>()
+  for (const { path } of files) {
+    if (paths.has(path)) throw new Error(`Duplicate path in folder: ${path}`)
+    paths.add(path)
+  }
+
   const manifest = new MantarayNode()
   let processed = 0
   for (const file of files) {

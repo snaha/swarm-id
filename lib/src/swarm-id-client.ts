@@ -1187,30 +1187,7 @@ export class SwarmIdClient {
       ...serializableOptions
     } = options ?? {}
 
-    // Setup progress listener if callback provided
-    let progressListener: ((event: MessageEvent) => void) | undefined
-    if (onProgress) {
-      progressListener = (event: MessageEvent) => {
-        if (event.origin !== new URL(this.iframeOrigin).origin) return
-
-        try {
-          const message = IframeToParentMessageSchema.parse(event.data)
-          if (
-            message.type === "uploadProgress" &&
-            message.requestId === requestId
-          ) {
-            onProgress({
-              total: message.total,
-              processed: message.processed,
-            })
-          }
-        } catch {
-          // Ignore invalid messages
-        }
-      }
-      window.addEventListener("message", progressListener)
-    }
-
+    const stopProgress = this.listenForProgress(requestId, onProgress)
     try {
       const response = await this.sendRequest<{
         type: "uploadDataResponse"
@@ -1235,10 +1212,7 @@ export class SwarmIdClient {
         tagUid: response.tagUid,
       }
     } finally {
-      // Clean up progress listener
-      if (progressListener) {
-        window.removeEventListener("message", progressListener)
-      }
+      stopProgress()
     }
   }
 
@@ -1407,30 +1381,7 @@ export class SwarmIdClient {
       )
     }
 
-    // Setup progress listener if callback provided
-    let progressListener: ((event: MessageEvent) => void) | undefined
-    if (onProgress) {
-      progressListener = (event: MessageEvent) => {
-        if (event.origin !== new URL(this.iframeOrigin).origin) return
-
-        try {
-          const message = IframeToParentMessageSchema.parse(event.data)
-          if (
-            message.type === "uploadProgress" &&
-            message.requestId === requestId
-          ) {
-            onProgress({
-              total: message.total,
-              processed: message.processed,
-            })
-          }
-        } catch {
-          // Ignore invalid messages
-        }
-      }
-      window.addEventListener("message", progressListener)
-    }
-
+    const stopProgress = this.listenForProgress(requestId, onProgress)
     try {
       const response = await this.sendRequest<{
         type: "uploadFileResponse"
@@ -1456,10 +1407,7 @@ export class SwarmIdClient {
         tagUid: response.tagUid,
       }
     } finally {
-      // Clean up progress listener
-      if (progressListener) {
-        window.removeEventListener("message", progressListener)
-      }
+      stopProgress()
     }
   }
 
@@ -1549,13 +1497,14 @@ export class SwarmIdClient {
    * manifest with `@ethersphere/core-sdk`.
    *
    * @param files - The folder's files
-   * @param options - Optional upload configuration; `onProgress` counts files
+   * @param options - Optional upload configuration; `onProgress` counts files, `useWorkers` / `workerCount` stamp in a pool as with {@link uploadData}
    * @param requestOptions - Optional request configuration (timeout, headers, endlesslyRetry). `timeout` replaces the client default for this call's whole round trip, not only the Bee request
    * @returns A promise resolving to the upload result
    * @returns return.reference - The Swarm reference of the manifest
    * @returns return.tagUid - The tag UID if a tag was created
    * @throws {Error} If the client is not initialized
    * @throws {Error} If the user is not authenticated or cannot upload
+   * @throws {Error} If two files share a path
    * @throws {Error} If the request times out
    *
    * @example
@@ -1575,7 +1524,8 @@ export class SwarmIdClient {
   ): Promise<UploadResult> {
     this.ensureReady()
     const requestId = this.generateRequestId()
-    const { onProgress, ...serializableOptions } = options ?? {}
+    const { onProgress, useWorkers, workerCount, ...serializableOptions } =
+      options ?? {}
 
     const entries = await Promise.all(
       Array.from(files, async (item) => {
@@ -1605,6 +1555,8 @@ export class SwarmIdClient {
         options: serializableOptions,
         requestOptions,
         enableProgress: !!onProgress,
+        useWorkers,
+        workerCount,
       })
       return { reference: response.reference, tagUid: response.tagUid }
     } finally {
@@ -3173,30 +3125,7 @@ export class SwarmIdClient {
     const requestId = this.generateRequestId()
     const { onProgress, ...serializableOptions } = options ?? {}
 
-    // Setup progress listener if callback provided
-    let progressListener: ((event: MessageEvent) => void) | undefined
-    if (onProgress) {
-      progressListener = (event: MessageEvent) => {
-        if (event.origin !== new URL(this.iframeOrigin).origin) return
-
-        try {
-          const message = IframeToParentMessageSchema.parse(event.data)
-          if (
-            message.type === "uploadProgress" &&
-            message.requestId === requestId
-          ) {
-            onProgress({
-              total: message.total,
-              processed: message.processed,
-            })
-          }
-        } catch {
-          // Ignore invalid messages
-        }
-      }
-      window.addEventListener("message", progressListener)
-    }
-
+    const stopProgress = this.listenForProgress(requestId, onProgress)
     try {
       const response = await this.sendRequest<{
         type: "actUploadDataResponse"
@@ -3226,10 +3155,7 @@ export class SwarmIdClient {
         tagUid: response.tagUid,
       }
     } finally {
-      // Clean up progress listener
-      if (progressListener) {
-        window.removeEventListener("message", progressListener)
-      }
+      stopProgress()
     }
   }
 

@@ -187,7 +187,14 @@ export type DownloadOptions = z.infer<typeof DownloadOptionsSchema>
  */
 export interface UploadFilesOptions extends Pick<
   UploadOptions,
-  "pin" | "encrypt" | "encryptManifest" | "tag" | "deferred" | "onProgress"
+  | "pin"
+  | "encrypt"
+  | "encryptManifest"
+  | "tag"
+  | "deferred"
+  | "onProgress"
+  | "useWorkers"
+  | "workerCount"
 > {
   /** Served for the bare `/bzz/<reference>/` (`website-index-document`) */
   indexDocument?: string
@@ -941,6 +948,8 @@ export const UploadFilesMessageSchema = z.object({
   options: UploadFilesOptionsSchema,
   requestOptions: RequestOptionsSchema,
   enableProgress: z.boolean().optional(),
+  useWorkers: z.boolean().optional(),
+  workerCount: z.number().int().min(1).max(32).optional(),
 })
 
 export const ListFilesMessageSchema = z.object({

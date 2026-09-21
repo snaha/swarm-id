@@ -116,6 +116,19 @@ describe("uploadCollection", () => {
     ).not.toContain("/")
   })
 
+  it("rejects a repeated path before uploading anything", async () => {
+    const store = new MockChunkStore()
+    const bee = new MockBee(store)
+    const target: UploadTarget = {
+      mode: "stamper",
+      bee,
+      stamper: createMockStamper(),
+    }
+    const twice = [FILES[0], FILES[1], { ...FILES[2], path: FILES[0].path }]
+    await expect(uploadCollection(target, twice)).rejects.toThrow("index.html")
+    expect(store.size()).toBe(0)
+  })
+
   it("reports progress once per file", async () => {
     const { target } = setup()
     const seen: Array<{ total: number; processed: number }> = []

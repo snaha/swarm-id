@@ -3972,8 +3972,15 @@ export class SwarmIdProxy {
     message: UploadFilesMessage,
     event: MessageEvent,
   ): Promise<void> {
-    const { requestId, files, options, requestOptions, enableProgress } =
-      message
+    const {
+      requestId,
+      files,
+      options,
+      requestOptions,
+      enableProgress,
+      useWorkers,
+      workerCount,
+    } = message
 
     try {
       this.ensureCanUpload()
@@ -3984,13 +3991,15 @@ export class SwarmIdProxy {
       )
       const tag = options?.tag ?? (await tryCreateTag(this.bee))
 
-      const result = await this.withModeAwareWriteLock(undefined, (target) =>
-        uploadCollection(target, files, {
-          ...options,
-          tag,
-          onProgress,
-          requestOptions,
-        }),
+      const result = await this.withModeAwareWriteLock(
+        { useWorkers, workerCount },
+        (target) =>
+          uploadCollection(target, files, {
+            ...options,
+            tag,
+            onProgress,
+            requestOptions,
+          }),
       )
 
       this.postMessage(event, {
