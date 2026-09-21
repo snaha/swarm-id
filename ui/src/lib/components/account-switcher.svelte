@@ -7,8 +7,9 @@
   import { resolve } from '$app/paths'
 
   import AccountAvatar from '$lib/components/account-avatar.svelte'
-  import UserAddFill from '$lib/components/icons/user-add-fill.svelte'
-  import UserUnfollowLine from '$lib/components/icons/user-unfollow-line.svelte'
+  import AddFill from '$lib/components/icons/add-fill.svelte'
+  import SubtractFill from '$lib/components/icons/subtract-fill.svelte'
+  import UserSearchLine from '$lib/components/icons/user-search-line.svelte'
   import SignBackInDialog from '$lib/components/sign-back-in-dialog.svelte'
   import SignOutDialog from '$lib/components/sign-out-dialog.svelte'
   import { Badge } from '$lib/components/ui/badge'
@@ -32,8 +33,6 @@
   const PANEL_AVATAR_SIZE = 48
 
   let open = $state(false)
-  /** Replaces the panel actions with the create/import choice. */
-  let addingAccount = $state(false)
   let signingOut = $state(false)
   /** Signed-out account being unlocked to sign back in. */
   let signingBackIn = $state<Account | undefined>(undefined)
@@ -41,14 +40,6 @@
   const others = $derived(
     accountsStore.accounts.filter((candidate) => !candidate.id.equals(account.id)),
   )
-
-  // However the menu closes (item click, outside pointerdown, Escape), the
-  // next open starts back on the main actions.
-  $effect(() => {
-    if (!open) {
-      addingAccount = false
-    }
-  })
 
   function select(candidate: Account) {
     if (candidate.isSignedOut) {
@@ -117,52 +108,47 @@
     {/if}
   </div>
 
-  {#if addingAccount}
-    <div class="flex flex-col gap-2">
-      <Button variant="ghost" size="sm" class="w-full" href={resolve(routes.ACCOUNT_NEW)}>
-        Create a new account
-      </Button>
-      <Button variant="ghost" size="sm" class="w-full" href={resolve(routes.ACCOUNT_IMPORT)}>
-        I already have an account
-      </Button>
-    </div>
-  {:else}
-    {#if others.length > 0}
-      <div class="flex flex-col">
-        {#each others as candidate (candidate.id.toHex())}
-          <DropdownMenuItem class="h-auto gap-2 p-1" onclick={() => select(candidate)}>
-            <AccountAvatar
-              value={candidate.id.toHex()}
-              size={36}
-              class="shrink-0 overflow-hidden rounded-md"
-            />
-            <span class="flex min-w-0 flex-1 flex-col">
-              <span class="truncate text-sm font-medium">{candidate.name}</span>
-              <span class="text-muted-foreground text-xs">
-                {truncateAddress(candidate.id.toChecksum())}
-              </span>
+  {#if others.length > 0}
+    <div class="flex flex-col">
+      {#each others as candidate (candidate.id.toHex())}
+        <DropdownMenuItem class="h-auto gap-2 p-1" onclick={() => select(candidate)}>
+          <AccountAvatar
+            value={candidate.id.toHex()}
+            size={36}
+            class="shrink-0 overflow-hidden rounded-md"
+          />
+          <span class="flex min-w-0 flex-1 flex-col">
+            <span class="truncate text-sm font-medium">{candidate.name}</span>
+            <span class="text-muted-foreground text-xs">
+              {truncateAddress(candidate.id.toChecksum())}
             </span>
-            {#if candidate.isSignedOut}
-              <Badge>Signed out</Badge>
-            {/if}
-          </DropdownMenuItem>
-        {/each}
-      </div>
-    {/if}
-
-    <div class="flex flex-col gap-2">
-      {#if others.length > 0}
-        <Button variant="ghost" size="sm" class="w-full" onclick={notImplemented}>
-          <UserUnfollowLine />
-          Remove an account
-        </Button>
-      {/if}
-      <Button variant="ghost" size="sm" class="w-full" onclick={() => (addingAccount = true)}>
-        <UserAddFill />
-        Sign in to another account
-      </Button>
+          </span>
+          {#if candidate.isSignedOut}
+            <Badge>Signed out</Badge>
+          {/if}
+        </DropdownMenuItem>
+      {/each}
     </div>
   {/if}
+
+  <!-- Frame 159-8517: three actions, each a page — creating an account no
+       longer hides behind "Sign in to another account" (#727). -->
+  <div class="flex flex-col gap-2">
+    {#if others.length > 0}
+      <Button variant="ghost" size="sm" class="w-full" onclick={notImplemented}>
+        <SubtractFill />
+        Remove an account
+      </Button>
+    {/if}
+    <Button variant="ghost" size="sm" class="w-full" href={resolve(routes.ACCOUNT_NEW)}>
+      <AddFill />
+      Create a new account
+    </Button>
+    <Button variant="ghost" size="sm" class="w-full" href={resolve(routes.ACCOUNT_ADD)}>
+      <UserSearchLine />
+      Sign in to another account
+    </Button>
+  </div>
 </DropdownMenu>
 
 {#if signingOut}
