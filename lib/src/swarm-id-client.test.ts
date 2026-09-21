@@ -743,3 +743,21 @@ describe("SwarmIdClient init-timeout timers (#421)", () => {
     }
   })
 })
+
+// A server render (Next.js App Router, SvelteKit with SSR) reaches the
+// constructor with no `window`. It used to throw a bare `ReferenceError` from
+// inside `setupMessageListener` — in the published build, a stack into
+// minified code that named neither the package nor the fix (#778).
+describe("SwarmIdClient on a server", () => {
+  it("says the package is browser-only and where to construct instead", () => {
+    vi.unstubAllGlobals()
+    expect(typeof window).toBe("undefined")
+    expect(
+      () =>
+        new SwarmIdClient({
+          iframeOrigin: "https://swarm-id.snaha.net",
+          metadata: { name: "ssr" },
+        }),
+    ).toThrow(/@snaha\/swarm-id .*browser/)
+  })
+})
