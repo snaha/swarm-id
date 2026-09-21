@@ -1,5 +1,23 @@
 # Changelog
 
+## [0.6.0](https://github.com/snaha/swarm-id/compare/v0.5.0...v0.6.0) (2026-09-21)
+
+
+### ⚠ BREAKING CHANGES
+
+* **lib:** every client rejection is a SwarmIdError with a code to branch on ([#811](https://github.com/snaha/swarm-id/issues/811))
+
+### Features
+
+* **lib:** every client rejection is a SwarmIdError with a code to branch on ([#811](https://github.com/snaha/swarm-id/issues/811)) ([2f298c5](https://github.com/snaha/swarm-id/commit/2f298c5748829bc135714aeee02236dd5b91c579))
+
+
+### Bug Fixes
+
+* **lib:** drop a stamper init whose stamp was cleared while it awaited ([#805](https://github.com/snaha/swarm-id/issues/805)) ([ff874a6](https://github.com/snaha/swarm-id/commit/ff874a68b495b7cd8b6fe29cf2e5af36b923d6ac))
+* **lib:** name the package and the fix when SwarmIdClient is constructed on a server ([#806](https://github.com/snaha/swarm-id/issues/806)) ([021ad37](https://github.com/snaha/swarm-id/commit/021ad373b31ea61a7e321d07906ce3568423dc94))
+* **lib:** refuse a drive whose record says the node lacks or cannot use it ([#808](https://github.com/snaha/swarm-id/issues/808)) ([6228b3e](https://github.com/snaha/swarm-id/commit/6228b3e15168f6ff1c49f72bc6c287adbc75b57c))
+
 ## [0.5.0](https://github.com/snaha/swarm-id/compare/v0.4.1...v0.5.0) (2026-09-21)
 
 
