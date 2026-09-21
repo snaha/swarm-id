@@ -194,6 +194,8 @@ function uploadUnavailableDescription(info: ConnectionInfo): string {
       return 'a postage stamp resolved but the write path would not build'
     case 'stamp-expired':
       return 'the account’s drive has expired — renew it or add another in Swarm ID'
+    case 'stamp-not-usable':
+      return 'the account’s drive is not usable by the node yet, or at all — a fresh drive takes a moment, otherwise add another in Swarm ID'
     default:
       return 'no postage stamp available'
   }

@@ -187,6 +187,14 @@ function writerPath(input: CheckInput): CheckResult {
         detail:
           'The account’s drive has expired, so the session refuses to stamp and the writer path was never exercised. Renew the drive or add another on the identity site, then run this again.',
       }
+    case 'stamp-not-usable':
+      return {
+        id,
+        title,
+        verdict: 'unknown',
+        detail:
+          'The account’s drive is not usable by the node yet (or at all), so the session refuses to stamp and the writer path was never exercised. A fresh drive takes a moment; otherwise add another on the identity site, then run this again.',
+      }
     default:
       // Not red: `uploadUnavailableReason` is optional on the wire, so an older
       // identity deployment sends `unavailable` without one and this branch is

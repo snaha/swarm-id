@@ -13,11 +13,36 @@
 
 const MS_PER_SECOND = 1000
 
-/** The subset of a stamp record the lifetime is derived from. */
+/** The subset of a stamp record the readiness rule is derived from. */
 export interface StampLifetimeFields {
   batchTTL?: number
   createdAt: number
   updatedAt?: number
+  /** What the node last said: absent on a record that predates the fields */
+  usable?: boolean
+  exists?: boolean
+}
+
+/** Why the session refuses to stamp with the record, or `undefined` if it will. */
+export type StampRefusal = "stamp-expired" | "stamp-not-usable"
+
+/**
+ * The readiness rule. Expiry first, because it is the older and the more
+ * specific answer; then what the node last said about the batch (#765): a
+ * batch it does not have (`exists: false`) or cannot use yet (`usable: false`
+ * — a fresh purchase for its first ~30 s, or one the node never accepted)
+ * refuses the first stamped write, which a dApp gating on `canUpload` alone
+ * met 30 s later as a timeout.
+ */
+export function stampRefusal(
+  stamp: StampLifetimeFields,
+  now = Date.now(),
+): StampRefusal | undefined {
+  if (isStampExpired(stamp, now)) return "stamp-expired"
+  if (stamp.usable === false || stamp.exists === false) {
+    return "stamp-not-usable"
+  }
+  return undefined
 }
 
 /**
@@ -51,9 +76,9 @@ export function isStampExpired(
 }
 
 /**
- * Whether two records would age to the same lifetime — the check a refresh
- * needs to notice a renewal of the SAME batch, which moves only `batchTTL`
- * and `updatedAt`.
+ * Whether two records would age to the same lifetime and refuse the same way
+ * — the check a refresh needs to notice a renewal of the SAME batch, which
+ * moves only `batchTTL` and `updatedAt`, or a node that has since accepted it.
  */
 export function sameStampLifetime(
   a: StampLifetimeFields | undefined,
@@ -62,6 +87,8 @@ export function sameStampLifetime(
   if (a === undefined || b === undefined) return a === b
   return (
     a.batchTTL === b.batchTTL &&
-    (a.updatedAt ?? a.createdAt) === (b.updatedAt ?? b.createdAt)
+    (a.updatedAt ?? a.createdAt) === (b.updatedAt ?? b.createdAt) &&
+    a.usable === b.usable &&
+    a.exists === b.exists
   )
 }
