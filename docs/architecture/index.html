@@ -258,25 +258,26 @@ and a dApp does not need to request anything on the iframe’s behalf.</p>
 <div class="sl-heading-wrapper level-h2"><h2 id="backup-and-recovery">Backup and Recovery</h2><a class="sl-anchor-link" href="#backup-and-recovery"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 1 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 0 0-1.42-1.42m8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 1 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 0 0 0 1.42 1 1 0 0 0 1.42 0l3.88-3.89a4.49 4.49 0 0 0 0-6.33M8.83 15.17a1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.92-4.92a1 1 0 1 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42"></path></svg></span><span class="sr-only" data-pagefind-ignore>Section titled “Backup and Recovery”</span></a></div>
 <p>Three ways an account’s state survives a device: an encrypted <code dir="auto">.swarmid</code> file, the account’s own feeds on Swarm, and live propagation over the <a href="../account-bus/">account bus</a>.</p>
 <div class="sl-heading-wrapper level-h3"><h3 id="the-swarmid-file">The <code dir="auto">.swarmid</code> file</h3><a class="sl-anchor-link" href="#the-swarmid-file"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 1 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 0 0-1.42-1.42m8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 1 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 0 0 0 1.42 1 1 0 0 0 1.42 0l3.88-3.89a4.49 4.49 0 0 0 0-6.33M8.83 15.17a1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.92-4.92a1 1 0 1 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42"></path></svg></span><span class="sr-only" data-pagefind-ignore>Section titled “The .swarmid file”</span></a></div>
-<p>A JSON object with a plaintext header and an encrypted payload:</p>
+<p>Written and read by the identity UI only; a dApp never sees it. A JSON envelope:</p>
 <ul>
-<li><strong>Header</strong>: <code dir="auto">version</code>, <code dir="auto">accountName</code>, <code dir="auto">exportedAt</code>. No key material and no account type, since every account is a recovery-phrase account</li>
-<li><strong>Payload</strong>: the account state snapshot (connected apps and postage stamps, plus account metadata), encrypted with AES-GCM-256 under the backup file key from <a href="../key-derivation/">Key Derivation</a>. App connections are kept in the payload so that a restored account keeps them</li>
+<li><code dir="auto">format</code>: <code dir="auto">"swarm-id-backup"</code>, <code dir="auto">version</code>: <code dir="auto">1</code></li>
+<li><code dir="auto">salt</code>: 32 random bytes, hex</li>
+<li><code dir="auto">payload</code>: the account’s portable projection (name, settings, devices, connected apps, postage stamps), AES-GCM-256 encrypted, hex. Never the seed vault, the access method, or live per-app session material</li>
 </ul>
+<p>The file key is HKDF-SHA256 over the recovery-phrase entropy with that salt, so the file is useless without the phrase. It is not part of the <a href="../key-derivation/">Key Derivation</a> tree: nothing else derives from it, and a fresh salt means two exports of the same account share no key.</p>
 <div class="sl-heading-wrapper level-h3"><h3 id="export">Export</h3><a class="sl-anchor-link" href="#export"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 1 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 0 0-1.42-1.42m8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 1 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 0 0 0 1.42 1 1 0 0 0 1.42 0l3.88-3.89a4.49 4.49 0 0 0 0-6.33M8.83 15.17a1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.92-4.92a1 1 0 1 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42"></path></svg></span><span class="sr-only" data-pagefind-ignore>Section titled “Export”</span></a></div>
-<p>No re-authentication is needed: <code dir="auto">derivationKey</code> is stored on the account, and the file key derives from it.</p>
 <ol>
-<li>Serialize the account state (<code dir="auto">serializeAccountStateSnapshot</code>)</li>
-<li>Derive <code dir="auto">swarmEncryptionKey</code> from <code dir="auto">derivationKey</code>, then the file key from that</li>
-<li>Encrypt with a random 12-byte IV</li>
-<li>Write the header and the ciphertext</li>
+<li>The user unlocks with their access method, which yields the seed entropy</li>
+<li>Serialize the portable projection (<code dir="auto">serializeSyncedAccount</code>)</li>
+<li>Draw a salt, derive the file key from the entropy, encrypt with a random IV</li>
+<li>Write the envelope</li>
 </ol>
 <div class="sl-heading-wrapper level-h3"><h3 id="import">Import</h3><a class="sl-anchor-link" href="#import"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 1 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 0 0-1.42-1.42m8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 1 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 0 0 0 1.42 1 1 0 0 0 1.42 0l3.88-3.89a4.49 4.49 0 0 0 0-6.33M8.83 15.17a1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.92-4.92a1 1 0 1 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42"></path></svg></span><span class="sr-only" data-pagefind-ignore>Section titled “Import”</span></a></div>
 <ol>
-<li>Parse the header to show the account name and export time</li>
-<li>The user enters the recovery phrase, which gives the master key and <code dir="auto">derivationKey</code> again</li>
-<li>Derive the file key and decrypt</li>
-<li>Validate the payload (<code dir="auto">deserializeAccountStateSnapshot</code>) and create the account on this device</li>
+<li>The user picks the file and enters the recovery phrase</li>
+<li>Derive the file key from the phrase’s entropy and the file’s salt, decrypt</li>
+<li>Validate the payload against the portable schema and check that the phrase’s address is the account id</li>
+<li>Choose an access method for this device and store the account</li>
 </ol>
 <div class="sl-heading-wrapper level-h3"><h3 id="restore-from-swarm">Restore from Swarm</h3><a class="sl-anchor-link" href="#restore-from-swarm"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 1 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 0 0-1.42-1.42m8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 1 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 0 0 0 1.42 1 1 0 0 0 1.42 0l3.88-3.89a4.49 4.49 0 0 0 0-6.33M8.83 15.17a1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.92-4.92a1 1 0 1 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42"></path></svg></span><span class="sr-only" data-pagefind-ignore>Section titled “Restore from Swarm”</span></a></div>
 <p>When a device signs in to an account it has never seen, it rebuilds the account from Swarm:</p>
