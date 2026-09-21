@@ -5,7 +5,7 @@ import { describe, it, expect } from "vitest"
 import { BatchId } from "@ethersphere/bee-js"
 
 import {
-  accountDeltaSnapshot,
+  accountDeltaFromSnapshot,
   restoreLocalSessionFields,
 } from "./account-delta"
 import { AccountDeltaMessageSchema } from "./messages"
@@ -137,7 +137,7 @@ describe("restoreLocalSessionFields — a peer's Disconnect", () => {
   })
 })
 
-describe("accountDeltaSnapshot", () => {
+describe("accountDeltaFromSnapshot", () => {
   function snapshot(connectedApps: ConnectedApp[]): AccountStateSnapshot {
     return {
       version: 1,
@@ -157,7 +157,7 @@ describe("accountDeltaSnapshot", () => {
   }
 
   it("strips the session material but carries the disconnect marker", () => {
-    const wire = accountDeltaSnapshot(
+    const wire = accountDeltaFromSnapshot(
       snapshot([localSession({ disconnectedAt: LATER })]),
     )
     const parsed = AccountDeltaMessageSchema.parse({

@@ -12,7 +12,6 @@ import {
   PARTITION_COUNT,
   PartitionLeaseLostError,
   UINT16_COUNTER_MAX_DEPTH,
-  UTILIZATION_SLOTS_PER_BUCKET,
   UtilizationAwareStamper,
   dataSlot,
   partitionCapacity,
@@ -274,7 +273,6 @@ describe("BMT-of-encrypted chunk address (contentHash invariant)", () => {
 describe("per-bucket reservation constants", () => {
   it("reserves 2 slots per bucket (down from the historical 4)", () => {
     expect(DATA_COUNTER_START).toBe(2)
-    expect(UTILIZATION_SLOTS_PER_BUCKET).toBe(2)
   })
 })
 

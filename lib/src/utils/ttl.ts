@@ -5,8 +5,6 @@
  * TTL (Time To Live) calculation and formatting utilities for postage stamps
  */
 
-import { CHAIN_READ_TIMEOUT_MS, jsonRpcCall } from "./json-rpc"
-
 /**
  * Gnosis Chain block time in seconds
  */
@@ -127,46 +125,6 @@ export function formatTTL(ttlSeconds: number | undefined): string {
   const hours = Math.floor((ttlSeconds % SECONDS_PER_DAY) / SECONDS_PER_HOUR)
 
   return `${days}d ${hours}h`
-}
-
-/**
- * Fetches block timestamp from Gnosis RPC.
- *
- * @param rpcUrl - Gnosis RPC URL
- * @param blockNumber - Block number to get timestamp for
- * @returns Block timestamp in seconds (Unix timestamp)
- */
-export async function getBlockTimestamp(
-  rpcUrl: string,
-  blockNumber: number,
-): Promise<number> {
-  const block = await jsonRpcCall<{ timestamp?: string }>(
-    rpcUrl,
-    "eth_getBlockByNumber",
-    [`0x${blockNumber.toString(16)}`, false],
-    { timeoutMs: CHAIN_READ_TIMEOUT_MS },
-  )
-  // An unknown block already rejected above (JSON-RPC answers `null`). This is
-  // the block that exists without the field, where `parseInt` would hand the
-  // expiry math a NaN timestamp instead of failing.
-  if (typeof block.timestamp !== "string") {
-    throw new Error(`Block ${blockNumber} came back without a timestamp`)
-  }
-  return parseInt(block.timestamp, 16)
-}
-
-/**
- * Calculates expiry timestamp for a postage stamp.
- *
- * @param blockTimestamp - Timestamp when stamp was created (from blockNumber)
- * @param ttlSeconds - TTL in seconds
- * @returns Expiry timestamp in seconds (Unix timestamp)
- */
-export function calculateExpiryTimestamp(
-  blockTimestamp: number,
-  ttlSeconds: number,
-): number {
-  return blockTimestamp + ttlSeconds
 }
 
 /**

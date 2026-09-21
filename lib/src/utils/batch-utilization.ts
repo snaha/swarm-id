@@ -75,14 +75,6 @@ export const BUCKET_DEPTH = 16
  */
 export const PARTITION_COUNT = 2
 
-/**
- * Reserved slots at the bottom of every bucket — one per partition, at
- * index = partition. They hold the partition's lock SOC / utilisation
- * (counter) chunk, are mutably overwritten, and do not count toward
- * utilisation. Data slots begin above them at `DATA_COUNTER_START`.
- */
-export const UTILIZATION_SLOTS_PER_BUCKET = PARTITION_COUNT
-
 /** First data slot index; reserved slots `[0, PARTITION_COUNT)` precede it. */
 export const DATA_COUNTER_START = PARTITION_COUNT
 
@@ -120,9 +112,6 @@ export const IDLE_YIELD_MS = 30 * 1000 // 30 seconds
 
 /** Size of each chunk in bytes */
 export const CHUNK_SIZE = 4096
-
-/** Batch depth for N=256 slots per bucket with 65536 buckets */
-export const DEFAULT_BATCH_DEPTH = 24
 
 /**
  * Maximum batch depth at which a uint16 per-bucket counter is sufficient.

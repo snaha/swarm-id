@@ -11,7 +11,6 @@ import {
   fetchBatchTTLFromContract,
   fetchOnChainBatchState,
   fetchOnChainBatchStateResult,
-  resolveBatchStatus,
   POSTAGE_STAMP_CONTRACT_ADDRESS,
   resolvePostageStampContractAddress,
   type OnChainBatchState,
@@ -453,77 +452,5 @@ describe("fetchOnChainBatchStateResult", () => {
       BATCH_ID,
     )
     expect(result.status).toBe("error")
-  })
-})
-
-describe("resolveBatchStatus", () => {
-  let fetchSpy: MockInstance<typeof fetch>
-
-  const RPC = "https://rpc.example"
-  const BEE = "https://bee.example"
-
-  beforeEach(() => {
-    fetchSpy = vi.spyOn(globalThis, "fetch")
-  })
-  afterEach(() => {
-    fetchSpy.mockRestore()
-  })
-
-  it("found via contract, with the contract TTL", async () => {
-    fetchSpy.mockImplementation((url) =>
-      Promise.resolve(
-        url === RPC ? batchResponse(FULL_RESPONSE) : ({} as Response),
-      ),
-    )
-    const result = await resolveBatchStatus(RPC, BEE, BATCH_ID)
-    expect(result).toEqual({
-      status: "found",
-      ttlSeconds: EXPECTED_TTL_SECONDS,
-    })
-  })
-
-  it("not-found is authoritative and does not consult the Bee node", async () => {
-    fetchSpy.mockImplementation((url) => {
-      if (url === RPC) {
-        return Promise.resolve(
-          batchResponse({
-            0: { result: ZERO_TUPLE },
-            1: { result: OUT_PAYMENT_RESULT },
-            2: { result: LAST_PRICE_RESULT },
-          }),
-        )
-      }
-      throw new Error("Bee must not be consulted on contract not-found")
-    })
-    const result = await resolveBatchStatus(RPC, BEE, BATCH_ID)
-    expect(result).toEqual({ status: "not-found" })
-  })
-
-  it("falls back to the Bee node when the contract read errors", async () => {
-    fetchSpy.mockImplementation((url) =>
-      url === RPC
-        ? Promise.reject(new Error("rpc down"))
-        : Promise.resolve({
-            ok: true,
-            status: 200,
-            json: () => Promise.resolve({ batchTTL: 4242 }),
-          } as Response),
-    )
-    const result = await resolveBatchStatus(RPC, BEE, BATCH_ID)
-    expect(result).toEqual({ status: "found", ttlSeconds: 4242 })
-  })
-
-  it("is unreachable when both the contract and the Bee node fail", async () => {
-    fetchSpy.mockImplementation((url) =>
-      url === RPC
-        ? Promise.reject(new Error("rpc down"))
-        : Promise.resolve({
-            ok: false,
-            status: 404,
-            json: () => Promise.resolve({}),
-          } as Response),
-    )
-    const result = await resolveBatchStatus(RPC, BEE, BATCH_ID)
-    expect(result).toEqual({ status: "unreachable" })
   })
 })

@@ -5,14 +5,12 @@ import { describe, it, expect } from "vitest"
 import { BatchId } from "@ethersphere/bee-js"
 import {
   resolveStampForApp,
-  collectAccountStampBatchIds,
   stampsReachableByApp,
 } from "./postage-stamp-association"
 import {
   TEST_BATCH_ID_HEX,
   TEST_BATCH_ID_2_HEX,
   createPostageStamp,
-  createConnectedApp,
 } from "../test-fixtures"
 
 const accountBatch = new BatchId(TEST_BATCH_ID_HEX)
@@ -81,41 +79,6 @@ describe("resolveStampForApp", () => {
       [accountStamp, appStamp],
     )
     expect(result).toBeUndefined()
-  })
-})
-
-describe("collectAccountStampBatchIds", () => {
-  it("collects the default, owned stamps, and per-app overrides", () => {
-    const result = collectAccountStampBatchIds({
-      defaultPostageStampBatchID: accountBatch,
-      postageStamps: [accountStamp, appStamp],
-      connectedApps: [createConnectedApp({ postageStampBatchID: appBatch })],
-    })
-    expect(result.map((b) => b.toHex()).sort()).toEqual(
-      [TEST_BATCH_ID_HEX, TEST_BATCH_ID_2_HEX].sort(),
-    )
-  })
-
-  it("deduplicates a batch referenced multiple ways", () => {
-    const result = collectAccountStampBatchIds({
-      defaultPostageStampBatchID: accountBatch,
-      postageStamps: [accountStamp],
-      connectedApps: [
-        createConnectedApp({
-          postageStampBatchID: new BatchId(TEST_BATCH_ID_HEX),
-        }),
-      ],
-    })
-    expect(result.map((b) => b.toHex())).toEqual([TEST_BATCH_ID_HEX])
-  })
-
-  it("returns an empty array when nothing references a stamp", () => {
-    const result = collectAccountStampBatchIds({
-      defaultPostageStampBatchID: undefined,
-      postageStamps: [],
-      connectedApps: [],
-    })
-    expect(result).toEqual([])
   })
 })
 

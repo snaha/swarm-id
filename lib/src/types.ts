@@ -43,8 +43,6 @@ export type {
 // Constants
 // ============================================================================
 
-export const SWARM_SECRET_PREFIX = "swarm-secret-"
-
 // Storage keys for versioned storage managers. The account is the single nested
 // document of record (it owns its connected apps and postage stamps inline), so
 // there are no longer separate identity/app/stamp collection keys.

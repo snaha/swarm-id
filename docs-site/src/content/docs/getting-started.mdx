@@ -189,7 +189,7 @@ For advanced setup (local Bee cluster, SSH tunnels for real-domain testing, know
 
 ## Import & Export
 
-The library also supports account backup and recovery via encrypted `.swarmid` files and Swarm-based restoration. See [Architecture](../architecture/#backup-and-recovery) for the file format and flows, and the [API Reference](../api/#backup-encryption) for the functions.
+Backup and recovery happen in the identity UI, not in your dApp: the user exports an encrypted `.swarmid` file there, restores it with the recovery phrase, or rebuilds the account from Swarm on a new device. See [Architecture](../architecture/#backup-and-recovery) for the file format and flows.
 
 ## Next Steps
 

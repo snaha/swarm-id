@@ -3,7 +3,7 @@
 /**
  * Pull the latest account state from Swarm and fold it into local stores.
  *
- * Unlike `restoreAccountFromSwarm`, this doesn't need the master key — it uses
+ * This doesn't need the master key — it uses
  * the local account's `derivationKey` (already stored after sign-in) to derive
  * the feed owner and encryption key. So it's safe to call from any signed-in
  * page, including after the temporary master key has been cleared.

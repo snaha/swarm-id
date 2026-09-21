@@ -1,7 +1,6 @@
 // Copyright 2026 The Swarm Authors. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import type { BatchId } from "@ethersphere/bee-js"
 import type { ConnectedApp, PostageStamp, SignedInAccount } from "../schemas"
 
 /**
@@ -42,37 +41,6 @@ export function resolveStampForApp(
     if (stamp) return stamp
   }
   return undefined
-}
-
-/**
- * Collect the postage batch ids associated with an account: every stamp it owns
- * plus any default / per-app override pointers, deduplicated.
- */
-export function collectAccountStampBatchIds(
-  account: Pick<
-    SignedInAccount,
-    "defaultPostageStampBatchID" | "postageStamps" | "connectedApps"
-  >,
-): BatchId[] {
-  const candidates: (BatchId | undefined)[] = [
-    account.defaultPostageStampBatchID,
-    // Deleted stamps (tombstones) own no slots — exclude them from partitioning.
-    ...account.postageStamps
-      .filter((stamp) => !stamp.deletedAt)
-      .map((stamp) => stamp.batchID),
-    ...account.connectedApps.map((app) => app.postageStampBatchID),
-  ]
-
-  const seen = new Set<string>()
-  const result: BatchId[] = []
-  for (const batchId of candidates) {
-    if (!batchId) continue
-    const hex = batchId.toHex()
-    if (seen.has(hex)) continue
-    seen.add(hex)
-    result.push(batchId)
-  }
-  return result
 }
 
 /**

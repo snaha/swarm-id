@@ -19,10 +19,8 @@ export type { ProxyConfig } from "./swarm-id-proxy"
 export {
   deriveSecret,
   deriveSharingKey,
-  generateMasterKey,
   hexToUint8Array,
   uint8ArrayToHex,
-  verifySecret,
   utils,
 } from "./utils/key-derivation"
 
@@ -63,10 +61,8 @@ export {
   deriveUtilizationChunkKey,
   NUM_BUCKETS,
   BUCKET_DEPTH,
-  UTILIZATION_SLOTS_PER_BUCKET,
   DATA_COUNTER_START,
   CHUNK_SIZE,
-  DEFAULT_BATCH_DEPTH,
   UINT16_COUNTER_MAX_DEPTH,
   MIN_USABLE_BATCH_DEPTH,
   PARTITION_COUNT,
@@ -137,8 +133,6 @@ export {
   LocalStorageAdapter,
   MemoryStorageAdapter,
   createLocalStorageManager,
-  createMemoryStorageManager,
-  createZodParser,
   VersionedStorageSchema,
 } from "./utils/versioned-storage"
 
@@ -156,18 +150,8 @@ export {
 // Storage manager types
 export type { NetworkSettingsStorageManager } from "./utils/storage-managers"
 
-// Account state snapshot (shared by file export and Swarm sync)
-export {
-  accountToStateSnapshot,
-  serializeAccountStateSnapshot,
-  deserializeAccountStateSnapshot,
-  AccountStateSnapshotSchemaV1,
-} from "./utils/account-state-snapshot"
-
-export type {
-  AccountStateSnapshot,
-  AccountStateSnapshotResult,
-} from "./utils/account-state-snapshot"
+// The account bus's `account-delta` payload, as the identity UI receives it
+export type { AccountStateSnapshot } from "./utils/account-state-snapshot"
 
 // Account bus (docs/Account-Bus.md). The proxy constructs its own; these
 // exports are for the SwarmID UI to publish and consume account-deltas
@@ -199,24 +183,6 @@ export {
   PRESENCE_MAX_AGE_MS,
 } from "./bus/presence"
 
-// Encrypted backup (.swarmid) support
-export {
-  deriveBackupEncryptionKey,
-  encryptBackupPayload,
-  decryptBackupPayload,
-  buildBackupHeader,
-  createEncryptedExport,
-  decryptEncryptedExport,
-  parseEncryptedExportHeader,
-  EncryptedSwarmIdExportSchemaV1,
-} from "./utils/backup-encryption"
-
-export type {
-  EncryptedSwarmIdExport,
-  BackupHeaderWithoutCiphertext,
-  ParseHeaderResult,
-} from "./utils/backup-encryption"
-
 // Epoch-based feeds - implementations
 export {
   EpochIndex,
@@ -228,20 +194,15 @@ export {
   createSyncEpochFinder,
   createAsyncEpochFinder,
   createEpochUpdater,
-  createEpochFinder, // deprecated alias for createSyncEpochFinder
   MAX_LEVEL,
 } from "./proxy/feeds/epochs"
 
 // State sync to Swarm
 export {
   // Account-level key derivation
-  deriveAccountBackupKey,
   deriveAccountDerivationKey,
   deriveSwarmEncryptionKey,
   derivePostageSignerKey,
-  backupKeyToPrivateKey,
-  serializeAccountState,
-  deserializeAccountState,
   // Snapshot merge primitives (shared by publish + refresh)
   mergeSnapshotWithRemote,
   mergeConnectedApps,
@@ -250,9 +211,6 @@ export {
   snapshotContainsContribution,
   // Sync account
   createSyncAccount,
-  // Restore account from Swarm
-  restoreAccountFromSwarm,
-  SnapshotDataUnavailableError,
   // Phase 3a: per-device snapshot feeds + append-only roster discovery
   deviceStateTopic,
   writeDeviceState,
@@ -281,8 +239,6 @@ export type {
   PostageStampsStoreInterface,
   StamperOptions,
   FlushableStamper,
-  // Restore account types
-  RestoreAccountResult,
   // Phase 3a types
   DeviceStateSnapshot,
   DeviceStateView,
@@ -408,7 +364,6 @@ export {
   LocalVaultSchemaV1,
   AccessMethodSchemaV1,
   PostageStampSchemaV1,
-  isLocalAccount,
   isSignedOutAccount,
 } from "./schemas"
 
@@ -440,7 +395,6 @@ export type {
 // Device ID utilities
 export {
   getOrCreateDeviceId,
-  getDeviceId,
   mergeDevices,
   detectDeviceName,
 } from "./utils/device-id"
@@ -528,7 +482,7 @@ export {
 export type { ActEntry, ActKeyCandidates } from "./proxy/act"
 
 // Constant exports
-export { SWARM_SECRET_PREFIX, STORAGE_CHALLENGE_KEY } from "./types"
+export { STORAGE_CHALLENGE_KEY } from "./types"
 
 // URL building utilities
 export { buildAuthUrl, isHttpUrl } from "./utils/url"
@@ -555,11 +509,8 @@ export {
   buildBzzCompatibleManifest,
   buildBzzManifestNode,
   buildMinimalManifest,
-  extractReferenceFromManifest,
   extractEntryFromManifest,
   extractContentFromFlatManifest,
-  padPayloadForSOCDetection,
-  MAX_PADDED_PAYLOAD_SIZE,
 } from "./proxy/manifest-builder"
 
 export type {
@@ -589,8 +540,6 @@ export {
 export {
   calculateTTLSeconds,
   formatTTL,
-  getBlockTimestamp,
-  calculateExpiryTimestamp,
   fetchSwarmPrice,
   fetchChainState,
   calculateStampAmountForDays,
@@ -615,7 +564,6 @@ export {
   fetchOnChainBatchStateResult,
   fetchBatchTTLFromContract,
   fetchAuthoritativeBatchTTL,
-  resolveBatchStatus,
   resolvePostageStampContractAddress,
   calculateContractTTLSeconds,
   decodeBatches,
@@ -626,14 +574,12 @@ export type {
   OnChainPostageBatch,
   OnChainBatchState,
   OnChainBatchResult,
-  BatchResolution,
 } from "./utils/postage-contract"
 
 // Postage stamp <-> account/app association
 export {
   resolveStampForApp,
   stampsReachableByApp,
-  collectAccountStampBatchIds,
 } from "./utils/postage-stamp-association"
 export {
   remainingLifespanSeconds,

@@ -162,26 +162,27 @@ Three ways an account's state survives a device: an encrypted `.swarmid` file, t
 
 ### The `.swarmid` file
 
-A JSON object with a plaintext header and an encrypted payload:
+Written and read by the identity UI only; a dApp never sees it. A JSON envelope:
 
-- **Header**: `version`, `accountName`, `exportedAt`. No key material and no account type, since every account is a recovery-phrase account
-- **Payload**: the account state snapshot (connected apps and postage stamps, plus account metadata), encrypted with AES-GCM-256 under the backup file key from [Key Derivation](../key-derivation/). App connections are kept in the payload so that a restored account keeps them
+- `format`: `"swarm-id-backup"`, `version`: `1`
+- `salt`: 32 random bytes, hex
+- `payload`: the account's portable projection (name, settings, devices, connected apps, postage stamps), AES-GCM-256 encrypted, hex. Never the seed vault, the access method, or live per-app session material
+
+The file key is HKDF-SHA256 over the recovery-phrase entropy with that salt, so the file is useless without the phrase. It is not part of the [Key Derivation](../key-derivation/) tree: nothing else derives from it, and a fresh salt means two exports of the same account share no key.
 
 ### Export
 
-No re-authentication is needed: `derivationKey` is stored on the account, and the file key derives from it.
-
-1. Serialize the account state (`serializeAccountStateSnapshot`)
-2. Derive `swarmEncryptionKey` from `derivationKey`, then the file key from that
-3. Encrypt with a random 12-byte IV
-4. Write the header and the ciphertext
+1. The user unlocks with their access method, which yields the seed entropy
+2. Serialize the portable projection (`serializeSyncedAccount`)
+3. Draw a salt, derive the file key from the entropy, encrypt with a random IV
+4. Write the envelope
 
 ### Import
 
-1. Parse the header to show the account name and export time
-2. The user enters the recovery phrase, which gives the master key and `derivationKey` again
-3. Derive the file key and decrypt
-4. Validate the payload (`deserializeAccountStateSnapshot`) and create the account on this device
+1. The user picks the file and enters the recovery phrase
+2. Derive the file key from the phrase's entropy and the file's salt, decrypt
+3. Validate the payload against the portable schema and check that the phrase's address is the account id
+4. Choose an access method for this device and store the account
 
 ### Restore from Swarm
 
