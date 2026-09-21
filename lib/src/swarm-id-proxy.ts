@@ -11,6 +11,8 @@ import type {
   DeriveAppSecretMessage,
   UploadFileMessage,
   DownloadFileMessage,
+  UploadFilesMessage,
+  ListFilesMessage,
   UploadChunkMessage,
   DownloadChunkMessage,
   IsConnectedMessage,
@@ -94,6 +96,11 @@ import {
   loadMantarayTreeWithChunkAPI,
   saveMantarayTree,
 } from "./proxy/mantaray"
+import {
+  uploadCollection,
+  listCollection,
+  manifestEncryption,
+} from "./proxy/collection"
 import { createFeedManifestDirect } from "./proxy/feed-manifest"
 import {
   resolveStampForApp,
@@ -2236,6 +2243,14 @@ export class SwarmIdProxy {
         await this.handleDownloadFile(message, event)
         break
 
+      case "uploadFiles":
+        await this.handleUploadFiles(message, event)
+        break
+
+      case "listFiles":
+        await this.handleListFiles(message, event)
+        break
+
       case "uploadChunk":
         await this.handleUploadChunk(message, event)
         break
@@ -3818,12 +3833,12 @@ export class SwarmIdProxy {
       const manifestResult = await this.withModeAwareWriteLock(
         { useWorkers, workerCount },
         async (target) => {
-          // Step 1: Upload file content
-          // Encrypted by default (unless encrypt=false) - encryption is client-side
-          const shouldEncryptContent = options?.encrypt !== false
+          // Step 1: Upload file content — encrypted by default, like the
+          // manifest below (the rule is `manifestEncryption`)
+          const encryption = manifestEncryption(options)
 
           const contentUpload = await uploadData(target, data, {
-            encryptionKey: shouldEncryptContent ? true : undefined,
+            encryptionKey: encryption.content ? true : undefined,
             pin: options?.pin,
             deferred: options?.deferred,
             tag: uploadTag,
@@ -3857,7 +3872,7 @@ export class SwarmIdProxy {
               })
               return { tagUid: isRoot ? uploadTag : undefined }
             },
-            { encrypt: options?.encryptManifest === true },
+            { encrypt: encryption.manifest },
           )
 
           return result
@@ -3948,6 +3963,74 @@ export class SwarmIdProxy {
         event,
         requestId,
         error instanceof Error ? error.message : "Download failed",
+      )
+    }
+  }
+
+  /** A folder as one manifest (#750); the Swarm-specific part is `uploadCollection`. */
+  private async handleUploadFiles(
+    message: UploadFilesMessage,
+    event: MessageEvent,
+  ): Promise<void> {
+    const {
+      requestId,
+      files,
+      options,
+      requestOptions,
+      enableProgress,
+      useWorkers,
+      workerCount,
+    } = message
+
+    try {
+      this.ensureCanUpload()
+      const onProgress = this.createProgressCallback(
+        event,
+        requestId,
+        enableProgress,
+      )
+      const tag = options?.tag ?? (await tryCreateTag(this.bee))
+
+      const result = await this.withModeAwareWriteLock(
+        { useWorkers, workerCount },
+        (target) =>
+          uploadCollection(target, files, {
+            ...options,
+            tag,
+            onProgress,
+            requestOptions,
+          }),
+      )
+
+      this.postMessage(event, {
+        type: "uploadFilesResponse",
+        requestId,
+        reference: result.reference,
+        tagUid: result.tagUid,
+      })
+    } catch (error) {
+      this.sendErrorToParent(
+        event,
+        requestId,
+        error instanceof Error ? error.message : "Upload failed",
+      )
+    }
+  }
+
+  private async handleListFiles(
+    message: ListFilesMessage,
+    event: MessageEvent,
+  ): Promise<void> {
+    const { requestId, reference, requestOptions } = message
+
+    try {
+      const entries = await listCollection(this.bee, reference, requestOptions)
+      this.postMessage(event, { type: "listFilesResponse", requestId, entries })
+    } catch (error) {
+      this.sendErrorToParent(
+        event,
+        requestId,
+        error instanceof Error ? error.message : "Listing failed",
       )
     }
   }
