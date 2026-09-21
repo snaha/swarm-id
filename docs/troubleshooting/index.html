@@ -102,18 +102,21 @@ and set <code dir="auto">deferred</code> from <code dir="auto">beeMode === 'dev'
 <p><strong>Cause.</strong> The first stamped write was refused by the node — it does not know the batch, because
 the batch was bought moments ago or on a different node — and the write coordinator read the
 refusal as contention from another device
-(<a href="https://github.com/snaha/swarm-id/issues/765">#765</a>). An expired drive used to land here too;
-now the session refuses before the coordinator, as <code dir="auto">The account's drive has expired</code>, with
-<code dir="auto">uploadUnavailableReason</code> set to <code dir="auto">stamp-expired</code>.</p>
-<p><strong>Fix.</strong> A batch the node has not ingested yet needs a moment after purchase. Otherwise check
-the drive: <code dir="auto">getPostageBatch()</code> reports <code dir="auto">exists</code> and <code dir="auto">usable</code> from a real node, and
-<code dir="auto">connectionInfo.canUpload</code> with <code dir="auto">uploadUnavailableReason</code> says whether the session will stamp at
-all. See the <a href="../subsidised-gateway/#upload-availability-truth-table">upload availability table</a>.</p>
+(<a href="https://github.com/snaha/swarm-id/issues/765">#765</a>). An expired drive used to land here too,
+and so did one whose stored record already said <code dir="auto">exists: false</code> or <code dir="auto">usable: false</code>; now the
+session refuses before the coordinator — <code dir="auto">The account's drive has expired</code> with
+<code dir="auto">uploadUnavailableReason</code> set to <code dir="auto">stamp-expired</code>, or <code dir="auto">The account's drive is not usable</code> with
+<code dir="auto">stamp-not-usable</code>.</p>
+<p><strong>Fix.</strong> A batch the node has not ingested yet needs a moment after purchase. Otherwise check the drive:
+<code dir="auto">getPostageBatch()</code> reports <code dir="auto">exists</code> and <code dir="auto">usable</code> from a real node, and <code dir="auto">connectionInfo.canUpload</code>
+with <code dir="auto">uploadUnavailableReason</code> says whether the session will stamp at all. See the
+<a href="../subsidised-gateway/#upload-availability-truth-table">upload availability table</a>.</p>
 <div class="sl-heading-wrapper level-h3"><h3 id="signed-in-and-every-upload-fails">Signed in, and every upload fails</h3><a class="sl-anchor-link" href="#signed-in-and-every-upload-fails"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 1 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 0 0-1.42-1.42m8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 1 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 0 0 0 1.42 1 1 0 0 0 1.42 0l3.88-3.89a4.49 4.49 0 0 0 0-6.33M8.83 15.17a1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.92-4.92a1 1 0 1 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42"></path></svg></span><span class="sr-only" data-pagefind-ignore>Section titled “Signed in, and every upload fails”</span></a></div>
 <p><strong>Cause.</strong> <code dir="auto">connectionInfo.identity</code> being set does not mean the session can upload. A fresh
 Swarm ID has no drive, so without a <code dir="auto">subsidisedGatewayUrl</code> every first-time user’s upload fails.</p>
 <p><strong>Fix.</strong> Gate uploads on <code dir="auto">connectionInfo.canUpload</code>, and show <code dir="auto">uploadUnavailableReason</code> when it is
 false: <code dir="auto">no-stamp</code> and <code dir="auto">stamp-expired</code> are the user’s to fix (attach, buy or renew a drive),
+<code dir="auto">stamp-not-usable</code> is the user’s too (open the drive in Swarm ID, which refreshes its record),
 <code dir="auto">stamper-failed</code> is a bug to report. Pass the public gateway as <code dir="auto">subsidisedGatewayUrl</code> for a
 free tier. See <a href="../getting-started/#a-batch-you-were-given">Quick Start</a> and
 <a href="../subsidised-gateway/#why-uploads-are-unavailable">Why Uploads Are Unavailable</a>.</p>
