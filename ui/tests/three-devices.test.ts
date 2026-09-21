@@ -102,6 +102,18 @@ const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
 type Seed = { accounts: string | null; current: string | null }
 
 /**
+ * Skip a scenario that has no subject, and say so where a reviewer looks: a
+ * `::warning::` line is an annotation on the run and the PR's checks tab,
+ * where a skipped scenario is otherwise a green check with the reason in the
+ * log only.
+ */
+function skipScenario(reason: string): never {
+  if (process.env.CI) console.log(`::warning::skipped ${test.info().title}: ${reason}`)
+  test.skip(true, reason)
+  throw new Error(reason) // unreachable: test.skip throws
+}
+
+/**
  * One device: one context, one (or more) demo tabs on it. Everything is read
  * from what the demo renders — the sidebar's `Partition:` line, the harness's
  * round-trip verdict and reference — so the suite asserts what a user sees.
@@ -298,7 +310,7 @@ class Device {
     } catch (error) {
       const shown = error instanceof Error ? error.message : String(error)
       if (UNANSWERED_WAIT.test(shown)) {
-        test.skip(true, `${this.label}'s slot wait was never answered: holders stayed busy (#707)`)
+        skipScenario(`${this.label}'s slot wait was never answered: holders stayed busy (#707)`)
       }
       throw error
     }
@@ -574,7 +586,7 @@ test.describe('three devices on two partitions', () => {
       if ((await device.partition()) !== undefined && busy >= BUSY_PUBLISHES) {
         // Not idle at all: it spent the window publishing device state to a
         // peer (#707), and every publish is lease activity.
-        test.skip(true, `${device.label} published ${busy}× during the idle window (#707)`)
+        skipScenario(`${device.label} published ${busy}× during the idle window (#707)`)
       }
       await expect.poll(() => device.partition(), { timeout: LEASE_REFRESH_MS * 2 }).toBeUndefined()
     }
@@ -635,8 +647,7 @@ test.describe('three devices on two partitions', () => {
     const before = await expectNoDualHold(all())
     const pB = before.get('B')
     if (pB === undefined || before.get('C') === undefined) {
-      test.skip(
-        true,
+      skipScenario(
         `B and C did not both hold before B's disconnect: ${JSON.stringify([...before])}`,
       )
     }
@@ -652,7 +663,7 @@ test.describe('three devices on two partitions', () => {
     await B.disconnect()
     await aUpload
     if (C.yieldedSince(asked)) {
-      test.skip(true, 'C yielded to the request before B’s release could be told apart')
+      skipScenario('C yielded to the request before B’s release could be told apart')
     }
     expect(await A.partition(), 'A did not land on the slot B released').toBe(pB)
     await expectNoDualHold([A, C])
