@@ -43,8 +43,19 @@ describe("toWireError", () => {
       code: "bee-rejected",
       status: 402,
       beeMessage: "batch not usable",
-      url: "http://bee.example/chunks",
+      url: "/chunks",
     })
+  })
+
+  it("keeps the node's host out of the path it sends", () => {
+    const rejected = new BeeResponseError(
+      "GET",
+      "http://192.168.1.20:1633/chunks/aa",
+      "Request failed with status code 404",
+      undefined,
+      404,
+    )
+    expect(toWireError(rejected, "x").url).toBe("/chunks/aa")
   })
 
   it("carries the subsidised gateway's status for a refused SOC", () => {

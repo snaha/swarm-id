@@ -1498,8 +1498,12 @@ export type SwarmIdErrorCode = z.infer<typeof SwarmIdErrorCodeSchema>
 /** The fields of a `SwarmIdError` as they cross the bridge */
 export const WireErrorSchema = z.object({
   error: z.string(),
-  code: SwarmIdErrorCodeSchema,
-  reason: UploadUnavailableReasonSchema.optional(),
+  // Degrade, never drop: the client ships in dApps and meets whatever the
+  // trusted domain runs (#662). A newer proxy's code or reason must land as
+  // `internal` / no reason with the message intact, not as a message the
+  // schema rejects and a request that never settles.
+  code: SwarmIdErrorCodeSchema.catch("internal"),
+  reason: UploadUnavailableReasonSchema.optional().catch(undefined),
   status: z.number().int().optional(),
   beeMessage: z.string().optional(),
   url: z.string().optional(),

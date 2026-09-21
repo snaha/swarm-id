@@ -15,6 +15,7 @@
  */
 
 import { SwarmIdError } from "../errors"
+import { refusedPath } from "./errors"
 import { Reference, PrivateKey, Identifier, Span } from "@ethersphere/bee-js"
 import type {
   Bee,
@@ -309,7 +310,11 @@ async function uploadChunkViaSubsidisedGatewayInternal(
     throw new SwarmIdError(
       "bee-rejected",
       `Subsidised chunk upload failed: ${response.status} ${response.statusText} - ${errorText}`,
-      { status: response.status, beeMessage: errorText, url: response.url },
+      {
+        status: response.status,
+        beeMessage: errorText,
+        url: refusedPath(response.url),
+      },
     )
   }
 

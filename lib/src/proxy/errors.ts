@@ -12,10 +12,17 @@ import { BeeResponseError } from "@ethersphere/bee-js"
 import { ZodError } from "zod"
 import { SwarmIdError } from "../errors"
 import type { WireError } from "../types"
-import { PartitionContendedError } from "../sync/batch-write-coordinator"
-import { PartitionLeaseLostError } from "../utils/batch-utilization"
-import { TimeoutError } from "../utils/promise"
-import { SocUploadError } from "./upload"
+
+// The lib's own classes are told apart by `name`, which each sets, rather
+// than imported for `instanceof`: importing the coordinator and the
+// utilization module from here closed a cycle back through
+// `partition-state`, whose schema literal then read `NUM_BUCKETS` as
+// undefined. This module must stay a leaf.
+const LIB_ERROR_CODES: Record<string, WireError["code"]> = {
+  PartitionContendedError: "partition-contended",
+  PartitionLeaseLostError: "lease-lost",
+  TimeoutError: "timeout",
+}
 
 /** Bee's error body is `{ code, message }`; the gateway may answer plain text */
 function beeMessageOf(body: unknown): string | undefined {
@@ -27,6 +34,19 @@ function beeMessageOf(body: unknown): string | undefined {
   return undefined
 }
 
+/**
+ * The endpoint that refused, without its host: bee-js joins the node's base
+ * URL in, and the user's node — a LAN address, an internal hostname — is
+ * theirs, not the dApp's to learn from an error.
+ */
+export function refusedPath(url: string): string | undefined {
+  try {
+    return new URL(url).pathname
+  } catch {
+    return undefined
+  }
+}
+
 export function toWireError(error: unknown, fallback: string): WireError {
   if (error instanceof SwarmIdError) return error.toWire()
   if (!(error instanceof Error)) return { error: fallback, code: "internal" }
@@ -36,17 +56,15 @@ export function toWireError(error: unknown, fallback: string): WireError {
     if (error.status !== undefined) wire.status = error.status
     const beeMessage = beeMessageOf(error.responseBody)
     if (beeMessage !== undefined) wire.beeMessage = beeMessage
-    wire.url = error.url
-  } else if (error instanceof SocUploadError) {
+    const path = refusedPath(error.url)
+    if (path !== undefined) wire.url = path
+  } else if (error.name === "SocUploadError") {
+    const { status, body } = error as Error & { status: number; body: string }
     wire.code = "bee-rejected"
-    wire.status = error.status
-    wire.beeMessage = error.body
-  } else if (error instanceof PartitionContendedError) {
-    wire.code = "partition-contended"
-  } else if (error instanceof PartitionLeaseLostError) {
-    wire.code = "lease-lost"
-  } else if (error instanceof TimeoutError) {
-    wire.code = "timeout"
+    wire.status = status
+    wire.beeMessage = body
+  } else if (error.name in LIB_ERROR_CODES) {
+    wire.code = LIB_ERROR_CODES[error.name]
   } else if (error instanceof ZodError) {
     wire.code = "invalid-request"
   } else if (error instanceof TypeError && /fetch/i.test(error.message)) {

@@ -5,7 +5,11 @@ import { describe, it, expect, vi, beforeEach } from "vitest"
 import type { Mock, MockInstance } from "vitest"
 import { SwarmIdClient } from "./swarm-id-client"
 import { SwarmIdError } from "./errors"
-import type { ConnectionInfo, IframeToParentMessage } from "./types"
+import {
+  IframeToParentMessageSchema,
+  type ConnectionInfo,
+  type IframeToParentMessage,
+} from "./types"
 import { generatedAvatar } from "./utils/avatar"
 
 /**
@@ -353,6 +357,44 @@ describe("SwarmIdClient request seam", () => {
       url: "http://bee.example/chunks/aa",
     })
   })
+
+  // #662: the client meets whatever the trusted domain runs. A newer proxy's
+  // code or reason lands as internal / no reason, message intact — never as a
+  // dropped message and a request that settles 30 s later as timeout.
+  it.each([
+    { skew: "no code", wire: {}, code: "internal", reason: undefined },
+    {
+      skew: "an unknown code",
+      wire: { code: "quota-exceeded" },
+      code: "internal",
+      reason: undefined,
+    },
+    {
+      skew: "an unknown reason",
+      wire: { code: "upload-unavailable", reason: "stamp-frozen" },
+      code: "upload-unavailable",
+      reason: undefined,
+    },
+  ])(
+    "degrades a wire error with $skew instead of dropping it",
+    async ({ wire, code, reason }) => {
+      const promise = client.downloadData("a".repeat(64))
+      const { requestId } = lastPostedMessage()
+      // Through the receive schema, as the message listener parses it.
+      deliver(
+        IframeToParentMessageSchema.parse({
+          type: "error",
+          requestId,
+          error: "newer proxy",
+          ...wire,
+        }),
+      )
+      const error = await promise.catch((e: unknown) => e)
+      expect(error).toBeInstanceOf(SwarmIdError)
+      expect(error).toMatchObject({ message: "newer proxy", code })
+      expect((error as SwarmIdError).reason).toBe(reason)
+    },
+  )
 
   it("carries the upload-unavailable reason through", async () => {
     const promise = client.uploadData(new Uint8Array([1]))

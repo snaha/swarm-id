@@ -1650,18 +1650,18 @@ try {
 }
 ```
 
-| Code                  | Meaning                                                                                                                     | Also set                      |
-| --------------------- | --------------------------------------------------------------------------------------------------------------------------- | ----------------------------- |
-| `not-authenticated`   | No session for this origin                                                                                                  |                               |
-| `upload-unavailable`  | The session refuses to stamp; see [Why Uploads Are Unavailable](../subsidised-gateway/#why-uploads-are-unavailable)         | `reason`                      |
-| `partition-contended` | Every partition of the batch is held by other devices and none yielded in time                                              |                               |
-| `lease-lost`          | This device's partition was reclaimed mid-write                                                                             |                               |
-| `bee-rejected`        | Bee or the gateway answered with a non-2xx status. A `404` on `/bzz` and on a chunk mean different things; `url` says which | `status`, `beeMessage`, `url` |
-| `network`             | The request never got a response: DNS, a refused connection, or a CORS preflight the gateway rejected                       |                               |
-| `timeout`             | A deadline ran out: the proxy's on a Bee request, or the client's on the whole round trip (`requestOptions.timeout`)        |                               |
-| `invalid-request`     | The message or an argument failed validation                                                                                |                               |
-| `init-failed`         | The proxy iframe did not come up; `initialize()` rejects with this                                                          |                               |
-| `internal`            | Anything else; the message is preserved                                                                                     |                               |
+| Code                  | Meaning                                                                                                                                                                   | Also set                      |
+| --------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------- |
+| `not-authenticated`   | No session for this origin                                                                                                                                                |                               |
+| `upload-unavailable`  | The session refuses to stamp; see [Why Uploads Are Unavailable](../subsidised-gateway/#why-uploads-are-unavailable)                                                       | `reason`                      |
+| `partition-contended` | Every partition of the batch is held by other devices and none yielded in time                                                                                            |                               |
+| `lease-lost`          | This device's partition was reclaimed mid-write                                                                                                                           |                               |
+| `bee-rejected`        | Bee or the gateway answered with a non-2xx status. A `404` on `/bzz` and on a chunk mean different things; `url` — the request's path, never the node's host — says which | `status`, `beeMessage`, `url` |
+| `network`             | The request never got a response: DNS, a refused connection, or a CORS preflight the gateway rejected                                                                     |                               |
+| `timeout`             | A deadline ran out: the proxy's on a Bee request, or the client's on the whole round trip (`requestOptions.timeout`)                                                      |                               |
+| `invalid-request`     | The message or an argument failed validation                                                                                                                              |                               |
+| `init-failed`         | The proxy iframe did not come up; `initialize()` rejects with this                                                                                                        |                               |
+| `internal`            | Anything else; the message is preserved                                                                                                                                   |                               |
 
 The instance is built on the client side from the fields the proxy sends — an `Error` posted through the iframe bridge arrives as a plain `Error`, so it never crosses it. A dApp that bundles two copies of the package should branch on `error.code` rather than `instanceof`, which is per copy.
 

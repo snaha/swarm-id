@@ -15,7 +15,7 @@ export interface SwarmIdErrorDetails {
   status?: number
   /** With `bee-rejected`: Bee's own message from the response body */
   beeMessage?: string
-  /** With `bee-rejected`: the request that was refused */
+  /** With `bee-rejected`: the path of the request that was refused (no host) */
   url?: string
   cause?: unknown
 }
