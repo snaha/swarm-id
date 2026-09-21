@@ -14,6 +14,8 @@
  *   const result = await uploadData(target, data, { encryptionKey: true })
  */
 
+import { SwarmIdError } from "../errors"
+import { refusedPath } from "./errors"
 import { Reference, PrivateKey, Identifier, Span } from "@ethersphere/bee-js"
 import type {
   Bee,
@@ -58,11 +60,14 @@ import { normalizeUrl } from "../utils/url"
  */
 export class SocUploadError extends Error {
   readonly status: number
+  /** What the node or gateway answered, for the bridge's `beeMessage` (#761) */
+  readonly body: string
 
   constructor(status: number, statusText: string, body: string) {
     super(`SOC upload failed: ${status} ${statusText} - ${body}`)
     this.name = "SocUploadError"
     this.status = status
+    this.body = body
   }
 }
 
@@ -302,8 +307,14 @@ async function uploadChunkViaSubsidisedGatewayInternal(
 
   if (!response.ok) {
     const errorText = await response.text()
-    throw new Error(
+    throw new SwarmIdError(
+      "bee-rejected",
       `Subsidised chunk upload failed: ${response.status} ${response.statusText} - ${errorText}`,
+      {
+        status: response.status,
+        beeMessage: errorText,
+        url: refusedPath(response.url),
+      },
     )
   }
 
@@ -856,7 +867,10 @@ export async function uploadSOC(
 ): Promise<UploadSOCResult> {
   // Validate data size
   if (data.length < 1 || data.length > 4096) {
-    throw new Error(`Invalid data length: ${data.length} (expected 1-4096)`)
+    throw new SwarmIdError(
+      "invalid-request",
+      `Invalid data length: ${data.length} (expected 1-4096)`,
+    )
   }
 
   const isEncrypted = options?.encryptionKey !== undefined

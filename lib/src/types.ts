@@ -1462,10 +1462,57 @@ export const UploadProgressMessageSchema = z.object({
   processed: z.number(),
 })
 
-export const ErrorMessageSchema = z.object({
+/**
+ * Why a request failed, as a dApp can branch on it (#761). `error.message`
+ * carries the text as before; the code is the stable part.
+ *
+ * - `not-authenticated` — no session for this origin
+ * - `upload-unavailable` — the session refuses to stamp; `reason` says why,
+ *   in the same vocabulary as `ConnectionInfo.uploadUnavailableReason`
+ * - `partition-contended` — every partition of the batch is held by other
+ *   devices and none yielded in time
+ * - `lease-lost` — this device's partition was reclaimed mid-write
+ * - `bee-rejected` — Bee or the gateway answered with a non-2xx status:
+ *   `status`, `beeMessage` and `url` say which
+ * - `network` — the request never got a response (a CORS preflight refusal
+ *   shows as this)
+ * - `timeout` — a deadline: the proxy's, or the client's round trip
+ * - `invalid-request` — the message or an argument failed validation
+ * - `init-failed` — the proxy iframe did not come up
+ * - `internal` — anything else, message preserved
+ */
+export const SwarmIdErrorCodeSchema = z.enum([
+  "not-authenticated",
+  "upload-unavailable",
+  "partition-contended",
+  "lease-lost",
+  "bee-rejected",
+  "network",
+  "timeout",
+  "invalid-request",
+  "init-failed",
+  "internal",
+])
+export type SwarmIdErrorCode = z.infer<typeof SwarmIdErrorCodeSchema>
+
+/** The fields of a `SwarmIdError` as they cross the bridge */
+export const WireErrorSchema = z.object({
+  error: z.string(),
+  // Degrade, never drop: the client ships in dApps and meets whatever the
+  // trusted domain runs (#662). A newer proxy's code or reason must land as
+  // `internal` / no reason with the message intact, not as a message the
+  // schema rejects and a request that never settles.
+  code: SwarmIdErrorCodeSchema.catch("internal"),
+  reason: UploadUnavailableReasonSchema.optional().catch(undefined),
+  status: z.number().int().optional(),
+  beeMessage: z.string().optional(),
+  url: z.string().optional(),
+})
+export type WireError = z.infer<typeof WireErrorSchema>
+
+export const ErrorMessageSchema = WireErrorSchema.extend({
   type: z.literal("error"),
   requestId: z.string(),
-  error: z.string(),
 })
 
 export const ConnectionInfoChangedMessageSchema = z.object({

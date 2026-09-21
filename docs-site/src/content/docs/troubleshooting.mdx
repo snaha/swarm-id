@@ -11,7 +11,7 @@ links to.
 
 **Cause.** A request header outside the gateway's short CORS allow-list — `Swarm-Pin`, `Swarm-Tag`
 or the ACT headers. The browser refuses the request at the preflight and reports nothing more
-specific.
+specific. Through the library it is a `SwarmIdError` with code `network`.
 
 **Fix.** Through Swarm ID this does not happen: the subsidised path sends none of those headers
 whatever the upload options say — `pin: true` is dropped there. If you see it, the request is
@@ -20,7 +20,8 @@ call. See [The Public Gateway](../public-gateway/).
 
 ### `Request timeout after 30000ms`
 
-**Cause.** One of two things, and the message does not say which.
+**Cause.** One of two things, and the message does not say which (the code is `timeout` either
+way).
 
 - The client's default `timeout` (30 s) bounds the whole request, uploads included. A file of a
   few MB over a testnet or the public gateway takes longer.
@@ -50,11 +51,11 @@ See [Using Your Own Bee Node](../own-bee-node/#a-node-in-dev-mode).
 **Cause.** The first stamped write was refused by the node — it does not know the batch, because
 the batch was bought moments ago or on a different node — and the write coordinator read the
 refusal as contention from another device
-([#765](https://github.com/snaha/swarm-id/issues/765)). An expired drive used to land here too,
-and so did one whose stored record already said `exists: false` or `usable: false`; now the
-session refuses before the coordinator — `The account's drive has expired` with
-`uploadUnavailableReason` set to `stamp-expired`, or `The account's drive is not usable` with
-`stamp-not-usable`.
+([#765](https://github.com/snaha/swarm-id/issues/765)); the code is `partition-contended`. An
+expired drive used to land here too, and so did one whose stored record already said
+`exists: false` or `usable: false`; now the session refuses before the coordinator — `The account's
+drive has expired` with `uploadUnavailableReason` set to `stamp-expired`, or `The account's drive
+is not usable` with `stamp-not-usable` — as `upload-unavailable` with that `reason`.
 
 **Fix.** A batch the node has not ingested yet needs a moment after purchase. Otherwise check the drive:
 `getPostageBatch()` reports `exists` and `usable` from a real node, and `connectionInfo.canUpload`
@@ -154,7 +155,8 @@ origin other than `localhost` unless the host is listed.
 
 ### A proxy error with nothing to branch on
 
-Every failure crosses the bridge as one string today — status, Bee's error body and the cause
-are flattened away ([#761](https://github.com/snaha/swarm-id/issues/761)). Until that lands,
-the browser's network tab holds the response the message dropped: the failing URL and the
-status are there.
+Every failure used to cross the bridge as one string — status, Bee's error body and the cause
+flattened away ([#761](https://github.com/snaha/swarm-id/issues/761)). Every rejection is now a
+`SwarmIdError`: branch on `error.code`, and for `bee-rejected` read `status`, `beeMessage` and
+`url`. See [Errors](../api/#errors). The message itself is unchanged, so what was logged before
+still reads the same.

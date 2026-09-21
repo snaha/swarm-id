@@ -4,7 +4,12 @@
 import { describe, it, expect, vi, beforeEach } from "vitest"
 import type { Mock, MockInstance } from "vitest"
 import { SwarmIdClient } from "./swarm-id-client"
-import type { ConnectionInfo, IframeToParentMessage } from "./types"
+import { SwarmIdError } from "./errors"
+import {
+  IframeToParentMessageSchema,
+  type ConnectionInfo,
+  type IframeToParentMessage,
+} from "./types"
 import { generatedAvatar } from "./utils/avatar"
 
 /**
@@ -324,6 +329,103 @@ describe("SwarmIdClient request seam", () => {
     internals(client).iframe = {
       style: {},
       contentWindow: { postMessage },
+    }
+  })
+
+  // #761: a failure used to arrive as `new Error(message.error)`, the status
+  // and Bee's message flattened into the string or dropped.
+  it("rejects with a SwarmIdError carrying the wire's code, status and Bee message", async () => {
+    const promise = client.downloadData("a".repeat(64))
+    const { requestId } = lastPostedMessage()
+    deliver({
+      type: "error",
+      requestId,
+      error: "Request failed with status code 404",
+      code: "bee-rejected",
+      status: 404,
+      beeMessage: "chunk not found",
+      url: "http://bee.example/chunks/aa",
+    })
+    const error = await promise.catch((e: unknown) => e)
+    expect(error).toBeInstanceOf(SwarmIdError)
+    expect(error).toMatchObject({
+      name: "SwarmIdError",
+      message: "Request failed with status code 404",
+      code: "bee-rejected",
+      status: 404,
+      beeMessage: "chunk not found",
+      url: "http://bee.example/chunks/aa",
+    })
+  })
+
+  // #662: the client meets whatever the trusted domain runs. A newer proxy's
+  // code or reason lands as internal / no reason, message intact — never as a
+  // dropped message and a request that settles 30 s later as timeout.
+  it.each([
+    { skew: "no code", wire: {}, code: "internal", reason: undefined },
+    {
+      skew: "an unknown code",
+      wire: { code: "quota-exceeded" },
+      code: "internal",
+      reason: undefined,
+    },
+    {
+      skew: "an unknown reason",
+      wire: { code: "upload-unavailable", reason: "stamp-frozen" },
+      code: "upload-unavailable",
+      reason: undefined,
+    },
+  ])(
+    "degrades a wire error with $skew instead of dropping it",
+    async ({ wire, code, reason }) => {
+      const promise = client.downloadData("a".repeat(64))
+      const { requestId } = lastPostedMessage()
+      // Through the receive schema, as the message listener parses it.
+      deliver(
+        IframeToParentMessageSchema.parse({
+          type: "error",
+          requestId,
+          error: "newer proxy",
+          ...wire,
+        }),
+      )
+      const error = await promise.catch((e: unknown) => e)
+      expect(error).toBeInstanceOf(SwarmIdError)
+      expect(error).toMatchObject({ message: "newer proxy", code })
+      expect((error as SwarmIdError).reason).toBe(reason)
+    },
+  )
+
+  it("carries the upload-unavailable reason through", async () => {
+    const promise = client.uploadData(new Uint8Array([1]))
+    const { requestId } = lastPostedMessage()
+    deliver({
+      type: "error",
+      requestId,
+      error: "drive expired",
+      code: "upload-unavailable",
+      reason: "stamp-expired",
+    })
+    await expect(promise).rejects.toMatchObject({
+      code: "upload-unavailable",
+      reason: "stamp-expired",
+    })
+  })
+
+  it("times the round trip out with a SwarmIdError of code timeout", async () => {
+    vi.useFakeTimers()
+    try {
+      const promise = client.downloadData("a".repeat(64), undefined, {
+        timeout: 1000,
+      })
+      const settled = promise.catch((e: unknown) => e)
+      await vi.advanceTimersByTimeAsync(1001)
+      const error = await settled
+      expect(error).toBeInstanceOf(SwarmIdError)
+      expect(error).toMatchObject({ code: "timeout" })
+      expect((error as Error).message).toMatch(/timeout after 1000ms/)
+    } finally {
+      vi.useRealTimers()
     }
   })
 

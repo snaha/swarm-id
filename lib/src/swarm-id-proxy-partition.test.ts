@@ -1750,6 +1750,12 @@ describe("SwarmIdProxy partitioned write enablement", () => {
       vi.setSystemTime(Date.now() + 61_000)
       try {
         expect(() => internals.ensureCanUpload()).toThrow(/expired/)
+        expect(() => internals.ensureCanUpload()).toThrow(
+          expect.objectContaining({
+            code: "upload-unavailable",
+            reason: "stamp-expired",
+          }),
+        )
         const info = internals.buildConnectionInfo()
         expect(info.canUpload).toBe(false)
         expect(info.uploadUnavailableReason).toBe("stamp-expired")

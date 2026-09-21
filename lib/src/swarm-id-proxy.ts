@@ -1,6 +1,8 @@
 // Copyright 2026 The Swarm Authors. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import { SwarmIdError } from "./errors"
+import { toWireError } from "./proxy/errors"
 import type {
   ParentToIframeMessage,
   ParentIdentifyMessage,
@@ -2044,7 +2046,10 @@ export class SwarmIdProxy {
       })
     }
     if (!this.coordinator) {
-      throw new Error("Stamper not initialized. Please login first.")
+      throw new SwarmIdError(
+        "not-authenticated",
+        "Stamper not initialized. Please login first.",
+      )
     }
     return this.coordinator.withWrite(operation, targetOptions)
   }
@@ -2140,11 +2145,7 @@ export class SwarmIdProxy {
         await this.handleParentMessage(message, event)
       } catch (error) {
         console.error("[Proxy] Error handling parent message:", error)
-        this.sendErrorToParent(
-          event,
-          message.requestId,
-          error instanceof Error ? error.message : "Unknown error",
-        )
+        this.sendErrorToParent(event, message.requestId, error, "Unknown error")
       }
     })
   }
@@ -3241,23 +3242,32 @@ export class SwarmIdProxy {
   /**
    * Send error message to parent
    */
+  /**
+   * Answer a request with what went wrong, as a dApp can branch on it (#761):
+   * the caught value is classified by `toWireError`; `fallback` is the
+   * message for a throw that was not an `Error`.
+   */
   private sendErrorToParent(
     event: MessageEvent,
     requestId: string | undefined,
-    error: string,
+    error: unknown,
+    fallback: string,
   ): void {
     if (requestId) {
       this.postMessage(event, {
         type: "error",
         requestId,
-        error,
+        ...toWireError(error, fallback),
       })
     }
   }
 
   private ensureCanUpload(): void {
     if (!this.authenticated || !this.appSecret) {
-      throw new Error("Not authenticated. Please login first.")
+      throw new SwarmIdError(
+        "not-authenticated",
+        "Not authenticated. Please login first.",
+      )
     }
     // Allow uploads if subsidised mode is active (gateway handles stamping)
     if (this.isSubsidisedModeActive()) {
@@ -3266,13 +3276,17 @@ export class SwarmIdProxy {
     // Refuse here, before the write coordinator: its first stamped write is
     // the lease claim, and a refused claim reads as partition contention (#745).
     if (this.stampRefusal === "stamp-expired") {
-      throw new Error(
+      throw new SwarmIdError(
+        "upload-unavailable",
         "The account's drive has expired. Renew it or add another in Swarm ID before uploading.",
+        { reason: "stamp-expired" },
       )
     }
     if (this.stampRefusal === "stamp-not-usable") {
-      throw new Error(
+      throw new SwarmIdError(
+        "upload-unavailable",
         "The account's drive is not usable: its record says the node does not have the batch, or cannot use it. Open the drive in Swarm ID to refresh it, or add another, before uploading.",
+        { reason: "stamp-not-usable" },
       )
     }
     // NB: the multi-device "all partitions held" case is NOT checked here.
@@ -3501,7 +3515,8 @@ export class SwarmIdProxy {
       this.sendErrorToParent(
         event,
         message.requestId,
-        error instanceof Error ? error.message : "Failed to get node info",
+        error,
+        "Failed to get node info",
       )
     }
   }
@@ -3788,11 +3803,7 @@ export class SwarmIdProxy {
         tagUid: uploadResult.tagUid,
       })
     } catch (error) {
-      this.sendErrorToParent(
-        event,
-        requestId,
-        error instanceof Error ? error.message : "Upload failed",
-      )
+      this.sendErrorToParent(event, requestId, error, "Upload failed")
     }
   }
 
@@ -3818,11 +3829,7 @@ export class SwarmIdProxy {
         data: data as Uint8Array,
       })
     } catch (error) {
-      this.sendErrorToParent(
-        event,
-        requestId,
-        error instanceof Error ? error.message : "Download failed",
-      )
+      this.sendErrorToParent(event, requestId, error, "Download failed")
     }
   }
 
@@ -3915,11 +3922,7 @@ export class SwarmIdProxy {
         tagUid: manifestResult.tagUid,
       })
     } catch (error) {
-      this.sendErrorToParent(
-        event,
-        requestId,
-        error instanceof Error ? error.message : "Upload failed",
-      )
+      this.sendErrorToParent(event, requestId, error, "Upload failed")
     }
   }
 
@@ -3987,11 +3990,7 @@ export class SwarmIdProxy {
         data,
       })
     } catch (error) {
-      this.sendErrorToParent(
-        event,
-        requestId,
-        error instanceof Error ? error.message : "Download failed",
-      )
+      this.sendErrorToParent(event, requestId, error, "Download failed")
     }
   }
 
@@ -4037,11 +4036,7 @@ export class SwarmIdProxy {
         tagUid: result.tagUid,
       })
     } catch (error) {
-      this.sendErrorToParent(
-        event,
-        requestId,
-        error instanceof Error ? error.message : "Upload failed",
-      )
+      this.sendErrorToParent(event, requestId, error, "Upload failed")
     }
   }
 
@@ -4055,11 +4050,7 @@ export class SwarmIdProxy {
       const entries = await listCollection(this.bee, reference, requestOptions)
       this.postMessage(event, { type: "listFilesResponse", requestId, entries })
     } catch (error) {
-      this.sendErrorToParent(
-        event,
-        requestId,
-        error instanceof Error ? error.message : "Listing failed",
-      )
+      this.sendErrorToParent(event, requestId, error, "Listing failed")
     }
   }
 
@@ -4098,11 +4089,7 @@ export class SwarmIdProxy {
         reference: chunk.address.toHex(),
       })
     } catch (error) {
-      this.sendErrorToParent(
-        event,
-        requestId,
-        error instanceof Error ? error.message : "Upload failed",
-      )
+      this.sendErrorToParent(event, requestId, error, "Upload failed")
     }
   }
 
@@ -4126,11 +4113,7 @@ export class SwarmIdProxy {
         data: data as Uint8Array,
       })
     } catch (error) {
-      this.sendErrorToParent(
-        event,
-        requestId,
-        error instanceof Error ? error.message : "Download failed",
-      )
+      this.sendErrorToParent(event, requestId, error, "Download failed")
     }
   }
 
@@ -4150,11 +4133,7 @@ export class SwarmIdProxy {
         signer: signer.toHex(),
       })
     } catch (error) {
-      this.sendErrorToParent(
-        event,
-        requestId,
-        error instanceof Error ? error.message : "GSOC mine failed",
-      )
+      this.sendErrorToParent(event, requestId, error, "GSOC mine failed")
     }
   }
 
@@ -4188,11 +4167,7 @@ export class SwarmIdProxy {
         tagUid: result.tagUid,
       })
     } catch (error) {
-      this.sendErrorToParent(
-        event,
-        requestId,
-        error instanceof Error ? error.message : "GSOC send failed",
-      )
+      this.sendErrorToParent(event, requestId, error, "GSOC send failed")
     }
   }
 
@@ -4236,11 +4211,7 @@ export class SwarmIdProxy {
         owner: signerKeyObj.publicKey().address().toHex(),
       })
     } catch (error) {
-      this.sendErrorToParent(
-        event,
-        requestId,
-        error instanceof Error ? error.message : "SOC upload failed",
-      )
+      this.sendErrorToParent(event, requestId, error, "SOC upload failed")
     }
   }
 
@@ -4277,11 +4248,7 @@ export class SwarmIdProxy {
         owner: signerKeyObj.publicKey().address().toHex(),
       })
     } catch (error) {
-      this.sendErrorToParent(
-        event,
-        requestId,
-        error instanceof Error ? error.message : "SOC raw upload failed",
-      )
+      this.sendErrorToParent(event, requestId, error, "SOC raw upload failed")
     }
   }
 
@@ -4296,7 +4263,10 @@ export class SwarmIdProxy {
       let resolvedOwner = owner
       if (!resolvedOwner) {
         if (!this.appSecret) {
-          throw new Error("Not authenticated. Please login first.")
+          throw new SwarmIdError(
+            "not-authenticated",
+            "Not authenticated. Please login first.",
+          )
         }
         resolvedOwner = new PrivateKey(this.appSecret)
           .publicKey()
@@ -4324,11 +4294,7 @@ export class SwarmIdProxy {
         owner: soc.owner,
       })
     } catch (error) {
-      this.sendErrorToParent(
-        event,
-        requestId,
-        error instanceof Error ? error.message : "SOC download failed",
-      )
+      this.sendErrorToParent(event, requestId, error, "SOC download failed")
     }
   }
 
@@ -4343,7 +4309,10 @@ export class SwarmIdProxy {
       let resolvedOwner = owner
       if (!resolvedOwner) {
         if (!this.appSecret) {
-          throw new Error("Not authenticated. Please login first.")
+          throw new SwarmIdError(
+            "not-authenticated",
+            "Not authenticated. Please login first.",
+          )
         }
         resolvedOwner = new PrivateKey(this.appSecret)
           .publicKey()
@@ -4373,11 +4342,7 @@ export class SwarmIdProxy {
         owner: soc.owner,
       })
     } catch (error) {
-      this.sendErrorToParent(
-        event,
-        requestId,
-        error instanceof Error ? error.message : "SOC raw download failed",
-      )
+      this.sendErrorToParent(event, requestId, error, "SOC raw download failed")
     }
   }
 
@@ -4389,7 +4354,10 @@ export class SwarmIdProxy {
 
     try {
       if (!this.appSecret) {
-        throw new Error("Not authenticated. Please login first.")
+        throw new SwarmIdError(
+          "not-authenticated",
+          "Not authenticated. Please login first.",
+        )
       }
 
       const owner = new PrivateKey(this.appSecret).publicKey().address().toHex()
@@ -4400,11 +4368,7 @@ export class SwarmIdProxy {
         owner,
       })
     } catch (error) {
-      this.sendErrorToParent(
-        event,
-        requestId,
-        error instanceof Error ? error.message : "SOC get owner failed",
-      )
+      this.sendErrorToParent(event, requestId, error, "SOC get owner failed")
     }
   }
 
@@ -4422,7 +4386,10 @@ export class SwarmIdProxy {
 
     try {
       if (!this.authenticated || !this.appSecret) {
-        throw new Error("Not authenticated. Please login first.")
+        throw new SwarmIdError(
+          "not-authenticated",
+          "Not authenticated. Please login first.",
+        )
       }
 
       const secretHex = await deriveSecret(this.appSecret, label)
@@ -4433,11 +4400,7 @@ export class SwarmIdProxy {
         secret: hexToUint8Array(secretHex),
       })
     } catch (error) {
-      this.sendErrorToParent(
-        event,
-        requestId,
-        error instanceof Error ? error.message : "deriveAppSecret failed",
-      )
+      this.sendErrorToParent(event, requestId, error, "deriveAppSecret failed")
     }
   }
 
@@ -4507,7 +4470,10 @@ export class SwarmIdProxy {
 
     try {
       if (!this.appSecret) {
-        throw new Error("Not authenticated. Please login first.")
+        throw new SwarmIdError(
+          "not-authenticated",
+          "Not authenticated. Please login first.",
+        )
       }
 
       const owner = new PrivateKey(this.appSecret).publicKey().address().toHex()
@@ -4518,11 +4484,7 @@ export class SwarmIdProxy {
         owner,
       })
     } catch (error) {
-      this.sendErrorToParent(
-        event,
-        requestId,
-        error instanceof Error ? error.message : "Feed get owner failed",
-      )
+      this.sendErrorToParent(event, requestId, error, "Feed get owner failed")
     }
   }
 
@@ -4536,7 +4498,10 @@ export class SwarmIdProxy {
       let resolvedOwner = owner
       if (!resolvedOwner) {
         if (!this.appSecret) {
-          throw new Error("Not authenticated. Please login first.")
+          throw new SwarmIdError(
+            "not-authenticated",
+            "Not authenticated. Please login first.",
+          )
         }
         resolvedOwner = new PrivateKey(this.appSecret)
           .publicKey()
@@ -4580,9 +4545,8 @@ export class SwarmIdProxy {
       this.sendErrorToParent(
         event,
         requestId,
-        error instanceof Error
-          ? error.message
-          : "Epoch feed download reference failed",
+        error,
+        "Epoch feed download reference failed",
       )
     }
   }
@@ -4678,9 +4642,8 @@ export class SwarmIdProxy {
       this.sendErrorToParent(
         event,
         requestId,
-        error instanceof Error
-          ? error.message
-          : "Epoch feed upload reference failed",
+        error,
+        "Epoch feed upload reference failed",
       )
     }
   }
@@ -4693,7 +4656,10 @@ export class SwarmIdProxy {
 
     try {
       if (!this.appSecret) {
-        throw new Error("Not authenticated. Please login first.")
+        throw new SwarmIdError(
+          "not-authenticated",
+          "Not authenticated. Please login first.",
+        )
       }
 
       const owner = new PrivateKey(this.appSecret).publicKey().address().toHex()
@@ -4707,9 +4673,8 @@ export class SwarmIdProxy {
       this.sendErrorToParent(
         event,
         requestId,
-        error instanceof Error
-          ? error.message
-          : "Sequential feed get owner failed",
+        error,
+        "Sequential feed get owner failed",
       )
     }
   }
@@ -4719,7 +4684,10 @@ export class SwarmIdProxy {
       return owner
     }
     if (!this.appSecret) {
-      throw new Error("Not authenticated. Please login first.")
+      throw new SwarmIdError(
+        "not-authenticated",
+        "Not authenticated. Please login first.",
+      )
     }
     return new PrivateKey(this.appSecret).publicKey().address().toHex()
   }
@@ -4757,7 +4725,10 @@ export class SwarmIdProxy {
     lookupTimeoutMs?: number,
   ): Promise<bigint> {
     if (!raw && !encryptionKey) {
-      throw new Error("Encryption key is required for encrypted feed lookup")
+      throw new SwarmIdError(
+        "invalid-request",
+        "Encryption key is required for encrypted feed lookup",
+      )
     }
     if (index !== undefined) {
       return this.parseFeedIndex(index)
@@ -4845,7 +4816,10 @@ export class SwarmIdProxy {
 
     try {
       if (!encryptionKey) {
-        throw new Error("Encryption key is required for downloadPayload")
+        throw new SwarmIdError(
+          "invalid-request",
+          "Encryption key is required for downloadPayload",
+        )
       }
 
       const resolvedOwner = await this.resolveSequentialOwner(owner)
@@ -4892,9 +4866,8 @@ export class SwarmIdProxy {
       this.sendErrorToParent(
         event,
         requestId,
-        error instanceof Error
-          ? error.message
-          : "Sequential feed download payload failed",
+        error,
+        "Sequential feed download payload failed",
       )
     }
   }
@@ -4962,9 +4935,8 @@ export class SwarmIdProxy {
       this.sendErrorToParent(
         event,
         requestId,
-        error instanceof Error
-          ? error.message
-          : "Sequential feed download raw payload failed",
+        error,
+        "Sequential feed download raw payload failed",
       )
     }
   }
@@ -4987,7 +4959,10 @@ export class SwarmIdProxy {
 
     try {
       if (!encryptionKey) {
-        throw new Error("Encryption key is required for downloadReference")
+        throw new SwarmIdError(
+          "invalid-request",
+          "Encryption key is required for downloadReference",
+        )
       }
 
       const resolvedOwner = await this.resolveSequentialOwner(owner)
@@ -5039,9 +5014,8 @@ export class SwarmIdProxy {
       this.sendErrorToParent(
         event,
         requestId,
-        error instanceof Error
-          ? error.message
-          : "Sequential feed download reference failed",
+        error,
+        "Sequential feed download reference failed",
       )
     }
   }
@@ -5145,9 +5119,8 @@ export class SwarmIdProxy {
       this.sendErrorToParent(
         event,
         requestId,
-        error instanceof Error
-          ? error.message
-          : "Sequential feed upload payload failed",
+        error,
+        "Sequential feed upload payload failed",
       )
     }
   }
@@ -5238,9 +5211,8 @@ export class SwarmIdProxy {
       this.sendErrorToParent(
         event,
         requestId,
-        error instanceof Error
-          ? error.message
-          : "Sequential feed upload raw payload failed",
+        error,
+        "Sequential feed upload raw payload failed",
       )
     }
   }
@@ -5335,9 +5307,8 @@ export class SwarmIdProxy {
       this.sendErrorToParent(
         event,
         requestId,
-        error instanceof Error
-          ? error.message
-          : "Sequential feed upload reference failed",
+        error,
+        "Sequential feed upload reference failed",
       )
     }
   }
@@ -5479,11 +5450,7 @@ export class SwarmIdProxy {
         tagUid: contentUpload.tagUid,
       })
     } catch (error) {
-      this.sendErrorToParent(
-        event,
-        requestId,
-        error instanceof Error ? error.message : "ACT upload failed",
-      )
+      this.sendErrorToParent(event, requestId, error, "ACT upload failed")
     }
   }
 
@@ -5502,7 +5469,10 @@ export class SwarmIdProxy {
 
     try {
       if (!this.authenticated || !this.appSecret) {
-        throw new Error("Not authenticated. Please login first.")
+        throw new SwarmIdError(
+          "not-authenticated",
+          "Not authenticated. Please login first.",
+        )
       }
 
       // Decrypt the ACT reference to get the content reference
@@ -5558,11 +5528,7 @@ export class SwarmIdProxy {
         data: data as Uint8Array,
       })
     } catch (error) {
-      this.sendErrorToParent(
-        event,
-        requestId,
-        error instanceof Error ? error.message : "ACT download failed",
-      )
+      this.sendErrorToParent(event, requestId, error, "ACT download failed")
     }
   }
 
@@ -5606,11 +5572,7 @@ export class SwarmIdProxy {
         actReference: result.actReference,
       })
     } catch (error) {
-      this.sendErrorToParent(
-        event,
-        requestId,
-        error instanceof Error ? error.message : "ACT add grantees failed",
-      )
+      this.sendErrorToParent(event, requestId, error, "ACT add grantees failed")
     }
   }
 
@@ -5665,7 +5627,8 @@ export class SwarmIdProxy {
       this.sendErrorToParent(
         event,
         requestId,
-        error instanceof Error ? error.message : "ACT revoke grantees failed",
+        error,
+        "ACT revoke grantees failed",
       )
     }
   }
@@ -5678,7 +5641,10 @@ export class SwarmIdProxy {
 
     try {
       if (!this.authenticated || !this.appSecret) {
-        throw new Error("Not authenticated. Please login first.")
+        throw new SwarmIdError(
+          "not-authenticated",
+          "Not authenticated. Please login first.",
+        )
       }
 
       const publisherPrivateKey = this.actKeys()
@@ -5697,11 +5663,7 @@ export class SwarmIdProxy {
         grantees,
       })
     } catch (error) {
-      this.sendErrorToParent(
-        event,
-        requestId,
-        error instanceof Error ? error.message : "ACT get grantees failed",
-      )
+      this.sendErrorToParent(event, requestId, error, "ACT get grantees failed")
     }
   }
 
@@ -5792,6 +5754,10 @@ export class SwarmIdProxy {
       this.sendErrorToParent(
         event,
         message.requestId,
+        new SwarmIdError(
+          "invalid-request",
+          "No owner provided and no app signer available",
+        ),
         "No owner provided and no app signer available",
       )
       return
@@ -5825,7 +5791,8 @@ export class SwarmIdProxy {
       this.sendErrorToParent(
         event,
         message.requestId,
-        error instanceof Error ? error.message : "Create feed manifest failed",
+        error,
+        "Create feed manifest failed",
       )
     }
   }
