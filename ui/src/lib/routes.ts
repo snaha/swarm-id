@@ -6,6 +6,7 @@ const routes = {
   ROOT: '/' as const,
   CONNECT: '/connect' as const,
   CONNECT_DONE: '/connect/done' as const,
+  ACCOUNT_ADD: '/account/add' as const,
   ACCOUNT_NEW: '/account/new' as const,
   ACCOUNT_NEW_PHRASE: '/account/new/phrase' as const,
   ACCOUNT_NEW_ACCESS: '/account/new/access' as const,

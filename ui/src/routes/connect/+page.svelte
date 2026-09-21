@@ -13,6 +13,7 @@
   import { resolve } from '$app/paths'
 
   import AccountList from '$lib/components/account-list.svelte'
+  import AccountStartChoice from '$lib/components/account-start-choice.svelte'
   import AppHeader from '$lib/components/app-header.svelte'
   import AppIcon from '$lib/components/app-icon.svelte'
   import UserAddFill from '$lib/components/icons/user-add-fill.svelte'
@@ -205,19 +206,7 @@
             </div>
           </div>
         {:else}
-          <div class="flex w-full flex-col items-center gap-4">
-            <Button size="lg" class="w-full" href={resolve(routes.ACCOUNT_NEW)}>
-              Create a new account
-            </Button>
-            <Button
-              size="lg"
-              variant="secondary"
-              class="w-full"
-              href={resolve(routes.ACCOUNT_IMPORT)}
-            >
-              I already have an account
-            </Button>
-          </div>
+          <AccountStartChoice />
         {/if}
       </div>
     {/if}
