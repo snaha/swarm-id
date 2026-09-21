@@ -131,8 +131,7 @@
     </div>
   {/if}
 
-  <!-- Frame 159-8517: three actions, each a page — creating an account no
-       longer hides behind "Sign in to another account" (#727). -->
+  <!-- Frame 159-8517: three actions, each a page. -->
   <div class="flex flex-col gap-2">
     {#if others.length > 0}
       <Button variant="ghost" size="sm" class="w-full" onclick={notImplemented}>

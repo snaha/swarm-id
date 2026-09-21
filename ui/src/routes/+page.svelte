@@ -6,10 +6,10 @@
 <script lang="ts">
   import ChevronLeft from '@lucide/svelte/icons/chevron-left'
 
-  import { resolve } from '$app/paths'
   import { page } from '$app/state'
 
   import AccountList from '$lib/components/account-list.svelte'
+  import AccountStartChoice from '$lib/components/account-start-choice.svelte'
   import AccountSwitcher from '$lib/components/account-switcher.svelte'
   import HomeAccount from '$lib/components/home-account.svelte'
   import HomeApps from '$lib/components/home-apps.svelte'
@@ -28,7 +28,6 @@
     driveAttentionDescription,
     drivesNeedingAttention,
   } from '$lib/drives'
-  import routes from '$lib/routes'
   import { accountsStore } from '$lib/stores/accounts.svelte'
   import { sessionStore } from '$lib/stores/session.svelte'
   import type { Account } from '$lib/types'
@@ -189,19 +188,7 @@
           </Button>
         </div>
       {:else}
-        <div class="flex w-full flex-col items-center gap-4">
-          <Button size="lg" class="w-full" href={resolve(routes.ACCOUNT_NEW)}>
-            Create a new account
-          </Button>
-          <Button
-            size="lg"
-            variant="secondary"
-            class="w-full"
-            href={resolve(routes.ACCOUNT_IMPORT)}
-          >
-            I already have an account
-          </Button>
-        </div>
+        <AccountStartChoice />
       {/if}
     </div>
   </div>
