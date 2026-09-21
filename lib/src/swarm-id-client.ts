@@ -1636,7 +1636,14 @@ export class SwarmIdClient {
    * This method is useful for low-level operations or when implementing
    * custom chunking strategies.
    *
-   * @param data - The chunk data to upload (should be exactly 4KB for optimal storage)
+   * `data` is the chunk's payload, not a finished chunk: the proxy builds the
+   * content-addressed chunk around it (span header, BMT address) and returns
+   * that address. A chunk that already carries its span header is wrapped a
+   * second time and stored under an address nothing else computes (#774). To
+   * store a folder as a manifest, use {@link uploadFiles}; to save a Mantaray
+   * tree of your own, use `saveMantarayTreeRecursively` with {@link uploadData}.
+   *
+   * @param data - The chunk payload, 1 to 4096 bytes
    * @param options - Optional upload configuration
    * @param options.pin - Whether to pin the chunk locally (defaults to false; ignored on a subsidised gateway)
    * @param options.encrypt - Whether to encrypt the chunk (defaults to false)
