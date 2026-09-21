@@ -761,6 +761,35 @@ describe("SwarmIdProxy partitioned write enablement", () => {
     expect(last.uploadUnavailableReason).toBe("stamp-expired")
   })
 
+  // #765: `exists` and `usable` are on the stored record and were read
+  // nowhere, so `canUpload` was true for a batch the node did not have or
+  // could not use yet, and the refusal arrived 30 s later as a timeout.
+  it.each([
+    { field: "usable", record: { usable: false } },
+    { field: "exists", record: { exists: false } },
+  ])(
+    "reports stamp-not-usable when the drive's record says $field is false",
+    async ({ record }) => {
+      const account = makeSyncedAccount()
+      const [stamp] = account.postageStamps
+      const challenge = await startPartitionedConnect()
+      await sendSetSecret(challenge, {
+        account: serializeSyncedAccount({
+          ...account,
+          postageStamps: [{ ...stamp, ...record }],
+        }),
+      })
+
+      const infos = messagesOfType("connectionInfoChanged")
+      const last = infos[infos.length - 1]
+      expect(last.canUpload).toBe(false)
+      expect(last.uploadMode).toBe("unavailable")
+      expect(last.uploadUnavailableReason).toBe("stamp-not-usable")
+      const internals = proxy as unknown as { ensureCanUpload(): void }
+      expect(() => internals.ensureCanUpload()).toThrow(/not usable/)
+    },
+  )
+
   it("becomes a first-class writer when the payload carries the synced account", async () => {
     const account = makeSyncedAccount()
     const challenge = await startPartitionedConnect()

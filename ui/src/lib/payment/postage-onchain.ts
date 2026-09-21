@@ -383,10 +383,12 @@ export async function preflightResize(
 }
 
 /**
- * Patch the stamp record from chain truth (depth, live per-chunk balance, and
- * the TTL it implies). Called after every confirmed transaction and on dialog
- * open, so an interrupted flow reconciles instead of trusting local state.
- * Returns false when the chain could not answer (record left untouched).
+ * Patch the stamp record from chain truth (depth, live per-chunk balance, the
+ * TTL it implies, and whether the batch exists and is usable — the readiness
+ * rule refuses a record that says otherwise, so a stale `false` must clear
+ * here). Called after every confirmed transaction and on dialog open, so an
+ * interrupted flow reconciles instead of trusting local state. Returns false
+ * when the chain could not answer (record left untouched).
  */
 export async function reconcileStampFromChain(
   account: Account,
@@ -403,10 +405,14 @@ export async function reconcileStampFromChain(
       return false
     }
     const remaining = await chain.getRemainingBalance(batchIdHex(stamp))
+    const batchTTL = ttlSecondsFor(remaining, constraints.lastPrice)
     account.updateStamp(stamp.batchID, {
       depth: batch.depth,
       amount: remaining,
-      batchTTL: ttlSecondsFor(remaining, constraints.lastPrice),
+      batchTTL,
+      // The same reading `fetchExistingBatchFromChain` stores on attach.
+      exists: true,
+      usable: batchTTL === undefined || batchTTL > 0,
     })
     return true
   } catch {

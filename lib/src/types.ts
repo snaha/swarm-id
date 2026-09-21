@@ -692,11 +692,16 @@ export type UploadMode = z.infer<typeof UploadModeSchema>
  *   (#745). The stamper builds from the record regardless, so without this the
  *   session claimed `user-stamp` and the first refused write surfaced as
  *   partition contention.
+ * - `stamp-not-usable` — the stamp resolved and is not expired, but its
+ *   stored record says the node does not have the batch (`exists: false`) or
+ *   cannot use it (`usable: false`). Opening the drive in the identity UI
+ *   refreshes the record from the chain (#765).
  */
 export const UploadUnavailableReasonSchema = z.enum([
   "no-stamp",
   "stamper-failed",
   "stamp-expired",
+  "stamp-not-usable",
 ])
 
 export type UploadUnavailableReason = z.infer<

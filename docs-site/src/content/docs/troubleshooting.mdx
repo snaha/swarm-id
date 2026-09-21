@@ -50,14 +50,16 @@ See [Using Your Own Bee Node](../own-bee-node/#a-node-in-dev-mode).
 **Cause.** The first stamped write was refused by the node — it does not know the batch, because
 the batch was bought moments ago or on a different node — and the write coordinator read the
 refusal as contention from another device
-([#765](https://github.com/snaha/swarm-id/issues/765)). An expired drive used to land here too;
-now the session refuses before the coordinator, as `The account's drive has expired`, with
-`uploadUnavailableReason` set to `stamp-expired`.
+([#765](https://github.com/snaha/swarm-id/issues/765)). An expired drive used to land here too,
+and so did one whose stored record already said `exists: false` or `usable: false`; now the
+session refuses before the coordinator — `The account's drive has expired` with
+`uploadUnavailableReason` set to `stamp-expired`, or `The account's drive is not usable` with
+`stamp-not-usable`.
 
-**Fix.** A batch the node has not ingested yet needs a moment after purchase. Otherwise check
-the drive: `getPostageBatch()` reports `exists` and `usable` from a real node, and
-`connectionInfo.canUpload` with `uploadUnavailableReason` says whether the session will stamp at
-all. See the [upload availability table](../subsidised-gateway/#upload-availability-truth-table).
+**Fix.** A batch the node has not ingested yet needs a moment after purchase. Otherwise check the drive:
+`getPostageBatch()` reports `exists` and `usable` from a real node, and `connectionInfo.canUpload`
+with `uploadUnavailableReason` says whether the session will stamp at all. See the
+[upload availability table](../subsidised-gateway/#upload-availability-truth-table).
 
 ### Signed in, and every upload fails
 
@@ -66,6 +68,7 @@ Swarm ID has no drive, so without a `subsidisedGatewayUrl` every first-time user
 
 **Fix.** Gate uploads on `connectionInfo.canUpload`, and show `uploadUnavailableReason` when it is
 false: `no-stamp` and `stamp-expired` are the user's to fix (attach, buy or renew a drive),
+`stamp-not-usable` is the user's too (open the drive in Swarm ID, which refreshes its record),
 `stamper-failed` is a bug to report. Pass the public gateway as `subsidisedGatewayUrl` for a
 free tier. See [Quick Start](../getting-started/#a-batch-you-were-given) and
 [Why Uploads Are Unavailable](../subsidised-gateway/#why-uploads-are-unavailable).

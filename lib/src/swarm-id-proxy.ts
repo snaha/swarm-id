@@ -107,9 +107,10 @@ import {
   stampsReachableByApp,
 } from "./utils/postage-stamp-association"
 import {
-  isStampExpired,
+  stampRefusal,
   sameStampLifetime,
   type StampLifetimeFields,
+  type StampRefusal,
 } from "./utils/stamp-lifespan"
 import {
   accountStateToDeviceView,
@@ -404,10 +405,9 @@ export class SwarmIdProxy {
   /** Bumped by every `initializeStamper`; an older init sees it move and stops */
   private stamperInitGeneration = 0
 
-  private get stampExpired(): boolean {
-    return (
-      this.stampLifetime !== undefined && isStampExpired(this.stampLifetime)
-    )
+  /** Why the session refuses to stamp with the resolved drive, if it does. */
+  private get stampRefusal(): StampRefusal | undefined {
+    return this.stampLifetime && stampRefusal(this.stampLifetime)
   }
   /**
    * The write path (lock + partition lease + stamp flush) for the current
@@ -3265,9 +3265,14 @@ export class SwarmIdProxy {
     }
     // Refuse here, before the write coordinator: its first stamped write is
     // the lease claim, and a refused claim reads as partition contention (#745).
-    if (this.stampExpired) {
+    if (this.stampRefusal === "stamp-expired") {
       throw new Error(
         "The account's drive has expired. Renew it or add another in Swarm ID before uploading.",
+      )
+    }
+    if (this.stampRefusal === "stamp-not-usable") {
+      throw new Error(
+        "The account's drive is not usable: its record says the node does not have the batch, or cannot use it. Open the drive in Swarm ID to refresh it, or add another, before uploading.",
       )
     }
     // NB: the multi-device "all partitions held" case is NOT checked here.
@@ -3287,7 +3292,7 @@ export class SwarmIdProxy {
    */
   private isSubsidisedModeActive(): boolean {
     return (
-      (!this.postageBatchId || !this.signerKey || this.stampExpired) &&
+      (!this.postageBatchId || !this.signerKey || !!this.stampRefusal) &&
       !!this.subsidisedGatewayUrl
     )
   }
@@ -3394,7 +3399,7 @@ export class SwarmIdProxy {
         this.postageBatchId &&
         this.signerKey &&
         this.stamper &&
-        !this.stampExpired
+        !this.stampRefusal
       ) {
         uploadMode = "user-stamp"
       } else if (this.subsidisedGatewayUrl) {
@@ -3430,7 +3435,7 @@ export class SwarmIdProxy {
   private uploadUnavailableReason(): UploadUnavailableReason | undefined {
     if (!this.authenticated || !this.appSecret) return undefined
     if (!this.postageBatchId || !this.signerKey) return "no-stamp"
-    if (this.stampExpired) return "stamp-expired"
+    if (this.stampRefusal) return this.stampRefusal
     // The stamp resolved and the write path still did not build:
     // `initializeStamper` logs and returns rather than throwing, so this is the
     // only place that difference survives to the dApp.
