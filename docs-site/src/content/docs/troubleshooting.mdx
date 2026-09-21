@@ -128,7 +128,9 @@ SvelteKit with SSR) throws there. Before the guard this surfaced as a bare
 `ReferenceError: window is not defined` from inside the package.
 
 **Fix.** Construct the client in code that runs only in the browser: an effect, `onMount`, or a
-branch on `typeof window !== 'undefined'`. See [Quick Start](../getting-started/#basic-usage).
+branch on `typeof window !== 'undefined'`. See [Quick Start](../getting-started/#basic-usage). Code
+that has no browser at all — a server, an agent — uses `@ethersphere/bee-js` with the drive's batch
+id and signer key instead; a headless client is [#770](https://github.com/snaha/swarm-id/issues/770).
 
 ### A session approved on `localhost` is gone behind a tunnel or on a preview URL
 
