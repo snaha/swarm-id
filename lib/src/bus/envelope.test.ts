@@ -40,4 +40,12 @@ describe("encryptEnvelope / decryptEnvelope", () => {
     const ciphertext = await encryptEnvelope("secret", key)
     await expect(decryptEnvelope(ciphertext, otherKey)).rejects.toThrow()
   })
+
+  it("rejects a tampered payload", async () => {
+    const key = await deriveAesGcmKey(TEST_DERIVATION_KEY_HEX, CONTEXT)
+    const bytes = Buffer.from(await encryptEnvelope("secret", key), "base64")
+    bytes[bytes.length - 1] ^= 1
+    const tampered = bytes.toString("base64")
+    await expect(decryptEnvelope(tampered, key)).rejects.toThrow()
+  })
 })
