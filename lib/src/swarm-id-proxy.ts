@@ -1753,15 +1753,25 @@ export class SwarmIdProxy {
    * Uses UtilizationAwareStamper to track bucket usage
    */
   private async initializeStamper(stampDepth: number): Promise<void> {
-    if (!this.signerKey || !this.postageBatchId) {
+    const { signerKey, postageBatchId: batchId } = this
+    if (!signerKey || !batchId) {
       console.warn(
         "[Proxy] Cannot initialize stamper: missing signer key or batch ID",
       )
       return
     }
+    // Captured once, above: `loadAuthData` calls this off the reconcile queue,
+    // so a storage event's `refreshStampFromStorage` can clear or rebind the
+    // stamp under any await below. Reading the fields again afterwards built a
+    // stamper and a coordinator for `batchId: undefined`, and every lease op on
+    // it threw (#804). A stale init leaves the session to the refresh that
+    // superseded it.
+    const superseded = (): boolean =>
+      this.postageBatchId !== batchId || this.signerKey !== signerKey
 
     // Look up account info for utilization tracking
     const accountInfo = await this.lookupAccountForApp()
+    if (superseded()) return
     if (!accountInfo) {
       console.warn("[Proxy] Cannot initialize stamper: account not found")
       return
@@ -1774,14 +1784,16 @@ export class SwarmIdProxy {
 
     // Create utilization-aware stamper with owner and encryption key
     try {
-      this.stamper = await UtilizationAwareStamper.create(
-        this.signerKey,
-        new BatchId(this.postageBatchId),
+      const stamper = await UtilizationAwareStamper.create(
+        signerKey,
+        new BatchId(batchId),
         stampDepth,
         this.utilizationStore,
         accountInfo.owner,
         accountInfo.encryptionKey,
       )
+      if (superseded()) return
+      this.stamper = stamper
       this.stamperAccountFingerprint = `${accountInfo.owner.toHex()}-${uint8ArrayToHex(accountInfo.encryptionKey)}`
     } catch (error) {
       console.error("[Proxy] Failed to create stamper:", error)
@@ -1798,18 +1810,18 @@ export class SwarmIdProxy {
     // (`startLease`) so the first upload doesn't pay the acquire latency; a
     // concurrent first upload queues on the same write lock and then finds the
     // lease already held. Single-device accounts get a lock-only coordinator.
-    this.teardownCoordinator()
     const backupKeyHex = await deriveSecret(
       uint8ArrayToHex(accountInfo.encryptionKey),
       "backup-key",
     )
+    if (superseded()) return
+    this.teardownCoordinator()
     const tuning = readPartitionTuningOverride()
-    // Captured once: the callbacks below outlive this narrowing, and the batch
-    // they name has to be the one the coordinator serves, on both counts: its
-    // lease cache is keyed on it, so a snapshot filed under a batch we have
-    // since moved off hints at a lane nobody holds (#684), and a lease message
-    // naming that batch answers nobody (#589).
-    const batchId = this.postageBatchId
+    // The callbacks below outlive this narrowing, and the batch they name has
+    // to be the one the coordinator serves, on both counts: its lease cache is
+    // keyed on it, so a snapshot filed under a batch we have since moved off
+    // hints at a lane nobody holds (#684), and a lease message naming that
+    // batch answers nobody (#589). `batchId` is the capture from the top.
     this.coordinator = new BatchWriteCoordinator({
       bee: this.bee,
       batchId,

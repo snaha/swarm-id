@@ -553,6 +553,56 @@ describe("SwarmIdProxy partitioned write enablement", () => {
     expect(app.lastConnectedAt).toBeGreaterThan(0)
   })
 
+  // `loadAuthData` runs in the identify handler, off the reconcile queue, so a
+  // storage event's `refreshStampFromStorage` runs while `initializeStamper`
+  // is inside an await. It used to read the batch id again afterwards: cleared
+  // in between, the coordinator was built for `batchId: undefined` and every
+  // lease op on it threw (#804).
+  it("drops a stamper init whose stamp was cleared while it awaited", async () => {
+    seedConnectedAccount()
+    const coordinatorsBefore = vi.mocked(BatchWriteCoordinator).mock.results
+      .length
+    let finishCreate: (() => void) | undefined
+    vi.mocked(UtilizationAwareStamper.create).mockImplementationOnce(
+      (_signerKey, batchId) =>
+        new Promise<UtilizationAwareStamper>((resolve) => {
+          finishCreate = () =>
+            resolve(
+              Object.assign(stamperStub, {
+                mock: "stamper",
+                batchId,
+              }) as unknown as UtilizationAwareStamper,
+            )
+        }),
+    )
+    const identified = dispatch(
+      { type: "parentIdentify", requestId: "r1", metadata: { name: "dApp" } },
+      PARENT_ORIGIN,
+      parentWindow,
+    )
+    await vi.waitFor(() => expect(finishCreate).toBeDefined())
+
+    // The drive goes away; the storage event's reconcile clears the stamp.
+    const shell = createAccountsStorageManager()
+    shell.save(
+      shell.load().map((account) => ({
+        ...account,
+        postageStamps: [],
+        defaultPostageStampBatchID: undefined,
+      })),
+    )
+    await flushBus()
+
+    finishCreate!()
+    await identified
+
+    const internals = proxy as unknown as { stamper: unknown }
+    expect(internals.stamper).toBeUndefined()
+    expect(vi.mocked(BatchWriteCoordinator).mock.results).toHaveLength(
+      coordinatorsBefore,
+    )
+  })
+
   it("refuses a handover that carries no account", async () => {
     const challenge = await startPartitionedConnect()
     await sendSetSecret(challenge, {})
