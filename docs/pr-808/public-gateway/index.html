@@ -160,12 +160,13 @@ where deferred uploads are required. On the public gateway it fails, and the rig
 response is to keep the default, which is what the demo does. Nothing about <code dir="auto">deferred</code>
 is needed against the public gateway.</li>
 <li><strong>Pair the retrieval path with the upload method.</strong> <code dir="auto">uploadData</code> → <code dir="auto">/bytes/&lt;ref&gt;</code> or
-<code dir="auto">downloadData</code>; <code dir="auto">uploadFile</code> → <code dir="auto">/bzz/&lt;ref&gt;/</code> or <code dir="auto">downloadFile</code>. See the
-<a href="../api/">API reference</a> for the same rule on each method.</li>
+<code dir="auto">downloadData</code>; <code dir="auto">uploadFile</code> → <code dir="auto">downloadFile</code>, or <code dir="auto">/bzz/&lt;ref&gt;/</code> for a plain upload
+(<code dir="auto">encrypt: false</code>). See the <a href="../api/">API reference</a> for the same rule on each method.</li>
 <li><strong>Never put an encrypted reference in a gateway URL.</strong> The 128-hex reference from an
 encrypted upload contains the decryption key. A URL sends it to a third-party server,
-which is the one place guaranteed to be logged. Fetch encrypted content through
-<code dir="auto">downloadData</code>, which decrypts in the browser.</li>
+which is the one place guaranteed to be logged. <code dir="auto">uploadFile</code> and <code dir="auto">uploadFiles</code> encrypt
+by default. Fetch encrypted content through <code dir="auto">downloadData</code> or <code dir="auto">downloadFile</code>, which
+decrypt in the browser.</li>
 <li><strong>Retention is not stated.</strong> Content the gateway stamps with its own batch lives as long as
 that batch does, on the operator’s terms, and the client cannot read that lifetime (there
 is no <code dir="auto">/stamps</code>). Do not point an on-chain commitment at gateway-funded content you could
