@@ -865,6 +865,9 @@ describe("PartitionLease.acquire — seeds the incremental first publish", () =>
   // REFERENCE chunk itself (the pointer's target, NOT in `publishedReferences`).
   // Cover both explicitly — the reference-chunk case is the subtler one the
   // detection must not forget.
+  // Above the suite's 30 s (vitest.config.ts): a full million-epoch scan under
+  // the parallel suite is the bound, and must be reachable before the clock.
+  const SCAN_TEST_TIMEOUT_MS = 120_000
   it.each([
     { kind: "counter chunk", pick: (sb: number[]) => sb[0] },
     { kind: "reference chunk", pick: (sb: number[]) => sb[sb.length - 1] },
@@ -897,8 +900,18 @@ describe("PartitionLease.acquire — seeds the incremental first publish", () =>
       // (not by forcing an unreadable address, which would break the resume read).
       // The idle-holder-crosses-an-epoch case: the heartbeat's own pointer write
       // would overstamp (evict) the retained chunk at their shared reserved slot.
+      //
+      // The retained chunk's bucket is random (its encryption key is), so the
+      // scan is a geometric draw with mean 65536: it stops at the first hit, and
+      // the bound only matters when it misses. The old bound of 400 000 missed
+      // once in ~450 runs (#796); a million misses once in ~4 million. A full
+      // scan measured 7.5–16 µs per epoch idle, and this test inflates ~3× under
+      // the parallel suite (#686), so the suite's 30 s timeout would cut a long
+      // scan short of the bound: the `timeout` on this test is what lets the
+      // bound decide, and the miss message print.
+      const SCAN_EPOCHS = 1_000_000
       let collidingEpoch: number | undefined
-      for (let e = acquireEpoch + 1; e < acquireEpoch + 400_000; e++) {
+      for (let e = acquireEpoch + 1; e < acquireEpoch + SCAN_EPOCHS; e++) {
         const bucket = toBucket(
           partitionState.statePointerAddress(
             TEST_BATCH_ID,
@@ -912,7 +925,10 @@ describe("PartitionLease.acquire — seeds the incremental first publish", () =>
           break
         }
       }
-      expect(collidingEpoch).toBeDefined()
+      expect(
+        collidingEpoch,
+        `no state-pointer bucket hit ${targetBucket} in ${SCAN_EPOCHS} epochs after ${acquireEpoch}`,
+      ).toBeDefined()
 
       // Resume the partition (full read seeds publishedReferences +
       // lastReferenceHex) without ever uploading.
@@ -939,6 +955,7 @@ describe("PartitionLease.acquire — seeds the incremental first publish", () =>
       const repin = await writeSpy.mock.results[0].value
       expect(repin.stateBuckets).not.toContain(targetBucket)
     },
+    SCAN_TEST_TIMEOUT_MS,
   )
 
   it("heartbeat stays a bare pointer write when no retained chunk collides", async () => {
