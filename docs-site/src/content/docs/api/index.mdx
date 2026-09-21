@@ -820,11 +820,13 @@ Uploads a single chunk to the Swarm network.
 
 Chunks are the fundamental unit of storage in Swarm (4KB each). This method is useful for low-level operations or when implementing custom chunking strategies.
 
+`data` is the chunk's payload, not a finished chunk: the proxy builds the content-addressed chunk around it (span header, BMT address) and returns that address. A chunk that already carries its span header is wrapped a second time and stored under an address nothing else computes. To store a folder as a manifest, use [`uploadFiles`](#uploadfilesfiles-options-requestoptions); to save a Mantaray tree of your own, use `saveMantarayTreeRecursively` with [`uploadData`](#uploaddatadata-options-requestoptions), which hands back the reference each node was stored under.
+
 **Parameters:**
 
 | Parameter                       | Type                     | Required | Description                                                                                                                            |
 | ------------------------------- | ------------------------ | -------- | -------------------------------------------------------------------------------------------------------------------------------------- |
-| `data`                          | `Uint8Array`             | Yes      | The chunk data (should be exactly 4KB for optimal storage)                                                                             |
+| `data`                          | `Uint8Array`             | Yes      | The chunk payload, 1 to 4096 bytes                                                                                                     |
 | `options`                       | `UploadOptions`          | No       | Upload configuration (see `uploadData`)                                                                                                |
 | `requestOptions`                | `RequestOptions`         | No       | Request configuration                                                                                                                  |
 | `requestOptions.timeout`        | `number`                 | No       | Request timeout in milliseconds for this call. Replaces the client's default (30 s) for the whole round trip, not only the Bee request |
