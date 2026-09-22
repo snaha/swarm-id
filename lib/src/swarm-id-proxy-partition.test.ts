@@ -7,6 +7,7 @@
  * the proxy into a first-class writer; a payload without one is refused.
  */
 
+import { derivePostageSignerKeySync } from "./utils/key-derivation"
 import {
   describe,
   it,
@@ -806,6 +807,14 @@ describe("SwarmIdProxy partitioned write enablement", () => {
     expect(last.canUpload).toBe(true)
     expect(last.uploadUnavailableReason).toBeUndefined()
     expect(last.identity?.name).toBe("Partition Test Account")
+    // The address an app buys a batch for (#815): the account's own postage
+    // signer, derived from the derivation key the way the drive flows do.
+    expect(last.identity?.postageSignerAddress).toBe(
+      new PrivateKey(derivePostageSignerKeySync(account.derivationKey))
+        .publicKey()
+        .address()
+        .toHex(),
+    )
 
     // The default stamp was bound from the hydrated account view.
     const createCalls = vi.mocked(UtilizationAwareStamper.create).mock.calls
