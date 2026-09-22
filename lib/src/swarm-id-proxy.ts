@@ -148,6 +148,7 @@ import { isStorageShared } from "./utils/storage-probe"
 import {
   deriveSecret,
   deriveSharingKey,
+  derivePostageSignerKeySync,
   deriveSwarmEncryptionKey,
   BACKUP_KEY_LABEL,
 } from "./utils/key-derivation"
@@ -3380,6 +3381,14 @@ export class SwarmIdProxy {
             address: account.id.toHex(),
             publicKey: account.publicKey,
             sharingPublicKey: deriveSharingKey(account.derivationKey).publicKey,
+            // The address an app buys a batch for (#815): the signer's, and
+            // the signer is one derivation away.
+            postageSignerAddress: new PrivateKey(
+              derivePostageSignerKeySync(account.derivationKey),
+            )
+              .publicKey()
+              .address()
+              .toHex(),
             avatar: generatedAvatar(account.id.toHex()),
           }
         }
