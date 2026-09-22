@@ -20,6 +20,7 @@ import {
   deriveSecret,
   deriveSwarmEncryptionKey,
   hexToUint8Array,
+  BACKUP_KEY_LABEL,
 } from "../utils/key-derivation"
 import {
   updateAfterWrite,
@@ -171,7 +172,10 @@ export function createSyncAccount(
     )
 
     // Derive owner address from backup key
-    const backupKeyHex = await deriveSecret(swarmEncryptionKey, "backup-key")
+    const backupKeyHex = await deriveSecret(
+      swarmEncryptionKey,
+      BACKUP_KEY_LABEL,
+    )
     const backupKey = new PrivateKey(backupKeyHex)
     const owner = backupKey.publicKey().address()
 
@@ -300,7 +304,7 @@ export function createSyncAccount(
     const partitionCount = state.metadata.partitionCount ?? 1
 
     // Derive the account feed key (also the lock-SOC backup signer) + owner.
-    const backupKeyHex = await deriveSecret(encryptionKey, "backup-key")
+    const backupKeyHex = await deriveSecret(encryptionKey, BACKUP_KEY_LABEL)
     const accountKey = new PrivateKey(backupKeyHex)
     const owner = accountKey.publicKey().address()
 

@@ -35,7 +35,7 @@ import type { UtilizationStoreDB } from "../storage/utilization-store"
 import { uploadChunk, type UploadTarget } from "../proxy/upload"
 import { tryCreateTag } from "./tag"
 import { lockSocAddress } from "./lock-soc"
-import { deriveSecret } from "./key-derivation"
+import { deriveSecret, BACKUP_KEY_LABEL } from "./key-derivation"
 import { uint8ArrayToHex } from "./hex"
 
 // ============================================================================
@@ -1673,7 +1673,10 @@ export class UtilizationAwareStamper implements Stamper {
     // single-device legacy accounts (the lock SOCs are never written).
     void owner // currently unused; reserved for a future Swarm upload path.
     const swarmEncryptionKeyHex = uint8ArrayToHex(encryptionKey)
-    const backupKeyHex = await deriveSecret(swarmEncryptionKeyHex, "backup-key")
+    const backupKeyHex = await deriveSecret(
+      swarmEncryptionKeyHex,
+      BACKUP_KEY_LABEL,
+    )
     const backupSigner = new PrivateKey(backupKeyHex)
     const backupOwner = backupSigner.publicKey().address()
     instance.lockSocs = Array.from({ length: PARTITION_COUNT }, (_, p) => ({

@@ -105,7 +105,11 @@ export {
 
 export { hexAddress } from "./utils/hex"
 
-export { deriveSecret, deriveSharingKey } from "./utils/key-derivation"
+export {
+  deriveSecret,
+  deriveSecretSync,
+  deriveSharingKey,
+} from "./utils/key-derivation"
 
 export {
   calculateContractTTLSeconds,

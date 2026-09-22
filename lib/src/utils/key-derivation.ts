@@ -4,8 +4,10 @@
 /**
  * Swarm Identity - Key Derivation Utilities
  *
- * Provides cryptographic functions for deriving app-specific secrets
- * from a master identity key.
+ * Every derived key is one HMAC-SHA256 of a parent key under a label:
+ * `deriveSecret(parentKey, label)`. The labels below are the fixed points of
+ * the derivation tree (docs-site: Key Derivation); an app secret uses the
+ * app's origin as its label instead.
  */
 
 import { PrivateKey } from "@ethersphere/bee-js"
@@ -13,51 +15,65 @@ import { hmac } from "@noble/hashes/hmac"
 import { sha256 } from "@noble/hashes/sha256"
 import { hexToUint8Array, uint8ArrayToHex } from "./hex"
 
-const SHARING_KEY_LABEL = new TextEncoder().encode("act-sharing")
+// Re-export hex utilities for backwards compatibility
+export { hexToUint8Array, uint8ArrayToHex } from "./hex"
+
+/** Master key → the stored derivation key */
+export const DERIVATION_KEY_LABEL = "derivation-key"
+/** Derivation key → the Swarm encryption key */
+export const SWARM_ENCRYPTION_LABEL = "swarm-encryption"
+/** Derivation key → the postage signer that stamps the account's uploads */
+export const POSTAGE_SIGNER_LABEL = "postage-signer"
+/** Swarm encryption key → the backup signer that owns every feed */
+export const BACKUP_KEY_LABEL = "backup-key"
+/** Derivation key → the account-wide ACT sharing key (#519) */
+export const ACT_SHARING_LABEL = "act-sharing"
 
 /**
- * Derive an app-specific secret from a master key and app origin
+ * Derive a secret from a parent key under a label, with Web Crypto.
  *
- * Uses HMAC-SHA256 to create a deterministic, unique secret for each app.
- * The same master key + app origin will always produce the same secret.
+ * HMAC-SHA256: deterministic, so the same parent key and label always give
+ * the same secret. `deriveSecretSync` is the same function without the
+ * `await`, for a caller that cannot have one; the test pins the two equal.
  *
- * @param masterKey - The master identity key (hex string)
- * @param appOrigin - The app's origin (e.g., "https://swarm-app.local:8080")
+ * @param parentKey - The key to derive from (hex string)
+ * @param label - What the derived key is for: one of the labels above, or the
+ *   app's origin (e.g. "https://swarm-app.local:8080") for a per-app secret
  * @returns The derived secret as a hex string
  */
 export async function deriveSecret(
-  masterKey: string,
-  appOrigin: string,
+  parentKey: string,
+  label: string,
 ): Promise<string> {
-  const encoder = new TextEncoder()
-
-  // Convert master key from hex string to Uint8Array
-  const keyData = hexToUint8Array(masterKey)
-  const message = encoder.encode(appOrigin)
-
-  // Import the master key for HMAC
   const cryptoKey = await crypto.subtle.importKey(
     "raw",
-    keyData,
+    hexToUint8Array(parentKey),
     { name: "HMAC", hash: "SHA-256" },
     false,
     ["sign"],
   )
-
-  // Sign the app origin with the master key
-  const signature = await crypto.subtle.sign("HMAC", cryptoKey, message)
-
-  // Convert to hex string
-  const secretHex = uint8ArrayToHex(new Uint8Array(signature))
-
-  return secretHex
+  const signature = await crypto.subtle.sign(
+    "HMAC",
+    cryptoKey,
+    new TextEncoder().encode(label),
+  )
+  return uint8ArrayToHex(new Uint8Array(signature))
 }
 
-// Re-export hex utilities for backwards compatibility
-export { hexToUint8Array, uint8ArrayToHex } from "./hex"
+/**
+ * `deriveSecret` without the `await`: the same HMAC-SHA256 computed with
+ * `@noble/hashes`, for a caller that cannot await — `buildConnectionInfo` in
+ * the proxy builds ConnectionInfo synchronously (#692). Byte-identical to the
+ * Web Crypto path, which the test pins.
+ */
+export function deriveSecretSync(parentKey: string, label: string): string {
+  return uint8ArrayToHex(
+    hmac(sha256, hexToUint8Array(parentKey), new TextEncoder().encode(label)),
+  )
+}
 
 /**
- * Derive an AES-GCM-256 key from `secretHex` under `context`.
+ * Derive an AES-GCM-256 key from `secretHex` under `label`.
  *
  * The three steps — HMAC to a fresh secret, hex to bytes, import as AES-GCM —
  * are one pipeline. Non-extractable and encrypt/decrypt only, which is the
@@ -67,9 +83,9 @@ export { hexToUint8Array, uint8ArrayToHex } from "./hex"
  */
 export async function deriveAesGcmKey(
   secretHex: string,
-  context: string,
+  label: string,
 ): Promise<CryptoKey> {
-  const keyHex = await deriveSecret(secretHex, context)
+  const keyHex = await deriveSecret(secretHex, label)
   return crypto.subtle.importKey(
     "raw",
     hexToUint8Array(keyHex),
@@ -91,7 +107,7 @@ export async function deriveAesGcmKey(
 export async function deriveAccountDerivationKey(
   accountMasterKey: string,
 ): Promise<string> {
-  return deriveSecret(accountMasterKey, `derivation-key`)
+  return deriveSecret(accountMasterKey, DERIVATION_KEY_LABEL)
 }
 
 /**
@@ -106,7 +122,7 @@ export async function deriveAccountDerivationKey(
 export async function deriveSwarmEncryptionKey(
   derivationKey: string,
 ): Promise<string> {
-  return deriveSecret(derivationKey, `swarm-encryption`)
+  return deriveSecret(derivationKey, SWARM_ENCRYPTION_LABEL)
 }
 
 /**
@@ -119,7 +135,7 @@ export async function deriveSwarmEncryptionKey(
 export async function derivePostageSignerKey(
   derivationKey: string,
 ): Promise<string> {
-  return deriveSecret(derivationKey, `postage-signer`)
+  return deriveSecret(derivationKey, POSTAGE_SIGNER_LABEL)
 }
 
 /**
@@ -127,19 +143,16 @@ export async function derivePostageSignerKey(
  * mean the person rather than one of their apps. Derived from the derivation
  * key, so every app origin and every device of the account arrives at the same
  * key — and the master key still never leaves the identity UI. Its public half
- * is `identity.sharingPublicKey`.
- *
- * The same HMAC-SHA256 as `deriveSecret(derivationKey, "act-sharing")`, computed
- * synchronously with `@noble/hashes` because ConnectionInfo is built without
- * awaiting and `deriveSecret` still goes through Web Crypto. Once #692 makes the
- * derivation chain synchronous this becomes that one call — the test pins the
- * two equal so the swap cannot move the key.
+ * is `identity.sharingPublicKey`. Synchronous because ConnectionInfo is built
+ * without awaiting.
  */
 export function deriveSharingKey(derivationKey: string): {
   secret: Uint8Array
   publicKey: string
 } {
-  const secret = hmac(sha256, hexToUint8Array(derivationKey), SHARING_KEY_LABEL)
+  const secret = hexToUint8Array(
+    deriveSecretSync(derivationKey, ACT_SHARING_LABEL),
+  )
   return {
     secret,
     publicKey: new PrivateKey(secret).publicKey().toCompressedHex(),
