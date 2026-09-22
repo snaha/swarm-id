@@ -139,6 +139,14 @@ export async function derivePostageSignerKey(
 }
 
 /**
+ * `derivePostageSignerKey` without the `await`, for the proxy's ConnectionInfo
+ * (#815): the signer's address is what an app buys a batch for.
+ */
+export function derivePostageSignerKeySync(derivationKey: string): string {
+  return deriveSecretSync(derivationKey, POSTAGE_SIGNER_LABEL)
+}
+
+/**
  * The account-wide ACT key (#519): what other people grant access to when they
  * mean the person rather than one of their apps. Derived from the derivation
  * key, so every app origin and every device of the account arrives at the same
