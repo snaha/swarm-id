@@ -9,7 +9,11 @@
  */
 
 import { Bee, EthAddress, PrivateKey } from "@ethersphere/bee-js"
-import { deriveSwarmEncryptionKey, deriveSecret } from "../utils/key-derivation"
+import {
+  deriveSwarmEncryptionKey,
+  deriveSecret,
+  BACKUP_KEY_LABEL,
+} from "../utils/key-derivation"
 import { readRoster } from "./device-roster"
 import {
   readLatestDeviceState,
@@ -116,7 +120,7 @@ async function doFoldAccountFromSwarm(opts: {
   accountId: string
 }): Promise<FoldAccountResult | undefined> {
   const swarmEncryptionKey = await deriveSwarmEncryptionKey(opts.derivationKey)
-  const backupKeyHex = await deriveSecret(swarmEncryptionKey, "backup-key")
+  const backupKeyHex = await deriveSecret(swarmEncryptionKey, BACKUP_KEY_LABEL)
   const owner = new PrivateKey(backupKeyHex).publicKey().address()
 
   const devices = await readRoster({
