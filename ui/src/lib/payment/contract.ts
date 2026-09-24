@@ -1,6 +1,6 @@
 // Copyright 2026 The Swarm Authors. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
-import { BatchId, PrivateKey } from '@ethersphere/bee-js'
+import { BatchId, EthAddress, PrivateKey } from '@ethersphere/bee-js'
 import { calculateContractTTLSeconds, fetchOnChainBatchStateResult } from '@snaha/swarm-id/internal'
 
 import { strip0x } from '$lib/crypto/hex'
@@ -12,13 +12,16 @@ import { networkSettingsStore } from '$lib/stores/network-settings.svelte'
  * Read a batch's parameters straight from the PostageStamp contract ON-CHAIN
  * (not from a Bee node), so any batch id works even when the configured node
  * never saw it — e.g. a public gateway with no `/stamps`, or a batch bought
- * independently. The signer key is NOT on-chain, so the caller supplies it (it's
- * needed to sign uploads with the batch and is validated later by an upload probe).
+ * independently. The signer key is NOT on-chain, so the caller supplies it; its
+ * address must be the batch owner, which IS on-chain and is checked here. Bee
+ * refuses a stamp signed by anyone else, so an upload probe against a node that
+ * cannot answer (timeout, 5xx, a gateway in front) is no substitute (#819).
  *
  * Returns `undefined` ONLY when the contract authoritatively has no such batch.
  * An endpoint that could not be read throws instead: "we couldn't ask" and
  * "it isn't there" send the user to different places, and the callers here
- * render the `undefined` as advice to check the batch id.
+ * render the `undefined` as advice to check the batch id. A batch owned by a
+ * different key throws too, naming both addresses.
  */
 export async function fetchExistingBatchFromChain(
   batchId: string,
@@ -50,6 +53,13 @@ export async function fetchExistingBatchFromChain(
 
   const state = result.state
   const { batch } = state
+  const owner = new EthAddress(batch.owner)
+  const signerAddress = signerKey.publicKey().address()
+  if (owner.toHex() !== signerAddress.toHex()) {
+    throw new Error(
+      `That batch is owned by ${owner.toChecksum()}, not by this signer key (${signerAddress.toChecksum()}). Check the signer key.`,
+    )
+  }
   const ttl = calculateContractTTLSeconds(state)
   return {
     batchID: new BatchId(strip0x(batchId)),

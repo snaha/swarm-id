@@ -16,7 +16,7 @@
  */
 
 import { describe, it, expect, vi, afterEach } from "vitest"
-import { PrivateKey, Identifier } from "@ethersphere/bee-js"
+import { Bee, PrivateKey, Identifier } from "@ethersphere/bee-js"
 import { uploadChunk, uploadData, uploadSOC, type UploadTarget } from "./upload"
 import { MockBee, createMockStamper } from "./feeds/epochs/test-utils"
 
@@ -46,7 +46,7 @@ function sentHeaders(fetchMock: ReturnType<typeof vi.fn>): string[] {
   )
 }
 
-function stamperTarget(bee: MockBee): UploadTarget {
+function stamperTarget(bee: Bee): UploadTarget {
   return { mode: "stamper", bee, stamper: createMockStamper() }
 }
 
@@ -167,5 +167,53 @@ describe("stamper uploads honour deferred", () => {
     for (const [, , options] of chunkUpload.mock.calls) {
       expect(options).toMatchObject({ deferred: false })
     }
+  })
+})
+
+/**
+ * The stamper-mode SOC POST is a hand-rolled `fetch`, so it must carry the
+ * headers `bee.chunk.upload` would: the `Bee` instance's own and the call's
+ * `requestOptions` (#819). Without them an authenticated node answers 401,
+ * which the batch-attach probe then misreads as "stampable".
+ */
+describe("stamper SOC uploads send the Bee headers", () => {
+  const AUTH = { authorization: "Bearer node-token" }
+  const CALL = { "x-call": "per-call" }
+
+  it("from the Bee instance", async () => {
+    const fetchMock = stubFetch()
+    const bee = new Bee("http://localhost:1633", { headers: AUTH })
+    await uploadSOC(
+      stamperTarget(bee),
+      signer,
+      identifier,
+      new Uint8Array(16),
+      {
+        tag: TAG_UID,
+      },
+    )
+    const [, init] = fetchMock.mock.calls[0] as [string, RequestInit]
+    expect(init.headers).toMatchObject(AUTH)
+  })
+
+  it("from the call's requestOptions, over the instance's", async () => {
+    const fetchMock = stubFetch()
+    const bee = new Bee("http://localhost:1633", { headers: AUTH })
+    await uploadSOC(
+      stamperTarget(bee),
+      signer,
+      identifier,
+      new Uint8Array(16),
+      {
+        tag: TAG_UID,
+        requestOptions: { headers: { ...CALL, authorization: "Bearer other" } },
+      },
+    )
+    const [, init] = fetchMock.mock.calls[0] as [string, RequestInit]
+    expect(init.headers).toMatchObject({
+      ...CALL,
+      authorization: "Bearer other",
+      "swarm-tag": String(TAG_UID),
+    })
   })
 })
