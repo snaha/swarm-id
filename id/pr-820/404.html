@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta
+      name="description"
+      content="Create and manage your decentralized identity with Ethereum or Passkey. Sync across devices with Swarm network."
+    />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black" />
+    <meta name="apple-mobile-web-app-title" content="Swarm Identity" />
+    <link rel="icon" href="/id/pr-820/favicon.png" type="image/png" />
+    <link rel="manifest" href="/id/pr-820/manifest.json" />
+    
+		<link rel="modulepreload" href="/id/pr-820/_app/immutable/entry/start.1AatcTlY.js">
+		<link rel="modulepreload" href="/id/pr-820/_app/immutable/chunks/C9mpOud6.js">
+		<link rel="modulepreload" href="/id/pr-820/_app/immutable/chunks/B3zruLp3.js">
+		<link rel="modulepreload" href="/id/pr-820/_app/immutable/chunks/CIITmoSg.js">
+		<link rel="modulepreload" href="/id/pr-820/_app/immutable/chunks/C86qLlaM.js">
+		<link rel="modulepreload" href="/id/pr-820/_app/immutable/entry/app.D_GOD7zY.js">
+		<link rel="modulepreload" href="/id/pr-820/_app/immutable/chunks/CTe7r116.js">
+		<link rel="modulepreload" href="/id/pr-820/_app/immutable/chunks/BuapiAx8.js">
+		<link rel="modulepreload" href="/id/pr-820/_app/immutable/chunks/PdVrOM-7.js">
+		<link rel="modulepreload" href="/id/pr-820/_app/immutable/chunks/CHxfgIJm.js">
+		<link rel="modulepreload" href="/id/pr-820/_app/immutable/chunks/BEhj4oNX.js">
+		<link rel="modulepreload" href="/id/pr-820/_app/env.js">
+  </head>
+  <body data-sveltekit-preload-data="hover">
+    <div style="display: contents">
+			<script>
+				{
+					__sveltekit_1rlj8r5 = {
+						base: "/id/pr-820",
+						assets: "/id/pr-820",
+						env: null
+					};
+
+					const element = document.currentScript.parentElement;
+
+					import("/id/pr-820/_app/env.js").then(({ env }) => {
+						__sveltekit_1rlj8r5.env = env;
+
+						Promise.all([
+							import("/id/pr-820/_app/immutable/entry/start.1AatcTlY.js"),
+							import("/id/pr-820/_app/immutable/entry/app.D_GOD7zY.js")
+						]).then(([kit, app]) => {
+							kit.start(app, element);
+						});
+					});
+				}
+			</script>
+		</div>
+  </body>
+</html>
