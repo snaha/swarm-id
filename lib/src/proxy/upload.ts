@@ -282,6 +282,21 @@ async function uploadStampedChunkViaHttp(
 }
 
 /**
+ * The headers `bee.chunk.upload` would send: the `Bee` instance's own, then
+ * the call's `requestOptions` on top — for the one request here that is a
+ * hand-rolled `fetch` rather than a bee-js call (#819). bee-js keeps the
+ * instance options private, so this reads the field it stores them in.
+ */
+function beeHeaders(
+  bee: Bee,
+  requestOptions?: BeeRequestOptions,
+): Record<string, string> {
+  const instance = (bee as unknown as { requestOptions?: BeeRequestOptions })
+    .requestOptions
+  return { ...instance?.headers, ...requestOptions?.headers }
+}
+
+/**
  * Upload a chunk via subsidised gateway (no stamp required).
  */
 async function uploadChunkViaSubsidisedGatewayInternal(
@@ -955,6 +970,7 @@ export async function uploadSOC(
     const url = `${bee.url}/soc/${owner.toHex()}/${identifier.toHex()}?sig=${signature.toHex()}`
 
     const headers: Record<string, string> = {
+      ...beeHeaders(bee, options?.requestOptions),
       "content-type": "application/octet-stream",
       "swarm-postage-stamp": stampHex,
     }
@@ -970,6 +986,7 @@ export async function uploadSOC(
       method: "POST",
       headers,
       body: socBody,
+      signal: options?.requestOptions?.signal,
     })
 
     if (!response.ok) {
