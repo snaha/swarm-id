@@ -31,7 +31,8 @@
   "license": "Apache-2.0",
   "dependencies": {
     "cafe-utility": "^33.8.0",
-    "viem": "^2.45.1"
+    "viem": "^2.45.1",
+    "zod": "4.4.3"
   },
   "devDependencies": {
     "@swarm-id/eslint-rules": "workspace:*",

@@ -64,6 +64,7 @@
     "@web3-onboard/core": "^2.24.1",
     "@web3-onboard/injected-wallets": "^2.11.3",
     "@web3-onboard/walletconnect": "^2.6.3",
-    "viem": "^2.55.10"
+    "viem": "^2.55.10",
+    "zod": "4.4.3"
   }
 }
