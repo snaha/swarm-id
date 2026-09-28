@@ -25,7 +25,7 @@
  * docs/Postage-Batch-Partitioning.md (§8 cross-device handoff).
  *
  * Topic = keccak256("swarm-id-partition-state-v1" ‖ batchId ‖ uint32(partition))
- * Owner = backup signer (`deriveSecret(swarmEncryptionKey, "backup-key")`)
+ * Owner = backup signer (`deriveSecret(swarmEncryptionKey, BACKUP_KEY_LABEL)`)
  */
 
 import {

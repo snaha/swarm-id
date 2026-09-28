@@ -19,9 +19,9 @@ import {
 import {
   deriveSecret,
   deriveSwarmEncryptionKey,
-  hexToUint8Array,
   BACKUP_KEY_LABEL,
 } from "../utils/key-derivation"
+import { hexToUint8Array } from "../utils/hex"
 import {
   updateAfterWrite,
   saveUtilizationState,

@@ -15,9 +15,6 @@ import { hmac } from "@noble/hashes/hmac"
 import { sha256 } from "@noble/hashes/sha256"
 import { hexToUint8Array, uint8ArrayToHex } from "./hex"
 
-// Re-export hex utilities for backwards compatibility
-export { hexToUint8Array, uint8ArrayToHex } from "./hex"
-
 /** Master key → the stored derivation key */
 export const DERIVATION_KEY_LABEL = "derivation-key"
 /** Derivation key → the Swarm encryption key */

@@ -40,7 +40,7 @@ import type {
   UtilizationStoreDB,
 } from "../storage/utilization-store"
 import { lockSocAddress } from "./lock-soc"
-import { deriveSecret } from "./key-derivation"
+import { deriveSecret, BACKUP_KEY_LABEL } from "./key-derivation"
 import { uint8ArrayToHex } from "./hex"
 
 const TEST_BATCH_ID = new BatchId("00".repeat(32))
@@ -1024,7 +1024,10 @@ describe("UtilizationAwareStamper partition awareness", () => {
     // burns a slot until the bucket is exhausted.
     const swarmEncryptionKey = TEST_ENC_KEY
     const swarmEncryptionKeyHex = uint8ArrayToHex(swarmEncryptionKey)
-    const backupKeyHex = await deriveSecret(swarmEncryptionKeyHex, "backup-key")
+    const backupKeyHex = await deriveSecret(
+      swarmEncryptionKeyHex,
+      BACKUP_KEY_LABEL,
+    )
     const backupOwner = new PrivateKey(backupKeyHex).publicKey().address()
     const expectedLockSocAddr = lockSocAddress(TEST_BATCH_ID, 0, backupOwner)
 

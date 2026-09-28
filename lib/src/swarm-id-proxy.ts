@@ -146,13 +146,12 @@ import {
 } from "./utils/storage-managers"
 import { isStorageShared } from "./utils/storage-probe"
 import {
-  hexToUint8Array,
-  uint8ArrayToHex,
   deriveSecret,
   deriveSharingKey,
   deriveSwarmEncryptionKey,
   BACKUP_KEY_LABEL,
 } from "./utils/key-derivation"
+import { hexToUint8Array, uint8ArrayToHex } from "./utils/hex"
 import { generatedAvatar } from "./utils/avatar"
 import { connectionInfoEqual } from "./utils/connection-info"
 import {
