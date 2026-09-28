@@ -11,6 +11,8 @@ import {
   deriveSecret,
   deriveSecretSync,
   deriveSharingKey,
+  derivePostageSignerKey,
+  derivePostageSignerKeySync,
 } from "./key-derivation"
 import { publicKeyFromPrivate, compressPublicKey } from "../proxy/act/crypto"
 import { uint8ArrayToHex } from "./hex"
@@ -67,5 +69,13 @@ describe("deriveSharingKey (#519)", () => {
     const { secret, publicKey } = deriveSharingKey(PARENT_KEY)
     const { x, y } = publicKeyFromPrivate(secret)
     expect(publicKey).toBe(uint8ArrayToHex(compressPublicKey(x, y)))
+  })
+})
+
+describe("derivePostageSignerKeySync", () => {
+  it("is derivePostageSignerKey without the await", async () => {
+    expect(derivePostageSignerKeySync(PARENT_KEY)).toBe(
+      await derivePostageSignerKey(PARENT_KEY),
+    )
   })
 })

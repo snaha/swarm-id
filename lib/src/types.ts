@@ -741,6 +741,13 @@ export const ConnectionIdentitySchema = z.object({
    * Every app the account connects can read what is granted to it.
    */
   sharingPublicKey: CompressedPublicKeySchema.optional(),
+  /**
+   * The address the account's postage signer stamps with (#815). An app that
+   * funds storage for the account buys a batch with this as `createBatch`'s
+   * owner; the account then adopts it in the identity UI with its own key.
+   * Bare hex like `address`.
+   */
+  postageSignerAddress: AddressSchema.optional(),
   /** Ready-to-render account avatar — every identity has one. */
   avatar: AvatarSchema,
 })

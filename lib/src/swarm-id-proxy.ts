@@ -148,6 +148,7 @@ import { isStorageShared } from "./utils/storage-probe"
 import {
   deriveSecret,
   deriveSharingKey,
+  derivePostageSignerKeySync,
   deriveSwarmEncryptionKey,
   BACKUP_KEY_LABEL,
 } from "./utils/key-derivation"
@@ -3359,6 +3360,35 @@ export class SwarmIdProxy {
   }
 
   /**
+   * The two public keys the identity carries, memoised on the derivation key
+   * they come from: `buildConnectionInfo` runs from eight sites, and the key
+   * changes only when the account does. Public halves only, never a secret.
+   */
+  private identityKeys?: {
+    derivationKey: string
+    sharingPublicKey: string
+    postageSignerAddress: string
+  }
+
+  private identityKeysFor(derivationKey: string) {
+    if (this.identityKeys?.derivationKey !== derivationKey) {
+      this.identityKeys = {
+        derivationKey,
+        sharingPublicKey: deriveSharingKey(derivationKey).publicKey,
+        // The address an app buys a batch for (#815): the signer's, and the
+        // signer is one derivation away.
+        postageSignerAddress: new PrivateKey(
+          derivePostageSignerKeySync(derivationKey),
+        )
+          .publicKey()
+          .address()
+          .toHex(),
+      }
+    }
+    return this.identityKeys
+  }
+
+  /**
    * Build the current ConnectionInfo snapshot from in-memory auth state and
    * shared localStorage. Pure — does not send anything.
    */
@@ -3374,12 +3404,15 @@ export class SwarmIdProxy {
         if (connection) {
           // The account IS the app-facing identity (single-level model).
           const { account } = connection
+          const { sharingPublicKey, postageSignerAddress } =
+            this.identityKeysFor(account.derivationKey)
           identity = {
             id: account.id.toHex(),
             name: account.name,
             address: account.id.toHex(),
             publicKey: account.publicKey,
-            sharingPublicKey: deriveSharingKey(account.derivationKey).publicKey,
+            sharingPublicKey,
+            postageSignerAddress,
             avatar: generatedAvatar(account.id.toHex()),
           }
         }
