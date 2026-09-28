@@ -30,11 +30,7 @@ import { WALLET_CHAINS } from '$lib/payment/payment-rail'
 // (`payment-rail.ts`), which switches the wallet to WALLET_CHAINS to sign
 // there. Each id exactly once: onboard rejects a duplicate outright, and it
 // throws while this module initialises, which takes every page down with it.
-//
-// `devWalletChains` is the local dev rail's source chain (`pnpm
-// dev:source-chain`), empty in a production build — via the seam rather than
-// an `import.meta.env.DEV` branch here, because a dead branch still leaves the
-// import, and this module is loaded on every page that can connect a wallet.
+// `devWalletChains` is empty in a production build.
 const walletChains = [...WALLET_CHAINS, ...devWalletChains]
 
 const injected = injectedModule()

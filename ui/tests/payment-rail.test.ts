@@ -320,10 +320,7 @@ async function mintUsdcTo(address: string, units: bigint): Promise<void> {
   ])
 }
 
-/**
- * Open the payment screens for a new drive and connect the injected wallet,
- * returning once the dialog shows it connected.
- */
+/** Open the payment screens for a new drive and connect the injected wallet. */
 async function openPaymentAndConnect(page: Page, { misroutedGnosis = false } = {}) {
   await injectPayingWallet(page, { misroutedGnosis })
   await seedPaidEnvironment(page)
@@ -458,8 +455,6 @@ test('changing wallet disconnects it and brings the picker back', async ({ page 
   test.setTimeout(PAYMENT_TIMEOUT_MS)
   await openPaymentAndConnect(page)
 
-  // Nothing is left of the old connection: onboard forgets the wallet, so the
-  // next connect asks which one rather than handing the old session back.
   await page.getByRole('button', { name: 'Change wallet' }).click()
   await expect(page.getByText('Connect wallet to proceed')).toBeVisible()
   await expect(page.getByText('Connected wallet')).toBeHidden()

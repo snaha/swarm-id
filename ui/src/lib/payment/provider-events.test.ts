@@ -5,7 +5,7 @@ import { describe, expect, it, vi } from 'vitest'
 import type { EthereumProvider } from '$lib/payment/payment-rail'
 import { subscribeProviderEvent } from '$lib/payment/provider-events'
 
-/** A provider whose `removeListener` removes nothing, like Coinbase's. */
+/** `removeListener` is a no-op, as in Coinbase's. */
 function stubProvider() {
   const listeners = new Map<string, Array<(payload: unknown) => void>>()
   const provider: EthereumProvider = {

@@ -99,7 +99,6 @@
   let errorMessage = $state('')
   let provider = $state<EthereumProvider | undefined>(undefined)
   let walletAddress = $state('')
-  /** onboard's label for the connected wallet, which is what disconnects it. */
   let walletLabel = ''
   // The rail is fixed for the life of one payment — the dialog is created fresh
   // per pending request — so its first chain and token are read ONCE as the
@@ -338,14 +337,9 @@
     }
   }
 
-  /**
-   * Drop the connected wallet and go back to connecting one. Through onboard
-   * rather than just forgetting it here: WalletConnect keeps its session in
-   * localStorage and hands it straight back on the next connect, so a wrong
-   * pairing could otherwise never be undone from inside the app.
-   */
+  /** Disconnect through onboard, or WalletConnect hands its session straight back. */
   async function changeWallet() {
-    attempts.begin()
+    attempts.supersede()
     const label = walletLabel
     provider = undefined
     walletAddress = ''
@@ -473,9 +467,6 @@
   // (the quote names the payer) with the old figures dropped, and a chain
   // change re-reads so the numbers come from wherever the wallet now is.
   $effect(() => {
-    // Through the registry, not `on`/`removeListener` directly: Coinbase's
-    // `removeListener` is a no-op, so a direct subscription would leak a
-    // handler every time the dialog reopens on the same provider.
     const walletProvider = provider
     if (!walletProvider) {
       return
