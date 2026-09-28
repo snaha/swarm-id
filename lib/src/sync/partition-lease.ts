@@ -35,7 +35,7 @@ import {
 import { uint8ArrayToHex } from "../utils/hex"
 import { withTimeout } from "../utils/promise"
 import { SYNC_READ_TIMEOUT_MS } from "./timing-constants"
-import { deriveSecret } from "../utils/key-derivation"
+import { deriveSecret, BACKUP_KEY_LABEL } from "../utils/key-derivation"
 import {
   LEASE_TTL_MS,
   NUM_BUCKETS,
@@ -324,7 +324,10 @@ export class PartitionLease {
     intentGuardPollMs?: number
   }): Promise<PartitionLease> {
     const swarmEncryptionKeyHex = uint8ArrayToHex(opts.swarmEncryptionKey)
-    const backupKeyHex = await deriveSecret(swarmEncryptionKeyHex, "backup-key")
+    const backupKeyHex = await deriveSecret(
+      swarmEncryptionKeyHex,
+      BACKUP_KEY_LABEL,
+    )
     const backupSigner = new PrivateKey(backupKeyHex)
     return new PartitionLease({ ...opts, backupSigner })
   }

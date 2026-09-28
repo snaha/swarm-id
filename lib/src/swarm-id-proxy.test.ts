@@ -22,7 +22,8 @@ import { Bee } from "@ethersphere/bee-js"
 
 import { DEFAULT_BEE_NODE_URL } from "./schemas"
 import { SwarmIdProxy } from "./swarm-id-proxy"
-import { deriveSecret, uint8ArrayToHex } from "./utils/key-derivation"
+import { deriveSecret } from "./utils/key-derivation"
+import { uint8ArrayToHex } from "./utils/hex"
 import { STORAGE_KEY_NETWORK_SETTINGS } from "./types"
 import type { ButtonConfig } from "./types"
 

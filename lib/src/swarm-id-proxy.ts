@@ -146,12 +146,12 @@ import {
 } from "./utils/storage-managers"
 import { isStorageShared } from "./utils/storage-probe"
 import {
-  hexToUint8Array,
-  uint8ArrayToHex,
   deriveSecret,
   deriveSharingKey,
   deriveSwarmEncryptionKey,
+  BACKUP_KEY_LABEL,
 } from "./utils/key-derivation"
+import { hexToUint8Array, uint8ArrayToHex } from "./utils/hex"
 import { generatedAvatar } from "./utils/avatar"
 import { connectionInfoEqual } from "./utils/connection-info"
 import {
@@ -1825,7 +1825,7 @@ export class SwarmIdProxy {
     // lease already held. Single-device accounts get a lock-only coordinator.
     const backupKeyHex = await deriveSecret(
       uint8ArrayToHex(accountInfo.encryptionKey),
-      "backup-key",
+      BACKUP_KEY_LABEL,
     )
     if (superseded()) return
     this.teardownCoordinator()
@@ -2696,7 +2696,7 @@ export class SwarmIdProxy {
       // Feed owner = backup signer (derived from the swarm encryption key).
       // Phase 3a: discovery is the append-only device roster, not a shared doc.
       const backupKey = new PrivateKey(
-        await deriveSecret(uint8ArrayToHex(encryptionKey), "backup-key"),
+        await deriveSecret(uint8ArrayToHex(encryptionKey), BACKUP_KEY_LABEL),
       )
       const owner = backupKey.publicKey().address()
       const rosterDevices = await readRoster({
@@ -2844,7 +2844,7 @@ export class SwarmIdProxy {
         connection.account.derivationKey,
       )
       const accountKey = new PrivateKey(
-        await deriveSecret(encryptionKey, "backup-key"),
+        await deriveSecret(encryptionKey, BACKUP_KEY_LABEL),
       )
       const owner = accountKey.publicKey().address()
 
