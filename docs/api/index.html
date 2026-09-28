@@ -518,6 +518,11 @@
 <td>The account-wide ACT key: grant to it to share with this person in every app they use. See <a href="#which-key-do-i-grant-to">Which key do I grant to?</a></td>
 </tr>
 <tr>
+<td><code dir="auto">identity.postageSignerAddress</code></td>
+<td><code dir="auto">string | undefined</code></td>
+<td>The address the account’s postage signer stamps with, bare hex like <code dir="auto">address</code>. An app that funds storage for the account buys a batch with it as <code dir="auto">createBatch</code>’s owner; the account then adopts the batch in the identity UI (Storage, Add drive, Use existing batch) with its own key. Knowing the address lets an app buy for the account, never spend for it</td>
+</tr>
+<tr>
 <td><code dir="auto">identity.avatar</code></td>
 <td><code dir="auto">Avatar</code></td>
 <td>Ready-to-render account avatar. See <a href="#avatars">Avatars</a></td>
