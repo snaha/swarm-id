@@ -63,14 +63,5 @@ export const devSourceChain: DevSourceChain | undefined = {
   saveRpcUrl: (url) => localStorage.setItem(SOURCE_RPC_OVERRIDE_KEY, url),
 }
 
-/**
- * Extra chains to declare to the wallet — to web3-onboard, so it recognises the
- * wallet's network while a payment is rehearsed against the local source chain
- * instead of reporting an unsupported one, and to a WalletConnect session, so a
- * switch to it is inside what was negotiated. Empty in a production build.
- *
- * The endpoint is read at module load, so an override saved in Network settings
- * reaches the wallet declaration on the next reload — which is as good as it
- * gets: web3-onboard reads its chain list once, when it is initialised.
- */
+/** The local source chain, for onboard and the WalletConnect session. Read at module load. */
 export const devWalletChains: Chain[] = [localSourceChain()]
