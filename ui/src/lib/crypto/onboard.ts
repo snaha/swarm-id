@@ -23,6 +23,21 @@ import { walletConnectOptions } from '$lib/crypto/wallet-connect'
 import { devWalletChains } from '$lib/payment/dev-funding'
 import { WALLET_CHAINS } from '$lib/payment/payment-rail'
 
+// Every chain onboard has to know about, or it reports the user's network as
+// unsupported. That covers two different callers: `eth-wallet.ts`'s
+// wallet-secured unlock, which only signs a plain message and stays on
+// whichever network the wallet already happens to be on — Ethereum mainnet,
+// the common default, which WALLET_CHAINS carries — and the payment flow
+// (`payment-rail.ts`), which switches the wallet to WALLET_CHAINS to sign
+// there. Each id exactly once: onboard rejects a duplicate outright, and it
+// throws while this module initialises, which takes every page down with it.
+//
+// `devWalletChains` is the local dev rail's source chain (`pnpm
+// dev:source-chain`), empty in a production build — via the seam rather than
+// an `import.meta.env.DEV` branch here, because a dead branch still leaves the
+// import, and this module is loaded on every page that can connect a wallet.
+const walletChains = [...WALLET_CHAINS, ...devWalletChains]
+
 const injected = injectedModule()
 // WalletConnect, where the build has a project id for it. Injected wallets
 // reach only browsers a wallet ships an extension for: Safari has neither
@@ -38,7 +53,7 @@ const injected = injectedModule()
 const walletConnect = walletConnectOptions(
   env.PUBLIC_WALLETCONNECT_PROJECT_ID,
   browser ? window.location.origin : undefined,
-  WALLET_CHAINS,
+  walletChains,
 )
 // Coinbase Wallet's own SDK, which like WalletConnect needs nothing installed:
 // it reaches the phone app directly. Narrower than WalletConnect — one wallet,
@@ -66,29 +81,12 @@ const accessWallets = [
   coinbaseModule({ ...coinbaseOptions, supportedWalletType: 'eoaOnly' }),
   ...walletConnectModules,
 ]
-// Every chain onboard has to know about, or it reports the user's network as
-// unsupported. That covers two different callers: `eth-wallet.ts`'s
-// wallet-secured unlock, which only signs a plain message and stays on
-// whichever network the wallet already happens to be on — Ethereum mainnet,
-// the common default, which WALLET_CHAINS carries — and the payment flow
-// (`payment-rail.ts`), which switches the wallet to WALLET_CHAINS to sign
-// there. Each id exactly once: onboard rejects a duplicate outright, and it
-// throws while this module initialises, which takes every page down with it.
-const chains = [
-  ...WALLET_CHAINS.map((chain) => ({
-    id: `0x${chain.id.toString(16)}`,
-    token: chain.nativeCurrency.symbol,
-    label: chain.name,
-    rpcUrl: chain.rpcUrls.default.http[0],
-  })),
-  // The local dev rail's source chain (`pnpm dev:source-chain`), so onboard
-  // recognises the wallet's network when a payment is rehearsed against it
-  // rather than reporting an unsupported chain. Empty in a production build —
-  // via the seam rather than an `import.meta.env.DEV` branch here, because a
-  // dead branch still leaves the import, and this module is loaded on every
-  // page that can connect a wallet.
-  ...devWalletChains,
-]
+const chains = walletChains.map((chain) => ({
+  id: `0x${chain.id.toString(16)}`,
+  token: chain.nativeCurrency.symbol,
+  label: chain.name,
+  rpcUrl: chain.rpcUrls.default.http[0],
+}))
 const appMetadata = {
   name: 'Swarm ID',
   description: 'The identity system for Swarm',

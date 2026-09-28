@@ -40,6 +40,7 @@
     type PaymentRail,
     displayAmount,
   } from '$lib/payment/payment-rail'
+  import { subscribeProviderEvent } from '$lib/payment/provider-events'
   import { createWalletChainRecord } from '$lib/payment/wallet-chain-record'
 
   /**
@@ -98,6 +99,8 @@
   let errorMessage = $state('')
   let provider = $state<EthereumProvider | undefined>(undefined)
   let walletAddress = $state('')
+  /** onboard's label for the connected wallet, which is what disconnects it. */
+  let walletLabel = ''
   // The rail is fixed for the life of one payment — the dialog is created fresh
   // per pending request — so its first chain and token are read ONCE as the
   // user's starting selection, not tracked.
@@ -310,6 +313,7 @@
       }
       provider = wallet.provider as unknown as EthereumProvider
       walletAddress = address
+      walletLabel = wallet.label
       // A wallet that has just arrived has been put on nothing.
       walletChain.forget()
 
@@ -331,6 +335,29 @@
       }
       errorMessage = caught instanceof Error ? caught.message : 'Could not connect the wallet.'
       screen = 'method'
+    }
+  }
+
+  /**
+   * Drop the connected wallet and go back to connecting one. Through onboard
+   * rather than just forgetting it here: WalletConnect keeps its session in
+   * localStorage and hands it straight back on the next connect, so a wrong
+   * pairing could otherwise never be undone from inside the app.
+   */
+  async function changeWallet() {
+    attempts.begin()
+    const label = walletLabel
+    provider = undefined
+    walletAddress = ''
+    walletLabel = ''
+    balances = {}
+    paymentQuote = undefined
+    quoting = false
+    errorMessage = ''
+    walletChain.forget()
+    screen = 'method'
+    if (label) {
+      await onboard.disconnectWallet({ label }).catch(() => undefined)
     }
   }
 
@@ -446,13 +473,13 @@
   // (the quote names the payer) with the old figures dropped, and a chain
   // change re-reads so the numbers come from wherever the wallet now is.
   $effect(() => {
+    // Through the registry, not `on`/`removeListener` directly: Coinbase's
+    // `removeListener` is a no-op, so a direct subscription would leak a
+    // handler every time the dialog reopens on the same provider.
     const walletProvider = provider
-    // Both halves required — EIP-1193 makes each optional, and a subscription
-    // that cannot be torn down leaks a handler on every provider change.
-    if (!walletProvider?.on || !walletProvider.removeListener) {
+    if (!walletProvider) {
       return
     }
-    const { on, removeListener } = walletProvider
     const onAccounts = (payload: unknown) => {
       const [first] = Array.isArray(payload) ? (payload as string[]) : []
       if (!first || first === walletAddress) {
@@ -471,11 +498,14 @@
       walletChain.forget()
       void readBalances()
     }
-    on.call(walletProvider, 'accountsChanged', onAccounts)
-    on.call(walletProvider, 'chainChanged', onChain)
+    const unsubscribes = [
+      subscribeProviderEvent(walletProvider, 'accountsChanged', onAccounts),
+      subscribeProviderEvent(walletProvider, 'chainChanged', onChain),
+    ]
     return () => {
-      removeListener.call(walletProvider, 'accountsChanged', onAccounts)
-      removeListener.call(walletProvider, 'chainChanged', onChain)
+      for (const unsubscribe of unsubscribes) {
+        unsubscribe()
+      }
     }
   })
 
@@ -732,6 +762,9 @@
         </span>
         <span class="font-medium">{shortAddress}</span>
       </div>
+      <Button variant="link" size="xs" class="-mt-2 self-end" onclick={() => void changeWallet()}>
+        Change wallet
+      </Button>
 
       <div class="flex w-full flex-col gap-2">
         <span class="text-sm font-medium">Chain</span>

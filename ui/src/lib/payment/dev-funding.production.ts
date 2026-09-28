@@ -10,6 +10,8 @@
  * Relay when the endpoint is proven Gnosis mainnet and offers nothing at all
  * when it is not (`resolve-rail.ts`).
  */
+import type { Chain } from 'viem'
+
 import type { PaymentRail } from '$lib/payment/payment-rail'
 
 /** No local source chain exists in a shipped build. */
@@ -18,12 +20,7 @@ export function resolveLocalRail(): Promise<PaymentRail | undefined> {
 }
 
 /** Nothing to declare to the wallet beyond the real chains. */
-export const devWalletChains: Array<{
-  id: string
-  token: string
-  label: string
-  rpcUrl: string
-}> = []
+export const devWalletChains: Chain[] = []
 
 /** Mirrors `dev-funding.ts` — see there for why it is declared twice. */
 export interface DevSourceChain {
