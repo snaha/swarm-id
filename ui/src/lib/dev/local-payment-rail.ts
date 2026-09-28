@@ -112,7 +112,7 @@ const RECEIPT_TIMEOUT_MS = 60_000
 const DELIVERY_POLL_MS = 1_000
 const DELIVERY_TIMEOUT_MS = 120_000
 
-function localSourceChain(): Chain {
+export function localSourceChain(): Chain {
   return defineChain({
     id: LOCAL_SOURCE_CHAIN_ID,
     name: 'Ethereum Mainnet (fake)',
