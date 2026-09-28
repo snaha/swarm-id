@@ -11,8 +11,9 @@
  * Relies on deterministic ECDSA (RFC 6979, standard in wallets): the same
  * message and key must always produce the same signature. Smart-contract
  * wallets (ERC-1271) don't return a recoverable ECDSA signature and are
- * rejected up front; a wallet that signs with a random nonce is caught at
- * enrollment, which asks for the signature twice and requires the same bytes.
+ * rejected up front. A wallet that signs with a random nonce is caught at
+ * enrollment, which asks any wallet not known to be deterministic for the
+ * signature twice and requires the same bytes.
  */
 import { hexToUint8Array } from '@snaha/swarm-id'
 import { type Hex, getAddress, recoverMessageAddress } from 'viem'
@@ -30,6 +31,14 @@ const SIGNING_MESSAGE =
 
 const UNSUPPORTED_WALLET = 'This wallet type is not supported for securing an account.'
 
+/**
+ * Onboard labels of wallets confirmed to sign byte-identically every time
+ * (#200), which enrollment trusts after one signature. The label is what the
+ * wallet reports about itself, so one posing as these skips the second
+ * signature; the address check still applies to it.
+ */
+const DETERMINISTIC_WALLETS: ReadonlySet<string> = new Set(['MetaMask', 'Coinbase Wallet'])
+
 export interface WalletKeySource {
   walletAddress: string
   /** Canonical-serialized signature of SIGNING_MESSAGE — the secret key material. */
@@ -40,7 +49,11 @@ export interface WalletKeySource {
  * Connect a wallet via @web3-onboard (so the user can pick one when several are
  * installed) and return its EIP-1193 provider plus the selected address.
  */
-async function connectWallet(): Promise<{ provider: EthereumProvider; walletAddress: string }> {
+async function connectWallet(): Promise<{
+  label: string
+  provider: EthereumProvider
+  walletAddress: string
+}> {
   const connected = await connectAccessWallet()
   const wallet = connected[0]
   if (!wallet) {
@@ -52,7 +65,11 @@ async function connectWallet(): Promise<{ provider: EthereumProvider; walletAddr
     throw new Error('No wallet account available.')
   }
 
-  return { provider: wallet.provider as unknown as EthereumProvider, walletAddress }
+  return {
+    label: wallet.label,
+    provider: wallet.provider as unknown as EthereumProvider,
+    walletAddress,
+  }
 }
 
 /**
@@ -83,13 +100,17 @@ async function signKeyMessage(provider: EthereumProvider, walletAddress: string)
 }
 
 /**
- * Connect a wallet to secure an account with. Asks for the signature twice and
- * accepts the wallet only if both are the same bytes: one that signs with a
- * random nonce would derive a different key on every unlock.
+ * Connect a wallet to secure an account with. A wallet outside
+ * DETERMINISTIC_WALLETS is asked for the signature twice and accepted only if
+ * both are the same bytes: one that signs with a random nonce would derive a
+ * different key on every unlock.
  */
 export async function enrollWalletKeySource(): Promise<WalletKeySource> {
-  const { provider, walletAddress } = await connectWallet()
+  const { label, provider, walletAddress } = await connectWallet()
   const signature = await signKeyMessage(provider, walletAddress)
+  if (DETERMINISTIC_WALLETS.has(label)) {
+    return { walletAddress: getAddress(walletAddress), signature }
+  }
   const repeated = await signKeyMessage(provider, walletAddress)
   if (repeated !== signature) {
     throw new Error(

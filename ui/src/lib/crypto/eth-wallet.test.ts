@@ -13,6 +13,9 @@ vi.mock('$lib/crypto/onboard', () => ({ connectAccessWallet: vi.fn() }))
 /** anvil's account #0 — a throwaway key. */
 const PRIVATE_KEY = '0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80'
 const account = privateKeyToAccount(PRIVATE_KEY)
+/** A wallet not on the deterministic list, so enrollment asks it to sign twice. */
+const UNLISTED_WALLET = 'WalletConnect'
+const LISTED_WALLET = 'MetaMask'
 /** An unrelated address, standing in for a smart-contract wallet's. */
 const CONTRACT_ADDRESS = '0x000000000000000000000000000000000000dEaD'
 /** Order of the secp256k1 group. */
@@ -35,7 +38,7 @@ function twin(signature: Hex): Hex {
 /** A fake EIP-1193 wallet, connected through the mocked onboard picker. */
 function connect(
   sign: (message: string, call: number) => Promise<Hex>,
-  address: string = account.address,
+  { address = account.address, label = UNLISTED_WALLET }: { address?: string; label?: string } = {},
 ) {
   let calls = 0
   const request = vi.fn(async ({ method, params }: { method: string; params?: unknown[] }) => {
@@ -45,7 +48,7 @@ function connect(
     return sign(params?.[0] as string, calls++)
   })
   vi.mocked(connectAccessWallet).mockResolvedValue([
-    { accounts: [{ address }], provider: { request } },
+    { label, accounts: [{ address }], provider: { request } },
   ] as unknown as WalletState[])
   return request
 }
@@ -79,8 +82,23 @@ describe('enrollWalletKeySource', () => {
     expect(request).toHaveBeenCalledTimes(2)
   })
 
+  it('trusts a listed wallet after one signature', async () => {
+    const request = connect(randomNonce, { label: LISTED_WALLET })
+
+    const source = await enrollWalletKeySource()
+
+    expect(request).toHaveBeenCalledTimes(1)
+    expect(source.walletAddress).toBe(account.address)
+  })
+
+  it('refuses a listed wallet whose signature does not recover to its address', async () => {
+    connect(deterministic, { address: CONTRACT_ADDRESS, label: LISTED_WALLET })
+
+    await expect(enrollWalletKeySource()).rejects.toThrow(/not supported/)
+  })
+
   it('refuses a signature that does not recover to the wallet address', async () => {
-    const request = connect(deterministic, CONTRACT_ADDRESS)
+    const request = connect(deterministic, { address: CONTRACT_ADDRESS })
 
     await expect(enrollWalletKeySource()).rejects.toThrow(/not supported/)
     expect(request).toHaveBeenCalledTimes(1)
@@ -100,7 +118,7 @@ describe('unlockWalletKeySource', () => {
   })
 
   it('refuses a signature that does not recover to the wallet address', async () => {
-    connect(deterministic, CONTRACT_ADDRESS)
+    connect(deterministic, { address: CONTRACT_ADDRESS })
 
     await expect(unlockWalletKeySource()).rejects.toThrow(/not supported/)
   })
