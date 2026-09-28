@@ -1,0 +1,1 @@
+const r=/^[0-9a-fA-F]*$/;function s(t){return t.startsWith("0x")?t.slice(2):t}function i(t){if(t.startsWith("0x"))return t;if(!r.test(t))throw new Error("Invalid hex string.");return`0x${t}`}export{i as p,s};
