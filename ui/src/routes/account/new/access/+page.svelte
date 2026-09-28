@@ -211,7 +211,7 @@
             <p class="text-sm">
               {method === 'passkey'
                 ? 'Follow the prompts on your device.'
-                : 'Approve the request in your Ethereum wallet.'}
+                : 'Approve both signature requests in your Ethereum wallet.'}
             </p>
           </div>
         </div>
@@ -246,7 +246,10 @@
                 or PIN.
               </p>
             {:else if method === 'eth-wallet'}
-              <p class="text-sm">Unlock by signing a message with your Ethereum wallet.</p>
+              <p class="text-sm">
+                Unlock by signing a message with your Ethereum wallet. You&rsquo;ll sign it twice,
+                to confirm your wallet signs it the same way each time.
+              </p>
             {/if}
           </div>
 

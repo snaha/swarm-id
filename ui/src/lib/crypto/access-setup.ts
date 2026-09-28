@@ -9,7 +9,7 @@ import { uint8ArrayToHex } from '@snaha/swarm-id'
 import { type AccessMethod } from '@snaha/swarm-id/internal'
 
 import { PASSWORD_KDF_ITERATIONS, deriveKeyFromPassword, randomSalt } from '$lib/crypto/encryption'
-import { deriveWalletKey, requestWalletKeySource } from '$lib/crypto/eth-wallet'
+import { deriveWalletKey, enrollWalletKeySource } from '$lib/crypto/eth-wallet'
 import { createPasskeyKey } from '$lib/crypto/passkey'
 
 export interface AccessSetup {
@@ -31,7 +31,7 @@ export async function createAccess(
     return { access: { type: 'passkey', credentialId: passkey.credentialId }, key: passkey.key }
   }
   if (method === 'eth-wallet') {
-    const source = await requestWalletKeySource()
+    const source = await enrollWalletKeySource()
     const salt = randomSalt()
     return {
       access: { type: 'eth-wallet', encryptionSalt: uint8ArrayToHex(salt) },
