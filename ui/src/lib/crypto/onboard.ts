@@ -18,6 +18,7 @@ import { asset } from '$app/paths'
 import { env } from '$env/dynamic/public'
 
 import { SWARM_MARK_SVG } from '$lib/components/swarm-mark'
+import { forgetCoinbaseSmartWallet } from '$lib/crypto/coinbase-signer'
 import { walletConnectOptions } from '$lib/crypto/wallet-connect'
 import { devWalletChains } from '$lib/payment/dev-funding'
 import { WALLET_CHAINS } from '$lib/payment/payment-rail'
@@ -54,7 +55,9 @@ const walletConnect = walletConnectOptions(
 //
 // The module's default wallet type is `all`, which includes Coinbase Smart
 // Wallet: fine for paying, but its ERC-1271 signatures cannot be reproduced
-// into a key, so the access flow gets an EOA-only Coinbase instead.
+// into a key, so the access flow gets an EOA-only Coinbase instead — and
+// forgets a Smart Wallet the SDK remembers from paying, which it would
+// otherwise reuse over that option.
 const coinbaseOptions = { reloadOnDisconnect: false }
 const walletConnectModules = walletConnect ? [walletConnectModule(walletConnect)] : []
 const wallets = [injected, coinbaseModule(coinbaseOptions), ...walletConnectModules]
@@ -129,6 +132,7 @@ export const onboard = Onboard({
  * list is swapped for the duration of the prompt and restored after.
  */
 export async function connectAccessWallet(): Promise<WalletState[]> {
+  forgetCoinbaseSmartWallet(localStorage)
   onboard.state.actions.setWalletModules(accessWallets)
   try {
     return await onboard.connectWallet()
