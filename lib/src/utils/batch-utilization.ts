@@ -1302,6 +1302,7 @@ export class UtilizationAwareStamper implements Stamper, SlotAssigner {
    * The next physical data slot per bucket, as core-sdk's `Stamper` means it.
    * A snapshot: the counters of record are lane-relative (`dataCounters`), so
    * writing here moves nothing — take a slot with {@link assignSlot}.
+   * Allocates a fresh NUM_BUCKETS-entry array per call.
    */
   get buckets(): Uint32Array {
     return this.utilizationState.dataCounters.map((j) =>
@@ -1681,6 +1682,10 @@ export class UtilizationAwareStamper implements Stamper, SlotAssigner {
    * @throws PartitionLeaseLostError when the bound partition's lease is gone
    */
   assignSlot(chunkAddress: Uint8Array): number {
+    // The three reserved-slot returns below skip the `maxSlot` bound: every
+    // reserved slot is below `partitionCount`, so it always fits. A data slot
+    // must never be returned from here — those take the bounded path at the end.
+    //
     // Lock-SOC short-circuit: when stamping our own per-partition lock SOC,
     // overstamp the fixed reserved slot (= partition index, 0 or 1) within
     // its bucket. Doesn't consume new slot budget, doesn't bump our local
