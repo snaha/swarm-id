@@ -475,9 +475,10 @@ describe("UtilizationAwareStamper partition awareness", () => {
     for (let j = 0; j < cap; j++) {
       stamper.stamp(makeAddressInBucket(BUCKET, j))
     }
-    // One more DATA chunk in BUCKET overflows the partition's lane → the
-    // underlying bee-js stamper throws "Bucket is full".
-    expect(() => stamper.stamp(makeAddressInBucket(BUCKET, 9000))).toThrow()
+    // One more DATA chunk in BUCKET overflows the partition's lane.
+    expect(() => stamper.stamp(makeAddressInBucket(BUCKET, 9000))).toThrow(
+      "Bucket is full",
+    )
 
     // A counter chunk marked reserved overstamps slot 0 (the partition's
     // reserved slot), which is free even though the data lane is full.

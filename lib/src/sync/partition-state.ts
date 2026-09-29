@@ -936,14 +936,13 @@ export async function writePartitionState(opts: {
 
   // Invariant the parallel PUTs below rely on: every reserved-slot chunk this
   // publish uploads must occupy a DISTINCT bucket. They all land at
-  // slot=partition, so a shared bucket both evicts one under Bee's newer-stamp-
-  // wins replacement AND races the shared `buckets[bucket]` counter across the
-  // concurrent stamps. `claimedBuckets` + `pickReservedChunkKey` already
-  // guarantee distinctness by construction; assert it here so a future change to
-  // that bucket-selection can't silently reintroduce a collision. (This covers
-  // the distinct-bucket half of the parallel-safety invariant; the "no `await`
-  // between the reserved-slot bucket-set and `stamp()`" half stays enforced by
-  // the UtilizationAwareStamper stamp path and the comment on the Promise.all.)
+  // slot=partition, so a shared bucket evicts one under Bee's newer-stamp-wins
+  // replacement. `claimedBuckets` + `pickReservedChunkKey` already guarantee
+  // distinctness by construction; assert it here so a future change to that
+  // bucket-selection can't silently reintroduce a collision. (This covers the
+  // distinct-bucket half of the parallel-safety invariant; the synchronous
+  // slot assignment half is `UtilizationAwareStamper.assignSlot`'s, see the
+  // comment on the Promise.all.)
   const writtenBuckets = [
     ...uploadIndices.map((i) => toBucket(references[i].slice(0, 32))),
     toBucket(refPicked.address),
@@ -968,12 +967,11 @@ export async function writePartitionState(opts: {
   //
   // CONCURRENCY: the phase-1 PUTs share one `stamper`. They are safe to fire in
   // parallel ONLY because (a) every chunk here lands in a DISTINCT bucket
-  // (`claimedBuckets` above guarantees it) and (b) the reserved-slot `stamp()`
-  // branches set `stamper.buckets[bucket]` and call `stamp()` with NO await
-  // between them, so each critical section runs to completion on the event loop
-  // before another starts. If a future change introduces an await inside those
-  // branches, concurrent stamps would race on the shared `buckets` array —
-  // serialize the PUTs (or guard the slot) before doing so.
+  // (`claimedBuckets` above guarantees it) and (b) the stamper's `assignSlot()`
+  // is synchronous, so each slot assignment runs to completion on the event
+  // loop before another starts. If a future change introduces an await inside
+  // it, concurrent stamps would race on the counters — serialize the PUTs (or
+  // guard the slot) before doing so.
   // Upload the EXACT encrypted bytes picked above — re-encrypting here would
   // randomize the padding (sub-4096 plaintexts, e.g. the reference chunk) and
   // land the chunk at a different address than the one already reserved and
