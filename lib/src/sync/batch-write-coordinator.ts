@@ -445,11 +445,10 @@ export class BatchWriteCoordinator {
       }
       // Invalidate BEFORE unbinding (same ordering as the displacement race
       // fix): teardown runs synchronously, off the write lock, so it can land
-      // between two awaits of an in-flight `stamp()`. `unbindPartition` alone
-      // resets `leaseStale=false`, letting that stamp silently fall back to
-      // legacy "any"-pool slot-picking and corrupt a peer's slots; invalidating
-      // first arms the breaker so the in-flight stamp aborts with
-      // `PartitionLeaseLostError` instead.
+      // between two stamps of an in-flight upload. An unbound stamper stamps
+      // at legacy slots, which here are a peer's; `invalidateLease` only arms
+      // on a bound stamper, and the breaker it arms outlives the unbind, so
+      // the rest of that upload aborts with `PartitionLeaseLostError` instead.
       stamper.invalidateLease()
       stamper.unbindPartition()
     }
@@ -675,7 +674,9 @@ export class BatchWriteCoordinator {
       // consumer callback — writeLeaseCache/onLeaseAcquired — threw): undo the
       // partial commit so the stamper and the interval don't outlive the lease
       // record. Invalidate-before-unbind per the displacement-race ordering;
-      // all three are no-ops when nothing was bound/armed.
+      // all three are no-ops when nothing was bound/armed. When something was,
+      // the stamper stays fenced while `readOnly` is false: the next write
+      // re-acquires, and that acquire's `bindPartition` clears the fence.
       if (this.partitionRefreshTimer !== undefined) {
         clearInterval(this.partitionRefreshTimer)
         this.partitionRefreshTimer = undefined
@@ -1000,7 +1001,7 @@ export class BatchWriteCoordinator {
     // The yield itself MUST run under the write lock: this tick is off-lock, so
     // an upload can enter `withWrite` between the idle check here and the
     // unbind inside `yieldIdleLease` — releasing the partition to peers and
-    // unbinding the stamper (which resets the `leaseStale` breaker) underneath
+    // unbinding the stamper (back to legacy any-slot picking) underneath
     // an in-flight `stamp()` is the same slot-corruption race as a displacement.
     // Holding the lock excludes in-flight uploads; the re-checks inside cover
     // an upload that completed (or a demote/teardown that ran) while this tick

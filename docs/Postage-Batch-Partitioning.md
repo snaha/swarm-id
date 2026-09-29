@@ -325,7 +325,8 @@ that feeds the rival set. The beacon is a correctness mechanism; the heartbeat i
 - **Write-fenced to clock skew (was: ack-safe, not write-safe).** A lease lapsing _mid-`op`_
   is fenced both for the **ack** (the reverse-clobber guard refuses to publish) and for the
   **data write**: `stamp()` throws `PartitionLeaseLostError` when either `leaseStale` is set
-  (a refresh tick _confirmed_ a peer took over) **or** the lease has lapsed by this device's
+  (a refresh tick _confirmed_ a peer took over, or `teardown()` invalidated the lease; it
+  survives the unbind until the next bind) **or** the lease has lapsed by this device's
   own clock — `Date.now() >= leaseValidUntil - LEASE_SKEW_MARGIN_MS`, a purely local check on
   every chunk. So an un-renewable holder (e.g. a disjoint-gateway view its refresh can't
   confirm by reading) stops writing the instant its own clock says the lease expired — before

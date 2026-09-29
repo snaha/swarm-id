@@ -175,9 +175,9 @@ Methods and getters:
 mid-`stamp()`. Demotion is therefore **two-phase**:
 
 1. **Immediately on confirmed displacement** (before taking any lock): `stamper.invalidateLease()`
-   only. The partition stays bound with `leaseStale = true`, so the `stamp()` circuit breaker
-   fires — the in-flight upload aborts with `PartitionLeaseLostError` instead of writing into a
-   slot a peer now owns.
+   only. That sets `leaseStale = true`, so the `stamp()` circuit breaker fires — the in-flight
+   upload aborts with `PartitionLeaseLostError` instead of writing into a slot a peer now owns.
+   The flag outlives `unbindPartition()` and only the next `bindPartition()` clears it.
 2. **Then unbind/clear under the write lock**: `unbindPartition()`, stop the timer, drop the lease
    and cache, enter read-only, re-arm `pendingAcquire`. The lock serializes the unbind after the
    in-flight upload's locked section completes or aborts, so no `stamp()` runs in the window
@@ -186,8 +186,8 @@ mid-`stamp()`. Demotion is therefore **two-phase**:
 Lock-synchronizing the demote _alone_ would be insufficient — it would merely order the demote
 after an upload that had already corrupted the peer's slot space. The same invalidate-before-unbind
 ordering is used in `teardown()`, which also runs off-lock and can land between two awaits of an
-in-flight `stamp()` (`unbindPartition` alone resets `leaseStale = false`, silently re-enabling
-legacy "any"-slot picking).
+in-flight `stamp()`: `unbindPartition` alone would drop the stamper back to legacy "any"-slot
+picking, while an invalidated stamper keeps refusing data stamps after the unbind.
 
 ## Consumers
 

@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, it, expect, vi } from "vitest"
+import { BatchId, EthAddress, PrivateKey } from "@ethersphere/bee-js"
 
 type MockLease = ReturnType<typeof makeLease>
 
@@ -56,7 +57,18 @@ import {
 import { NO_HOLDER_DEVICE_ID } from "./partition-lock"
 import type { LeaseRefreshOutcome } from "./partition-lease"
 import { STATE_POINTER_EPOCH_MS } from "./partition-state"
-import { LEASE_REFRESH_MS, LEASE_TTL_MS } from "../utils/batch-utilization"
+import {
+  LEASE_REFRESH_MS,
+  LEASE_TTL_MS,
+  NUM_BUCKETS,
+  PartitionLeaseLostError,
+  UtilizationAwareStamper,
+  dataSlot,
+} from "../utils/batch-utilization"
+import type { UtilizationStoreDB } from "../storage/utilization-store"
+import { uploadData } from "../proxy/upload"
+import { CHUNK_SIZE } from "../proxy/chunking"
+import { MockBee } from "../proxy/feeds/epochs/test-utils"
 
 const SELF = "self-device"
 const PEER = "peer-device"
@@ -761,6 +773,63 @@ describe("BatchWriteCoordinator — teardown safety", () => {
     // No ghost lease: the disposed coordinator never re-binds a partition.
     expect(stamper.bindPartition).not.toHaveBeenCalled()
     expect(coordinator.currentPartition).toBeUndefined()
+  })
+
+  it("an upload that outlives teardown has its remaining data stamps refused", async () => {
+    const TWO_PARTITIONS = 2
+    const LEAF_CHUNKS = 3
+    const SLOT_OFFSET = 4
+    const stamper = await UtilizationAwareStamper.create(
+      new PrivateKey(new Uint8Array(32).fill(1)).toHex(),
+      new BatchId(BATCH_ID),
+      20,
+      {
+        getAllChunks: async () => [],
+        putChunk: async () => undefined,
+      } as unknown as UtilizationStoreDB,
+      new EthAddress("00".repeat(20)),
+      new Uint8Array(32),
+    )
+    leaseController.lease = makeLease({
+      acquireResult: {
+        partition: 0,
+        partitionCount: TWO_PARTITIONS,
+        localCounter: new Uint32Array(NUM_BUCKETS),
+        isReadOnly: false,
+      },
+      leasedUntil: Date.now() + LEASE_TTL_MS,
+    })
+    const bee = new MockBee()
+    const coordinator = new BatchWriteCoordinator(
+      makeDeps({ bee, stamper, partitionCount: TWO_PARTITIONS }),
+    )
+
+    // The disconnect lands while the first chunk is on the wire — between two
+    // stamps of the same upload.
+    const stampedSlots: number[] = []
+    const upload = bee.chunk.upload
+    bee.chunk.upload = async (envelope, ...rest) => {
+      if (typeof envelope === "object" && "index" in envelope) {
+        const { index } = envelope
+        stampedSlots.push(
+          new DataView(index.buffer, index.byteOffset).getUint32(SLOT_OFFSET),
+        )
+      }
+      if (stampedSlots.length === 1) coordinator.teardown()
+      return upload(envelope, ...rest)
+    }
+
+    const data = new Uint8Array(CHUNK_SIZE * LEAF_CHUNKS).map((_, i) => i % 251)
+    await expect(
+      coordinator.withWrite((target) => uploadData(target, data), {
+        wait: "block",
+      }),
+    ).rejects.toBeInstanceOf(PartitionLeaseLostError)
+
+    // Only the pre-teardown chunk was stamped, in partition 0's own lane —
+    // nothing at a legacy `dataSlot(_, _, 1)` slot, which with two partitions
+    // is the other device's reserved slot and data lane.
+    expect(stampedSlots).toEqual([dataSlot(0, 0, TWO_PARTITIONS)])
   })
 
   it("startLease is a no-op after teardown", () => {
