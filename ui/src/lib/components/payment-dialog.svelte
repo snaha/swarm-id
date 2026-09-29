@@ -129,6 +129,11 @@
   )
   /** True while `quoteFunding` is pricing the built-in method's side. */
   let pricing = $state(false)
+  /**
+   * True while the previous wallet disconnects. A WalletConnect disconnect is a
+   * relay round-trip; connecting before it lands can get the dying session back.
+   */
+  let disconnecting = $state(false)
   /** Why the built-in method cannot be used, in the quoter's own words. */
   let builtInRefusal = $state('')
   /**
@@ -351,7 +356,9 @@
     walletChain.forget()
     screen = 'method'
     if (label) {
+      disconnecting = true
       await onboard.disconnectWallet({ label }).catch(() => undefined)
+      disconnecting = false
     }
   }
 
@@ -738,7 +745,11 @@
         <p class="bg-muted rounded-md px-3 py-2 text-sm">
           {errorMessage || (pricing ? 'Checking the price…' : 'Connect wallet to proceed')}
         </p>
-        <Button class="w-full" disabled={pricing || !gnosisQuote} onclick={connect}>
+        <Button
+          class="w-full"
+          disabled={pricing || !gnosisQuote || disconnecting}
+          onclick={connect}
+        >
           Connect wallet
           <ArrowRight />
         </Button>
