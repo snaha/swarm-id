@@ -55,7 +55,7 @@ export async function fetchExistingBatchFromChain(
   const { batch } = state
   const owner = new EthAddress(batch.owner)
   const signerAddress = signerKey.publicKey().address()
-  if (owner.toHex() !== signerAddress.toHex()) {
+  if (!owner.equals(signerAddress)) {
     throw new Error(
       `That batch is owned by ${owner.toChecksum()}, not by this signer key (${signerAddress.toChecksum()}). Check the signer key.`,
     )

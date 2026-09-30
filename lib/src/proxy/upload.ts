@@ -283,8 +283,8 @@ async function uploadStampedChunkViaHttp(
 
 /**
  * The headers `bee.chunk.upload` would send: the `Bee` instance's own, then
- * the call's `requestOptions` on top — for the one request here that is a
- * hand-rolled `fetch` rather than a bee-js call (#819). bee-js keeps the
+ * the call's `requestOptions` on top — for the one hand-rolled `fetch` sent
+ * to a `Bee` instance rather than through a bee-js call (#819). bee-js keeps the
  * instance options private, so this reads the field it stores them in.
  */
 function beeHeaders(

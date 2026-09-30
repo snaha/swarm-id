@@ -199,6 +199,7 @@ describe("stamper SOC uploads send the Bee headers", () => {
   it("from the call's requestOptions, over the instance's", async () => {
     const fetchMock = stubFetch()
     const bee = new Bee("http://localhost:1633", { headers: AUTH })
+    const controller = new AbortController()
     await uploadSOC(
       stamperTarget(bee),
       signer,
@@ -206,7 +207,10 @@ describe("stamper SOC uploads send the Bee headers", () => {
       new Uint8Array(16),
       {
         tag: TAG_UID,
-        requestOptions: { headers: { ...CALL, authorization: "Bearer other" } },
+        requestOptions: {
+          signal: controller.signal,
+          headers: { ...CALL, authorization: "Bearer other" },
+        },
       },
     )
     const [, init] = fetchMock.mock.calls[0] as [string, RequestInit]
@@ -215,5 +219,6 @@ describe("stamper SOC uploads send the Bee headers", () => {
       authorization: "Bearer other",
       "swarm-tag": String(TAG_UID),
     })
+    expect(init.signal).toBe(controller.signal)
   })
 })
