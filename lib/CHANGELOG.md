@@ -1,5 +1,27 @@
 # Changelog
 
+## [0.6.0](https://github.com/snaha/swarm-id/compare/v0.5.0...v0.6.0) (2026-10-01)
+
+
+### ⚠ BREAKING CHANGES
+
+* **lib:** every client rejection is a SwarmIdError with a code to branch on ([#811](https://github.com/snaha/swarm-id/issues/811))
+
+### Features
+
+* **lib:** every client rejection is a SwarmIdError with a code to branch on ([#811](https://github.com/snaha/swarm-id/issues/811)) ([2f298c5](https://github.com/snaha/swarm-id/commit/2f298c5748829bc135714aeee02236dd5b91c579))
+* **lib:** identity carries the account's postage signer address ([#817](https://github.com/snaha/swarm-id/issues/817)) ([0616fd5](https://github.com/snaha/swarm-id/commit/0616fd59fbef70ba4c395d62e0e191e121f2a69e))
+
+
+### Bug Fixes
+
+* **lib:** drop a stamper init whose stamp was cleared while it awaited ([#805](https://github.com/snaha/swarm-id/issues/805)) ([ff874a6](https://github.com/snaha/swarm-id/commit/ff874a68b495b7cd8b6fe29cf2e5af36b923d6ac))
+* **lib:** keep the lease fence armed across unbindPartition ([#813](https://github.com/snaha/swarm-id/issues/813)) ([933c051](https://github.com/snaha/swarm-id/commit/933c051629da1364ccad92e4bc66e18ed0742a30))
+* **lib:** name the package and the fix when SwarmIdClient is constructed on a server ([#806](https://github.com/snaha/swarm-id/issues/806)) ([021ad37](https://github.com/snaha/swarm-id/commit/021ad373b31ea61a7e321d07906ce3568423dc94))
+* **lib:** refuse a drive whose record says the node lacks or cannot use it ([#808](https://github.com/snaha/swarm-id/issues/808)) ([6228b3e](https://github.com/snaha/swarm-id/commit/6228b3e15168f6ff1c49f72bc6c287adbc75b57c))
+* **lib:** the stamp worker pool takes its slot from the stamper ([#812](https://github.com/snaha/swarm-id/issues/812)) ([7c3dadf](https://github.com/snaha/swarm-id/commit/7c3dadf1452e3a407f75f9bc4a8587525455fcdf))
+* **ui:** refuse to attach a batch the signer key does not own ([#820](https://github.com/snaha/swarm-id/issues/820)) ([6d70460](https://github.com/snaha/swarm-id/commit/6d7046030a9cd0ea09a5adaf4318ab5fc2f0ecce))
+
 ## [0.5.0](https://github.com/snaha/swarm-id/compare/v0.4.1...v0.5.0) (2026-09-21)
 
 
