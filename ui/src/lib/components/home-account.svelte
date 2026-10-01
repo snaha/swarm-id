@@ -623,7 +623,7 @@
         </p>
         <p class="text-sm">
           {newMethod === 'eth-wallet'
-            ? 'Approve the request in your Ethereum wallet.'
+            ? 'Approve the request in your Ethereum wallet. It may ask a second time.'
             : 'Follow the prompts on your device.'}
         </p>
       </div>
@@ -639,7 +639,10 @@
         Unlock with your device&rsquo;s built-in authentication &mdash; fingerprint, face, or PIN.
       </p>
     {:else if newMethod === 'eth-wallet'}
-      <p class="text-sm">Unlock by signing a message with your Ethereum wallet.</p>
+      <p class="text-sm">
+        Unlock by signing a message with your Ethereum wallet. Your wallet may ask you to sign it a
+        second time, to confirm it signs the same way each time.
+      </p>
     {:else}
       <NewPasswordFields bind:password={newPassword} bind:verify={verifyNewPassword} />
     {/if}

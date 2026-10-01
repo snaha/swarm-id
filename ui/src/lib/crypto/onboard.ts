@@ -8,7 +8,7 @@
  * be offered at all, which is the only kind some browsers have.
  */
 import coinbaseModule from '@web3-onboard/coinbase'
-import Onboard from '@web3-onboard/core'
+import Onboard, { type WalletState } from '@web3-onboard/core'
 import injectedModule from '@web3-onboard/injected-wallets'
 import walletConnectModule from '@web3-onboard/walletconnect'
 
@@ -18,6 +18,7 @@ import { asset } from '$app/paths'
 import { env } from '$env/dynamic/public'
 
 import { SWARM_MARK_SVG } from '$lib/components/swarm-mark'
+import { forgetCoinbaseSmartWallet } from '$lib/crypto/coinbase-signer'
 import { walletConnectOptions } from '$lib/crypto/wallet-connect'
 import { devWalletChains } from '$lib/payment/dev-funding'
 import { WALLET_CHAINS } from '$lib/payment/payment-rail'
@@ -51,8 +52,20 @@ const walletConnect = walletConnectOptions(
 // check even when nothing is passed). `false` is also what this app would want
 // if the option were still live: reloading the page out from under a disconnect
 // would discard whatever dialog the user is in the middle of.
-const coinbase = coinbaseModule({ supportedWalletType: 'all', reloadOnDisconnect: false })
-const wallets = [injected, coinbase, ...(walletConnect ? [walletConnectModule(walletConnect)] : [])]
+//
+// The module's default wallet type is `all`, which includes Coinbase Smart
+// Wallet: fine for paying, but its ERC-1271 signatures cannot be reproduced
+// into a key, so the access flow gets an EOA-only Coinbase instead — and
+// forgets a Smart Wallet the SDK remembers from paying, which it would
+// otherwise reuse over that option.
+const coinbaseOptions = { reloadOnDisconnect: false }
+const walletConnectModules = walletConnect ? [walletConnectModule(walletConnect)] : []
+const wallets = [injected, coinbaseModule(coinbaseOptions), ...walletConnectModules]
+const accessWallets = [
+  injected,
+  coinbaseModule({ ...coinbaseOptions, supportedWalletType: 'eoaOnly' }),
+  ...walletConnectModules,
+]
 // Every chain onboard has to know about, or it reports the user's network as
 // unsupported. That covers two different callers: `eth-wallet.ts`'s
 // wallet-secured unlock, which only signs a plain message and stays on
@@ -111,3 +124,19 @@ export const onboard = Onboard({
     },
   },
 })
+
+/**
+ * Connect a wallet to secure or unlock an account with: the same picker, offering
+ * only wallets whose message signature can be reproduced. Onboard keeps its
+ * state in one module-level store, so a second instance would share it — the
+ * list is swapped for the duration of the prompt and restored after.
+ */
+export async function connectAccessWallet(): Promise<WalletState[]> {
+  forgetCoinbaseSmartWallet(localStorage)
+  onboard.state.actions.setWalletModules(accessWallets)
+  try {
+    return await onboard.connectWallet()
+  } finally {
+    onboard.state.actions.setWalletModules(wallets)
+  }
+}

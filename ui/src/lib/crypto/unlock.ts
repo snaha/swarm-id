@@ -8,7 +8,7 @@
 import { hexToUint8Array } from '@snaha/swarm-id'
 
 import { decryptSeed, deriveKeyFromPassword } from '$lib/crypto/encryption'
-import { deriveWalletKey, requestWalletKeySource } from '$lib/crypto/eth-wallet'
+import { deriveWalletKey, unlockWalletKeySource } from '$lib/crypto/eth-wallet'
 import { authenticateWithPasskey } from '$lib/crypto/passkey'
 import type { Account } from '$lib/types'
 
@@ -37,7 +37,7 @@ export async function unlockAccount(account: Account, password?: string): Promis
   } else {
     // No wallet-address check: the wrong wallet derives a different key and
     // simply fails to decrypt below (the account id already pins the address).
-    const source = await requestWalletKeySource()
+    const source = await unlockWalletKeySource()
     key = await deriveWalletKey(source, hexToUint8Array(access.encryptionSalt))
   }
 
