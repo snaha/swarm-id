@@ -3305,18 +3305,32 @@ export class SwarmIdProxy {
   }
 
   /**
-   * Check if subsidised upload mode is active.
-   * Subsidised mode is active when:
-   * - User has no postage stamp OR no signer key — partitioning is not one of
-   *   the causes: the connect popup hands the stamps over, so a partitioned
-   *   session resolves its own like any other
-   * - AND a subsidised gateway URL is configured
+   * Whether uploads can be stamped with the account's own postage batch. Both
+   * what the dApp is told (`buildConnectionInfo`'s `uploadMode`) and where the
+   * bytes go (`isSubsidisedModeActive`) are decided by this one rule.
+   */
+  private hasUsableUserStamp(): boolean {
+    // No stamp resolved. Partitioning is not a cause: the connect popup hands
+    // the stamps over, so a partitioned session resolves its own like any other.
+    if (!this.postageBatchId || !this.signerKey) return false
+    // The drive has expired, or its record says the node cannot use it.
+    if (this.stampRefusal) return false
+    // The stamp resolved but no stamper was built from it, a state the proxy
+    // really reaches: `initializeStamper` logs and returns rather than
+    // throwing, and the stamp is set before an init's first await. No
+    // coordinator exists for this stamp either, so a user-stamp write would
+    // throw "Stamper not initialized".
+    if (!this.stamper) return false
+    return true
+  }
+
+  /**
+   * Whether uploads go to the subsidised gateway: one is configured, and there
+   * is no usable user stamp to write with instead.
    */
   private isSubsidisedModeActive(): boolean {
-    return (
-      (!this.postageBatchId || !this.signerKey || !!this.stampRefusal) &&
-      !!this.subsidisedGatewayUrl
-    )
+    if (!this.subsidisedGatewayUrl) return false
+    return !this.hasUsableUserStamp()
   }
 
   /**
@@ -3442,19 +3456,10 @@ export class SwarmIdProxy {
     // Upload mode is only meaningful when authenticated — `ensureCanUpload`
     // throws on missing auth, so reporting `canUpload=true` here without an
     // app secret would mislead the dApp into attempting uploads that always
-    // fail.
-    // - User-stamp mode also requires a fully constructed `stamper`;
-    //   `initializeStamper` can swallow errors and leave it `undefined`,
-    //   in which case uploads via user stamp will fail.
-    // - Subsidised mode is the fallback when no user stamp is usable.
+    // fail. Subsidised mode is the fallback when no user stamp is usable.
     let uploadMode: "user-stamp" | "subsidised" | "unavailable" = "unavailable"
     if (this.authenticated && this.appSecret) {
-      if (
-        this.postageBatchId &&
-        this.signerKey &&
-        this.stamper &&
-        !this.stampRefusal
-      ) {
+      if (this.hasUsableUserStamp()) {
         uploadMode = "user-stamp"
       } else if (this.subsidisedGatewayUrl) {
         uploadMode = "subsidised"
