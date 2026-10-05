@@ -10,7 +10,7 @@
   import ArrowRight from '@lucide/svelte/icons/arrow-right'
   import LoaderCircle from '@lucide/svelte/icons/loader-circle'
   import Wallet from '@lucide/svelte/icons/wallet'
-  import { TimeoutError, jsonRpcCall } from '@snaha/swarm-id'
+  import { TimeoutError, jsonRpcCall, withTimeout } from '@snaha/swarm-id'
   import { encodeFunctionData, erc20Abi, formatUnits } from 'viem'
 
   import { createAttemptTracker } from '$lib/attempt'
@@ -357,11 +357,26 @@
     screen = 'method'
     if (label) {
       disconnecting = true
-      await onboard.disconnectWallet({ label }).catch(() => undefined)
-      disconnecting = false
+      try {
+        await withTimeout(
+          onboard.disconnectWallet({ label }),
+          DISCONNECT_TIMEOUT_MS,
+          'Wallet disconnect timed out',
+        )
+      } catch {
+        // Proceed: the user is picking another wallet anyway.
+      } finally {
+        disconnecting = false
+      }
     }
   }
 
+  /**
+   * How long Connect wallet stays disabled waiting on the old wallet's
+   * disconnect. Past it the user picks another wallet regardless: a disconnect
+   * that never settles must not leave Back as the only way out.
+   */
+  const DISCONNECT_TIMEOUT_MS = 5_000
   /** Bounded like any other read; the figures are cosmetic, a hang would not be. */
   const BALANCE_TIMEOUT_MS = 10_000
 
