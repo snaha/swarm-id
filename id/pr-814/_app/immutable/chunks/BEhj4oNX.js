@@ -1,0 +1,1 @@
+import{A as b,B as h,o as k,C as A,S as B}from"./B3zruLp3.js";function u(r,i){return r===i||r?.[B]===i}function c(r={},i,a,S){return b(()=>{var f,s;return h(()=>{f=s,s=S?.()||[],k(()=>{r!==a(...s)&&(i(r,...s),f&&u(a(...f),r)&&i(null,...f))})}),()=>{A(()=>{s&&u(a(...s),r)&&i(null,...s)})}}),r}export{c as b};
