@@ -53,10 +53,20 @@ every pull request touching `lib/**`, so these tests gate merges like any other.
   one-time cost for the whole run instead of per file.
 - `gateway.ts` then starts upstream's `ethersphere/gateway-proxy` in front of
   the same queen, stamping with that same batch, and stops it when the run
-  ends. That covers **subsidised mode** — the one upload path the library does
-  not stamp itself, where it POSTs bare chunks and SOCs and the gateway injects
-  `swarm-postage-batch-id`. Mocking that contract would only ever confirm our
-  own assumptions back to us, so the real server runs.
+  ends. Both upload modes that go through a gateway run against it:
+  - **subsidised**: the one upload path the library does not stamp itself. It
+    POSTs bare chunks and SOCs and the gateway injects `swarm-postage-batch-id`.
+  - **user stamp via a gateway**, the production default: the stamper target
+    with its `Bee` pointed at the gateway, so every chunk and SOC carries the
+    user's own `swarm-postage-stamp`. The gateway adds its batch id to these
+    too and Bee prefers the stamp, so a round trip cannot tell whose stamp was
+    used. A stamp signed by a key that does not own the batch can: Bee refuses
+    it, and the gateway must hand that refusal back rather than store the
+    chunk under its own batch.
+
+  Mocking that contract would only ever confirm our own assumptions back to
+  us, so the real server runs. Every read goes to the queen, never back
+  through the gateway.
 
   It needs nothing beyond Docker, which the cluster already requires — so with
   a cluster up, a gateway that will not start is a real breakage, and the setup
@@ -83,13 +93,19 @@ describe("my feature", () => {
 Each test should use a unique data set (random or name-derived) so files stay
 independent and can run in any order against the shared node.
 
-## Next steps
+## Coverage
 
-Covered so far: plain and encrypted data round-trips (`round-trip.test.ts`),
-chunk-boundary sizes (`data-sizes.test.ts`), large plain uploads read back
-through Bee's native `/bytes` as an interop proof (`large-plain-upload.test.ts`),
-and subsidised-gateway mode — plain, multi-chunk, and SOC
-(`subsidised-round-trip.test.ts`).
+- Plain and encrypted data round-trips against the queen (`round-trip.test.ts`)
+- Chunk-boundary sizes (`data-sizes.test.ts`)
+- Large plain uploads read back through Bee's native `/bytes`, as an interop
+  proof (`large-plain-upload.test.ts`)
+- Subsidised mode through the gateway: plain, multi-chunk and SOC
+  (`subsidised-round-trip.test.ts`)
+- User stamp through the gateway: plain, multi-chunk, encrypted and SOC, plus
+  a stamp the batch owner did not sign being refused at the queen and through
+  the gateway alike (`user-stamp-gateway.test.ts`)
+
+## Next steps
 
 Natural extensions: sequential/epoch feeds, ACT, and manifests. These need
 network push and retrieval to work, which is why they waited on a multi-node
