@@ -11,7 +11,7 @@
  *
  * So this quotes for real and asserts what we depend on. It is a **read**:
  * `getQuote` prices a route, it does not move money, needs no wallet and no
- * key. The addresses below are anvil's public dev accounts.
+ * key — nor any funds at the addresses it names.
  *
  * Two layers. The wire shape is pinned on ONE canonical pair (Base ETH), in
  * enough depth to catch a field being renamed or its precision changing. Then
@@ -34,14 +34,20 @@ const GNOSIS_CHAIN_ID = 100
 const BASE_CHAIN_ID = 8453
 const NATIVE = '0x0000000000000000000000000000000000000000'
 /**
- * Anvil's first two dev accounts, standing in for the payer's wallet and the
- * batch-owner address. Public, and only ever quote parameters here.
+ * Stand-ins for the payer's wallet and the batch-owner address — quote
+ * parameters only, so any EOA will do, funded or not.
+ *
+ * Never a well-known dev account (anvil's, hardhat's): their keys are public,
+ * bots sweep them on every chain, and hosted services blocklist them for it —
+ * Relay answers BLOCKED_WALLET_ADDRESS. These are the last 20 bytes of
+ * `keccak256("swarm-id relay live test: payer")` and of the same with `owner`:
+ * addresses no one holds a key for, so no one can ever transact from them.
  *
  * Two of them, not one: in the app these are never the same address, and Relay
  * refuses a same-chain native quote that would be a self-send outright.
  */
-const PAYER_ADDRESS = '0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266'
-const OWNER_ADDRESS = '0x70997970C51812dc3A010C7d01b50e0d17dc79C8'
+const PAYER_ADDRESS = '0xbF3d1536C5B236014469BdB72F790ac94F70F803'
+const OWNER_ADDRESS = '0xDFcE2df0456C90ec8699e46518a3E4DE85282029'
 /** 0.06 xDAI — the magnitude a real extend actually delivers. */
 const XDAI_OUT_WEI = '60000000000000000'
 const REQUEST_TIMEOUT_MS = 25_000
