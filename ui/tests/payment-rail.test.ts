@@ -320,18 +320,8 @@ async function mintUsdcTo(address: string, units: bigint): Promise<void> {
   ])
 }
 
-/**
- * Buy a drive, paying from `chainId`, and return once the drive exists.
- *
- * The two chains take genuinely different routes — Gnosis is a direct transfer
- * with no bridge, anything else goes through the rail and its solver — but the
- * screens are identical, which is the point of the seam.
- */
-async function buyPayingFrom(
-  page: Page,
-  chainId: number,
-  { tokenAddress, misroutedGnosis }: { tokenAddress?: string; misroutedGnosis?: boolean } = {},
-) {
+/** Open the payment screens for a new drive and connect the injected wallet. */
+async function openPaymentAndConnect(page: Page, { misroutedGnosis = false } = {}) {
   await injectPayingWallet(page, { misroutedGnosis })
   await seedPaidEnvironment(page)
 
@@ -360,6 +350,21 @@ async function buyPayingFrom(
   await page.getByRole('button', { name: 'Connect wallet' }).click()
   await page.getByRole('button', { name: 'MetaMask' }).click()
   await expect(page.getByText('Connected wallet')).toBeVisible({ timeout: PAYMENT_TIMEOUT_MS })
+}
+
+/**
+ * Buy a drive, paying from `chainId`, and return once the drive exists.
+ *
+ * The two chains take genuinely different routes — Gnosis is a direct transfer
+ * with no bridge, anything else goes through the rail and its solver — but the
+ * screens are identical, which is the point of the seam.
+ */
+async function buyPayingFrom(
+  page: Page,
+  chainId: number,
+  { tokenAddress, misroutedGnosis }: { tokenAddress?: string; misroutedGnosis?: boolean } = {},
+) {
+  await openPaymentAndConnect(page, { misroutedGnosis })
 
   // 3. Pick the chain — and token — to pay from, rather than relying on what
   //    leads the list: the ordering is a product decision and should not
@@ -444,4 +449,16 @@ test('paying in a token takes an approve first, and the solver pulls it', async 
   // The pull was real: the solver collected the token before it filled.
   expect(await sourceUsdc(LOCAL_SOLVER_ADDRESS)).toBeGreaterThan(pulledBefore)
   await expectDriveOwnedBySigner(page)
+})
+
+test('changing wallet disconnects it and brings the picker back', async ({ page }) => {
+  test.setTimeout(PAYMENT_TIMEOUT_MS)
+  await openPaymentAndConnect(page)
+
+  await page.getByRole('button', { name: 'Change wallet' }).click()
+  await expect(page.getByText('Connect wallet to proceed')).toBeVisible()
+  await expect(page.getByText('Connected wallet')).toBeHidden()
+  await page.getByRole('button', { name: 'Connect wallet' }).click()
+  await page.getByRole('button', { name: 'MetaMask' }).click()
+  await expect(page.getByText('Connected wallet')).toBeVisible({ timeout: PAYMENT_TIMEOUT_MS })
 })

@@ -10,7 +10,7 @@
   import ArrowRight from '@lucide/svelte/icons/arrow-right'
   import LoaderCircle from '@lucide/svelte/icons/loader-circle'
   import Wallet from '@lucide/svelte/icons/wallet'
-  import { TimeoutError, jsonRpcCall } from '@snaha/swarm-id'
+  import { TimeoutError, jsonRpcCall, withTimeout } from '@snaha/swarm-id'
   import { encodeFunctionData, erc20Abi, formatUnits } from 'viem'
 
   import { createAttemptTracker } from '$lib/attempt'
@@ -40,6 +40,7 @@
     type PaymentRail,
     displayAmount,
   } from '$lib/payment/payment-rail'
+  import { subscribeProviderEvent } from '$lib/payment/provider-events'
   import { createWalletChainRecord } from '$lib/payment/wallet-chain-record'
 
   /**
@@ -98,6 +99,7 @@
   let errorMessage = $state('')
   let provider = $state<EthereumProvider | undefined>(undefined)
   let walletAddress = $state('')
+  let walletLabel = ''
   // The rail is fixed for the life of one payment — the dialog is created fresh
   // per pending request — so its first chain and token are read ONCE as the
   // user's starting selection, not tracked.
@@ -127,6 +129,11 @@
   )
   /** True while `quoteFunding` is pricing the built-in method's side. */
   let pricing = $state(false)
+  /**
+   * True while the previous wallet disconnects. A WalletConnect disconnect is a
+   * relay round-trip; connecting before it lands can get the dying session back.
+   */
+  let disconnecting = $state(false)
   /** Why the built-in method cannot be used, in the quoter's own words. */
   let builtInRefusal = $state('')
   /**
@@ -310,6 +317,7 @@
       }
       provider = wallet.provider as unknown as EthereumProvider
       walletAddress = address
+      walletLabel = wallet.label
       // A wallet that has just arrived has been put on nothing.
       walletChain.forget()
 
@@ -334,6 +342,41 @@
     }
   }
 
+  /** Disconnect through onboard, or WalletConnect hands its session straight back. */
+  async function changeWallet() {
+    attempts.supersede()
+    const label = walletLabel
+    provider = undefined
+    walletAddress = ''
+    walletLabel = ''
+    balances = {}
+    paymentQuote = undefined
+    quoting = false
+    errorMessage = ''
+    walletChain.forget()
+    screen = 'method'
+    if (label) {
+      disconnecting = true
+      try {
+        await withTimeout(
+          onboard.disconnectWallet({ label }),
+          DISCONNECT_TIMEOUT_MS,
+          'Wallet disconnect timed out',
+        )
+      } catch {
+        // Proceed: the user is picking another wallet anyway.
+      } finally {
+        disconnecting = false
+      }
+    }
+  }
+
+  /**
+   * How long Connect wallet stays disabled waiting on the old wallet's
+   * disconnect. Past it the user picks another wallet regardless: a disconnect
+   * that never settles must not leave Back as the only way out.
+   */
+  const DISCONNECT_TIMEOUT_MS = 5_000
   /** Bounded like any other read; the figures are cosmetic, a hang would not be. */
   const BALANCE_TIMEOUT_MS = 10_000
 
@@ -447,12 +490,9 @@
   // change re-reads so the numbers come from wherever the wallet now is.
   $effect(() => {
     const walletProvider = provider
-    // Both halves required — EIP-1193 makes each optional, and a subscription
-    // that cannot be torn down leaks a handler on every provider change.
-    if (!walletProvider?.on || !walletProvider.removeListener) {
+    if (!walletProvider) {
       return
     }
-    const { on, removeListener } = walletProvider
     const onAccounts = (payload: unknown) => {
       const [first] = Array.isArray(payload) ? (payload as string[]) : []
       if (!first || first === walletAddress) {
@@ -471,11 +511,14 @@
       walletChain.forget()
       void readBalances()
     }
-    on.call(walletProvider, 'accountsChanged', onAccounts)
-    on.call(walletProvider, 'chainChanged', onChain)
+    const unsubscribes = [
+      subscribeProviderEvent(walletProvider, 'accountsChanged', onAccounts),
+      subscribeProviderEvent(walletProvider, 'chainChanged', onChain),
+    ]
     return () => {
-      removeListener.call(walletProvider, 'accountsChanged', onAccounts)
-      removeListener.call(walletProvider, 'chainChanged', onChain)
+      for (const unsubscribe of unsubscribes) {
+        unsubscribe()
+      }
     }
   })
 
@@ -717,7 +760,11 @@
         <p class="bg-muted rounded-md px-3 py-2 text-sm">
           {errorMessage || (pricing ? 'Checking the price…' : 'Connect wallet to proceed')}
         </p>
-        <Button class="w-full" disabled={pricing || !gnosisQuote} onclick={connect}>
+        <Button
+          class="w-full"
+          disabled={pricing || !gnosisQuote || disconnecting}
+          onclick={connect}
+        >
           Connect wallet
           <ArrowRight />
         </Button>
@@ -732,6 +779,9 @@
         </span>
         <span class="font-medium">{shortAddress}</span>
       </div>
+      <Button variant="link" size="xs" class="-mt-2 self-end" onclick={() => void changeWallet()}>
+        Change wallet
+      </Button>
 
       <div class="flex w-full flex-col gap-2">
         <span class="text-sm font-medium">Chain</span>

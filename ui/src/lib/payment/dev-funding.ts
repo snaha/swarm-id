@@ -20,10 +20,13 @@
  * Keep the two files' exports identical. They are typechecked independently,
  * so a drift shows up as a build failure rather than a runtime surprise.
  */
+import type { Chain } from 'viem'
+
 import {
   DEFAULT_SOURCE_RPC_URL,
   LOCAL_SOURCE_CHAIN_ID,
   SOURCE_RPC_OVERRIDE_KEY,
+  localSourceChain,
   localSourceRpcUrl,
   resolveLocalRail,
 } from '$lib/dev/local-payment-rail'
@@ -60,20 +63,5 @@ export const devSourceChain: DevSourceChain | undefined = {
   saveRpcUrl: (url) => localStorage.setItem(SOURCE_RPC_OVERRIDE_KEY, url),
 }
 
-/**
- * Extra chains to declare to web3-onboard, so it recognises the wallet's
- * network while a payment is rehearsed against the local source chain instead
- * of reporting an unsupported one. Empty in a production build.
- *
- * The endpoint is read at module load, so an override saved in Network settings
- * reaches the wallet declaration on the next reload — which is as good as it
- * gets: web3-onboard reads its chain list once, when it is initialised.
- */
-export const devWalletChains = [
-  {
-    id: `0x${LOCAL_SOURCE_CHAIN_ID.toString(16)}`,
-    token: 'ETH',
-    label: 'Ethereum Mainnet (fake)',
-    rpcUrl: localSourceRpcUrl(),
-  },
-]
+/** The local source chain, for onboard and the WalletConnect session. Read at module load. */
+export const devWalletChains: Chain[] = [localSourceChain()]
