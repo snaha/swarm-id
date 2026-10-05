@@ -665,8 +665,10 @@ describe("SwarmIdClient request seam", () => {
 describe("SwarmIdClient window message filtering", () => {
   let client: SwarmIdClient
   let listener: (event: unknown) => void
-  let contentWindow: object
+  let contentWindow: { postMessage: Mock }
   let warn: MockInstance<typeof console.warn>
+  /** Every "message" listener currently registered on the stubbed `window`. */
+  let messageListeners: Set<(event: unknown) => void>
 
   /** The listener the constructor registered on `window`. */
   function registeredMessageListener(): (event: unknown) => void {
@@ -679,12 +681,28 @@ describe("SwarmIdClient window message filtering", () => {
     return registration[1] as unknown as (event: unknown) => void
   }
 
+  /** Deliver an event to every registered listener, as a real `window` does. */
+  function dispatch(event: unknown): void {
+    for (const registered of [...messageListeners]) {
+      registered(event)
+    }
+  }
+
   beforeEach(() => {
     vi.restoreAllMocks()
     warn = vi.spyOn(console, "warn").mockImplementation(() => {})
+    messageListeners = new Set()
     vi.stubGlobal("window", {
-      addEventListener: vi.fn(),
-      removeEventListener: vi.fn(),
+      addEventListener: vi.fn(
+        (type: string, registered: (event: unknown) => void) => {
+          if (type === "message") messageListeners.add(registered)
+        },
+      ),
+      removeEventListener: vi.fn(
+        (type: string, registered: (event: unknown) => void) => {
+          if (type === "message") messageListeners.delete(registered)
+        },
+      ),
       parent: { postMessage: vi.fn() },
       location: { origin: "https://localhost" },
       open: vi.fn(),
@@ -781,6 +799,76 @@ describe("SwarmIdClient window message filtering", () => {
       expect.anything(),
       expect.anything(),
     )
+  })
+
+  describe("upload progress", () => {
+    /** Start an upload reporting to `onProgress`, once its request is posted. */
+    async function startUpload(onProgress: Mock) {
+      internals(client).ready = true
+      const upload = client.uploadData(new Uint8Array([1, 2, 3]), {
+        onProgress,
+      })
+      await vi.waitFor(() =>
+        expect(contentWindow.postMessage).toHaveBeenCalled(),
+      )
+      const [{ requestId }] = contentWindow.postMessage.mock.calls[0]
+      return { upload, requestId }
+    }
+
+    /** An `uploadProgress` for `requestId` from `source`, at the identity origin. */
+    const progressFrom = (source: object, requestId: string) => ({
+      origin: "https://swarm-id.example.com",
+      source,
+      data: { type: "uploadProgress", requestId, total: 10, processed: 5 },
+    })
+
+    /** Our iframe answers the upload, which settles it. */
+    const settle = (requestId: string) =>
+      dispatch({
+        origin: "https://swarm-id.example.com",
+        source: contentWindow,
+        data: {
+          type: "uploadDataResponse",
+          requestId,
+          reference: "a".repeat(64),
+        },
+      })
+
+    // Any window on the identity origin passes the origin check — a sibling
+    // frame, an opener — and a request id is a counter and a timestamp, easy
+    // to guess. Only our own iframe may report progress on our upload.
+    it("ignores progress from another window on the identity origin", async () => {
+      const onProgress = vi.fn()
+      const { upload, requestId } = await startUpload(onProgress)
+
+      dispatch(progressFrom({ postMessage: vi.fn() }, requestId))
+      settle(requestId)
+      await upload
+
+      expect(onProgress).not.toHaveBeenCalled()
+    })
+
+    it("forwards progress from our iframe to the callback", async () => {
+      const onProgress = vi.fn()
+      const { upload, requestId } = await startUpload(onProgress)
+
+      dispatch(progressFrom(contentWindow, requestId))
+      settle(requestId)
+      await upload
+
+      expect(onProgress.mock.calls).toEqual([[{ total: 10, processed: 5 }]])
+    })
+
+    it("stops forwarding progress once the upload settles", async () => {
+      const onProgress = vi.fn()
+      const { upload, requestId } = await startUpload(onProgress)
+      settle(requestId)
+      await upload
+
+      dispatch(progressFrom(contentWindow, requestId))
+
+      expect(onProgress).not.toHaveBeenCalled()
+    })
   })
 })
 
