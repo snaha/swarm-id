@@ -150,6 +150,30 @@ vi.mock("./bus/bus-context", async (importActual) => {
     }),
   }
 })
+/**
+ * Lets a test hold the next backup-key derivation and release it, which pauses
+ * a stamper init at that step. Every other derivation — and every backup-key
+ * one while nothing is armed — passes straight through to the real one.
+ */
+const backupKeyGate = vi.hoisted(() => ({
+  holdNext: false,
+  release: undefined as (() => void) | undefined,
+}))
+vi.mock("./utils/key-derivation", async (importActual) => {
+  const actual = await importActual<typeof import("./utils/key-derivation")>()
+  return {
+    ...actual,
+    deriveSecret: vi.fn((parentKey: string, label: string) => {
+      if (label !== actual.BACKUP_KEY_LABEL || !backupKeyGate.holdNext) {
+        return actual.deriveSecret(parentKey, label)
+      }
+      backupKeyGate.holdNext = false
+      return new Promise<void>((resolve) => {
+        backupKeyGate.release = resolve
+      }).then(() => actual.deriveSecret(parentKey, label))
+    }),
+  }
+})
 vi.mock("./sync/batch-write-coordinator", () => ({
   BatchWriteCoordinator: vi.fn(function (deps: {
     accountId: string
@@ -352,6 +376,10 @@ describe("SwarmIdProxy partitioned write enablement", () => {
 
   beforeEach(() => {
     vi.restoreAllMocks()
+    // Dropped, not released: a held init belongs to the previous test's proxy,
+    // and letting it finish now would build a coordinator into this test.
+    backupKeyGate.holdNext = false
+    backupKeyGate.release = undefined
 
     parentWindow = { postMessage: vi.fn() }
     localStorageFake = makeLocalStorage()
@@ -688,6 +716,212 @@ describe("SwarmIdProxy partitioned write enablement", () => {
       expect(infos[infos.length - 1].uploadUnavailableReason).toBeUndefined()
     },
   )
+
+  // The stamper and the coordinator that writes through it belong to one
+  // stamp. Each case is a moment the two could disagree: an upload has to go
+  // where the session says it goes, and never through a coordinator built for
+  // a drive, or an account, the session has since moved off.
+  describe("the write path follows the resolved stamp", () => {
+    const GATEWAY_URL = "https://gateway.example.com/"
+    const OTHER_BATCH_ID_HEX = "dd".repeat(32)
+    const OTHER_ACCOUNT_ID_HEX = "bb".repeat(20)
+    const OTHER_APP_SECRET = "55".repeat(32)
+    const CONNECTION_LIFETIME_MS = 60_000
+
+    type CoordinatorStub = {
+      batchId: string
+      teardown: ReturnType<typeof vi.fn>
+      withWrite: ReturnType<typeof vi.fn>
+    }
+
+    type WriteInternals = {
+      ensureCanUpload(): void
+      withModeAwareWriteLock<T>(
+        targetOptions: undefined,
+        operation: (target: unknown) => Promise<T>,
+      ): Promise<T>
+      buildConnectionInfo(): {
+        uploadMode: string
+        uploadUnavailableReason?: string
+      }
+    }
+
+    const internals = () => proxy as unknown as WriteInternals
+
+    /**
+     * The target an upload is executed against, through the same two gates
+     * every upload handler passes: the refusal check, then the mode-aware write.
+     */
+    const uploadTarget = async (): Promise<unknown> => {
+      internals().ensureCanUpload()
+      return internals().withModeAwareWriteLock(
+        undefined,
+        async (target) => target,
+      )
+    }
+
+    /** Settle an upload either way, so what it reached is checked first. */
+    const attemptUpload = () =>
+      uploadTarget().then(
+        (target) => ({ target }),
+        (error: unknown) => ({ error }),
+      )
+
+    const coordinatorCount = () =>
+      vi.mocked(BatchWriteCoordinator).mock.results.length
+
+    const latestCoordinator = (): CoordinatorStub =>
+      vi.mocked(BatchWriteCoordinator).mock.results.at(-1)!
+        .value as CoordinatorStub
+
+    const identify = (subsidisedGatewayUrl?: string) =>
+      dispatch(
+        {
+          type: "parentIdentify",
+          requestId: "r1",
+          metadata: { name: "dApp" },
+          subsidisedGatewayUrl,
+        },
+        PARENT_ORIGIN,
+        parentWindow,
+      )
+
+    const lastConnectionInfo = () =>
+      messagesOfType("connectionInfoChanged").at(-1)
+
+    it("sends an upload to the gateway while the first stamper is being built", async () => {
+      seedConnectedAccount()
+      const coordinatorsBefore = coordinatorCount()
+      backupKeyGate.holdNext = true
+      const identified = identify(GATEWAY_URL)
+      await vi.waitFor(() => expect(backupKeyGate.release).toBeDefined())
+
+      await expect(uploadTarget()).resolves.toEqual({
+        mode: "subsidised",
+        gatewayUrl: GATEWAY_URL,
+      })
+      expect(internals().buildConnectionInfo().uploadMode).toBe("subsidised")
+
+      backupKeyGate.release!()
+      await identified
+
+      expect(coordinatorCount()).toBe(coordinatorsBefore + 1)
+      const coordinator = latestCoordinator()
+      expect(coordinator.batchId).toBe(BATCH_ID_HEX)
+      expect(internals().buildConnectionInfo().uploadMode).toBe("user-stamp")
+      await uploadTarget()
+      expect(coordinator.withWrite).toHaveBeenCalledTimes(1)
+    })
+
+    it("drops the previous drive's coordinator before building the next one", async () => {
+      seedConnectedAccount()
+      await identify()
+      const previous = latestCoordinator()
+
+      backupKeyGate.holdNext = true
+      const replacement = new BatchId(OTHER_BATCH_ID_HEX)
+      const shell = createAccountsStorageManager()
+      shell.save(
+        shell.load().map((account) => ({
+          ...account,
+          defaultPostageStampBatchID: replacement,
+          postageStamps: (account as SyncedAccount).postageStamps.map(
+            (stamp) => ({ ...stamp, batchID: replacement }),
+          ),
+        })),
+      )
+      await vi.waitFor(() => expect(backupKeyGate.release).toBeDefined())
+
+      const outcome = await attemptUpload()
+      expect(previous.withWrite).not.toHaveBeenCalled()
+      expect(previous.teardown).toHaveBeenCalled()
+      expect(outcome).toHaveProperty("error")
+
+      backupKeyGate.release!()
+      await vi.waitFor(() =>
+        expect(latestCoordinator().batchId).toBe(OTHER_BATCH_ID_HEX),
+      )
+    })
+
+    it("refuses an upload once the drive is removed instead of writing through its coordinator", async () => {
+      seedConnectedAccount()
+      await identify()
+      const previous = latestCoordinator()
+
+      const shell = createAccountsStorageManager()
+      shell.save(
+        shell.load().map((account) => ({
+          ...account,
+          postageStamps: [],
+          defaultPostageStampBatchID: undefined,
+        })),
+      )
+      await vi.waitFor(() =>
+        expect(lastConnectionInfo()?.uploadUnavailableReason).toBe("no-stamp"),
+      )
+
+      const outcome = await attemptUpload()
+      expect(previous.withWrite).not.toHaveBeenCalled()
+      expect(previous.teardown).toHaveBeenCalled()
+      expect(outcome).toHaveProperty("error")
+      expect(internals().buildConnectionInfo()).toMatchObject({
+        uploadMode: "unavailable",
+        uploadUnavailableReason: "no-stamp",
+      })
+    })
+
+    it("refuses an upload after the connection moves to an account with no drive", async () => {
+      seedConnectedAccount()
+      await identify()
+      const previous = latestCoordinator()
+
+      // The dApp is disconnected from the first account and connected to a
+      // second, with a secret of its own — what the identity UI writes when the
+      // user picks another account for it.
+      const shell = createAccountsStorageManager()
+      const [current] = shell.load() as SignedInAccount[]
+      const now = Date.now()
+      shell.save([
+        {
+          ...current,
+          connectedApps: current.connectedApps.map((app) => ({
+            ...app,
+            appSecret: undefined,
+            connectedUntil: undefined,
+            disconnectedAt: now,
+          })),
+        },
+        {
+          ...current,
+          id: new EthAddress(OTHER_ACCOUNT_ID_HEX),
+          derivationKey: OTHER_DERIVATION_KEY,
+          postageStamps: [],
+          defaultPostageStampBatchID: undefined,
+          connectedApps: [
+            {
+              appUrl: PARENT_ORIGIN,
+              appName: "dApp",
+              appSecret: OTHER_APP_SECRET,
+              lastConnectedAt: now,
+              connectedUntil: now + CONNECTION_LIFETIME_MS,
+            },
+          ],
+        },
+      ])
+      await vi.waitFor(() =>
+        expect(lastConnectionInfo()?.identity?.id).toBe(OTHER_ACCOUNT_ID_HEX),
+      )
+
+      const outcome = await attemptUpload()
+      expect(previous.withWrite).not.toHaveBeenCalled()
+      expect(previous.teardown).toHaveBeenCalled()
+      expect(outcome).toHaveProperty("error")
+      expect(internals().buildConnectionInfo()).toMatchObject({
+        uploadMode: "unavailable",
+        uploadUnavailableReason: "no-stamp",
+      })
+    })
+  })
 
   it("refuses a handover that carries no account", async () => {
     const challenge = await startPartitionedConnect()
