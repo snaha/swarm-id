@@ -701,12 +701,14 @@ describe("SwarmIdProxy partitioned write enablement", () => {
     const CONNECTION_LIFETIME_MS = 60_000
 
     type CoordinatorStub = {
+      deps: { bee: { url: string } }
       batchId: string
       teardown: ReturnType<typeof vi.fn>
       withWrite: ReturnType<typeof vi.fn>
     }
 
     type WriteInternals = {
+      bee: { url: string }
       ensureCanUpload(): void
       withModeAwareWriteLock<T>(
         targetOptions: undefined,
@@ -913,6 +915,59 @@ describe("SwarmIdProxy partitioned write enablement", () => {
       expect(internals().buildConnectionInfo()).toMatchObject({
         uploadMode: "unavailable",
         uploadUnavailableReason: "no-stamp",
+      })
+    })
+
+    // Reads have to come from where the uploads go, or a dApp reads back a 404
+    // for the chunk it just wrote; and a user-stamped write goes to the
+    // configured node, never to the dApp's gateway.
+    describe("the Bee client follows the upload mode", () => {
+      // bee-js keeps a client's URL without its trailing slash.
+      const CONFIGURED_NODE_URL = DEFAULT_BEE_NODE_URL.replace(/\/$/, "")
+      const GATEWAY_NODE_URL = GATEWAY_URL.replace(/\/$/, "")
+      const DRIVE_TTL_SECONDS = 60
+      const PAST_DRIVE_TTL_MS = 61_000
+
+      it("writes and reads at the configured node for a session connected after load", async () => {
+        // Nothing connected yet: the session starts out subsidised.
+        await identify(GATEWAY_URL)
+        expect(internals().bee.url).toBe(GATEWAY_NODE_URL)
+        const coordinatorsBefore = coordinatorCount()
+
+        seedConnectedAccount()
+        const shell = createAccountsStorageManager()
+        shell.save(shell.load())
+        await vi.waitFor(() =>
+          expect(coordinatorCount()).toBe(coordinatorsBefore + 1),
+        )
+
+        expect(latestCoordinator().deps.bee.url).toBe(CONFIGURED_NODE_URL)
+        expect(internals().bee.url).toBe(CONFIGURED_NODE_URL)
+      })
+
+      it("reads from the gateway once the drive's lifetime runs out in an open session", async () => {
+        const [stamp] = makeSyncedAccount().postageStamps
+        seedConnectedAccount({
+          account: {
+            postageStamps: [
+              { ...stamp, batchTTL: DRIVE_TTL_SECONDS, updatedAt: Date.now() },
+            ],
+          },
+        })
+        await identify(GATEWAY_URL)
+        expect(internals().buildConnectionInfo().uploadMode).toBe("user-stamp")
+        expect(internals().bee.url).toBe(CONFIGURED_NODE_URL)
+
+        vi.setSystemTime(Date.now() + PAST_DRIVE_TTL_MS)
+        try {
+          await expect(uploadTarget()).resolves.toEqual({
+            mode: "subsidised",
+            gatewayUrl: GATEWAY_URL,
+          })
+          expect(internals().bee.url).toBe(GATEWAY_NODE_URL)
+        } finally {
+          vi.useRealTimers()
+        }
       })
     })
   })

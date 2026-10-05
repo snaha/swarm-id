@@ -6,20 +6,6 @@ import { describe, it, expect, vi, beforeEach } from "vitest"
 // Rollup-only virtual module (see rollup.config.js) — not resolvable in vitest
 vi.mock("virtual:stamp-worker-code", () => ({ default: "" }))
 
-// Wrap the Bee constructor so tests can observe which node URL the proxy points
-// its client at, without touching any other bee-js export the proxy relies on.
-vi.mock("@ethersphere/bee-js", async (importActual) => {
-  const actual = await importActual<typeof import("@ethersphere/bee-js")>()
-  return {
-    ...actual,
-    Bee: vi.fn(function (url: string) {
-      return new actual.Bee(url)
-    }),
-  }
-})
-
-import { Bee } from "@ethersphere/bee-js"
-
 import { DEFAULT_BEE_NODE_URL } from "./schemas"
 import { SwarmIdProxy } from "./swarm-id-proxy"
 import { deriveSecret } from "./utils/key-derivation"
@@ -57,10 +43,15 @@ type ProxyInternals = {
   ) => Promise<T>
   initializeStamper: (stampDepth: number) => Promise<void>
   lookupAccountForApp: () => Promise<unknown>
+  /** The Bee client the proxy reads (and subsidised-uploads) through now. */
+  bee: { url: string }
 }
 
 const internals = (p: SwarmIdProxy): ProxyInternals =>
   p as unknown as ProxyInternals
+
+/** bee-js keeps a client's URL without its trailing slash. */
+const clientUrl = (url: string): string => url.replace(/\/$/, "")
 
 const PARENT_ORIGIN = "https://dapp.example.com"
 const ATTACKER_ORIGIN = "https://evil.example.com"
@@ -296,8 +287,7 @@ describe("SwarmIdProxy honours a Bee URL change mid-session (#515)", () => {
   const NEW_BEE_URL = "https://custom-node.example.com/"
   let storageListeners: Array<(event: StorageEvent) => void>
   let store: Map<string, string>
-
-  const BeeMock = vi.mocked(Bee)
+  let proxy: SwarmIdProxy
 
   const setNetworkSettings = (beeNodeUrl: string) =>
     store.set(
@@ -310,7 +300,6 @@ describe("SwarmIdProxy honours a Bee URL change mid-session (#515)", () => {
 
   beforeEach(() => {
     vi.restoreAllMocks()
-    BeeMock.mockClear()
 
     store = new Map()
     vi.stubGlobal("localStorage", {
@@ -332,26 +321,26 @@ describe("SwarmIdProxy honours a Bee URL change mid-session (#515)", () => {
       location: { origin: "https://id.example.com" },
     })
 
-    new SwarmIdProxy()
+    proxy = new SwarmIdProxy()
   })
 
   it("rebuilds the Bee client at the newly configured node", () => {
-    expect(BeeMock).toHaveBeenLastCalledWith(DEFAULT_BEE_NODE_URL)
+    expect(internals(proxy).bee.url).toBe(clientUrl(DEFAULT_BEE_NODE_URL))
 
     setNetworkSettings(NEW_BEE_URL)
     fireStorage(STORAGE_KEY_NETWORK_SETTINGS)
 
-    expect(BeeMock).toHaveBeenLastCalledWith(NEW_BEE_URL)
+    expect(internals(proxy).bee.url).toBe(clientUrl(NEW_BEE_URL))
   })
 
   it("ignores storage events for other keys and unchanged URLs", () => {
-    const callsAfterConstruction = BeeMock.mock.calls.length
+    const client = internals(proxy).bee
 
     fireStorage("some-other-key")
     setNetworkSettings(DEFAULT_BEE_NODE_URL)
     fireStorage(STORAGE_KEY_NETWORK_SETTINGS)
 
-    expect(BeeMock.mock.calls.length).toBe(callsAfterConstruction)
+    expect(internals(proxy).bee).toBe(client)
   })
 })
 
@@ -468,8 +457,6 @@ describe("SwarmIdProxy subsidised-mode selection", () => {
     },
   ]
 
-  const BeeMock = vi.mocked(Bee)
-
   let proxy: SwarmIdProxy
   let parentWindow: { postMessage: ReturnType<typeof vi.fn> }
   let messageListener: MessageListener
@@ -555,7 +542,6 @@ describe("SwarmIdProxy subsidised-mode selection", () => {
 
   beforeEach(() => {
     vi.restoreAllMocks()
-    BeeMock.mockClear()
 
     store = new Map()
     localStorageFake = {
@@ -765,7 +751,7 @@ describe("SwarmIdProxy subsidised-mode selection", () => {
       fireStorage(STORAGE_KEY_NETWORK_SETTINGS)
 
       expect(connectionInfo().uploadMode).toBe("unavailable")
-      expect(BeeMock).toHaveBeenLastCalledWith(CUSTOM_BEE_URL)
+      expect(internals(proxy).bee.url).toBe(clientUrl(CUSTOM_BEE_URL))
     })
 
     // Documented one-way door: going back to the default node does NOT bring
@@ -780,7 +766,7 @@ describe("SwarmIdProxy subsidised-mode selection", () => {
       fireStorage(STORAGE_KEY_NETWORK_SETTINGS)
 
       expect(connectionInfo().uploadMode).toBe("unavailable")
-      expect(BeeMock).toHaveBeenLastCalledWith(DEFAULT_BEE_NODE_URL)
+      expect(internals(proxy).bee.url).toBe(clientUrl(DEFAULT_BEE_NODE_URL))
     })
   })
 
@@ -789,6 +775,6 @@ describe("SwarmIdProxy subsidised-mode selection", () => {
   it("points the Bee client at the gateway in subsidised mode", async () => {
     await identify(GATEWAY_URL)
 
-    expect(BeeMock).toHaveBeenLastCalledWith(GATEWAY_URL)
+    expect(internals(proxy).bee.url).toBe(clientUrl(GATEWAY_URL))
   })
 })
