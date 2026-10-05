@@ -78,7 +78,8 @@ free tier. See [Quick Start](../getting-started/#a-batch-you-were-given) and
 
 **Cause.** The element the button container lives in was unmounted — typically rendered only
 in the signed-out branch of the UI — which destroyed the proxy iframe with it. Every later call
-has no iframe to talk to, and a later popup has no opener.
+has no iframe to talk to, and a later popup has no opener. Through the library it is a
+`SwarmIdError` with code `invalid-state`.
 
 **Fix.** Keep the container mounted for the life of the page, in every state. See
 [Quick Start](../getting-started/#basic-usage).
@@ -86,7 +87,7 @@ has no iframe to talk to, and a later popup has no opener.
 ### `Failed to open authentication popup`
 
 **Cause.** The browser blocked the popup: `connect()` was not called from a user gesture, or a
-blocker is on.
+blocker is on. The code is `popup-blocked`.
 
 **Fix.** Call `connect()` synchronously from the click handler, or render the iframe's own
 button. The client opens the popup from the iframe or the page as the storage situation

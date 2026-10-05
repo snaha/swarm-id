@@ -1485,7 +1485,15 @@ export const UploadProgressMessageSchema = z.object({
  *   shows as this)
  * - `timeout` — a deadline: the proxy's, or the client's round trip
  * - `invalid-request` — the message or an argument failed validation
- * - `init-failed` — the proxy iframe did not come up
+ * - `invalid-state` — the client cannot take the call in its current state:
+ *   `initialize()` has not resolved, was already called, or `destroy()` ran;
+ *   a call (or an `initialize()`) still pending when `destroy()` runs rejects
+ *   with it too
+ * - `init-failed` — the proxy iframe did not come up: it failed to load, the
+ *   proxy refused the origin, or it did not answer within
+ *   `initializationTimeout`
+ * - `popup-blocked` — the browser blocked the authentication popup `connect()`
+ *   opens (not called from a user gesture, or a blocker)
  * - `internal` — anything else, message preserved
  */
 export const SwarmIdErrorCodeSchema = z.enum([
@@ -1497,7 +1505,9 @@ export const SwarmIdErrorCodeSchema = z.enum([
   "network",
   "timeout",
   "invalid-request",
+  "invalid-state",
   "init-failed",
+  "popup-blocked",
   "internal",
 ])
 export type SwarmIdErrorCode = z.infer<typeof SwarmIdErrorCodeSchema>

@@ -92,12 +92,29 @@ import { generatedAvatar } from "./utils/avatar"
 import { uint8ArrayToHex } from "./utils/hex"
 import { collectionPath } from "./utils/collection"
 import { buildAuthUrl } from "./utils/url"
-import { withTimeout } from "./utils/promise"
+import { TimeoutError, withTimeout } from "./utils/promise"
 
 const DEFAULT_TIMEOUT_MS = 30000
 /** The largest delay `setTimeout` honours; past it, it fires almost at once. */
 const MAX_TIMER_DELAY_MS = 2 ** 31 - 1
 const DEFAULT_INITIALIZATION_TIMEOUT_MS = 30000
+
+/**
+ * {@link withTimeout} for one of `initialize()`'s waits: a missed deadline
+ * rejects as `init-failed`, the `TimeoutError` kept as its cause, so every
+ * way `initialize()` fails to come up carries the same code.
+ */
+function initDeadline(
+  work: Promise<void>,
+  ms: number,
+  message: string,
+): Promise<void> {
+  return withTimeout(work, ms, message).catch((error: unknown) => {
+    throw error instanceof TimeoutError
+      ? new SwarmIdError("init-failed", error.message, { cause: error })
+      : error
+  })
+}
 
 /**
  * Main client library for integrating Swarm ID authentication and storage capabilities
@@ -140,6 +157,8 @@ export class SwarmIdClient {
   private lastConnectionInfo: ConnectionInfo | undefined
   private firstConnectionInfoPromise: Promise<void> | undefined
   private firstConnectionInfoResolve?: () => void
+  private firstConnectionInfoReject?: (error: SwarmIdError) => void
+  private iframeLoadReject?: (error: SwarmIdError) => void
   private popupMode: "popup" | "window"
   private metadata: AppMetadata
   private buttonConfig?: ButtonConfig
@@ -155,7 +174,7 @@ export class SwarmIdClient {
   private storageShared: boolean | undefined
   private readyPromise: Promise<void> | undefined
   private readyResolve?: () => void
-  private readyReject?: (error: Error) => void
+  private readyReject?: (error: SwarmIdError) => void
   private pendingRequests: Map<
     string,
     {
@@ -176,7 +195,7 @@ export class SwarmIdClient {
   private messageListener: ((event: MessageEvent) => void) | undefined
   private proxyInitializedPromise: Promise<void> | undefined
   private proxyInitializedResolve?: () => void
-  private proxyInitializedReject?: (error: Error) => void
+  private proxyInitializedReject?: (error: SwarmIdError) => void
 
   /**
    * Creates a new SwarmIdClient instance.
@@ -202,7 +221,8 @@ export class SwarmIdClient {
    * @param options.buttonConfig.fontSize - CSS font-size for the button; the default floating iframe is a fixed 300x50 px and hides its overflow, so a size that does not fit is clipped — pass `containerId` to own the box (optional)
    * @param options.buttonConfig.fontWeight - CSS font-weight for the button, as a keyword or a number (optional)
    * @param options.containerId - ID of container element to place iframe in (optional)
-   * @throws {Error} If the provided app metadata is invalid
+   * @throws {Error} If constructed where there is no `window` (a server render)
+   * @throws {SwarmIdError} `invalid-request` if the provided app metadata is invalid
    */
   constructor(options: ClientOptions) {
     // Before anything touches `window`: a server render reached
@@ -230,7 +250,11 @@ export class SwarmIdClient {
     try {
       AppMetadataSchema.parse(this.metadata)
     } catch (error) {
-      throw new Error(`Invalid app metadata: ${error}`)
+      throw new SwarmIdError(
+        "invalid-request",
+        `Invalid app metadata: ${error}`,
+        { cause: error },
+      )
     }
 
     // Note: `readyPromise`, `proxyInitializedPromise`, and
@@ -252,10 +276,9 @@ export class SwarmIdClient {
    * the proxy to signal readiness.
    *
    * @returns A promise that resolves when the client is fully initialized
-   * @throws {Error} If the client is already initialized
-   * @throws {Error} If the iframe fails to load
-   * @throws {Error} If the proxy does not respond within the timeout period (30 seconds)
-   * @throws {Error} If origin validation fails on the proxy side
+   * @throws {SwarmIdError} `invalid-state` if the client is already initialized, or `destroy()` runs before it resolves
+   * @throws {SwarmIdError} `invalid-request` if `containerId` names no element
+   * @throws {SwarmIdError} `init-failed` if the iframe fails to load, origin validation fails on the proxy side, or the proxy does not respond within `initializationTimeout` (30 seconds by default)
    *
    * @example
    * ```typescript
@@ -270,7 +293,10 @@ export class SwarmIdClient {
    */
   async initialize(): Promise<void> {
     if (this.iframe) {
-      throw new Error("SwarmIdClient already initialized")
+      throw new SwarmIdError(
+        "invalid-state",
+        "SwarmIdClient already initialized",
+      )
     }
 
     // Set up the first-snapshot wait now (not in the constructor) so the
@@ -284,10 +310,11 @@ export class SwarmIdClient {
     // (deferred-style) because it has to be called later, from
     // `handleIframeMessage` when the `connectionInfoChanged` arrives — not
     // from this executor. ES2024's `Promise.withResolvers()` would express
-    // the same shape more directly.
-    this.firstConnectionInfoPromise = withTimeout(
-      new Promise<void>((resolve) => {
+    // the same shape more directly. The `reject` is stashed for `destroy()`.
+    this.firstConnectionInfoPromise = initDeadline(
+      new Promise<void>((resolve, reject) => {
         this.firstConnectionInfoResolve = resolve
+        this.firstConnectionInfoReject = reject
       }),
       this.initializationTimeout,
       `Proxy initialization timeout - proxy did not send initial connectionInfoChanged within ${this.initializationTimeout}ms`,
@@ -295,15 +322,15 @@ export class SwarmIdClient {
     // Attach a no-op handler so the rejection isn't surfaced as
     // "unhandled" if the timeout fires before we reach the awaiting line
     // below (e.g. because an earlier `await` in this method hung first).
-    // The original promise is still rejected; the `await` on line 359 will
-    // re-throw it normally.
+    // The original promise is still rejected; the `await` at the end of this
+    // method re-throws it normally.
     this.firstConnectionInfoPromise.catch(() => {})
 
     // Same deferred+timeout pattern for the proxyReady handshake and the
     // iframe-ready signal: created here (not the constructor) so the timers
     // start when init begins and `withTimeout` clears them on settle. The
     // stashed resolve/reject are invoked later from `handleIframeMessage`.
-    this.proxyInitializedPromise = withTimeout(
+    this.proxyInitializedPromise = initDeadline(
       new Promise<void>((resolve, reject) => {
         this.proxyInitializedResolve = resolve
         this.proxyInitializedReject = reject
@@ -313,7 +340,7 @@ export class SwarmIdClient {
     )
     this.proxyInitializedPromise.catch(() => {})
 
-    this.readyPromise = withTimeout(
+    this.readyPromise = initDeadline(
       new Promise<void>((resolve, reject) => {
         this.readyResolve = resolve
         this.readyReject = reject
@@ -337,7 +364,8 @@ export class SwarmIdClient {
     if (this.containerId) {
       containerElement = document.getElementById(this.containerId) || undefined
       if (!containerElement) {
-        throw new Error(
+        throw new SwarmIdError(
+          "invalid-request",
           `Container element with ID "${this.containerId}" not found`,
         )
       }
@@ -357,8 +385,10 @@ export class SwarmIdClient {
       this.iframe.style.zIndex = "999999"
     }
 
-    // Wait for iframe to load
+    // Wait for iframe to load. The `reject` is stashed for `destroy()`: a
+    // removed iframe never fires `load`, and nothing else would settle this.
     await new Promise<void>((resolve, reject) => {
+      this.iframeLoadReject = reject
       this.iframe!.onload = () => resolve()
       this.iframe!.onerror = () =>
         reject(
@@ -576,14 +606,18 @@ export class SwarmIdClient {
    */
   private sendMessage(message: ParentToIframeMessage): void {
     if (!this.iframe || !this.iframe.contentWindow) {
-      throw new Error("Iframe not initialized")
+      throw new SwarmIdError("invalid-state", "Iframe not initialized")
     }
 
     // Validate message before sending
     try {
       ParentToIframeMessageSchema.parse(message)
     } catch (error) {
-      throw new Error(`Invalid message format: ${error}`)
+      throw new SwarmIdError(
+        "invalid-request",
+        `Invalid message format: ${error}`,
+        { cause: error },
+      )
     }
 
     this.iframe.contentWindow.postMessage(message, this.iframeOrigin)
@@ -742,7 +776,10 @@ export class SwarmIdClient {
    */
   private ensureReady(): void {
     if (!this.ready) {
-      throw new Error("SwarmIdClient not initialized. Call initialize() first.")
+      throw new SwarmIdError(
+        "invalid-state",
+        "SwarmIdClient not initialized. Call initialize() first.",
+      )
     }
   }
 
@@ -760,8 +797,7 @@ export class SwarmIdClient {
    * The iframe is positioned fixed in the bottom-right corner of the viewport.
    *
    * @returns The iframe element displaying the authentication UI
-   * @throws {Error} If the client is not initialized
-   * @throws {Error} If the iframe is not available
+   * @throws {SwarmIdError} `invalid-state` if the client is not initialized, or the iframe is not available
    *
    * @example
    * ```typescript
@@ -773,7 +809,7 @@ export class SwarmIdClient {
     this.ensureReady()
 
     if (!this.iframe) {
-      throw new Error("Iframe not initialized")
+      throw new SwarmIdError("invalid-state", "Iframe not initialized")
     }
 
     return this.iframe
@@ -866,9 +902,9 @@ export class SwarmIdClient {
    * un-authenticated snapshot.
    *
    * @returns A promise that resolves when disconnection is complete
-   * @throws {Error} If the client is not initialized
-   * @throws {Error} If the disconnect operation fails
-   * @throws {Error} If the request times out
+   * @throws {SwarmIdError} `invalid-state` if the client is not initialized
+   * @throws {SwarmIdError} `internal` if the proxy reports the disconnect failed
+   * @throws {SwarmIdError} `timeout` if the request times out
    *
    * @example
    * ```typescript
@@ -890,7 +926,7 @@ export class SwarmIdClient {
     })
 
     if (!response.success) {
-      throw new Error("Failed to disconnect")
+      throw new SwarmIdError("internal", "Failed to disconnect")
     }
   }
 
@@ -922,7 +958,8 @@ export class SwarmIdClient {
    * https://github.com/snaha/swarm-id/issues/584
    *
    * @param options - Configuration options for the connect flow
-   * @throws {Error} If the client is not initialized or the popup fails to open
+   * @throws {SwarmIdError} `invalid-state` if the client is not initialized
+   * @throws {SwarmIdError} `popup-blocked` if the browser blocks the popup
    *
    * @example
    * ```typescript
@@ -944,7 +981,10 @@ export class SwarmIdClient {
       // `connect()` that resolved anyway would report a connect in progress
       // that no window is running.
       if (!this.openAuthWindow(options)) {
-        throw new Error("Failed to open authentication popup")
+        throw new SwarmIdError(
+          "popup-blocked",
+          "Failed to open authentication popup",
+        )
       }
       return
     }
@@ -974,7 +1014,10 @@ export class SwarmIdClient {
     // turns out to be shared it just works, and on a partitioned one it fails
     // no worse than not having asked.
     if (!this.openAuthWindow(options)) {
-      throw new Error("Failed to open authentication popup")
+      throw new SwarmIdError(
+        "popup-blocked",
+        "Failed to open authentication popup",
+      )
     }
   }
 
@@ -1010,7 +1053,7 @@ export class SwarmIdClient {
    * is ready and refreshed whenever any of those derived fields change.
    * Subscribe to {@link ClientOptions.onConnectionChange} to react to updates.
    *
-   * @throws {Error} If {@link initialize} has not been called yet
+   * @throws {SwarmIdError} `invalid-state` if {@link initialize} has not resolved yet
    *
    * @example
    * ```typescript
@@ -1024,9 +1067,13 @@ export class SwarmIdClient {
   get connectionInfo(): ConnectionInfo {
     this.ensureReady()
     if (!this.lastConnectionInfo) {
-      // Unreachable: initialize() awaits firstConnectionInfoPromise, which is
-      // resolved by the proxy's eager emit after proxyReady.
-      throw new Error("SwarmIdClient connectionInfo not yet available.")
+      // `ready` flips true on `proxyReady`, which the proxy sends before its
+      // first `connectionInfoChanged`, so a read before `initialize()`
+      // resolves can land here.
+      throw new SwarmIdError(
+        "invalid-state",
+        "SwarmIdClient connectionInfo not yet available.",
+      )
     }
     return this.lastConnectionInfo
   }
@@ -3419,7 +3466,8 @@ export class SwarmIdClient {
    *
    * This method should be called when the client is no longer needed.
    * It performs the following cleanup:
-   * - Cancels all pending requests with an error
+   * - Rejects every pending request, and a pending `initialize()`, with a
+   *   `SwarmIdError` of code `invalid-state`
    * - Removes the message event listener
    * - Removes the iframe from the DOM
    * - Resets the client to an uninitialized state
@@ -3441,10 +3489,13 @@ export class SwarmIdClient {
    * ```
    */
   destroy(): void {
+    const destroyed = () =>
+      new SwarmIdError("invalid-state", "Client destroyed")
+
     // Clear pending requests
     this.pendingRequests.forEach((pending) => {
       clearTimeout(pending.timeoutId)
-      pending.reject(new SwarmIdError("internal", "Client destroyed"))
+      pending.reject(destroyed())
     })
     this.pendingRequests.clear()
     this.progressListeners.clear()
@@ -3461,18 +3512,27 @@ export class SwarmIdClient {
       this.iframe = undefined
     }
 
-    // Reject any still-pending init deferreds so their `withTimeout` timers
-    // clear now instead of lingering the full initializationTimeout. The
+    // Reject every still-pending init wait. Whichever one `initialize()` is
+    // awaiting rejects it, so a destroy mid-initialize settles it instead of
+    // leaving it on an iframe that will never load or a proxy that is gone;
+    // and the deadline-bound ones clear their `withTimeout` timers now
+    // instead of lingering the full initializationTimeout. The
     // `.catch(() => {})` guards attached in initialize() keep these from
     // surfacing as unhandled when nothing is awaiting.
-    this.readyReject?.(new Error("Client destroyed"))
-    this.proxyInitializedReject?.(new Error("Client destroyed"))
+    this.iframeLoadReject?.(destroyed())
+    this.proxyInitializedReject?.(destroyed())
+    this.readyReject?.(destroyed())
+    this.firstConnectionInfoReject?.(destroyed())
+    this.iframeLoadReject = undefined
     this.readyResolve = undefined
     this.readyReject = undefined
     this.proxyInitializedResolve = undefined
     this.proxyInitializedReject = undefined
+    this.firstConnectionInfoResolve = undefined
+    this.firstConnectionInfoReject = undefined
     this.readyPromise = undefined
     this.proxyInitializedPromise = undefined
+    this.firstConnectionInfoPromise = undefined
 
     this.ready = false
   }
