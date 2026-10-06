@@ -39,6 +39,17 @@ yarn add @snaha/swarm-id
 ```typescript
 import { SwarmIdClient } from '@snaha/swarm-id'
 
+// What the connect popup and the identity site show for your app. The icon is
+// any data URL under 4 KB, SVG or PNG; an emoji in an SVG will do to start.
+const APP_ICON =
+  'data:image/svg+xml;charset=utf-8,' +
+  encodeURIComponent(
+    '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 56 56">' +
+      '<rect width="56" height="56" rx="8" fill="white"/>' +
+      '<text x="50%" y="50%" font-size="32" dominant-baseline="middle" text-anchor="middle">🐝</text>' +
+      '</svg>',
+  )
+
 // 1. Create the client
 const client = new SwarmIdClient({
   iframeOrigin: 'https://swarm-id.snaha.net',
@@ -48,6 +59,7 @@ const client = new SwarmIdClient({
   metadata: {
     name: 'My app',
     description: 'A demo Swarm application',
+    icon: APP_ICON,
   },
   onConnectionChange: (info) => {
     console.log('Connection changed:', info.identity?.name, 'canUpload=', info.canUpload)
@@ -113,6 +125,7 @@ chunk so the user's own drive is spent through the public gateway. See
 | `metadata`             | `object`   | No       | What the connect popup shows about your app                                           |
 | `metadata.name`        | `string`   | No       | Your app's name                                                                       |
 | `metadata.description` | `string`   | No       | A line about your app                                                                 |
+| `metadata.icon`        | `string`   | No       | Your app's icon as a data URL, SVG or PNG, under 4 KB                                 |
 | `onConnectionChange`   | `function` | No       | Called when the app-visible connection state changes (identity, stamp, account, auth) |
 
 The full list, including the subsidised gateway and the iframe button's look, is on the
