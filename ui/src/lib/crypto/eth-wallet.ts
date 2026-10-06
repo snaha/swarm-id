@@ -16,9 +16,9 @@
  * signature twice and requires the same bytes.
  */
 import { hexToUint8Array } from '@snaha/swarm-id'
+import { deriveKeyFromSignature } from '@snaha/swarm-id/internal'
 import { type Hex, getAddress, recoverMessageAddress } from 'viem'
 
-import { deriveKeyFromSignature } from '$lib/crypto/encryption'
 import { connectAccessWallet } from '$lib/crypto/onboard'
 import { canonicalSignature } from '$lib/crypto/signature'
 

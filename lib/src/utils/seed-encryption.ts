@@ -5,15 +5,21 @@
  * derived from the chosen access method (passkey PRF, wallet signature, or
  * password); the access method can always re-derive the key, so only the
  * ciphertext is persisted.
+ *
+ * Lives in the lib, not the UI, because the ciphertext is part of the on-disk
+ * account record (`LocalVaultSchemaV1.encryptedSeed`) and a host app that
+ * writes that record from outside the browser (an Electron shell that creates
+ * an account for the user, #815) has to produce the same bytes. The
+ * parameters below are the contract the docs' "Storage layout" page states.
  */
-import { hexToUint8Array, uint8ArrayToHex } from '@snaha/swarm-id'
+import { hexToUint8Array, uint8ArrayToHex } from "./hex"
 
-const AES_GCM = 'AES-GCM'
+const AES_GCM = "AES-GCM"
 const AES_KEY_BITS = 256
 const IV_LENGTH = 12
 const SALT_LENGTH = 32
 const PBKDF2_ITERATIONS = 600_000
-const SEED_ENCRYPTION_INFO = 'swarm-id-seed-encryption-v1'
+const SEED_ENCRYPTION_INFO = "swarm-id-seed-encryption-v1"
 
 export function randomSalt(): Uint8Array {
   const salt = new Uint8Array(SALT_LENGTH)
@@ -22,7 +28,10 @@ export function randomSalt(): Uint8Array {
 }
 
 /** Encrypt bytes; returns hex of IV || ciphertext. */
-export async function encryptSeed(data: Uint8Array, key: CryptoKey): Promise<string> {
+export async function encryptSeed(
+  data: Uint8Array,
+  key: CryptoKey,
+): Promise<string> {
   const iv = new Uint8Array(IV_LENGTH)
   crypto.getRandomValues(iv)
   const ciphertext = await crypto.subtle.encrypt(
@@ -36,7 +45,10 @@ export async function encryptSeed(data: Uint8Array, key: CryptoKey): Promise<str
   return uint8ArrayToHex(payload)
 }
 
-export async function decryptSeed(payloadHex: string, key: CryptoKey): Promise<Uint8Array> {
+export async function decryptSeed(
+  payloadHex: string,
+  key: CryptoKey,
+): Promise<Uint8Array> {
   const payload = hexToUint8Array(payloadHex)
   const iv = payload.slice(0, IV_LENGTH)
   const ciphertext = payload.slice(IV_LENGTH)
@@ -58,20 +70,24 @@ export async function deriveKeyFromSecret(
   salt: Uint8Array,
   info: string,
 ): Promise<CryptoKey> {
-  const key = await crypto.subtle.importKey('raw', ikm as BufferSource, 'HKDF', false, [
-    'deriveKey',
-  ])
+  const key = await crypto.subtle.importKey(
+    "raw",
+    ikm as BufferSource,
+    "HKDF",
+    false,
+    ["deriveKey"],
+  )
   return crypto.subtle.deriveKey(
     {
-      name: 'HKDF',
-      hash: 'SHA-256',
+      name: "HKDF",
+      hash: "SHA-256",
       salt: salt as BufferSource,
       info: new TextEncoder().encode(info),
     },
     key,
     { name: AES_GCM, length: AES_KEY_BITS },
     false,
-    ['encrypt', 'decrypt'],
+    ["encrypt", "decrypt"],
   )
 }
 
@@ -95,18 +111,18 @@ export async function deriveKeyFromPassword(
   iterations: number = PBKDF2_ITERATIONS,
 ): Promise<CryptoKey> {
   const ikm = await crypto.subtle.importKey(
-    'raw',
+    "raw",
     new TextEncoder().encode(password),
-    'PBKDF2',
+    "PBKDF2",
     false,
-    ['deriveKey'],
+    ["deriveKey"],
   )
   return crypto.subtle.deriveKey(
-    { name: 'PBKDF2', hash: 'SHA-256', salt: salt as BufferSource, iterations },
+    { name: "PBKDF2", hash: "SHA-256", salt: salt as BufferSource, iterations },
     ikm,
     { name: AES_GCM, length: AES_KEY_BITS },
     false,
-    ['encrypt', 'decrypt'],
+    ["encrypt", "decrypt"],
   )
 }
 

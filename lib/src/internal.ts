@@ -33,8 +33,12 @@ export { SocUploadError, uploadSOC } from "./proxy/upload"
 export type { UploadTarget } from "./proxy/upload"
 
 export {
+  AccessMethodSchemaV1,
   BatchIdSchema,
   DEFAULT_GNOSIS_RPC_URL,
+  LocalAccountSchemaV1,
+  LocalVaultSchemaV1,
+  NetworkSettingsSchemaV1,
   PostageStampSchemaV1,
   PrivateKeySchema,
   SyncedAccountSchemaV1,
@@ -55,6 +59,20 @@ export type {
 } from "./schemas"
 
 export { DebouncedUtilizationUploader } from "./storage/debounced-uploader"
+
+// The on-disk account record and the vault it carries. Exported with the
+// schemas above so a host app that writes `localStorage` itself (#815) can
+// produce the same bytes the identity UI does — see docs "Storage layout".
+export {
+  PASSWORD_KDF_ITERATIONS,
+  decryptSeed,
+  deriveKeyFromPassword,
+  deriveKeyFromPrf,
+  deriveKeyFromSecret,
+  deriveKeyFromSignature,
+  encryptSeed,
+  randomSalt,
+} from "./utils/seed-encryption"
 
 export { UtilizationStoreDB } from "./storage/utilization-store"
 
@@ -81,6 +99,8 @@ export type { PartitionLeaseStateSnapshot } from "./sync/partition-lease"
 export {
   AuthDataSchema,
   STORAGE_CHALLENGE_KEY,
+  STORAGE_KEY_ACCOUNTS,
+  STORAGE_KEY_NETWORK_SETTINGS,
   leaseCacheStorageKey,
 } from "./types"
 

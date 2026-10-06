@@ -13,11 +13,14 @@ import { hexToUint8Array, uint8ArrayToHex } from '@snaha/swarm-id'
 import {
   type SyncedAccount,
   SyncedAccountSchemaV1,
+  decryptSeed,
+  deriveKeyFromSecret,
+  encryptSeed,
   isSignedOutAccount,
+  randomSalt,
   serializeSyncedAccount,
 } from '@snaha/swarm-id/internal'
 
-import { decryptSeed, deriveKeyFromSecret, encryptSeed, randomSalt } from '$lib/crypto/encryption'
 import type { Account } from '$lib/types'
 
 const SNAPSHOT_VERSION = 1

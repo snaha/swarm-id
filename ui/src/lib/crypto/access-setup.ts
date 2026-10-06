@@ -6,9 +6,13 @@
  * step and the change-method ceremony.
  */
 import { uint8ArrayToHex } from '@snaha/swarm-id'
-import { type AccessMethod } from '@snaha/swarm-id/internal'
+import {
+  type AccessMethod,
+  PASSWORD_KDF_ITERATIONS,
+  deriveKeyFromPassword,
+  randomSalt,
+} from '@snaha/swarm-id/internal'
 
-import { PASSWORD_KDF_ITERATIONS, deriveKeyFromPassword, randomSalt } from '$lib/crypto/encryption'
 import { deriveWalletKey, enrollWalletKeySource } from '$lib/crypto/eth-wallet'
 import { createPasskeyKey } from '$lib/crypto/passkey'
 

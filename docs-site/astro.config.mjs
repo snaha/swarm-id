@@ -35,6 +35,7 @@ export default defineConfig({
             { label: 'Quick Start', slug: 'getting-started' },
             { label: 'Architecture', slug: 'architecture' },
             { label: 'Key Derivation', slug: 'key-derivation' },
+            { label: 'Storage Layout', slug: 'storage-layout' },
             { label: 'Subsidised Gateway', slug: 'subsidised-gateway' },
             { label: 'The Public Gateway', slug: 'public-gateway' },
             { label: 'Self-Hosting the Identity Site', slug: 'self-hosting' },

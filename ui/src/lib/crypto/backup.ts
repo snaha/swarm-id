@@ -11,10 +11,12 @@ import { hexToUint8Array, uint8ArrayToHex } from '@snaha/swarm-id'
 import {
   type SyncedAccount,
   SyncedAccountSchemaV1,
+  decryptSeed,
+  deriveKeyFromSecret,
+  encryptSeed,
   serializeSyncedAccount,
 } from '@snaha/swarm-id/internal'
 
-import { decryptSeed, deriveKeyFromSecret, encryptSeed } from '$lib/crypto/encryption'
 import { walletFromPhrase } from '$lib/crypto/mnemonic'
 
 const BACKUP_VERSION = 1
