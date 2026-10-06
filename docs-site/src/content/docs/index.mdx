@@ -1,52 +1,145 @@
 ---
 title: Introduction
-description: Cross-browser identity management for Swarm dApps
+description: One account for every Swarm app, with sign-in and storage your users can take anywhere
 ---
 
-Swarm ID is an authentication and identity management system for Swarm dApps. It gives a dApp a popup sign-in flow, in the style of OAuth, that works in Chrome, Firefox and Safari without a browser extension and without the Storage Access API. Where a browser partitions the proxy iframe's storage, Safari above all, the connect popup hands the iframe its credentials directly. `client.connect()` works either way, from the dApp's own button: the client picks the transport. See [Architecture](./architecture/) for what is confirmed on a real device.
+import { Image } from 'astro:assets'
+import { CardGrid, LinkCard } from '@astrojs/starlight/components'
+import connectPopup from '../../assets/intro/connect-popup.png'
+import accessMethod from '../../assets/intro/access-method.png'
+import connected from '../../assets/intro/connected.png'
+import identityApps from '../../assets/intro/identity-apps.png'
+import identityStorage from '../../assets/intro/identity-storage.png'
 
-## Key Features
+Swarm ID gives the people who use your app one account that works across every app built on
+[Swarm](https://www.ethswarm.org/). They sign in with a passkey, a password or an Ethereum
+wallet, in whatever browser they already have, with nothing to install. Your app gets a signed-in
+user and a place to store their data on Swarm, without running any of the infrastructure that
+usually comes with either.
 
-- **Works in every major browser** - Chrome, Firefox and Safari, with no extension
-- **One secret, many keys** - every key derives from the account's recovery phrase; see [Key Derivation](./key-derivation/)
-- **Master key stays home** - the master key never leaves the trusted domain
-- **One secret per app** - each dApp gets its own derived secret, so two apps never share one
-- **Three ways to unlock** - a passkey, an Ethereum wallet, or a password
-- **Backup and recovery** - an encrypted `.swarmid` file, plus restoration from Swarm on a new device
-- **Drives** - postage batches bought in the app, shared by all of the account's devices
-- **Live propagation** - a change reaches the account's open tabs, iframes and devices in about a round trip over the [account bus](./account-bus/)
+It is for anyone building on Swarm: a developer who wants sign-in and storage done in an
+afternoon, or a product owner deciding how users will get into the app at all. This page shows
+what your users see, what your app gets, and where to go next.
 
-## How It Works
+## What your users see
 
-Three parts:
+Your app shows a connect button. From there, three screens:
 
-1. **Trusted domain** - `swarm-id.snaha.net` hosts the identity UI, the keystore, and the two pages below
-2. **Connect popup** - opened from a dApp, it unlocks the account and derives that dApp's secret
-3. **Proxy iframe** - hidden in the dApp page, it holds the secret and makes every Bee request on the dApp's behalf
+<div class="intro-shots">
+  <figure>
+    <Image
+      src={connectPopup}
+      alt="The Swarm ID popup asking to connect to the demo app, with a button to create a new account and one to use an existing account"
+      width="480"
+    />
+    <figcaption>
+      A popup opens on the Swarm ID site. First time, they create an account; after that, they pick
+      the one they have.
+    </figcaption>
+  </figure>
+  <figure>
+    <Image
+      src={accessMethod}
+      alt="The access security screen offering a passkey, an Ethereum wallet, or a password"
+      width="480"
+    />
+    <figcaption>
+      They choose how to unlock it: a passkey, an Ethereum wallet, or a password.
+    </figcaption>
+  </figure>
+  <figure>
+    <Image
+      src={connected}
+      alt="The confirmation screen saying the Swarm ID is now connected to the demo app, with a button back to the app"
+      width="480"
+    />
+    <figcaption>Done. The popup closes and the app has a signed-in user.</figcaption>
+  </figure>
+</div>
 
-### Connecting a dApp
+The account is a normal recovery phrase under the hood, so it can be restored on any device, but
+nobody has to see a phrase to get started. A user who picks a password or a passkey never touches
+a wallet.
 
-1. The dApp page embeds a hidden iframe from the trusted domain
-2. The user clicks connect, and a popup opens on the trusted domain
-3. The user creates an account or unlocks the existing one
-4. The popup derives a secret for that dApp's origin from the master key
-5. The secret reaches the iframe. When the dApp page and the trusted domain are same-site, the popup writes it to the shared store and the iframe picks it up from a storage event. When the browser partitions the iframe's storage, the popup posts it to the iframe through `window.opener` instead, together with the stamps the dApp may spend
-6. From then on the iframe signs and sends every Bee request for that dApp
+Try it yourself at [the demo app](https://swarm-demo.snaha.net): press **Connect** in the sidebar,
+and you have an account two minutes from now. The demo then lets you upload a file, publish a
+feed and share something with a chosen reader, which is roughly what any app on Swarm does.
 
-## Security Model
+## One account, every app, every device
 
-- **Master key isolation** - the master key lives only in the identity UI, encrypted at rest under the account's access method
-- **Deterministic app secrets** - HMAC-SHA256 of the master key and the dApp's origin
-- **Origin isolation** - the dApp page cannot read the iframe's storage; they are different origins
-- **Validated messages** - every postMessage is checked against a Zod schema before anything acts on it
+Swarm ID is also where your users manage that account. The identity site lists the apps they have
+connected and lets them disconnect one, and holds their **drives**: prepaid storage on Swarm that
+any connected app can write to.
 
-## Live Demos
+<div class="intro-wide">
+  <Image
+    src={identityApps}
+    alt="The Swarm ID site showing a connected app, the demo, with a Connected badge and a setting for how long apps stay connected"
+  />
+</div>
 
-- **Demo App**: [swarm-demo.snaha.net](https://swarm-demo.snaha.net)
-- **Identity UI**: [swarm-id.snaha.net](https://swarm-id.snaha.net)
+<div class="intro-wide">
+  <Image
+    src={identityStorage}
+    alt="The Storage tab of the Swarm ID site, explaining that drives are prepaid storage on Swarm, with an Add drive button"
+  />
+</div>
 
-## Next Steps
+Drives are bought once and follow the account. A user who signs in on a second laptop finds the
+same drives there, and uploads from either device land in the same place. For you this means
+storage is the user's, paid for by them, and your app never has to hold a payment method or a
+storage budget on anyone's behalf. If you would rather sponsor it, a
+[subsidised gateway](./subsidised-gateway/) covers the storage for them.
 
-- [Quick Start](./getting-started/) - integrate the library in a few steps
-- [Architecture](./architecture/) - how the pieces fit, the message protocol, and where WebSocket is used
-- [Key Derivation](./key-derivation/) - every key and where it comes from
+## What your app gets
+
+- **Sign-in in one call.** The library opens the popup, waits for the user, and hands you the
+  connection. There is no server to run and no session store to keep.
+- **Storage through the same connection.** Upload, download, publish a feed, encrypt for a
+  chosen set of readers. The library makes every Swarm request on the user's behalf, using the
+  user's drive.
+- **Keys you do not have to keep.** Each app receives its own key, derived for that app alone.
+  Two apps connected to one account cannot read each other's data, and losing your app's key
+  cannot expose the account. The secret that controls the account never leaves the Swarm ID
+  site.
+- **Every major browser.** Chrome, Firefox and Safari, desktop and mobile, with no extension. This
+  is the part that is usually hard on the web, and it is verified on real devices.
+
+The identity site at [swarm-id.snaha.net](https://swarm-id.snaha.net) is hosted for you, so an
+integration is a package install and a few lines. The code is open source, and you can
+[host your own](./self-hosting/) copy when you want the sign-in page on your domain.
+
+## Where next
+
+<CardGrid>
+  <LinkCard
+    title="Quick Start"
+    description="Install the library and add the connect button to your app."
+    href="./getting-started/"
+  />
+  <LinkCard
+    title="Try the demo"
+    description="Create an account, upload a file, and share it, in the browser you have open."
+    href="https://swarm-demo.snaha.net"
+  />
+  <LinkCard
+    title="Architecture"
+    description="How the popup, the identity site and your app fit together, for the technically curious."
+    href="./architecture/"
+  />
+  <LinkCard
+    title="Using your own Bee node"
+    description="Point Swarm ID at a node you run instead of the public gateway."
+    href="./own-bee-node/"
+  />
+</CardGrid>
+
+<style>{`
+  .intro-shots { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1rem; }
+  @media (max-width: 40rem) { .intro-shots { grid-template-columns: 1fr; } }
+  .intro-shots figure { margin: 0; }
+  .intro-wide { margin-top: 1rem; }
+  .intro-wide img,
+  .intro-shots img { border: 1px solid var(--sl-color-hairline); border-radius: 0.5rem; }
+  .intro-shots figcaption { font-size: var(--sl-text-sm); color: var(--sl-color-gray-2); margin-top: 0.5rem; }
+`}</style>
