@@ -12,14 +12,14 @@ a node that does not allow the origin they come from rejects every one of them.
 
 ## Why the iframe's origin is the one that matters
 
-Swarm ID never hands your dApp a Bee URL to fetch from. When your dApp calls `uploadData()`, the
+Swarm ID never hands your app a Bee URL to fetch from. When your app calls `uploadData()`, the
 call is posted to the hidden iframe served from the identity UI's origin, and **the iframe makes the
-HTTP request to Bee**. The browser therefore sends `Origin: <identity UI origin>` — your dApp's own
+HTTP request to Bee**. The browser therefore sends `Origin: <identity UI origin>` — your app's own
 origin never appears on a request to Bee at all.
 
 So the origin to allow is the identity UI's, not your app's. This is the part that is easy to get
-backwards: allowing `https://my-dapp.example` and nothing else leaves every upload and download
-blocked, no matter how many dApps you add to the list.
+backwards: allowing `https://my-app.example` and nothing else leaves every upload and download
+blocked, no matter how many apps you add to the list.
 
 The identity UI also talks to Bee first-party — when you manage drives on it directly — but that is
 the same origin, so a single entry covers both paths.
@@ -94,4 +94,4 @@ you run by hand needs the setting above.
 ## Subsidised gateways
 
 A [subsidised gateway](../subsidised-gateway/) is fetched by the same iframe, so it needs the same
-entry in its CORS configuration — the identity UI's origin, not the origins of the dApps it serves.
+entry in its CORS configuration — the identity UI's origin, not the origins of the apps it serves.

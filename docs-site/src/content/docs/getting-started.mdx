@@ -1,13 +1,14 @@
 ---
 title: Quick Start
-description: Get Swarm ID integrated into your dApp
+description: Add Swarm ID to your app in a few minutes
 ---
-
-Get Swarm ID integrated into your dApp in just a few steps.
 
 import { Tabs, TabItem } from '@astrojs/starlight/components'
 
-## Installation
+Install the package, create a client, call `connect()`. That is the whole integration; the rest of
+this page is what happens around it.
+
+## Install
 
 <Tabs syncKey="pkg">
   <TabItem label="pnpm">
@@ -33,16 +34,7 @@ yarn add @snaha/swarm-id
   </TabItem>
 </Tabs>
 
-## Basic Usage
-
-The package is browser-only: importing it is harmless, but constructing a client touches
-`window`. In a framework that renders on a server (Next.js App Router, SvelteKit with SSR, Nuxt),
-construct it in code that runs only in the browser — an effect, `onMount`, or a branch on
-`typeof window !== 'undefined'` — not at module scope of a file the server renders. There is no
-server-side client yet ([#770](https://github.com/snaha/swarm-id/issues/770) tracks one): a server or
-an agent that writes to Swarm goes through `@ethersphere/bee-js` directly, with the drive's batch id
-and signer key, envelope-stamping each chunk so the user's own batch is spent through the public
-gateway — see [The Public Gateway](../public-gateway/).
+## Connect and upload
 
 ```typescript
 import { SwarmIdClient } from '@snaha/swarm-id'
@@ -50,11 +42,11 @@ import { SwarmIdClient } from '@snaha/swarm-id'
 // 1. Create the client
 const client = new SwarmIdClient({
   iframeOrigin: 'https://swarm-id.snaha.net',
-  // A new account has no drive yet. This lets it upload anyway — see the note
-  // below the example.
+  // A new account has no drive yet. This lets it upload anyway; see the note
+  // below.
   subsidisedGatewayUrl: 'https://api.gateway.ethswarm.org/',
   metadata: {
-    name: 'My dApp',
+    name: 'My app',
     description: 'A demo Swarm application',
   },
   onConnectionChange: (info) => {
@@ -62,141 +54,149 @@ const client = new SwarmIdClient({
   },
 })
 
-// 2. Initialize (creates hidden iframe; populates client.connectionInfo)
+// 2. Initialize: embeds the hidden iframe and fills client.connectionInfo
 await client.initialize()
 
-// 3a. Option A: Use iframe authentication button
-// The iframe will show a connect/disconnect button automatically
-
-// 3b. Option B: Manual authentication with connect()
-// Opens the authentication page in a new window/tab (useful for custom UI).
-// Works whether or not the browser partitions the iframe's storage: the
-// client picks the transport. Keep the iframe mounted for the life of the
-// page — destroying it (say, by unmounting its container on sign-in) leaves
-// the popup with nothing to hand the session to.
+// 3. Connect. Either let the iframe show its own connect button, or call
+//    connect() from yours. It opens the popup and resolves when the user is
+//    through. Keep the iframe mounted for the life of the page: unmounting
+//    its container on sign-in leaves the popup with nothing to hand the
+//    session to.
 await client.connect()
 
-// 4. Read current connection state synchronously
+// 4. The connection state is always available synchronously
 const info = client.connectionInfo
 
-// 5. Upload data (requires authentication AND upload capability — a connected
-//    user can still have canUpload=false if they have no postage stamp and no
-//    subsidised gateway is configured)
+// 5. Upload. A connected user can still have canUpload=false: no drive and
+//    no subsidised gateway means nothing pays for the upload.
 if (info.identity && info.canUpload) {
   const result = await client.uploadData(new TextEncoder().encode('Hello, Swarm!'))
   console.log('Uploaded:', result.reference)
 }
 
-// 6. Cleanup when done
+// 6. Tear down when the page is done with it
 client.destroy()
 ```
 
 :::note[Every new account starts without a drive]
-A drive (a postage batch) is what pays for uploads, and a freshly created Swarm ID has none. So without a subsidised gateway, the first upload of every first-time user fails: `canUpload` is `false` and `uploadUnavailableReason` is `'no-stamp'`. Downloads and key derivation work regardless.
+A drive is what pays for uploads, and a fresh Swarm ID has none. Without a subsidised gateway,
+the first upload of every first-time user fails: `canUpload` is `false` and
+`uploadUnavailableReason` is `'no-stamp'`. Downloads and key derivation work regardless.
 
-Two ways to handle it, and most dApps do both:
+Two ways to handle it, and most apps do both:
 
-- **Pass `subsidisedGatewayUrl`.** Uploads from accounts with no drive then go through that gateway, which stamps them (`uploadMode` becomes `'subsidised'`). The public gateway at `https://api.gateway.ethswarm.org/` works for development and demos — see [Using the public gateway](../subsidised-gateway/#using-the-public-gateway) for its limits.
-- **Send the user to add a drive.** When `uploadUnavailableReason === 'no-stamp'`, link to the identity site (`https://swarm-id.snaha.net`, Storage tab). Once the user has a drive, the session uses it in preference to any gateway.
+- **Pass `subsidisedGatewayUrl`.** Uploads from accounts with no drive go through that gateway,
+  which stamps them (`uploadMode` becomes `'subsidised'`). The public gateway at
+  `https://api.gateway.ethswarm.org/` is fine for development and demos; see
+  [Using the public gateway](../subsidised-gateway/#using-the-public-gateway) for its limits.
+- **Send the user to add a drive.** When `uploadUnavailableReason === 'no-stamp'`, link to the
+  identity site (`https://swarm-id.snaha.net`, Storage tab). Once the user has a drive, the
+  session uses it over any gateway.
   :::
 
-## Configuration Options
+:::caution[Browser only]
+Importing the package is harmless anywhere, but constructing a client touches `window`. In a
+framework that renders on a server (Next.js App Router, SvelteKit with SSR, Nuxt), construct it in
+code that only runs in the browser: an effect, `onMount`, or a branch on
+`typeof window !== 'undefined'`. There is no server-side client yet
+([#770](https://github.com/snaha/swarm-id/issues/770)). A server or an agent that writes to Swarm
+goes through `@ethersphere/bee-js` directly with the drive's batch id and signer key, stamping each
+chunk so the user's own drive is spent through the public gateway. See
+[The Public Gateway](../public-gateway/).
+:::
 
-The `SwarmIdClient` constructor accepts the following options:
+## Options
 
-| Option                 | Type       | Required | Description                                                                              |
-| ---------------------- | ---------- | -------- | ---------------------------------------------------------------------------------------- |
-| `iframeOrigin`         | `string`   | Yes      | Origin of the Swarm ID iframe (e.g., `https://swarm-id.snaha.net`)                       |
-| `metadata`             | `object`   | No       | App metadata shown during authentication                                                 |
-| `metadata.name`        | `string`   | No       | Your app's name                                                                          |
-| `metadata.description` | `string`   | No       | Brief description of your app                                                            |
-| `onConnectionChange`   | `function` | No       | Callback when the dApp-visible connection state changes (identity, stamp, account, auth) |
+| Option                 | Type       | Required | Description                                                                           |
+| ---------------------- | ---------- | -------- | ------------------------------------------------------------------------------------- |
+| `iframeOrigin`         | `string`   | Yes      | Origin of the Swarm ID iframe, for example `https://swarm-id.snaha.net`               |
+| `metadata`             | `object`   | No       | What the connect popup shows about your app                                           |
+| `metadata.name`        | `string`   | No       | Your app's name                                                                       |
+| `metadata.description` | `string`   | No       | A line about your app                                                                 |
+| `onConnectionChange`   | `function` | No       | Called when the app-visible connection state changes (identity, stamp, account, auth) |
 
-## Data Operations
+The full list, including the subsidised gateway and the iframe button's look, is on the
+[API Reference](../api/).
 
-> **Note:** Data operations require the user to be authenticated first. Use `client.connect()` or the iframe button to authenticate.
+## Data
 
-### Upload Data
+Everything below needs a connected user. Call `client.connect()` or let the iframe button do it.
+
+### Upload and download bytes
 
 ```typescript
-// Simple upload
+// Plain
 const result = await client.uploadData(data)
 
-// Upload with encryption
+// Encrypted
 const result = await client.uploadData(data, { encrypt: true })
 
-// Upload with progress tracking: `onProgress` is an upload option, and
-// progress is counted in chunks
+// With progress, counted in chunks
 const result = await client.uploadData(data, {
   onProgress: (progress) => console.log(`${progress.processed}/${progress.total} chunks`),
 })
+
+// Read it back. An encrypted reference is 128 hex characters instead of 64.
+const bytes = await client.downloadData(result.reference)
 ```
 
-Retrieve what `uploadData` stored with `downloadData`, or from a gateway at `/bytes/<reference>`. It is raw bytes with no manifest, so `downloadFile` and `/bzz/<reference>/` cannot resolve it.
+What `uploadData` stores is raw bytes with no manifest. Read it back with `downloadData`, or from
+a gateway at `/bytes/<reference>`; `downloadFile` and `/bzz/<reference>/` cannot resolve it.
 
 **An encrypted reference is a capability, not an address.** The 128-hex reference from
-`{ encrypt: true }` contains the decryption key, so whoever holds it can read the content.
-Treat it as a secret: never put it in a public index, an on-chain record or a gateway URL.
-If something public has to point at the content, publish a hash of the reference and hand the
-reference itself to the reader over a channel you trust. Every encrypted chunk is padded to
-4 KB and its span is encrypted, so the exact byte length is hidden, but the number of chunks
-is not; if the size of a payload alone says something, pad or bucket it before upload.
+`{ encrypt: true }` contains the decryption key, so whoever holds it can read the content. Treat
+it as a secret: never put it in a public index, an on-chain record or a gateway URL. If something
+public has to point at the content, publish a hash of the reference and hand the reference itself
+to the reader over a channel you trust. Every encrypted chunk is padded to 4 KB and its span is
+encrypted, so the exact byte length is hidden, but the number of chunks is not; if the size of a
+payload alone says something, pad or bucket it before upload.
 
-### Download Data
+### Upload and download files
 
-```typescript
-// Download by reference
-const data = await client.downloadData(reference)
-
-// Download encrypted data (reference will be 128 chars instead of 64)
-const data = await client.downloadData(encryptedReference)
-```
-
-### File Operations
-
-`uploadFile` wraps the bytes in a manifest that carries the filename, so its reference is read back with `downloadFile`. The two pairs do not cross. `uploadFile` encrypts by default, and its 128-hex reference carries the key: a gateway's `/bzz/<reference>/` is only for a plain reference, uploaded with `encrypt: false`.
+`uploadFile` wraps the bytes in a manifest that carries the filename, so its reference is read
+back with `downloadFile`. The two pairs do not cross. `uploadFile` encrypts by default, and its
+128-hex reference carries the key: a gateway's `/bzz/<reference>/` is only for a plain reference,
+uploaded with `encrypt: false`.
 
 ```typescript
-// Upload a file
 const result = await client.uploadFile(file, 'myfile.txt')
 
-// Download a file
-const fileData = await client.downloadFile(reference)
+const fileData = await client.downloadFile(result.reference)
 console.log(fileData.name, fileData.data)
 ```
 
 ## A batch you were given
 
-A postage batch (a **drive** in the identity UI) is not an identity. If someone hands you a batch id and the private key that owns it, as hackathon gift codes do, create or sign in to a Swarm ID however you like, then attach the batch: **Storage → Add drive → Use existing batch**, with the batch id and the signer key. From then on every dApp the account connects can upload with it. On a new device, an existing account is restored from its recovery phrase; the batch comes back with it.
+A postage batch (a **drive** in the identity site) is not an identity. If someone hands you a
+batch id and the private key that owns it, as hackathon gift codes do, create or sign in to a
+Swarm ID however you like, then attach the batch: **Storage → Add drive → Use existing batch**,
+with the batch id and the signer key. From then on every app the account connects can upload with
+it. On a new device, restore the account from its recovery phrase and the batch comes back with
+it.
 
-## Local Development
+## Run it locally
 
 ```bash
-# Clone the repository
 git clone https://github.com/snaha/swarm-id
-
-# Install dependencies
 pnpm install
-
-# Start both demo and identity UI
 pnpm dev
 ```
 
-Open http://localhost:3500 — that's it!
+Open http://localhost:3500. The demo runs on port 3500, the identity site on 5500, and the account
+bus signaling server on 5520. No HTTPS, certificates or custom domains: `localhost` is a
+[secure context](https://developer.mozilla.org/en-US/docs/Web/Security/Secure_Contexts).
 
-- Demo app runs on port 3500
-- Identity UI runs on port 5500
-- The account bus signaling server runs on port 5520
-- No HTTPS, certificates, or custom domains required (`localhost` is a [secure context](https://developer.mozilla.org/en-US/docs/Web/Security/Secure_Contexts))
+For a local Bee cluster, tunnels for real-domain testing, and the known dev keys, see
+[Local Development](../local-development/).
 
-For advanced setup (local Bee cluster, SSH tunnels for real-domain testing, known dev keys), see the [Local Development guide](../local-development/).
+## Backup and recovery
 
-## Import & Export
+These happen on the identity site, not in your app. The user exports an encrypted `.swarmid` file
+there, restores it with the recovery phrase, or rebuilds the account from Swarm on a new device.
+[Architecture](../architecture/#backup-and-recovery) has the file format and the flows.
 
-Backup and recovery happen in the identity UI, not in your dApp: the user exports an encrypted `.swarmid` file there, restores it with the recovery phrase, or rebuilds the account from Swarm on a new device. See [Architecture](../architecture/#backup-and-recovery) for the file format and flows.
+## Next
 
-## Next Steps
-
-- [Architecture](../architecture/) - Understand how Swarm ID works
-- [Key Derivation](../key-derivation/) - Every key the account uses and where it comes from
-- [API Reference](../api/) - Detailed API documentation
+- [Architecture](../architecture/): how the popup, the iframe and your page fit together
+- [Key Derivation](../key-derivation/): every key the account uses and where it comes from
+- [API Reference](../api/): every method and option

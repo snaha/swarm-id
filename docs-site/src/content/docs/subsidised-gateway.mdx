@@ -3,7 +3,7 @@ title: Subsidised Gateway
 description: Enable uploads for users without their own postage stamps
 ---
 
-A subsidised gateway allows dApps to provide postage stamps on behalf of their users, enabling uploads even when users don't have their own stamps.
+A subsidised gateway allows apps to provide postage stamps on behalf of their users, enabling uploads even when users don't have their own stamps.
 
 ## Overview
 
@@ -11,9 +11,9 @@ Normally, uploading to Swarm requires a postage stamp — a cryptographic proof 
 
 With a subsidised gateway:
 
-- The dApp operator runs a gateway that provides stamps for uploads
+- The app operator runs a gateway that provides stamps for uploads
 - Users can upload without owning stamps
-- The dApp operator pays for storage on behalf of users
+- The app operator pays for storage on behalf of users
 
 This is useful for:
 
@@ -27,7 +27,7 @@ Pass the `subsidisedGatewayUrl` option when creating the client:
 ```typescript
 const client = new SwarmIdClient({
   iframeOrigin: 'https://swarm-id.snaha.net',
-  subsidisedGatewayUrl: 'https://gateway.my-dapp.com',
+  subsidisedGatewayUrl: 'https://gateway.my-app.com',
   metadata: {
     name: 'My App',
     description: 'A decentralized application',
@@ -60,11 +60,11 @@ The session resolved a postage batch **and** its signer key **and** built a work
 
 The user has configured a custom Bee node URL in the identity provider's network settings. When a custom node is set, the subsidised gateway is **silently disabled**, so that uploads go to the user's chosen node. That node must allow the identity UI's origin — see [Using Your Own Bee Node](../own-bee-node/).
 
-The check is an exact inequality against the default gateway URL, and it runs in two places: once when the dApp identifies itself to the proxy, and again whenever network settings arrive or change. The second matters for a storage-partitioned session, whose settings are handed over by the connect popup _after_ the dApp has identified itself. Reverting to the default URL does not re-enable a gateway already dropped — that takes a dApp reload.
+The check is an exact inequality against the default gateway URL, and it runs in two places: once when the app identifies itself to the proxy, and again whenever network settings arrive or change. The second matters for a storage-partitioned session, whose settings are handed over by the connect popup _after_ the app has identified itself. Reverting to the default URL does not re-enable a gateway already dropped — that takes an app reload.
 
 **Subsidised Configured**
 
-The dApp passed a `subsidisedGatewayUrl` when creating the SwarmIdClient.
+The app passed a `subsidisedGatewayUrl` when creating the SwarmIdClient.
 
 ### Why Uploads Are Unavailable
 
@@ -73,7 +73,7 @@ When `uploadMode` is `unavailable`, `ConnectionInfo.uploadUnavailableReason` nam
 | Reason             | Meaning                                                                                                                                                                                                                                |
 | ------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `no-stamp`         | No postage batch or no signer key resolved — most often an account with no drive yet.                                                                                                                                                  |
-| `stamper-failed`   | The stamp resolved, but the write path did not build. The only place that difference reaches the dApp.                                                                                                                                 |
+| `stamper-failed`   | The stamp resolved, but the write path did not build. The only place that difference reaches the app.                                                                                                                                  |
 | `stamp-expired`    | The stamp resolved, but its stored lifetime has run out. The session refuses to stamp with it; with a subsidised gateway configured, uploads fall back to the gateway instead.                                                         |
 | `stamp-not-usable` | The stamp resolved and is not expired, but its stored record says the node does not have the batch or cannot use it. Opening the drive in the identity UI refreshes the record from the chain. Falls back to the gateway the same way. |
 
@@ -124,18 +124,18 @@ const client = new SwarmIdClient({
 
 This is the gateway behind the demo's "Use subsidised gateway" toggle (off by default), and it is the quickest way to let a first-time user upload during development, a demo, or a hackathon. Two things to know before shipping with it:
 
-- **It is shared and rate limited**, on the operator's terms, with no guarantee for your traffic. Production dApps should run their own gateway (below) or expect users to hold a drive.
+- **It is shared and rate limited**, on the operator's terms, with no guarantee for your traffic. Production apps should run their own gateway (below) or expect users to hold a drive.
 - **Its CORS allow-list is short** — `Content-Type`, `Swarm-Encrypt`, `Swarm-Postage-Batch-Id`, `Swarm-Postage-Stamp`, `Swarm-Deferred-Upload`, `Swarm-Collection`, `Swarm-Index-Document` — so a request carrying any other Swarm header fails before it leaves the browser, as a bare `Failed to fetch`. That is why the subsidised path drops `pin` and `tag` ([above](#what-the-gateway-path-ignores); the `pin` and `tag` rows of the [API reference](../api/) say the same). A gateway you run yourself, or a bare Bee node, accepts every Swarm header.
 
 ## Running a Subsidised Gateway
 
-To provide a subsidised gateway for your dApp:
+To provide a subsidised gateway for your app:
 
 1. Run a Bee node with a funded wallet
 2. Purchase a postage stamp with sufficient depth and amount for your expected usage
 3. Deploy a gateway proxy (such as [swarm-gateway](https://github.com/ethersphere/swarm-gateway)) in front of your Bee node that automatically injects the postage stamp header for uploads
 4. Expose the gateway via HTTPS
-5. Allow the identity UI's origin in the gateway's CORS configuration — uploads are made by the Swarm ID iframe, not by the dApps you serve, so their origins are not the ones that appear. See [Using Your Own Bee Node](../own-bee-node/#why-the-iframes-origin-is-the-one-that-matters)
+5. Allow the identity UI's origin in the gateway's CORS configuration — uploads are made by the Swarm ID iframe, not by the apps you serve, so their origins are not the ones that appear. See [Using Your Own Bee Node](../own-bee-node/#why-the-iframes-origin-is-the-one-that-matters)
 
 The gateway proxy intercepts upload requests and adds the required postage stamp header, so clients can upload without providing their own stamp.
 

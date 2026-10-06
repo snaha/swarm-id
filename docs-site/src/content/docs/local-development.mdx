@@ -60,8 +60,8 @@ UI's origin allowed explicitly — see [Using Your Own Bee Node](../own-bee-node
 
 ### Tunnels
 
-Behind a tunnel (ngrok, Cloudflare Tunnel), the dApp's origin is the tunnel hostname, not
-`localhost`: the identity UI sees a different dApp and derives a different
+Behind a tunnel (ngrok, Cloudflare Tunnel), the app's origin is the tunnel hostname, not
+`localhost`: the identity UI sees a different app and derives a different
 [app secret](../key-derivation/#app-secret), so a session approved on `localhost` does not carry
 over. Some dev servers also refuse cross-origin requests from anything but `localhost` — Next.js
 needs the tunnel host in `allowedDevOrigins` — and the symptom is the proxy iframe rejecting

@@ -19,7 +19,7 @@ export default defineConfig({
   integrations: [
     starlight({
       title: 'Swarm ID',
-      description: 'Cross-browser identity management for Swarm dApps',
+      description: 'Cross-browser identity management for Swarm apps',
       social: [
         {
           icon: 'github',

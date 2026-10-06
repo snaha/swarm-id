@@ -50,7 +50,7 @@ re-encrypts the same seed under a new key.
 ```text
 recovery phrase (BIP-39)
 └─ master key  (wallet private key; address = account id)
-   ├─ app secret            = deriveSecret(master, appOrigin)           one per dApp origin
+   ├─ app secret            = deriveSecret(master, appOrigin)           one per app origin
    │  └─ app material       = deriveSecret(appSecret, label)            client.deriveAppSecret(label)
    └─ derivationKey         = deriveSecret(master, "derivation-key")    stored on the account
       ├─ swarmEncryptionKey = deriveSecret(derivationKey, "swarm-encryption")
@@ -65,13 +65,13 @@ recovery phrase (BIP-39)
 ### App secret
 
 `deriveSecret(masterKey, appOrigin)`, computed in the connect popup when the user approves a
-dApp. The origin is the dApp page's origin, so the same account always gives the same dApp
-the same secret, and two dApps never share one. It is the only key that is handed to a
-dApp's proxy iframe, and it is what the iframe authenticates with. A dApp can derive further
+app. The origin is the app page's origin, so the same account always gives the same app
+the same secret, and two apps never share one. It is the only key that is handed to a
+app's proxy iframe, and it is what the iframe authenticates with. An app can derive further
 material of its own from it with `client.deriveAppSecret(label)`; the popup and the master key
 are not involved in that.
 
-Every origin is a different dApp. `http://localhost:3000`, a tunnel hostname and each preview
+Every origin is a different app. `http://localhost:3000`, a tunnel hostname and each preview
 deployment (every `*.vercel.app` preview has a hostname of its own) all derive different
 secrets, so a wallet, key or feed topic derived with `deriveAppSecret` on a preview URL is
 not the one production will see. Settle the production origin before anything derived from
@@ -114,15 +114,15 @@ else.
 
 ## What leaves the trusted domain
 
-| Material                                     | Who receives it                                                   |
-| -------------------------------------------- | ----------------------------------------------------------------- |
-| master key, recovery phrase, vault           | nobody; they stay in the identity UI's own storage                |
-| app secret                                   | that one dApp's proxy iframe, which is also on the trusted domain |
-| account view (stamps, signer keys, no vault) | a proxy iframe whose storage the browser has partitioned          |
-| app material from `deriveAppSecret`          | the dApp page that asked for it                                   |
+| Material                                     | Who receives it                                                  |
+| -------------------------------------------- | ---------------------------------------------------------------- |
+| master key, recovery phrase, vault           | nobody; they stay in the identity UI's own storage               |
+| app secret                                   | that one app's proxy iframe, which is also on the trusted domain |
+| account view (stamps, signer keys, no vault) | a proxy iframe whose storage the browser has partitioned         |
+| app material from `deriveAppSecret`          | the app page that asked for it                                   |
 
-The proxy iframe is served from the trusted domain, so a dApp page cannot read its storage.
-What the dApp gets is what it asks the iframe for through `SwarmIdClient`.
+The proxy iframe is served from the trusted domain, so an app page cannot read its storage.
+What the app gets is what it asks the iframe for through `SwarmIdClient`.
 
 ## Porting
 

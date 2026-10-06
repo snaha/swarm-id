@@ -1,11 +1,11 @@
 ---
 title: Self-Hosting the Identity UI
-description: Serve Swarm ID same-site with your dApp, and what that costs
+description: Serve Swarm ID same-site with your app, and what that costs
 ---
 
 The identity UI is a static SvelteKit build under Apache-2.0, and nothing in it is bound
-to `swarm-id.snaha.net`. A dApp can serve its own copy. The reason to do it is the browser's
-notion of **site**: a dApp on `app.example.com` embedding an identity UI on
+to `swarm-id.snaha.net`. An app can serve its own copy. The reason to do it is the browser's
+notion of **site**: an app on `app.example.com` embedding an identity UI on
 `id.example.com` is same-site, so the proxy iframe reads the identity origin's first-party
 storage directly. No storage partitioning, no popup handover, no third browser context on
 first run. This is how the canonical deployment already runs: `swarm-demo.snaha.net`
@@ -17,19 +17,19 @@ embeds `swarm-id.snaha.net`, both under `snaha.net`.
    use `/id`), and `PUBLIC_BUS_SIGNALING_URL` pointing at a
    [signaling server](../account-bus/) you run, or leave it unset to run without
    cross-device sync.
-2. Serve the build from a subdomain of your dApp's site, over HTTPS, with the same
+2. Serve the build from a subdomain of your app's site, over HTTPS, with the same
    registrable domain. Ports do not affect site; the scheme and the registrable domain do.
 3. Point your `SwarmIdClient` at it with `iframeOrigin`.
 4. If you use a subsidised gateway or your own Bee node, allow the **identity origin** in
-   its CORS configuration, not the dApp's: the iframe is what uploads. See
+   its CORS configuration, not the app's: the iframe is what uploads. See
    [Using Your Own Bee Node](../own-bee-node/).
 
 ## What it keeps
 
 The property that makes the design honest survives intact. A different **origin** keeps
-its own storage, so the dApp's JavaScript still cannot read the seed. Passkeys are
+its own storage, so the app's JavaScript still cannot read the seed. Passkeys are
 unaffected either way: the ceremony runs in the identity origin's own popup, so they work
-from the dApp on any deployment. What same-site adds is storage, not credentials.
+from the app on any deployment. What same-site adds is storage, not credentials.
 
 ## What it costs
 
@@ -45,7 +45,7 @@ from the dApp on any deployment. What same-site adds is storage, not credentials
   the fixes.
 
 Weigh the onboarding win against that ownership downgrade rather than assuming it wins.
-For a dApp whose users already have a Swarm ID, or who will use several dApps, the hosted
+For an app whose users already have a Swarm ID, or who will use several apps, the hosted
 identity is the better answer; the partitioned path works on every current browser, and
 the connect popup is one window.
 
