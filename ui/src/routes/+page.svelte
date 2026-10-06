@@ -6,6 +6,7 @@
 <script lang="ts">
   import ChevronLeft from '@lucide/svelte/icons/chevron-left'
 
+  import { replaceState } from '$app/navigation'
   import { page } from '$app/state'
 
   import AccountList from '$lib/components/account-list.svelte'
@@ -35,15 +36,31 @@
 
   const TABS = [
     { value: 'apps', label: 'Apps' },
-    { value: 'drives', label: 'Storage' },
+    { value: 'storage', label: 'Storage' },
     { value: 'account', label: 'Account' },
   ]
 
   /** Shows the create/import choice while other accounts exist on the device. */
   let addingAccount = $state(false)
-  // Deep-linkable (`/?tab=drives`) — the drive-attention actions land here.
-  const initialTab = page.url.searchParams.get('tab')
-  let tab = $state(TABS.some((t) => t.value === initialTab) ? (initialTab as string) : 'apps')
+  // Deep-linkable: `#<tab>[/<target>…]`, e.g. `#storage/<batchId>` or
+  // `#account/keys/data-sharing` — the target is handed to the tab to open.
+  let tab = $state('apps')
+  let target = $state<string[]>([])
+
+  function readHash(hash: string) {
+    const [head, ...rest] = hash.slice(1).split('/')
+    tab = TABS.some((t) => t.value === head) ? head : 'apps'
+    target = rest
+  }
+  readHash(page.url.hash)
+
+  /** Switches tab and mirrors it in the hash, without a history entry. */
+  function selectTab(value: string) {
+    tab = value
+    target = []
+    // eslint-disable-next-line svelte/no-navigation-without-resolve -- hash only, same page
+    replaceState(`#${value}`, page.state)
+  }
   /** Signed-out account being unlocked to sign back in. */
   let signingBackIn = $state<Account | undefined>(undefined)
   /** Signed-out account being unlocked to see the drive needing attention,
@@ -92,18 +109,20 @@
       return
     }
     sessionStore.setCurrentAccount(chosen.id)
-    tab = 'drives'
+    selectTab('storage')
   }
 
   const attentionCount = $derived(account ? drivesNeedingAttention(account) : 0)
 </script>
+
+<svelte:window onhashchange={() => readHash(location.hash)} />
 
 {#if account}
   <div class="flex min-h-svh flex-col">
     <header class="flex w-full items-center gap-2 p-8">
       <SwarmWordmark height={30} />
       <div class="flex flex-1 items-center justify-end gap-2">
-        <AccountSwitcher {account} onmanage={() => (tab = 'account')} />
+        <AccountSwitcher {account} onmanage={() => selectTab('account')} />
         <SettingsMenu />
       </div>
     </header>
@@ -122,7 +141,7 @@
               <button
                 type="button"
                 class="cursor-pointer underline underline-offset-2"
-                onclick={() => (tab = 'drives')}
+                onclick={() => selectTab('storage')}
               >
                 Check your storage
               </button>
@@ -131,16 +150,16 @@
           </div>
         {/if}
 
-        <Tabs tabs={TABS} bind:value={tab} />
+        <Tabs tabs={TABS} bind:value={() => tab, selectTab} />
 
         <!-- Keyed so per-account state (e.g. the unlocked seed) never survives a switch. -->
         {#key account.id}
           {#if tab === 'apps'}
             <HomeApps {account} />
-          {:else if tab === 'drives'}
-            <HomeDrives {account} />
+          {:else if tab === 'storage'}
+            <HomeDrives {account} {target} />
           {:else}
-            <HomeAccount {account} />
+            <HomeAccount {account} {target} />
           {/if}
         {/key}
       </div>
@@ -213,7 +232,7 @@
     description={driveAttentionDescription(checkingDrive.attention, 'home')}
     onsignedin={(restored) => {
       sessionStore.setCurrentAccount(restored.id)
-      tab = 'drives'
+      selectTab('storage')
       checkingDrive = undefined
     }}
     onclose={() => (checkingDrive = undefined)}

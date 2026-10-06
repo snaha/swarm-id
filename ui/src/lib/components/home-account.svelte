@@ -4,7 +4,7 @@
 -->
 
 <script lang="ts">
-  import type { Component } from 'svelte'
+  import { type Component, tick, untrack } from 'svelte'
 
   import { PublicKey } from '@ethersphere/bee-js'
   import ChevronDown from '@lucide/svelte/icons/chevron-down'
@@ -54,9 +54,11 @@
 
   interface Props {
     account: Account
+    /** From the URL hash (`#account/<section>[/<key card>]`): what to open. */
+    target?: string[]
   }
 
-  let { account }: Props = $props()
+  let { account, target = [] }: Props = $props()
 
   type SectionId = 'identity' | 'access' | 'keys' | 'phrase' | 'backup'
   /** What the unlock confirmation is for; completes once the seed decrypts. */
@@ -74,6 +76,16 @@
   let addDriveOpen = $state(false)
   let keysDetailOpen = $state(false)
   let sharingDetailOpen = $state(false)
+
+  $effect(() => {
+    const [section, card] = target
+    if (!section || !(section in untrack(() => expanded))) return
+    expanded[section as SectionId] = true
+    if (card === 'account-identity') keysDetailOpen = true
+    if (card === 'data-sharing') sharingDetailOpen = true
+    tick().then(() => document.getElementById(`account-${card ?? section}`)?.scrollIntoView())
+  })
+
   let signingOut = $state(false)
   let deleting = $state(false)
   // Reveals cache only their derived display value — never the raw seed, which
@@ -281,6 +293,7 @@
 
 {#snippet sectionHeader(id: SectionId, title: string, description: string)}
   <button
+    id="account-{id}"
     type="button"
     class="flex w-full cursor-pointer flex-col items-start text-left"
     aria-expanded={expanded[id]}
@@ -457,7 +470,10 @@
     )}
     {#if expanded.keys}
       <div class="flex flex-col gap-3 pl-5">
-        <div class="border-border flex w-full flex-col rounded-lg border">
+        <div
+          id="account-account-identity"
+          class="border-border flex w-full flex-col rounded-lg border"
+        >
           {@render keyCardHeader(
             'Account identity',
             account.id.toChecksum(),
@@ -490,7 +506,7 @@
           {/if}
         </div>
 
-        <div class="border-border flex w-full flex-col rounded-lg border">
+        <div id="account-data-sharing" class="border-border flex w-full flex-col rounded-lg border">
           {@render keyCardHeader(
             'Data sharing',
             sharingAddress,

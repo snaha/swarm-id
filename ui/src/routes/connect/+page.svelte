@@ -127,7 +127,7 @@
       return
     }
     sessionStore.setCurrentAccount(account.id)
-    window.open(resolve(routes.ROOT) + '?tab=drives', '_blank')
+    window.open(resolve(routes.ROOT) + '#storage', '_blank')
   }
 </script>
 
@@ -245,7 +245,7 @@
     description={driveAttentionDescription(checkingDrive.attention, 'connect')}
     onsignedin={(restored) => {
       sessionStore.setCurrentAccount(restored.id)
-      window.open(resolve(routes.ROOT) + '?tab=drives', '_blank')
+      window.open(resolve(routes.ROOT) + '#storage', '_blank')
       checkingDrive = undefined
     }}
     onclose={() => (checkingDrive = undefined)}

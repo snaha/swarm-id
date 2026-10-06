@@ -122,7 +122,7 @@ async function openIdentityTab(page: Page, tab: 'apps' | 'account') {
   // while the `goto` is still running — the `await` below still throws it, so a
   // genuine failure of either is reported, whichever happens first.
   joined.catch(() => undefined)
-  await idPage.goto(`${ID_ORIGIN}/?tab=${tab}`)
+  await idPage.goto(`${ID_ORIGIN}/#${tab}`)
   await joined
   return idPage
 }
@@ -286,7 +286,7 @@ test('a change on one device reaches another device’s stored account', async (
     const pageB = await deviceB.newPage()
     const joined = busRoomJoined(pageB)
     joined.catch(() => undefined)
-    await pageB.goto(`${ID_ORIGIN}/?tab=apps`)
+    await pageB.goto(`${ID_ORIGIN}/#apps`)
     await joined
 
     // A revokes on device A...
