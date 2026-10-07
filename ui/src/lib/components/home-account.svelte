@@ -60,7 +60,11 @@
 
   let { account, target = [] }: Props = $props()
 
-  type SectionId = 'identity' | 'access' | 'keys' | 'phrase' | 'backup'
+  const SECTION_IDS = ['identity', 'access', 'keys', 'phrase', 'backup'] as const
+  type SectionId = (typeof SECTION_IDS)[number]
+  function isSectionId(value: string | undefined): value is SectionId {
+    return SECTION_IDS.some((id) => id === value)
+  }
   /** What the unlock confirmation is for; completes once the seed decrypts. */
   type UnlockTarget = 'private-key' | 'phrase' | 'export' | 'change-method'
 
@@ -77,20 +81,18 @@
   let keysDetailOpen = $state(false)
   let sharingDetailOpen = $state(false)
 
-  const SECTION_IDS: readonly SectionId[] = ['identity', 'access', 'keys', 'phrase', 'backup']
-
   // Re-runs on a new hash only: the explicit list keeps it from reading
   // `expanded`, which would re-open the section as soon as the user collapsed
   // it. The list also rejects inherited keys like `#account/constructor`.
   $effect(() => {
     const [section, card] = target
-    if (!SECTION_IDS.includes(section as SectionId)) return
-    expanded[section as SectionId] = true
+    if (!isSectionId(section)) return
+    expanded[section] = true
     if (section === 'keys' && card === 'account-identity') keysDetailOpen = true
     if (section === 'keys' && card === 'data-sharing') sharingDetailOpen = true
     tick().then(() => {
       const el =
-        document.getElementById(`account-${section}-${card}`) ??
+        (card && document.getElementById(`account-${section}-${card}`)) ||
         document.getElementById(`account-${section}`)
       el?.scrollIntoView()
     })
