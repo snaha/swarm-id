@@ -10,7 +10,7 @@
   import ArrowRight from '@lucide/svelte/icons/arrow-right'
   import LoaderCircle from '@lucide/svelte/icons/loader-circle'
   import Wallet from '@lucide/svelte/icons/wallet'
-  import { TimeoutError, jsonRpcCall, withTimeout } from '@snaha/swarm-id'
+  import { TimeoutError, jsonRpcCall } from '@snaha/swarm-id'
   import { encodeFunctionData, erc20Abi, formatUnits } from 'viem'
 
   import { createAttemptTracker } from '$lib/attempt'
@@ -18,6 +18,7 @@
   import { Dialog } from '$lib/components/ui/dialog'
   import { Select } from '$lib/components/ui/select'
   import { onboard } from '$lib/crypto/onboard'
+  import { disconnectWallet } from '$lib/crypto/wallet-disconnect'
   import type { FundingNeed } from '$lib/payment/drive-operation'
   import {
     type FundingQuote,
@@ -130,8 +131,9 @@
   /** True while `quoteFunding` is pricing the built-in method's side. */
   let pricing = $state(false)
   /**
-   * True while the previous wallet disconnects. A WalletConnect disconnect is a
-   * relay round-trip; connecting before it lands can get the dying session back.
+   * True while the previous wallet's session ends, keeping Connect disabled.
+   * Ending a WalletConnect session is a relay round-trip, and a WalletConnect
+   * connect started before it lands is handed that session back.
    */
   let disconnecting = $state(false)
   /** Why the built-in method cannot be used, in the quoter's own words. */
@@ -342,7 +344,10 @@
     }
   }
 
-  /** Disconnect through onboard, or WalletConnect hands its session straight back. */
+  /**
+   * Back to the method screen, with Connect disabled (`disconnecting`) until
+   * the old wallet's session has ended.
+   */
   async function changeWallet() {
     attempts.supersede()
     const label = walletLabel
@@ -358,11 +363,7 @@
     if (label) {
       disconnecting = true
       try {
-        await withTimeout(
-          onboard.disconnectWallet({ label }),
-          DISCONNECT_TIMEOUT_MS,
-          'Wallet disconnect timed out',
-        )
+        await disconnectWallet(onboard, label, DISCONNECT_TIMEOUT_MS)
       } catch {
         // Proceed: the user is picking another wallet anyway.
       } finally {
