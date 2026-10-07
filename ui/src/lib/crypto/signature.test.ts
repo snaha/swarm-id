@@ -1,5 +1,13 @@
 // Copyright 2026 The Swarm Authors. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
+import { hexToUint8Array } from '@snaha/swarm-id'
+import {
+  decryptSeed,
+  deriveKeyFromSignature,
+  encryptSeed,
+  randomSalt,
+} from '@snaha/swarm-id/internal'
+import { generatePrivateKey, privateKeyToAccount } from 'viem/accounts'
 import { describe, expect, it } from 'vitest'
 
 import { canonicalSignature } from './signature'
@@ -67,5 +75,27 @@ describe('canonicalSignature', () => {
   // parity for it would seal a vault that never reopens.
   it('rejects a v that is neither a plain recovery id nor an EIP-155 fold', () => {
     expect(() => canonicalSignature(`0x${R_AND_S}1d`)).toThrow()
+  })
+})
+
+// The whole wallet path, signature to vault: a real wallet signs the message,
+// the canonical bytes derive the key, and signing again unseals what the first
+// signature sealed. It lives in ui because `canonicalSignature` needs viem.
+describe('canonicalSignature seals the vault', () => {
+  it('a re-signed message decrypts what the first signature encrypted', async () => {
+    const wallet = privateKeyToAccount(generatePrivateKey())
+    const message = 'sign to encrypt'
+    const salt = randomSalt()
+    const entropy = new Uint8Array(16).fill(5)
+
+    const signature = canonicalSignature(await wallet.signMessage({ message }))
+    const reSignature = canonicalSignature(await wallet.signMessage({ message }))
+    expect(reSignature).toBe(signature)
+
+    const key = await deriveKeyFromSignature(hexToUint8Array(signature), salt)
+    const payload = await encryptSeed(entropy, key)
+    expect(
+      await decryptSeed(payload, await deriveKeyFromSignature(hexToUint8Array(reSignature), salt)),
+    ).toEqual(entropy)
   })
 })

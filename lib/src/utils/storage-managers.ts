@@ -52,12 +52,18 @@ const parseAccountsV1: VersionParser<Account> = (data: unknown) => {
 
   const accounts: Account[] = []
   for (const record of records.data) {
-    const result = LocalAccountSchemaV1.safeParse(record)
-    if (!result.success) {
-      console.error("Skipping invalid account record:", result.error.format())
-      continue
+    // The try is the last line of defence: a throw inside a transform escapes
+    // `safeParse`, and must still cost one record, never the document.
+    try {
+      const result = LocalAccountSchemaV1.safeParse(record)
+      if (!result.success) {
+        console.error("Skipping invalid account record:", result.error.format())
+        continue
+      }
+      accounts.push(result.data)
+    } catch (e) {
+      console.error("Skipping invalid account record:", e)
     }
-    accounts.push(result.data)
   }
 
   return accounts.map((account) => {

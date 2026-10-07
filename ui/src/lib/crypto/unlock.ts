@@ -6,8 +6,8 @@
  * phrase) and backup export.
  */
 import { hexToUint8Array } from '@snaha/swarm-id'
+import { decryptSeed, deriveKeyFromPassword } from '@snaha/swarm-id/internal'
 
-import { decryptSeed, deriveKeyFromPassword } from '$lib/crypto/encryption'
 import { deriveWalletKey, unlockWalletKeySource } from '$lib/crypto/eth-wallet'
 import { authenticateWithPasskey } from '$lib/crypto/passkey'
 import type { Account } from '$lib/types'

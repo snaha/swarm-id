@@ -206,3 +206,84 @@ describe("isSignedOutAccount", () => {
     expectTypeOf(account.encryptedSeed).toEqualTypeOf<string>()
   })
 })
+
+// The record a host writes by hand, field for field as the docs' "Storage
+// layout" page lists them (#815). If this stops parsing, the page is wrong.
+const HOST_RECORD = {
+  id: "9b1d8c4a5e2f3b7c6d0e1f2a3b4c5d6e7f8a9b0c",
+  name: "Alice",
+  createdAt: 1_760_000_000_000,
+  publicKey: "02" + "ab".repeat(32),
+  derivationKey: "f".repeat(64),
+  partitionCount: 2,
+  devices: [],
+  connectedApps: [],
+  postageStamps: [
+    {
+      batchID: "c".repeat(64),
+      signerKey: "d".repeat(64),
+      utilization: 0,
+      usable: true,
+      depth: 20,
+      amount: "1000000000000000000",
+      bucketDepth: 16,
+      blockNumber: 1,
+      immutableFlag: false,
+      exists: true,
+      createdAt: 1_760_000_000_000,
+    },
+  ],
+  access: {
+    type: "password",
+    // The salt the known-answer vector below was sealed under (seed-encryption
+    // tests), so the record is a real vault, not only a schema-shaped one.
+    kdfSalt: "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f",
+    kdfIterations: 600_000,
+  },
+  encryptedSeed:
+    "960e15b5ac56351da6dd82a9fc9e7d674dd8e31836577a2dc7c099537281756c70baf56637dbbac5e2f81aa9",
+}
+
+describe("LocalAccountSchemaV1 host-written record", () => {
+  it("parses as a signed-in account", () => {
+    const result = LocalAccountSchemaV1.safeParse(HOST_RECORD)
+    expect(result.success).toBe(true)
+    if (!result.success) return
+    if (isSignedOutAccount(result.data)) throw new Error("signed out")
+    expect(result.data.id.toHex()).toBe(HOST_RECORD.id)
+    expect(result.data.postageStamps[0].amount).toBe(1_000_000_000_000_000_000n)
+  })
+})
+
+// The schema half of the malformed-record defence, on its own: the loader's
+// per-record catch would hide a regression here, and `bus/messages.ts` and
+// `sync/device-state.ts` parse peer input with these schemas and no catch. A
+// bee-js constructor or `BigInt` throwing inside a transform escapes
+// `safeParse`; the hex and decimal checks ahead of them must reject first.
+describe("LocalAccountSchemaV1 rejects malformed transform input", () => {
+  const [stamp] = HOST_RECORD.postageStamps
+  it.each([
+    ["a non-hex id", { ...HOST_RECORD, id: "z".repeat(40) }],
+    [
+      "a non-hex batchID",
+      {
+        ...HOST_RECORD,
+        postageStamps: [{ ...stamp, batchID: "z".repeat(64) }],
+      },
+    ],
+    [
+      "a non-hex signerKey",
+      {
+        ...HOST_RECORD,
+        postageStamps: [{ ...stamp, signerKey: "z".repeat(64) }],
+      },
+    ],
+    [
+      "a non-decimal amount",
+      { ...HOST_RECORD, postageStamps: [{ ...stamp, amount: "1e18" }] },
+    ],
+  ])("%s fails validation without throwing", (_label, record) => {
+    const result = LocalAccountSchemaV1.safeParse(record)
+    expect(result.success).toBe(false)
+  })
+})

@@ -1,0 +1,131 @@
+---
+title: Storage Layout
+description: What the identity site keeps in localStorage, byte for byte, so a host application can write it
+---
+
+Everything the identity site knows about an account lives in the trusted domain's `localStorage`.
+A browser keeps that store private to the origin, which is the security model. A host that owns
+the browser, such as an Electron application that embeds the identity site, is outside that model
+and can write the store directly. This page is the contract for doing so: it is what
+[#815](https://github.com/snaha/swarm-id/issues/815) and
+[#816](https://github.com/snaha/swarm-id/issues/816) asked for, and nothing on the public
+`@snaha/swarm-id` SDK offers it, by design (the end of the [API reference](../api/) explains the
+divide).
+
+:::caution[Pre-production]
+While the version is `0.x` this layout may change in place, without a migration. Pin the version
+of `@snaha/swarm-id` you validate against and read this page again when you bump it.
+:::
+
+`@snaha/swarm-id/internal` exports the pieces of this page that are code: the Zod schemas
+(`LocalAccountSchemaV1`, `NetworkSettingsSchemaV1`) to validate a record before writing it, the
+storage keys (`STORAGE_KEY_ACCOUNTS`, `STORAGE_KEY_NETWORK_SETTINGS`), the key derivation from
+[Key Derivation](../key-derivation/), and the seed encryption (`encryptSeed`,
+`deriveKeyFromPassword`, `deriveKeyFromSignature`, `randomSalt`). A TypeScript host still builds
+the JSON itself, from the tables below: the schemas only validate, and what they parse to (bee-js
+`EthAddress`, `BatchId`, `BigInt`) is not what goes on disk. The `internal` entry is otherwise what
+the identity site imports; it carries no stability promise beyond this page.
+
+## Network settings
+
+Key `swarm-id-network-settings`. A flat object, no envelope, both fields required `http(s)` URLs:
+
+```json
+{
+  "beeNodeUrl": "http://localhost:1633",
+  "gnosisRpcUrl": "https://xdai.fairdatasociety.org/"
+}
+```
+
+This is a per-device setting. Absent, the UI uses the public gateway and the default RPC. A host
+that runs the user's Bee node writes this once and the **Network settings** dialog shows it.
+
+## Accounts
+
+Key `swarm-id-accounts`. A versioned envelope around an array of account records:
+
+```json
+{ "version": 1, "data": [{ "...": "one record per account" }] }
+```
+
+The UI reads the key on load and again on every `storage` event, so a write from another window
+of the same origin is picked up live. Two behaviours a host has to write against:
+
+- The envelope must be exactly `{ "version": 1, "data": [...] }`. Anything else, non-JSON, a
+  `data` that is not an array, or any other `version`, loads as no accounts at all, and the UI's
+  next write replaces the key with what it loaded.
+- A record that fails validation is skipped, not fatal, with the reason on the console. Skipped
+  is not kept: the UI writes back what it loaded, so a malformed record, `encryptedSeed` included,
+  is gone after the user's next change to any account. Validate before writing.
+
+### A signed-in account
+
+The schema is `LocalAccountSchemaV1`, the signed-in arm: the portable projection
+(`SyncedAccountSchemaV1`) plus the device vault. The fields a host writes for a fresh account:
+
+| Field            | Value                                                                                                                                                         |
+| ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `id`             | The account address: 40 lowercase hex characters, no `0x`                                                                                                     |
+| `name`           | Display name                                                                                                                                                  |
+| `createdAt`      | Epoch milliseconds                                                                                                                                            |
+| `publicKey`      | The account's compressed secp256k1 public key, 66 hex characters, no `0x`                                                                                     |
+| `derivationKey`  | `deriveSecret(masterKey, "derivation-key")`, 64 hex characters                                                                                                |
+| `partitionCount` | `PARTITION_COUNT` (currently `2`). Omitted, the UI treats the record as the single-device layout until `devices` is non-empty, then assumes `PARTITION_COUNT` |
+| `devices`        | `[]`. The UI registers this device on first sign-in                                                                                                           |
+| `connectedApps`  | `[]`                                                                                                                                                          |
+| `postageStamps`  | `[]`, or the batches the host already owns, below                                                                                                             |
+| `access`         | The access method record, below                                                                                                                               |
+| `encryptedSeed`  | The BIP-39 entropy encrypted at rest, below                                                                                                                   |
+
+`id`, `publicKey` and the master key all come from the recovery phrase on the first Ethereum
+path of BIP-44, as [Key Derivation](../key-derivation/) describes. The optional fields of the
+schema (the per-field clocks, `settings`, `defaultPostageStampBatchID`, `lastModified`) are left
+out of a fresh record; the UI sets them as the user edits.
+
+Everything on the record except `access` and `encryptedSeed` is the synced projection, and a
+record with the same `id` may already exist from an earlier import. Replace it only with the
+vault fields; replacing the collections discards stamps and connected apps the user added on
+another device.
+
+### The vault
+
+The entropy of the recovery phrase (16 bytes for 12 words, 32 for 24) is encrypted with
+AES-GCM-256 under a key the access method derives. `encryptedSeed` is the **lowercase** hex of
+`IV (12 bytes) || ciphertext`, so 88 characters for a 12-word phrase and 120 for a 24-word one.
+
+`access` records how that key is made again at unlock:
+
+| `access.type` | Fields                                            | Key derivation                                                                                                                                                                                                                                                                                                                                                                                            |
+| ------------- | ------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `password`    | `kdfSalt` (32 random bytes, hex), `kdfIterations` | PBKDF2-SHA256 over the UTF-8 password with that salt and iteration count, to a 256-bit AES-GCM key. The schema does not bound `kdfIterations`; `600000` is what the UI writes and what a host is expected to write                                                                                                                                                                                        |
+| `eth-wallet`  | `encryptionSalt` (32 random bytes, hex)           | HKDF-SHA256 with that salt and the info `swarm-id-seed-encryption-v1`, over the wallet's `personal_sign` (EIP-191) signature of the message `Swarm ID\n\nSign this message to encrypt your recovery phrase on this device.\n\nv1`, in canonical form: 65 bytes `r ‖ s ‖ v` with `v` as `27`/`28`. A vault sealed with `v` as `0`/`1`, or with a compact (EIP-2098) signature, is one the UI cannot unlock |
+| `passkey`     | `credentialId`                                    | HKDF-SHA256 with an empty salt and the same info, over the credential's WebAuthn PRF output evaluated on `SHA-256("<hostname>:swarm-id-seed-encryption-v1")`                                                                                                                                                                                                                                              |
+
+A host can only write the `password` and `eth-wallet` forms: a passkey's PRF output exists only
+inside the browser's credential ceremony. For an account created outside the UI, `password` is
+the one with no external dependency.
+
+### Postage stamps
+
+An entry of `postageStamps` is `PostageStampSchemaV1`: `batchID` (64 hex characters),
+`signerKey` (the private key that owns the batch, 64 bare hex characters), `createdAt` (epoch
+milliseconds), and the batch as the chain reports it: `depth`, `bucketDepth`, `amount` (a decimal
+string, since it does not fit a JSON number), `blockNumber`, `immutableFlag`, `exists`, `usable`,
+`utilization` (`0` for a fresh batch) and optionally `batchTTL`.
+
+The signer key has to be the batch's on-chain owner: the UI's **Use existing batch** import
+checks that before attaching a batch, and refuses one the supplied key does not own
+([#820](https://github.com/snaha/swarm-id/issues/820)). The record is synced with the account,
+`signerKey` included, so a batch under any key follows the user to their other devices. The
+recommended key is nonetheless the account's own postage signer,
+`deriveSecret(derivationKey, "postage-signer")`: every device derives it, so the UI can buy, top
+up and dilute with it without a key the host chose. A host that buys batches for the account
+derives this key first, from the phrase it created the account with, and buys with it. The
+partition scheme on [Postage Batch Sharing](../multi-device-postage-batches/) then needs nothing
+from the host.
+
+### Signed out
+
+A signed-out account is the other arm of the union: the display fields, the vault, and
+`encryptedState`, an encrypted snapshot of everything the signed-in arm had. A host has no
+reason to write this form.

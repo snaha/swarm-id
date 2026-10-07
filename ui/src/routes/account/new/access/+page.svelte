@@ -14,6 +14,7 @@
     type Account as AccountRecord,
     PARTITION_COUNT,
     deriveAccountDerivationKey,
+    encryptSeed,
   } from '@snaha/swarm-id/internal'
 
   import { goto } from '$app/navigation'
@@ -26,7 +27,6 @@
   import { Tabs } from '$lib/components/ui/tabs'
   import { completeConnect } from '$lib/connect-handshake'
   import { createAccess } from '$lib/crypto/access-setup'
-  import { encryptSeed } from '$lib/crypto/encryption'
   import { strip0x } from '$lib/crypto/hex'
   import { walletFromPhrase } from '$lib/crypto/mnemonic'
   import { triggerSync } from '$lib/dev/sync-hooks'

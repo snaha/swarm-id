@@ -8,8 +8,9 @@
  * `derivationKey`, none of which ever leaves the trusted domain, so a dApp has
  * no use for any of it; a dApp holds a `SwarmIdClient` from the package root.
  * The proxy iframe, which lives in the same lib, reaches these modules directly.
- * A name is on this list because `ui/` (its tests included) imports it, and for
- * no other reason:
+ * A name is on this list because `ui/` (its tests included) imports it, or
+ * because the docs' "Storage layout" page names it for a host that writes the
+ * identity UI's `localStorage` itself (#815) — and for no other reason:
  * nothing is re-exported for a caller that does not exist (#801).
  */
 
@@ -35,6 +36,8 @@ export type { UploadTarget } from "./proxy/upload"
 export {
   BatchIdSchema,
   DEFAULT_GNOSIS_RPC_URL,
+  LocalAccountSchemaV1,
+  NetworkSettingsSchemaV1,
   PostageStampSchemaV1,
   PrivateKeySchema,
   SyncedAccountSchemaV1,
@@ -55,6 +58,19 @@ export type {
 } from "./schemas"
 
 export { DebouncedUtilizationUploader } from "./storage/debounced-uploader"
+
+// The vault's encryption, for the host case above: a host that writes the
+// record produces the same `encryptedSeed` bytes the identity UI does.
+export {
+  PASSWORD_KDF_ITERATIONS,
+  decryptSeed,
+  deriveKeyFromPassword,
+  deriveKeyFromPrf,
+  deriveKeyFromSecret,
+  deriveKeyFromSignature,
+  encryptSeed,
+  randomSalt,
+} from "./utils/seed-encryption"
 
 export { UtilizationStoreDB } from "./storage/utilization-store"
 
@@ -81,6 +97,8 @@ export type { PartitionLeaseStateSnapshot } from "./sync/partition-lease"
 export {
   AuthDataSchema,
   STORAGE_CHALLENGE_KEY,
+  STORAGE_KEY_ACCOUNTS,
+  STORAGE_KEY_NETWORK_SETTINGS,
   leaseCacheStorageKey,
 } from "./types"
 

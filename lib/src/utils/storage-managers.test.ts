@@ -162,6 +162,35 @@ describe("createAccountsStorageManager().load() — invalid records", () => {
     expect(loaded[0].id.equals(good.id)).toBe(true)
   })
 
+  // A throw inside a Zod transform escapes `safeParse`: without a format check
+  // ahead of `new EthAddress(s)` / `BigInt(s)`, one record with a 40-character
+  // non-hex id or a non-decimal `amount` dropped the WHOLE document, and the
+  // next read-merge-write erased the other accounts for real.
+  it("skips a record whose transform input is malformed, not the document", () => {
+    vi.spyOn(console, "error").mockImplementation(() => undefined)
+    const good = createAccount()
+    const other = createAccount({
+      id: new EthAddress(TEST_ETH_ADDRESS_2_HEX),
+      postageStamps: [createPostageStamp()],
+    })
+    const serialized = serializeAccount(other)
+    const [stamp] = serialized.postageStamps as Record<string, unknown>[]
+    const badId = { ...serialized, id: "z".repeat(40) }
+    const badAmount = {
+      ...serialized,
+      postageStamps: [{ ...stamp, amount: "1e18" }],
+    }
+    stubLocalStorage({
+      version: 1,
+      data: [badId, serializeAccount(good), badAmount],
+    })
+
+    const loaded = createAccountsStorageManager().load()
+
+    expect(loaded).toHaveLength(1)
+    expect(loaded[0].id.equals(good.id)).toBe(true)
+  })
+
   // Pre-vault-retention releases wiped the vault on sign-out; those records
   // can't be signed back into and are quarantined by the loader (pre-prod,
   // no migration).

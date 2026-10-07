@@ -22,7 +22,7 @@
   import RefreshCw from '@lucide/svelte/icons/refresh-cw'
   import Wallet from '@lucide/svelte/icons/wallet'
   import { uint8ArrayToHex } from '@snaha/swarm-id'
-  import { type AccessMethod, deriveSharingKey } from '@snaha/swarm-id/internal'
+  import { type AccessMethod, deriveSharingKey, encryptSeed } from '@snaha/swarm-id/internal'
 
   import { createAttemptTracker } from '$lib/attempt'
   import AccountAvatar from '$lib/components/account-avatar.svelte'
@@ -38,7 +38,6 @@
   import UnlockDialog from '$lib/components/unlock-dialog.svelte'
   import { createAccess } from '$lib/crypto/access-setup'
   import { backupFilename, createBackup } from '$lib/crypto/backup'
-  import { encryptSeed } from '$lib/crypto/encryption'
   import { prefix0x } from '$lib/crypto/hex'
   import { phraseFromEntropy, privateKeyFromEntropy } from '$lib/crypto/mnemonic'
   import { toastStore } from '$lib/stores/toast.svelte'

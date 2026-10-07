@@ -6,6 +6,8 @@ description: Point Swarm ID at a self-hosted Bee node, and allow the right origi
 By default Swarm ID talks to the public gateway at `https://api.gateway.ethswarm.org/`. To use a
 node you run yourself, open the settings menu in the identity site, choose **Network settings**, and
 put your node's API URL in **Bee address**.
+An application that embeds the identity site and runs the node itself can write that setting
+directly; [Storage Layout](../storage-layout/) has the key and the shape.
 
 One thing has to be configured on the node itself: **CORS**. Requests reach Bee from a browser, and
 a node that does not allow the origin they come from rejects every one of them.

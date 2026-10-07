@@ -5,7 +5,7 @@
  * is the key material for encrypting the seed — the passkey never holds the
  * seed itself, it only gates the decryption key.
  */
-import { deriveKeyFromPrf } from '$lib/crypto/encryption'
+import { deriveKeyFromPrf } from '@snaha/swarm-id/internal'
 
 const WEBAUTHN_TIMEOUT_MS = 60_000
 
