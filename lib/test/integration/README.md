@@ -105,6 +105,19 @@ independent and can run in any order against the shared node.
   a stamp the batch owner did not sign being refused at the queen and through
   the gateway alike (`user-stamp-gateway.test.ts`)
 
+### Not covered
+
+- **Tags through a gateway.** gateway-proxy does not proxy `/tags`, so
+  `POST /tags` answers 404 and `tryCreateTag` falls back to uploading without
+  one. Every gateway upload here takes that fallback, so a dApp behind a
+  gateway gets no tag for an upload. The suite proves the fallback, not tag
+  tracking.
+- **CORS.** Node's `fetch` never sends a preflight. gateway-proxy 0.17.0
+  hard-codes its `Access-Control-Allow-Headers`, and `swarm-postage-stamp` is
+  not on the list, so a browser's user-stamp upload through this image fails
+  its preflight. Subsidised uploads are unaffected. A browser test of either mode belongs to
+  the e2e step of [#831](https://github.com/snaha/swarm-id/issues/831).
+
 ## Next steps
 
 Natural extensions: sequential/epoch feeds, ACT, and manifests. These need
