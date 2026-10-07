@@ -119,7 +119,7 @@ never settles, even on a single device.
 
 ## Running it locally
 
-`pnpm dev` starts the signaling server on port 5520 next to the identity UI and the demo; the
+`pnpm dev` starts the signaling server on port 5520 next to the identity site and the demo; the
 UI reaches it through `PUBLIC_BUS_SIGNALING_URL`, which falls back to `ws://localhost:5520` in
 dev. A build with no URL configured runs the bus over `BroadcastChannel` only, so a partitioned
 iframe then reaches nothing outside its own partition. The rig that exercises a genuinely

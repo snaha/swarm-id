@@ -36,7 +36,7 @@ encrypted with AES-GCM under a key that the account's **access method** produces
 
 | Access method       | How the seed-encryption key is made                                                 |
 | ------------------- | ----------------------------------------------------------------------------------- |
-| **Passkey**         | The WebAuthn PRF extension, evaluated on a salt bound to the identity UI's hostname |
+| **Passkey**         | The WebAuthn PRF extension, evaluated on a salt bound to the identity site's hostname |
 | **Ethereum wallet** | A signature over a fixed message, combined with a random salt stored on the device  |
 | **Password**        | PBKDF2-SHA256 with 600,000 iterations and a random salt stored on the device        |
 
@@ -97,7 +97,7 @@ entropy by HKDF with a per-file salt, see [Architecture](../architecture/#the-sw
 ### postageSignerKey
 
 `deriveSecret(derivationKey, "postage-signer")`. The key that owns postage batches bought
-through the identity UI and that signs the stamps on every chunk uploaded with them.
+through the identity site and that signs the stamps on every chunk uploaded with them.
 
 ### Sharing key
 
@@ -116,7 +116,7 @@ else.
 
 | Material                                     | Who receives it                                                  |
 | -------------------------------------------- | ---------------------------------------------------------------- |
-| master key, recovery phrase, vault           | nobody; they stay in the identity UI's own storage               |
+| master key, recovery phrase, vault           | nobody; they stay in the identity site's own storage               |
 | app secret                                   | that one app's proxy iframe, which is also on the trusted domain |
 | account view (stamps, signer keys, no vault) | a proxy iframe whose storage the browser has partitioned         |
 | app material from `deriveAppSecret`          | the app page that asked for it                                   |
