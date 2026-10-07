@@ -165,6 +165,13 @@ export class SwarmIdClient {
       timeoutId: NodeJS.Timeout
     }
   > = new Map()
+  /**
+   * Progress callbacks of in-flight uploads, by request id. Dispatched from
+   * the one window listener, so progress passes the same source and origin
+   * checks as every other message from the iframe.
+   */
+  private progressListeners: Map<string, (progress: UploadProgress) => void> =
+    new Map()
   private requestIdCounter = 0
   private messageListener: ((event: MessageEvent) => void) | undefined
   private proxyInitializedPromise: Promise<void> | undefined
@@ -543,8 +550,12 @@ export class SwarmIdClient {
       }
 
       case "uploadProgress":
-        // Progress messages are handled by dedicated listeners in uploadData/uploadFile
-        // Don't resolve pending request - wait for the actual response
+        // Report to the upload's callback, if it registered one. Don't resolve
+        // the pending request - the response does that
+        this.progressListeners.get(message.requestId)?.({
+          total: message.total,
+          processed: message.processed,
+        })
         break
 
       default:
@@ -1615,30 +1626,18 @@ export class SwarmIdClient {
 
   /**
    * Forward the proxy's `uploadProgress` messages for one request to a
-   * callback. Returns the function that stops listening; a no-op without a
-   * callback.
+   * callback, through the window listener's checks. Returns the function that
+   * stops forwarding; a no-op without a callback.
    */
   private listenForProgress(
     requestId: string,
     onProgress: ((progress: UploadProgress) => void) | undefined,
   ): () => void {
     if (!onProgress) return () => {}
-    const listener = (event: MessageEvent) => {
-      if (event.origin !== new URL(this.iframeOrigin).origin) return
-      try {
-        const message = IframeToParentMessageSchema.parse(event.data)
-        if (
-          message.type === "uploadProgress" &&
-          message.requestId === requestId
-        ) {
-          onProgress({ total: message.total, processed: message.processed })
-        }
-      } catch {
-        // Ignore invalid messages
-      }
+    this.progressListeners.set(requestId, onProgress)
+    return () => {
+      this.progressListeners.delete(requestId)
     }
-    window.addEventListener("message", listener)
-    return () => window.removeEventListener("message", listener)
   }
 
   // ============================================================================
@@ -3448,6 +3447,7 @@ export class SwarmIdClient {
       pending.reject(new SwarmIdError("internal", "Client destroyed"))
     })
     this.pendingRequests.clear()
+    this.progressListeners.clear()
 
     // Remove message listener
     if (this.messageListener) {
