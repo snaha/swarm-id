@@ -5,7 +5,7 @@ description: What api.gateway.ethswarm.org offers a client, and what it does not
 
 The Swarm Foundation runs a public gateway that any client can read from and, within
 limits, write through. Swarm ID uses it as the default Bee endpoint and as the value most
-dApps pass for `subsidisedGatewayUrl` during development. It is not a Bee node, and four of
+apps pass for `subsidisedGatewayUrl` during development. It is not a Bee node, and four of
 the six teams at one hackathon lost time finding that out one endpoint at a time. This page
 is the list.
 
@@ -36,7 +36,7 @@ Measured on 2026-09-15; the gateway is operated by the Swarm Foundation and may 
 | `GET /node`                                        | `404`. `getNodeInfo()` fails against the public gateway; see below.                                                                                                                  |
 | CORS preflight                                     | A short allow-list. `Swarm-Pin`, `Swarm-Tag` and the ACT headers are refused, which a browser reports only as `Failed to fetch`. Swarm ID sends none of them on the subsidised path. |
 
-## What that means for a dApp
+## What that means for an app
 
 - **Do not gate anything on `getNodeInfo()`.** It exists to detect a dev-mode Bee node,
   where deferred uploads are required. On the public gateway it fails, and the right

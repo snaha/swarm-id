@@ -12,7 +12,7 @@ The project uses [@snaha/bee-compose](https://www.npmjs.com/package/@snaha/bee-c
 ### Quick Start
 
 ```bash
-# Start everything: cluster and chain in background, identity UI and demo in foreground
+# Start everything: cluster and chain in background, identity site and demo in foreground
 pnpm dev:local
 
 # The same, from a clean chain and empty node state
@@ -54,14 +54,14 @@ Once the cluster is running, these endpoints are available:
 local solver that stands in for Relay, so a payment from another chain can be rehearsed end to
 end; see [Paying for a Drive](#paying-for-a-drive).
 
-Every node in the cluster allows all CORS origins, so the identity UI can talk to
+Every node in the cluster allows all CORS origins, so the identity site can talk to
 `http://localhost:1633` as soon as it is up. A Bee node you run yourself instead needs the identity
 UI's origin allowed explicitly — see [Using Your Own Bee Node](../own-bee-node/).
 
 ### Tunnels
 
-Behind a tunnel (ngrok, Cloudflare Tunnel), the dApp's origin is the tunnel hostname, not
-`localhost`: the identity UI sees a different dApp and derives a different
+Behind a tunnel (ngrok, Cloudflare Tunnel), the app's origin is the tunnel hostname, not
+`localhost`: the identity site sees a different app and derives a different
 [app secret](../key-derivation/#app-secret), so a session approved on `localhost` does not carry
 over. Some dev servers also refuse cross-origin requests from anything but `localhost` — Next.js
 needs the tunnel host in `allowedDevOrigins` — and the symptom is the proxy iframe rejecting
@@ -69,14 +69,14 @@ every message rather than anything about the tunnel.
 
 ## Developer Tools (/dev)
 
-The Identity UI includes a Developer Tools page at `http://localhost:5500/dev` with utilities for testing and debugging.
+The Identity site includes a Developer Tools page at `http://localhost:5500/dev` with utilities for testing and debugging.
 
 A menu in the page header switches the whole app between the local endpoints and the production ones in a click; anything else is edited through the product's own Network settings dialog. Below it, a banner names the chain the configured RPC actually serves — proven by its genesis hash, since the local chain reports Gnosis' chain id on purpose — so it is always visible whether the tools below would be spending real money.
 
 ### Overview Tab
 
 - **Endpoints these tools use** — the Bee node, the cluster worker (a second node, for checking that a chunk replicated off the node that took it), the Gnosis Chain RPC, and the fake Ethereum mainnet RPC, each with a live indicator
-- **Test connect flow** — a link to the demo app on port 3500 to run the connect flow against this identity UI
+- **Test connect flow** — a link to the demo app on port 3500 to run the connect flow against this identity site
 - **Local data** — counts of the accounts, connections, and stamps on this device, with **Clear accounts** and **Clear everything** buttons
 
 ### Chain Tab
@@ -209,7 +209,7 @@ After buying a postage stamp, wait ~30 seconds before using it. The stamp needs 
 
 Safari's Intelligent Tracking Prevention (ITP) partitions storage for third-party iframes, so the proxy cannot read the trusted domain's localStorage. Uploads are designed to keep working — the connect popup hands the iframe the account's stamps and signer keys — and the session is kept in that partition's own store, so a reload does not re-run the handshake ([#635](https://github.com/snaha/swarm-id/issues/635)). See [issue #277](https://github.com/snaha/swarm-id/issues/277) for the background.
 
-The whole path — handover, stamper, upload — is confirmed on real Safari (iOS 18.7 / Safari 26.6), in a normal and a private window alike. A plain `pnpm dev` cannot reproduce it — the identity UI and demo are served from the same site, and ports do not make them cross-site. Browsing the demo under a **different hostname for the same machine** does: `http://127.0.0.1:3500` or `http://[::1]:3500` while the proxy origin stays `http://localhost:5500`. That is the rig `ui/tests/bus-propagation.test.ts` uses.
+The whole path — handover, stamper, upload — is confirmed on real Safari (iOS 18.7 / Safari 26.6), in a normal and a private window alike. A plain `pnpm dev` cannot reproduce it — the identity site and demo are served from the same site, and ports do not make them cross-site. Browsing the demo under a **different hostname for the same machine** does: `http://127.0.0.1:3500` or `http://[::1]:3500` while the proxy origin stays `http://localhost:5500`. That is the rig `ui/tests/bus-propagation.test.ts` uses.
 
 Locally, `pnpm dev` also starts the [account-bus](../account-bus/) signaling server on port 5520; without it a partitioned iframe can only reach contexts in its own partition.
 
@@ -223,12 +223,12 @@ To check if storage is partitioned:
 2. Go to **Application** → **Storage**
 3. Look for partitioned storage indicators
 
-On the local rig storage is not partitioned at all: `localhost:3500` and `localhost:5500` are the same _site_ (ports do not affect site), so the iframe reads the identity UI's first-party store directly. Browsing the demo under a different name for the same machine — `127.0.0.1:3500` instead of `localhost:3500` — makes it cross-site and partitions it, which is the quickest way to reproduce the partitioned path locally.
+On the local rig storage is not partitioned at all: `localhost:3500` and `localhost:5500` are the same _site_ (ports do not affect site), so the iframe reads the identity site's first-party store directly. Browsing the demo under a different name for the same machine — `127.0.0.1:3500` instead of `localhost:3500` — makes it cross-site and partitions it, which is the quickest way to reproduce the partitioned path locally.
 
 ### Bee Requests Blocked by CORS
 
 The cluster started by `pnpm dev:cluster:start` allows every origin, so this only bites a Bee node
-you run by hand: it has to allow the **identity UI's** origin (`http://localhost:5500` in
+you run by hand: it has to allow the **identity site's** origin (`http://localhost:5500` in
 development), because Bee requests are made by the Swarm ID iframe rather than by the app embedding
 it. See [Using Your Own Bee Node](../own-bee-node/).
 
@@ -241,7 +241,7 @@ it. See [Using Your Own Bee Node](../own-bee-node/).
 
 ### Library Changes Not Reflected
 
-The identity UI and the demo dev servers import the library's source directly, so an edit in
+The identity site and the demo dev servers import the library's source directly, so an edit in
 `lib/src` shows up on the next reload without a build. Two things still need a restart of
 `pnpm dev`: switching branches, and running `pnpm build:lib`. Either can leave the dev server's
 module graph stale, which shows up as a missing export that plainly exists in the file.
@@ -324,4 +324,4 @@ test.
 https://demo.yourdomain.com/?idDomain=https://id.yourdomain.com
 ```
 
-The `?idDomain=` parameter tells the demo which identity service to use. This allows testing cross-origin storage partitioning with real browser security policies while still having hot reload for the identity UI.
+The `?idDomain=` parameter tells the demo which identity service to use. This allows testing cross-origin storage partitioning with real browser security policies while still having hot reload for the identity site.

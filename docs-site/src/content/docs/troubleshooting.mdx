@@ -82,7 +82,7 @@ has no iframe to talk to, and a later popup has no opener. Through the library i
 `SwarmIdError` with code `invalid-state`.
 
 **Fix.** Keep the container mounted for the life of the page, in every state. See
-[Quick Start](../getting-started/#basic-usage).
+[Quick Start](../getting-started/#connect-and-upload).
 
 ### `Failed to open authentication popup`
 
@@ -91,7 +91,7 @@ blocker is on. The code is `popup-blocked`.
 
 **Fix.** Call `connect()` synchronously from the click handler, or render the iframe's own
 button. The client opens the popup from the iframe or the page as the storage situation
-requires, so a dApp's own button works on partitioned storage too.
+requires, so an app's own button works on partitioned storage too.
 
 ### `[SwarmIdClient] Rejected message from unauthorized origin`, several times a second
 
@@ -133,14 +133,14 @@ SvelteKit with SSR) throws there. Before the guard this surfaced as a bare
 `ReferenceError: window is not defined` from inside the package.
 
 **Fix.** Construct the client in code that runs only in the browser: an effect, `onMount`, or a
-branch on `typeof window !== 'undefined'`. See [Quick Start](../getting-started/#basic-usage). Code
+branch on `typeof window !== 'undefined'`. See [Quick Start](../getting-started/#connect-and-upload). Code
 that has no browser at all — a server, an agent — uses `@ethersphere/bee-js` with the drive's batch
 id and signer key instead; a headless client is [#770](https://github.com/snaha/swarm-id/issues/770).
 
 ### A session approved on `localhost` is gone behind a tunnel or on a preview URL
 
-**Cause.** The app secret is derived from the dApp's origin, and a tunnel hostname or a preview
-deployment is a different origin — so a different dApp, with a different secret and different
+**Cause.** The app secret is derived from the app's origin, and a tunnel hostname or a preview
+deployment is a different origin — so a different app, with a different secret and different
 derived keys.
 
 **Fix.** Expected. Settle the production origin before anything derived from the app secret is

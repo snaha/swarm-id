@@ -1,6 +1,6 @@
 ---
 title: Account Bus
-description: How the live contexts of one account — dApp iframes, the Swarm ID tab, other devices — hear about each other's changes in a round trip, over an encrypted WebRTC/relay mesh, without moving durable truth off Swarm and local storage.
+description: How the live contexts of one account — app iframes, the Swarm ID tab, other devices — hear about each other's changes in a round trip, over an encrypted WebRTC/relay mesh, without moving durable truth off Swarm and local storage.
 ---
 
 Swarm ID keeps an account's durable state in two places: the trusted domain's local storage
@@ -15,7 +15,7 @@ poll. It carries nothing durable, and nothing depends on it for correctness — 
 
 ## Who is a peer
 
-- Every proxy iframe of the account, in every dApp and every storage partition (a Safari
+- Every proxy iframe of the account, in every app and every storage partition (a Safari
   iframe with its own partitioned storage is a full peer, which is what makes it a full writer;
   see [Storage Partitioning](../architecture/#storage)).
 - The Swarm ID tab itself, where revokes and renames happen.
@@ -32,11 +32,11 @@ linkable to the account id, so the server learns a room name, connection timing,
 
 One interface, three transports:
 
-| Transport                                  | Reaches                                                       | Status                                                                |
-| ------------------------------------------ | ------------------------------------------------------------- | --------------------------------------------------------------------- |
-| `BroadcastChannel`                         | contexts in the same origin and the same storage partition    | shipped                                                               |
-| Signaling server + WebRTC `RTCDataChannel` | everything else: other partitions, other dApps, other devices | shipped; `wss://swarm-id.snaha.net/bus` in production, `:5520` in dev |
-| SWIP-60 pub-sub                            | synced accounts, through the Bee node                         | future adapter, once bee and bee-js ship it                           |
+| Transport                                  | Reaches                                                      | Status                                                                |
+| ------------------------------------------ | ------------------------------------------------------------ | --------------------------------------------------------------------- |
+| `BroadcastChannel`                         | contexts in the same origin and the same storage partition   | shipped                                                               |
+| Signaling server + WebRTC `RTCDataChannel` | everything else: other partitions, other apps, other devices | shipped; `wss://swarm-id.snaha.net/bus` in production, `:5520` in dev |
+| SWIP-60 pub-sub                            | synced accounts, through the Bee node                        | future adapter, once bee and bee-js ship it                           |
 
 The Swarm ID tab uses the signaling transport only — anything a `BroadcastChannel` would
 reach from there already converges through storage events.
@@ -108,7 +108,7 @@ never settles, even on a single device.
 
 ## What the bus is not
 
-- **Not a mailbox.** A message reaches the peers that are in the room now. A dApp partition that
+- **Not a mailbox.** A message reaches the peers that are in the room now. An app partition that
   is closed when an app is revoked learns about it when it next overlaps with a live peer, or
   from the one-time read of the account's published state it does on restore.
 - **Not the record.** Every message either shortcuts a wait the durable protocol would
@@ -119,7 +119,7 @@ never settles, even on a single device.
 
 ## Running it locally
 
-`pnpm dev` starts the signaling server on port 5520 next to the identity UI and the demo; the
+`pnpm dev` starts the signaling server on port 5520 next to the identity site and the demo; the
 UI reaches it through `PUBLIC_BUS_SIGNALING_URL`, which falls back to `ws://localhost:5520` in
 dev. A build with no URL configured runs the bus over `BroadcastChannel` only, so a partitioned
 iframe then reaches nothing outside its own partition. The rig that exercises a genuinely

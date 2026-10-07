@@ -522,7 +522,7 @@ device's full current view (`DeviceStateSnapshotSchemaV1`):
 
 A device writes its feed on a local change, never after a read, so write amplification is
 bounded and folding is repeatable. Both writers go through the batch write coordinator (the
-cross-tab lock plus the partition lease): the identity UI publishes once per change, and the
+cross-tab lock plus the partition lease): the identity site publishes once per change, and the
 proxy iframe publishes with a short debounce when it acquires a lease or sees a local change.
 
 ### Read: the fold
