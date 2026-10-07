@@ -147,6 +147,7 @@ import {
 import { isStorageShared } from "./utils/storage-probe"
 import {
   deriveSecret,
+  deriveSecretSync,
   deriveSharingKey,
   derivePostageSignerKeySync,
   deriveSwarmEncryptionKey,
@@ -414,9 +415,10 @@ export class SwarmIdProxy {
   }
   /**
    * The write path (lock + partition lease + stamp flush) for the current
-   * account+batch. Constructed in `initializeStamper` once the stamper and
-   * account context are known; undefined before auth / after disconnect. The
-   * proxy delegates all writes to it via `withModeAwareWriteLock`.
+   * account+batch. Assigned in `initializeStamper` together with the stamper it
+   * writes through, and dropped with it whenever the resolved stamp changes
+   * (`setResolvedStamp`); undefined before auth / after disconnect. The proxy
+   * delegates all writes to it via `withModeAwareWriteLock`.
    */
   private coordinator: BatchWriteCoordinator | undefined
   /**
@@ -732,15 +734,28 @@ export class SwarmIdProxy {
       return
     }
 
-    this.postageBatchId = nextBatchId
-    this.signerKey = nextSignerKey
-    this.stampLifetime = stamp
-    this.stamper = undefined
-    this.stamperAccountFingerprint = undefined
-
+    this.setResolvedStamp(stamp)
     if (stamp) {
       await this.initializeStamper(stamp.depth)
     }
+  }
+
+  /**
+   * The only way the resolved stamp changes. The write path — the stamper and
+   * the coordinator that writes through it — belongs to the stamp it was built
+   * for, so it goes whenever the fields naming that stamp do, before anything
+   * is built for the next one. Otherwise the previous coordinator outlives its
+   * stamp: after the drive is removed, or the connection moves to another
+   * account, an upload still takes that coordinator's lease and spends the old
+   * batch while the dApp is told there is no stamp at all.
+   */
+  private setResolvedStamp(stamp: PostageStamp | undefined): void {
+    this.teardownCoordinator()
+    this.stamper = undefined
+    this.stamperAccountFingerprint = undefined
+    this.postageBatchId = stamp?.batchID.toHex()
+    this.signerKey = stamp?.signerKey.toHex()
+    this.stampLifetime = stamp
   }
 
   /**
@@ -762,21 +777,12 @@ export class SwarmIdProxy {
     this.joinAccountBus()
 
     // Look up postage stamp. When switching identities, the new identity may
-    // not have a stamp at all — explicitly clear any prior stamper state so
-    // we don't emit a snapshot claiming `user-stamp` mode with the previous
-    // identity's stamp.
+    // not have a stamp at all, and the previous identity's write path must not
+    // survive into it either way.
     const stamp = this.lookupPostageStampForApp()
+    this.setResolvedStamp(stamp)
     if (stamp) {
-      this.postageBatchId = stamp.batchID.toHex()
-      this.signerKey = stamp.signerKey.toHex()
-      this.stampLifetime = stamp
       await this.initializeStamper(stamp.depth)
-    } else {
-      this.postageBatchId = undefined
-      this.signerKey = undefined
-      this.stampLifetime = undefined
-      this.stamper = undefined
-      this.stamperAccountFingerprint = undefined
     }
 
     this.showAuthButton()
@@ -1802,8 +1808,9 @@ export class SwarmIdProxy {
     }
 
     // Create utilization-aware stamper with owner and encryption key
+    let stamper: UtilizationAwareStamper
     try {
-      const stamper = await UtilizationAwareStamper.create(
+      stamper = await UtilizationAwareStamper.create(
         signerKey,
         new BatchId(batchId),
         stampDepth,
@@ -1811,18 +1818,14 @@ export class SwarmIdProxy {
         accountInfo.owner,
         accountInfo.encryptionKey,
       )
-      if (superseded()) return
-      this.stamper = stamper
-      this.stamperAccountFingerprint = `${accountInfo.owner.toHex()}-${uint8ArrayToHex(accountInfo.encryptionKey)}`
     } catch (error) {
+      // Nothing to clear: the write path was dropped when the stamp was
+      // resolved (`setResolvedStamp`), and if this init has been superseded,
+      // whatever stamper there is by now belongs to the newer one.
       console.error("[Proxy] Failed to create stamper:", error)
-      // A stale init's create rejects too (its batch was just removed); the
-      // stamper by then is the superseding refresh's, not this init's to clear.
-      if (superseded()) return
-      this.stamper = undefined
-      this.stamperAccountFingerprint = undefined
       return
     }
+    if (superseded()) return
 
     // Build the write-path coordinator for this account+batch. It owns the
     // cross-tab write lock, the partition-lease lifecycle, and the stamp flush.
@@ -1832,12 +1835,15 @@ export class SwarmIdProxy {
     // (`startLease`) so the first upload doesn't pay the acquire latency; a
     // concurrent first upload queues on the same write lock and then finds the
     // lease already held. Single-device accounts get a lock-only coordinator.
-    const backupKeyHex = await deriveSecret(
-      uint8ArrayToHex(accountInfo.encryptionKey),
-      BACKUP_KEY_LABEL,
-    )
-    if (superseded()) return
-    this.teardownCoordinator()
+    // No await from here to `startLease`: the stamper and the coordinator that
+    // writes through it are assigned together, because a stamper without its
+    // coordinator tells an upload it is in user-stamp mode and then has nothing
+    // to write through. It also means the stamper is assigned the moment
+    // `create` returns: a utilization delta that arrives while there is no
+    // stamper is dropped, so one a peer broadcast after `create` read the
+    // stored counters would end up in neither.
+    this.stamper = stamper
+    this.stamperAccountFingerprint = `${accountInfo.owner.toHex()}-${uint8ArrayToHex(accountInfo.encryptionKey)}`
     const tuning = readPartitionTuningOverride()
     // The callbacks below outlive this narrowing, and the batch they name has
     // to be the one the coordinator serves, on both counts: its lease cache is
@@ -1847,7 +1853,7 @@ export class SwarmIdProxy {
     this.coordinator = new BatchWriteCoordinator({
       bee: this.bee,
       batchId,
-      stamper: this.stamper,
+      stamper,
       deviceId: this.requireDeviceId(),
       knownDeviceIds: () =>
         this.knownDeviceIdsForAccount(accountInfo.accountId),
@@ -1863,7 +1869,12 @@ export class SwarmIdProxy {
       intentGuardWindowMs: tuning?.guardWindowMs,
       intentGuardPollMs: tuning?.guardPollMs,
       accountId: accountInfo.accountId,
-      backupSigner: new PrivateKey(backupKeyHex),
+      backupSigner: new PrivateKey(
+        deriveSecretSync(
+          uint8ArrayToHex(accountInfo.encryptionKey),
+          BACKUP_KEY_LABEL,
+        ),
+      ),
       swarmEncryptionKey: accountInfo.encryptionKey,
       partitionCount: accountInfo.partitionCount,
       mode: "persistent",
@@ -2411,15 +2422,9 @@ export class SwarmIdProxy {
 
       // Look up postage stamp from shared storage based on connected identity
       const stamp = this.lookupPostageStampForApp()
+      this.setResolvedStamp(stamp)
       if (stamp) {
-        this.postageBatchId = stamp.batchID.toHex()
-        this.signerKey = stamp.signerKey.toHex()
-        this.stampLifetime = stamp
         await this.initializeStamper(stamp.depth)
-      } else {
-        this.postageBatchId = undefined
-        this.signerKey = undefined
-        this.stampLifetime = undefined
       }
       return
     }
@@ -3221,18 +3226,13 @@ export class SwarmIdProxy {
     this.authenticated = false
     this.authLoading = false
     this.appSecret = undefined
-    this.postageBatchId = undefined
-    this.signerKey = undefined
     // Before dropping `deviceId` — the release announcement is sent as us.
-    this.teardownCoordinator()
+    this.setResolvedStamp(undefined)
     this.deviceId = undefined
     if (this.publishTimer !== undefined) {
       clearTimeout(this.publishTimer)
       this.publishTimer = undefined
     }
-    this.stamper = undefined
-    this.stamperAccountFingerprint = undefined
-    this.stampLifetime = undefined
     this.pendingLaneUpdates.clear()
     this.storagePartitioned = false
     this.partitionAccount = undefined
@@ -3317,9 +3317,10 @@ export class SwarmIdProxy {
     if (this.stampRefusal) return false
     // The stamp resolved but no stamper was built from it, a state the proxy
     // really reaches: `initializeStamper` logs and returns rather than
-    // throwing, and the stamp is set before an init's first await. No
-    // coordinator exists for this stamp either, so a user-stamp write would
-    // throw "Stamper not initialized".
+    // throwing, and the stamp is set before an init's first await. The
+    // stamper and its coordinator are assigned together, so no stamper also
+    // means no coordinator, and a user-stamp write would throw "Stamper not
+    // initialized".
     if (!this.stamper) return false
     return true
   }
