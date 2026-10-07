@@ -165,7 +165,7 @@ describe("createAccountsStorageManager().load() — invalid records", () => {
   // A throw inside a Zod transform escapes `safeParse`: without a format check
   // ahead of `new EthAddress(s)` / `BigInt(s)`, one record with a 40-character
   // non-hex id or a non-decimal `amount` dropped the WHOLE document, and the
-  // next read-merge-write erased the other accounts for real (#838 review).
+  // next read-merge-write erased the other accounts for real.
   it("skips a record whose transform input is malformed, not the document", () => {
     vi.spyOn(console, "error").mockImplementation(() => undefined)
     const good = createAccount()

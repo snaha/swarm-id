@@ -49,8 +49,14 @@ Key `swarm-id-accounts`. A versioned envelope around an array of account records
 ```
 
 The UI reads the key on load and again on every `storage` event, so a write from another window
-of the same origin is picked up live. A record that fails validation is skipped, not fatal, with
-the reason on the console.
+of the same origin is picked up live. Two behaviours a host has to write against:
+
+- The envelope must be exactly `{ "version": 1, "data": [...] }`. Anything else, non-JSON, a
+  `data` that is not an array, or any other `version`, loads as no accounts at all, and the UI's
+  next write replaces the key with what it loaded.
+- A record that fails validation is skipped, not fatal, with the reason on the console. Skipped
+  is not kept: the UI writes back what it loaded, so a malformed record, `encryptedSeed` included,
+  is gone after the user's next change to any account. Validate before writing.
 
 ### A signed-in account
 

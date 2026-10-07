@@ -80,8 +80,7 @@ describe('canonicalSignature', () => {
 
 // The whole wallet path, signature to vault: a real wallet signs the message,
 // the canonical bytes derive the key, and signing again unseals what the first
-// signature sealed. Moved here from the ui encryption test when seed
-// encryption went into the lib (#838).
+// signature sealed. It lives in ui because `canonicalSignature` needs viem.
 describe('canonicalSignature seals the vault', () => {
   it('a re-signed message decrypts what the first signature encrypted', async () => {
     const wallet = privateKeyToAccount(generatePrivateKey())

@@ -34,11 +34,9 @@ export { SocUploadError, uploadSOC } from "./proxy/upload"
 export type { UploadTarget } from "./proxy/upload"
 
 export {
-  AccessMethodSchemaV1,
   BatchIdSchema,
   DEFAULT_GNOSIS_RPC_URL,
   LocalAccountSchemaV1,
-  LocalVaultSchemaV1,
   NetworkSettingsSchemaV1,
   PostageStampSchemaV1,
   PrivateKeySchema,
