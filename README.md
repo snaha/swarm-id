@@ -185,7 +185,9 @@ the default when buying a drive — settles on Gnosis **mainnet** only, so local
 it to settle against: pick the built-in method to pay on the local chain, or turn on `/dev` →
 **Chain** → **Simulated purchase**, which stands in for the widget with a fabricated batch so that
 method's own screens stay reachable here. (It is also offered for buying alone; its contract ABI
-cannot top up or dilute, so extend and resize list the built-in method by itself.)
+cannot top up or dilute, so extend and resize list the built-in method by itself.) The third,
+`Pay with card (swarm-storage.fly.dev)`, opens the card shop on the widget's protocol; set
+`PUBLIC_CARD_SHOP_URL` in `ui/.env` to a shop run locally in dry-run mode to try it here.
 
 ```bash
 pnpm dev:local         # everything: cluster, both chains, solver, identity UI, demo

@@ -1,9 +1,9 @@
 // Copyright 2026 The Swarm Authors. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
-import { WIDGET_HOST } from '$lib/payment/multichain-widget'
+import { CARD_SHOP_HOST, WIDGET_HOST } from '$lib/payment/multichain-widget'
 
 /**
- * The two ways a drive can be paid for, named once.
+ * The ways a drive can be paid for, named once.
  *
  * Two screens offer this choice — the up-front one in `drive-add-dialog`, and
  * the method screen inside `payment-dialog` a payment lands on — and a user who
@@ -14,15 +14,20 @@ import { WIDGET_HOST } from '$lib/payment/multichain-widget'
  * ABI carries `createBatch` alone, so it can buy a drive and can neither extend
  * nor resize one.
  */
-export type PaymentMethod = 'widget' | 'built-in'
+export type PaymentMethod = 'widget' | 'card' | 'built-in'
 
 export const WIDGET_LABEL = `Pay with crypto (${WIDGET_HOST})`
+export const CARD_LABEL = `Pay with card (${CARD_SHOP_HOST})`
 export const BUILT_IN_LABEL = 'Pay with crypto (built in, experimental)'
 /** The button that hands the payment to the popup, the same from either dialog. */
 export const WIDGET_CONTINUE_LABEL = `Continue to ${WIDGET_HOST}`
+export const CARD_CONTINUE_LABEL = `Continue to ${CARD_SHOP_HOST}`
 
 /** Why the size and lifespan on the form are only a starting point on this route. */
 export const WIDGET_EXPLAINER = `${WIDGET_HOST} opens in a popup with the size and lifespan from the form as its defaults. Confirm or change them there — the drive gets what you buy in the popup.`
+
+/** The card route: a storage purchase in euros or pounds, no token anywhere in it. */
+export const CARD_EXPLAINER = `${CARD_SHOP_HOST} opens in a popup with the size and lifespan from the form filled in. Pay by card there — the drive gets what you buy in the popup.`
 
 /** What the built-in engine will ask for next, said before it is chosen. */
 export const BUILT_IN_EXPLAINER =

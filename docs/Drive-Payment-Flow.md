@@ -47,12 +47,22 @@ Two properties hold throughout:
 
 ## The method chooser
 
-Two methods, in this order:
+Three methods, in this order:
 
-| Method                                     | What it is                                                            | Offered for            |
-| ------------------------------------------ | --------------------------------------------------------------------- | ---------------------- |
-| `Pay with crypto (fund.bzz.limo)`          | the external widget popup, which settles and creates the batch itself | buying a drive         |
-| `Pay with crypto (built in, experimental)` | everything the rest of this document describes                        | buy, extend and resize |
+| Method                                     | What it is                                                                | Offered for            |
+| ------------------------------------------ | ------------------------------------------------------------------------- | ---------------------- |
+| `Pay with crypto (fund.bzz.limo)`          | the external widget popup, which settles and creates the batch itself     | buying a drive         |
+| `Pay with card (swarm-storage.fly.dev)`    | the card shop popup, same protocol as the widget, paid in euros or pounds | buying a drive         |
+| `Pay with crypto (built in, experimental)` | everything the rest of this document describes                            | buy, extend and resize |
+
+**The card shop is the widget's protocol on another origin.** [snaha/swarm-storage](https://github.com/snaha/swarm-storage)
+takes the same URL (`destination`, `depth`, `amount`), shows the size and lifespan filled in with the
+owner locked, takes a card payment on Stripe inside the popup and creates the batch from its own
+treasury; its order page then posts the same `payment`, `batch`, `error` and `finish` events to
+`window.opener`, so `openStampPurchaseWidget({ card: true })` is the whole integration. It is
+offered from the add-drive chooser only — the funding seam's method screen lists the widget and the
+built-in engine, as before. `PUBLIC_CARD_SHOP_URL` points a build at another shop, a local one for
+development. The shop's own contract is `docs/swarm-id-integration.md` in its repository.
 
 **The widget leads, and is selected by default.** It is the settlement path the legacy UI has used
 all along; the built-in engine beside it is new, has not been through a mainnet season, and says so

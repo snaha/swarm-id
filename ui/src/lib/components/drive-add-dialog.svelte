@@ -43,6 +43,9 @@
   import {
     BUILT_IN_EXPLAINER,
     BUILT_IN_LABEL,
+    CARD_CONTINUE_LABEL,
+    CARD_EXPLAINER,
+    CARD_LABEL,
     type PaymentMethod,
     WIDGET_CONTINUE_LABEL,
     WIDGET_EXPLAINER,
@@ -76,6 +79,7 @@
 
   const METHOD_OPTIONS = [
     { value: 'widget', label: WIDGET_LABEL },
+    { value: 'card', label: CARD_LABEL },
     { value: 'built-in', label: BUILT_IN_LABEL },
   ]
 
@@ -264,8 +268,8 @@
 
   /** Start the purchase on the method the chooser is on. */
   function startPurchase() {
-    if (method === 'widget') {
-      void purchaseWithWidget(attempts.begin())
+    if (method === 'widget' || method === 'card') {
+      void purchaseWithWidget(attempts.begin(), method === 'card')
       return
     }
     void purchaseNew()
@@ -323,11 +327,12 @@
   }
 
   /**
-   * Buy the drive through the multichain-widget popup, which settles the payment
-   * and creates the batch itself and hands back the finished thing. Nothing
-   * here goes near the rail or the on-chain engine.
+   * Buy the drive through the multichain-widget popup — or, with `card`, the
+   * card shop's, which speaks the same protocol — which settles the payment and
+   * creates the batch itself and hands back the finished thing. Nothing here
+   * goes near the rail or the on-chain engine.
    */
-  async function purchaseWithWidget(attempt: Attempt) {
+  async function purchaseWithWidget(attempt: Attempt, card = false) {
     // Release whatever is still open before taking a new handle. Every route in
     // releases first, so this is a no-op today; it sits at the assignment so a
     // new one can't silently orphan a live popup, which nothing could cancel
@@ -352,6 +357,7 @@
       )
       purchase = openStampPurchaseWidget({
         destination,
+        card,
         // /dev mock (see dev-settings): simulate the purchase without a real
         // cross-chain payment. No-op in production, where the toggle is off.
         mocked: devSettingsStore.data.mockStampEnabled,
@@ -505,14 +511,22 @@
     </div>
 
     <p class="bg-muted rounded-md px-3 py-2 text-sm">
-      {method === 'widget' ? WIDGET_EXPLAINER : BUILT_IN_EXPLAINER}
+      {method === 'widget'
+        ? WIDGET_EXPLAINER
+        : method === 'card'
+          ? CARD_EXPLAINER
+          : BUILT_IN_EXPLAINER}
     </p>
 
     <!-- The widget's label matches the one on `PaymentDialog`'s own method
          screen: the same route reached from either place must read as the same
          route. -->
     <Button class="w-full" onclick={startPurchase}>
-      {method === 'widget' ? WIDGET_CONTINUE_LABEL : 'Continue'}
+      {method === 'widget'
+        ? WIDGET_CONTINUE_LABEL
+        : method === 'card'
+          ? CARD_CONTINUE_LABEL
+          : 'Continue'}
       <ArrowRight />
     </Button>
   </Dialog>

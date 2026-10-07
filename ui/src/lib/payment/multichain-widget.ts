@@ -12,6 +12,8 @@
  * size and lifespan, are chosen inside the popup, and the `batch` event reports
  * what was actually bought.
  */
+import { env } from '$env/dynamic/public'
+
 import { strip0x } from '$lib/crypto/hex'
 
 // The deployment carrying the `window.opener` fix (ethersphere/multichain-widget
@@ -27,7 +29,23 @@ export const WIDGET_HOST = new URL(WIDGET_BASE_URL).host
 export const WIDGET_ORIGIN = new URL(WIDGET_BASE_URL).origin
 // The base is allowed by construction: moving it to a fourth host and
 // forgetting this list would silently drop every event the popup posts.
-const ALLOWED_ORIGINS = [WIDGET_ORIGIN, 'https://swarmbucks.eth.limo', 'https://fund.ethswarm.org']
+// The card shop (snaha/swarm-storage) speaks the same popup protocol — the URL
+// below, and `payment` / `batch` / `error` / `finish` posted to `window.opener` —
+// but is paid by card, with the batch created from the shop's own treasury.
+// `PUBLIC_CARD_SHOP_URL` points a build at another deployment, a local one for
+// development: the shop has no `mocked` mode of its own.
+const CARD_SHOP_BASE_URL = new URL(env.PUBLIC_CARD_SHOP_URL || 'https://swarm-storage.fly.dev/')
+  .href
+/** The card shop's host as the UI names it, so copy cannot drift from the URL. */
+export const CARD_SHOP_HOST = new URL(CARD_SHOP_BASE_URL).host
+/** The card shop's origin, which its events arrive from. Exported for the test. */
+export const CARD_SHOP_ORIGIN = new URL(CARD_SHOP_BASE_URL).origin
+const ALLOWED_ORIGINS = [
+  WIDGET_ORIGIN,
+  'https://swarmbucks.eth.limo',
+  'https://fund.ethswarm.org',
+  CARD_SHOP_ORIGIN,
+]
 const POPUP_FEATURES = 'popup,width=500,height=700'
 
 /** Batch event posted by the multichain widget once a purchase settles. */
@@ -59,6 +77,9 @@ export interface PurchaseStampOptions {
   // as-is, so the drive it leaves behind is the one that was chosen.
   depth?: number
   amount?: bigint
+  // Open the card shop instead of the crypto widget. Same parameters, same
+  // events back; the user pays by card and never touches a token.
+  card?: boolean
 }
 
 /** How long to keep listening for a trailing `batch` message after the popup
@@ -86,6 +107,7 @@ export function buildWidgetUrl(
   destination: string,
   { depth, amount }: BatchDefaults,
   mocked?: boolean,
+  card?: boolean,
 ): string {
   const params = new URLSearchParams({
     mode: 'batch',
@@ -108,7 +130,7 @@ export function buildWidgetUrl(
     params.set('mocked', 'true')
   }
 
-  return `${WIDGET_BASE_URL}?${params.toString()}`
+  return `${card ? CARD_SHOP_BASE_URL : WIDGET_BASE_URL}?${params.toString()}`
 }
 
 /** Check if the message origin is from an allowed widget domain. */
@@ -336,6 +358,7 @@ export function openStampPurchaseWidget(options: PurchaseStampOptions): StampPur
     mockError,
     depth,
     amount,
+    card,
   } = options
 
   // Mocked mode (the /dev toggle): settle locally without a real cross-chain
@@ -347,7 +370,7 @@ export function openStampPurchaseWidget(options: PurchaseStampOptions): StampPur
   if (mocked) {
     const popup = mockPopup
       ? window.open(
-          buildWidgetUrl(destination, { depth, amount }, true),
+          buildWidgetUrl(destination, { depth, amount }, true, card),
           'stamp-purchase',
           POPUP_FEATURES,
         )
@@ -380,7 +403,7 @@ export function openStampPurchaseWidget(options: PurchaseStampOptions): StampPur
     }
   }
 
-  const url = buildWidgetUrl(destination, { depth, amount })
+  const url = buildWidgetUrl(destination, { depth, amount }, false, card)
   const popup = window.open(url, 'stamp-purchase', POPUP_FEATURES)
 
   if (!popup) {
