@@ -11,6 +11,8 @@
  * writes that record from outside the browser (an Electron shell that creates
  * an account for the user, #815) has to produce the same bytes. The
  * parameters below are the contract the docs' "Storage layout" page states.
+ * One input is normalised elsewhere: the canonical form of a wallet signature
+ * (`v` as 27/28) is ui's `crypto/signature.ts`, since it needs viem.
  */
 import { hexToUint8Array, uint8ArrayToHex } from "./hex"
 

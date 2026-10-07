@@ -8,8 +8,9 @@
  * `derivationKey`, none of which ever leaves the trusted domain, so a dApp has
  * no use for any of it; a dApp holds a `SwarmIdClient` from the package root.
  * The proxy iframe, which lives in the same lib, reaches these modules directly.
- * A name is on this list because `ui/` (its tests included) imports it, and for
- * no other reason:
+ * A name is on this list because `ui/` (its tests included) imports it, or
+ * because the docs' "Storage layout" page names it for a host that writes the
+ * identity UI's `localStorage` itself (#815) — and for no other reason:
  * nothing is re-exported for a caller that does not exist (#801).
  */
 
@@ -60,9 +61,8 @@ export type {
 
 export { DebouncedUtilizationUploader } from "./storage/debounced-uploader"
 
-// The on-disk account record and the vault it carries. Exported with the
-// schemas above so a host app that writes `localStorage` itself (#815) can
-// produce the same bytes the identity UI does — see docs "Storage layout".
+// The vault's encryption, for the host case above: a host that writes the
+// record produces the same `encryptedSeed` bytes the identity UI does.
 export {
   PASSWORD_KDF_ITERATIONS,
   decryptSeed,

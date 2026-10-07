@@ -206,3 +206,49 @@ describe("isSignedOutAccount", () => {
     expectTypeOf(account.encryptedSeed).toEqualTypeOf<string>()
   })
 })
+
+// The record a host writes by hand, field for field as the docs' "Storage
+// layout" page lists them (#815). If this stops parsing, the page is wrong.
+describe("LocalAccountSchemaV1 host-written record", () => {
+  const HOST_RECORD = {
+    id: "9b1d8c4a5e2f3b7c6d0e1f2a3b4c5d6e7f8a9b0c",
+    name: "Alice",
+    createdAt: 1_760_000_000_000,
+    publicKey: "02" + "ab".repeat(32),
+    derivationKey: "f".repeat(64),
+    partitionCount: 2,
+    devices: [],
+    connectedApps: [],
+    postageStamps: [
+      {
+        batchID: "c".repeat(64),
+        signerKey: "d".repeat(64),
+        utilization: 0,
+        usable: true,
+        depth: 20,
+        amount: "1000000000000000000",
+        bucketDepth: 16,
+        blockNumber: 1,
+        immutableFlag: false,
+        exists: true,
+        createdAt: 1_760_000_000_000,
+      },
+    ],
+    access: {
+      type: "password",
+      kdfSalt: "0".repeat(64),
+      kdfIterations: 600_000,
+    },
+    encryptedSeed:
+      "960e15b5ac56351da6dd82a9fc9e7d674dd8e31836577a2dc7c099537281756c70baf56637dbbac5e2f81aa9",
+  }
+
+  it("parses as a signed-in account", () => {
+    const result = LocalAccountSchemaV1.safeParse(HOST_RECORD)
+    expect(result.success).toBe(true)
+    if (!result.success) return
+    if (isSignedOutAccount(result.data)) throw new Error("signed out")
+    expect(result.data.id.toHex()).toBe(HOST_RECORD.id)
+    expect(result.data.postageStamps[0].amount).toBe(1_000_000_000_000_000_000n)
+  })
+})

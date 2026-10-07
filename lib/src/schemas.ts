@@ -70,29 +70,17 @@ export type FeedIndex = z.infer<typeof FeedIndexSchema>
 // Primitive → bee-js Type Transforms (internal, for entity schemas)
 // ============================================================================
 
-/**
- * Schema for EthAddress - validates 40-char hex string, transforms to EthAddress
- */
-const StoredEthAddress = z
+// Each validates the hex BEFORE its transform: a throw inside a transform
+// escapes `safeParse`, so a bee-js constructor rejecting a 40-character
+// non-hex string would fail the whole document, not the one record.
+const StoredEthAddress = AddressSchema.transform((s) => new EthAddress(s))
+const StoredBatchId = BatchIdSchema.transform((s) => new BeeBatchId(s))
+const StoredPrivateKey = PrivateKeySchema.transform((s) => new BeePrivateKey(s))
+/** A decimal string: `BigInt("1e18")` throws, and a transform must not. */
+const StoredBigInt = z
   .string()
-  .length(40)
-  .transform((s) => new EthAddress(s))
-
-/**
- * Schema for BatchId - validates 64-char hex string, transforms to BatchId
- */
-const StoredBatchId = z
-  .string()
-  .length(64)
-  .transform((s) => new BeeBatchId(s))
-
-/**
- * Schema for PrivateKey - validates 64-char hex string, transforms to PrivateKey
- */
-const StoredPrivateKey = z
-  .string()
-  .length(64)
-  .transform((s) => new BeePrivateKey(s))
+  .regex(/^\d+$/, { message: "Must be a decimal integer string" })
+  .transform((s) => BigInt(s))
 
 // ============================================================================
 // Device Schema
@@ -192,7 +180,7 @@ export const PostageStampSchemaV1 = z.object({
   utilization: z.number(),
   usable: z.boolean(),
   depth: z.number(),
-  amount: z.string().transform((val) => BigInt(val)),
+  amount: StoredBigInt,
   bucketDepth: z.number(),
   blockNumber: z.number(),
   immutableFlag: z.boolean(),

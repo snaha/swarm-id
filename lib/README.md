@@ -11,7 +11,7 @@ The Swarm ID library provides a secure, iframe-based authentication system for S
 
 Authentication is handled by the SvelteKit identity management UI ([ui](../ui/)).
 
-The package root, `@snaha/swarm-id`, is the dApp API and the only stable surface. `@snaha/swarm-id/internal` exists for the identity UI: it carries no stability promise, its exports change whenever the UI's needs do, and a change there is not a breaking change of the package.
+The package root, `@snaha/swarm-id`, is the dApp API and the only stable surface. `@snaha/swarm-id/internal` exists for the identity UI, and for a host that writes the identity UI's `localStorage` itself (the docs' "Storage Layout" page): it carries no stability promise, its exports change whenever the UI's needs do, and a change there is not a breaking change of the package.
 
 ## Installation
 
