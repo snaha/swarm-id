@@ -46,6 +46,9 @@ export async function disconnectWallet(
   const provider = onboard.state.get().wallets.find((wallet) => wallet.label === label)?.provider
   try {
     if (isWalletConnectProvider(provider)) {
+      // Past the wrapper, whose `disconnect` would also null the module's
+      // `instance`: the ended session stays there, and is what the next
+      // WalletConnect wallet reports as `instance` until a new session is set.
       await withTimeout(provider.connector.disconnect(), timeoutMs, 'Wallet disconnect timed out')
     }
   } finally {
