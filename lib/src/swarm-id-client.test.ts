@@ -1,8 +1,9 @@
 // Copyright 2026 The Swarm Authors. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { describe, it, expect, vi, beforeEach } from "vitest"
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest"
 import type { Mock, MockInstance } from "vitest"
+import { ZodError } from "zod"
 import { SwarmIdClient } from "./swarm-id-client"
 import { SwarmIdError } from "./errors"
 import {
@@ -11,6 +12,7 @@ import {
   type IframeToParentMessage,
 } from "./types"
 import { generatedAvatar } from "./utils/avatar"
+import { TimeoutError } from "./utils/promise"
 
 /**
  * A view of the client that admits to the private members these tests drive.
@@ -30,6 +32,37 @@ type ClientInternals = {
 
 const internals = (c: SwarmIdClient): ClientInternals =>
   c as unknown as ClientInternals
+
+/** What `work` rejected with; fails the test if it resolved instead. */
+function rejectionOf(work: Promise<unknown>): Promise<unknown> {
+  return work.then(
+    () => {
+      throw new Error("expected a rejection, but it resolved")
+    },
+    (error: unknown) => error,
+  )
+}
+
+/** What `work` threw; fails the test if it returned instead. */
+function thrownBy(work: () => unknown): unknown {
+  try {
+    work()
+  } catch (error) {
+    return error
+  }
+  throw new Error("expected a throw, but it returned")
+}
+
+/** The listener the constructor registered on `window`. */
+function registeredMessageListener(): (event: unknown) => void {
+  const registration = vi
+    .mocked(window.addEventListener)
+    .mock.calls.find(([type]) => type === "message")
+  if (!registration) {
+    throw new Error("no message listener was registered")
+  }
+  return registration[1] as unknown as (event: unknown) => void
+}
 
 describe("SwarmIdClient connect()", () => {
   let client: SwarmIdClient
@@ -104,9 +137,12 @@ describe("SwarmIdClient connect()", () => {
       setStorageShared(true)
       vi.mocked(window.open).mockReturnValue(null)
 
-      await expect(client.connect()).rejects.toThrow(
-        "Failed to open authentication popup",
-      )
+      const error = await rejectionOf(client.connect())
+      expect(error).toBeInstanceOf(SwarmIdError)
+      expect(error).toMatchObject({
+        code: "popup-blocked",
+        message: "Failed to open authentication popup",
+      })
     })
   })
 
@@ -166,16 +202,22 @@ describe("SwarmIdClient connect()", () => {
       })
       vi.mocked(window.open).mockReturnValue(null)
 
-      await expect(client.connect()).rejects.toThrow(
-        "Failed to open authentication popup",
-      )
+      const error = await rejectionOf(client.connect())
+      expect(error).toBeInstanceOf(SwarmIdError)
+      expect(error).toMatchObject({
+        code: "popup-blocked",
+        message: "Failed to open authentication popup",
+      })
     })
   })
 
   it("should throw error if client is not initialized", async () => {
-    await expect(client.connect()).rejects.toThrow(
-      "SwarmIdClient not initialized. Call initialize() first.",
-    )
+    const error = await rejectionOf(client.connect())
+    expect(error).toBeInstanceOf(SwarmIdError)
+    expect(error).toMatchObject({
+      code: "invalid-state",
+      message: "SwarmIdClient not initialized. Call initialize() first.",
+    })
   })
 })
 
@@ -283,9 +325,25 @@ describe("SwarmIdClient connectionInfo", () => {
   })
 
   it("throws from connectionInfo getter before initialize()", () => {
-    expect(() => client.connectionInfo).toThrow(
-      "SwarmIdClient not initialized. Call initialize() first.",
-    )
+    const error = thrownBy(() => client.connectionInfo)
+    expect(error).toBeInstanceOf(SwarmIdError)
+    expect(error).toMatchObject({
+      code: "invalid-state",
+      message: "SwarmIdClient not initialized. Call initialize() first.",
+    })
+  })
+
+  // `ready` flips on `proxyReady`, which the proxy sends before its first
+  // snapshot, so a read before `initialize()` resolves can land in between.
+  it("throws from connectionInfo getter between proxyReady and the first snapshot", () => {
+    internals(client).ready = true
+
+    const error = thrownBy(() => client.connectionInfo)
+    expect(error).toBeInstanceOf(SwarmIdError)
+    expect(error).toMatchObject({
+      code: "invalid-state",
+      message: "SwarmIdClient connectionInfo not yet available.",
+    })
   })
 })
 
@@ -660,6 +718,64 @@ describe("SwarmIdClient request seam", () => {
     })
     await expect(promise).rejects.toThrow("Not authenticated")
   })
+
+  it("rejects a request still pending at destroy() with invalid-state", async () => {
+    const promise = client.downloadData("a".repeat(64))
+
+    client.destroy()
+
+    const error = await rejectionOf(promise)
+    expect(error).toBeInstanceOf(SwarmIdError)
+    expect(error).toMatchObject({
+      code: "invalid-state",
+      message: "Client destroyed",
+    })
+  })
+
+  it("rejects a request with invalid-state when the iframe is gone", async () => {
+    internals(client).iframe = undefined
+
+    const error = await rejectionOf(client.downloadData("a".repeat(64)))
+    expect(error).toBeInstanceOf(SwarmIdError)
+    expect(error).toMatchObject({
+      code: "invalid-state",
+      message: "Iframe not initialized",
+    })
+  })
+
+  it("getAuthIframe() throws invalid-state when the iframe is gone", () => {
+    internals(client).iframe = undefined
+
+    const error = thrownBy(() => client.getAuthIframe())
+    expect(error).toBeInstanceOf(SwarmIdError)
+    expect(error).toMatchObject({
+      code: "invalid-state",
+      message: "Iframe not initialized",
+    })
+  })
+
+  // `Reference` is a plain string to TypeScript; only the message schema
+  // knows it has to be hex of a reference's length.
+  it("rejects an argument the message schema refuses with invalid-request", async () => {
+    const error = await rejectionOf(client.downloadData("not-a-reference"))
+    expect(error).toBeInstanceOf(SwarmIdError)
+    expect(error).toMatchObject({ code: "invalid-request" })
+    expect((error as SwarmIdError).message).toMatch(/^Invalid message format: /)
+    expect((error as SwarmIdError).cause).toBeInstanceOf(ZodError)
+  })
+
+  it("rejects disconnect() with internal when the proxy answers it failed", async () => {
+    const promise = client.disconnect()
+    const { requestId } = lastPostedMessage()
+    deliver({ type: "disconnectResponse", requestId, success: false })
+
+    const error = await rejectionOf(promise)
+    expect(error).toBeInstanceOf(SwarmIdError)
+    expect(error).toMatchObject({
+      code: "internal",
+      message: "Failed to disconnect",
+    })
+  })
 })
 
 describe("SwarmIdClient window message filtering", () => {
@@ -669,17 +785,6 @@ describe("SwarmIdClient window message filtering", () => {
   let warn: MockInstance<typeof console.warn>
   /** Every "message" listener currently registered on the stubbed `window`. */
   let messageListeners: Set<(event: unknown) => void>
-
-  /** The listener the constructor registered on `window`. */
-  function registeredMessageListener(): (event: unknown) => void {
-    const registration = vi
-      .mocked(window.addEventListener)
-      .mock.calls.find(([type]) => type === "message")
-    if (!registration) {
-      throw new Error("no message listener was registered")
-    }
-    return registration[1] as unknown as (event: unknown) => void
-  }
 
   /** Deliver an event to every registered listener, as a real `window` does. */
   function dispatch(event: unknown): void {
@@ -931,6 +1036,221 @@ describe("SwarmIdClient init-timeout timers (#421)", () => {
     } finally {
       vi.useRealTimers()
     }
+  })
+})
+
+describe("SwarmIdClient lifecycle errors", () => {
+  // A distinctive value so a deadline is identifiable in its message.
+  const INIT_TIMEOUT_MS = 12345
+  const IFRAME_ORIGIN = "https://swarm-id.example.com"
+
+  /** What `initialize()` awaits, in the order it awaits them. */
+  const INIT_PHASES = [
+    "the iframe load",
+    "proxyInitialized",
+    "proxyReady",
+    "the first connectionInfoChanged",
+  ] as const
+  type InitPhase = (typeof INIT_PHASES)[number]
+
+  let iframe: {
+    style: Record<string, string>
+    src: string
+    onload?: () => void
+    onerror?: () => void
+    contentWindow: { postMessage: Mock }
+    parentNode: { removeChild: Mock }
+  }
+
+  beforeEach(() => {
+    vi.restoreAllMocks()
+    // Timers only: `setImmediate` stays real so `drain()` can wait out every
+    // queued microtask.
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] })
+    iframe = {
+      style: {},
+      src: "",
+      contentWindow: { postMessage: vi.fn() },
+      parentNode: { removeChild: vi.fn() },
+    }
+    vi.stubGlobal("window", {
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+      parent: { postMessage: vi.fn() },
+      location: { origin: "https://localhost" },
+      open: vi.fn(),
+    })
+    vi.stubGlobal("document", {
+      createElement: vi.fn().mockReturnValue(iframe),
+      getElementById: vi.fn(),
+      body: { appendChild: vi.fn(), removeChild: vi.fn() },
+    })
+  })
+
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+
+  function makeClient(containerId?: string): SwarmIdClient {
+    return new SwarmIdClient({
+      iframeOrigin: IFRAME_ORIGIN,
+      metadata: { name: "Test App", description: "A test application" },
+      initializationTimeout: INIT_TIMEOUT_MS,
+      containerId,
+    })
+  }
+
+  /** Lets every queued microtask run, so a chain that can settle has. */
+  function drain(): Promise<void> {
+    return new Promise((resolve) => setImmediate(() => resolve()))
+  }
+
+  /** What `promise` rejected with once it can have settled, else its state. */
+  async function outcomeOf(promise: Promise<unknown>): Promise<unknown> {
+    let outcome: unknown = "still pending"
+    promise.then(
+      () => {
+        outcome = "resolved"
+      },
+      (error: unknown) => {
+        outcome = error
+      },
+    )
+    await drain()
+    return outcome
+  }
+
+  function fromProxy(data: unknown): void {
+    registeredMessageListener()({
+      source: iframe.contentWindow,
+      origin: IFRAME_ORIGIN,
+      data,
+    })
+  }
+
+  /** What ends each phase, in order: phase N is reached after the first N. */
+  const ARRIVALS: (() => void)[] = [
+    () => iframe.onload?.(),
+    () => fromProxy({ type: "proxyInitialized" }),
+    () =>
+      fromProxy({
+        type: "proxyReady",
+        authenticated: false,
+        parentOrigin: "https://localhost",
+      }),
+  ]
+
+  /** Walk a started `initialize()` to where it awaits `phase`. */
+  async function advanceTo(phase: InitPhase): Promise<void> {
+    for (const arrive of ARRIVALS.slice(0, INIT_PHASES.indexOf(phase))) {
+      arrive()
+      await drain()
+    }
+  }
+
+  it.each(INIT_PHASES)(
+    "rejects initialize() with invalid-state when destroy() runs while it awaits %s",
+    async (phase) => {
+      const client = makeClient()
+      const initializing = client.initialize()
+      await advanceTo(phase)
+
+      client.destroy()
+
+      const error = await outcomeOf(initializing)
+      expect(error).toBeInstanceOf(SwarmIdError)
+      expect(error).toMatchObject({
+        code: "invalid-state",
+        message: "Client destroyed",
+      })
+    },
+  )
+
+  it.each(INIT_PHASES)(
+    "leaves no init deadline armed when destroy() runs while it awaits %s",
+    async (phase) => {
+      const client = makeClient()
+      client.initialize().catch(() => {})
+      await advanceTo(phase)
+
+      client.destroy()
+      await drain()
+
+      expect(vi.getTimerCount()).toBe(0)
+    },
+  )
+
+  // The iframe load carries no deadline of its own, so it is not listed.
+  it.each([
+    { phase: "proxyInitialized", waitingFor: "did not signal readiness" },
+    { phase: "proxyReady", waitingFor: "did not respond" },
+    {
+      phase: "the first connectionInfoChanged",
+      waitingFor: "did not send initial connectionInfoChanged",
+    },
+  ] as const)(
+    "rejects initialize() with init-failed when $phase misses the deadline",
+    async ({ phase, waitingFor }) => {
+      const client = makeClient()
+      const failure = rejectionOf(client.initialize())
+      await advanceTo(phase)
+
+      await vi.advanceTimersByTimeAsync(INIT_TIMEOUT_MS)
+
+      const error = await failure
+      expect(error).toBeInstanceOf(SwarmIdError)
+      expect(error).toMatchObject({
+        code: "init-failed",
+        message: `Proxy initialization timeout - proxy ${waitingFor} within ${INIT_TIMEOUT_MS}ms`,
+      })
+      expect((error as SwarmIdError).cause).toBeInstanceOf(TimeoutError)
+    },
+  )
+
+  it("rejects a second initialize() with invalid-state", async () => {
+    const client = makeClient()
+    client.initialize().catch(() => {})
+
+    const error = await rejectionOf(client.initialize())
+    expect(error).toBeInstanceOf(SwarmIdError)
+    expect(error).toMatchObject({
+      code: "invalid-state",
+      message: "SwarmIdClient already initialized",
+    })
+  })
+
+  it("rejects initialize() with invalid-request when containerId names no element", async () => {
+    const error = await rejectionOf(makeClient("missing").initialize())
+    expect(error).toBeInstanceOf(SwarmIdError)
+    expect(error).toMatchObject({
+      code: "invalid-request",
+      message: 'Container element with ID "missing" not found',
+    })
+  })
+
+  it("getAuthIframe() throws invalid-state before initialize()", () => {
+    const client = makeClient()
+
+    const error = thrownBy(() => client.getAuthIframe())
+    expect(error).toBeInstanceOf(SwarmIdError)
+    expect(error).toMatchObject({
+      code: "invalid-state",
+      message: "SwarmIdClient not initialized. Call initialize() first.",
+    })
+  })
+
+  it("throws invalid-request for invalid app metadata, the validation error as cause", () => {
+    const error = thrownBy(
+      () =>
+        new SwarmIdClient({
+          iframeOrigin: IFRAME_ORIGIN,
+          metadata: { name: "" },
+        }),
+    )
+    expect(error).toBeInstanceOf(SwarmIdError)
+    expect(error).toMatchObject({ code: "invalid-request" })
+    expect((error as SwarmIdError).message).toMatch(/^Invalid app metadata: /)
+    expect((error as SwarmIdError).cause).toBeInstanceOf(ZodError)
   })
 })
 

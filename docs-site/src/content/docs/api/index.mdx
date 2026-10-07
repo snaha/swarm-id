@@ -65,7 +65,10 @@ Creates a new SwarmIdClient instance.
 | `options.containerId`           | `string`                         | No       | ID of container element to place iframe in (optional)                                                                                                                                                |
 | `options.subsidisedGatewayUrl`  | `string`                         | No       | URL of a subsidised gateway for uploads without user's postage stamp. See [Subsidised Gateway](../subsidised-gateway/) for details.                                                                  |
 
-**Throws:** `Error` if the provided app metadata is invalid
+**Throws:**
+
+- `invalid-request` if the provided app metadata is invalid
+- a plain `Error` if constructed where there is no `window` (a server render)
 
 **Example:**
 
@@ -98,10 +101,9 @@ This method must be called before using any other client methods. It creates a h
 
 **Throws:**
 
-- `Error` if the client is already initialized
-- `Error` if the iframe fails to load
-- `Error` if the proxy does not respond within the initialization timeout period (configurable via `initializationTimeout`, defaults to 30 seconds)
-- `Error` if origin validation fails on the proxy side
+- `invalid-state` if the client is already initialized, or `destroy()` runs before it resolves
+- `invalid-request` if `containerId` names no element
+- `init-failed` if the iframe fails to load, origin validation fails on the proxy side, or the proxy does not respond within the initialization timeout period (configurable via `initializationTimeout`, defaults to 30 seconds)
 
 **Example:**
 
@@ -123,7 +125,7 @@ Destroys the client and releases all resources.
 
 This method should be called when the client is no longer needed. It performs the following cleanup:
 
-- Cancels all pending requests with an error
+- Rejects every pending request, and a pending `initialize()`, with a `SwarmIdError` of code `invalid-state`
 - Removes the message event listener
 - Removes the iframe from the DOM
 - Resets the client to an uninitialized state
@@ -165,8 +167,7 @@ The iframe is positioned fixed in the bottom-right corner of the viewport.
 
 **Throws:**
 
-- `Error` if the client is not initialized
-- `Error` if the iframe is not available
+- `invalid-state` if the client is not initialized, or the iframe is not available
 
 **Example:**
 
@@ -332,8 +333,8 @@ interface ConnectOptions {
 
 **Throws:**
 
-- `Error` if the client is not initialized
-- `Error` if the popup fails to open
+- `invalid-state` if the client is not initialized
+- `popup-blocked` if the browser blocks the popup
 
 **Example:**
 
@@ -360,9 +361,9 @@ After disconnection, the user will need to re-authenticate to perform uploads or
 
 **Throws:**
 
-- `Error` if the client is not initialized
-- `Error` if the disconnect operation fails
-- `Error` if the request times out
+- `invalid-state` if the client is not initialized
+- `internal` if the proxy reports the disconnect failed
+- `timeout` if the request times out
 
 **Example:**
 
@@ -398,7 +399,7 @@ Synchronous accessor for the current connection state. Populated by the proxy as
 
 **Type:** `ConnectionInfo`
 
-**Throws:** `Error` if `initialize()` has not been called yet.
+**Throws:** `invalid-state` if `initialize()` has not resolved yet.
 
 | Property                        | Type                                                                                   | Description                                                                                                                                                                                                                                                                                                                                                     |
 | ------------------------------- | -------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -1651,18 +1652,20 @@ try {
 }
 ```
 
-| Code                  | Meaning                                                                                                                                                                   | Also set                      |
-| --------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------- |
-| `not-authenticated`   | No session for this origin                                                                                                                                                |                               |
-| `upload-unavailable`  | The session refuses to stamp; see [Why Uploads Are Unavailable](../subsidised-gateway/#why-uploads-are-unavailable)                                                       | `reason`                      |
-| `partition-contended` | Every partition of the batch is held by other devices and none yielded in time                                                                                            |                               |
-| `lease-lost`          | This device's partition was reclaimed mid-write                                                                                                                           |                               |
-| `bee-rejected`        | Bee or the gateway answered with a non-2xx status. A `404` on `/bzz` and on a chunk mean different things; `url` — the request's path, never the node's host — says which | `status`, `beeMessage`, `url` |
-| `network`             | The request never got a response: DNS, a refused connection, or a CORS preflight the gateway rejected                                                                     |                               |
-| `timeout`             | A deadline ran out: the proxy's on a Bee request, or the client's on the whole round trip (`requestOptions.timeout`)                                                      |                               |
-| `invalid-request`     | The message or an argument failed validation                                                                                                                              |                               |
-| `init-failed`         | The proxy iframe did not come up; `initialize()` rejects with this                                                                                                        |                               |
-| `internal`            | Anything else; the message is preserved                                                                                                                                   |                               |
+| Code                  | Meaning                                                                                                                                                                                                                | Also set                      |
+| --------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------- |
+| `not-authenticated`   | No session for this origin                                                                                                                                                                                             |                               |
+| `upload-unavailable`  | The session refuses to stamp; see [Why Uploads Are Unavailable](../subsidised-gateway/#why-uploads-are-unavailable)                                                                                                    | `reason`                      |
+| `partition-contended` | Every partition of the batch is held by other devices and none yielded in time                                                                                                                                         |                               |
+| `lease-lost`          | This device's partition was reclaimed mid-write                                                                                                                                                                        |                               |
+| `bee-rejected`        | Bee or the gateway answered with a non-2xx status. A `404` on `/bzz` and on a chunk mean different things; `url` — the request's path, never the node's host — says which                                              | `status`, `beeMessage`, `url` |
+| `network`             | The request never got a response: DNS, a refused connection, or a CORS preflight the gateway rejected                                                                                                                  |                               |
+| `timeout`             | A deadline ran out: the proxy's on a Bee request, or the client's on the whole round trip (`requestOptions.timeout`)                                                                                                   |                               |
+| `invalid-request`     | The message or an argument failed validation                                                                                                                                                                           |                               |
+| `invalid-state`       | The client cannot take the call in its current state: `initialize()` has not resolved, was already called, or `destroy()` ran. A call, or an `initialize()`, still pending when `destroy()` runs rejects with this too |                               |
+| `init-failed`         | The proxy iframe did not come up: it failed to load, the proxy refused the origin, or it did not answer within `initializationTimeout`; `initialize()` rejects with this                                               |                               |
+| `popup-blocked`       | The browser blocked the authentication popup `connect()` opens: not called from a user gesture, or a blocker                                                                                                           |                               |
+| `internal`            | Anything else; the message is preserved                                                                                                                                                                                |                               |
 
 The instance is built on the client side from the fields the proxy sends — an `Error` posted through the iframe bridge arrives as a plain `Error`, so it never crosses it. A dApp that bundles two copies of the package should branch on `error.code` rather than `instanceof`, which is per copy.
 
