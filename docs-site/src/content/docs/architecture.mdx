@@ -132,15 +132,11 @@ mobile; that is the basis for the browser claim on the Introduction, and this Sa
 one with a written record.
 :::
 
-**The Storage Access API is not part of this, by measurement rather than oversight.** It was
-evaluated and is not called anywhere: on Safari it unlocks unpartitioned _cookies_ only, and the
-non-cookie extension (`requestStorageAccess({ localStorage: true })`, Chrome 125+) has no WebKit
-implementation through Safari 26. `document.hasStorageAccess()` cannot even answer "am I
-partitioned": it returns `true` inside a frame whose `localStorage` is genuinely partitioned,
-because Chrome partitions storage separately from cookies. So the iframe decides by storage
-instead: the identity site leaves a marker in its first-party store, the iframe reads it back, and
-an absent marker means partitioned (`lib/src/utils/storage-probe.ts`). No prompt is involved, and
-your app does not need to request anything on the iframe's behalf.
+The Storage Access API is not used: it governs cookies, not `localStorage`, so it can neither
+unpartition the iframe's store nor say whether it is partitioned
+([#613](https://github.com/snaha/swarm-id/issues/613)). The iframe finds out by reading a marker
+the identity site leaves in its first-party store; no prompt is involved, and your app requests
+nothing on the iframe's behalf.
 
 ## Message protocol
 
