@@ -175,7 +175,11 @@
 </tr>
 </tbody>
 </table>
-<p><strong>Throws:</strong> <code dir="auto">Error</code> if the provided app metadata is invalid</p>
+<p><strong>Throws:</strong></p>
+<ul>
+<li><code dir="auto">invalid-request</code> if the provided app metadata is invalid</li>
+<li>a plain <code dir="auto">Error</code> if constructed where there is no <code dir="auto">window</code> (a server render)</li>
+</ul>
 <p><strong>Example:</strong></p>
 <div class="expressive-code"><figure class="frame not-content"><figcaption class="header"></figcaption><pre data-language="typescript"><code><div class="ec-line"><div class="code"><span style="--0:#C792EA;--1:#8844AE">const </span><span style="--0:#82AAFF;--1:#3B61B0">client</span><span style="--0:#C792EA;--1:#8844AE"> = </span><span style="--0:#7FDBCA;--1:#096E72">new</span><span style="--0:#C792EA;--1:#8844AE"> </span><span style="--0:#82AAFF;--1:#3B61B0">SwarmIdClient</span><span style="--0:#D6DEEB;--1:#403F53">(</span><span style="--0:#C792EA;--1:#8844AE">{</span></div></div><div class="ec-line"><div class="code"><span class="indent"><span style="--0:#C792EA;--1:#8844AE">  </span></span><span style="--0:#C792EA;--1:#8844AE">iframeOrigin: </span><span style="--0:#D9F5DD;--1:#111111">'</span><span style="--0:#ECC48D;--1:#984E4D">https://id.swarm.example.com</span><span style="--0:#D9F5DD;--1:#111111">'</span><span style="--0:#C792EA;--1:#8844AE">,</span></div></div><div class="ec-line"><div class="code"><span class="indent"><span style="--0:#C792EA;--1:#8844AE">  </span></span><span style="--0:#C792EA;--1:#8844AE">timeout: </span><span style="--0:#F78C6C;--1:#AA0982">60000</span><span style="--0:#C792EA;--1:#8844AE">,</span></div></div><div class="ec-line"><div class="code"><span class="indent"><span style="--0:#C792EA;--1:#8844AE">  </span></span><span style="--0:#C792EA;--1:#8844AE">metadata: {</span></div></div><div class="ec-line"><div class="code"><span class="indent"><span style="--0:#C792EA;--1:#8844AE">    </span></span><span style="--0:#C792EA;--1:#8844AE">name: </span><span style="--0:#D9F5DD;--1:#111111">'</span><span style="--0:#ECC48D;--1:#984E4D">My dApp</span><span style="--0:#D9F5DD;--1:#111111">'</span><span style="--0:#C792EA;--1:#8844AE">,</span></div></div><div class="ec-line"><div class="code"><span class="indent"><span style="--0:#C792EA;--1:#8844AE">    </span></span><span style="--0:#C792EA;--1:#8844AE">description: </span><span style="--0:#D9F5DD;--1:#111111">'</span><span style="--0:#ECC48D;--1:#984E4D">A decentralized application built on Swarm</span><span style="--0:#D9F5DD;--1:#111111">'</span><span style="--0:#C792EA;--1:#8844AE">,</span></div></div><div class="ec-line"><div class="code"><span class="indent"><span style="--0:#C792EA;--1:#8844AE">    </span></span><span style="--0:#C792EA;--1:#8844AE">icon: </span><span style="--0:#D9F5DD;--1:#111111">'</span><span style="--0:#ECC48D;--1:#984E4D">data:image/svg+xml;base64,...</span><span style="--0:#D9F5DD;--1:#111111">'</span><span style="--0:#C792EA;--1:#8844AE">,</span></div></div><div class="ec-line"><div class="code"><span class="indent"><span style="--0:#C792EA;--1:#8844AE">  </span></span><span style="--0:#C792EA;--1:#8844AE">},</span></div></div><div class="ec-line"><div class="code"><span class="indent">  </span><span style="--0:#82AAFF;--1:#3B61B0">onConnectionChange</span><span style="--0:#C792EA;--1:#8844AE">: </span><span style="--0:#D9F5DD;--1:#111111">(</span><span style="--0:#D7DBE0;--1:#403F53">info</span><span style="--0:#D9F5DD;--1:#111111">)</span><span style="--0:#C792EA;--1:#8844AE"> =&gt; {</span></div></div><div class="ec-line"><div class="code"><span class="indent">    </span><span style="--0:#82AAFF;--1:#3B61B0">updateUI</span><span style="--0:#D6DEEB;--1:#403F53">(info)</span></div></div><div class="ec-line"><div class="code"><span class="indent"><span style="--0:#C792EA;--1:#8844AE">  </span></span><span style="--0:#C792EA;--1:#8844AE">},</span></div></div><div class="ec-line"><div class="code"><span style="--0:#C792EA;--1:#8844AE">}</span><span style="--0:#D6DEEB;--1:#403F53">)</span></div></div></code></pre><div class="copy"><div aria-live="polite"></div><button title="Copy to clipboard" data-copied="Copied!" data-code="const client = new SwarmIdClient({  iframeOrigin: &#x27;https://id.swarm.example.com&#x27;,  timeout: 60000,  metadata: {    name: &#x27;My dApp&#x27;,    description: &#x27;A decentralized application built on Swarm&#x27;,    icon: &#x27;data:image/svg+xml;base64,...&#x27;,  },  onConnectionChange: (info) => {    updateUI(info)  },})"><div></div></button></div></figure></div>
 <hr>
@@ -186,10 +190,9 @@
 <p><strong>Returns:</strong> <code dir="auto">Promise&lt;void&gt;</code> - Resolves when the client is fully initialized</p>
 <p><strong>Throws:</strong></p>
 <ul>
-<li><code dir="auto">Error</code> if the client is already initialized</li>
-<li><code dir="auto">Error</code> if the iframe fails to load</li>
-<li><code dir="auto">Error</code> if the proxy does not respond within the initialization timeout period (configurable via <code dir="auto">initializationTimeout</code>, defaults to 30 seconds)</li>
-<li><code dir="auto">Error</code> if origin validation fails on the proxy side</li>
+<li><code dir="auto">invalid-state</code> if the client is already initialized, or <code dir="auto">destroy()</code> runs before it resolves</li>
+<li><code dir="auto">invalid-request</code> if <code dir="auto">containerId</code> names no element</li>
+<li><code dir="auto">init-failed</code> if the iframe fails to load, origin validation fails on the proxy side, or the proxy does not respond within the initialization timeout period (configurable via <code dir="auto">initializationTimeout</code>, defaults to 30 seconds)</li>
 </ul>
 <p><strong>Example:</strong></p>
 <div class="expressive-code"><figure class="frame not-content"><figcaption class="header"></figcaption><pre data-language="typescript"><code><div class="ec-line"><div class="code"><span style="--0:#C792EA;--1:#8844AE">const </span><span style="--0:#82AAFF;--1:#3B61B0">client</span><span style="--0:#C792EA;--1:#8844AE"> = </span><span style="--0:#7FDBCA;--1:#096E72">new</span><span style="--0:#C792EA;--1:#8844AE"> </span><span style="--0:#82AAFF;--1:#3B61B0">SwarmIdClient</span><span style="--0:#D6DEEB;--1:#403F53">(</span><span style="--0:#C792EA;--1:#8844AE">{ </span><span style="--0:#7FDBCA;--1:#096E72">...</span><span style="--0:#C792EA;--1:#8844AE"> }</span><span style="--0:#D6DEEB;--1:#403F53">)</span></div></div><div class="ec-line"><div class="code"><span style="--0:#C792EA;--1:#8844AE">try</span><span style="--0:#D6DEEB;--1:#403F53"> {</span></div></div><div class="ec-line"><div class="code"><span class="indent">  </span><span style="--0:#C792EA;--1:#8844AE">await</span><span style="--0:#D6DEEB;--1:#403F53"> client</span><span style="--0:#C792EA;--1:#8844AE">.</span><span style="--0:#82AAFF;--1:#3B61B0">initialize</span><span style="--0:#D6DEEB;--1:#403F53">()</span></div></div><div class="ec-line"><div class="code"><span class="indent"><span style="--0:#D6DEEB;--1:#403F53">  </span></span><span style="--0:#D6DEEB;--1:#403F53">console</span><span style="--0:#C792EA;--1:#8844AE">.</span><span style="--0:#82AAFF;--1:#3B61B0">log</span><span style="--0:#D6DEEB;--1:#403F53">(</span><span style="--0:#D9F5DD;--1:#111111">'</span><span style="--0:#ECC48D;--1:#984E4D">Client ready</span><span style="--0:#D9F5DD;--1:#111111">'</span><span style="--0:#D6DEEB;--1:#403F53">)</span></div></div><div class="ec-line"><div class="code"><span style="--0:#D6DEEB;--1:#403F53">} </span><span style="--0:#C792EA;--1:#8844AE">catch</span><span style="--0:#D6DEEB;--1:#403F53"> (error) {</span></div></div><div class="ec-line"><div class="code"><span class="indent"><span style="--0:#D6DEEB;--1:#403F53">  </span></span><span style="--0:#D6DEEB;--1:#403F53">console</span><span style="--0:#C792EA;--1:#8844AE">.</span><span style="--0:#82AAFF;--1:#3B61B0">error</span><span style="--0:#D6DEEB;--1:#403F53">(</span><span style="--0:#D9F5DD;--1:#111111">'</span><span style="--0:#ECC48D;--1:#984E4D">Failed to initialize:</span><span style="--0:#D9F5DD;--1:#111111">'</span><span style="--0:#D6DEEB;--1:#403F53">, error)</span></div></div><div class="ec-line"><div class="code"><span style="--0:#D6DEEB;--1:#403F53">}</span></div></div></code></pre><div class="copy"><div aria-live="polite"></div><button title="Copy to clipboard" data-copied="Copied!" data-code="const client = new SwarmIdClient({ ... })try {  await client.initialize()  console.log(&#x27;Client ready&#x27;)} catch (error) {  console.error(&#x27;Failed to initialize:&#x27;, error)}"><div></div></button></div></figure></div>
@@ -198,7 +201,7 @@
 <p>Destroys the client and releases all resources.</p>
 <p>This method should be called when the client is no longer needed. It performs the following cleanup:</p>
 <ul>
-<li>Cancels all pending requests with an error</li>
+<li>Rejects every pending request, and a pending <code dir="auto">initialize()</code>, with a <code dir="auto">SwarmIdError</code> of code <code dir="auto">invalid-state</code></li>
 <li>Removes the message event listener</li>
 <li>Removes the iframe from the DOM</li>
 <li>Resets the client to an uninitialized state</li>
@@ -221,8 +224,7 @@
 <p><strong>Returns:</strong> <code dir="auto">HTMLIFrameElement</code> - The iframe element displaying the authentication UI</p>
 <p><strong>Throws:</strong></p>
 <ul>
-<li><code dir="auto">Error</code> if the client is not initialized</li>
-<li><code dir="auto">Error</code> if the iframe is not available</li>
+<li><code dir="auto">invalid-state</code> if the client is not initialized, or the iframe is not available</li>
 </ul>
 <p><strong>Example:</strong></p>
 <div class="expressive-code"><figure class="frame not-content"><figcaption class="header"></figcaption><pre data-language="typescript"><code><div class="ec-line"><div class="code"><span style="--0:#C792EA;--1:#8844AE">const </span><span style="--0:#82AAFF;--1:#3B61B0">iframe</span><span style="--0:#C792EA;--1:#8844AE"> = </span><span style="--0:#D6DEEB;--1:#403F53">client</span><span style="--0:#C792EA;--1:#8844AE">.</span><span style="--0:#82AAFF;--1:#3B61B0">getAuthIframe</span><span style="--0:#D6DEEB;--1:#403F53">()</span></div></div><div class="ec-line"><div class="code"><span style="--0:#919F9F;--1:#5D6376">// The iframe is already displayed; this returns a reference to it</span></div></div></code></pre><div class="copy"><div aria-live="polite"></div><button title="Copy to clipboard" data-copied="Copied!" data-code="const iframe = client.getAuthIframe()// The iframe is already displayed; this returns a reference to it"><div></div></button></div></figure></div>
@@ -411,8 +413,8 @@
 <p><strong>Returns:</strong> <code dir="auto">Promise&lt;void&gt;</code> - Resolves when the authentication popup has been opened</p>
 <p><strong>Throws:</strong></p>
 <ul>
-<li><code dir="auto">Error</code> if the client is not initialized</li>
-<li><code dir="auto">Error</code> if the popup fails to open</li>
+<li><code dir="auto">invalid-state</code> if the client is not initialized</li>
+<li><code dir="auto">popup-blocked</code> if the browser blocks the popup</li>
 </ul>
 <p><strong>Example:</strong></p>
 <div class="expressive-code"><figure class="frame not-content"><figcaption class="header"></figcaption><pre data-language="typescript"><code><div class="ec-line"><div class="code"><span style="--0:#C792EA;--1:#8844AE">const </span><span style="--0:#82AAFF;--1:#3B61B0">client</span><span style="--0:#C792EA;--1:#8844AE"> = </span><span style="--0:#7FDBCA;--1:#096E72">new</span><span style="--0:#C792EA;--1:#8844AE"> </span><span style="--0:#82AAFF;--1:#3B61B0">SwarmIdClient</span><span style="--0:#D6DEEB;--1:#403F53">(</span><span style="--0:#C792EA;--1:#8844AE">{ </span><span style="--0:#7FDBCA;--1:#096E72">...</span><span style="--0:#C792EA;--1:#8844AE"> }</span><span style="--0:#D6DEEB;--1:#403F53">)</span></div></div><div class="ec-line"><div class="code"><span style="--0:#C792EA;--1:#8844AE">await</span><span style="--0:#D6DEEB;--1:#403F53"> client</span><span style="--0:#C792EA;--1:#8844AE">.</span><span style="--0:#82AAFF;--1:#3B61B0">initialize</span><span style="--0:#D6DEEB;--1:#403F53">()</span></div></div><div class="ec-line"><div class="code">
@@ -425,9 +427,9 @@
 <p><strong>Returns:</strong> <code dir="auto">Promise&lt;void&gt;</code> - Resolves when disconnection is complete</p>
 <p><strong>Throws:</strong></p>
 <ul>
-<li><code dir="auto">Error</code> if the client is not initialized</li>
-<li><code dir="auto">Error</code> if the disconnect operation fails</li>
-<li><code dir="auto">Error</code> if the request times out</li>
+<li><code dir="auto">invalid-state</code> if the client is not initialized</li>
+<li><code dir="auto">internal</code> if the proxy reports the disconnect failed</li>
+<li><code dir="auto">timeout</code> if the request times out</li>
 </ul>
 <p><strong>Example:</strong></p>
 <div class="expressive-code"><figure class="frame not-content"><figcaption class="header"></figcaption><pre data-language="typescript"><code><div class="ec-line"><div class="code"><span style="--0:#C792EA;--1:#8844AE">await</span><span style="--0:#D6DEEB;--1:#403F53"> client</span><span style="--0:#C792EA;--1:#8844AE">.</span><span style="--0:#82AAFF;--1:#3B61B0">disconnect</span><span style="--0:#D6DEEB;--1:#403F53">()</span></div></div><div class="ec-line"><div class="code"><span style="--0:#D6DEEB;--1:#403F53">console</span><span style="--0:#C792EA;--1:#8844AE">.</span><span style="--0:#82AAFF;--1:#3B61B0">log</span><span style="--0:#D6DEEB;--1:#403F53">(</span><span style="--0:#D9F5DD;--1:#111111">'</span><span style="--0:#ECC48D;--1:#984E4D">User logged out</span><span style="--0:#D9F5DD;--1:#111111">'</span><span style="--0:#D6DEEB;--1:#403F53">)</span></div></div></code></pre><div class="copy"><div aria-live="polite"></div><button title="Copy to clipboard" data-copied="Copied!" data-code="await client.disconnect()console.log(&#x27;User logged out&#x27;)"><div></div></button></div></figure></div>
@@ -457,7 +459,7 @@
 <div class="sl-heading-wrapper level-h3"><h3 id="connectioninfo-property"><code dir="auto">connectionInfo</code> (property)</h3><a class="sl-anchor-link" href="#connectioninfo-property"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 1 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 0 0-1.42-1.42m8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 1 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 0 0 0 1.42 1 1 0 0 0 1.42 0l3.88-3.89a4.49 4.49 0 0 0 0-6.33M8.83 15.17a1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.92-4.92a1 1 0 1 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42"></path></svg></span><span class="sr-only" data-pagefind-ignore>Section titled “connectionInfo (property)”</span></a></div>
 <p>Synchronous accessor for the current connection state. Populated by the proxy as soon as it is ready and refreshed automatically whenever any of the derived fields change (identity rename, default-stamp change, account migration, postage stamp purchased, auth transitions). Subscribe to <code dir="auto">onConnectionChange</code> to react to updates.</p>
 <p><strong>Type:</strong> <code dir="auto">ConnectionInfo</code></p>
-<p><strong>Throws:</strong> <code dir="auto">Error</code> if <code dir="auto">initialize()</code> has not been called yet.</p>
+<p><strong>Throws:</strong> <code dir="auto">invalid-state</code> if <code dir="auto">initialize()</code> has not resolved yet.</p>
 <table>
 <thead>
 <tr>
@@ -2945,8 +2947,18 @@ under a new ACT.</p></div></aside>
 <td></td>
 </tr>
 <tr>
+<td><code dir="auto">invalid-state</code></td>
+<td>The client cannot take the call in its current state: <code dir="auto">initialize()</code> has not resolved, was already called, or <code dir="auto">destroy()</code> ran. A call, or an <code dir="auto">initialize()</code>, still pending when <code dir="auto">destroy()</code> runs rejects with this too</td>
+<td></td>
+</tr>
+<tr>
 <td><code dir="auto">init-failed</code></td>
-<td>The proxy iframe did not come up; <code dir="auto">initialize()</code> rejects with this</td>
+<td>The proxy iframe did not come up: it failed to load, the proxy refused the origin, or it did not answer within <code dir="auto">initializationTimeout</code>; <code dir="auto">initialize()</code> rejects with this</td>
+<td></td>
+</tr>
+<tr>
+<td><code dir="auto">popup-blocked</code></td>
+<td>The browser blocked the authentication popup <code dir="auto">connect()</code> opens: not called from a user gesture, or a blocker</td>
 <td></td>
 </tr>
 <tr>

@@ -122,12 +122,13 @@ free tier. See <a href="../getting-started/#a-batch-you-were-given">Quick Start<
 <div class="sl-heading-wrapper level-h3"><h3 id="iframe-not-initialized-after-sign-in"><code dir="auto">Iframe not initialized</code> after sign-in</h3><a class="sl-anchor-link" href="#iframe-not-initialized-after-sign-in"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 1 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 0 0-1.42-1.42m8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 1 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 0 0 0 1.42 1 1 0 0 0 1.42 0l3.88-3.89a4.49 4.49 0 0 0 0-6.33M8.83 15.17a1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.92-4.92a1 1 0 1 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42"></path></svg></span><span class="sr-only" data-pagefind-ignore>Section titled “Iframe not initialized after sign-in”</span></a></div>
 <p><strong>Cause.</strong> The element the button container lives in was unmounted — typically rendered only
 in the signed-out branch of the UI — which destroyed the proxy iframe with it. Every later call
-has no iframe to talk to, and a later popup has no opener.</p>
+has no iframe to talk to, and a later popup has no opener. Through the library it is a
+<code dir="auto">SwarmIdError</code> with code <code dir="auto">invalid-state</code>.</p>
 <p><strong>Fix.</strong> Keep the container mounted for the life of the page, in every state. See
 <a href="../getting-started/#basic-usage">Quick Start</a>.</p>
 <div class="sl-heading-wrapper level-h3"><h3 id="failed-to-open-authentication-popup"><code dir="auto">Failed to open authentication popup</code></h3><a class="sl-anchor-link" href="#failed-to-open-authentication-popup"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 1 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 0 0-1.42-1.42m8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 1 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 0 0 0 1.42 1 1 0 0 0 1.42 0l3.88-3.89a4.49 4.49 0 0 0 0-6.33M8.83 15.17a1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.92-4.92a1 1 0 1 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42"></path></svg></span><span class="sr-only" data-pagefind-ignore>Section titled “Failed to open authentication popup”</span></a></div>
 <p><strong>Cause.</strong> The browser blocked the popup: <code dir="auto">connect()</code> was not called from a user gesture, or a
-blocker is on.</p>
+blocker is on. The code is <code dir="auto">popup-blocked</code>.</p>
 <p><strong>Fix.</strong> Call <code dir="auto">connect()</code> synchronously from the click handler, or render the iframe’s own
 button. The client opens the popup from the iframe or the page as the storage situation
 requires, so a dApp’s own button works on partitioned storage too.</p>
