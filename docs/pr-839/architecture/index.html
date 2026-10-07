@@ -112,7 +112,7 @@ settings</li>
 <p>The rest of <code dir="auto">swarm-id.snaha.net</code>: account creation from a recovery phrase, the keystore, drives,
 connected apps, devices, backup and restore, and the developer tools at <code dir="auto">/dev</code>.</p>
 <div class="sl-heading-wrapper level-h2"><h2 id="keys">Keys</h2><a class="sl-anchor-link" href="#keys"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 1 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 0 0-1.42-1.42m8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 1 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 0 0 0 1.42 1 1 0 0 0 1.42 0l3.88-3.89a4.49 4.49 0 0 0 0-6.33M8.83 15.17a1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.92-4.92a1 1 0 1 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42"></path></svg></span><span class="sr-only" data-pagefind-ignore>Section titled “Keys”</span></a></div>
-<p>Every key derives from the account’s recovery phrase. The phrase gives a wallet whose private key
+<p>Every key the account makes derives from its recovery phrase. The phrase gives a wallet whose private key
 is the <strong>master key</strong> and whose address is the account id. The master key stays on the identity
 site, encrypted at rest under the access method. From it come the per-app secrets and a stored
 <code dir="auto">derivationKey</code>, and from that the Swarm encryption key, the backup signer that owns every feed,
@@ -149,7 +149,9 @@ carries no account view is refused rather than starting a session that could nei
 told it had been revoked, and <code dir="auto">ConnectionInfo.uploadUnavailableReason</code> says which of the remaining
 causes a connected session hit.</p><p>A private window passes the same checks; its sessions are still discarded when the window closes,
 by design. Not yet checked on a device: whether a dormant account’s partitioned storage survives
-ITP’s roughly 30-day eviction window (<a href="https://github.com/snaha/swarm-id/issues/664">#664</a>).</p></div></aside>
+ITP’s roughly 30-day eviction window (<a href="https://github.com/snaha/swarm-id/issues/659">#659</a>).</p><p>Chrome, Firefox and Safari have also been run through the connect flow by hand, on desktop and
+mobile; that is the basis for the browser claim on the Introduction, and this Safari entry is the
+one with a written record.</p></div></aside>
 <p><strong>The Storage Access API is not part of this, by measurement rather than oversight.</strong> It was
 evaluated and is not called anywhere: on Safari it unlocks unpartitioned <em>cookies</em> only, and the
 non-cookie extension (<code dir="auto">requestStorageAccess({ localStorage: true })</code>, Chrome 125+) has no WebKit

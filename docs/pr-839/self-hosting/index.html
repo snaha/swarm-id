@@ -100,22 +100,22 @@ unaffected either way: the ceremony runs in the identity origin’s own popup, s
 from the app on any deployment. What same-site adds is storage, not credentials.</p>
 <div class="sl-heading-wrapper level-h2"><h2 id="what-it-costs">What it costs</h2><a class="sl-anchor-link" href="#what-it-costs"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 1 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 0 0-1.42-1.42m8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 1 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 0 0 0 1.42 1 1 0 0 0 1.42 0l3.88-3.89a4.49 4.49 0 0 0 0-6.33M8.83 15.17a1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.92-4.92a1 1 0 1 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42"></path></svg></span><span class="sr-only" data-pagefind-ignore>Section titled “What it costs”</span></a></div>
 <ul>
-<li><strong>You become the identity provider.</strong> The account is the recovery phrase, and every key,
-drive and synced record derives from it, so the same phrase is the same Swarm ID on your
-origin and on <code dir="auto">swarm-id.snaha.net</code>. The unlock is what does not carry over: passkeys bind
-to the RP ID and the vault lives in the origin’s own storage, so a user brings an account
-to your deployment by entering the phrase (or importing a <code dir="auto">.swarmid</code> file) and choosing an
-access method there, and restores it from Swarm like on any new device.</li>
+<li><strong>Every user signs up again on your origin.</strong> The account itself carries over: every key
+the account makes derives from the recovery phrase, and the drives travel in the synced
+record, so the same phrase is the same Swarm ID on your origin and on <code dir="auto">swarm-id.snaha.net</code>.
+The unlock does not: passkeys bind to the RP ID and the vault lives in the origin’s own
+storage. A user with an existing Swarm ID enters the phrase on your site, chooses an access
+method there, and the account restores from Swarm like on any new device.</li>
 <li><strong>Backup and recovery are yours.</strong> Every support question about a lost account lands
 with you.</li>
 <li><strong>You track a security-critical fork.</strong> Seed vaults and key derivation move fast in this
 repository. Bugs there lose data irrecoverably, and a copy that falls behind does not get
 the fixes.</li>
 </ul>
-<p>Weigh the onboarding win against that ownership downgrade rather than assuming it wins.
-For an app whose users already have a Swarm ID, or who will use several apps, the hosted
-identity is the better answer; the partitioned path works on every current browser, and
-the connect popup is one window.</p>
+<p>Weigh the onboarding win against that rather than assuming it wins. For an app whose users
+already have a Swarm ID, or who will use several apps, the hosted identity spares them a
+second sign-up and a second vault to look after; the partitioned path works on every
+current browser, and the connect popup is one window.</p>
 <div class="sl-heading-wrapper level-h2"><h2 id="what-it-does-not-change">What it does not change</h2><a class="sl-anchor-link" href="#what-it-does-not-change"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 1 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 0 0-1.42-1.42m8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 1 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 0 0 0 1.42 1 1 0 0 0 1.42 0l3.88-3.89a4.49 4.49 0 0 0 0-6.33M8.83 15.17a1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.92-4.92a1 1 0 1 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42"></path></svg></span><span class="sr-only" data-pagefind-ignore>Section titled “What it does not change”</span></a></div>
 <p>Nothing about the data. Identity and storage are separate layers: ciphertext goes from the
 browser to the Swarm network through a Bee API, addressed by content hash and kept alive
