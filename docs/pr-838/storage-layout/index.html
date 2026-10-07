@@ -100,8 +100,15 @@ that runs the user’s Bee node writes this once and the <strong>Network setting
 <p>Key <code dir="auto">swarm-id-accounts</code>. A versioned envelope around an array of account records:</p>
 <div class="expressive-code"><figure class="frame not-content"><figcaption class="header"></figcaption><pre data-language="json"><code><div class="ec-line"><div class="code"><span style="--0:#D6DEEB;--1:#403F53">{ </span><span style="--0:#7FDBCA;--1:#096E72">"version"</span><span style="--0:#D6DEEB;--1:#403F53">: </span><span style="--0:#F78C6C;--1:#AA0982">1</span><span style="--0:#D6DEEB;--1:#403F53">, </span><span style="--0:#7FDBCA;--1:#096E72">"data"</span><span style="--0:#D6DEEB;--1:#403F53">: [{ </span><span style="--0:#7FDBCA;--1:#096E72">"..."</span><span style="--0:#D6DEEB;--1:#403F53">: </span><span style="--0:#D9F5DD;--1:#111111">"</span><span style="--0:#C789D6;--1:#7C5686">one record per account</span><span style="--0:#D9F5DD;--1:#111111">"</span><span style="--0:#D6DEEB;--1:#403F53"> }] }</span></div></div></code></pre><div class="copy"><div aria-live="polite"></div><button title="Copy to clipboard" data-copied="Copied!" data-code="{ &quot;version&quot;: 1, &quot;data&quot;: [{ &quot;...&quot;: &quot;one record per account&quot; }] }"><div></div></button></div></figure></div>
 <p>The UI reads the key on load and again on every <code dir="auto">storage</code> event, so a write from another window
-of the same origin is picked up live. A record that fails validation is skipped, not fatal, with
-the reason on the console.</p>
+of the same origin is picked up live. Two behaviours a host has to write against:</p>
+<ul>
+<li>The envelope must be exactly <code dir="auto">{ "version": 1, "data": [...] }</code>. Anything else, non-JSON, a
+<code dir="auto">data</code> that is not an array, or any other <code dir="auto">version</code>, loads as no accounts at all, and the UI’s
+next write replaces the key with what it loaded.</li>
+<li>A record that fails validation is skipped, not fatal, with the reason on the console. Skipped
+is not kept: the UI writes back what it loaded, so a malformed record, <code dir="auto">encryptedSeed</code> included,
+is gone after the user’s next change to any account. Validate before writing.</li>
+</ul>
 <div class="sl-heading-wrapper level-h3"><h3 id="a-signed-in-account">A signed-in account</h3><a class="sl-anchor-link" href="#a-signed-in-account"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 1 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 0 0-1.42-1.42m8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 1 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 0 0 0 1.42 1 1 0 0 0 1.42 0l3.88-3.89a4.49 4.49 0 0 0 0-6.33M8.83 15.17a1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.92-4.92a1 1 0 1 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42"></path></svg></span><span class="sr-only" data-pagefind-ignore>Section titled “A signed-in account”</span></a></div>
 <p>The schema is <code dir="auto">LocalAccountSchemaV1</code>, the signed-in arm: the portable projection
 (<code dir="auto">SyncedAccountSchemaV1</code>) plus the device vault. The fields a host writes for a fresh account:</p>
