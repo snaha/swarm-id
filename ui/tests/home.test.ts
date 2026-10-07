@@ -41,6 +41,26 @@ test('the URL hash selects a tab and opens what it names', async ({ page }) => {
     await expect(page.getByText('Sharing public key')).toBeVisible()
   }
 
+  // A section opened from a link still collapses, and stays collapsed.
+  const keys = page.getByRole('button', { name: /Keys & addresses/ })
+  await keys.click()
+  await expect(keys).toHaveAttribute('aria-expanded', 'false')
+  await expect(page.getByText('Sharing public key')).toBeHidden()
+
+  // Unknown targets: an unknown tab lands on Apps, an unknown section (or an
+  // inherited object key) on Account with nothing expanded.
+  await page.goto('/#bogus')
+  await expect(page.getByRole('tab', { name: 'Apps' })).toHaveAttribute('aria-selected', 'true')
+  for (const hash of ['#account/bogus', '#account/constructor']) {
+    await page.goto(`/${hash}`)
+    await expect(page.getByRole('tab', { name: 'Account' })).toHaveAttribute(
+      'aria-selected',
+      'true',
+    )
+    await expect(keys).toBeVisible()
+    await expect(page.locator('button[id^="account-"][aria-expanded="true"]')).toHaveCount(0)
+  }
+
   await page.getByRole('tab', { name: 'Storage' }).click()
   await expect(page).toHaveURL(/\/#storage$/)
   await page.reload()

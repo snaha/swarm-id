@@ -4,7 +4,7 @@
 -->
 
 <script lang="ts">
-  import { type Component, tick, untrack } from 'svelte'
+  import { type Component, tick } from 'svelte'
 
   import { PublicKey } from '@ethersphere/bee-js'
   import ChevronDown from '@lucide/svelte/icons/chevron-down'
@@ -77,13 +77,23 @@
   let keysDetailOpen = $state(false)
   let sharingDetailOpen = $state(false)
 
+  const SECTION_IDS: readonly SectionId[] = ['identity', 'access', 'keys', 'phrase', 'backup']
+
+  // Re-runs on a new hash only: the explicit list keeps it from reading
+  // `expanded`, which would re-open the section as soon as the user collapsed
+  // it. The list also rejects inherited keys like `#account/constructor`.
   $effect(() => {
     const [section, card] = target
-    if (!section || !(section in untrack(() => expanded))) return
+    if (!SECTION_IDS.includes(section as SectionId)) return
     expanded[section as SectionId] = true
-    if (card === 'account-identity') keysDetailOpen = true
-    if (card === 'data-sharing') sharingDetailOpen = true
-    tick().then(() => document.getElementById(`account-${card ?? section}`)?.scrollIntoView())
+    if (section === 'keys' && card === 'account-identity') keysDetailOpen = true
+    if (section === 'keys' && card === 'data-sharing') sharingDetailOpen = true
+    tick().then(() => {
+      const el =
+        document.getElementById(`account-${section}-${card}`) ??
+        document.getElementById(`account-${section}`)
+      el?.scrollIntoView()
+    })
   })
 
   let signingOut = $state(false)
@@ -471,7 +481,7 @@
     {#if expanded.keys}
       <div class="flex flex-col gap-3 pl-5">
         <div
-          id="account-account-identity"
+          id="account-keys-account-identity"
           class="border-border flex w-full flex-col rounded-lg border"
         >
           {@render keyCardHeader(
@@ -506,7 +516,10 @@
           {/if}
         </div>
 
-        <div id="account-data-sharing" class="border-border flex w-full flex-col rounded-lg border">
+        <div
+          id="account-keys-data-sharing"
+          class="border-border flex w-full flex-col rounded-lg border"
+        >
           {@render keyCardHeader(
             'Data sharing',
             sharingAddress,
