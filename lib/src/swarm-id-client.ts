@@ -385,8 +385,9 @@ export class SwarmIdClient {
       this.iframe.style.zIndex = "999999"
     }
 
-    // Wait for iframe to load. The `reject` is stashed for `destroy()`: a
-    // removed iframe never fires `load`, and nothing else would settle this.
+    // Wait for iframe to load. The `reject` is stashed for `destroy()` while
+    // the load is pending: a removed iframe never fires `load`, and nothing
+    // else would settle this.
     await new Promise<void>((resolve, reject) => {
       this.iframeLoadReject = reject
       this.iframe!.onload = () => resolve()
@@ -402,6 +403,7 @@ export class SwarmIdClient {
         document.body.appendChild(this.iframe!)
       }
     })
+    this.iframeLoadReject = undefined
 
     // Wait for proxy to signal it's ready
     await this.proxyInitializedPromise
