@@ -33,11 +33,12 @@ from the app on any deployment. What same-site adds is storage, not credentials.
 
 ## What it costs
 
-- **You become the identity provider.** Passkeys bind to the RP ID, so accounts created on
-  your origin are different credentials from ones on `swarm-id.snaha.net`. A user cannot
-  bring an existing Swarm ID to your app, or take the one they made with you elsewhere.
-  Recovery phrases still export and import, but that is a manual migration, not a shared
-  identity.
+- **You become the identity provider.** The account is the recovery phrase, and every key,
+  drive and synced record derives from it, so the same phrase is the same Swarm ID on your
+  origin and on `swarm-id.snaha.net`. The unlock is what does not carry over: passkeys bind
+  to the RP ID and the vault lives in the origin's own storage, so a user brings an account
+  to your deployment by entering the phrase (or importing a `.swarmid` file) and choosing an
+  access method there, and restores it from Swarm like on any new device.
 - **Backup and recovery are yours.** Every support question about a lost account lands
   with you.
 - **You track a security-critical fork.** Seed vaults and key derivation move fast in this
