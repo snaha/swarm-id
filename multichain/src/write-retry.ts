@@ -3,7 +3,7 @@
 // Adapted from @upcoming/multichain-library (ISC)
 // https://github.com/ethersphere/multichain-library
 
-import { Dates, Objects, System } from "cafe-utility"
+import { Dates, System } from "cafe-utility"
 
 const ATTEMPTS = 4
 const BACKOFF_MILLIS = Dates.seconds(2)
@@ -28,6 +28,31 @@ const ALREADY_KNOWN = /already ?known|already imported|known transaction/i
 export function isAlreadyKnown(error: unknown): boolean {
   for (let e = error; e instanceof Error; e = e.cause) {
     if (ALREADY_KNOWN.test(e.message)) {
+      return true
+    }
+  }
+  return false
+}
+
+/**
+ * How each client family says the offer is too low: Nethermind `FeeTooLow`
+ * (and `FeeTooLowToCompete` against a full pool), geth and erigon
+ * `transaction underpriced` and `replacement transaction underpriced`, and
+ * Gnosis RPCs `transaction underpriced, EffectivePriorityFeePerGas too low`.
+ * viem classifies none of them, so the
+ * node's text, wherever it lands in the wrapper, is all there is to match.
+ */
+const UNDERPRICED = /FeeTooLow|underpriced/i
+
+/**
+ * Whether the node refused this transaction for offering too little.
+ *
+ * The one refusal a resend can fix, provided the resend offers more — which
+ * is why the caller's action is handed its attempt number.
+ */
+export function isUnderpriced(error: unknown): boolean {
+  for (let e = error; e instanceof Error; e = e.cause) {
+    if (UNDERPRICED.test(e.message)) {
       return true
     }
   }
@@ -60,10 +85,11 @@ export interface RetryOptions<T> {
 }
 
 /**
- * Retry a transaction send when the node rejects it with FeeTooLow (the gas
- * price moved between quoting and sending, or the offer was too low to begin
- * with). Any other error propagates immediately — a revert or nonce clash must
- * not be retried blindly.
+ * Retry a transaction send when the node rejects it as underpriced — Nethermind
+ * `FeeTooLow` and geth's `transaction underpriced` alike (the gas price moved
+ * between quoting and sending, or the offer was too low to begin with). Any
+ * other error propagates immediately — a revert or nonce clash must not be
+ * retried blindly.
  *
  * `action` is handed its attempt number so it can RAISE its offer. Without
  * that the retry re-sends bytes the node has already refused and waits for the
@@ -85,7 +111,7 @@ export async function withFeeTooLowRetry<T>(
         }
         return options.onAlreadyKnown()
       }
-      if (Objects.errorMatches(error, "FeeTooLow")) {
+      if (isUnderpriced(error)) {
         await System.sleepMillis(BACKOFF_MILLIS)
       } else {
         throw error

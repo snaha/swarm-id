@@ -11,6 +11,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import {
   TransactionAlreadyKnownError,
   isAlreadyKnown,
+  isUnderpriced,
   withFeeTooLowRetry,
 } from "./write-retry"
 
@@ -36,6 +37,19 @@ function nonceTooLowOverAlreadyKnown(): Error {
 
 function feeTooLow(): Error {
   return new Error("err: FeeTooLow: transaction underpriced")
+}
+
+/**
+ * The swap that failed after the user had paid: signed at the quoted 12 wei in
+ * the block where the base fee reached 12, so its effective tip was zero.
+ */
+function underpriced(): Error {
+  return new Error(
+    "Missing or invalid parameters. Double check you have provided the correct parameters.\n" +
+      "URL: https://rpc.gnosischain.com/\n" +
+      "Details: transaction underpriced, EffectivePriorityFeePerGas too low 0 < 1\n" +
+      "Version: viem@2.55.13",
+  )
 }
 
 describe("isAlreadyKnown", () => {
@@ -68,6 +82,41 @@ describe("isAlreadyKnown", () => {
   it("ignores values that are not node errors", () => {
     expect(isAlreadyKnown(undefined)).toBe(false)
     expect(isAlreadyKnown({ detail: "AlreadyKnown" })).toBe(false)
+  })
+})
+
+describe("isUnderpriced", () => {
+  it("recognises the answer that ended the swap", () => {
+    expect(isUnderpriced(underpriced())).toBe(true)
+  })
+
+  // Nethermind names it, geth and erigon describe it, and viem passes either
+  // through unclassified — the node's text is all there is to go on.
+  it.each([
+    ["nethermind", new Error("FeeTooLow")],
+    ["nethermind, against the pool", new Error("FeeTooLowToCompete")],
+    ["geth / erigon", new Error("transaction underpriced")],
+    ["geth replacement", new Error("replacement transaction underpriced")],
+  ])("recognises the %s spelling", (_, error) => {
+    expect(isUnderpriced(error)).toBe(true)
+  })
+
+  it.each([
+    ["the swap's answer", underpriced()],
+    ["nethermind", new Error("FeeTooLow")],
+    ["geth replacement", new Error("replacement transaction underpriced")],
+  ])("looks through the cause chain for %s", (_, cause) => {
+    expect(isUnderpriced(new Error("send failed", { cause }))).toBe(true)
+  })
+
+  it("does not confuse it with anything that must not be retried", () => {
+    expect(isUnderpriced(alreadyKnown())).toBe(false)
+    expect(isUnderpriced(new Error("execution reverted"))).toBe(false)
+  })
+
+  it("ignores values that are not node errors", () => {
+    expect(isUnderpriced(undefined)).toBe(false)
+    expect(isUnderpriced({ detail: "transaction underpriced" })).toBe(false)
   })
 })
 
@@ -111,6 +160,20 @@ describe("withFeeTooLowRetry", () => {
 
     await expect(run(withFeeTooLowRetry(action))).resolves.toBe("0xhash")
     expect(seen).toEqual([0, 1, 2])
+  })
+
+  // The regression: geth and erigon never say `FeeTooLow`, so an underpriced
+  // send reached the user as a failure instead of being bid up and resent.
+  it("retries a send the node calls underpriced", async () => {
+    const action = vi.fn(async (attempt: number) => {
+      if (attempt === 0) {
+        throw underpriced()
+      }
+      return "0xhash"
+    })
+
+    await expect(run(withFeeTooLowRetry(action))).resolves.toBe("0xhash")
+    expect(action).toHaveBeenCalledTimes(2)
   })
 
   it("gives up with a readable message when every attempt is underpriced", async () => {
