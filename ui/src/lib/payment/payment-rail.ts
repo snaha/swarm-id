@@ -201,6 +201,14 @@ export interface PaymentQuote {
    * fails at the far end of a payment that already succeeded.
    */
   delivers: Delivery
+  /**
+   * What the wallet pays out of each asset on the source chain, in that asset's
+   * own base units, keyed by the same token address the picker uses
+   * (`NATIVE_CURRENCY` for the native coin). Pay is checked against the
+   * wallet's balances with it. Empty when the rail cannot say. Source-chain
+   * gas is not included: the wallet prices that itself.
+   */
+  charges: { currency: string; amount: bigint }[]
 }
 
 export interface ExecutePaymentOptions {
@@ -310,6 +318,56 @@ export async function walletGenesisHash(provider: EthereumProvider): Promise<str
   ).catch(() => undefined)
   const hash = (block as { hash?: unknown } | undefined)?.hash
   return typeof hash === 'string' ? hash : undefined
+}
+
+/**
+ * Shorter than the genesis probe's bound, because nothing is fetched: a wallet
+ * answers this from its own state, and the connect screen's spinner is up for
+ * as long as it takes. A wallet that will not say costs the user only the
+ * default chain, so there is nothing worth waiting longer for.
+ */
+const CHAIN_ID_PROBE_TIMEOUT_MS = 5_000
+
+/** An EIP-1193 `eth_chainId` answer: a hex quantity, nothing else. */
+const HEX_CHAIN_ID = /^0x[0-9a-f]+$/i
+
+/**
+ * The chain the wallet is on right now, as it reports it. `eth_chainId` is
+ * answered without a prompt, so asking costs the user nothing.
+ *
+ * @returns undefined when the wallet will not say, or says something that is
+ *   not a chain id — no answer is not a chain, and a guessed one would be
+ *   treated as where the user's funds are.
+ */
+export async function walletChainId(provider: EthereumProvider): Promise<number | undefined> {
+  const reported = await withTimeout(
+    provider.request({ method: 'eth_chainId' }),
+    CHAIN_ID_PROBE_TIMEOUT_MS,
+    'The wallet did not say which chain it is on.',
+  ).catch(() => undefined)
+  return typeof reported === 'string' && HEX_CHAIN_ID.test(reported) ? Number(reported) : undefined
+}
+
+/**
+ * The chain a payment opens on once a wallet connects: the wallet's own when
+ * the payment can come from it, otherwise whatever is already selected.
+ *
+ * The wallet's chain wins because that is where its funds most likely are.
+ * When it is no help — not offered, or not reported — the selection stands:
+ * before any pick that is the rails' first chain, a product decision about
+ * which route to recommend, and after one it is the user's own choice, which a
+ * wallet change says nothing against.
+ *
+ * @param selected - the chain the picker is on now
+ */
+export function startingChainId(
+  walletChain: number | undefined,
+  chains: Chain[],
+  selected: number,
+): number {
+  return walletChain !== undefined && chains.some((chain) => chain.id === walletChain)
+    ? walletChain
+    : selected
 }
 
 /**

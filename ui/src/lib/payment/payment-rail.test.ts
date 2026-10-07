@@ -1,14 +1,17 @@
 // Copyright 2026 The Swarm Authors. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 import { defineChain } from 'viem'
-import { gnosis } from 'viem/chains'
-import { describe, expect, it, vi } from 'vitest'
+import { base, gnosis, mainnet } from 'viem/chains'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import {
+  type EthereumProvider,
   displayAmount,
   displayUsd,
   isUnrecognizedChainError,
+  startingChainId,
   switchWalletChain,
+  walletChainId,
 } from '$lib/payment/payment-rail'
 
 /**
@@ -325,5 +328,91 @@ describe('switchWalletChain — two networks, one chain id', () => {
     const { provider, calls } = walletOn({ genesis: OTHER_GENESIS })
     await switchWalletChain(provider, gnosis.id, [gnosis])
     expect(calls).toEqual(['wallet_switchEthereumChain'])
+  })
+})
+
+/**
+ * Where the pay screen opens. A wallet already on a chain the payment can come
+ * from is where its funds most likely are; sending it somewhere else before
+ * the user has chosen anything is how a wallet holding only ETH was walked to
+ * Gnosis and offered a payment in xDAI it did not have.
+ */
+describe('startingChainId', () => {
+  it('opens on the wallet’s own chain when the payment can come from it', () => {
+    expect(startingChainId(base.id, [gnosis, mainnet, base], gnosis.id)).toBe(base.id)
+  })
+
+  /** What is already selected decides only when the wallet's chain is no help. */
+  it('keeps the selection when the wallet’s chain is not one on offer', () => {
+    expect(startingChainId(mainnet.id, [gnosis, base], gnosis.id)).toBe(gnosis.id)
+  })
+
+  it('keeps the selection when the wallet would not say', () => {
+    expect(startingChainId(undefined, [gnosis, mainnet], gnosis.id)).toBe(gnosis.id)
+  })
+
+  /**
+   * A wallet changed mid-payment: the user already picked a chain, and a
+   * wallet with nothing to say about it must not throw that pick away for the
+   * rails' default.
+   */
+  it('keeps a chain the user picked over the rails’ default', () => {
+    expect(startingChainId(mainnet.id, [gnosis, base], base.id)).toBe(base.id)
+  })
+})
+
+/**
+ * The chain the wallet is on, read without asking anyone anything. Whatever
+ * cannot be read as a chain id is "no answer", never a guess: the caller falls
+ * back to its default and offers the switch it always did.
+ */
+describe('walletChainId', () => {
+  /** Long enough for any wallet that is ever going to answer. */
+  const SILENCE_MS = 10_000
+
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+
+  /** A wallet answering `eth_chainId` with `answer`, recording what it is asked. */
+  function answering(answer: unknown) {
+    const calls: string[] = []
+    const provider: EthereumProvider = {
+      request({ method }) {
+        calls.push(method)
+        return Promise.resolve(answer)
+      },
+    }
+    return { provider, calls }
+  }
+
+  it('reads the hex chain id the wallet reports', async () => {
+    const { provider, calls } = answering('0x64')
+    expect(await walletChainId(provider)).toBe(gnosis.id)
+    // The one question a wallet answers from its own state, with no prompt.
+    expect(calls).toEqual(['eth_chainId'])
+  })
+
+  it('is no answer when the wallet refuses the question', async () => {
+    const provider: EthereumProvider = {
+      request: () => Promise.reject(new Error('the method eth_chainId does not exist')),
+    }
+    expect(await walletChainId(provider)).toBeUndefined()
+  })
+
+  it.each([['garbage'], [''], ['0x'], ['0xzz'], [gnosis.id], [undefined], [{}]])(
+    'is no answer when the wallet says something that is not a hex chain id (%s)',
+    async (answer) => {
+      expect(await walletChainId(answering(answer).provider)).toBeUndefined()
+    },
+  )
+
+  /** Connect waits on this read, so a wallet that never answers must not hold it. */
+  it('gives up on a wallet that never answers', async () => {
+    vi.useFakeTimers()
+    const provider: EthereumProvider = { request: () => new Promise(() => undefined) }
+    const reading = walletChainId(provider)
+    await vi.advanceTimersByTimeAsync(SILENCE_MS)
+    await expect(reading).resolves.toBeUndefined()
   })
 })
