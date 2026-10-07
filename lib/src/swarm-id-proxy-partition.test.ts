@@ -132,7 +132,11 @@ const SLOW_YIELD_MS = vi.hoisted(() => 400)
 const rosterDevices = vi.hoisted(() => [] as Device[])
 vi.mock("./sync", async (importActual) => {
   const actual = await importActual<typeof import("./sync")>()
-  return { ...actual, readRoster: vi.fn(async () => rosterDevices) }
+  return {
+    ...actual,
+    readRoster: vi.fn(async () => rosterDevices),
+    publishDeviceState: vi.fn(async () => {}),
+  }
 })
 /** Lets a test count derivations (they run on every accounts storage event)
  *  and make one fail, without faking what a topic is. */
@@ -204,6 +208,7 @@ import { busChannelName } from "./bus/account-bus"
 import { BusMessageSchema } from "./bus/messages"
 import { deriveBusContext } from "./bus/bus-context"
 import { BatchWriteCoordinator } from "./sync/batch-write-coordinator"
+import { publishDeviceState, readRoster } from "./sync"
 import { UtilizationAwareStamper } from "./utils/batch-utilization"
 import {
   createAccountsStorageManager,
@@ -701,12 +706,14 @@ describe("SwarmIdProxy partitioned write enablement", () => {
     const CONNECTION_LIFETIME_MS = 60_000
 
     type CoordinatorStub = {
+      deps: { bee: { url: string } }
       batchId: string
       teardown: ReturnType<typeof vi.fn>
       withWrite: ReturnType<typeof vi.fn>
     }
 
     type WriteInternals = {
+      bee: { url: string }
       ensureCanUpload(): void
       withModeAwareWriteLock<T>(
         targetOptions: undefined,
@@ -913,6 +920,123 @@ describe("SwarmIdProxy partitioned write enablement", () => {
       expect(internals().buildConnectionInfo()).toMatchObject({
         uploadMode: "unavailable",
         uploadUnavailableReason: "no-stamp",
+      })
+    })
+
+    // Reads have to come from where the uploads go, or a dApp reads back a 404
+    // for the chunk it just wrote; and a user-stamped write goes to the
+    // configured node, never to the dApp's gateway.
+    describe("the Bee client follows the upload mode", () => {
+      // bee-js keeps a client's URL without its trailing slash.
+      const CONFIGURED_NODE_URL = DEFAULT_BEE_NODE_URL.replace(/\/$/, "")
+      const GATEWAY_NODE_URL = GATEWAY_URL.replace(/\/$/, "")
+      const DRIVE_TTL_SECONDS = 60
+      const PAST_DRIVE_TTL_MS = 61_000
+
+      it("writes and reads at the configured node for a session connected after load", async () => {
+        // Nothing connected yet: the session starts out subsidised.
+        await identify(GATEWAY_URL)
+        expect(internals().bee.url).toBe(GATEWAY_NODE_URL)
+        const coordinatorsBefore = coordinatorCount()
+
+        seedConnectedAccount()
+        const shell = createAccountsStorageManager()
+        shell.save(shell.load())
+        await vi.waitFor(() =>
+          expect(coordinatorCount()).toBe(coordinatorsBefore + 1),
+        )
+
+        expect(latestCoordinator().deps.bee.url).toBe(CONFIGURED_NODE_URL)
+        expect(internals().bee.url).toBe(CONFIGURED_NODE_URL)
+      })
+
+      it("reads from the gateway once the drive's lifetime runs out in an open session", async () => {
+        const [stamp] = makeSyncedAccount().postageStamps
+        seedConnectedAccount({
+          account: {
+            postageStamps: [
+              { ...stamp, batchTTL: DRIVE_TTL_SECONDS, updatedAt: Date.now() },
+            ],
+          },
+        })
+        await identify(GATEWAY_URL)
+        expect(internals().buildConnectionInfo().uploadMode).toBe("user-stamp")
+        expect(internals().bee.url).toBe(CONFIGURED_NODE_URL)
+
+        vi.setSystemTime(Date.now() + PAST_DRIVE_TTL_MS)
+        try {
+          await expect(uploadTarget()).resolves.toEqual({
+            mode: "subsidised",
+            gatewayUrl: GATEWAY_URL,
+          })
+          expect(internals().bee.url).toBe(GATEWAY_NODE_URL)
+        } finally {
+          vi.useRealTimers()
+        }
+      })
+
+      // A refused drive keeps its coordinator while the session reads as
+      // subsidised. What that coordinator writes, the roster and this device's
+      // state, it writes at the configured node, so it reads them back there.
+      it("keeps the coordinator's roster reads at the configured node once the drive runs out", async () => {
+        const [stamp] = makeSyncedAccount().postageStamps
+        seedConnectedAccount({
+          account: {
+            postageStamps: [
+              { ...stamp, batchTTL: DRIVE_TTL_SECONDS, updatedAt: Date.now() },
+            ],
+          },
+          connectedApps: [
+            {
+              appUrl: PARENT_ORIGIN,
+              appName: "dApp",
+              appSecret: OTHER_APP_SECRET,
+              lastConnectedAt: Date.now(),
+              connectedUntil: Date.now() + PAST_DRIVE_TTL_MS * 2,
+            },
+          ],
+        })
+        await identify(GATEWAY_URL)
+        const coordinator = latestCoordinator() as CoordinatorStub & {
+          accountId?: string
+          currentPartition?: number
+          deps: {
+            accountId: string
+            refreshKnownDeviceIds: () => Promise<void>
+          }
+        }
+        // A publish needs a held partition, and checks the snapshot's account
+        // against the coordinator's, which the mock carries on `deps` only.
+        coordinator.currentPartition = 0
+        coordinator.accountId = coordinator.deps.accountId
+        coordinator.withWrite.mockImplementationOnce(
+          (write: (target: unknown) => Promise<void>) => write({}),
+        )
+        rosterDevices.length = 0
+        vi.mocked(readRoster).mockClear()
+        vi.mocked(publishDeviceState).mockClear()
+
+        vi.setSystemTime(Date.now() + PAST_DRIVE_TTL_MS)
+        try {
+          expect(internals().bee.url).toBe(GATEWAY_NODE_URL)
+          await coordinator.deps.refreshKnownDeviceIds()
+          await (
+            proxy as unknown as {
+              runAccountStatePublish(reason: "acquired"): Promise<void>
+            }
+          ).runAccountStatePublish("acquired")
+        } finally {
+          vi.useRealTimers()
+        }
+
+        const rosterReads = vi
+          .mocked(readRoster)
+          .mock.calls.map(([options]) => options.bee.url)
+        expect(rosterReads).toEqual([CONFIGURED_NODE_URL, CONFIGURED_NODE_URL])
+        expect(vi.mocked(publishDeviceState)).toHaveBeenCalledOnce()
+        expect(vi.mocked(publishDeviceState).mock.calls[0][0].bee.url).toBe(
+          CONFIGURED_NODE_URL,
+        )
       })
     })
   })

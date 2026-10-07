@@ -388,7 +388,12 @@ export class SwarmIdProxy {
   private buttonConfig: ButtonConfig | undefined
   private popupMode: "popup" | "window" = "window"
   private appMetadata: AppMetadata | undefined
-  private bee: Bee
+  /**
+   * The last Bee client built, with the URL it was asked for. Keyed on that
+   * input URL, not on the client's own `url`, which bee-js keeps without the
+   * trailing slash.
+   */
+  private beeClient: { url: string; bee: Bee } | undefined
   private unsubscribeStorageListeners: Array<() => void> = []
   private storageWorkQueue: Promise<void> = Promise.resolve()
   private lastConnectionInfo: ConnectionInfo | undefined
@@ -413,6 +418,46 @@ export class SwarmIdProxy {
   private get stampRefusal(): StampRefusal | undefined {
     return this.stampLifetime && stampRefusal(this.stampLifetime)
   }
+
+  /**
+   * The client for the node the current mode writes to: the dApp's gateway
+   * while the session is subsidised, the configured node otherwise. Reads have
+   * to come from where the uploads go, or a dApp reads back a 404 for the
+   * chunk it just wrote.
+   *
+   * Derived on every read rather than assigned, because a mode change is not
+   * always an event — a drive's expiry is read off the clock — and a client
+   * picked once keeps pointing wherever the session started: at the gateway
+   * for a session that connected after the page loaded, or at the node for
+   * one whose drive has since run out or been removed.
+   */
+  private get bee(): Bee {
+    return this.beeClientFor(
+      this.isSubsidisedModeActive()
+        ? this.subsidisedGatewayUrl!
+        : this.beeApiUrl,
+    )
+  }
+
+  /**
+   * The client for the configured node, whatever the mode. The coordinator
+   * writes there, and only there: it runs in user-stamp mode alone, and a
+   * refused drive (expired, unusable) keeps one while `bee` points at the
+   * gateway. What it writes — the roster, this device's state — is read back
+   * through this client too.
+   */
+  private get nodeBee(): Bee {
+    return this.beeClientFor(this.beeApiUrl)
+  }
+
+  /** A client for `url`, rebuilt only when the URL differs from the last. */
+  private beeClientFor(url: string): Bee {
+    if (this.beeClient?.url !== url) {
+      this.beeClient = { url, bee: new Bee(url) }
+    }
+    return this.beeClient.bee
+  }
+
   /**
    * The write path (lock + partition lease + stamp flush) for the current
    * account+batch. Assigned in `initializeStamper` together with the stamper it
@@ -463,7 +508,6 @@ export class SwarmIdProxy {
         "[Proxy] No account-bus signaling URL configured — cross-partition and cross-device coordination is off (docs/Account-Bus.md).",
       )
     }
-    this.bee = new Bee(this.beeApiUrl)
     this.setupMessageListener()
     this.setupStorageListeners()
 
@@ -563,10 +607,9 @@ export class SwarmIdProxy {
   }
 
   /**
-   * Re-read network settings and repoint the Bee client at the configured node.
-   * `beeApiUrl` / `gnosisRpcUrl` are read fresh per call by the TTL/contract
-   * helpers, so only the cached `this.bee` needs rebuilding. No-op when the Bee
-   * URL is unchanged, so an RPC-only change doesn't churn the client mid-op.
+   * Re-read network settings. `beeApiUrl` / `gnosisRpcUrl` are read fresh per
+   * call — by the TTL/contract helpers, and by `bee`, which builds the client
+   * for a changed URL on its next read — so updating them is all it takes.
    */
   private applyNetworkSettings(): void {
     this.applyNetworkSettingsValues(
@@ -599,12 +642,6 @@ export class SwarmIdProxy {
     if (this.beeApiUrl !== DEFAULT_BEE_NODE_URL) {
       this.subsidisedGatewayUrl = undefined
     }
-
-    this.bee = new Bee(
-      this.isSubsidisedModeActive()
-        ? this.subsidisedGatewayUrl!
-        : this.beeApiUrl,
-    )
   }
 
   /**
@@ -1851,7 +1888,7 @@ export class SwarmIdProxy {
     // hints at a lane nobody holds (#684), and a lease message naming that
     // batch answers nobody (#589). `batchId` is the capture from the top.
     this.coordinator = new BatchWriteCoordinator({
-      bee: this.bee,
+      bee: this.nodeBee,
       batchId,
       stamper,
       deviceId: this.requireDeviceId(),
@@ -2222,12 +2259,6 @@ export class SwarmIdProxy {
 
     // Load existing secret if available
     await this.loadAuthData()
-
-    // Update this.bee to use subsidised gateway URL when in subsidised mode
-    // This ensures downloads use the same endpoint as uploads
-    if (this.isSubsidisedModeActive()) {
-      this.bee = new Bee(this.subsidisedGatewayUrl!)
-    }
 
     // Acknowledge receipt
     this.postMessage(event, {
@@ -2713,7 +2744,7 @@ export class SwarmIdProxy {
       )
       const owner = backupKey.publicKey().address()
       const rosterDevices = await readRoster({
-        bee: this.bee,
+        bee: this.nodeBee,
         accountId: account.id.toHex(),
         owner,
       })
@@ -2943,7 +2974,7 @@ export class SwarmIdProxy {
       const deviceId = this.requireDeviceId()
       if (reason === "acquired") {
         const rosterDevices = await readRoster({
-          bee: this.bee,
+          bee: this.nodeBee,
           accountId: snapshot.accountId,
           owner,
         }).catch(() => [])
@@ -3003,7 +3034,7 @@ export class SwarmIdProxy {
 
       await coordinator.withWrite((target) =>
         publishDeviceState({
-          bee: this.bee,
+          bee: this.nodeBee,
           accountId: snapshot.accountId,
           device: thisDevice,
           accountKey,
