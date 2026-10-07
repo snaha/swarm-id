@@ -439,6 +439,17 @@ export class SwarmIdProxy {
     )
   }
 
+  /**
+   * The client for the configured node, whatever the mode. The coordinator
+   * writes there, and only there: it runs in user-stamp mode alone, and a
+   * refused drive (expired, unusable) keeps one while `bee` points at the
+   * gateway. What it writes — the roster, this device's state — is read back
+   * through this client too.
+   */
+  private get nodeBee(): Bee {
+    return this.beeClientFor(this.beeApiUrl)
+  }
+
   /** A client for `url`, rebuilt only when the URL differs from the last. */
   private beeClientFor(url: string): Bee {
     if (this.beeClient?.url !== url) {
@@ -1877,10 +1888,7 @@ export class SwarmIdProxy {
     // hints at a lane nobody holds (#684), and a lease message naming that
     // batch answers nobody (#589). `batchId` is the capture from the top.
     this.coordinator = new BatchWriteCoordinator({
-      // The configured node, not `this.bee`: the coordinator only ever runs in
-      // user-stamp mode, and a refused drive (expired, unusable) still gets one
-      // while the session reads as subsidised.
-      bee: this.beeClientFor(this.beeApiUrl),
+      bee: this.nodeBee,
       batchId,
       stamper,
       deviceId: this.requireDeviceId(),
@@ -2736,7 +2744,7 @@ export class SwarmIdProxy {
       )
       const owner = backupKey.publicKey().address()
       const rosterDevices = await readRoster({
-        bee: this.bee,
+        bee: this.nodeBee,
         accountId: account.id.toHex(),
         owner,
       })
@@ -2966,7 +2974,7 @@ export class SwarmIdProxy {
       const deviceId = this.requireDeviceId()
       if (reason === "acquired") {
         const rosterDevices = await readRoster({
-          bee: this.bee,
+          bee: this.nodeBee,
           accountId: snapshot.accountId,
           owner,
         }).catch(() => [])
@@ -3026,7 +3034,7 @@ export class SwarmIdProxy {
 
       await coordinator.withWrite((target) =>
         publishDeviceState({
-          bee: this.bee,
+          bee: this.nodeBee,
           accountId: snapshot.accountId,
           device: thisDevice,
           accountKey,

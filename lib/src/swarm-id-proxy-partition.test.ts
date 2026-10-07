@@ -132,7 +132,11 @@ const SLOW_YIELD_MS = vi.hoisted(() => 400)
 const rosterDevices = vi.hoisted(() => [] as Device[])
 vi.mock("./sync", async (importActual) => {
   const actual = await importActual<typeof import("./sync")>()
-  return { ...actual, readRoster: vi.fn(async () => rosterDevices) }
+  return {
+    ...actual,
+    readRoster: vi.fn(async () => rosterDevices),
+    publishDeviceState: vi.fn(async () => {}),
+  }
 })
 /** Lets a test count derivations (they run on every accounts storage event)
  *  and make one fail, without faking what a topic is. */
@@ -204,6 +208,7 @@ import { busChannelName } from "./bus/account-bus"
 import { BusMessageSchema } from "./bus/messages"
 import { deriveBusContext } from "./bus/bus-context"
 import { BatchWriteCoordinator } from "./sync/batch-write-coordinator"
+import { publishDeviceState, readRoster } from "./sync"
 import { UtilizationAwareStamper } from "./utils/batch-utilization"
 import {
   createAccountsStorageManager,
@@ -968,6 +973,70 @@ describe("SwarmIdProxy partitioned write enablement", () => {
         } finally {
           vi.useRealTimers()
         }
+      })
+
+      // A refused drive keeps its coordinator while the session reads as
+      // subsidised. What that coordinator writes, the roster and this device's
+      // state, it writes at the configured node, so it reads them back there.
+      it("keeps the coordinator's roster reads at the configured node once the drive runs out", async () => {
+        const [stamp] = makeSyncedAccount().postageStamps
+        seedConnectedAccount({
+          account: {
+            postageStamps: [
+              { ...stamp, batchTTL: DRIVE_TTL_SECONDS, updatedAt: Date.now() },
+            ],
+          },
+          connectedApps: [
+            {
+              appUrl: PARENT_ORIGIN,
+              appName: "dApp",
+              appSecret: OTHER_APP_SECRET,
+              lastConnectedAt: Date.now(),
+              connectedUntil: Date.now() + PAST_DRIVE_TTL_MS * 2,
+            },
+          ],
+        })
+        await identify(GATEWAY_URL)
+        const coordinator = latestCoordinator() as CoordinatorStub & {
+          accountId?: string
+          currentPartition?: number
+          deps: {
+            accountId: string
+            refreshKnownDeviceIds: () => Promise<void>
+          }
+        }
+        // A publish needs a held partition, and checks the snapshot's account
+        // against the coordinator's, which the mock carries on `deps` only.
+        coordinator.currentPartition = 0
+        coordinator.accountId = coordinator.deps.accountId
+        coordinator.withWrite.mockImplementationOnce(
+          (write: (target: unknown) => Promise<void>) => write({}),
+        )
+        rosterDevices.length = 0
+        vi.mocked(readRoster).mockClear()
+        vi.mocked(publishDeviceState).mockClear()
+
+        vi.setSystemTime(Date.now() + PAST_DRIVE_TTL_MS)
+        try {
+          expect(internals().bee.url).toBe(GATEWAY_NODE_URL)
+          await coordinator.deps.refreshKnownDeviceIds()
+          await (
+            proxy as unknown as {
+              runAccountStatePublish(reason: "acquired"): Promise<void>
+            }
+          ).runAccountStatePublish("acquired")
+        } finally {
+          vi.useRealTimers()
+        }
+
+        const rosterReads = vi
+          .mocked(readRoster)
+          .mock.calls.map(([options]) => options.bee.url)
+        expect(rosterReads).toEqual([CONFIGURED_NODE_URL, CONFIGURED_NODE_URL])
+        expect(vi.mocked(publishDeviceState)).toHaveBeenCalledOnce()
+        expect(vi.mocked(publishDeviceState).mock.calls[0][0].bee.url).toBe(
+          CONFIGURED_NODE_URL,
+        )
       })
     })
   })
