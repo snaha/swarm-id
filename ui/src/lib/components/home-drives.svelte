@@ -4,6 +4,8 @@
 -->
 
 <script lang="ts">
+  import { tick, untrack } from 'svelte'
+
   import ChevronsUpDown from '@lucide/svelte/icons/chevrons-up-down'
   import EllipsisVertical from '@lucide/svelte/icons/ellipsis-vertical'
   import Pencil from '@lucide/svelte/icons/pencil'
@@ -22,6 +24,7 @@
   import { DropdownMenu, DropdownMenuItem } from '$lib/components/ui/dropdown-menu'
   import { Input } from '$lib/components/ui/input'
   import UtilizationBar from '$lib/components/utilization-bar.svelte'
+  import { strip0x } from '$lib/crypto/hex'
   import { describeDrive } from '$lib/drives'
   import { toastStore } from '$lib/stores/toast.svelte'
   import type { Account } from '$lib/types'
@@ -29,9 +32,11 @@
 
   interface Props {
     account: Account
+    /** From the URL hash (`#storage/<batchId>`): the drive to open. */
+    target?: string[]
   }
 
-  let { account }: Props = $props()
+  let { account, target = [] }: Props = $props()
 
   let expandedId = $state<string | undefined>(undefined)
   let nameDraft = $state('')
@@ -48,6 +53,18 @@
     expandedId = batchId
     nameDraft = currentName
   }
+
+  // Re-runs on a new hash only — not when the user collapses the drive again.
+  $effect(() => {
+    const batchId = target[0] && strip0x(target[0]).toLowerCase()
+    untrack(() => {
+      const drive = account.stamps.find((stamp) => stamp.batchID.toHex() === batchId)
+      if (!drive) return
+      expandedId = batchId
+      nameDraft = describeDrive(drive).name
+      tick().then(() => document.getElementById(`drive-${batchId}`)?.scrollIntoView())
+    })
+  })
 
   function commitRename(drive: PostageStamp) {
     const trimmed = nameDraft.trim()
@@ -121,7 +138,7 @@
               : // No TTL data (e.g. a stamp stored before the source recorded
                 // it) — never render a blank line under the heading.
                 d.timeLeftLabel || 'Unknown'}
-        <div class="border-border w-full overflow-hidden rounded-lg border">
+        <div id="drive-{batchKey}" class="border-border w-full overflow-hidden rounded-lg border">
           <!-- Header row: name (editable when open) + status + capacity + toggle -->
           <div class="flex items-center gap-3 px-4 py-3">
             {#if isOpen}

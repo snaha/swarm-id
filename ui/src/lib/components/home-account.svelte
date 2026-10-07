@@ -4,7 +4,7 @@
 -->
 
 <script lang="ts">
-  import type { Component } from 'svelte'
+  import { type Component, tick } from 'svelte'
 
   import { PublicKey } from '@ethersphere/bee-js'
   import ChevronDown from '@lucide/svelte/icons/chevron-down'
@@ -53,11 +53,17 @@
 
   interface Props {
     account: Account
+    /** From the URL hash (`#account/<section>[/<key card>]`): what to open. */
+    target?: string[]
   }
 
-  let { account }: Props = $props()
+  let { account, target = [] }: Props = $props()
 
-  type SectionId = 'identity' | 'access' | 'keys' | 'phrase' | 'backup'
+  const SECTION_IDS = ['identity', 'access', 'keys', 'phrase', 'backup'] as const
+  type SectionId = (typeof SECTION_IDS)[number]
+  function isSectionId(value: string | undefined): value is SectionId {
+    return SECTION_IDS.some((id) => id === value)
+  }
   /** What the unlock confirmation is for; completes once the seed decrypts. */
   type UnlockTarget = 'private-key' | 'phrase' | 'export' | 'change-method'
 
@@ -73,6 +79,24 @@
   let addDriveOpen = $state(false)
   let keysDetailOpen = $state(false)
   let sharingDetailOpen = $state(false)
+
+  // Re-runs on a new hash only: the explicit list keeps it from reading
+  // `expanded`, which would re-open the section as soon as the user collapsed
+  // it. The list also rejects inherited keys like `#account/constructor`.
+  $effect(() => {
+    const [section, card] = target
+    if (!isSectionId(section)) return
+    expanded[section] = true
+    if (section === 'keys' && card === 'account-identity') keysDetailOpen = true
+    if (section === 'keys' && card === 'data-sharing') sharingDetailOpen = true
+    tick().then(() => {
+      const el =
+        (card && document.getElementById(`account-${section}-${card}`)) ||
+        document.getElementById(`account-${section}`)
+      el?.scrollIntoView()
+    })
+  })
+
   let signingOut = $state(false)
   let deleting = $state(false)
   // Reveals cache only their derived display value — never the raw seed, which
@@ -280,6 +304,7 @@
 
 {#snippet sectionHeader(id: SectionId, title: string, description: string)}
   <button
+    id="account-{id}"
     type="button"
     class="flex w-full cursor-pointer flex-col items-start text-left"
     aria-expanded={expanded[id]}
@@ -456,7 +481,10 @@
     )}
     {#if expanded.keys}
       <div class="flex flex-col gap-3 pl-5">
-        <div class="border-border flex w-full flex-col rounded-lg border">
+        <div
+          id="account-keys-account-identity"
+          class="border-border flex w-full flex-col rounded-lg border"
+        >
           {@render keyCardHeader(
             'Account identity',
             account.id.toChecksum(),
@@ -489,7 +517,10 @@
           {/if}
         </div>
 
-        <div class="border-border flex w-full flex-col rounded-lg border">
+        <div
+          id="account-keys-data-sharing"
+          class="border-border flex w-full flex-col rounded-lg border"
+        >
           {@render keyCardHeader(
             'Data sharing',
             sharingAddress,
