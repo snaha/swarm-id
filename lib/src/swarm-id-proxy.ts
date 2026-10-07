@@ -147,6 +147,7 @@ import {
 import { isStorageShared } from "./utils/storage-probe"
 import {
   deriveSecret,
+  deriveSecretSync,
   deriveSharingKey,
   derivePostageSignerKeySync,
   deriveSwarmEncryptionKey,
@@ -1806,20 +1807,6 @@ export class SwarmIdProxy {
       this.utilizationStore = new UtilizationStoreDB()
     }
 
-    // The coordinator's backup signer, derived before the stamper is built so
-    // that nothing is left to await between the two: the stamper and the
-    // coordinator that writes through it are assigned together, below. A
-    // stamper without its coordinator tells an upload it is in user-stamp mode
-    // and then has nothing to write through. Deriving first also means the
-    // stamper is assigned the moment `create` returns: a utilization delta that
-    // arrives while there is no stamper is dropped, so one a peer broadcast
-    // after `create` read the stored counters would end up in neither.
-    const backupKeyHex = await deriveSecret(
-      uint8ArrayToHex(accountInfo.encryptionKey),
-      BACKUP_KEY_LABEL,
-    )
-    if (superseded()) return
-
     // Create utilization-aware stamper with owner and encryption key
     let stamper: UtilizationAwareStamper
     try {
@@ -1848,8 +1835,13 @@ export class SwarmIdProxy {
     // (`startLease`) so the first upload doesn't pay the acquire latency; a
     // concurrent first upload queues on the same write lock and then finds the
     // lease already held. Single-device accounts get a lock-only coordinator.
-    // No await from here to `startLease`, so no upload ever sees the stamper
-    // without this coordinator.
+    // No await from here to `startLease`: the stamper and the coordinator that
+    // writes through it are assigned together, because a stamper without its
+    // coordinator tells an upload it is in user-stamp mode and then has nothing
+    // to write through. It also means the stamper is assigned the moment
+    // `create` returns: a utilization delta that arrives while there is no
+    // stamper is dropped, so one a peer broadcast after `create` read the
+    // stored counters would end up in neither.
     this.stamper = stamper
     this.stamperAccountFingerprint = `${accountInfo.owner.toHex()}-${uint8ArrayToHex(accountInfo.encryptionKey)}`
     const tuning = readPartitionTuningOverride()
@@ -1877,7 +1869,12 @@ export class SwarmIdProxy {
       intentGuardWindowMs: tuning?.guardWindowMs,
       intentGuardPollMs: tuning?.guardPollMs,
       accountId: accountInfo.accountId,
-      backupSigner: new PrivateKey(backupKeyHex),
+      backupSigner: new PrivateKey(
+        deriveSecretSync(
+          uint8ArrayToHex(accountInfo.encryptionKey),
+          BACKUP_KEY_LABEL,
+        ),
+      ),
       swarmEncryptionKey: accountInfo.encryptionKey,
       partitionCount: accountInfo.partitionCount,
       mode: "persistent",

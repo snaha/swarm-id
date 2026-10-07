@@ -150,30 +150,6 @@ vi.mock("./bus/bus-context", async (importActual) => {
     }),
   }
 })
-/**
- * Lets a test hold the next backup-key derivation and release it, which pauses
- * a stamper init at that step. Every other derivation — and every backup-key
- * one while nothing is armed — passes straight through to the real one.
- */
-const backupKeyGate = vi.hoisted(() => ({
-  holdNext: false,
-  release: undefined as (() => void) | undefined,
-}))
-vi.mock("./utils/key-derivation", async (importActual) => {
-  const actual = await importActual<typeof import("./utils/key-derivation")>()
-  return {
-    ...actual,
-    deriveSecret: vi.fn((parentKey: string, label: string) => {
-      if (label !== actual.BACKUP_KEY_LABEL || !backupKeyGate.holdNext) {
-        return actual.deriveSecret(parentKey, label)
-      }
-      backupKeyGate.holdNext = false
-      return new Promise<void>((resolve) => {
-        backupKeyGate.release = resolve
-      }).then(() => actual.deriveSecret(parentKey, label))
-    }),
-  }
-})
 vi.mock("./sync/batch-write-coordinator", () => ({
   BatchWriteCoordinator: vi.fn(function (deps: {
     accountId: string
@@ -376,10 +352,6 @@ describe("SwarmIdProxy partitioned write enablement", () => {
 
   beforeEach(() => {
     vi.restoreAllMocks()
-    // Dropped, not released: a held init belongs to the previous test's proxy,
-    // and letting it finish now would build a coordinator into this test.
-    backupKeyGate.holdNext = false
-    backupKeyGate.release = undefined
 
     parentWindow = { postMessage: vi.fn() }
     localStorageFake = makeLocalStorage()
@@ -789,12 +761,34 @@ describe("SwarmIdProxy partitioned write enablement", () => {
     const lastConnectionInfo = () =>
       messagesOfType("connectionInfoChanged").at(-1)
 
+    /**
+     * Holds the next stamper `create`, which pauses that init before it has
+     * assigned a stamper or a coordinator. `release` is set once the init
+     * reaches it.
+     */
+    const holdNextCreate = () => {
+      const held: { release?: () => void } = {}
+      vi.mocked(UtilizationAwareStamper.create).mockImplementationOnce(
+        (_signerKey, batchId) =>
+          new Promise<UtilizationAwareStamper>((resolve) => {
+            held.release = () =>
+              resolve(
+                Object.assign(stamperStub, {
+                  mock: "stamper",
+                  batchId,
+                }) as unknown as UtilizationAwareStamper,
+              )
+          }),
+      )
+      return held
+    }
+
     it("sends an upload to the gateway while the first stamper is being built", async () => {
       seedConnectedAccount()
       const coordinatorsBefore = coordinatorCount()
-      backupKeyGate.holdNext = true
+      const create = holdNextCreate()
       const identified = identify(GATEWAY_URL)
-      await vi.waitFor(() => expect(backupKeyGate.release).toBeDefined())
+      await vi.waitFor(() => expect(create.release).toBeDefined())
 
       await expect(uploadTarget()).resolves.toEqual({
         mode: "subsidised",
@@ -802,7 +796,7 @@ describe("SwarmIdProxy partitioned write enablement", () => {
       })
       expect(internals().buildConnectionInfo().uploadMode).toBe("subsidised")
 
-      backupKeyGate.release!()
+      create.release!()
       await identified
 
       expect(coordinatorCount()).toBe(coordinatorsBefore + 1)
@@ -818,7 +812,7 @@ describe("SwarmIdProxy partitioned write enablement", () => {
       await identify()
       const previous = latestCoordinator()
 
-      backupKeyGate.holdNext = true
+      const create = holdNextCreate()
       const replacement = new BatchId(OTHER_BATCH_ID_HEX)
       const shell = createAccountsStorageManager()
       shell.save(
@@ -830,14 +824,14 @@ describe("SwarmIdProxy partitioned write enablement", () => {
           ),
         })),
       )
-      await vi.waitFor(() => expect(backupKeyGate.release).toBeDefined())
+      await vi.waitFor(() => expect(create.release).toBeDefined())
 
       const outcome = await attemptUpload()
       expect(previous.withWrite).not.toHaveBeenCalled()
       expect(previous.teardown).toHaveBeenCalled()
       expect(outcome).toHaveProperty("error")
 
-      backupKeyGate.release!()
+      create.release!()
       await vi.waitFor(() =>
         expect(latestCoordinator().batchId).toBe(OTHER_BATCH_ID_HEX),
       )
