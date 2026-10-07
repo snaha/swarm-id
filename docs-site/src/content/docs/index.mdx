@@ -55,8 +55,10 @@ Your app shows a connect button. From there:
 </div>
 
 Under the hood the account is a recovery phrase, so it can be restored on any device. They save
-it once, at sign-up, and from then on unlock with whatever they chose. Signing in with a password
-or a passkey needs no wallet.
+it once, at sign-up, and from then on unlock with whatever they chose. None of this costs anything:
+an account is created and signed in without a payment, and reading from Swarm never needs one. A
+read-only account is complete as it is. Payment enters only when the user wants storage of their
+own, below.
 
 Try it on [the demo app](https://swarm-demo.snaha.net). Press **Connect** in the sidebar and you
 have an account two minutes from now. A new account has no storage of its own yet, so turn on
@@ -84,16 +86,15 @@ connected app can write to.
   />
 </div>
 
-A drive follows the account. Sign in on a second laptop and the same drives are there; upload
-from either and it lands in the same place. Storage belongs to the user and is paid for by the
-user, in crypto: through a payment widget on the identity site, or from a connected Ethereum
-wallet. A drive is bought for a period and has to be extended before it runs out. Your app never
-holds a payment method or a storage budget for anyone.
+A drive is where payment enters. It follows the account: sign in on a second laptop and the same
+drives are there; upload from either and it lands in the same place. Storage belongs to the user
+and is paid for by the user, in crypto, through a payment widget on the identity site or from an
+Ethereum account they connect for it. A drive is bought for a period and has to be extended before
+it runs out. Your app never holds a payment method or a storage budget for anyone.
 
-Every new account starts without a drive, and uploads from an account with no drive have nothing
-to pay for them. Until the user adds one, your app either sends them to the identity site's
-Storage tab or picks up the bill itself through a [subsidised gateway](./subsidised-gateway/).
-Downloads are free either way.
+Every new account starts without a drive, so it can read but not write. Until the user adds one,
+your app either sends them to the identity site's Storage tab or picks up the bill itself through
+a [subsidised gateway](./subsidised-gateway/). Downloads are free either way.
 
 ## What your app gets
 
