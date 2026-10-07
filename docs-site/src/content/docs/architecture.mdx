@@ -80,7 +80,7 @@ connected apps, devices, backup and restore, and the developer tools at `/dev`.
 
 ## Keys
 
-Every key derives from the account's recovery phrase. The phrase gives a wallet whose private key
+Every key the account makes derives from its recovery phrase. The phrase gives a wallet whose private key
 is the **master key** and whose address is the account id. The master key stays on the identity
 site, encrypted at rest under the access method. From it come the per-app secrets and a stored
 `derivationKey`, and from that the Swarm encryption key, the backup signer that owns every feed,
@@ -125,7 +125,11 @@ causes a connected session hit.
 
 A private window passes the same checks; its sessions are still discarded when the window closes,
 by design. Not yet checked on a device: whether a dormant account's partitioned storage survives
-ITP's roughly 30-day eviction window ([#664](https://github.com/snaha/swarm-id/issues/664)).
+ITP's roughly 30-day eviction window ([#659](https://github.com/snaha/swarm-id/issues/659)).
+
+Chrome, Firefox and Safari have also been run through the connect flow by hand, on desktop and
+mobile; that is the basis for the browser claim on the Introduction, and this Safari entry is the
+one with a written record.
 :::
 
 **The Storage Access API is not part of this, by measurement rather than oversight.** It was

@@ -33,22 +33,22 @@ from the app on any deployment. What same-site adds is storage, not credentials.
 
 ## What it costs
 
-- **You become the identity provider.** The account is the recovery phrase, and every key,
-  drive and synced record derives from it, so the same phrase is the same Swarm ID on your
-  origin and on `swarm-id.snaha.net`. The unlock is what does not carry over: passkeys bind
-  to the RP ID and the vault lives in the origin's own storage, so a user brings an account
-  to your deployment by entering the phrase (or importing a `.swarmid` file) and choosing an
-  access method there, and restores it from Swarm like on any new device.
+- **Every user signs up again on your origin.** The account itself carries over: every key
+  the account makes derives from the recovery phrase, and the drives travel in the synced
+  record, so the same phrase is the same Swarm ID on your origin and on `swarm-id.snaha.net`.
+  The unlock does not: passkeys bind to the RP ID and the vault lives in the origin's own
+  storage. A user with an existing Swarm ID enters the phrase on your site, chooses an access
+  method there, and the account restores from Swarm like on any new device.
 - **Backup and recovery are yours.** Every support question about a lost account lands
   with you.
 - **You track a security-critical fork.** Seed vaults and key derivation move fast in this
   repository. Bugs there lose data irrecoverably, and a copy that falls behind does not get
   the fixes.
 
-Weigh the onboarding win against that ownership downgrade rather than assuming it wins.
-For an app whose users already have a Swarm ID, or who will use several apps, the hosted
-identity is the better answer; the partitioned path works on every current browser, and
-the connect popup is one window.
+Weigh the onboarding win against that rather than assuming it wins. For an app whose users
+already have a Swarm ID, or who will use several apps, the hosted identity spares them a
+second sign-up and a second vault to look after; the partitioned path works on every
+current browser, and the connect popup is one window.
 
 ## What it does not change
 
