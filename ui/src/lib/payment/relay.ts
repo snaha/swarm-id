@@ -60,6 +60,9 @@ const EXECUTE_STALL_TIMEOUT_MS = 600_000
  */
 const QUOTE_TIMEOUT_MS = 30_000
 
+/** Whole base units, as Relay states `currencyIn.amount`; anything else is no figure. */
+const BASE_UNITS = /^\d+$/
+
 /** Source chains offered in the payment screen (mirrors the widget's set).
  * The same list `onboard.ts` declares to the wallet — one list, so a chain
  * cannot be offered here and be unknown there. */
@@ -192,6 +195,7 @@ async function quotePayment(request: QuoteRequest): Promise<PaymentQuote> {
     'Relay did not answer with a price. Check your connection and try again.',
   )
   const currencyIn = quote.details?.currencyIn
+  const amountIn = currencyIn?.amount ?? ''
   // Relay's own figures are raw, not display-ready: `amountFormatted` is the
   // full wei expansion and `amountUsd` carries six decimals. Rendered as-is
   // they sat above breakdown rows rounded to four digits.
@@ -203,6 +207,14 @@ async function quotePayment(request: QuoteRequest): Promise<PaymentQuote> {
     // user's own token across would mean holding inventory in it. The gas
     // share arrives as xDAI too but is not swapped, so only the rest is.
     delivers: { input: 'xdai', amount: request.xdaiWei - request.gasXdaiWei },
+    // The deposit is one asset, the one picked, and `amount` is it in exact
+    // base units where `amountFormatted` is only a display string. It is
+    // optional in Relay's schema, and a missing figure only means Pay cannot
+    // be checked against the wallet before signing — no reason to refuse a
+    // price that is otherwise good.
+    charges: BASE_UNITS.test(amountIn)
+      ? [{ currency: request.currency, amount: BigInt(amountIn) }]
+      : [],
   }
 }
 

@@ -187,6 +187,9 @@ export function quoteLocalPayment(request: QuoteRequest): PaymentQuote {
     // user's own token across would mean holding inventory in it. The gas
     // share arrives as xDAI too but is not swapped, so only the rest is.
     delivers: { input: 'xdai', amount: request.xdaiWei - request.gasXdaiWei },
+    // The deposit's value, or the solver's pull: either way the one asset
+    // picked, in its own base units.
+    charges: [{ currency: request.currency, amount: amountSourceWei }],
   }
 }
 

@@ -47,6 +47,7 @@ function stubRail(chains: PaymentRail['chains'], tokens: Record<number, PaymentT
         amountFormatted: '',
         amountUsd: '',
         delivers: { input: 'xdai' as const, amount: 0n },
+        charges: [],
       }),
     ),
     execute: vi.fn(() => Promise.resolve()),

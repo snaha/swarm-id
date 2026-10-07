@@ -40,9 +40,12 @@
     type PaymentQuote,
     type PaymentRail,
     displayAmount,
+    startingChainId,
+    walletChainId,
   } from '$lib/payment/payment-rail'
   import { subscribeProviderEvent } from '$lib/payment/provider-events'
   import { createWalletChainRecord } from '$lib/payment/wallet-chain-record'
+  import { shortfallMessage, walletShortfall } from '$lib/payment/wallet-shortfall'
 
   /**
    * The payment screens: choose a method, then — for the built-in engine —
@@ -103,7 +106,9 @@
   let walletLabel = ''
   // The rail is fixed for the life of one payment — the dialog is created fresh
   // per pending request — so its first chain and token are read ONCE as the
-  // user's starting selection, not tracked.
+  // selection before any wallet is known, not tracked. Connecting moves it to
+  // the wallet's own chain wherever the payment can come from there
+  // (`startingChainId`).
   let chainId = $state(untrack(() => String(rail.chains[0].id)))
   let tokenAddress = $state(untrack(() => rail.tokens(rail.chains[0].id)[0].address))
   // Raw, not deep-reactive: the rail-private `handle` inside must reach
@@ -146,11 +151,12 @@
   let paying = $state(false)
   /**
    * What the connected wallet holds, keyed `chainId:tokenAddress`, so the
-   * token selector can label every option on the selected chain. Keyed rather
-   * than one figure per screen: a read landing late still lands in its own
-   * slot, and switching back to a chain shows its last figures immediately.
-   * A missing key means no figure yet — no label, never a zero that reads as
-   * "you cannot pay".
+   * token selector can label every option on the selected chain and Pay can
+   * be held back where the wallet is known to be short (`fundsShortfall`).
+   * Keyed rather than one figure per screen: a read landing late still lands
+   * in its own slot, and switching back to a chain shows its last figures
+   * immediately. A missing key means no figure yet — no label and no hold,
+   * never a zero that reads as "you cannot pay".
    */
   let balances = $state<Record<string, bigint>>({})
   /**
@@ -184,12 +190,17 @@
   const tokenOptions = $derived(
     rail.tokens(Number(chainId)).map((token) => {
       const held = balances[balanceKey(chainId, token.address)]
+      // An empty balance is spelled out: `formatAmount` renders zero as
+      // nothing, which is right for a price and leaves a bare dash here —
+      // exactly where a shortfall sends the user to look for a funded token.
+      const holding =
+        held === undefined ? undefined : held === 0n ? '0' : formatAmount(held, token.decimals)
       return {
         value: token.address,
         label:
-          held === undefined
+          holding === undefined
             ? `${token.symbol} (${token.name})`
-            : `${token.symbol} (${token.name}) — ${formatAmount(held, token.decimals)}`,
+            : `${token.symbol} (${token.name}) — ${holding}`,
       }
     }),
   )
@@ -233,6 +244,44 @@
     }
     const paid = `${paymentQuote.amountFormatted} ${tokenSymbol}`
     return separateGasLeg ? `${paid} + ${gasLegAmount} gas` : paid
+  })
+
+  /**
+   * Why Pay cannot go ahead on what the wallet is known to hold, in one
+   * sentence — empty when it can, or when that is not known. Otherwise the
+   * wallet is the first to find out, after the user has committed, and says
+   * "insufficient funds" about a chain they may not have chosen.
+   *
+   * Derived rather than written into `errorMessage`: it clears by itself the
+   * moment another chain or token is picked or a balance read lands, and it
+   * never overwrites a failure the user still needs to see.
+   */
+  const fundsShortfall = $derived.by(() => {
+    if (!paymentQuote) {
+      return ''
+    }
+    const tokens = rail.tokens(Number(chainId))
+    const listed = (currency: string) => tokens.find((token) => token.address === currency)
+    // A charge in an asset the picker does not list has no balance read for it
+    // and no name to give, so it is left to the wallet rather than guessed at.
+    const short = walletShortfall(paymentQuote.charges, (currency) =>
+      listed(currency) ? balances[balanceKey(chainId, currency)] : undefined,
+    )
+    if (!short) {
+      return ''
+    }
+    const token = listed(short.currency)
+    const chain = rail.chains.find((candidate) => String(candidate.id) === chainId)
+    if (!token || !chain) {
+      return ''
+    }
+    return shortfallMessage({
+      symbol: token.symbol,
+      decimals: token.decimals,
+      held: short.held,
+      needed: short.needed,
+      chainName: chain.name,
+    })
   })
 
   /**
@@ -317,18 +366,31 @@
       if (!wallet || !address) {
         throw new Error('No wallet connected. Select a wallet and try again.')
       }
-      provider = wallet.provider as unknown as EthereumProvider
+      const walletProvider = wallet.provider as unknown as EthereumProvider
+      provider = walletProvider
       walletAddress = address
       walletLabel = wallet.label
       // A wallet that has just arrived has been put on nothing.
       walletChain.forget()
 
-      // Adding a network is what makes the wallet show a balance for it at all,
-      // so it is offered here rather than at Pay. A refusal is not fatal — they
-      // may mean to pay from somewhere else, and `pay()` asks again for
-      // whichever chain they land on.
-      screen = 'switching'
-      await attempt.guard(ensureWalletChain().catch(() => undefined))
+      // A wallet already on a chain this payment can come from is left there:
+      // that is where its funds most likely are, and asking for a network
+      // change the user did not choose is what sends them to a chain they hold
+      // nothing on. Pay still proves the chain before anything is signed.
+      // Otherwise the selected chain is offered here rather than at Pay, because
+      // adding a network is what makes the wallet show a balance for it at
+      // all. A refusal is not fatal — they may mean to pay from somewhere
+      // else, and `pay()` asks again for whichever chain they land on.
+      const current = await attempt.guard(walletChainId(walletProvider))
+      const starting = startingChainId(current, rail.chains, Number(chainId))
+      if (String(starting) !== chainId) {
+        chainId = String(starting)
+        tokenAddress = rail.tokens(starting)[0]?.address ?? ''
+      }
+      if (current !== starting) {
+        screen = 'switching'
+        await attempt.guard(ensureWalletChain().catch(() => undefined))
+      }
 
       screen = 'configure'
       // After the guard, like everything else here: a connect cancelled at the
@@ -385,9 +447,9 @@
 
   /**
    * Read what the wallet holds of every token on the selected chain, one slot
-   * per token. Fire-and-forget from the events that move what it holds: the
-   * switch (at connect, and on a chain change), a new account, the wallet's
-   * own chain change, and a failed attempt that may still have spent.
+   * per token. Fire-and-forget from the events that move what it holds:
+   * connecting, a chain change, a new account, the wallet's own chain change,
+   * and a failed attempt that may still have spent.
    *
    * Through the chain's own endpoint, never the wallet's: the same chain state
    * either way, and one path instead of two.
@@ -437,7 +499,8 @@
             balances[balanceKey(chain.id, token.address)] = BigInt(result)
           }
         } catch {
-          // The label stays absent; the quote is what gates Pay.
+          // The label stays absent, and so does the hold on Pay: a figure that
+          // could not be read is no figure, not a zero (`walletShortfall`).
         }
       }),
     )
@@ -610,7 +673,9 @@
   async function pay() {
     const quote = paymentQuote
     const priced = gnosisQuote
-    if (!provider || !quote || !priced) {
+    // The shortfall disables the button too; checked again here so a click
+    // that races a balance read landing cannot slip past it.
+    if (!provider || !quote || !priced || fundsShortfall !== '') {
       return
     }
     const attempt = attempts.begin()
@@ -850,11 +915,19 @@
         </p>
       {/if}
 
+      {#if fundsShortfall}
+        <p class="text-destructive w-full text-sm">{fundsShortfall}</p>
+      {/if}
+
       {#if errorMessage}
         <p class="text-destructive w-full text-sm">{errorMessage}</p>
       {/if}
 
-      <Button class="w-full" disabled={!paymentQuote || quoting} onclick={pay}>
+      <Button
+        class="w-full"
+        disabled={!paymentQuote || quoting || fundsShortfall !== ''}
+        onclick={pay}
+      >
         Pay with your wallet
       </Button>
     {/if}
