@@ -5,6 +5,7 @@
 
 import { RollingValueProvider, Types } from "cafe-utility"
 import { jsonRpc, jsonRpcOrUndefined } from "./fetch"
+import { legacyGasPrice } from "./fees"
 import type { MultichainSettings } from "./settings"
 
 export interface TransactionReceipt {
@@ -59,6 +60,27 @@ export async function getGasPrice(
 ): Promise<bigint> {
   const result = await jsonRpc(rpcProvider, settings, "eth_gasPrice", [])
   return BigInt(Types.asString(result))
+}
+
+/**
+ * The `gasPrice` source for ONE legacy send and its retries.
+ *
+ * Each call re-quotes `eth_gasPrice` and prices it with {@link legacyGasPrice},
+ * against the offer this pricer returned last time. Create it once per send,
+ * outside `withFeeTooLowRetry`, and call it inside the action: an attempt only
+ * runs again because the one before it was refused, so the previous offer IS
+ * the refused one, and the retry bids above it instead of re-sending the same
+ * price.
+ */
+export function legacyGasPricer(
+  settings: MultichainSettings,
+  rpcProvider: RollingValueProvider<string>,
+): () => Promise<bigint> {
+  let last: bigint | undefined
+  return async () => {
+    last = legacyGasPrice(await getGasPrice(settings, rpcProvider), last)
+    return last
+  }
 }
 
 /**

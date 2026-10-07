@@ -7,7 +7,7 @@ import { RollingValueProvider } from "cafe-utility"
 import { encodeFunctionData, encodePacked, parseAbi } from "viem"
 import { privateKeyToAccount } from "viem/accounts"
 import { publicClientFor, walletClientFor } from "./chain"
-import { getGasPrice, getTransactionCount } from "./rpc"
+import { getTransactionCount, legacyGasPricer } from "./rpc"
 import type { MultichainSettings } from "./settings"
 import { withFeeTooLowRetry } from "./write-retry"
 import { withGasMargin } from "./gas"
@@ -394,6 +394,7 @@ export async function swapTokenToBzz(
       functionName: "approve",
       args: [sushi.router, options.amount],
     })
+    const approveGasPrice = legacyGasPricer(settings, rpcProvider)
     const approveHash = await withFeeTooLowRetry(async () => {
       const serializedTransaction = await account.signTransaction({
         chainId: settings.chainId,
@@ -402,7 +403,7 @@ export async function swapTokenToBzz(
           to: pool.tokenIn,
           data: approveData,
         }),
-        gasPrice: await getGasPrice(settings, rpcProvider),
+        gasPrice: await approveGasPrice(),
         type: "legacy",
         to: pool.tokenIn,
         data: approveData,
@@ -439,11 +440,12 @@ export async function swapTokenToBzz(
     to: sushi.router,
     data,
   })
+  const gasPrice = legacyGasPricer(settings, rpcProvider)
   return withFeeTooLowRetry(async () => {
     const serializedTransaction = await account.signTransaction({
       chainId: settings.chainId,
       gas: withGasMargin(gasEstimate),
-      gasPrice: await getGasPrice(settings, rpcProvider),
+      gasPrice: await gasPrice(),
       type: "legacy",
       to: sushi.router,
       data,
@@ -505,11 +507,12 @@ export async function swapXdaiToBzz(
   })
 
   const client = walletClientFor(settings, rpcProvider)
+  const gasPrice = legacyGasPricer(settings, rpcProvider)
   return withFeeTooLowRetry(async () => {
     const serializedTransaction = await account.signTransaction({
       chainId: settings.chainId,
       gas: withGasMargin(gasEstimate),
-      gasPrice: await getGasPrice(settings, rpcProvider),
+      gasPrice: await gasPrice(),
       type: "legacy",
       to: sushi.router,
       value: options.amountXdai,
