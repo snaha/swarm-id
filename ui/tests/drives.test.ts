@@ -141,6 +141,16 @@ test('drive management: add, rename, set default, remove', async ({ page }) => {
   await expect(newCard).toBeVisible({ timeout: DRIVE_SETTLE_TIMEOUT_MS })
   await newCard.getByRole('button', { name: 'Expand drive' }).click()
   await expandedCard.getByRole('button', { name: 'Drive actions' }).click()
+  // #837: the batch ID is one click away, and the explorer link carries it bare.
+  const explorer = page.getByRole('menuitem', { name: 'View in batch explorer' })
+  await expect(explorer).toHaveAttribute(
+    'href',
+    /^https:\/\/batch-explorer\.github\.io\/batch\/[0-9a-f]{64}$/,
+  )
+  await expect(explorer).toHaveAttribute('target', '_blank')
+  await page.getByRole('menuitem', { name: 'Copy batch ID' }).click()
+  await expect(page.getByText('Batch ID copied to clipboard')).toBeVisible()
+  await expandedCard.getByRole('button', { name: 'Drive actions' }).click()
   await page.getByRole('menuitem', { name: 'Set as default' }).click()
 
   const afterDefault = await storedDrives(page)

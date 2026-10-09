@@ -7,6 +7,7 @@
   import { tick, untrack } from 'svelte'
 
   import ChevronsUpDown from '@lucide/svelte/icons/chevrons-up-down'
+  import Copy from '@lucide/svelte/icons/copy'
   import EllipsisVertical from '@lucide/svelte/icons/ellipsis-vertical'
   import ExternalLink from '@lucide/svelte/icons/external-link'
   import Pencil from '@lucide/svelte/icons/pencil'
@@ -30,7 +31,7 @@
   import { describeDrive } from '$lib/drives'
   import { toastStore } from '$lib/stores/toast.svelte'
   import type { Account } from '$lib/types'
-  import { cn } from '$lib/utils'
+  import { cn, copyToClipboard } from '$lib/utils'
 
   interface Props {
     account: Account
@@ -85,6 +86,11 @@
   function setDefault(drive: PostageStamp) {
     account.setDefaultStamp(drive.batchID)
     toastStore.show('Default drive updated')
+  }
+
+  async function copyBatchId(drive: PostageStamp) {
+    const copied = await copyToClipboard(drive.batchID.toHex())
+    toastStore.show(copied ? 'Batch ID copied to clipboard' : 'Could not copy to clipboard')
   }
 
   function remove(drive: PostageStamp) {
@@ -319,6 +325,10 @@
                     <span class="flex-1 whitespace-nowrap">Set as default</span>
                   </DropdownMenuItem>
                 {/if}
+                <DropdownMenuItem onclick={() => copyBatchId(drive)}>
+                  <Copy class="size-4 shrink-0" />
+                  <span class="flex-1 whitespace-nowrap">Copy batch ID</span>
+                </DropdownMenuItem>
                 <DropdownMenuItem
                   href={BATCH_EXPLORER_URL + drive.batchID.toHex()}
                   target="_blank"
