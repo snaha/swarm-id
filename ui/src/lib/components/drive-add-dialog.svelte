@@ -386,8 +386,9 @@
           // trust by the widget path. Read the batch off Gnosis first: that
           // catches a shop on the wrong chain, a dry-run batch that exists
           // nowhere, and a spoofed or buggy id, and the record comes from the
-          // chain rather than from the message.
-          if (card) {
+          // chain rather than from the message. Not under `pnpm dev`: there the
+          // shop to test against is a dry-run one, whose batch is on no chain.
+          if (card && !import.meta.env.DEV) {
             void recordVerifiedBatch(attempt, batch.batchId, signerKey, driveName)
             return
           }

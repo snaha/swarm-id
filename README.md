@@ -187,9 +187,10 @@ it to settle against: pick the built-in method to pay on the local chain, or tur
 method's own screens stay reachable here. (It is also offered for buying alone; its contract ABI
 cannot top up or dilute, so extend and resize list the built-in method by itself.) The third,
 `Pay with card (<shop host>)`, opens the card shop on the widget's protocol; `PUBLIC_CARD_SHOP_URL` in
-`ui/.env` points it at another deployment. The shop settles on Gnosis mainnet and the batch it reports
-is read back from the chain before the drive is recorded, so a shop run locally in dry-run mode gets as
-far as that check and no further — its fake batch exists on no chain, this fork included.
+`ui/.env` points it at another deployment. The shop settles on Gnosis mainnet and a built UI reads the batch it
+reports back from the chain before recording the drive; `pnpm dev` skips that check, so a shop run in
+dry-run mode — whose fake batch exists on no chain, this fork included — can still be driven end to end
+here.
 
 ```bash
 pnpm dev:local         # everything: cluster, both chains, solver, identity UI, demo
