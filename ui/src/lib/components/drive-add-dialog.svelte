@@ -83,11 +83,15 @@
   type Storage = 'new' | 'existing'
   type Phase = 'form' | 'method' | 'pending' | 'success' | 'error' | 'unconfirmed'
 
-  const METHOD_OPTIONS = [
+  // The card shop is experimental: offered only behind the dev-settings switch,
+  // which a build reads from local storage too (#858).
+  const METHOD_OPTIONS = $derived([
     { value: 'widget', label: WIDGET_LABEL },
-    ...(CARD_AVAILABLE ? [{ value: 'card', label: CARD_LABEL }] : []),
+    ...(CARD_AVAILABLE && devSettingsStore.data.cardPaymentEnabled
+      ? [{ value: 'card', label: CARD_LABEL }]
+      : []),
     { value: 'built-in', label: BUILT_IN_LABEL },
-  ]
+  ])
 
   let storage = $state<Storage>('new')
   let name = $state('')
@@ -386,9 +390,11 @@
           // trust by the widget path. Read the batch off Gnosis first: that
           // catches a shop on the wrong chain, a dry-run batch that exists
           // nowhere, and a spoofed or buggy id, and the record comes from the
-          // chain rather than from the message. Not under `pnpm dev`: there the
-          // shop to test against is a dry-run one, whose batch is on no chain.
-          if (card && !import.meta.env.DEV) {
+          // chain rather than from the message. Not while the route is
+          // experimental: the shop to test against runs in dry-run mode, whose
+          // batch is on no chain, so the switch that offers the card also
+          // waives the check until #858 turns it back on for good.
+          if (card && !devSettingsStore.data.cardPaymentEnabled) {
             void recordVerifiedBatch(attempt, batch.batchId, signerKey, driveName)
             return
           }

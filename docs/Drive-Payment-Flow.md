@@ -74,8 +74,11 @@ widget. The shop charges the card and creates the batch server-side _before_ its
 pending dialog's Cancel closes the popup but warns the same way. And the `batch` it posts is read
 back from Gnosis (`fetchExistingBatchFromChain`, as "Use existing batch" does) before it is
 recorded, so a shop on another chain, a dry-run batch that exists nowhere, or a spoofed id is
-refused — in a build, that is; `pnpm dev` skips the check so a dry-run shop can be driven end to
-end. The card is offered from the add-drive chooser only — the funding seam's method screen
+refused. For now the route is experimental: it is offered only with the dev-settings switch on
+(/dev → Chain → Experimental card payment, or the `dev-card-payment-enabled` local-storage key in
+a build, which ships no /dev), and while that switch is what offers it, the batch is recorded on
+trust so that a dry-run shop can be driven end to end. snaha/swarm-id#858 turns the check on when
+the route ships. The card is offered from the add-drive chooser only — the funding seam's method screen
 lists the widget and the built-in engine, as before. The label names the configured host:
 `swarm-storage.fly.dev` by default, `PUBLIC_CARD_SHOP_URL` for another deployment; a value that is
 not a web URL drops the option rather than the screen.

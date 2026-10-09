@@ -4,7 +4,10 @@
  * Dev Settings Store
  *
  * Developer settings used by the /dev page to mock the stamp-purchase widget so
- * the product Add-drive flow can be exercised without a real cross-chain payment.
+ * the product Add-drive flow can be exercised without a real cross-chain payment,
+ * and to switch the experimental card payment on. That one is read in a build
+ * too, where /dev is not shipped: set the `dev-card-payment-enabled` key to
+ * `true` in local storage by hand (snaha/swarm-id#858).
  */
 import { browser } from '$app/environment'
 
@@ -16,6 +19,9 @@ interface DevSettings {
   // popup path in a real browser). Off → pure local simulation, no `window.open`.
   mockStampPopup: boolean
   mockStampResult: MockStampResult
+  // Offer "Pay with card" in the add-drive chooser. Off by default everywhere
+  // until the route leaves the experiment (#858).
+  cardPaymentEnabled: boolean
 }
 
 // Persist mock mode in localStorage so an explicit choice is durable and shared
@@ -25,6 +31,7 @@ interface DevSettings {
 const MOCK_ENABLED_KEY = 'dev-mock-stamp-enabled'
 const MOCK_POPUP_KEY = 'dev-mock-stamp-popup'
 const MOCK_RESULT_KEY = 'dev-mock-stamp-result'
+const CARD_PAYMENT_KEY = 'dev-card-payment-enabled'
 
 function loadMockEnabled(): boolean {
   if (!browser) return import.meta.env.DEV
@@ -40,10 +47,15 @@ function loadMockResult(): MockStampResult {
   return browser && localStorage.getItem(MOCK_RESULT_KEY) === 'error' ? 'error' : 'success'
 }
 
+function loadCardPaymentEnabled(): boolean {
+  return browser && localStorage.getItem(CARD_PAYMENT_KEY) === 'true'
+}
+
 const settings = $state<DevSettings>({
   mockStampEnabled: loadMockEnabled(),
   mockStampPopup: loadMockPopup(),
   mockStampResult: loadMockResult(),
+  cardPaymentEnabled: loadCardPaymentEnabled(),
 })
 
 if (browser) {
@@ -54,6 +66,7 @@ if (browser) {
     if (e.key === MOCK_ENABLED_KEY) settings.mockStampEnabled = loadMockEnabled()
     if (e.key === MOCK_POPUP_KEY) settings.mockStampPopup = loadMockPopup()
     if (e.key === MOCK_RESULT_KEY) settings.mockStampResult = loadMockResult()
+    if (e.key === CARD_PAYMENT_KEY) settings.cardPaymentEnabled = loadCardPaymentEnabled()
   })
 }
 
@@ -72,5 +85,9 @@ export const devSettingsStore = {
   setMockStampResult(result: MockStampResult) {
     settings.mockStampResult = result
     if (browser) localStorage.setItem(MOCK_RESULT_KEY, result)
+  },
+  setCardPaymentEnabled(enabled: boolean) {
+    settings.cardPaymentEnabled = enabled
+    if (browser) localStorage.setItem(CARD_PAYMENT_KEY, String(enabled))
   },
 }
