@@ -124,6 +124,7 @@ export {
 export { hexAddress } from "./utils/hex"
 
 export {
+  derivePostageSignerKeySync,
   deriveSecret,
   deriveSecretSync,
   deriveSharingKey,

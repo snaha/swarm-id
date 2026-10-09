@@ -41,6 +41,19 @@ test('the URL hash selects a tab and opens what it names', async ({ page }) => {
     await expect(page.getByText('Sharing public key')).toBeVisible()
   }
 
+  // #848: the drive management card is linkable too, shows the postage batch
+  // signer, and a collapsed card hides a revealed private key again.
+  await page.goto('/#account/keys/drive-management')
+  await expect(page.getByText('Postage batch signer address')).toBeVisible()
+  await page.getByRole('button', { name: 'Reveal postage batch signer private key' }).click()
+  await expect(page.getByText(/^0x[0-9a-f]{64}$/)).toBeVisible()
+  await page.getByRole('button', { name: 'Hide drive management keys' }).click()
+  await page.getByRole('button', { name: 'Show drive management keys' }).click()
+  await expect(page.getByText(/^0x[0-9a-f]{64}$/)).toBeHidden()
+  await expect(
+    page.getByRole('button', { name: 'Reveal postage batch signer private key' }),
+  ).toBeVisible()
+
   // A section opened from a link still collapses, and stays collapsed.
   const keys = page.getByRole('button', { name: /Keys & addresses/ })
   await keys.click()

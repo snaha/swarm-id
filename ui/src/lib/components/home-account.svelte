@@ -6,10 +6,9 @@
 <script lang="ts">
   import { type Component, tick } from 'svelte'
 
-  import { PublicKey } from '@ethersphere/bee-js'
+  import { PrivateKey, PublicKey } from '@ethersphere/bee-js'
   import ChevronDown from '@lucide/svelte/icons/chevron-down'
   import ChevronRight from '@lucide/svelte/icons/chevron-right'
-  import ChevronsUpDown from '@lucide/svelte/icons/chevrons-up-down'
   import Copy from '@lucide/svelte/icons/copy'
   import Download from '@lucide/svelte/icons/download'
   import Eye from '@lucide/svelte/icons/eye'
@@ -22,12 +21,18 @@
   import RefreshCw from '@lucide/svelte/icons/refresh-cw'
   import Wallet from '@lucide/svelte/icons/wallet'
   import { uint8ArrayToHex } from '@snaha/swarm-id'
-  import { type AccessMethod, deriveSharingKey, encryptSeed } from '@snaha/swarm-id/internal'
+  import {
+    type AccessMethod,
+    derivePostageSignerKeySync,
+    deriveSharingKey,
+    encryptSeed,
+  } from '@snaha/swarm-id/internal'
 
   import { createAttemptTracker } from '$lib/attempt'
   import AccountAvatar from '$lib/components/account-avatar.svelte'
   import DeleteAccountDialog from '$lib/components/delete-account-dialog.svelte'
   import DriveAddDialog from '$lib/components/drive-add-dialog.svelte'
+  import KeyCard from '$lib/components/key-card.svelte'
   import NewPasswordFields, { isNewPasswordValid } from '$lib/components/new-password-fields.svelte'
   import PhraseGrid from '$lib/components/phrase-grid.svelte'
   import SignOutDialog from '$lib/components/sign-out-dialog.svelte'
@@ -42,9 +47,8 @@
   import { phraseFromEntropy, privateKeyFromEntropy } from '$lib/crypto/mnemonic'
   import { toastStore } from '$lib/stores/toast.svelte'
   import type { Account } from '$lib/types'
-  import { copyToClipboard, truncateAddress } from '$lib/utils'
+  import { copyToClipboard } from '$lib/utils'
 
-  const MASKED_KEY = '•'.repeat(66)
   const METHOD_TABS = [
     { value: 'passkey', label: 'Passkey' },
     { value: 'eth-wallet', label: 'ETH wallet' },
@@ -79,6 +83,7 @@
   let addDriveOpen = $state(false)
   let keysDetailOpen = $state(false)
   let sharingDetailOpen = $state(false)
+  let signerDetailOpen = $state(false)
 
   // Re-runs on a new hash only: the explicit list keeps it from reading
   // `expanded`, which would re-open the section as soon as the user collapsed
@@ -89,6 +94,7 @@
     expanded[section] = true
     if (section === 'keys' && card === 'account-identity') keysDetailOpen = true
     if (section === 'keys' && card === 'data-sharing') sharingDetailOpen = true
+    if (section === 'keys' && card === 'drive-management') signerDetailOpen = true
     tick().then(() => {
       const el =
         (card && document.getElementById(`account-${section}-${card}`)) ||
@@ -102,10 +108,11 @@
   // Reveals cache only their derived display value — never the raw seed, which
   // is zeroed the moment each ceremony finishes with it (issue #412).
   let revealedPrivateKey = $state<string | undefined>(undefined)
-  // No unlock for this one: it derives from `derivationKey`, which sits in
+  // No unlock for these two: they derive from `derivationKey`, which sits in
   // plaintext in storage while signed in, so a dialog would only pretend to
-  // guard it. The mask is a shoulder-surfing courtesy, nothing more.
-  let sharingKeyShown = $state(false)
+  // guard them. The mask is a shoulder-surfing courtesy, nothing more.
+  let revealedSharingKey = $state<string | undefined>(undefined)
+  let revealedSignerKey = $state<string | undefined>(undefined)
   let revealedPhrase = $state<string[] | undefined>(undefined)
   // Seed held only across the change-method two-step ceremony; zeroed after.
   let changeMethodSeed: Uint8Array | undefined
@@ -135,6 +142,11 @@
   const sharingKeyDisplay = $derived(sharingKey.publicKey)
   const sharingAddress = $derived(new PublicKey(sharingKey.publicKey).address().toChecksum())
   const sharingPrivateKeyDisplay = $derived(prefix0x(uint8ArrayToHex(sharingKey.secret)))
+  // The key every drive of the account is bought for (#848): its address is
+  // the batch owner on-chain.
+  const signerKey = $derived(derivePostageSignerKeySync(account.derivationKey))
+  const signerAddress = $derived(new PrivateKey(signerKey).publicKey().address().toChecksum())
+  const signerPrivateKeyDisplay = $derived(prefix0x(signerKey))
   const newPasswordValid = $derived(isNewPasswordValid(newPassword, verifyNewPassword))
 
   const unlockTitle = $derived(
@@ -322,94 +334,6 @@
   </button>
 {/snippet}
 
-{#snippet keyBlock(label: string, description: string)}
-  <div class="flex flex-col">
-    <p class="text-sm font-medium">{label}</p>
-    <p class="text-muted-foreground text-xs">{description}</p>
-  </div>
-{/snippet}
-
-{#snippet keyRow(label: string, description: string, value: string, what: string)}
-  <div class="bg-muted flex flex-col gap-1 rounded-md p-4">
-    {@render keyBlock(label, description)}
-    <div class="flex items-center gap-2">
-      <p class="min-w-0 flex-1 text-sm break-all">{value}</p>
-      <Button
-        variant="ghost"
-        size="icon"
-        class="size-7 shrink-0"
-        aria-label="Copy {what.toLowerCase()}"
-        onclick={() => copyText(value, what)}
-      >
-        <Copy />
-      </Button>
-    </div>
-  </div>
-{/snippet}
-
-{#snippet secretRow(
-  label: string,
-  description: string,
-  revealed: string | undefined,
-  what: string,
-  onreveal: () => void,
-)}
-  <div class="bg-muted flex flex-col gap-1 rounded-md p-4">
-    {@render keyBlock(label, description)}
-    <div class="flex items-center gap-2">
-      {#if revealed}
-        <p class="min-w-0 flex-1 text-sm break-all">{revealed}</p>
-        <Button
-          variant="ghost"
-          size="icon"
-          class="size-7 shrink-0"
-          aria-label="Copy {what.toLowerCase()}"
-          onclick={() => copyText(revealed, what)}
-        >
-          <Copy />
-        </Button>
-      {:else}
-        <p class="min-w-0 flex-1 text-sm break-all select-none">{MASKED_KEY}</p>
-        <Button
-          variant="ghost"
-          size="icon"
-          class="size-7 shrink-0"
-          aria-label="Reveal {what.toLowerCase()}"
-          onclick={onreveal}
-        >
-          <Eye />
-        </Button>
-      {/if}
-    </div>
-  </div>
-{/snippet}
-
-{#snippet keyCardHeader(
-  title: string,
-  address: string,
-  what: string,
-  open: boolean,
-  ontoggle: () => void,
-)}
-  <p class="px-4 pt-4 text-sm font-bold">{title}</p>
-  <div class="flex h-12 w-full items-center gap-2 px-4">
-    <p class="flex-1 truncate text-sm">{truncateAddress(address)}</p>
-    <Button variant="ghost" size="sm" onclick={() => copyText(address, what)}>
-      <Copy />
-      Copy
-    </Button>
-    <Button
-      variant="ghost"
-      size="icon"
-      class="-mr-2 size-7"
-      aria-label={open ? `Hide ${title.toLowerCase()} keys` : `Show ${title.toLowerCase()} keys`}
-      onclick={ontoggle}
-    >
-      <ChevronsUpDown />
-    </Button>
-  </div>
-{/snippet}
-
 <div class="flex w-full flex-col gap-6">
   {#if isLocal}
     <!-- Local account banner: no stamps yet, so the account is view-only. -->
@@ -481,77 +405,66 @@
     )}
     {#if expanded.keys}
       <div class="flex flex-col gap-3 pl-5">
-        <div
+        <KeyCard
           id="account-keys-account-identity"
-          class="border-border flex w-full flex-col rounded-lg border"
-        >
-          {@render keyCardHeader(
-            'Account identity',
-            account.id.toChecksum(),
-            'Address',
-            keysDetailOpen,
-            () => (keysDetailOpen = !keysDetailOpen),
-          )}
-          {#if keysDetailOpen}
-            <div class="mx-1 mb-1 flex flex-col gap-1">
-              {@render keyRow(
-                'Address',
-                'The unique identifier for your Swarm ID.',
-                account.id.toChecksum(),
-                'Address',
-              )}
-              {@render keyRow(
-                'Public key',
-                'Can be used for establishing secure, private communication.',
-                publicKeyDisplay,
-                'Public key',
-              )}
-              {@render secretRow(
-                'Private key',
-                'Grants full control over your account. Never share it.',
-                revealedPrivateKey,
-                'Private key',
-                () => (unlockTarget = 'private-key'),
-              )}
-            </div>
-          {/if}
-        </div>
+          title="Account identity"
+          address={{
+            label: 'Address',
+            description: 'The unique identifier for your Swarm ID.',
+            value: account.id.toChecksum(),
+          }}
+          publicKey={{
+            label: 'Public key',
+            description: 'Can be used for establishing secure, private communication.',
+            value: publicKeyDisplay,
+          }}
+          privateKey={{
+            label: 'Private key',
+            description: 'Grants full control over your account. Never share it.',
+          }}
+          bind:revealed={revealedPrivateKey}
+          onreveal={() => (unlockTarget = 'private-key')}
+          bind:open={keysDetailOpen}
+        />
 
-        <div
+        <KeyCard
           id="account-keys-data-sharing"
-          class="border-border flex w-full flex-col rounded-lg border"
-        >
-          {@render keyCardHeader(
-            'Data sharing',
-            sharingAddress,
-            'Sharing address',
-            sharingDetailOpen,
-            () => (sharingDetailOpen = !sharingDetailOpen),
-          )}
-          {#if sharingDetailOpen}
-            <div class="mx-1 mb-1 flex flex-col gap-1">
-              {@render keyRow(
-                'Sharing address',
-                'The unique identifier for your data sharing key.',
-                sharingAddress,
-                'Sharing address',
-              )}
-              {@render keyRow(
-                'Sharing public key',
-                'Used by apps to securely share data with each other.',
-                sharingKeyDisplay,
-                'Sharing public key',
-              )}
-              {@render secretRow(
-                'Sharing private key',
-                'Grants access to shared data. Never share it.',
-                sharingKeyShown ? sharingPrivateKeyDisplay : undefined,
-                'Sharing private key',
-                () => (sharingKeyShown = true),
-              )}
-            </div>
-          {/if}
-        </div>
+          title="Data sharing"
+          address={{
+            label: 'Sharing address',
+            description: 'The unique identifier for your data sharing key.',
+            value: sharingAddress,
+          }}
+          publicKey={{
+            label: 'Sharing public key',
+            description: 'Used by apps to securely share data with each other.',
+            value: sharingKeyDisplay,
+          }}
+          privateKey={{
+            label: 'Sharing private key',
+            description: 'Grants access to shared data. Never share it.',
+          }}
+          bind:revealed={revealedSharingKey}
+          onreveal={() => (revealedSharingKey = sharingPrivateKeyDisplay)}
+          bind:open={sharingDetailOpen}
+        />
+
+        <KeyCard
+          id="account-keys-drive-management"
+          title="Drive management"
+          address={{
+            label: 'Postage batch signer address',
+            description: 'Manage drives for your account.',
+            value: signerAddress,
+          }}
+          privateKey={{
+            label: 'Postage batch signer private key',
+            description: 'Used to transfer ownership of your drives. Never share it.',
+          }}
+          bind:revealed={revealedSignerKey}
+          onreveal={() => (revealedSignerKey = signerPrivateKeyDisplay)}
+          bind:open={signerDetailOpen}
+        />
       </div>
     {/if}
   </div>
