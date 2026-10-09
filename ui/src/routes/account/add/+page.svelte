@@ -4,7 +4,7 @@
 -->
 
 <!-- Get Started (frame 573-17153) as a page: where the account menu's
-     "Sign in to another account" lands. -->
+     "Add another account" lands. -->
 <script lang="ts">
   import AccountStartChoice from '$lib/components/account-start-choice.svelte'
   import AppHeader from '$lib/components/app-header.svelte'

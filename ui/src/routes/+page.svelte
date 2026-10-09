@@ -17,7 +17,6 @@
   import HomeDrives from '$lib/components/home-drives.svelte'
   import AlertFill from '$lib/components/icons/alert-fill.svelte'
   import UserAddFill from '$lib/components/icons/user-add-fill.svelte'
-  import UserUnfollowLine from '$lib/components/icons/user-unfollow-line.svelte'
   import ProductPage from '$lib/components/product-page.svelte'
   import SettingsMenu from '$lib/components/settings-menu.svelte'
   import SignBackInDialog from '$lib/components/sign-back-in-dialog.svelte'
@@ -32,7 +31,6 @@
   import { accountsStore } from '$lib/stores/accounts.svelte'
   import { sessionStore } from '$lib/stores/session.svelte'
   import type { Account } from '$lib/types'
-  import { notImplemented } from '$lib/utils'
 
   const TABS = [
     { value: 'apps', label: 'Apps' },
@@ -197,13 +195,9 @@
             oncheckdrive={checkDrive}
           />
 
-          <Button variant="outline" size="sm" class="w-full" onclick={notImplemented}>
-            <UserUnfollowLine />
-            Remove an account
-          </Button>
           <Button variant="outline" size="sm" class="w-full" onclick={() => (addingAccount = true)}>
             <UserAddFill />
-            Sign in to another account
+            Add another account
           </Button>
         </div>
       {:else}
