@@ -7,9 +7,7 @@
   import { resolve } from '$app/paths'
 
   import AccountAvatar from '$lib/components/account-avatar.svelte'
-  import AddFill from '$lib/components/icons/add-fill.svelte'
-  import SubtractFill from '$lib/components/icons/subtract-fill.svelte'
-  import UserSearchLine from '$lib/components/icons/user-search-line.svelte'
+  import UserAddFill from '$lib/components/icons/user-add-fill.svelte'
   import SignBackInDialog from '$lib/components/sign-back-in-dialog.svelte'
   import SignOutDialog from '$lib/components/sign-out-dialog.svelte'
   import { Badge } from '$lib/components/ui/badge'
@@ -19,7 +17,7 @@
   import { accountsStore } from '$lib/stores/accounts.svelte'
   import { sessionStore } from '$lib/stores/session.svelte'
   import type { Account } from '$lib/types'
-  import { notImplemented, truncateAddress } from '$lib/utils'
+  import { truncateAddress } from '$lib/utils'
 
   interface Props {
     account: Account
@@ -131,23 +129,11 @@
     </div>
   {/if}
 
-  <!-- Frame 159-8517: three actions, each a page. -->
-  <div class="flex flex-col gap-2">
-    {#if others.length > 0}
-      <Button variant="ghost" size="sm" class="w-full" onclick={notImplemented}>
-        <SubtractFill />
-        Remove an account
-      </Button>
-    {/if}
-    <Button variant="ghost" size="sm" class="w-full" href={resolve(routes.ACCOUNT_NEW)}>
-      <AddFill />
-      Create a new account
-    </Button>
-    <Button variant="ghost" size="sm" class="w-full" href={resolve(routes.ACCOUNT_ADD)}>
-      <UserSearchLine />
-      Sign in to another account
-    </Button>
-  </div>
+  <!-- Frame 159-8517: one action, a page offering create or sign in (#834). -->
+  <Button variant="ghost" size="sm" class="w-full" href={resolve(routes.ACCOUNT_ADD)}>
+    <UserAddFill />
+    Add another account
+  </Button>
 </DropdownMenu>
 
 {#if signingOut}

@@ -17,7 +17,6 @@
   import AppHeader from '$lib/components/app-header.svelte'
   import AppIcon from '$lib/components/app-icon.svelte'
   import UserAddFill from '$lib/components/icons/user-add-fill.svelte'
-  import UserUnfollowLine from '$lib/components/icons/user-unfollow-line.svelte'
   import SignBackInDialog from '$lib/components/sign-back-in-dialog.svelte'
   import { Button } from '$lib/components/ui/button'
   import UnlockDialog from '$lib/components/unlock-dialog.svelte'
@@ -28,7 +27,6 @@
   import { connectStore } from '$lib/stores/connect.svelte'
   import { sessionStore } from '$lib/stores/session.svelte'
   import type { Account } from '$lib/types'
-  import { notImplemented } from '$lib/utils'
 
   let missingRequest = $state(false)
   /** Account being unlocked to approve the connection. */
@@ -194,16 +192,10 @@
               </div>
             {/if}
 
-            <div class="flex flex-col gap-2">
-              <Button variant="outline" size="sm" class="w-full" onclick={notImplemented}>
-                <UserUnfollowLine />
-                Remove an account
-              </Button>
-              <Button variant="outline" size="sm" class="w-full" onclick={startAdding}>
-                <UserAddFill />
-                Sign in to another account
-              </Button>
-            </div>
+            <Button variant="outline" size="sm" class="w-full" onclick={startAdding}>
+              <UserAddFill />
+              Add another account
+            </Button>
           </div>
         {:else}
           <AccountStartChoice />
