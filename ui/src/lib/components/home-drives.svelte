@@ -8,6 +8,7 @@
 
   import ChevronsUpDown from '@lucide/svelte/icons/chevrons-up-down'
   import EllipsisVertical from '@lucide/svelte/icons/ellipsis-vertical'
+  import ExternalLink from '@lucide/svelte/icons/external-link'
   import Pencil from '@lucide/svelte/icons/pencil'
   import Plus from '@lucide/svelte/icons/plus'
   import Star from '@lucide/svelte/icons/star'
@@ -38,6 +39,8 @@
   }
 
   let { account, target = [] }: Props = $props()
+
+  const BATCH_EXPLORER_URL = 'https://batch-explorer.github.io/batch/'
 
   // Drives bought with the account stamp with this key; one attached with a
   // pasted signer key stamps with its own, which only its card can show.
@@ -316,6 +319,14 @@
                     <span class="flex-1 whitespace-nowrap">Set as default</span>
                   </DropdownMenuItem>
                 {/if}
+                <DropdownMenuItem
+                  href={BATCH_EXPLORER_URL + drive.batchID.toHex()}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                >
+                  <ExternalLink class="size-4 shrink-0" />
+                  <span class="flex-1 whitespace-nowrap">View in batch explorer</span>
+                </DropdownMenuItem>
                 <DropdownMenuItem onclick={() => remove(drive)}>
                   <Trash2 class="size-4 shrink-0" />
                   <span class="flex-1 whitespace-nowrap">Remove</span>
