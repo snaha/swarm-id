@@ -27,9 +27,13 @@
     /** Omit it and the card shows no public key row (drive management has none). */
     publicKey?: KeyRow
     privateKey: Omit<KeyRow, 'value'>
-    /** The private key once revealed; collapsing the card clears it. */
-    revealed: string | undefined
-    onreveal: () => void
+    /**
+     * The private key once revealed, for a reveal that completes elsewhere (an
+     * unlock dialog). A reveal that needs no ceremony returns the key from
+     * `onreveal` instead and the card keeps it itself. Collapsing clears both.
+     */
+    revealed?: string | undefined
+    onreveal: () => string | undefined
     open?: boolean
   }
 
@@ -44,10 +48,20 @@
     open = $bindable(false),
   }: Props = $props()
 
+  let shown = $state<string | undefined>(undefined)
+  const displayed = $derived(revealed ?? shown)
+
+  function reveal() {
+    shown = onreveal()
+  }
+
   function toggle() {
     open = !open
     // Reopening asks for the private key again rather than showing it still.
-    if (!open) revealed = undefined
+    if (!open) {
+      revealed = undefined
+      shown = undefined
+    }
   }
 
   async function copyText(text: string, what: string) {
@@ -111,14 +125,14 @@
       <div class="bg-muted flex flex-col gap-1 rounded-md p-4">
         {@render keyBlock(privateKey.label, privateKey.description)}
         <div class="flex items-center gap-2">
-          {#if revealed}
-            <p class="min-w-0 flex-1 text-sm break-all">{revealed}</p>
+          {#if displayed}
+            <p class="min-w-0 flex-1 text-sm break-all">{displayed}</p>
             <Button
               variant="ghost"
               size="icon"
               class="size-7 shrink-0"
               aria-label="Copy {privateKey.label.toLowerCase()}"
-              onclick={() => revealed && copyText(revealed, privateKey.label)}
+              onclick={() => displayed && copyText(displayed, privateKey.label)}
             >
               <Copy />
             </Button>
@@ -129,7 +143,7 @@
               size="icon"
               class="size-7 shrink-0"
               aria-label="Reveal {privateKey.label.toLowerCase()}"
-              onclick={onreveal}
+              onclick={reveal}
             >
               <Eye />
             </Button>

@@ -47,18 +47,33 @@ test('the URL hash selects a tab and opens what it names', async ({ page }) => {
   await expect(page.getByText('Postage batch signer address')).toBeVisible()
   await page.getByRole('button', { name: 'Reveal postage batch signer private key' }).click()
   await expect(page.getByText(/^0x[0-9a-f]{64}$/)).toBeVisible()
+  const signerKey = await page.getByText(/^0x[0-9a-f]{64}$/).textContent()
   await page.getByRole('button', { name: 'Hide drive management keys' }).click()
   await page.getByRole('button', { name: 'Show drive management keys' }).click()
   await expect(page.getByText(/^0x[0-9a-f]{64}$/)).toBeHidden()
-  await expect(
-    page.getByRole('button', { name: 'Reveal postage batch signer private key' }),
-  ).toBeVisible()
+  const reveal = page.getByRole('button', { name: 'Reveal postage batch signer private key' })
+  await expect(reveal).toBeVisible()
 
-  // A section opened from a link still collapses, and stays collapsed.
+  // A section opened from a link still collapses, and stays collapsed — and
+  // forgets a reveal made inside it.
+  await reveal.click()
+  await expect(page.getByText(/^0x[0-9a-f]{64}$/)).toBeVisible()
   const keys = page.getByRole('button', { name: /Keys & addresses/ })
   await keys.click()
   await expect(keys).toHaveAttribute('aria-expanded', 'false')
   await expect(page.getByText('Sharing public key')).toBeHidden()
+  await keys.click()
+  await expect(page.getByText(/^0x[0-9a-f]{64}$/)).toBeHidden()
+  await expect(reveal).toBeVisible()
+
+  // The shown signer is the one drives are bought with: /dev derives it on the
+  // purchase path and shows the same key.
+  await page.goto('/dev')
+  await page.getByRole('tab', { name: 'Chain' }).click()
+  const devKey = page.getByText(/^[0-9a-f]{64}$/)
+  await expect(devKey).toBeVisible()
+  expect(`0x${await devKey.textContent()}`).toBe(signerKey)
+  await page.goto('/')
 
   // Unknown targets: an unknown tab lands on Apps, an unknown section (or an
   // inherited object key) on Account with nothing expanded.

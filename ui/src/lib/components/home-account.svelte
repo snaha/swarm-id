@@ -108,11 +108,10 @@
   // Reveals cache only their derived display value — never the raw seed, which
   // is zeroed the moment each ceremony finishes with it (issue #412).
   let revealedPrivateKey = $state<string | undefined>(undefined)
-  // No unlock for these two: they derive from `derivationKey`, which sits in
-  // plaintext in storage while signed in, so a dialog would only pretend to
-  // guard them. The mask is a shoulder-surfing courtesy, nothing more.
-  let revealedSharingKey = $state<string | undefined>(undefined)
-  let revealedSignerKey = $state<string | undefined>(undefined)
+  // No unlock for the sharing and signer keys: they derive from
+  // `derivationKey`, which sits in plaintext in storage while signed in, so a
+  // dialog would only pretend to guard them. The mask is a shoulder-surfing
+  // courtesy, nothing more; the cards derive and hold them on reveal.
   let revealedPhrase = $state<string[] | undefined>(undefined)
   // Seed held only across the change-method two-step ceremony; zeroed after.
   let changeMethodSeed: Uint8Array | undefined
@@ -141,12 +140,14 @@
   const sharingKey = $derived(deriveSharingKey(account.derivationKey))
   const sharingKeyDisplay = $derived(sharingKey.publicKey)
   const sharingAddress = $derived(new PublicKey(sharingKey.publicKey).address().toChecksum())
-  const sharingPrivateKeyDisplay = $derived(prefix0x(uint8ArrayToHex(sharingKey.secret)))
-  // The key every drive of the account is bought for (#848): its address is
-  // the batch owner on-chain.
-  const signerKey = $derived(derivePostageSignerKeySync(account.derivationKey))
-  const signerAddress = $derived(new PrivateKey(signerKey).publicKey().address().toChecksum())
-  const signerPrivateKeyDisplay = $derived(prefix0x(signerKey))
+  // The signer for drives bought with this account: its address is their batch
+  // owner on-chain. A drive attached with a pasted signer key has its own.
+  const signerAddress = $derived(
+    new PrivateKey(derivePostageSignerKeySync(account.derivationKey))
+      .publicKey()
+      .address()
+      .toChecksum(),
+  )
   const newPasswordValid = $derived(isNewPasswordValid(newPassword, verifyNewPassword))
 
   const unlockTitle = $derived(
@@ -172,6 +173,9 @@
 
   function toggle(section: SectionId) {
     expanded[section] = !expanded[section]
+    // The cards unmount with the section and forget their own reveals; this
+    // one is held here for the unlock dialog, so forget it here too.
+    if (section === 'keys' && !expanded.keys) revealedPrivateKey = undefined
   }
 
   function onNameChange() {
@@ -423,7 +427,10 @@
             description: 'Grants full control over your account. Never share it.',
           }}
           bind:revealed={revealedPrivateKey}
-          onreveal={() => (unlockTarget = 'private-key')}
+          onreveal={() => {
+            unlockTarget = 'private-key'
+            return undefined
+          }}
           bind:open={keysDetailOpen}
         />
 
@@ -444,8 +451,7 @@
             label: 'Sharing private key',
             description: 'Grants access to shared data. Never share it.',
           }}
-          bind:revealed={revealedSharingKey}
-          onreveal={() => (revealedSharingKey = sharingPrivateKeyDisplay)}
+          onreveal={() => prefix0x(uint8ArrayToHex(sharingKey.secret))}
           bind:open={sharingDetailOpen}
         />
 
@@ -454,15 +460,14 @@
           title="Drive management"
           address={{
             label: 'Postage batch signer address',
-            description: 'Manage drives for your account.',
+            description: 'The signer for drives bought with this account.',
             value: signerAddress,
           }}
           privateKey={{
             label: 'Postage batch signer private key',
-            description: 'Used to transfer ownership of your drives. Never share it.',
+            description: 'Stamps uploads to drives bought with this account. Never share it.',
           }}
-          bind:revealed={revealedSignerKey}
-          onreveal={() => (revealedSignerKey = signerPrivateKeyDisplay)}
+          onreveal={() => prefix0x(derivePostageSignerKeySync(account.derivationKey))}
           bind:open={signerDetailOpen}
         />
       </div>

@@ -12,19 +12,20 @@
   import Plus from '@lucide/svelte/icons/plus'
   import Star from '@lucide/svelte/icons/star'
   import Trash2 from '@lucide/svelte/icons/trash-2'
-  import type { PostageStamp } from '@snaha/swarm-id/internal'
+  import { type PostageStamp, derivePostageSignerKeySync } from '@snaha/swarm-id/internal'
 
   import AppIcon from '$lib/components/app-icon.svelte'
   import DriveAddDialog from '$lib/components/drive-add-dialog.svelte'
   import DriveExtendDialog from '$lib/components/drive-extend-dialog.svelte'
   import DriveRemoveDialog from '$lib/components/drive-remove-dialog.svelte'
   import DriveResizeDialog from '$lib/components/drive-resize-dialog.svelte'
+  import KeyCard from '$lib/components/key-card.svelte'
   import { Badge } from '$lib/components/ui/badge'
   import { Button } from '$lib/components/ui/button'
   import { DropdownMenu, DropdownMenuItem } from '$lib/components/ui/dropdown-menu'
   import { Input } from '$lib/components/ui/input'
   import UtilizationBar from '$lib/components/utilization-bar.svelte'
-  import { strip0x } from '$lib/crypto/hex'
+  import { prefix0x, strip0x } from '$lib/crypto/hex'
   import { describeDrive } from '$lib/drives'
   import { toastStore } from '$lib/stores/toast.svelte'
   import type { Account } from '$lib/types'
@@ -37,6 +38,10 @@
   }
 
   let { account, target = [] }: Props = $props()
+
+  // Drives bought with the account stamp with this key; one attached with a
+  // pasted signer key stamps with its own, which only its card can show.
+  const accountSignerKey = $derived(derivePostageSignerKeySync(account.derivationKey))
 
   let expandedId = $state<string | undefined>(undefined)
   let nameDraft = $state('')
@@ -242,6 +247,26 @@
                 </Button>
               {/if}
             </div>
+
+            {#if drive.signerKey.toHex() !== accountSignerKey}
+              <!-- Drive management: this drive's own signer -->
+              <div class="border-border border-t p-1">
+                <KeyCard
+                  id="drive-{batchKey}-management"
+                  title="Drive management"
+                  address={{
+                    label: 'Postage batch signer address',
+                    description: 'This drive was attached with its own signer key.',
+                    value: drive.signerKey.publicKey().address().toChecksum(),
+                  }}
+                  privateKey={{
+                    label: 'Postage batch signer private key',
+                    description: 'Stamps uploads to this drive. Never share it.',
+                  }}
+                  onreveal={() => prefix0x(drive.signerKey.toHex())}
+                />
+              </div>
+            {/if}
 
             <!-- Connected apps (account-wide; per-drive usage not yet tracked) -->
             <div class="border-border flex flex-col gap-3 border-t px-4 py-3">
