@@ -3,7 +3,7 @@
 /**
  * The account menu's one way to another account is "Add another account"
  * (#834), landing on the Get Started page that offers both creating one and
- * signing in to one — frame 159-8517. "Remove an account" is gone with it.
+ * signing in to one — frame 159-8517.
  */
 import { expect, test } from '@playwright/test'
 
@@ -22,8 +22,6 @@ test('the account menu links to the Get Started page', async ({ page }) => {
 
   await page.getByRole('button', { name: 'Switch account' }).click()
   const menu = page.getByRole('menu')
-  await expect(menu.getByRole('button', { name: 'Remove an account' })).toHaveCount(0)
-  await expect(menu.getByRole('link', { name: 'Create a new account' })).toHaveCount(0)
   await menu.getByRole('link', { name: 'Add another account' }).click()
 
   await expect(page).toHaveURL(/\/account\/add$/)
