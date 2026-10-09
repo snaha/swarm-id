@@ -185,7 +185,14 @@ the default when buying a drive — settles on Gnosis **mainnet** only, so local
 it to settle against: pick the built-in method to pay on the local chain, or turn on `/dev` →
 **Chain** → **Simulated purchase**, which stands in for the widget with a fabricated batch so that
 method's own screens stay reachable here. (It is also offered for buying alone; its contract ABI
-cannot top up or dilute, so extend and resize list the built-in method by itself.)
+cannot top up or dilute, so extend and resize list the built-in method by itself.) The third,
+`Pay with card (<shop host>)`, opens the card shop on the widget's protocol; `PUBLIC_CARD_SHOP_URL` in
+`ui/.env` points it at another deployment. It is experimental and off by default: switch it on under `/dev` → **Chain**
+→ **Experimental card payment** (in a build, which has no `/dev`, set `dev-card-payment-enabled` to
+`true` in local storage). The shop settles on Gnosis mainnet; while the route is experimental the
+batch it reports is recorded without the on-chain check a shipped route will have (#858), so a shop
+run in dry-run mode — whose fake batch exists on no chain, this fork included — can be driven end to
+end here.
 
 ```bash
 pnpm dev:local         # everything: cluster, both chains, solver, identity UI, demo

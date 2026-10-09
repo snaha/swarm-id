@@ -47,12 +47,41 @@ Two properties hold throughout:
 
 ## The method chooser
 
-Two methods, in this order:
+Three methods, in this order:
 
-| Method                                     | What it is                                                            | Offered for            |
-| ------------------------------------------ | --------------------------------------------------------------------- | ---------------------- |
-| `Pay with crypto (fund.bzz.limo)`          | the external widget popup, which settles and creates the batch itself | buying a drive         |
-| `Pay with crypto (built in, experimental)` | everything the rest of this document describes                        | buy, extend and resize |
+| Method                                     | What it is                                                                | Offered for            |
+| ------------------------------------------ | ------------------------------------------------------------------------- | ---------------------- |
+| `Pay with crypto (fund.bzz.limo)`          | the external widget popup, which settles and creates the batch itself     | buying a drive         |
+| `Pay with card (<shop host>)`              | the card shop popup, same protocol as the widget, paid in euros or pounds | buying a drive         |
+| `Pay with crypto (built in, experimental)` | everything the rest of this document describes                            | buy, extend and resize |
+
+**The card shop is the widget's protocol on another origin.** The shop takes the same URL
+(`destination`, `depth`, `amount`; `mode`, `intent` and `reserved-slots` are accepted and ignored),
+shows the size and lifespan filled in with the owner locked, takes a card payment on Stripe inside
+the popup and creates the batch on **Gnosis mainnet** from its own treasury. Its order page then
+posts to `window.opener`, each at most once:
+
+| Event     | When                            | Fields                                                                |
+| --------- | ------------------------------- | --------------------------------------------------------------------- |
+| `payment` | Stripe confirmed the payment    | –                                                                     |
+| `batch`   | the batch exists on chain       | `batchId` (64 hex), `depth`, `amount` (PLUR per chunk), `blockNumber` |
+| `error`   | fulfilment failed after payment | `error` (string)                                                      |
+| `finish`  | the buyer clicked Done          | –                                                                     |
+
+So `openStampPurchaseWidget({ card: true })` is the whole integration, with two differences from the
+widget. The shop charges the card and creates the batch server-side _before_ its order page can post
+`payment`, so any close without a `batch` is an unconfirmed close, never a clean cancel, and the
+pending dialog's Cancel closes the popup but warns the same way. And the `batch` it posts is read
+back from Gnosis (`fetchExistingBatchFromChain`, as "Use existing batch" does) before it is
+recorded, so a shop on another chain, a dry-run batch that exists nowhere, or a spoofed id is
+refused. For now the route is experimental: it is offered only with the dev-settings switch on
+(/dev → Chain → Experimental card payment, or the `dev-card-payment-enabled` local-storage key in
+a build, which ships no /dev), and while that switch is what offers it, the batch is recorded on
+trust so that a dry-run shop can be driven end to end. snaha/swarm-id#858 turns the check on when
+the route ships. The card is offered from the add-drive chooser only — the funding seam's method screen
+lists the widget and the built-in engine, as before. The label names the configured host:
+`swarm-storage.fly.dev` by default, `PUBLIC_CARD_SHOP_URL` for another deployment; a value that is
+not a web URL drops the option rather than the screen.
 
 **The widget leads, and is selected by default.** It is the settlement path the legacy UI has used
 all along; the built-in engine beside it is new, has not been through a mainnet season, and says so

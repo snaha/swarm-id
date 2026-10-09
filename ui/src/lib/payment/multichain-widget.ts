@@ -12,6 +12,8 @@
  * size and lifespan, are chosen inside the popup, and the `batch` event reports
  * what was actually bought.
  */
+import { env } from '$env/dynamic/public'
+
 import { strip0x } from '$lib/crypto/hex'
 
 // The deployment carrying the `window.opener` fix (ethersphere/multichain-widget
@@ -27,7 +29,38 @@ export const WIDGET_HOST = new URL(WIDGET_BASE_URL).host
 export const WIDGET_ORIGIN = new URL(WIDGET_BASE_URL).origin
 // The base is allowed by construction: moving it to a fourth host and
 // forgetting this list would silently drop every event the popup posts.
-const ALLOWED_ORIGINS = [WIDGET_ORIGIN, 'https://swarmbucks.eth.limo', 'https://fund.ethswarm.org']
+// The card shop (snaha/swarm-storage) speaks the same popup protocol — the URL
+// below, and `payment` / `batch` / `error` / `finish` posted to `window.opener` —
+// but is paid by card, with the batch created from the shop's own treasury.
+// `PUBLIC_CARD_SHOP_URL` points a build at another deployment, a local one for
+// development: the shop has no `mocked` mode of its own. The shop settles on
+// Gnosis mainnet, the chain this app uses drives on.
+const DEFAULT_CARD_SHOP_URL = 'https://swarm-storage.fly.dev/'
+
+/** The configured shop, or undefined when the value cannot be a web origin: a
+ *  malformed URL must cost the card option, not the module (and with it every
+ *  screen that imports a label from here). */
+function parseCardShopUrl(raw: string | undefined): URL | undefined {
+  try {
+    const url = new URL(raw || DEFAULT_CARD_SHOP_URL)
+    return url.protocol === 'https:' || url.protocol === 'http:' ? url : undefined
+  } catch {
+    return undefined
+  }
+}
+const CARD_SHOP = parseCardShopUrl(env.PUBLIC_CARD_SHOP_URL)
+/** Whether "Pay with card" can be offered at all. */
+export const CARD_SHOP_AVAILABLE = CARD_SHOP !== undefined
+/** The card shop's host as the UI names it, so copy cannot drift from the URL. */
+export const CARD_SHOP_HOST = CARD_SHOP?.host ?? 'card shop'
+/** The card shop's origin, which its events arrive from. Exported for the test. */
+export const CARD_SHOP_ORIGIN = CARD_SHOP?.origin ?? ''
+const ALLOWED_ORIGINS = [
+  WIDGET_ORIGIN,
+  'https://swarmbucks.eth.limo',
+  'https://fund.ethswarm.org',
+  ...(CARD_SHOP ? [CARD_SHOP.origin] : []),
+]
 const POPUP_FEATURES = 'popup,width=500,height=700'
 
 /** Batch event posted by the multichain widget once a purchase settles. */
@@ -59,6 +92,13 @@ export interface PurchaseStampOptions {
   // as-is, so the drive it leaves behind is the one that was chosen.
   depth?: number
   amount?: bigint
+  // Open the card shop instead of the crypto widget. Same parameters, same
+  // events back; the user pays by card and never touches a token. One
+  // difference governs every close below: the shop charges the card and
+  // creates the batch server-side BEFORE its order page can post `payment`, so
+  // from the moment the popup opens, a close without a `batch` may have left a
+  // paid-for batch behind — `onUnconfirmedClose`, never `onCancel`.
+  card?: boolean
 }
 
 /** How long to keep listening for a trailing `batch` message after the popup
@@ -86,6 +126,7 @@ export function buildWidgetUrl(
   destination: string,
   { depth, amount }: BatchDefaults,
   mocked?: boolean,
+  card?: boolean,
 ): string {
   const params = new URLSearchParams({
     mode: 'batch',
@@ -108,7 +149,7 @@ export function buildWidgetUrl(
     params.set('mocked', 'true')
   }
 
-  return `${WIDGET_BASE_URL}?${params.toString()}`
+  return `${card ? (CARD_SHOP?.href ?? DEFAULT_CARD_SHOP_URL) : WIDGET_BASE_URL}?${params.toString()}`
 }
 
 /** Check if the message origin is from an allowed widget domain. */
@@ -305,10 +346,11 @@ export interface StampPurchaseHandle {
    * settled — once money is in flight the popup has to run to the end, so it is
    * left open. Fires no callback — the caller initiated it.
    *
-   * @returns `true` when the popup was left running because the user's money is
-   *   already in it. That exit is otherwise silent — no callback, and the
-   *   purchase may still settle after our UI is gone — so the caller is the one
-   *   place that can say so (and then recover it via "Use existing batch").
+   * @returns `true` when the purchase may still complete without us: the widget
+   *   popup was left running with the user's money in it, or the card shop may
+   *   already have charged the card. That exit is otherwise silent — no
+   *   callback — so the caller is the one place that can say so (and then
+   *   recover it via "Use existing batch").
    *   `false` on a clean back-out, and on any later call: cancelling is
    *   terminal, so a second one (a dialog's `onDestroy` after its own close)
    *   reports nothing.
@@ -336,6 +378,7 @@ export function openStampPurchaseWidget(options: PurchaseStampOptions): StampPur
     mockError,
     depth,
     amount,
+    card,
   } = options
 
   // Mocked mode (the /dev toggle): settle locally without a real cross-chain
@@ -345,13 +388,16 @@ export function openStampPurchaseWidget(options: PurchaseStampOptions): StampPur
   // works where popups are blocked (previews) or the widget origin is offline.
   // Either way the settlement is simulated after a short, visible delay.
   if (mocked) {
-    const popup = mockPopup
-      ? window.open(
-          buildWidgetUrl(destination, { depth, amount }, true),
-          'stamp-purchase',
-          POPUP_FEATURES,
-        )
-      : undefined
+    // The shop has no mocked mode: opened with `?mocked=true` it would show its
+    // live payment form for the mock's delay, so the card mock opens nothing.
+    const popup =
+      mockPopup && !card
+        ? window.open(
+            buildWidgetUrl(destination, { depth, amount }, true, card),
+            'stamp-purchase',
+            POPUP_FEATURES,
+          )
+        : undefined
     const mockTimer = setTimeout(() => {
       popup?.close()
       if (mockError) {
@@ -380,7 +426,11 @@ export function openStampPurchaseWidget(options: PurchaseStampOptions): StampPur
     }
   }
 
-  const url = buildWidgetUrl(destination, { depth, amount })
+  if (card && !CARD_SHOP) {
+    onError(new Error('The card shop is not configured.'))
+    return { cancel: () => false }
+  }
+  const url = buildWidgetUrl(destination, { depth, amount }, false, card)
   const popup = window.open(url, 'stamp-purchase', POPUP_FEATURES)
 
   if (!popup) {
@@ -392,7 +442,8 @@ export function openStampPurchaseWidget(options: PurchaseStampOptions): StampPur
   let settled = false
   // A `payment` event arrived: the user's money is in flight and the widget's
   // pipeline must be allowed to run to the end, whatever we do with our UI.
-  let paid = false
+  // The card shop charges before it can say so, so there it holds from the start.
+  let paid = card === true
   // Terminal: listeners are detached and no further callback may fire.
   let finished = false
   let closeGraceTimer: ReturnType<typeof setTimeout> | undefined
@@ -444,7 +495,10 @@ export function openStampPurchaseWidget(options: PurchaseStampOptions): StampPur
       // (its `payment` events carry a `resumed` flag), and a detached listener
       // would lose the batch that recovery settles. If the popup does end
       // without one, the close poll concludes it as unconfirmed.
-      if (paid && !settled) {
+      // The shop's `error` is terminal — fulfilment failed server-side and it
+      // says it will follow up — so the popup may go; nothing of the user's
+      // sits inside it.
+      if (paid && !settled && !card) {
         onError(error)
         return
       }
@@ -529,7 +583,13 @@ export function openStampPurchaseWidget(options: PurchaseStampOptions): StampPur
       cleanup()
       // Never close a popup that still has the user's money in it: the pipeline
       // runs client-side there, and killing it strands funds on the temporary
-      // wallet (#550). Detach only and let it finish on its own.
+      // wallet (#550). Detach only and let it finish on its own. The card shop
+      // keeps nothing in the popup — fulfilment runs on its server — so that one
+      // can close; what the user needs is the warning, hence `true`.
+      if (card) {
+        popup.close()
+        return !settled
+      }
       if (!paid && !settled) {
         popup.close()
         return false

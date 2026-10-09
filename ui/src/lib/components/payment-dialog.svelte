@@ -29,7 +29,7 @@
   import type { CancelOptions } from '$lib/payment/funding-request.svelte'
   import {
     BUILT_IN_LABEL,
-    type PaymentMethod,
+    type FundingMethod,
     WIDGET_CONTINUE_LABEL,
     WIDGET_EXPLAINER,
     WIDGET_LABEL,
@@ -84,9 +84,11 @@
      * Which method the chooser opens on. Passed by a caller that has already
      * asked — buying a drive chooses before it touches the chain, and finding
      * the choice flipped back here would read as the answer not having landed.
-     * Defaults to the widget wherever it is on offer.
+     * Defaults to the widget wherever it is on offer. The card shop is not a
+     * method this screen can run — it is a popup of its own, chosen before the
+     * funding seam is reached — so it is excluded by type.
      */
-    initialMethod?: PaymentMethod
+    initialMethod?: FundingMethod
   }
 
   let { need, rail, onPaid, onCancel, onUseWidget, initialMethod }: Props = $props()
@@ -125,7 +127,7 @@
   /** Which method the chooser is on. Which methods exist is fixed for the life
    * of one payment — the dialog is created fresh per pending request — so this
    * is read ONCE, as the user's starting selection, not tracked. */
-  let method = $state<PaymentMethod>(
+  let method = $state<FundingMethod>(
     untrack(() => initialMethod ?? (onUseWidget ? 'widget' : 'built-in')),
   )
   /** True while `quoteFunding` is pricing the built-in method's side. */

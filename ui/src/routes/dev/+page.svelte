@@ -56,7 +56,7 @@
   import { syncStore } from '$lib/dev/sync.svelte'
   import { chainIdentity, evictChainCaches, probeChainId } from '$lib/payment/chain'
   import { fetchExistingBatchFromChain } from '$lib/payment/contract'
-  import { WIDGET_HOST } from '$lib/payment/multichain-widget'
+  import { CARD_SHOP_HOST, WIDGET_HOST } from '$lib/payment/multichain-widget'
   import { type EthereumProvider, switchWalletChain } from '$lib/payment/payment-rail'
   import { resolvePaymentRail } from '$lib/payment/resolve-rail'
   import routes from '$lib/routes'
@@ -1585,6 +1585,27 @@ Check console logs for details:
           />
         </label>
       {/if}
+
+      <div class="bg-border my-4 h-px"></div>
+
+      <h3 class="text-lg font-semibold">Experimental card payment</h3>
+      <p class="text-muted-foreground text-sm">
+        Offer <strong>Pay with card ({CARD_SHOP_HOST})</strong> in <strong>Add drive</strong>. The
+        batch the shop reports is then recorded on trust, without the on-chain check a shipped route
+        will have (#858), so a shop in dry-run mode can be driven end to end. This page is not in a
+        build: there, set <code>dev-card-payment-enabled</code> to <code>true</code> in local storage
+        by hand.
+      </p>
+      <label class="flex items-center gap-2">
+        <Switch
+          bind:checked={
+            () => devSettingsStore.data.cardPaymentEnabled,
+            (enabled) => devSettingsStore.setCardPaymentEnabled(enabled)
+          }
+          aria-label="Enable card payment"
+        />
+        <span class="text-sm">Enable card payment</span>
+      </label>
 
       <div class="bg-border my-4 h-px"></div>
 

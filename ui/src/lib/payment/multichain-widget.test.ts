@@ -3,6 +3,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import {
+  CARD_SHOP_ORIGIN,
   type PurchaseStampOptions,
   type StampPurchaseHandle,
   WIDGET_ORIGIN,
@@ -42,6 +43,14 @@ describe('buildWidgetUrl', () => {
     // One halving, like our lane labels (#566).
     expect(url.searchParams.get('reserved-slots')).toBe('1')
     expect(url.searchParams.has('mocked')).toBe(false)
+  })
+
+  it('opens the card shop on the same parameters', () => {
+    const url = new URL(buildWidgetUrl(DESTINATION, { depth: 21, amount: 1n }, false, true))
+    expect(url.origin).toBe(CARD_SHOP_ORIGIN)
+    expect(url.searchParams.get('destination')).toBe(DESTINATION)
+    expect(url.searchParams.get('depth')).toBe('21')
+    expect(url.searchParams.get('amount')).toBe('1')
   })
 
   it('omits the defaults it does not have', () => {
@@ -105,6 +114,7 @@ describe('parseBatchEvent', () => {
 
 describe('openStampPurchaseWidget', () => {
   let popup: { closed: boolean; close: ReturnType<typeof vi.fn> }
+  let openedUrl: string | undefined
   let listener: ((event: unknown) => void) | undefined
   let callbacks: ReturnType<typeof makeCallbacks>
 
@@ -119,8 +129,8 @@ describe('openStampPurchaseWidget', () => {
   }
 
   /** Open the widget against a stubbed `window`, capturing its message listener. */
-  function open(): StampPurchaseHandle {
-    return openStampPurchaseWidget({ destination: DESTINATION, ...callbacks })
+  function open(card = false): StampPurchaseHandle {
+    return openStampPurchaseWidget({ destination: DESTINATION, card, ...callbacks })
   }
 
   /** Deliver a message as if the popup had posted it. */
@@ -137,12 +147,16 @@ describe('openStampPurchaseWidget', () => {
   beforeEach(() => {
     vi.useFakeTimers()
     popup = { closed: false, close: vi.fn() }
+    openedUrl = undefined
     listener = undefined
     callbacks = makeCallbacks()
     // The service only ever touches these three, and reads only
     // source/origin/data off an event — enough to test without a DOM.
     vi.stubGlobal('window', {
-      open: () => popup,
+      open: (url: string) => {
+        openedUrl = url
+        return popup
+      },
       addEventListener: (_type: string, fn: (event: unknown) => void) => (listener = fn),
       // Actually drops the listener. A no-op here lets `post()` keep delivering
       // after `cleanup()`, so any test about what happens once the service has
@@ -331,10 +345,71 @@ describe('openStampPurchaseWidget', () => {
     expect(popup.close).not.toHaveBeenCalled()
   })
 
+  it('opens the card shop and records the batch it posts', () => {
+    open(true)
+    expect(openedUrl?.startsWith(CARD_SHOP_ORIGIN)).toBe(true)
+    post(makeEvent(), popup, CARD_SHOP_ORIGIN)
+    expect(callbacks.onSuccess).toHaveBeenCalledWith(expect.objectContaining({ batchId: BATCH_ID }))
+  })
+
   it('ignores messages from a foreign origin or a foreign source', () => {
     open()
     post(makeEvent(), popup, 'https://evil.example')
     post(makeEvent(), { closed: false })
     expect(callbacks.onSuccess).not.toHaveBeenCalled()
+  })
+
+  describe('card shop', () => {
+    it('ignores a foreign source on the shop origin, and a foreign origin from the popup', () => {
+      open(true)
+      post(makeEvent(), { closed: false }, CARD_SHOP_ORIGIN)
+      post(makeEvent(), popup, 'https://evil.example')
+      expect(callbacks.onSuccess).not.toHaveBeenCalled()
+    })
+
+    it('treats a close with no events as unconfirmed: the card may already be charged', () => {
+      open(true)
+      closePopup()
+      expect(callbacks.onUnconfirmedClose).toHaveBeenCalled()
+      expect(callbacks.onCancel).not.toHaveBeenCalled()
+    })
+
+    it('reports a failed fulfilment once: payment, error, then finish', () => {
+      open(true)
+      post(PAYMENT_SENT, popup, CARD_SHOP_ORIGIN)
+      post({ event: 'error', error: 'The storage could not be set up.' }, popup, CARD_SHOP_ORIGIN)
+      expect(callbacks.onError).toHaveBeenCalledTimes(1)
+      expect(popup.close).toHaveBeenCalled()
+      post({ event: 'finish' }, popup, CARD_SHOP_ORIGIN)
+      closePopup()
+      expect(callbacks.onError).toHaveBeenCalledTimes(1)
+      expect(callbacks.onUnconfirmedClose).not.toHaveBeenCalled()
+      expect(callbacks.onCancel).not.toHaveBeenCalled()
+    })
+
+    it('cancel() closes the popup and asks the caller to warn', () => {
+      const handle = open(true)
+      expect(handle.cancel()).toBe(true)
+      expect(popup.close).toHaveBeenCalled()
+    })
+
+    it('cancel() after the batch settled needs no warning', () => {
+      const handle = open(true)
+      post(makeEvent(), popup, CARD_SHOP_ORIGIN)
+      expect(handle.cancel()).toBe(false)
+    })
+
+    it('the mock opens no popup for the card shop, which has no mocked mode', () => {
+      openStampPurchaseWidget({
+        destination: DESTINATION,
+        card: true,
+        mocked: true,
+        mockPopup: true,
+        ...callbacks,
+      })
+      expect(openedUrl).toBeUndefined()
+      vi.advanceTimersByTime(2_000)
+      expect(callbacks.onSuccess).toHaveBeenCalled()
+    })
   })
 })

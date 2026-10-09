@@ -39,10 +39,19 @@
     createFundingRequester,
     describeStep,
   } from '$lib/payment/funding-request.svelte'
-  import { type StampPurchaseHandle, openStampPurchaseWidget } from '$lib/payment/multichain-widget'
+  import {
+    CARD_SHOP_HOST,
+    type StampPurchaseHandle,
+    WIDGET_HOST,
+    openStampPurchaseWidget,
+  } from '$lib/payment/multichain-widget'
   import {
     BUILT_IN_EXPLAINER,
     BUILT_IN_LABEL,
+    CARD_AVAILABLE,
+    CARD_CONTINUE_LABEL,
+    CARD_EXPLAINER,
+    CARD_LABEL,
     type PaymentMethod,
     WIDGET_CONTINUE_LABEL,
     WIDGET_EXPLAINER,
@@ -74,10 +83,15 @@
   type Storage = 'new' | 'existing'
   type Phase = 'form' | 'method' | 'pending' | 'success' | 'error' | 'unconfirmed'
 
-  const METHOD_OPTIONS = [
+  // The card shop is experimental: offered only behind the dev-settings switch,
+  // which a build reads from local storage too (#858).
+  const METHOD_OPTIONS = $derived([
     { value: 'widget', label: WIDGET_LABEL },
+    ...(CARD_AVAILABLE && devSettingsStore.data.cardPaymentEnabled
+      ? [{ value: 'card', label: CARD_LABEL }]
+      : []),
     { value: 'built-in', label: BUILT_IN_LABEL },
-  ]
+  ])
 
   let storage = $state<Storage>('new')
   let name = $state('')
@@ -189,7 +203,9 @@
     purchase = undefined
     if (stillPaying) {
       toastStore.show(
-        'Payment is still finishing in the widget window. If the drive does not appear, add it with “Use existing batch”.',
+        method === 'card'
+          ? `If you already paid at ${CARD_SHOP_HOST}, the storage was still bought for this account — don’t pay again. Ask the shop for the batch ID and add it with “Use existing batch”.`
+          : `Payment is still finishing in the ${WIDGET_HOST} window. If the drive does not appear, add it with “Use existing batch”.`,
       )
     }
   }
@@ -264,8 +280,8 @@
 
   /** Start the purchase on the method the chooser is on. */
   function startPurchase() {
-    if (method === 'widget') {
-      void purchaseWithWidget(attempts.begin())
+    if (method === 'widget' || method === 'card') {
+      void purchaseWithWidget(attempts.begin(), method === 'card')
       return
     }
     void purchaseNew()
@@ -323,11 +339,12 @@
   }
 
   /**
-   * Buy the drive through the multichain-widget popup, which settles the payment
-   * and creates the batch itself and hands back the finished thing. Nothing
-   * here goes near the rail or the on-chain engine.
+   * Buy the drive through the multichain-widget popup — or, with `card`, the
+   * card shop's, which speaks the same protocol — which settles the payment and
+   * creates the batch itself and hands back the finished thing. Nothing here
+   * goes near the rail or the on-chain engine.
    */
-  async function purchaseWithWidget(attempt: Attempt) {
+  async function purchaseWithWidget(attempt: Attempt, card = false) {
     // Release whatever is still open before taking a new handle. Every route in
     // releases first, so this is a no-op today; it sits at the assignment so a
     // new one can't silently orphan a live popup, which nothing could cancel
@@ -352,6 +369,7 @@
       )
       purchase = openStampPurchaseWidget({
         destination,
+        card,
         // /dev mock (see dev-settings): simulate the purchase without a real
         // cross-chain payment. No-op in production, where the toggle is off.
         mocked: devSettingsStore.data.mockStampEnabled,
@@ -366,6 +384,18 @@
         amount: amountPerChunk,
         onSuccess: (batch) => {
           if (!attempt.current) {
+            return
+          }
+          // The shop is a newly trusted origin, and what it posts is taken on
+          // trust by the widget path. Read the batch off Gnosis first: that
+          // catches a shop on the wrong chain, a dry-run batch that exists
+          // nowhere, and a spoofed or buggy id, and the record comes from the
+          // chain rather than from the message. Not while the route is
+          // experimental: the shop to test against runs in dry-run mode, whose
+          // batch is on no chain, so the switch that offers the card also
+          // waives the check until #858 turns it back on for good.
+          if (card && !devSettingsStore.data.cardPaymentEnabled) {
+            void recordVerifiedBatch(attempt, batch.batchId, signerKey, driveName)
             return
           }
           // The size/lifespan actually bought are confirmed INSIDE the widget —
@@ -404,6 +434,33 @@
       }
       errorDetail = failureDetail(caught)
       errorMessage = caught instanceof Error ? caught.message : 'Could not start the purchase.'
+      phase = 'error'
+    }
+  }
+
+  /** The card shop's batch, recorded from the chain or not at all. */
+  async function recordVerifiedBatch(
+    attempt: Attempt,
+    batchId: string,
+    signerKey: PrivateKey,
+    driveName: string | undefined,
+  ) {
+    pendingLabel = 'Checking the batch on chain…'
+    try {
+      const stamp = await attempt.guard(fetchExistingBatchFromChain(batchId, signerKey, driveName))
+      if (!stamp) {
+        errorMessage = `${CARD_SHOP_HOST} reported a batch that is not on Gnosis. Don’t pay again — ask the shop about the order it just took.`
+        phase = 'error'
+        return
+      }
+      account.addStamp(stamp)
+      succeed()
+    } catch (caught) {
+      if (!attempt.current) {
+        return
+      }
+      errorDetail = failureDetail(caught)
+      errorMessage = caught instanceof Error ? caught.message : 'Could not verify the batch.'
       phase = 'error'
     }
   }
@@ -479,8 +536,14 @@
     <div class="flex items-start gap-2">
       <TriangleAlert class="text-destructive mt-0.5 size-4 shrink-0" />
       <p class="text-sm">
-        Your payment went through, but the payment window closed before the purchase was confirmed.
-        The drive may still appear shortly — don't pay again without checking.
+        {#if method === 'card'}
+          The {CARD_SHOP_HOST} window closed before this account heard back. If you completed the payment,
+          the storage was still bought for this account — don’t pay again. Ask the shop for the batch
+          ID and add it with “Use existing batch”. If you didn’t pay, nothing was bought.
+        {:else}
+          Your payment went through, but the payment window closed before the purchase was
+          confirmed. The drive may still appear shortly — don't pay again without checking.
+        {/if}
       </p>
     </div>
     <Button variant="outline" class="w-full" onclick={close}>Close</Button>
@@ -505,14 +568,22 @@
     </div>
 
     <p class="bg-muted rounded-md px-3 py-2 text-sm">
-      {method === 'widget' ? WIDGET_EXPLAINER : BUILT_IN_EXPLAINER}
+      {method === 'widget'
+        ? WIDGET_EXPLAINER
+        : method === 'card'
+          ? CARD_EXPLAINER
+          : BUILT_IN_EXPLAINER}
     </p>
 
     <!-- The widget's label matches the one on `PaymentDialog`'s own method
          screen: the same route reached from either place must read as the same
          route. -->
     <Button class="w-full" onclick={startPurchase}>
-      {method === 'widget' ? WIDGET_CONTINUE_LABEL : 'Continue'}
+      {method === 'widget'
+        ? WIDGET_CONTINUE_LABEL
+        : method === 'card'
+          ? CARD_CONTINUE_LABEL
+          : 'Continue'}
       <ArrowRight />
     </Button>
   </Dialog>
