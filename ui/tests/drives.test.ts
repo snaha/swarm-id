@@ -89,6 +89,23 @@ async function expireStoredDrives(page: import('@playwright/test').Page) {
   })
 }
 
+/** Re-keys every stored drive to one random signer, as a pasted key would; returns it. */
+async function giveStoredDrivesTheirOwnSigner(page: import('@playwright/test').Page) {
+  return page.evaluate(() => {
+    const key = Array.from(crypto.getRandomValues(new Uint8Array(32)), (b) =>
+      b.toString(16).padStart(2, '0'),
+    ).join('')
+    const doc = JSON.parse(localStorage.getItem('swarm-id-accounts') ?? '{}') as {
+      data?: { postageStamps?: { signerKey?: string }[] }[]
+    }
+    for (const stamp of doc.data?.[0]?.postageStamps ?? []) {
+      stamp.signerKey = key
+    }
+    localStorage.setItem('swarm-id-accounts', JSON.stringify(doc))
+    return key
+  })
+}
+
 test('drive management: add, rename, set default, remove', async ({ page }) => {
   test.setTimeout(CHAIN_TEST_TIMEOUT_MS)
   await createLocalAccount(page)
@@ -289,4 +306,18 @@ test('an expired drive offers no extend or resize, only removal', async ({ page 
 
   await page.getByRole('button', { name: 'Drive actions' }).click()
   await expect(page.getByRole('menuitem', { name: 'Remove' })).toBeVisible()
+  await page.keyboard.press('Escape')
+
+  // A drive bought with the account shows no signer of its own; one attached
+  // with a pasted signer key (stored per stamp) shows that key's card.
+  await expect(page.getByText('Drive management')).toHaveCount(0)
+  const foreignKey = await giveStoredDrivesTheirOwnSigner(page)
+  await page.reload()
+  await page.getByRole('tab', { name: 'Storage' }).click()
+  await page.getByRole('button', { name: 'Expand drive' }).click()
+  await expect(page.getByText('Drive management')).toBeVisible()
+  await page.getByRole('button', { name: 'Show drive management keys' }).click()
+  await expect(page.getByText('This drive was attached with its own signer key.')).toBeVisible()
+  await page.getByRole('button', { name: 'Reveal postage batch signer private key' }).click()
+  await expect(page.getByText(`0x${foreignKey}`)).toBeVisible()
 })
