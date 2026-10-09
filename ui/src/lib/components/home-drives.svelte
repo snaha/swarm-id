@@ -7,7 +7,9 @@
   import { tick, untrack } from 'svelte'
 
   import ChevronsUpDown from '@lucide/svelte/icons/chevrons-up-down'
+  import Copy from '@lucide/svelte/icons/copy'
   import EllipsisVertical from '@lucide/svelte/icons/ellipsis-vertical'
+  import ExternalLink from '@lucide/svelte/icons/external-link'
   import Pencil from '@lucide/svelte/icons/pencil'
   import Plus from '@lucide/svelte/icons/plus'
   import Star from '@lucide/svelte/icons/star'
@@ -29,7 +31,7 @@
   import { describeDrive } from '$lib/drives'
   import { toastStore } from '$lib/stores/toast.svelte'
   import type { Account } from '$lib/types'
-  import { cn } from '$lib/utils'
+  import { cn, copyToClipboard } from '$lib/utils'
 
   interface Props {
     account: Account
@@ -38,6 +40,8 @@
   }
 
   let { account, target = [] }: Props = $props()
+
+  const BATCH_EXPLORER_URL = 'https://batch-explorer.github.io/batch/'
 
   // Drives bought with the account stamp with this key; one attached with a
   // pasted signer key stamps with its own, which only its card can show.
@@ -82,6 +86,11 @@
   function setDefault(drive: PostageStamp) {
     account.setDefaultStamp(drive.batchID)
     toastStore.show('Default drive updated')
+  }
+
+  async function copyBatchId(drive: PostageStamp) {
+    const copied = await copyToClipboard(drive.batchID.toHex())
+    toastStore.show(copied ? 'Batch ID copied to clipboard' : 'Could not copy to clipboard')
   }
 
   function remove(drive: PostageStamp) {
@@ -316,6 +325,18 @@
                     <span class="flex-1 whitespace-nowrap">Set as default</span>
                   </DropdownMenuItem>
                 {/if}
+                <DropdownMenuItem onclick={() => copyBatchId(drive)}>
+                  <Copy class="size-4 shrink-0" />
+                  <span class="flex-1 whitespace-nowrap">Copy batch ID</span>
+                </DropdownMenuItem>
+                <DropdownMenuItem
+                  href={BATCH_EXPLORER_URL + drive.batchID.toHex()}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                >
+                  <ExternalLink class="size-4 shrink-0" />
+                  <span class="flex-1 whitespace-nowrap">View in batch explorer</span>
+                </DropdownMenuItem>
                 <DropdownMenuItem onclick={() => remove(drive)}>
                   <Trash2 class="size-4 shrink-0" />
                   <span class="flex-1 whitespace-nowrap">Remove</span>
