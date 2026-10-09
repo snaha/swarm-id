@@ -5,14 +5,16 @@ import { defineConfig } from "vitest/config"
 
 /**
  * Tests against the baked local chain (`pnpm dev:chain`), which carries a real
- * BZZ market and the PostageStamp the cluster follows. Opt-in and skipped
- * automatically when no chain is reachable.
+ * BZZ market and the PostageStamp the cluster follows. Opt-in, and it FAILS
+ * rather than skipping when no chain is reachable — see `global-setup.ts`.
  */
 export default defineConfig({
   test: {
     globals: true,
     environment: "node",
     include: ["test/fork/**/*.test.ts"],
+    // Refuses the run when no fork is reachable, so nothing below has to ask.
+    globalSetup: ["./test/fork/global-setup.ts"],
     // The chain mines on a block cadence, so a purchase spans several
     // confirmations.
     testTimeout: 180_000,

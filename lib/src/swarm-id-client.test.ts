@@ -28,6 +28,8 @@ type ClientInternals = {
   ready: boolean
   iframe: unknown
   storageShared?: boolean
+  /** The in-flight requests `sendRequest` is holding open. */
+  pendingRequests: Map<string, unknown>
 }
 
 const internals = (c: SwarmIdClient): ClientInternals =>
@@ -62,6 +64,75 @@ function registeredMessageListener(): (event: unknown) => void {
     throw new Error("no message listener was registered")
   }
   return registration[1] as unknown as (event: unknown) => void
+}
+
+const IFRAME_ORIGIN = "https://swarm-id.example.com"
+const APP_METADATA = { name: "Test App", description: "A test application" }
+
+/**
+ * Browser stand-ins that keep the two seams these tests drive: the `message`
+ * listener the constructor registers — so a message can be delivered the way
+ * the browser delivers it, THROUGH the origin/source/schema gate rather than
+ * around it — and the iframe element `initialize()` creates, so its `onload`
+ * can be fired on cue.
+ */
+function stubBrowserGlobals() {
+  const messageListeners: Array<(event: MessageEvent) => void> = []
+  const iframeContentWindow = { postMessage: vi.fn() }
+  const iframeElement = {
+    style: {} as Record<string, string>,
+    onload: undefined as (() => void) | undefined,
+    onerror: undefined as (() => void) | undefined,
+    src: "",
+    contentWindow: iframeContentWindow,
+    parentNode: { removeChild: vi.fn() },
+  }
+  const removeEventListener = vi.fn()
+
+  vi.stubGlobal("window", {
+    addEventListener: vi.fn(
+      (type: string, listener: (event: MessageEvent) => void) => {
+        if (type === "message") messageListeners.push(listener)
+      },
+    ),
+    removeEventListener,
+    parent: { postMessage: vi.fn() },
+    location: { origin: "https://localhost" },
+    open: vi.fn(),
+  })
+  vi.stubGlobal("document", {
+    createElement: vi.fn().mockReturnValue(iframeElement),
+    body: { appendChild: vi.fn(), removeChild: vi.fn() },
+  })
+
+  return {
+    iframeElement,
+    iframeContentWindow,
+    removeEventListener,
+    /** The handler the client registered — what `destroy()` must hand back. */
+    get messageListener() {
+      return messageListeners[0]
+    },
+    /** What the iframe was last told, as `sendMessage` posted it. */
+    lastPostedMessage() {
+      const calls = iframeContentWindow.postMessage.mock.calls
+      return calls[calls.length - 1]?.[0]
+    },
+    /**
+     * Deliver an event the way the browser would. The defaults are the trusted
+     * case; pass `origin` or `source` to make it arrive from somewhere else.
+     */
+    dispatch(event: { origin?: string; source?: unknown; data: unknown }) {
+      const messageEvent = {
+        origin: event.origin ?? IFRAME_ORIGIN,
+        source: "source" in event ? event.source : iframeContentWindow,
+        data: event.data,
+      } as unknown as MessageEvent
+      // Iterate a copy: an upload's progress listener removes itself as the
+      // request settles, and that must not shift the iteration underneath us.
+      ;[...messageListeners].forEach((listener) => listener(messageEvent))
+    },
+  }
 }
 
 describe("SwarmIdClient connect()", () => {
@@ -223,34 +294,27 @@ describe("SwarmIdClient connect()", () => {
 
 describe("SwarmIdClient connectionInfo", () => {
   let client: SwarmIdClient
+  let env: ReturnType<typeof stubBrowserGlobals>
   let onConnectionChange: Mock<(info: ConnectionInfo) => void>
+
+  // Delivered through the listener, not into `handleIframeMessage`: a snapshot
+  // shaped like something the proxy cannot actually put on the wire would
+  // otherwise pass here and fail only in a browser. Hex is bare — `0x`-prefixed
+  // addresses and 68-char public keys are what `IframeToParentMessageSchema`
+  // rejects (#427).
+  const deliver = (message: unknown) => env.dispatch({ data: message })
 
   beforeEach(() => {
     vi.restoreAllMocks()
-    vi.stubGlobal("window", {
-      addEventListener: vi.fn(),
-      removeEventListener: vi.fn(),
-      parent: { postMessage: vi.fn() },
-      location: { origin: "https://localhost" },
-      open: vi.fn(),
-    })
-    vi.stubGlobal("document", {
-      createElement: vi.fn().mockReturnValue({
-        style: {},
-        onload: null,
-        onerror: null,
-        src: "",
-        contentWindow: { postMessage: vi.fn() },
-      }),
-      body: { appendChild: vi.fn(), removeChild: vi.fn() },
-    })
+    env = stubBrowserGlobals()
 
     onConnectionChange = vi.fn()
     client = new SwarmIdClient({
-      iframeOrigin: "https://swarm-id.example.com",
-      metadata: { name: "Test App", description: "A test application" },
+      iframeOrigin: IFRAME_ORIGIN,
+      metadata: APP_METADATA,
       onConnectionChange,
     })
+    internals(client).iframe = env.iframeElement
   })
 
   it("invokes onConnectionChange with the pushed snapshot and caches it", () => {
@@ -260,19 +324,20 @@ describe("SwarmIdClient connectionInfo", () => {
       storagePartitioned: undefined,
       uploadMode: "user-stamp" as const,
       identity: {
-        id: "0x1111111111111111111111111111111111111111",
+        id: "11".repeat(20),
         name: "alice",
-        address: "0x1111111111111111111111111111111111111111",
-        publicKey: "0x02" + "ab".repeat(32),
-        avatar: generatedAvatar("0x1111111111111111111111111111111111111111"),
+        address: "11".repeat(20),
+        publicKey: "02" + "ab".repeat(32),
+        postageSignerAddress: "44".repeat(20),
+        avatar: generatedAvatar("11".repeat(20)),
       },
       appKey: {
-        address: "0x2222222222222222222222222222222222222222",
-        publicKey: "0x03" + "cd".repeat(32),
+        address: "22".repeat(20),
+        publicKey: "03" + "cd".repeat(32),
       },
     }
 
-    internals(client).handleIframeMessage(snapshot)
+    deliver(snapshot)
 
     expect(onConnectionChange).toHaveBeenCalledTimes(1)
     expect(onConnectionChange).toHaveBeenCalledWith({
@@ -307,21 +372,58 @@ describe("SwarmIdClient connectionInfo", () => {
       canUpload: true,
       uploadMode: "subsidised" as const,
       identity: {
-        id: "0x3333333333333333333333333333333333333333",
+        id: "33".repeat(20),
         name: "bob",
-        address: "0x3333333333333333333333333333333333333333",
-        avatar: generatedAvatar("0x3333333333333333333333333333333333333333"),
+        address: "33".repeat(20),
+        avatar: generatedAvatar("33".repeat(20)),
       },
       appKey: undefined,
     }
 
-    internals(client).handleIframeMessage(first)
-    internals(client).handleIframeMessage(second)
+    deliver(first)
+    deliver(second)
     internals(client).ready = true
 
     expect(onConnectionChange).toHaveBeenCalledTimes(2)
     expect(client.connectionInfo.identity?.name).toBe("bob")
     expect(client.connectionInfo.canUpload).toBe(true)
+  })
+
+  // `uploadUnavailableReason` is `.catch(undefined)` on purpose: the client
+  // DROPS a `connectionInfoChanged` it cannot parse, and dropping the first one
+  // after `proxyReady` leaves `initialize()` to time out. A proxy from the
+  // #616–#642 window still emits the `"download-only"` this lib removed, and
+  // deploy-cache skew alone is enough to pair it with a current client — so one
+  // unrecognised member must degrade the field, not stop the dApp starting.
+  it("keeps a snapshot whose uploadUnavailableReason this lib no longer knows", () => {
+    deliver({
+      type: "connectionInfoChanged",
+      canUpload: false,
+      uploadMode: "unavailable",
+      uploadUnavailableReason: "download-only",
+    })
+
+    expect(onConnectionChange).toHaveBeenCalledTimes(1)
+    expect(onConnectionChange).toHaveBeenCalledWith(
+      expect.objectContaining({
+        canUpload: false,
+        uploadMode: "unavailable",
+        uploadUnavailableReason: undefined,
+      }),
+    )
+  })
+
+  it("keeps a reason it does know", () => {
+    deliver({
+      type: "connectionInfoChanged",
+      canUpload: false,
+      uploadMode: "unavailable",
+      uploadUnavailableReason: "stamper-failed",
+    })
+
+    expect(onConnectionChange).toHaveBeenCalledWith(
+      expect.objectContaining({ uploadUnavailableReason: "stamper-failed" }),
+    )
   })
 
   it("throws from connectionInfo getter before initialize()", () => {
@@ -793,6 +895,13 @@ describe("SwarmIdClient window message filtering", () => {
     }
   }
 
+  /** Well-formed: whatever drops it, it is not the receive schema. */
+  const proxyReady = {
+    type: "proxyReady",
+    authenticated: false,
+    parentOrigin: "https://localhost",
+  }
+
   beforeEach(() => {
     vi.restoreAllMocks()
     warn = vi.spyOn(console, "warn").mockImplementation(() => {})
@@ -844,6 +953,22 @@ describe("SwarmIdClient window message filtering", () => {
     expect(warn).not.toHaveBeenCalled()
   })
 
+  // The origin check alone does not settle this: any window served from the
+  // trusted domain clears it — a sibling iframe the page also embeds, an
+  // opener. Only the source check ties a push like `connectionInfoChanged` or
+  // `authSuccess` to OUR proxy rather than to a co-origin impostor, and it
+  // drops the impostor as silently as any other window's traffic.
+  it("drops a message from a co-origin window that is not our iframe", () => {
+    listener({
+      origin: "https://swarm-id.example.com",
+      source: { postMessage: vi.fn() },
+      data: proxyReady,
+    })
+
+    expect(internals(client).ready).toBe(false)
+    expect(warn).not.toHaveBeenCalled()
+  })
+
   it("drops a message silently before the iframe exists", () => {
     internals(client).iframe = undefined
 
@@ -875,6 +1000,23 @@ describe("SwarmIdClient window message filtering", () => {
     expect(warn).not.toHaveBeenCalled()
     expect(internals(client).ready).toBe(true)
     expect(internals(client).storageShared).toBe(true)
+  })
+
+  it("compares origins, so an iframeOrigin carrying a path still matches", () => {
+    const withPath = new SwarmIdClient({
+      iframeOrigin: "https://swarm-id.example.com/id",
+      metadata: { name: "Test App" },
+    })
+    internals(withPath).iframe = { style: {}, contentWindow }
+
+    dispatch({
+      origin: "https://swarm-id.example.com",
+      source: contentWindow,
+      data: proxyReady,
+    })
+
+    expect(warn).not.toHaveBeenCalled()
+    expect(internals(withPath).ready).toBe(true)
   })
 
   // From our own iframe, so the mismatch is ours to report: the frame is
@@ -1042,7 +1184,6 @@ describe("SwarmIdClient init-timeout timers (#421)", () => {
 describe("SwarmIdClient lifecycle errors", () => {
   // A distinctive value so a deadline is identifiable in its message.
   const INIT_TIMEOUT_MS = 12345
-  const IFRAME_ORIGIN = "https://swarm-id.example.com"
 
   /** What `initialize()` awaits, in the order it awaits them. */
   const INIT_PHASES = [
@@ -1251,6 +1392,201 @@ describe("SwarmIdClient lifecycle errors", () => {
     expect(error).toMatchObject({ code: "invalid-request" })
     expect((error as SwarmIdError).message).toMatch(/^Invalid app metadata: /)
     expect((error as SwarmIdError).cause).toBeInstanceOf(ZodError)
+  })
+})
+
+/** Let the microtask queue drain so an `await` chain can move on. */
+const flush = () => new Promise<void>((resolve) => setTimeout(resolve, 0))
+
+describe("SwarmIdClient request timeout", () => {
+  const TIMEOUT_MS = 5000
+  let client: SwarmIdClient
+  let env: ReturnType<typeof stubBrowserGlobals>
+
+  beforeEach(() => {
+    vi.restoreAllMocks()
+    env = stubBrowserGlobals()
+    client = new SwarmIdClient({
+      iframeOrigin: IFRAME_ORIGIN,
+      metadata: APP_METADATA,
+      timeout: TIMEOUT_MS,
+    })
+    internals(client).ready = true
+    internals(client).iframe = env.iframeElement
+  })
+
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+
+  // The rejection itself is pinned in the request seam above; this is the
+  // constructor's `timeout`, and the bookkeeping it leaves behind.
+  it("times out at the constructor's timeout, and forgets the request", async () => {
+    vi.useFakeTimers()
+    const request = client.getPostageBatch()
+    const rejected = expect(request).rejects.toMatchObject({
+      code: "timeout",
+      message: `Request timeout after ${TIMEOUT_MS}ms`,
+    })
+
+    await vi.advanceTimersByTimeAsync(TIMEOUT_MS)
+
+    await rejected
+    expect(internals(client).pendingRequests.size).toBe(0)
+  })
+
+  // The pending is gone by then, so the late answer has nothing to settle —
+  // what matters is that it does not throw or resurrect an entry.
+  it("ignores an answer that arrives after the timeout", async () => {
+    vi.useFakeTimers()
+    const request = client.getPostageBatch()
+    const rejected = expect(request).rejects.toMatchObject({ code: "timeout" })
+    const { requestId } = env.lastPostedMessage()
+
+    await vi.advanceTimersByTimeAsync(TIMEOUT_MS)
+    await rejected
+
+    env.dispatch({ data: { type: "getPostageBatchResponse", requestId } })
+
+    expect(internals(client).pendingRequests.size).toBe(0)
+  })
+
+  it("clears the timer when an answer settles the request", async () => {
+    vi.useFakeTimers()
+    const request = client.getPostageBatch()
+    const { requestId } = env.lastPostedMessage()
+    expect(vi.getTimerCount()).toBe(1)
+
+    env.dispatch({ data: { type: "getPostageBatchResponse", requestId } })
+
+    await expect(request).resolves.toBeUndefined()
+    expect(internals(client).pendingRequests.size).toBe(0)
+    expect(vi.getTimerCount()).toBe(0)
+  })
+
+  // Progress is reported on its own listener and deliberately does not settle
+  // the pending. It does not move the deadline either: `timeout` is a flat cap
+  // on the whole request, so an upload still transferring when it expires is
+  // rejected mid-flight.
+  it("reports progress without settling the request or extending its deadline", async () => {
+    vi.useFakeTimers()
+    const progress: Array<{ total: number; processed: number }> = []
+    const upload = client.uploadData(new Uint8Array([1, 2, 3]), {
+      onProgress: (update) => progress.push(update),
+    })
+    const rejected = expect(upload).rejects.toMatchObject({
+      code: "timeout",
+      message: `Request timeout after ${TIMEOUT_MS}ms`,
+    })
+    const { requestId } = env.lastPostedMessage()
+
+    await vi.advanceTimersByTimeAsync(TIMEOUT_MS - 1)
+    env.dispatch({
+      data: { type: "uploadProgress", requestId, total: 10, processed: 9 },
+    })
+
+    expect(progress).toEqual([{ total: 10, processed: 9 }])
+    expect(internals(client).pendingRequests.size).toBe(1)
+
+    await vi.advanceTimersByTimeAsync(1)
+    await rejected
+  })
+})
+
+describe("SwarmIdClient destroy()", () => {
+  let client: SwarmIdClient
+  let env: ReturnType<typeof stubBrowserGlobals>
+
+  beforeEach(() => {
+    vi.restoreAllMocks()
+    env = stubBrowserGlobals()
+    client = new SwarmIdClient({
+      iframeOrigin: IFRAME_ORIGIN,
+      metadata: APP_METADATA,
+    })
+  })
+
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+
+  /** A client past `initialize()`, without running it. */
+  function markReady() {
+    internals(client).ready = true
+    internals(client).iframe = env.iframeElement
+  }
+
+  it("clears the timers and pendings those requests armed", () => {
+    vi.useFakeTimers()
+    markReady()
+    client.getPostageBatch().catch(() => {})
+    client.getNodeInfo().catch(() => {})
+    expect(vi.getTimerCount()).toBe(2)
+
+    client.destroy()
+
+    expect(vi.getTimerCount()).toBe(0)
+    expect(internals(client).pendingRequests.size).toBe(0)
+  })
+
+  it("stops listening for messages", () => {
+    markReady()
+    const listener = env.messageListener
+
+    client.destroy()
+
+    expect(env.removeEventListener).toHaveBeenCalledWith("message", listener)
+  })
+
+  it("removes the iframe from the document", () => {
+    markReady()
+
+    client.destroy()
+
+    expect(env.iframeElement.parentNode.removeChild).toHaveBeenCalledWith(
+      env.iframeElement,
+    )
+    expect(internals(client).iframe).toBeUndefined()
+  })
+})
+
+describe("SwarmIdClient initialize() sequencing", () => {
+  let client: SwarmIdClient
+  let env: ReturnType<typeof stubBrowserGlobals>
+
+  beforeEach(() => {
+    vi.restoreAllMocks()
+    env = stubBrowserGlobals()
+    client = new SwarmIdClient({
+      iframeOrigin: IFRAME_ORIGIN,
+      metadata: APP_METADATA,
+    })
+  })
+
+  it("identifies the parent only once the proxy says it is initialized", async () => {
+    const initializing = client.initialize()
+    initializing.catch(() => {})
+
+    await flush()
+    env.iframeElement.onload?.()
+    await flush()
+    expect(env.iframeContentWindow.postMessage).not.toHaveBeenCalled()
+
+    // `proxyInitialized` is handled BEFORE the origin check — it rides a
+    // wildcard origin — so the source check is the only thing standing between
+    // any window on the page and the handshake.
+    env.dispatch({ data: { type: "proxyInitialized" }, source: {} })
+    await flush()
+    expect(env.iframeContentWindow.postMessage).not.toHaveBeenCalled()
+
+    env.dispatch({ data: { type: "proxyInitialized" } })
+    await flush()
+    expect(env.iframeContentWindow.postMessage).toHaveBeenCalledWith(
+      expect.objectContaining({ type: "parentIdentify" }),
+      IFRAME_ORIGIN,
+    )
+
+    client.destroy()
   })
 })
 

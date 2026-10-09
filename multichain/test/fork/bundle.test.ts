@@ -21,14 +21,7 @@ import { beforeAll, describe, expect, it } from "vitest"
 import { generatePrivateKey, privateKeyToAccount } from "viem/accounts"
 import { MultichainClient, gnosisMainnetSettings } from "../../src/index"
 import { devRpc, ensureBundlingDelegate, fundLocalAccount } from "../../src/dev"
-import {
-  FORK_RPC_URL,
-  isGnosisForkReachable,
-  randomNonce,
-  setNativeBalance,
-} from "./fork"
-
-const forkUp = await isGnosisForkReachable()
+import { FORK_RPC_URL, randomNonce, setNativeBalance } from "./fork"
 
 const XDAI = 10n ** 18n
 const DEPTH = 17
@@ -38,7 +31,7 @@ const BUCKET_DEPTH = 16
 const FLOOR_MULTIPLE = 4n
 /** Covers the batch plus every top-up this suite makes, with room to spare. */
 const OWNER_BZZ = 5n * 10n ** 16n
-describe.skipIf(!forkUp)("atomic postage bundle on a Gnosis fork", () => {
+describe("atomic postage bundle on a Gnosis fork", () => {
   const settings = gnosisMainnetSettings({ rpcUrls: [FORK_RPC_URL] })
   const client = new MultichainClient(settings)
   const delegate = settings.addresses.eip7702Delegate
