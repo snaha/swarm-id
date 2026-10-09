@@ -186,8 +186,10 @@ it to settle against: pick the built-in method to pay on the local chain, or tur
 **Chain** → **Simulated purchase**, which stands in for the widget with a fabricated batch so that
 method's own screens stay reachable here. (It is also offered for buying alone; its contract ABI
 cannot top up or dilute, so extend and resize list the built-in method by itself.) The third,
-`Pay with card (swarm-storage.fly.dev)`, opens the card shop on the widget's protocol; set
-`PUBLIC_CARD_SHOP_URL` in `ui/.env` to a shop run locally in dry-run mode to try it here.
+`Pay with card (<shop host>)`, opens the card shop on the widget's protocol; `PUBLIC_CARD_SHOP_URL` in
+`ui/.env` points it at another deployment. The shop settles on Gnosis mainnet and the batch it reports
+is read back from the chain before the drive is recorded, so a shop run locally in dry-run mode gets as
+far as that check and no further — its fake batch exists on no chain, this fork included.
 
 ```bash
 pnpm dev:local         # everything: cluster, both chains, solver, identity UI, demo

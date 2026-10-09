@@ -39,10 +39,16 @@
     createFundingRequester,
     describeStep,
   } from '$lib/payment/funding-request.svelte'
-  import { type StampPurchaseHandle, openStampPurchaseWidget } from '$lib/payment/multichain-widget'
+  import {
+    CARD_SHOP_HOST,
+    type StampPurchaseHandle,
+    WIDGET_HOST,
+    openStampPurchaseWidget,
+  } from '$lib/payment/multichain-widget'
   import {
     BUILT_IN_EXPLAINER,
     BUILT_IN_LABEL,
+    CARD_AVAILABLE,
     CARD_CONTINUE_LABEL,
     CARD_EXPLAINER,
     CARD_LABEL,
@@ -79,7 +85,7 @@
 
   const METHOD_OPTIONS = [
     { value: 'widget', label: WIDGET_LABEL },
-    { value: 'card', label: CARD_LABEL },
+    ...(CARD_AVAILABLE ? [{ value: 'card', label: CARD_LABEL }] : []),
     { value: 'built-in', label: BUILT_IN_LABEL },
   ]
 
@@ -193,7 +199,9 @@
     purchase = undefined
     if (stillPaying) {
       toastStore.show(
-        'Payment is still finishing in the widget window. If the drive does not appear, add it with “Use existing batch”.',
+        method === 'card'
+          ? `If you already paid at ${CARD_SHOP_HOST}, the storage was still bought for this account — don’t pay again. Ask the shop for the batch ID and add it with “Use existing batch”.`
+          : `Payment is still finishing in the ${WIDGET_HOST} window. If the drive does not appear, add it with “Use existing batch”.`,
       )
     }
   }
@@ -374,6 +382,15 @@
           if (!attempt.current) {
             return
           }
+          // The shop is a newly trusted origin, and what it posts is taken on
+          // trust by the widget path. Read the batch off Gnosis first: that
+          // catches a shop on the wrong chain, a dry-run batch that exists
+          // nowhere, and a spoofed or buggy id, and the record comes from the
+          // chain rather than from the message.
+          if (card) {
+            void recordVerifiedBatch(attempt, batch.batchId, signerKey, driveName)
+            return
+          }
           // The size/lifespan actually bought are confirmed INSIDE the widget —
           // the form's selection is only its default. Derive the lifespan from
           // what settled (funded blocks × block time); when the chain price
@@ -410,6 +427,33 @@
       }
       errorDetail = failureDetail(caught)
       errorMessage = caught instanceof Error ? caught.message : 'Could not start the purchase.'
+      phase = 'error'
+    }
+  }
+
+  /** The card shop's batch, recorded from the chain or not at all. */
+  async function recordVerifiedBatch(
+    attempt: Attempt,
+    batchId: string,
+    signerKey: PrivateKey,
+    driveName: string | undefined,
+  ) {
+    pendingLabel = 'Checking the batch on chain…'
+    try {
+      const stamp = await attempt.guard(fetchExistingBatchFromChain(batchId, signerKey, driveName))
+      if (!stamp) {
+        errorMessage = `${CARD_SHOP_HOST} reported a batch that is not on Gnosis. Don’t pay again — ask the shop about the order it just took.`
+        phase = 'error'
+        return
+      }
+      account.addStamp(stamp)
+      succeed()
+    } catch (caught) {
+      if (!attempt.current) {
+        return
+      }
+      errorDetail = failureDetail(caught)
+      errorMessage = caught instanceof Error ? caught.message : 'Could not verify the batch.'
       phase = 'error'
     }
   }
@@ -485,8 +529,14 @@
     <div class="flex items-start gap-2">
       <TriangleAlert class="text-destructive mt-0.5 size-4 shrink-0" />
       <p class="text-sm">
-        Your payment went through, but the payment window closed before the purchase was confirmed.
-        The drive may still appear shortly — don't pay again without checking.
+        {#if method === 'card'}
+          The {CARD_SHOP_HOST} window closed before this account heard back. If you completed the payment,
+          the storage was still bought for this account — don’t pay again. Ask the shop for the batch
+          ID and add it with “Use existing batch”. If you didn’t pay, nothing was bought.
+        {:else}
+          Your payment went through, but the payment window closed before the purchase was
+          confirmed. The drive may still appear shortly — don't pay again without checking.
+        {/if}
       </p>
     </div>
     <Button variant="outline" class="w-full" onclick={close}>Close</Button>

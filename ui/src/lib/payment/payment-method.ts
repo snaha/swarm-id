@@ -1,6 +1,6 @@
 // Copyright 2026 The Swarm Authors. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
-import { CARD_SHOP_HOST, WIDGET_HOST } from '$lib/payment/multichain-widget'
+import { CARD_SHOP_AVAILABLE, CARD_SHOP_HOST, WIDGET_HOST } from '$lib/payment/multichain-widget'
 
 /**
  * The ways a drive can be paid for, named once.
@@ -12,9 +12,13 @@ import { CARD_SHOP_HOST, WIDGET_HOST } from '$lib/payment/multichain-widget'
  *
  * Extend and resize list only the built-in engine: the widget's PostageStamp
  * ABI carries `createBatch` alone, so it can buy a drive and can neither extend
- * nor resize one.
+ * nor resize one; the card shop sells one new batch per purchase.
  */
 export type PaymentMethod = 'widget' | 'card' | 'built-in'
+/** The methods the funding seam can run: every one but the card shop. */
+export type FundingMethod = Exclude<PaymentMethod, 'card'>
+/** Whether the chooser lists the card shop: no shop configured, no option. */
+export const CARD_AVAILABLE = CARD_SHOP_AVAILABLE
 
 export const WIDGET_LABEL = `Pay with crypto (${WIDGET_HOST})`
 export const CARD_LABEL = `Pay with card (${CARD_SHOP_HOST})`

@@ -358,4 +358,58 @@ describe('openStampPurchaseWidget', () => {
     post(makeEvent(), { closed: false })
     expect(callbacks.onSuccess).not.toHaveBeenCalled()
   })
+
+  describe('card shop', () => {
+    it('ignores a foreign source on the shop origin, and a foreign origin from the popup', () => {
+      open(true)
+      post(makeEvent(), { closed: false }, CARD_SHOP_ORIGIN)
+      post(makeEvent(), popup, 'https://evil.example')
+      expect(callbacks.onSuccess).not.toHaveBeenCalled()
+    })
+
+    it('treats a close with no events as unconfirmed: the card may already be charged', () => {
+      open(true)
+      closePopup()
+      expect(callbacks.onUnconfirmedClose).toHaveBeenCalled()
+      expect(callbacks.onCancel).not.toHaveBeenCalled()
+    })
+
+    it('reports a failed fulfilment once: payment, error, then finish', () => {
+      open(true)
+      post(PAYMENT_SENT, popup, CARD_SHOP_ORIGIN)
+      post({ event: 'error', error: 'The storage could not be set up.' }, popup, CARD_SHOP_ORIGIN)
+      expect(callbacks.onError).toHaveBeenCalledTimes(1)
+      expect(popup.close).toHaveBeenCalled()
+      post({ event: 'finish' }, popup, CARD_SHOP_ORIGIN)
+      closePopup()
+      expect(callbacks.onError).toHaveBeenCalledTimes(1)
+      expect(callbacks.onUnconfirmedClose).not.toHaveBeenCalled()
+      expect(callbacks.onCancel).not.toHaveBeenCalled()
+    })
+
+    it('cancel() closes the popup and asks the caller to warn', () => {
+      const handle = open(true)
+      expect(handle.cancel()).toBe(true)
+      expect(popup.close).toHaveBeenCalled()
+    })
+
+    it('cancel() after the batch settled needs no warning', () => {
+      const handle = open(true)
+      post(makeEvent(), popup, CARD_SHOP_ORIGIN)
+      expect(handle.cancel()).toBe(false)
+    })
+
+    it('the mock opens no popup for the card shop, which has no mocked mode', () => {
+      openStampPurchaseWidget({
+        destination: DESTINATION,
+        card: true,
+        mocked: true,
+        mockPopup: true,
+        ...callbacks,
+      })
+      expect(openedUrl).toBeUndefined()
+      vi.advanceTimersByTime(2_000)
+      expect(callbacks.onSuccess).toHaveBeenCalled()
+    })
+  })
 })
