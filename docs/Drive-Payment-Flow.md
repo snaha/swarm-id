@@ -61,12 +61,12 @@ shows the size and lifespan filled in with the owner locked, takes a card paymen
 the popup and creates the batch on **Gnosis mainnet** from its own treasury. Its order page then
 posts to `window.opener`, each at most once:
 
-| Event     | When                             | Fields                                                                        |
-| --------- | -------------------------------- | ----------------------------------------------------------------------------- |
-| `payment` | Stripe confirmed the payment     | –                                                                             |
-| `batch`   | the batch exists on chain        | `batchId` (64 hex), `depth`, `amount` (PLUR per chunk), `blockNumber`         |
-| `error`   | fulfilment failed after payment  | `error` (string)                                                              |
-| `finish`  | the buyer clicked Done           | –                                                                             |
+| Event     | When                            | Fields                                                                |
+| --------- | ------------------------------- | --------------------------------------------------------------------- |
+| `payment` | Stripe confirmed the payment    | –                                                                     |
+| `batch`   | the batch exists on chain       | `batchId` (64 hex), `depth`, `amount` (PLUR per chunk), `blockNumber` |
+| `error`   | fulfilment failed after payment | `error` (string)                                                      |
+| `finish`  | the buyer clicked Done          | –                                                                     |
 
 So `openStampPurchaseWidget({ card: true })` is the whole integration, with two differences from the
 widget. The shop charges the card and creates the batch server-side _before_ its order page can post
