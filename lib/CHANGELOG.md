@@ -1,5 +1,25 @@
 # Changelog
 
+## [0.7.0](https://github.com/snaha/swarm-id/compare/v0.6.0...v0.7.0) (2026-10-09)
+
+
+### ⚠ BREAKING CHANGES
+
+* **lib:** the client's own failures are SwarmIdErrors too ([#828](https://github.com/snaha/swarm-id/issues/828))
+
+### Features
+
+* **lib:** the on-disk account record as a documented, exported contract ([#838](https://github.com/snaha/swarm-id/issues/838)) ([e4727d2](https://github.com/snaha/swarm-id/commit/e4727d2876c59cc61417a30a75d44148109a78d3))
+* **ui:** show the postage batch signer under Keys & addresses ([#855](https://github.com/snaha/swarm-id/issues/855)) ([21f4680](https://github.com/snaha/swarm-id/commit/21f4680db43097292f778584de4cea0927c84314))
+
+
+### Bug Fixes
+
+* **lib:** the Bee client follows the upload mode ([#830](https://github.com/snaha/swarm-id/issues/830)) ([ea13ee6](https://github.com/snaha/swarm-id/commit/ea13ee6af977a502a5fe2e9d93615d589b935ec4))
+* **lib:** the client's own failures are SwarmIdErrors too ([#828](https://github.com/snaha/swarm-id/issues/828)) ([d976a67](https://github.com/snaha/swarm-id/commit/d976a67b71bad880ffee384c2399f6525759f628))
+* **lib:** the write coordinator goes with the stamp it was built for ([#829](https://github.com/snaha/swarm-id/issues/829)) ([89726f2](https://github.com/snaha/swarm-id/commit/89726f26cbbe6dd5e174787f3ddff0d1f3b5057a))
+* **lib:** upload progress only from our own iframe ([#827](https://github.com/snaha/swarm-id/issues/827)) ([4bc9a05](https://github.com/snaha/swarm-id/commit/4bc9a052a6d4a0bca7458f71de9fd7d43125c790)), closes [#792](https://github.com/snaha/swarm-id/issues/792)
+
 ## [0.6.0](https://github.com/snaha/swarm-id/compare/v0.5.0...v0.6.0) (2026-10-05)
 
 
