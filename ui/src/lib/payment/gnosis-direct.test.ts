@@ -108,6 +108,14 @@ describe('quoteDirectPayment', () => {
       (await quoteDirectPayment(request(parseUnits('0.0000434659', 18)))).amountFormatted,
     ).toBe('0.00004347')
   })
+
+  /** One transfer, and every wei of it xDAI out of the wallet — what Pay is checked against. */
+  it('charges the wallet the whole payment in xDAI', async () => {
+    const xdaiWei = parseUnits('0.06', 18)
+    expect((await quoteDirectPayment(request(xdaiWei))).charges).toEqual([
+      { currency: NATIVE_CURRENCY, amount: xdaiWei },
+    ])
+  })
 })
 
 /**
@@ -547,6 +555,44 @@ describe('paying in something other than xDAI', () => {
     })
     expect((quote.handle as { amount: bigint }).amount).toBe(42n)
     expect(getTokenBalance).not.toHaveBeenCalled()
+  })
+
+  /**
+   * What the wallet pays out of each asset, for Pay to be checked against its
+   * balances. A token payment draws on two: the token for the BZZ leg, and xDAI
+   * for the gas leg — and holding plenty of the one says nothing about the other.
+   */
+  describe('charges', () => {
+    const GAS_LEG = parseUnits('0.005', 18)
+
+    function quoteInUsdc(gasXdaiWei: bigint) {
+      chainIdentity.mockResolvedValue(identity('mainnet'))
+      quoteTokenInForBzzOut.mockResolvedValue(9_030_000n)
+      return quoteDirectPayment({
+        ...request(parseUnits('9.04', 18), USDC),
+        bzzPlur: 206n * 10n ** 16n,
+        gasXdaiWei,
+      })
+    }
+
+    it('charges the token leg in the token and the gas leg in xDAI', async () => {
+      expect((await quoteInUsdc(GAS_LEG)).charges).toEqual([
+        { currency: USDC, amount: BUFFERED_USDC },
+        { currency: NATIVE_CURRENCY, amount: GAS_LEG },
+      ])
+    })
+
+    /** A covered leg sends nothing, so it costs the wallet nothing either. */
+    it('charges only the gas when an earlier transfer covers the token leg', async () => {
+      getTokenBalance.mockResolvedValue(BUFFERED_USDC)
+      expect((await quoteInUsdc(GAS_LEG)).charges).toEqual([
+        { currency: NATIVE_CURRENCY, amount: GAS_LEG },
+      ])
+    })
+
+    it('charges only the token when there is no gas leg to send', async () => {
+      expect((await quoteInUsdc(0n)).charges).toEqual([{ currency: USDC, amount: BUFFERED_USDC }])
+    })
   })
 
   /** Paying in xDAI stays one prompt — the gas rides along in the same send. */

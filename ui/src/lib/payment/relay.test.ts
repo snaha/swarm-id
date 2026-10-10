@@ -26,8 +26,14 @@ interface ExecuteOptions {
 
 /** An `execute` that accepts the payment and then goes quiet forever. */
 const execute = vi.fn((_options: ExecuteOptions) => new Promise<void>(() => undefined))
-/** A `getQuote` that never prices anything. */
-const getQuote = vi.fn(() => new Promise<never>(() => undefined))
+/** As much of the SDK's quote as this rail reads. */
+interface Quoted {
+  details?: {
+    currencyIn?: { amount?: string; amountFormatted?: string; amountUsd?: string }
+  }
+}
+/** A `getQuote` that never prices anything, unless a test has it answer. */
+const getQuote = vi.fn((): Promise<Quoted> => new Promise(() => undefined))
 
 /** As much of the SDK's client as the rail configures. */
 interface Client {
@@ -75,6 +81,7 @@ function payFrom(
       amountFormatted: '0.001',
       amountUsd: '0.01',
       delivers: { input: 'xdai', amount: 0n },
+      charges: [],
     },
     provider,
     chainId,
@@ -289,6 +296,50 @@ describe('relay quote', () => {
     // again rather than warned about money in flight.
     await expect(priced).rejects.toThrow(/try again/)
   })
+
+  /** A Base payment in ETH, priced by a Relay that answers with `currencyIn`. */
+  function quoteAnswering(currencyIn: NonNullable<Quoted['details']>['currencyIn']) {
+    getQuote.mockResolvedValueOnce({ details: { currencyIn } })
+    return relayRail.quote({
+      chainId: 8453,
+      currency: NATIVE_CURRENCY,
+      user: '0xpayer',
+      recipient: '0xowner',
+      xdaiWei: 60_000_000_000_000_000n,
+      bzzPlur: 1_000_000_000n,
+      gasXdaiWei: 1_000_000_000_000_000n,
+    })
+  }
+
+  /**
+   * What the deposit takes out of the wallet, in the source token's own base
+   * units — the figure Pay is checked against the wallet's balance with.
+   * `amountFormatted` is a display string; `amount` is the exact one.
+   */
+  it('charges the wallet what Relay says the deposit takes', async () => {
+    const quote = await quoteAnswering({
+      amount: '43465998997394',
+      amountFormatted: '0.000043465998997394',
+      amountUsd: '0.170000',
+    })
+    expect(quote.charges).toEqual([{ currency: NATIVE_CURRENCY, amount: 43_465_998_997_394n }])
+  })
+
+  /**
+   * `currencyIn` is optional in Relay's schema. A missing figure only means Pay
+   * cannot be checked ahead of the wallet; it is no reason to refuse a price.
+   */
+  it('charges nothing it cannot name when Relay leaves the amount out', async () => {
+    expect((await quoteAnswering(undefined)).charges).toEqual([])
+    expect((await quoteAnswering({ amountFormatted: '0.0001' })).charges).toEqual([])
+  })
+
+  it.each([['0.000043'], ['4.3e13'], ['-1'], [''], ['lots']])(
+    'charges nothing for an amount that is not whole base units (%s)',
+    async (amount) => {
+      expect((await quoteAnswering({ amount })).charges).toEqual([])
+    },
+  )
 })
 
 /**
