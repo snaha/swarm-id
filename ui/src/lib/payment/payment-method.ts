@@ -10,12 +10,13 @@ import { CARD_SHOP_AVAILABLE, CARD_SHOP_HOST, WIDGET_HOST } from '$lib/payment/m
  * meets different words for the same route in each would reasonably read them
  * as different routes. The labels are also what the e2e suites click.
  *
- * Extend and resize list only the built-in engine: the widget's PostageStamp
- * ABI carries `createBatch` alone, so it can buy a drive and can neither extend
- * nor resize one; the card shop sells one new batch per purchase.
+ * Resize lists only the built-in engine. The widget's PostageStamp ABI carries
+ * `createBatch` alone, so it can buy a drive and can neither extend nor resize
+ * one. The card shop buys a drive, and extends one from its own treasury.
  */
 export type PaymentMethod = 'widget' | 'card' | 'built-in'
-/** The methods the funding seam can run: every one but the card shop. */
+/** What a caller can preselect on the payment screen: buying a drive chooses
+ *  the card before the funding seam is ever reached, so never the card. */
 export type FundingMethod = Exclude<PaymentMethod, 'card'>
 /** Whether the chooser lists the card shop: no shop configured, no option. */
 export const CARD_AVAILABLE = CARD_SHOP_AVAILABLE
@@ -32,6 +33,9 @@ export const WIDGET_EXPLAINER = `${WIDGET_HOST} opens in a popup with the size a
 
 /** The card route: a storage purchase in euros or pounds, no token anywhere in it. */
 export const CARD_EXPLAINER = `${CARD_SHOP_HOST} opens in a popup with the size and lifespan from the form filled in. Pay by card there — the drive gets what you buy in the popup.`
+
+/** The card route for an extension: the shop tops the drive up itself. */
+export const CARD_TOP_UP_EXPLAINER = `${CARD_SHOP_HOST} opens in a popup with this drive and the added lifespan filled in. Pay by card there — the shop extends the drive itself, and nothing is sent to your address.`
 
 /** What the built-in engine will ask for next, said before it is chosen. */
 export const BUILT_IN_EXPLAINER =

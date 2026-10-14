@@ -29,6 +29,10 @@ import type { Account } from '$lib/types'
 
 /** Upper bound on waiting for one confirmation (the client polls inside it). */
 const CONFIRMATION_TIMEOUT_MS = 90_000
+// How a top-up made elsewhere (the card shop) is confirmed: a few reads, spaced
+// out, because the replica we read can lag the transaction the shop confirmed.
+const TOP_UP_READS = 5
+const TOP_UP_READ_INTERVAL_MS = 2_000
 
 /** xDAI budget covering approve + topUp + increaseDepth with ample headroom
  * (each op costs well under 0.001 xDAI at current Gnosis gas prices). */
@@ -418,4 +422,45 @@ export async function reconcileStampFromChain(
   } catch {
     return false
   }
+}
+
+/**
+ * The batch's normalised balance — the one figure only a top-up raises, where
+ * the remaining balance falls every block — or undefined when the batch cannot
+ * be read. Taken before handing a top-up to the card shop, for `confirmTopUp`.
+ */
+export async function readNormalisedBalance(
+  stamp: Pick<PostageStamp, 'batchID'>,
+  client?: MultichainClient,
+): Promise<bigint | undefined> {
+  const chain = client ?? (await postageChain())
+  try {
+    return (await chain.getPostageBatch(batchIdHex(stamp)))?.normalisedBalance
+  } catch {
+    return undefined
+  }
+}
+
+/**
+ * Whether the chain shows the batch topped up past `before`. The card shop's
+ * `topup` message is only its word: a dry-run shop, or a buggy one, says the
+ * same with nothing on chain, and the drive must not claim a lifespan it lacks.
+ */
+export async function confirmTopUp(
+  stamp: Pick<PostageStamp, 'batchID'>,
+  before: bigint,
+  client?: MultichainClient,
+  intervalMs = TOP_UP_READ_INTERVAL_MS,
+): Promise<boolean> {
+  const chain = client ?? (await postageChain())
+  for (let read = 0; read < TOP_UP_READS; read++) {
+    if (read > 0) {
+      await new Promise((resolve) => setTimeout(resolve, intervalMs))
+    }
+    const balance = await readNormalisedBalance(stamp, chain)
+    if (balance !== undefined && balance > before) {
+      return true
+    }
+  }
+  return false
 }
