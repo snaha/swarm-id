@@ -198,11 +198,11 @@ the identity UI's origin, then reload:
 localStorage.setItem('dev-card-payment-enabled', 'true') // removeItem(...) hides it again
 ```
 
-The shop settles on Gnosis mainnet. A purchase it reports is recorded without the on-chain check a
-shipped route will have (#858), so a shop in dry-run mode — whose fake batch exists on no chain,
-this fork included — can be driven end to end here. An extension is always checked: the drive
-counts as extended only once the chain shows the batch topped up, so against a dry-run shop the
-dialog reports the lifespan as unchanged.
+The shop settles on Gnosis mainnet. While the route is experimental, what it reports is taken
+without the on-chain check a shipped route will have (#858), so a shop in dry-run mode — whose fake
+batch exists on no chain, this fork included — can be driven end to end here. An extension still
+re-reads the drive from the chain, so against a dry-run shop it reports success and the lifespan
+stays as it was.
 
 ```bash
 pnpm dev:local         # everything: cluster, both chains, solver, identity UI, demo

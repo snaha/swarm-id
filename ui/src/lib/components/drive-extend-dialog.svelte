@@ -260,14 +260,20 @@
     'The card shop reported the extension, but the chain does not show it, so the drive’s lifespan is unchanged. If your card was charged, the shop will follow up.'
 
   /**
-   * The shop says the top-up landed. Only the chain decides: success once the
+   * The shop says the top-up landed. The chain decides: success once the
    * batch's balance has risen past `before`, and the record is re-read from the
    * chain either way, so it never shows a lifespan the batch does not have.
+   *
+   * Not while the route is experimental, as for buying: the shop to test
+   * against runs in dry-run mode, whose top-up never reaches the chain, so the
+   * switch that offers the card also waives the check until #858 turns it back
+   * on for good. The re-read still leaves the lifespan as the chain has it.
    */
   async function recordTopUp(attempt: Attempt, before: bigint) {
     popupLabel = ''
     step = 'recording'
-    const confirmed = await confirmTopUp(drive, before)
+    const confirmed =
+      devSettingsStore.data.cardPaymentEnabled || (await confirmTopUp(drive, before))
     await reconcileStampFromChain(account, drive)
     if (!attempt.current) {
       return
