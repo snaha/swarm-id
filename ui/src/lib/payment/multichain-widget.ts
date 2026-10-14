@@ -63,9 +63,10 @@ const ALLOWED_ORIGINS = [
 ]
 const POPUP_FEATURES = 'popup,width=500,height=700'
 
-/** Batch event posted by the multichain widget once a purchase settles. */
+/** Batch event posted by the multichain widget once a purchase settles — or, as
+ *  `topup`, by the card shop once it extended the batch it was opened on. */
 export interface BatchEvent {
-  event: 'batch'
+  event: 'batch' | 'topup'
   batchId: string // bare 64-hex (parseBatchEvent strips any 0x prefix)
   depth: number // e.g., 21
   amount: string // "10453363201" (PLUR units)
@@ -99,6 +100,12 @@ export interface PurchaseStampOptions {
   // from the moment the popup opens, a close without a `batch` may have left a
   // paid-for batch behind — `onUnconfirmedClose`, never `onCancel`.
   card?: boolean
+  // With `card`: extend this batch (bare or 0x hex) instead of buying one. The
+  // shop opens its extend page with `amount` as the PLUR per chunk to add, tops
+  // the batch up from its own treasury and posts `topup`, which settles only
+  // for this batch id; a `batch` event is ignored, so a top-up can never be
+  // recorded as a new drive. The widget cannot extend at all.
+  topUpBatchId?: string
 }
 
 /** How long to keep listening for a trailing `batch` message after the popup
@@ -150,6 +157,15 @@ export function buildWidgetUrl(
   }
 
   return `${card ? (CARD_SHOP?.href ?? DEFAULT_CARD_SHOP_URL) : WIDGET_BASE_URL}?${params.toString()}`
+}
+
+/** The card shop's extend page for `batchId`, adding `amount` per chunk. */
+function buildCardTopUpUrl(batchId: string, amount: bigint | undefined): string {
+  const params = new URLSearchParams({ batchId: strip0x(batchId) })
+  if (amount !== undefined) {
+    params.set('amount', amount.toString())
+  }
+  return `${new URL('extend', CARD_SHOP?.href ?? DEFAULT_CARD_SHOP_URL).href}?${params.toString()}`
 }
 
 /** Check if the message origin is from an allowed widget domain. */
@@ -309,9 +325,12 @@ function toStringField(value: unknown): string | undefined {
  * or numeric strings. A too-strict parser silently drops a successful purchase
  * (the message is ignored, then the popup-close path reverts the UI).
  */
-export function parseBatchEvent(data: unknown): BatchEvent | undefined {
+export function parseBatchEvent(
+  data: unknown,
+  expected: BatchEvent['event'] = 'batch',
+): BatchEvent | undefined {
   const obj = coerceObject(data)
-  if (!obj || obj.event !== 'batch') {
+  if (!obj || obj.event !== expected) {
     return undefined
   }
 
@@ -330,7 +349,7 @@ export function parseBatchEvent(data: unknown): BatchEvent | undefined {
   }
 
   return {
-    event: 'batch',
+    event: expected,
     batchId: batchIdHex, // Store without 0x prefix
     depth,
     amount,
@@ -379,7 +398,9 @@ export function openStampPurchaseWidget(options: PurchaseStampOptions): StampPur
     depth,
     amount,
     card,
+    topUpBatchId,
   } = options
+  const topUpHex = topUpBatchId === undefined ? undefined : strip0x(topUpBatchId).toLowerCase()
 
   // Mocked mode (the /dev toggle): settle locally without a real cross-chain
   // payment. `mockPopup` still opens the widget's own `?mocked=true` popup (which
@@ -430,7 +451,10 @@ export function openStampPurchaseWidget(options: PurchaseStampOptions): StampPur
     onError(new Error('The card shop is not configured.'))
     return { cancel: () => false }
   }
-  const url = buildWidgetUrl(destination, { depth, amount }, false, card)
+  const url =
+    topUpHex === undefined
+      ? buildWidgetUrl(destination, { depth, amount }, false, card)
+      : buildCardTopUpUrl(topUpHex, amount)
   const popup = window.open(url, 'stamp-purchase', POPUP_FEATURES)
 
   if (!popup) {
@@ -458,8 +482,9 @@ export function openStampPurchaseWidget(options: PurchaseStampOptions): StampPur
 
     const data = event.data
 
-    const batchEvent = parseBatchEvent(data)
-    if (batchEvent) {
+    const batchEvent = parseBatchEvent(data, topUpHex === undefined ? 'batch' : 'topup')
+    // A top-up of some other batch is no answer to this popup.
+    if (batchEvent && (topUpHex === undefined || batchEvent.batchId.toLowerCase() === topUpHex)) {
       // Record the batch, but leave the popup running: `create-batch` is not the
       // last step — the trailing transfer steps sweep leftover xDAI off the
       // widget's temporary wallet back to the owner. Closing here would strand
