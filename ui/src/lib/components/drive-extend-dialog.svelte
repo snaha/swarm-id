@@ -59,7 +59,8 @@
 
   type Phase = 'form' | 'pending' | 'success' | 'error'
 
-  let count = $state('0')
+  // Opens on one month rather than empty.
+  let count = $state('1')
   let unit = $state<LifespanUnit>('months')
   let phase = $state<Phase>('form')
   let errorMessage = $state('')
