@@ -181,15 +181,15 @@ bucket overwrites its oldest chunk in that lane.
 
 One PR each, in order.
 
-| #   | PR                                                                                                                                                                                                 | Depends on   |
-| --- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------ |
-| 1   | **Refactor, no behaviour change**: per-drive write state extracted from `SwarmIdProxy`; the proxy holds exactly one (`DriveWritePath`). Tests change only where they set the moved private fields. | —            |
-| 2   | **Schemas**: the drive grant, drive `kind`, their merge, the single reachability rule, the partitioned handover, the default-drive rule, the immutable-import check and kind picker.               | —            |
-| 3   | **Proxy map**: lazily created per-drive entries, bus routing by `batchId`, teardown and abort when a drive leaves the grant.                                                                       | 1, 2         |
-| 4   | **SDK**: `getDrives()`, optional `batchID` on every writer with the primary as fallback, the typed rejection. Docs-site pages and the demo's drive selector.                                       | 3            |
-| 5   | **Connect-time request**: the requirement in the client options → `connect` message → per-kind drive selection on the connect screen, including creating a drive there (#502), the primary shown.  | 4            |
-| 6   | **Later request and grant editing** (#711): `requestDrives()`, a popup opened by the iframe; approval only, no re-authentication; removing a drive from an app.                                    | 5, UI design |
-| 7   | **Scratch drive**: kind chosen in the Add drive flow, the wrapping counter, uint32 counters, the never-full display, no "Set as default" on a scratch drive.                                       | 4            |
+| #   | PR                                                                                                                                                                                                           | Depends on   |
+| --- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------ |
+| 1   | **Refactor, no behaviour change**: per-drive write state extracted from `SwarmIdProxy`; the proxy holds exactly one (`DriveWritePath`). Tests change only where they set the moved private fields.           | —            |
+| 2   | **Schemas**: the drive grant, drive `kind`, their merge, the single reachability rule, the partitioned handover, the default-drive rule, the immutable-import check (#864). The kind picker moved to step 7. | —            |
+| 3   | **Proxy map**: lazily created per-drive entries, bus routing by `batchId`, teardown and abort when a drive leaves the grant.                                                                                 | 1, 2         |
+| 4   | **SDK**: `getDrives()`, optional `batchID` on every writer with the primary as fallback, the typed rejection. Docs-site pages and the demo's drive selector.                                                 | 3            |
+| 5   | **Connect-time request**: the requirement in the client options → `connect` message → per-kind drive selection on the connect screen, including creating a drive there (#502), the primary shown.            | 4            |
+| 6   | **Later request and grant editing** (#711): `requestDrives()`, a popup opened by the iframe; approval only, no re-authentication; removing a drive from an app.                                              | 5, UI design |
+| 7   | **Scratch drive**: kind chosen in the Add drive flow and at import, the wrapping counter, uint32 counters, the never-full display, no "Set as default" on a scratch drive.                                   | 4            |
 
 Step 1 carries the risk and ships no feature.
 
