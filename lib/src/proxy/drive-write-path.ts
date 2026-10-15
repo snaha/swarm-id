@@ -14,13 +14,14 @@ const DEFAULT_WORKER_COUNT = 4
 const MAX_WORKER_COUNT = 8
 
 /**
- * One drive's write path in a proxy session: the stamp the session resolved,
- * and the stamper, coordinator and worker pool built from it.
+ * One drive's write path in a proxy session: a granted stamp, and the
+ * stamper, coordinator and worker pool built from it. The proxy holds one per
+ * drive it writes to, keyed by batch; they never reference each other (#862).
  *
- * Everything here belongs to that one batch, so it is created when the stamp
- * resolves and dropped as a unit when it changes — the proxy never patches
- * one field of it. That is also how a stale `initializeStamper` knows it has
- * been superseded: the proxy holds a different instance (#862).
+ * Everything here belongs to that one batch, so it is created as a unit and
+ * dropped as a unit when its stamp changes or leaves the grant — the proxy
+ * never patches one field of it. That is also how a stale `initializeStamper`
+ * knows it has been superseded: the proxy holds a different instance.
  */
 export class DriveWritePath {
   /**
@@ -43,7 +44,10 @@ export class DriveWritePath {
    * account+batch, assigned together with the `stamper` it writes through.
    */
   coordinator: BatchWriteCoordinator | undefined
+  /** Settles when `initializeStamper` for this drive is done, either way. */
+  ready: Promise<void> = Promise.resolve()
   private workerPool: StampWorkerPool | undefined
+  private tornDown = false
 
   constructor(
     readonly batchId: string,
@@ -74,6 +78,10 @@ export class DriveWritePath {
       (typeof navigator !== "undefined" && navigator.hardwareConcurrency
         ? Math.min(navigator.hardwareConcurrency, MAX_WORKER_COUNT)
         : DEFAULT_WORKER_COUNT)
+
+    // A coordinator torn down mid-write still asks; a pool built for it now
+    // would never be terminated. It signs on the main thread instead.
+    if (this.tornDown) return undefined
 
     if (
       this.workerPool?.size === desiredCount &&
@@ -106,6 +114,7 @@ export class DriveWritePath {
    * coordinator's `onLeaseReleased` on the way out.
    */
   teardown(): void {
+    this.tornDown = true
     this.coordinator?.teardown()
     this.coordinator = undefined
     this.terminateWorkerPool()

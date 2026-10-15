@@ -56,9 +56,12 @@ the proxy holds a map of them keyed by batch id.
 Each entry is the stack `initializeStamper` builds today: one `UtilizationAwareStamper`, one
 `BatchWriteCoordinator`, one worker pool. Entries never reference each other.
 
-**Created lazily, on the first write to that drive** — never at connect. An entry costs a
+**Created lazily, on the first write to that drive** — except the primary's. An entry costs a
 lane acquire and a heartbeat, so an "all drives" app must not pay for drives it never
-writes. The coordinator's existing idle-yield releases the lane again.
+writes. The coordinator's existing idle-yield releases the lane again. The primary's entry is
+built when the session resolves it, as the single drive's always was (departure, step 3):
+`uploadMode` and `uploadUnavailableReason` report whether its stamper built, and its eager
+lease is what spares the first upload the acquire.
 
 Bus handlers route by the `batchId` already on each message, to the matching entry or to
 none.
@@ -205,7 +208,8 @@ they cross drives, so step 3 binds each to its own `DriveWritePath`, test first:
   flush, so a rebind mid-flush mislabels the buckets.
 
 Each reaches across drives today only when a coordinator torn down mid-write is still
-running.
+running. Done in step 3; a torn-down drive also refuses to build a worker pool, which nothing
+would terminate.
 
 ### Testing
 
@@ -214,7 +218,9 @@ running.
   partitioned session only its granted drives' signer keys (a live `"all"` grant learns of
   new drives that way); an integration test against the local Bee
   cluster with one session writing two drives and a second device taking over each lane
-  independently.
+  independently. That test lands in step 4 (departure): before the SDK's `batchID`, a second
+  drive is reachable only through a private method, and `lib/src/sync/` — where the lanes
+  live — does not change in step 3.
 - Step 7: unit tests for the wrap (slot sequence, counter monotonicity across a publish); an
   integration test that fills a lane past its capacity and reads back the newest data; a
   live test that the overwrite evicts on a real network.
