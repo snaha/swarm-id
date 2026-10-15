@@ -93,7 +93,8 @@ import {
   downloadEncryptedSOC,
 } from "./proxy/download-data"
 import type { UploadProgress } from "./proxy/types"
-import { StampWorkerPool } from "./proxy/stamp-worker-pool"
+import { DriveWritePath } from "./proxy/drive-write-path"
+import type { StampWorkerPool } from "./proxy/stamp-worker-pool"
 import {
   loadMantarayTreeWithChunkAPI,
   saveMantarayTree,
@@ -108,12 +109,7 @@ import {
   resolveStampForApp,
   stampsReachableByApp,
 } from "./utils/postage-stamp-association"
-import {
-  stampRefusal,
-  sameStampLifetime,
-  type StampLifetimeFields,
-  type StampRefusal,
-} from "./utils/stamp-lifespan"
+import { sameStampLifetime } from "./utils/stamp-lifespan"
 import {
   accountStateToDeviceView,
   foldAccount,
@@ -322,18 +318,14 @@ export class SwarmIdProxy {
   private authenticated: boolean = false
   private authLoading: boolean = true // Start in loading state
   private appSecret: string | undefined
-  private postageBatchId: string | undefined
-  private signerKey: string | undefined
-  private stamper: UtilizationAwareStamper | undefined
   /**
-   * Hash of `<owner>-<encryptionKey>` that the current `stamper` was built
-   * with. Account-level inputs are baked into `UtilizationAwareStamper` at
-   * construction, so when the underlying account changes (e.g. a local
-   * account migrates to a synced one) we need to detect that even if the
-   * postage stamp's batch/signer didn't change, and rebuild the stamper.
+   * The resolved drive's write path: its stamp, and the stamper and
+   * coordinator built from it. Replaced as a unit whenever the resolved stamp
+   * changes (`setResolvedStamp`); undefined before auth, after disconnect, and
+   * while no stamp resolves. The proxy delegates all writes to its
+   * coordinator via `withModeAwareWriteLock`.
    */
-  private stamperAccountFingerprint: string | undefined
-  private stampWorkerPool: StampWorkerPool | undefined
+  private drive: DriveWritePath | undefined
   private storagePartitioned: boolean = false
   private pendingChallenge: string | undefined
   /**
@@ -405,21 +397,6 @@ export class SwarmIdProxy {
   private presenceTimer: ReturnType<typeof setInterval> | undefined
   private subsidisedGatewayUrl: string | undefined
   /**
-   * The resolved stamp's stored lifetime fields (#745), set wherever the
-   * stamp is. Expiry is derived from them on every read, so a tab left open
-   * past the drive's lifetime refuses its own writes rather than letting Bee
-   * refuse the lease claim.
-   */
-  private stampLifetime: StampLifetimeFields | undefined
-  /** Bumped by every `initializeStamper`; an older init sees it move and stops */
-  private stamperInitGeneration = 0
-
-  /** Why the session refuses to stamp with the resolved drive, if it does. */
-  private get stampRefusal(): StampRefusal | undefined {
-    return this.stampLifetime && stampRefusal(this.stampLifetime)
-  }
-
-  /**
    * The client for the node the current mode writes to: the dApp's gateway
    * while the session is subsidised, the configured node otherwise. Reads have
    * to come from where the uploads go, or a dApp reads back a 404 for the
@@ -458,14 +435,6 @@ export class SwarmIdProxy {
     return this.beeClient.bee
   }
 
-  /**
-   * The write path (lock + partition lease + stamp flush) for the current
-   * account+batch. Assigned in `initializeStamper` together with the stamper it
-   * writes through, and dropped with it whenever the resolved stamp changes
-   * (`setResolvedStamp`); undefined before auth / after disconnect. The proxy
-   * delegates all writes to it via `withModeAwareWriteLock`.
-   */
-  private coordinator: BatchWriteCoordinator | undefined
   /**
    * Debounce timer + in-flight guard for proxy-side account-state publishing.
    * The proxy publishes the account snapshot to the shared sync feed when it
@@ -762,18 +731,18 @@ export class SwarmIdProxy {
       : undefined
 
     if (
-      nextBatchId === this.postageBatchId &&
-      nextSignerKey === this.signerKey &&
-      nextAccountFingerprint === this.stamperAccountFingerprint &&
+      nextBatchId === this.drive?.batchId &&
+      nextSignerKey === this.drive?.signerKey &&
+      nextAccountFingerprint === this.drive?.accountFingerprint &&
       // A renewal keeps the batch and the key and moves only the lifetime.
-      sameStampLifetime(stamp, this.stampLifetime)
+      sameStampLifetime(stamp, this.drive?.lifetime)
     ) {
       return
     }
 
-    this.setResolvedStamp(stamp)
-    if (stamp) {
-      await this.initializeStamper(stamp.depth)
+    const drive = this.setResolvedStamp(stamp)
+    if (drive && stamp) {
+      await this.initializeStamper(drive, stamp.depth)
     }
   }
 
@@ -786,13 +755,18 @@ export class SwarmIdProxy {
    * account, an upload still takes that coordinator's lease and spends the old
    * batch while the dApp is told there is no stamp at all.
    */
-  private setResolvedStamp(stamp: PostageStamp | undefined): void {
+  private setResolvedStamp(
+    stamp: PostageStamp | undefined,
+  ): DriveWritePath | undefined {
     this.teardownCoordinator()
-    this.stamper = undefined
-    this.stamperAccountFingerprint = undefined
-    this.postageBatchId = stamp?.batchID.toHex()
-    this.signerKey = stamp?.signerKey.toHex()
-    this.stampLifetime = stamp
+    this.drive = stamp
+      ? new DriveWritePath(
+          stamp.batchID.toHex(),
+          stamp.signerKey.toHex(),
+          stamp,
+        )
+      : undefined
+    return this.drive
   }
 
   /**
@@ -817,9 +791,9 @@ export class SwarmIdProxy {
     // not have a stamp at all, and the previous identity's write path must not
     // survive into it either way.
     const stamp = this.lookupPostageStampForApp()
-    this.setResolvedStamp(stamp)
-    if (stamp) {
-      await this.initializeStamper(stamp.depth)
+    const drive = this.setResolvedStamp(stamp)
+    if (drive && stamp) {
+      await this.initializeStamper(drive, stamp.depth)
     }
 
     this.showAuthButton()
@@ -1323,17 +1297,7 @@ export class SwarmIdProxy {
   private teardownCoordinator(): void {
     // Scheduled answers describe a lease we are about to drop anyway.
     this.cancelPendingYields()
-    // A held partition is announced through `onLeaseReleased` on the way out.
-    this.coordinator?.teardown()
-    this.coordinator = undefined
-    // The pool signs for the stamper this coordinator wrote through, and its
-    // workers hold that stamper's signer key.
-    this.terminateStampWorkerPool()
-  }
-
-  private terminateStampWorkerPool(): void {
-    this.stampWorkerPool?.terminate()
-    this.stampWorkerPool = undefined
+    this.drive?.teardown()
   }
 
   private static laneKey(
@@ -1379,17 +1343,14 @@ export class SwarmIdProxy {
   private applyPendingLaneUpdate(): void {
     const buffered = this.pendingLaneUpdates
     this.pendingLaneUpdates = new Map()
-    const lane = this.stamper?.currentPartition
-    if (!this.stamper || !this.postageBatchId || lane === undefined) return
+    const stamper = this.drive?.stamper
+    const lane = stamper?.currentPartition
+    if (!this.drive || !stamper || lane === undefined) return
     const buckets = buffered.get(
-      SwarmIdProxy.laneKey(
-        this.postageBatchId,
-        lane,
-        this.stamper.partitionCount,
-      ),
+      SwarmIdProxy.laneKey(this.drive.batchId, lane, stamper.partitionCount),
     )
     if (!buckets) return
-    this.stamper.applyUtilizationUpdate(
+    stamper.applyUtilizationUpdate(
       [...buckets].map(([index, value]) => ({ index, value })),
     )
   }
@@ -1411,7 +1372,7 @@ export class SwarmIdProxy {
     batchId: string,
     requestId: string,
   ): void {
-    const coordinator = this.coordinator
+    const coordinator = this.drive?.coordinator
     if (!coordinator) return
     // Once the rank timer fires its handle is gone from `pendingYields`, so
     // the answered-id memory is what keeps a round from being answered twice
@@ -1457,7 +1418,7 @@ export class SwarmIdProxy {
    * measuring a race the product does not have.
    */
   private yieldRankDelayMs(requestId: string): number {
-    const coordinator = this.coordinator
+    const coordinator = this.drive?.coordinator
     const partition = coordinator?.currentPartition
     const partitionCount = coordinator?.partitionCount ?? 1
     if (partition === undefined || partitionCount <= 1) return 0
@@ -1526,8 +1487,9 @@ export class SwarmIdProxy {
           // stampers (`unbindPartition` also resets the count to 1) — that
           // coupling lives in another file and is exactly the assumption whose
           // last violation caused the resume-pointer skip described above.
-          if (message.batchId !== this.postageBatchId || !this.stamper) return
-          const lane = this.stamper.currentPartition
+          const stamper = this.drive?.stamper
+          if (message.batchId !== this.drive?.batchId || !stamper) return
+          const lane = stamper.currentPartition
           if (lane === undefined) {
             // Unbound: the lane this delta belongs to may well be the one we
             // are about to bind. Dropping it loses it for good — the adopt
@@ -1538,7 +1500,7 @@ export class SwarmIdProxy {
             // A legacy single-partition delta has no lease to wait for and
             // applies immediately.
             if (message.partition === 0 && message.partitionCount === 1) {
-              this.stamper.applyUtilizationUpdate(message.buckets)
+              stamper.applyUtilizationUpdate(message.buckets)
             } else {
               this.bufferLaneUpdate(message)
             }
@@ -1552,15 +1514,15 @@ export class SwarmIdProxy {
           // resume counter.
           if (
             message.partition === lane &&
-            message.partitionCount === this.stamper.partitionCount
+            message.partitionCount === stamper.partitionCount
           ) {
             // Apply delta update directly - no IndexedDB read needed
-            this.stamper.applyUtilizationUpdate(message.buckets)
+            stamper.applyUtilizationUpdate(message.buckets)
           }
           return
         }
         case "lease-request": {
-          const coordinator = this.coordinator
+          const coordinator = this.drive?.coordinator
           // Batch as well as account: a lane is one partition of ONE batch
           // (#589), so a waiter on another batch contends with nothing we
           // hold, and yielding to it would drop a lease that helps neither of
@@ -1598,8 +1560,8 @@ export class SwarmIdProxy {
         case "lease-claim": {
           if (
             message.fromDeviceId === this.deviceId ||
-            message.accountId !== this.coordinator?.accountId ||
-            message.batchId !== this.coordinator?.batchId
+            message.accountId !== this.drive?.coordinator?.accountId ||
+            message.batchId !== this.drive?.coordinator?.batchId
           ) {
             return
           }
@@ -1612,15 +1574,15 @@ export class SwarmIdProxy {
         case "lease-released": {
           if (
             message.fromDeviceId === this.deviceId ||
-            message.accountId !== this.coordinator?.accountId ||
-            message.batchId !== this.coordinator?.batchId
+            message.accountId !== this.drive?.coordinator?.accountId ||
+            message.batchId !== this.drive?.coordinator?.batchId
           ) {
             return
           }
           // The claim normally arrives first; this also covers a peer whose
           // claim we missed, and a release that answers no request at all.
           this.standDownFromRequest(message.requestId)
-          this.coordinator?.notifySlotMaybeFree()
+          this.drive?.coordinator?.notifySlotMaybeFree()
           return
         }
         case "account-delta": {
@@ -1794,42 +1756,33 @@ export class SwarmIdProxy {
    * Get the stored postage batch ID
    */
   getPostageBatchId(): string | undefined {
-    return this.postageBatchId
+    return this.drive?.batchId
   }
 
   /**
    * Get the stored signer key
    */
   getSignerKey(): string | undefined {
-    return this.signerKey
+    return this.drive?.signerKey
   }
 
   /**
    * Initialize the Stamper for client-side signing
    * Uses UtilizationAwareStamper to track bucket usage
    */
-  private async initializeStamper(stampDepth: number): Promise<void> {
-    const { signerKey, postageBatchId: batchId } = this
-    if (!signerKey || !batchId) {
-      console.warn(
-        "[Proxy] Cannot initialize stamper: missing signer key or batch ID",
-      )
-      return
-    }
-    // Captured once, above: `loadAuthData` calls this off the reconcile queue,
-    // so a storage event's `refreshStampFromStorage` can clear or rebind the
-    // stamp under any await below. Reading the fields again afterwards built a
-    // stamper and a coordinator for `batchId: undefined`, and every lease op on
-    // it threw (#804). A stale init leaves the session to the refresh that
-    // superseded it.
-    // The generation catches a re-init for the SAME stamp — a storage event
-    // during the first init finds no fingerprint yet and inits again — so the
-    // older init yields to the newer one instead of racing it for the fields.
-    const generation = ++this.stamperInitGeneration
-    const superseded = (): boolean =>
-      this.postageBatchId !== batchId ||
-      this.signerKey !== signerKey ||
-      this.stamperInitGeneration !== generation
+  private async initializeStamper(
+    drive: DriveWritePath,
+    stampDepth: number,
+  ): Promise<void> {
+    const { signerKey, batchId } = drive
+    // `loadAuthData` calls this off the reconcile queue, so a storage event's
+    // `refreshStampFromStorage` can clear or rebind the stamp under any await
+    // below (#804). Every rebind is a new `DriveWritePath`, a re-resolve of the
+    // SAME stamp included — a storage event during the first init finds no
+    // fingerprint yet and resolves again — so an init whose drive is no longer
+    // the session's has been superseded, and leaves the session to the init
+    // that superseded it.
+    const superseded = (): boolean => this.drive !== drive
 
     // Look up account info for utilization tracking
     const accountInfo = await this.lookupAccountForApp()
@@ -1879,15 +1832,15 @@ export class SwarmIdProxy {
     // `create` returns: a utilization delta that arrives while there is no
     // stamper is dropped, so one a peer broadcast after `create` read the
     // stored counters would end up in neither.
-    this.stamper = stamper
-    this.stamperAccountFingerprint = `${accountInfo.owner.toHex()}-${uint8ArrayToHex(accountInfo.encryptionKey)}`
+    drive.stamper = stamper
+    drive.accountFingerprint = `${accountInfo.owner.toHex()}-${uint8ArrayToHex(accountInfo.encryptionKey)}`
     const tuning = readPartitionTuningOverride()
     // The callbacks below outlive this narrowing, and the batch they name has
     // to be the one the coordinator serves, on both counts: its lease cache is
     // keyed on it, so a snapshot filed under a batch we have since moved off
     // hints at a lane nobody holds (#684), and a lease message naming that
     // batch answers nobody (#589). `batchId` is the capture from the top.
-    this.coordinator = new BatchWriteCoordinator({
+    drive.coordinator = new BatchWriteCoordinator({
       bee: this.nodeBee,
       batchId,
       stamper,
@@ -1960,7 +1913,7 @@ export class SwarmIdProxy {
         })
       },
     })
-    this.coordinator.startLease()
+    drive.coordinator.startLease()
   }
 
   /**
@@ -2000,41 +1953,14 @@ export class SwarmIdProxy {
   }
 
   /**
-   * Get or create a StampWorkerPool for parallel signing.
-   * Lazy-initialized on first use and reused across uploads, for as long as
-   * it signs for the current stamper and has the requested size.
+   * The current drive's worker pool. Read at call time, not bound to the
+   * coordinator's own drive: a coordinator torn down mid-write that asks after
+   * a rebind is handed the new drive's pool, as before the extraction (#862).
    */
   private async getOrCreateWorkerPool(
     requestedCount?: number,
   ): Promise<StampWorkerPool | undefined> {
-    const desiredCount =
-      requestedCount ??
-      (typeof navigator !== "undefined" && navigator.hardwareConcurrency
-        ? Math.min(navigator.hardwareConcurrency, 8)
-        : 4)
-
-    if (
-      this.stampWorkerPool?.size === desiredCount &&
-      this.stampWorkerPool.stamper === this.stamper
-    ) {
-      return this.stampWorkerPool
-    }
-
-    this.terminateStampWorkerPool()
-
-    if (!this.signerKey || !this.stamper) return undefined
-
-    try {
-      this.stampWorkerPool = await StampWorkerPool.create(
-        this.signerKey,
-        this.stamper,
-        desiredCount,
-      )
-      return this.stampWorkerPool
-    } catch (error) {
-      console.warn("[Proxy] Failed to create StampWorkerPool:", error)
-      return undefined
-    }
+    return this.drive?.getOrCreateWorkerPool(requestedCount)
   }
 
   /**
@@ -2042,7 +1968,8 @@ export class SwarmIdProxy {
    * Utilization-aware stamper persists bucket state automatically
    */
   private async saveStamperState(): Promise<void> {
-    if (!this.stamper) {
+    const stamper = this.drive?.stamper
+    if (!stamper) {
       return
     }
 
@@ -2054,11 +1981,11 @@ export class SwarmIdProxy {
       // as the legacy `{0, 1}` lane, which every momentarily-unbound same-batch
       // peer then folds — the exact resume-pointer skip the lane guard exists
       // to prevent.
-      const buckets = this.stamper.getBucketUpdatesForBroadcast()
-      const partition = this.stamper.currentPartition ?? 0
-      const partitionCount = this.stamper.partitionCount
+      const buckets = stamper.getBucketUpdatesForBroadcast()
+      const partition = stamper.currentPartition ?? 0
+      const partitionCount = stamper.partitionCount
 
-      await this.stamper.flush()
+      await stamper.flush()
 
       // Broadcast the utilization update to peers with pre-captured buckets.
       // Local transports only: the counters are per-partition, and every peer
@@ -2066,11 +1993,14 @@ export class SwarmIdProxy {
       // lane, so a remote copy is dropped at the receive guard after paying for
       // encryption and a frame the signaling server's payload cap may refuse
       // outright (one entry per dirty bucket, up to NUM_BUCKETS of them).
-      if (this.postageBatchId && buckets.length > 0) {
+      // The batch is read after the flush, as it always was; a rebind landing
+      // mid-flush labels these buckets with the next drive's batch (#862).
+      const batchId = this.drive?.batchId
+      if (batchId && buckets.length > 0) {
         this.bus.publish(
           {
             type: "utilization-updated",
-            batchId: this.postageBatchId,
+            batchId,
             partition,
             partitionCount,
             buckets,
@@ -2101,13 +2031,14 @@ export class SwarmIdProxy {
         gatewayUrl: this.subsidisedGatewayUrl!,
       })
     }
-    if (!this.coordinator) {
+    const coordinator = this.drive?.coordinator
+    if (!coordinator) {
       throw new SwarmIdError(
         "not-authenticated",
         "Stamper not initialized. Please login first.",
       )
     }
-    return this.coordinator.withWrite(operation, targetOptions)
+    return coordinator.withWrite(operation, targetOptions)
   }
 
   /**
@@ -2453,9 +2384,9 @@ export class SwarmIdProxy {
 
       // Look up postage stamp from shared storage based on connected identity
       const stamp = this.lookupPostageStampForApp()
-      this.setResolvedStamp(stamp)
-      if (stamp) {
-        await this.initializeStamper(stamp.depth)
+      const drive = this.setResolvedStamp(stamp)
+      if (drive && stamp) {
+        await this.initializeStamper(drive, stamp.depth)
       }
       return
     }
@@ -2941,7 +2872,7 @@ export class SwarmIdProxy {
       return
     }
     if (reason === "change") this.publishAccountDelta()
-    const coordinator = this.coordinator
+    const coordinator = this.drive?.coordinator
     if (!coordinator || coordinator.currentPartition === undefined) return
     this.publishInFlight = true
     try {
@@ -2952,7 +2883,7 @@ export class SwarmIdProxy {
       // the meantime. Bail rather than write through a stale instance. (The
       // coordinator also self-guards against re-acquire when disposed; this
       // just avoids the needless lock round-trip.)
-      if (this.coordinator !== coordinator) return
+      if (this.drive?.coordinator !== coordinator) return
       const { snapshot, encryptionKey, accountKey, owner } = assembled
 
       // The snapshot is assembled from the most recent connection for this
@@ -3213,7 +3144,7 @@ export class SwarmIdProxy {
     this.clearPartitionSession()
 
     // Clear stamper state from localStorage
-    const stamperKey = `swarm-stamper-${this.parentOrigin}-${this.postageBatchId}`
+    const stamperKey = `swarm-stamper-${this.parentOrigin}-${this.drive?.batchId}`
     localStorage.removeItem(stamperKey)
 
     // Invalidate matching connected-app entries in the nested account documents
@@ -3314,14 +3245,15 @@ export class SwarmIdProxy {
     }
     // Refuse here, before the write coordinator: its first stamped write is
     // the lease claim, and a refused claim reads as partition contention (#745).
-    if (this.stampRefusal === "stamp-expired") {
+    const refusal = this.drive?.refusal
+    if (refusal === "stamp-expired") {
       throw new SwarmIdError(
         "upload-unavailable",
         "The account's drive has expired. Renew it or add another in Swarm ID before uploading.",
         { reason: "stamp-expired" },
       )
     }
-    if (this.stampRefusal === "stamp-not-usable") {
+    if (refusal === "stamp-not-usable") {
       throw new SwarmIdError(
         "upload-unavailable",
         "The account's drive is not usable: its record says the node does not have the batch, or cannot use it. Open the drive in Swarm ID to refresh it, or add another, before uploading.",
@@ -3343,16 +3275,16 @@ export class SwarmIdProxy {
   private hasUsableUserStamp(): boolean {
     // No stamp resolved. Partitioning is not a cause: the connect popup hands
     // the stamps over, so a partitioned session resolves its own like any other.
-    if (!this.postageBatchId || !this.signerKey) return false
+    if (!this.drive) return false
     // The drive has expired, or its record says the node cannot use it.
-    if (this.stampRefusal) return false
+    if (this.drive.refusal) return false
     // The stamp resolved but no stamper was built from it, a state the proxy
     // really reaches: `initializeStamper` logs and returns rather than
     // throwing, and the stamp is set before an init's first await. The
     // stamper and its coordinator are assigned together, so no stamper also
     // means no coordinator, and a user-stamp write would throw "Stamper not
     // initialized".
-    if (!this.stamper) return false
+    if (!this.drive.stamper) return false
     return true
   }
 
@@ -3511,7 +3443,7 @@ export class SwarmIdProxy {
       deviceId: this.deviceId,
       identity,
       appKey,
-      partition: this.coordinator?.currentPartition,
+      partition: this.drive?.coordinator?.currentPartition,
     }
   }
 
@@ -3525,12 +3457,13 @@ export class SwarmIdProxy {
    */
   private uploadUnavailableReason(): UploadUnavailableReason | undefined {
     if (!this.authenticated || !this.appSecret) return undefined
-    if (!this.postageBatchId || !this.signerKey) return "no-stamp"
-    if (this.stampRefusal) return this.stampRefusal
+    if (!this.drive) return "no-stamp"
+    const refusal = this.drive.refusal
+    if (refusal) return refusal
     // The stamp resolved and the write path still did not build:
     // `initializeStamper` logs and returns rather than throwing, so this is the
     // only place that difference survives to the dApp.
-    if (!this.stamper) return "stamper-failed"
+    if (!this.drive.stamper) return "stamper-failed"
     return undefined
   }
 
