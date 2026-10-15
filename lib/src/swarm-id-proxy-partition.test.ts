@@ -652,8 +652,8 @@ describe("SwarmIdProxy partitioned write enablement", () => {
     finishCreate!()
     await identified
 
-    const internals = proxy as unknown as { stamper: unknown }
-    expect(internals.stamper).toBeUndefined()
+    const internals = proxy as unknown as { drive?: { stamper: unknown } }
+    expect(internals.drive?.stamper).toBeUndefined()
     expect(vi.mocked(BatchWriteCoordinator).mock.results).toHaveLength(
       coordinatorsBefore,
     )
@@ -702,16 +702,20 @@ describe("SwarmIdProxy partitioned write enablement", () => {
         })),
       )
       const internals = proxy as unknown as {
-        stamper: { batchId?: BatchId } | undefined
+        drive?: { stamper: { batchId?: BatchId } | undefined }
       }
       await vi.waitFor(() =>
-        expect(String(internals.stamper?.batchId)).toBe(replacement.toHex()),
+        expect(String(internals.drive?.stamper?.batchId)).toBe(
+          replacement.toHex(),
+        ),
       )
 
       rejectCreate!(new Error("batch gone"))
       await identified
 
-      expect(String(internals.stamper?.batchId)).toBe(replacement.toHex())
+      expect(String(internals.drive?.stamper?.batchId)).toBe(
+        replacement.toHex(),
+      )
       const infos = messagesOfType("connectionInfoChanged")
       expect(infos[infos.length - 1].uploadUnavailableReason).toBeUndefined()
     },

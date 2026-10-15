@@ -13,6 +13,7 @@ import { uint8ArrayToHex } from "./utils/hex"
 import { STORAGE_KEY_NETWORK_SETTINGS } from "./types"
 import type { ButtonConfig } from "./types"
 import type { StampLifetimeFields } from "./utils/stamp-lifespan"
+import { DriveWritePath } from "./proxy/drive-write-path"
 
 /**
  * A view of the proxy that admits to the private members these tests drive.
@@ -27,10 +28,7 @@ type ProxyInternals = {
   ) => Promise<void>
   authenticated: boolean
   appSecret: string
-  postageBatchId?: string
-  signerKey?: string
-  stamper?: unknown
-  stampLifetime?: StampLifetimeFields
+  drive?: DriveWritePath
   buildConnectionInfo: () => {
     canUpload: boolean
     uploadMode: string
@@ -41,7 +39,10 @@ type ProxyInternals = {
     targetOptions: undefined,
     operation: (target: unknown) => Promise<T>,
   ) => Promise<T>
-  initializeStamper: (stampDepth: number) => Promise<void>
+  initializeStamper: (
+    drive: DriveWritePath,
+    stampDepth: number,
+  ) => Promise<void>
   lookupAccountForApp: () => Promise<unknown>
   /** The Bee client the proxy reads (and subsidised-uploads) through now. */
   bee: { url: string }
@@ -519,10 +520,22 @@ describe("SwarmIdProxy subsidised-mode selection", () => {
   }): void {
     internals(proxy).authenticated = true
     internals(proxy).appSecret = APP_SECRET_HEX
-    internals(proxy).postageBatchId = state.postageBatchId
-    internals(proxy).signerKey = state.signerKey
-    internals(proxy).stamper = state.stamper ? { mock: "stamper" } : undefined
-    internals(proxy).stampLifetime = state.stampLifetime
+    // A record with no measured TTL and no node verdict refuses nothing,
+    // which is what leaving `stampLifetime` out has always meant here.
+    const drive =
+      state.postageBatchId && state.signerKey
+        ? new DriveWritePath(
+            state.postageBatchId,
+            state.signerKey,
+            state.stampLifetime ?? { createdAt: 0 },
+          )
+        : undefined
+    if (drive && state.stamper) {
+      drive.stamper = {
+        mock: "stamper",
+      } as unknown as DriveWritePath["stamper"]
+    }
+    internals(proxy).drive = drive
   }
 
   const connectionInfo = () => internals(proxy).buildConnectionInfo()
@@ -658,7 +671,10 @@ describe("SwarmIdProxy subsidised-mode selection", () => {
           }),
       )
 
-      const init = internals(proxy).initializeStamper(STAMP_DEPTH)
+      const init = internals(proxy).initializeStamper(
+        internals(proxy).drive!,
+        STAMP_DEPTH,
+      )
       await vi.waitFor(() => expect(finishLookup).toBeDefined())
 
       expect(connectionInfo().uploadMode).toBe("subsidised")
@@ -671,7 +687,7 @@ describe("SwarmIdProxy subsidised-mode selection", () => {
       finishLookup!(undefined)
       await init
 
-      expect(internals(proxy).stamper).toBeUndefined()
+      expect(internals(proxy).drive?.stamper).toBeUndefined()
       expect(connectionInfo().uploadMode).toBe("subsidised")
       await expect(uploadTarget()).resolves.toEqual({
         mode: "subsidised",

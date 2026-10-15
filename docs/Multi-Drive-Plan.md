@@ -181,21 +181,35 @@ bucket overwrites its oldest chunk in that lane.
 
 One PR each, in order.
 
-| #   | PR                                                                                                                                                                                                | Depends on   |
-| --- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------ |
-| 1   | **Refactor, no behaviour change**: per-drive write state extracted from `SwarmIdProxy`; the proxy holds exactly one. Existing tests pass unmodified.                                              | —            |
-| 2   | **Schemas**: the drive grant, drive `kind`, their merge, the single reachability rule, the partitioned handover, the default-drive rule, the immutable-import check and kind picker.              | —            |
-| 3   | **Proxy map**: lazily created per-drive entries, bus routing by `batchId`, teardown and abort when a drive leaves the grant.                                                                      | 1, 2         |
-| 4   | **SDK**: `getDrives()`, optional `batchID` on every writer with the primary as fallback, the typed rejection. Docs-site pages and the demo's drive selector.                                      | 3            |
-| 5   | **Connect-time request**: the requirement in the client options → `connect` message → per-kind drive selection on the connect screen, including creating a drive there (#502), the primary shown. | 4            |
-| 6   | **Later request and grant editing** (#711): `requestDrives()`, a popup opened by the iframe; approval only, no re-authentication; removing a drive from an app.                                   | 5, UI design |
-| 7   | **Scratch drive**: kind chosen in the Add drive flow, the wrapping counter, uint32 counters, the never-full display, no "Set as default" on a scratch drive.                                      | 4            |
+| #   | PR                                                                                                                                                                                                 | Depends on   |
+| --- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------ |
+| 1   | **Refactor, no behaviour change**: per-drive write state extracted from `SwarmIdProxy`; the proxy holds exactly one (`DriveWritePath`). Tests change only where they set the moved private fields. | —            |
+| 2   | **Schemas**: the drive grant, drive `kind`, their merge, the single reachability rule, the partitioned handover, the default-drive rule, the immutable-import check and kind picker.               | —            |
+| 3   | **Proxy map**: lazily created per-drive entries, bus routing by `batchId`, teardown and abort when a drive leaves the grant.                                                                       | 1, 2         |
+| 4   | **SDK**: `getDrives()`, optional `batchID` on every writer with the primary as fallback, the typed rejection. Docs-site pages and the demo's drive selector.                                       | 3            |
+| 5   | **Connect-time request**: the requirement in the client options → `connect` message → per-kind drive selection on the connect screen, including creating a drive there (#502), the primary shown.  | 4            |
+| 6   | **Later request and grant editing** (#711): `requestDrives()`, a popup opened by the iframe; approval only, no re-authentication; removing a drive from an app.                                    | 5, UI design |
+| 7   | **Scratch drive**: kind chosen in the Add drive flow, the wrapping counter, uint32 counters, the never-full display, no "Set as default" on a scratch drive.                                       | 4            |
 
 Step 1 carries the risk and ships no feature.
 
+### Step 3 must bind each callback to its drive
+
+Step 1 keeps three reads of "the current drive" at call time, because binding them changes
+behaviour in a race and a refactor should not. With one drive they are harmless; with a map
+they cross drives, so step 3 binds each to its own `DriveWritePath`, test first:
+
+- the coordinator's `flushStamperState` flushes whichever drive is current, not its own;
+- its `getWorkerPool` hands back the current drive's pool, signing with that drive's key;
+- `saveStamperState` labels its `utilization-updated` broadcast with the batch read _after_ the
+  flush, so a rebind mid-flush mislabels the buckets.
+
+Each reaches across drives today only when a coordinator torn down mid-write is still
+running.
+
 ### Testing
 
-- Step 1: the existing suite, unmodified, is the test.
+- Step 1: the existing suite is the test; only the helpers that set the moved private fields change.
 - Steps 2–4: unit tests per `lib/AGENTS.md`, including that an account-bus delta hands a
   partitioned session only its granted drives' signer keys (a live `"all"` grant learns of
   new drives that way); an integration test against the local Bee
