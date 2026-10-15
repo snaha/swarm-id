@@ -14,11 +14,12 @@ const DEFAULT_WORKER_COUNT = 4
 const MAX_WORKER_COUNT = 8
 
 /**
- * One drive's write path in a proxy session: the stamp the session resolved,
- * and the stamper, coordinator and worker pool built from it.
+ * One drive's write path in a proxy session: a granted stamp, and the
+ * stamper, coordinator and worker pool built from it. The proxy holds one per
+ * drive it writes to, keyed by batch; they never reference each other (#862).
  *
  * Everything here belongs to that one batch, so it is created when the stamp
- * resolves and dropped as a unit when it changes: the stamper, the account it
+ * resolves and dropped as a unit when it changes or leaves the grant: the stamper, the account it
  * was built for and the coordinator that writes through it arrive together
  * (`attach`), and the proxy never sets one of them alone. That is also how a
  * stale `initializeStamper` knows it has been superseded: the proxy holds a
@@ -28,7 +29,10 @@ export class DriveWritePath {
   private _stamper: UtilizationAwareStamper | undefined
   private _accountFingerprint: string | undefined
   private _coordinator: BatchWriteCoordinator | undefined
+  /** Settles when `initializeStamper` for this drive is done, either way. */
+  ready: Promise<void> = Promise.resolve()
   private workerPool: StampWorkerPool | undefined
+  private tornDown = false
 
   constructor(
     readonly batchId: string,
@@ -105,6 +109,10 @@ export class DriveWritePath {
         ? Math.min(navigator.hardwareConcurrency, MAX_WORKER_COUNT)
         : DEFAULT_WORKER_COUNT)
 
+    // A coordinator torn down mid-write still asks; a pool built for it now
+    // would never be terminated. It signs on the main thread instead.
+    if (this.tornDown) return undefined
+
     if (
       this.workerPool?.size === desiredCount &&
       this.workerPool.stamper === this.stamper
@@ -137,6 +145,7 @@ export class DriveWritePath {
    * proxy drops the whole path right after, or is being destroyed.
    */
   teardown(): void {
+    this.tornDown = true
     this._coordinator?.teardown()
     this._coordinator = undefined
     this.terminateWorkerPool()

@@ -94,7 +94,6 @@ import {
 } from "./proxy/download-data"
 import type { UploadProgress } from "./proxy/types"
 import { DriveWritePath } from "./proxy/drive-write-path"
-import type { StampWorkerPool } from "./proxy/stamp-worker-pool"
 import {
   loadMantarayTreeWithChunkAPI,
   saveMantarayTree,
@@ -319,13 +318,16 @@ export class SwarmIdProxy {
   private authLoading: boolean = true // Start in loading state
   private appSecret: string | undefined
   /**
-   * The resolved drive's write path: its stamp, and the stamper and
-   * coordinator built from it. Replaced as a unit whenever the resolved stamp
-   * changes (`setResolvedStamp`); undefined before auth, after disconnect, and
-   * while no stamp resolves. The proxy delegates all writes to its
-   * coordinator via `withModeAwareWriteLock`.
+   * The write path of each granted drive this session writes to, by batch id
+   * (#862): its stamp, and the stamper and coordinator built from it. The
+   * primary's is built when the session resolves it; any other's on its first
+   * write (`writePathFor`), since each costs a lane. An entry goes as a unit
+   * when its stamp changes or leaves the grant (`reconcileDrives`). The proxy
+   * delegates all writes to these coordinators via `withModeAwareWriteLock`.
    */
-  private drive: DriveWritePath | undefined
+  private drives = new Map<string, DriveWritePath>()
+  /** The primary drive's batch: where a write that names no drive goes. */
+  private primaryBatchId: string | undefined
   private storagePartitioned: boolean = false
   private pendingChallenge: string | undefined
   /**
@@ -355,8 +357,13 @@ export class SwarmIdProxy {
    *  connection resolves now — is who a publish actually reaches. */
   private busBoundAccountId: string | undefined
   /** Scheduled answers to peers' `lease-request`s, by request id, so a peer
-   *  earlier in the rank order can call ours off (`yieldRankDelayMs`). */
-  private pendingYields = new Map<string, ReturnType<typeof setTimeout>>()
+   *  earlier in the rank order can call ours off (`yieldRankDelayMs`). Each
+   *  names the batch it would yield, so tearing one drive down cancels only
+   *  that drive's. */
+  private pendingYields = new Map<
+    string,
+    { batchId: string; timer: ReturnType<typeof setTimeout> }
+  >()
   /** Request ids somebody has claimed (us or a peer). Insertion-ordered and
    *  capped at `ANSWERED_REQUEST_MEMORY`. Separate from `pendingYields`
    *  because the cancel window has to outlive the rank timer: the timer only
@@ -656,8 +663,8 @@ export class SwarmIdProxy {
         // New connection, or the connected account / secret changed.
         await this.authenticateFromStorage(app)
       } else {
-        // Same connection — related metadata (default stamp, per-app batch
-        // override, rename) may have changed. A partitioned session skips this
+        // Same connection — related metadata (default stamp, the app's
+        // drive grant, rename) may have changed. A partitioned session skips this
         // for a storage event, whose account document it cannot read; after a
         // bus fold it must NOT skip it, because the hydrated view it just
         // folded into is exactly what the refresh reads (the same call
@@ -712,61 +719,125 @@ export class SwarmIdProxy {
   }
 
   /**
-   * Re-resolve postage stamp and account inputs for the current connection
-   * from shared storage. Reinitializes the stamper if the batch, signer
-   * key, or account-level inputs (owner / encryption key) changed — the
-   * last case handles e.g. local→synced account migration where the
-   * postage stamp is unchanged but the underlying account isn't.
+   * Re-resolve the drives and account inputs for the current connection from
+   * shared storage, and bring the write paths in line (`reconcileDrives`).
    */
   private async refreshStampFromStorage(): Promise<void> {
     // A rebound account is a different bus topic.
     this.joinAccountBus()
+    await this.reconcileDrives()
+  }
 
-    const stamp = this.lookupPostageStampForApp()
-    const nextBatchId = stamp?.batchID.toHex()
-    const nextSignerKey = stamp?.signerKey.toHex()
-    const account = stamp ? await this.lookupAccountForApp() : undefined
-    const nextAccountFingerprint = account
-      ? `${account.owner.toHex()}-${uint8ArrayToHex(account.encryptionKey)}`
-      : undefined
-
-    if (
-      nextBatchId === this.drive?.batchId &&
-      nextSignerKey === this.drive?.signerKey &&
-      nextAccountFingerprint === this.drive?.accountFingerprint &&
-      // A renewal keeps the batch and the key and moves only the lifetime.
-      sameStampLifetime(stamp, this.drive?.lifetime)
-    ) {
-      return
-    }
-
-    const drive = this.setResolvedStamp(stamp)
-    if (drive && stamp) {
-      await this.initializeStamper(drive, stamp.depth)
-    }
+  /** The primary drive's write path, if the session has one. */
+  private get drive(): DriveWritePath | undefined {
+    return this.primaryBatchId === undefined
+      ? undefined
+      : this.drives.get(this.primaryBatchId)
   }
 
   /**
-   * The only way the resolved stamp changes. The write path — the stamper and
-   * the coordinator that writes through it — belongs to the stamp it was built
-   * for, so it goes whenever the fields naming that stamp do, before anything
-   * is built for the next one. Otherwise the previous coordinator outlives its
+   * The only way the write paths change. Each belongs to the stamp it was
+   * built for, so it goes whenever that stamp leaves the grant or the fields
+   * naming it change — the batch's signer key, its lifetime (a renewal keeps
+   * the batch and the key), or the account inputs baked into its stamper (a
+   * local account migrating to a synced one keeps the stamp) — before
+   * anything is built for the next one. Otherwise a coordinator outlives its
    * stamp: after the drive is removed, or the connection moves to another
    * account, an upload still takes that coordinator's lease and spends the old
-   * batch while the dApp is told there is no stamp at all.
+   * batch while the dApp is told there is no stamp at all. Tearing it down
+   * aborts an upload in flight on it.
+   *
+   * Then the primary is built if it has no write path yet; any other granted
+   * drive waits for its first write (`writePathFor`).
    */
-  private setResolvedStamp(
-    stamp: PostageStamp | undefined,
-  ): DriveWritePath | undefined {
-    this.teardownCoordinator()
-    this.drive = stamp
-      ? new DriveWritePath(
-          stamp.batchID.toHex(),
-          stamp.signerKey.toHex(),
-          stamp,
+  private async reconcileDrives(): Promise<void> {
+    const { primary, granted } = this.lookupDrivesForApp()
+    if (this.drives.size > 0) {
+      const account =
+        granted.length > 0 ? await this.lookupAccountForApp() : undefined
+      const fingerprint = account
+        ? `${account.owner.toHex()}-${uint8ArrayToHex(account.encryptionKey)}`
+        : undefined
+      for (const drive of [...this.drives.values()]) {
+        const stamp = granted.find(
+          (candidate) => candidate.batchID.toHex() === drive.batchId,
         )
-      : undefined
-    return this.drive
+        const unchanged =
+          stamp !== undefined &&
+          stamp.signerKey.toHex() === drive.signerKey &&
+          fingerprint === drive.accountFingerprint &&
+          sameStampLifetime(stamp, drive.lifetime)
+        if (!unchanged) this.teardownDrive(drive)
+      }
+    }
+    this.primaryBatchId = primary?.batchID.toHex()
+    if (primary && !this.drives.has(primary.batchID.toHex())) {
+      await this.addDrive(primary).ready
+    }
+  }
+
+  /** Register a write path for `stamp` and start building it. */
+  private addDrive(stamp: PostageStamp): DriveWritePath {
+    const drive = new DriveWritePath(
+      stamp.batchID.toHex(),
+      stamp.signerKey.toHex(),
+      stamp,
+    )
+    this.drives.set(drive.batchId, drive)
+    drive.ready = this.initializeStamper(drive, stamp.depth)
+    return drive
+  }
+
+  /**
+   * The write path for `batchId`, built on the first write to it (#862).
+   * Refuses a drive the app was not granted.
+   */
+  private async writePathFor(batchId: string): Promise<DriveWritePath> {
+    let drive = this.drives.get(batchId)
+    if (!drive) {
+      const stamp = this.lookupDrivesForApp().granted.find(
+        (candidate) => candidate.batchID.toHex() === batchId,
+      )
+      if (!stamp) {
+        throw new SwarmIdError(
+          "upload-unavailable",
+          "This app has not been granted that drive in Swarm ID.",
+        )
+      }
+      drive = this.addDrive(stamp)
+    }
+    await drive.ready
+    // A reconcile may have replaced or dropped the entry while it built; ask
+    // again, which waits for its replacement or refuses a drive now gone.
+    // ponytail: unbounded only if every build is superseded by the next.
+    if (this.drives.get(batchId) !== drive) return this.writePathFor(batchId)
+    return drive
+  }
+
+  /** Tear one drive's write path down and forget it. */
+  private teardownDrive(drive: DriveWritePath): void {
+    // Scheduled answers describe a lease we are about to drop anyway.
+    this.cancelPendingYields(drive.batchId)
+    drive.teardown()
+    this.drives.delete(drive.batchId)
+  }
+
+  /**
+   * Tear every write path down, announcing each partition held so waiting
+   * peers wake now instead of sleeping out their poll interval
+   * (docs/Account-Bus.md, bus-accelerated leases). The announcement races the
+   * Swarm release it describes, which is harmless: the lock SOCs stay the
+   * authority, so a peer woken too early just spends one extra read round.
+   */
+  private teardownDrives(): void {
+    for (const drive of [...this.drives.values()]) this.teardownDrive(drive)
+    this.primaryBatchId = undefined
+  }
+
+  /** Tear everything down and build the write paths afresh. */
+  private async rebuildDrives(): Promise<void> {
+    this.teardownDrives()
+    await this.reconcileDrives()
   }
 
   /**
@@ -790,11 +861,7 @@ export class SwarmIdProxy {
     // Look up postage stamp. When switching identities, the new identity may
     // not have a stamp at all, and the previous identity's write path must not
     // survive into it either way.
-    const stamp = this.lookupPostageStampForApp()
-    const drive = this.setResolvedStamp(stamp)
-    if (drive && stamp) {
-      await this.initializeStamper(drive, stamp.depth)
-    }
+    await this.rebuildDrives()
 
     this.showAuthButton()
     this.sendToParent({
@@ -1265,9 +1332,9 @@ export class SwarmIdProxy {
     }
     this.unsubscribeStorageListeners = []
 
-    // Release the partition lease (best-effort) so peers see this device
-    // vacate its partition promptly.
-    this.teardownCoordinator()
+    // Release the partition leases (best-effort) so peers see this device
+    // vacate its partitions promptly.
+    this.teardownDrives()
     if (this.publishTimer !== undefined) {
       clearTimeout(this.publishTimer)
       this.publishTimer = undefined
@@ -1285,19 +1352,6 @@ export class SwarmIdProxy {
     this.busJoinedKey = undefined
     this.busBoundAccountId = undefined
     this.bus.close()
-  }
-
-  /**
-   * Tear the write coordinator down, announcing the partition it held so
-   * waiting peers wake now instead of sleeping out their poll interval
-   * (docs/Account-Bus.md, bus-accelerated leases). The announcement races the
-   * Swarm release it describes, which is harmless: the lock SOCs stay the
-   * authority, so a peer woken too early just spends one extra read round.
-   */
-  private teardownCoordinator(): void {
-    // Scheduled answers describe a lease we are about to drop anyway.
-    this.cancelPendingYields()
-    this.drive?.teardown()
   }
 
   private static laneKey(
@@ -1333,22 +1387,29 @@ export class SwarmIdProxy {
   }
 
   /**
-   * Fold the buffered delta for the lane we just bound in, then drop every
-   * buffered lane — the ones we did not bind are another device's business.
+   * Fold the buffered delta for the lane `drive` just bound in, then drop
+   * that batch's other buffered lanes — they are another device's business.
+   * Other batches' stay: their drives have not bound yet.
    * Called on every lease acquire: on the cold path the counters are already
    * seeded from the durable partition-state feed, so this is a harmless
    * monotonic no-op; on the adopt fast path they are not, and this is the
    * whole point.
    */
-  private applyPendingLaneUpdate(): void {
-    const buffered = this.pendingLaneUpdates
-    this.pendingLaneUpdates = new Map()
-    const stamper = this.drive?.stamper
+  private applyPendingLaneUpdate(drive: DriveWritePath): void {
+    const stamper = drive.stamper
     const lane = stamper?.currentPartition
-    if (!this.drive || !stamper || lane === undefined) return
-    const buckets = buffered.get(
-      SwarmIdProxy.laneKey(this.drive.batchId, lane, stamper.partitionCount),
-    )
+    const key =
+      stamper && lane !== undefined
+        ? SwarmIdProxy.laneKey(drive.batchId, lane, stamper.partitionCount)
+        : undefined
+    const buckets =
+      key === undefined ? undefined : this.pendingLaneUpdates.get(key)
+    for (const buffered of [...this.pendingLaneUpdates.keys()]) {
+      if (buffered.startsWith(`${drive.batchId}:`)) {
+        this.pendingLaneUpdates.delete(buffered)
+      }
+    }
+    if (!stamper || !buckets) return
     if (!buckets) return
     stamper.applyUtilizationUpdate(
       [...buckets].map(([index, value]) => ({ index, value })),
@@ -1372,7 +1433,7 @@ export class SwarmIdProxy {
     batchId: string,
     requestId: string,
   ): void {
-    const coordinator = this.drive?.coordinator
+    const coordinator = this.drives.get(batchId)?.coordinator
     if (!coordinator) return
     // Once the rank timer fires its handle is gone from `pendingYields`, so
     // the answered-id memory is what keeps a round from being answered twice
@@ -1417,10 +1478,12 @@ export class SwarmIdProxy {
    * Change the formula here and change it there, or the script starts
    * measuring a race the product does not have.
    */
-  private yieldRankDelayMs(requestId: string): number {
-    const coordinator = this.drive?.coordinator
-    const partition = coordinator?.currentPartition
-    const partitionCount = coordinator?.partitionCount ?? 1
+  private yieldRankDelayMs(
+    coordinator: BatchWriteCoordinator,
+    requestId: string,
+  ): number {
+    const partition = coordinator.currentPartition
+    const partitionCount = coordinator.partitionCount
     if (partition === undefined || partitionCount <= 1) return 0
     // The id is hex (schema-enforced), so the seed needs no hash function.
     const seed = Number.parseInt(
@@ -1444,7 +1507,7 @@ export class SwarmIdProxy {
     this.markRequestAnswered(requestId)
     const scheduled = this.pendingYields.get(requestId)
     if (scheduled === undefined) return
-    clearTimeout(scheduled)
+    clearTimeout(scheduled.timer)
     this.pendingYields.delete(requestId)
   }
 
@@ -1456,12 +1519,14 @@ export class SwarmIdProxy {
     if (oldest !== undefined) this.answeredRequests.delete(oldest)
   }
 
-  /** Drop every scheduled answer — nothing they would release is ours now. */
-  private cancelPendingYields(): void {
-    for (const timer of this.pendingYields.values()) {
-      clearTimeout(timer)
+  /** Drop the scheduled answers for `batchId` — nothing they would release
+   *  is ours now. */
+  private cancelPendingYields(batchId: string): void {
+    for (const [requestId, scheduled] of this.pendingYields) {
+      if (scheduled.batchId !== batchId) continue
+      clearTimeout(scheduled.timer)
+      this.pendingYields.delete(requestId)
     }
-    this.pendingYields.clear()
   }
 
   /**
@@ -1487,8 +1552,8 @@ export class SwarmIdProxy {
           // stampers (`unbindPartition` also resets the count to 1) — that
           // coupling lives in another file and is exactly the assumption whose
           // last violation caused the resume-pointer skip described above.
-          const stamper = this.drive?.stamper
-          if (message.batchId !== this.drive?.batchId || !stamper) return
+          const stamper = this.drives.get(message.batchId)?.stamper
+          if (!stamper) return
           const lane = stamper.currentPartition
           if (lane === undefined) {
             // Unbound: the lane this delta belongs to may well be the one we
@@ -1522,16 +1587,14 @@ export class SwarmIdProxy {
           return
         }
         case "lease-request": {
-          const coordinator = this.drive?.coordinator
-          // Batch as well as account: a lane is one partition of ONE batch
-          // (#589), so a waiter on another batch contends with nothing we
-          // hold, and yielding to it would drop a lease that helps neither of
-          // us. Per-app stamp overrides make that a live pairing, not a
-          // multi-batch hypothetical.
+          // Routed by batch as well as account: a lane is one partition of ONE
+          // batch (#589), so a waiter on another batch contends with nothing
+          // that drive holds, and yielding it would drop a lease that helps
+          // neither of us. Each drive answers for its own (#862).
+          const coordinator = this.drives.get(message.batchId)?.coordinator
           if (
             !coordinator ||
             message.accountId !== coordinator.accountId ||
-            message.batchId !== coordinator.batchId ||
             message.fromDeviceId === this.deviceId
           ) {
             return
@@ -1546,22 +1609,28 @@ export class SwarmIdProxy {
           // an active account — sits at the front of the order and declines in
           // silence, and every later rank falls through behind it.
           if (!coordinator.canYieldForPeer) return
-          const timer = setTimeout(() => {
-            this.pendingYields.delete(requestId)
-            this.answerLeaseRequest(
-              message.accountId,
-              message.batchId,
-              requestId,
-            )
-          }, this.yieldRankDelayMs(requestId))
-          this.pendingYields.set(requestId, timer)
+          const timer = setTimeout(
+            () => {
+              this.pendingYields.delete(requestId)
+              this.answerLeaseRequest(
+                message.accountId,
+                message.batchId,
+                requestId,
+              )
+            },
+            this.yieldRankDelayMs(coordinator, requestId),
+          )
+          this.pendingYields.set(requestId, {
+            batchId: message.batchId,
+            timer,
+          })
           return
         }
         case "lease-claim": {
+          const coordinator = this.drives.get(message.batchId)?.coordinator
           if (
             message.fromDeviceId === this.deviceId ||
-            message.accountId !== this.drive?.coordinator?.accountId ||
-            message.batchId !== this.drive?.coordinator?.batchId
+            message.accountId !== coordinator?.accountId
           ) {
             return
           }
@@ -1572,17 +1641,18 @@ export class SwarmIdProxy {
           return
         }
         case "lease-released": {
+          const coordinator = this.drives.get(message.batchId)?.coordinator
           if (
+            !coordinator ||
             message.fromDeviceId === this.deviceId ||
-            message.accountId !== this.drive?.coordinator?.accountId ||
-            message.batchId !== this.drive?.coordinator?.batchId
+            message.accountId !== coordinator.accountId
           ) {
             return
           }
           // The claim normally arrives first; this also covers a peer whose
           // claim we missed, and a release that answers no request at all.
           this.standDownFromRequest(message.requestId)
-          this.drive?.coordinator?.notifySlotMaybeFree()
+          coordinator.notifySlotMaybeFree()
           return
         }
         case "account-delta": {
@@ -1781,7 +1851,7 @@ export class SwarmIdProxy {
     // fingerprint yet and resolves again — so an init whose drive is no longer
     // the session's has been superseded, and leaves the session to the init
     // that superseded it.
-    const superseded = (): boolean => this.drive !== drive
+    const superseded = (): boolean => this.drives.get(batchId) !== drive
 
     // Look up account info for utilization tracking
     const accountInfo = await this.lookupAccountForApp()
@@ -1809,7 +1879,7 @@ export class SwarmIdProxy {
       )
     } catch (error) {
       // Nothing to clear: the write path was dropped when the stamp was
-      // resolved (`setResolvedStamp`), and if this init has been superseded,
+      // resolved (`reconcileDrives`), and if this init has been superseded,
       // whatever stamper there is by now belongs to the newer one.
       console.error("[Proxy] Failed to create stamper:", error)
       return
@@ -1865,8 +1935,11 @@ export class SwarmIdProxy {
       readLeaseCache: () => this.readLeaseCache(accountInfo.accountId, batchId),
       writeLeaseCache: (snap) =>
         this.writeLeaseCache(accountInfo.accountId, batchId, snap ?? null),
-      flushStamperState: () => this.saveStamperStateIfNeeded(),
-      getWorkerPool: (count) => this.getOrCreateWorkerPool(count),
+      // Bound to this drive, not read at call time: a coordinator torn down
+      // mid-write still runs these, and must not flush, or sign with, the
+      // drive the session holds by then (#862).
+      flushStamperState: () => this.saveStamperStateIfNeeded(drive),
+      getWorkerPool: (count) => drive.getOrCreateWorkerPool(count),
       onLeaseChange: () => this.emitConnectionInfoIfChanged(),
       // Each slot-wait poll round, ask live holders over the account bus to
       // yield their partition (docs/Account-Bus.md, bus-accelerated leases).
@@ -1891,7 +1964,7 @@ export class SwarmIdProxy {
       // from this tab's own in-memory state (the adopt fast path does), and the
       // publish below reads those counters.
       onLeaseAcquired: () => {
-        this.applyPendingLaneUpdate()
+        this.applyPendingLaneUpdate(drive)
         this.schedulePublish("acquired")
       },
       // Every release — idle timer, a peer's request, teardown — wakes the
@@ -1952,22 +2025,11 @@ export class SwarmIdProxy {
   }
 
   /**
-   * The current drive's worker pool. Read at call time, not bound to the
-   * coordinator's own drive: a coordinator torn down mid-write that asks after
-   * a rebind is handed the new drive's pool.
-   */
-  private async getOrCreateWorkerPool(
-    requestedCount?: number,
-  ): Promise<StampWorkerPool | undefined> {
-    return this.drive?.getOrCreateWorkerPool(requestedCount)
-  }
-
-  /**
    * Save stamper bucket state to IndexedDB
    * Utilization-aware stamper persists bucket state automatically
    */
-  private async saveStamperState(): Promise<void> {
-    const stamper = this.drive?.stamper
+  private async saveStamperState(drive: DriveWritePath): Promise<void> {
+    const stamper = drive.stamper
     if (!stamper) {
       return
     }
@@ -1992,14 +2054,11 @@ export class SwarmIdProxy {
       // lane, so a remote copy is dropped at the receive guard after paying for
       // encryption and a frame the signaling server's payload cap may refuse
       // outright (one entry per dirty bucket, up to NUM_BUCKETS of them).
-      // The batch is read after the flush, so a rebind landing mid-flush
-      // labels these buckets with the next drive's batch.
-      const batchId = this.drive?.batchId
-      if (batchId && buckets.length > 0) {
+      if (buckets.length > 0) {
         this.bus.publish(
           {
             type: "utilization-updated",
-            batchId,
+            batchId: drive.batchId,
             partition,
             partitionCount,
             buckets,
@@ -2019,11 +2078,28 @@ export class SwarmIdProxy {
    * mode the write goes through the {@link BatchWriteCoordinator}, which takes
    * the cross-tab write lock, ensures a held partition, and flushes stamper
    * state — the proxy no longer owns any of that.
+   *
+   * A write that names its drive (`batchId`) goes to that drive's write path,
+   * built on first use, and never falls back to the gateway: the app asked
+   * for that drive (#862).
    */
   private async withModeAwareWriteLock<T>(
     targetOptions: { useWorkers?: boolean; workerCount?: number } | undefined,
     operation: (target: UploadTarget) => Promise<T>,
+    batchId?: string,
   ): Promise<T> {
+    if (batchId !== undefined) {
+      const drive = await this.writePathFor(batchId)
+      this.refuseDrive(drive)
+      if (!drive.coordinator) {
+        throw new SwarmIdError(
+          "upload-unavailable",
+          "That drive's write path did not build.",
+          { reason: "stamper-failed" },
+        )
+      }
+      return drive.coordinator.withWrite(operation, targetOptions)
+    }
     if (this.isSubsidisedModeActive()) {
       return operation({
         mode: "subsidised",
@@ -2041,13 +2117,13 @@ export class SwarmIdProxy {
   }
 
   /**
-   * Save stamper state only in stamper mode.
-   * In subsidised mode, there's no local stamp state to persist.
+   * Save the drive's stamper state unless its writes go to the gateway: a
+   * refused drive with a gateway configured has no local stamp state to
+   * persist.
    */
-  private async saveStamperStateIfNeeded(): Promise<void> {
-    if (!this.isSubsidisedModeActive()) {
-      await this.saveStamperState()
-    }
+  private async saveStamperStateIfNeeded(drive: DriveWritePath): Promise<void> {
+    if (this.subsidisedGatewayUrl && drive.refusal) return
+    await this.saveStamperState(drive)
   }
 
   /**
@@ -2382,11 +2458,7 @@ export class SwarmIdProxy {
       this.joinAccountBus()
 
       // Look up postage stamp from shared storage based on connected identity
-      const stamp = this.lookupPostageStampForApp()
-      const drive = this.setResolvedStamp(stamp)
-      if (drive && stamp) {
-        await this.initializeStamper(drive, stamp.depth)
-      }
+      await this.rebuildDrives()
       return
     }
 
@@ -2516,28 +2588,35 @@ export class SwarmIdProxy {
   }
 
   /**
-   * Look up the postage stamp for the currently connected app's identity
-   * by reading from shared localStorage stores.
+   * The connected app's drives, from shared storage or the partitioned
+   * session's account view: its primary (`resolveStampForApp`), and every
+   * live drive its grant names — the ones it may write to (#862).
    */
-  private lookupPostageStampForApp(): PostageStamp | undefined {
-    if (!this.parentOrigin) {
-      return undefined
-    }
-
+  private lookupDrivesForApp(): {
+    primary: PostageStamp | undefined
+    granted: PostageStamp[]
+  } {
+    const none = { primary: undefined, granted: [] }
+    if (!this.parentOrigin) return none
     try {
       const connection = this.findConnectionForParent()
-      if (!connection) {
-        return undefined
-      }
+      if (!connection) return none
       const { account, app } = connection
 
       // The app's primary drive (#862): the account default for no grant or
       // `"all"`, the first granted regular drive for a list. Never a drive the
       // app was not granted.
-      return resolveStampForApp(app, account, account.postageStamps)
+      return {
+        primary: resolveStampForApp(app, account, account.postageStamps),
+        granted: stampsReachableByApp(
+          app,
+          account,
+          account.postageStamps,
+        ).filter((stamp) => !stamp.deletedAt),
+      }
     } catch (error) {
-      console.error("[Proxy] Error looking up postage stamp:", error)
-      return undefined
+      console.error("[Proxy] Error looking up postage stamps:", error)
+      return none
     }
   }
 
@@ -3188,7 +3267,7 @@ export class SwarmIdProxy {
     this.authLoading = false
     this.appSecret = undefined
     // Before dropping `deviceId` — the release announcement is sent as us.
-    this.setResolvedStamp(undefined)
+    this.teardownDrives()
     this.deviceId = undefined
     if (this.publishTimer !== undefined) {
       clearTimeout(this.publishTimer)
@@ -3242,9 +3321,21 @@ export class SwarmIdProxy {
     if (this.isSubsidisedModeActive()) {
       return
     }
-    // Refuse here, before the write coordinator: its first stamped write is
-    // the lease claim, and a refused claim reads as partition contention (#745).
-    const refusal = this.drive?.refusal
+    if (this.drive) this.refuseDrive(this.drive)
+    // NB: the multi-device "all partitions held" case is NOT checked here.
+    // It's deferred to the coordinator's `withWrite`, which runs a fresh
+    // acquisition attempt (with slot-wait) under the write lock and then throws
+    // if no partition is held — so a read-only upload waits for a slot to free
+    // (turn-taking) instead of failing instantly.
+  }
+
+  /**
+   * Refuse a drive here, before its write coordinator: its first stamped
+   * write is the lease claim, and a refused claim reads as partition
+   * contention (#745).
+   */
+  private refuseDrive(drive: DriveWritePath): void {
+    const refusal = drive.refusal
     if (refusal === "stamp-expired") {
       throw new SwarmIdError(
         "upload-unavailable",
@@ -3259,11 +3350,6 @@ export class SwarmIdProxy {
         { reason: "stamp-not-usable" },
       )
     }
-    // NB: the multi-device "all partitions held" case is NOT checked here.
-    // It's deferred to the coordinator's `withWrite`, which runs a fresh
-    // acquisition attempt (with slot-wait) under the write lock and then throws
-    // if no partition is held — so a read-only upload waits for a slot to free
-    // (turn-taking) instead of failing instantly.
   }
 
   /**
@@ -5680,7 +5766,7 @@ export class SwarmIdProxy {
     message: GetPostageBatchMessage,
     event: MessageEvent,
   ): Promise<void> {
-    const stamp = this.lookupPostageStampForApp()
+    const stamp = this.lookupDrivesForApp().primary
 
     if (!stamp) {
       this.postMessage(event, {
