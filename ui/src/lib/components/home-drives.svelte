@@ -14,7 +14,11 @@
   import Plus from '@lucide/svelte/icons/plus'
   import Star from '@lucide/svelte/icons/star'
   import Trash2 from '@lucide/svelte/icons/trash-2'
-  import { type PostageStamp, derivePostageSignerKeySync } from '@snaha/swarm-id/internal'
+  import {
+    type PostageStamp,
+    derivePostageSignerKeySync,
+    isScratchDrive,
+  } from '@snaha/swarm-id/internal'
 
   import AppIcon from '$lib/components/app-icon.svelte'
   import DriveAddDialog from '$lib/components/drive-add-dialog.svelte'
@@ -319,7 +323,8 @@
                   </Button>
                 {/snippet}
 
-                {#if !isDefault}
+                <!-- The account never syncs to a scratch drive (#862). -->
+                {#if !isDefault && !isScratchDrive(drive)}
                   <DropdownMenuItem onclick={() => setDefault(drive)}>
                     <Star class="size-4 shrink-0" />
                     <span class="flex-1 whitespace-nowrap">Set as default</span>

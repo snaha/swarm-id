@@ -217,10 +217,10 @@ With the bus in place the partitioned iframe is a first-class writer:
   encrypted on-Swarm account state contains the `derivationKey` anyway, so holding the derived
   keys is equivalent — derived-only would be defense-in-depth theater.)
 - **What the partitioned session is allowed to hold** (#578). The stamp collection is narrowed
-  to the batches this app's own pointers name — its `postageStampBatchID` override and the
-  account default it falls through to (`stampsReachableByApp`) — at the handover AND after
-  every `account-delta` fold, since the publisher is an unpartitioned context that sends the
-  whole collection. A session can only ever spend the stamp `resolveStampForApp` picks, so
+  to the batches this app's drive grant names — its `drives` list, every drive for `"all"`, or
+  the account default when it has no grant (`stampsReachableByApp`, #862) — at the handover
+  AND after every `account-delta` fold, since the publisher is an unpartitioned context that
+  sends the whole collection. A session can only ever spend the drives it was granted, so
   every other signer key it held was exposure with no use.
 
   The `derivationKey` **stays**, and that is the trade-off worth stating rather than leaving

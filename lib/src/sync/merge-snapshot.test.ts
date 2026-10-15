@@ -413,8 +413,8 @@ describe("mergeSnapshotWithRemote — apps / stamps", () => {
     const staleWithNewStamp = {
       ...makeConnectedApp("https://app.example"),
       appSecret: "33".repeat(32),
-      postageStampBatchID: new BatchId("cc".repeat(32)),
-      postageStampBatchIDAt: 9_000_000,
+      drives: [new BatchId("cc".repeat(32))],
+      drivesAt: 9_000_000,
     }
     const result = mergeSnapshotWithRemote(
       makeSnapshot({ connectedApps: [staleWithNewStamp] }),
@@ -431,17 +431,18 @@ describe("mergeSnapshotWithRemote — apps / stamps", () => {
   it("a newer drive choice propagates between two live copies", () => {
     const chosen = {
       ...makeConnectedApp("https://app.example"),
-      postageStampBatchID: new BatchId("cc".repeat(32)),
-      postageStampBatchIDAt: 9_000_000,
+      drives: [new BatchId("cc".repeat(32))],
+      drivesAt: 9_000_000,
     }
     const stale = makeConnectedApp("https://app.example")
     const result = mergeSnapshotWithRemote(
       makeSnapshot({ connectedApps: [stale] }),
       makeSnapshot({ connectedApps: [chosen] }),
     )
-    expect(result.connectedApps[0].postageStampBatchID?.toHex()).toBe(
+    const { drives } = result.connectedApps[0]
+    expect(drives !== "all" && drives?.map((b) => b.toHex())).toEqual([
       "cc".repeat(32),
-    )
+    ])
   })
 
   // A removal is not permanent: connecting again clears both markers and sets a

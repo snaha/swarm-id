@@ -167,8 +167,11 @@ export function serializeConnectedApp(
     appDescription: app.appDescription,
     connectedUntil: app.connectedUntil,
     appSecret: app.appSecret,
-    postageStampBatchID: app.postageStampBatchID?.toString(),
-    postageStampBatchIDAt: app.postageStampBatchIDAt,
+    drives:
+      app.drives === "all"
+        ? "all"
+        : app.drives?.map((batchId) => batchId.toString()),
+    drivesAt: app.drivesAt,
     revokedAt: app.revokedAt,
     disconnectedAt: app.disconnectedAt,
   }
@@ -207,6 +210,7 @@ export function serializePostageStamp(
     signerKey: stamp.signerKey.toString(),
     name: stamp.name,
     nameUpdatedAt: stamp.nameUpdatedAt,
+    kind: stamp.kind,
     utilization: stamp.utilization,
     usable: stamp.usable,
     depth: stamp.depth,
