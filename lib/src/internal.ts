@@ -135,7 +135,10 @@ export {
   fetchOnChainBatchStateResult,
 } from "./utils/postage-contract"
 
-export { stampsReachableByApp } from "./utils/postage-stamp-association"
+export {
+  isScratchDrive,
+  stampsReachableByApp,
+} from "./utils/postage-stamp-association"
 
 export { sleep, withIdleTimeout } from "./utils/promise"
 

@@ -217,10 +217,10 @@ With the bus in place the partitioned iframe is a first-class writer:
   encrypted on-Swarm account state contains the `derivationKey` anyway, so holding the derived
   keys is equivalent — derived-only would be defense-in-depth theater.)
 - **What the partitioned session is allowed to hold** (#578). The stamp collection is narrowed
-  to the batches this app's own pointers name — its `postageStampBatchID` override and the
-  account default it falls through to (`stampsReachableByApp`) — at the handover AND after
-  every `account-delta` fold, since the publisher is an unpartitioned context that sends the
-  whole collection. A session can only ever spend the stamp `resolveStampForApp` picks, so
+  to the batches this app's drive grant names — its `drives` list, every drive for `"all"`, or
+  the account default when it has no grant (`stampsReachableByApp`, #862) — at the handover
+  AND after every `account-delta` fold, since the publisher is an unpartitioned context that
+  sends the whole collection. A session can only ever spend the drives it was granted, so
   every other signer key it held was exposure with no use.
 
   The `derivationKey` **stays**, and that is the trade-off worth stating rather than leaving
@@ -315,7 +315,9 @@ Each landed as its own PR chain, in this order:
    is untouched as the authority and offline fallback.
 
    **Scoped to the batch, like the lock it front-runs** (#589). Every lease message carries a
-   `batchId`, and a receiver drops one naming a batch it does not serve. A lane is
+   `batchId`, and a receiver routes it to the write path of the drive it names, or drops it
+   when it holds none for that batch: a session writing several drives runs one coordinator
+   per drive, each answering for its own lanes (#862). A lane is
    `(batchId, partition)` — the lock, intent and occupancy addresses all hash the batch — so a
    holder on batch X and a waiter on batch Y contend for nothing, and answering across batches
    would drop a lease that helps neither. The bus must be neither broader nor narrower than the

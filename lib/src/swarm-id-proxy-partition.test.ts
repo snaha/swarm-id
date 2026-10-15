@@ -210,6 +210,7 @@ import { deriveBusContext } from "./bus/bus-context"
 import { BatchWriteCoordinator } from "./sync/batch-write-coordinator"
 import { publishDeviceState, readRoster } from "./sync"
 import { UtilizationAwareStamper } from "./utils/batch-utilization"
+import { DriveWritePath } from "./proxy/drive-write-path"
 import {
   createAccountsStorageManager,
   serializeAccount,
@@ -652,8 +653,8 @@ describe("SwarmIdProxy partitioned write enablement", () => {
     finishCreate!()
     await identified
 
-    const internals = proxy as unknown as { stamper: unknown }
-    expect(internals.stamper).toBeUndefined()
+    const internals = proxy as unknown as { drive?: { stamper: unknown } }
+    expect(internals.drive?.stamper).toBeUndefined()
     expect(vi.mocked(BatchWriteCoordinator).mock.results).toHaveLength(
       coordinatorsBefore,
     )
@@ -702,20 +703,372 @@ describe("SwarmIdProxy partitioned write enablement", () => {
         })),
       )
       const internals = proxy as unknown as {
-        stamper: { batchId?: BatchId } | undefined
+        drive?: { stamper: { batchId?: BatchId } | undefined }
       }
       await vi.waitFor(() =>
-        expect(String(internals.stamper?.batchId)).toBe(replacement.toHex()),
+        expect(String(internals.drive?.stamper?.batchId)).toBe(
+          replacement.toHex(),
+        ),
       )
 
       rejectCreate!(new Error("batch gone"))
       await identified
 
-      expect(String(internals.stamper?.batchId)).toBe(replacement.toHex())
+      expect(String(internals.drive?.stamper?.batchId)).toBe(
+        replacement.toHex(),
+      )
       const infos = messagesOfType("connectionInfoChanged")
       expect(infos[infos.length - 1].uploadUnavailableReason).toBeUndefined()
     },
   )
+
+  // An account's drives share no write state (#862): each has its own stamper,
+  // coordinator and worker pool, and what a coordinator was built with reaches
+  // ITS drive, never whichever one the session resolves by the time it calls.
+  describe("each drive has its own write path", () => {
+    const SECOND_BATCH_ID_HEX = "dd".repeat(32)
+    const UNGRANTED_BATCH_ID_HEX = "ee".repeat(32)
+    const ACCOUNT_ID = "aa".repeat(20)
+
+    type StamperFake = {
+      batchId: unknown
+      flush: ReturnType<typeof vi.fn>
+      getBucketUpdatesForBroadcast: () => { index: number; value: number }[]
+      applyUtilizationUpdate: ReturnType<typeof vi.fn>
+      currentPartition: number | undefined
+      partitionCount: number
+    }
+
+    type CoordinatorFake = {
+      batchId: string
+      teardown: ReturnType<typeof vi.fn>
+      withWrite: ReturnType<typeof vi.fn>
+      yieldForPeer: ReturnType<typeof vi.fn>
+      deps: {
+        flushStamperState(): Promise<void>
+        getWorkerPool(count?: number): Promise<unknown>
+      }
+    }
+
+    type DriveInternals = {
+      withModeAwareWriteLock<T>(
+        targetOptions: undefined,
+        operation: (target: unknown) => Promise<T>,
+        batchId?: string,
+      ): Promise<T>
+    }
+
+    const internals = () => proxy as unknown as DriveInternals
+
+    // `coordinatorFor` reads every coordinator built, so only this test's.
+    beforeEach(() => {
+      vi.mocked(BatchWriteCoordinator).mockClear()
+    })
+    // A queued `nextStamper` a test did not consume would hand its stamper to
+    // the next test's first drive. Back to the default `create`.
+    afterEach(() => {
+      vi.mocked(UtilizationAwareStamper.create).mockReset()
+    })
+
+    /** A stamper of its own for the next `create`, so two drives' flushes and
+     *  deltas can be told apart. */
+    const nextStamper = (): StamperFake => {
+      const stamper: StamperFake = {
+        batchId: undefined,
+        flush: vi.fn(async () => {}),
+        getBucketUpdatesForBroadcast: () => [{ index: 1, value: 2 }],
+        applyUtilizationUpdate: vi.fn(),
+        currentPartition: 0,
+        partitionCount: 2,
+      }
+      vi.mocked(UtilizationAwareStamper.create).mockImplementationOnce(
+        async (_signerKey, batchId) => {
+          stamper.batchId = batchId
+          return stamper as unknown as UtilizationAwareStamper
+        },
+      )
+      return stamper
+    }
+
+    const coordinatorFor = (batchId: string): CoordinatorFake | undefined =>
+      vi
+        .mocked(BatchWriteCoordinator)
+        .mock.results.map((result) => result.value as CoordinatorFake)
+        .filter((coordinator) => coordinator.batchId === batchId)
+        .at(-1)
+
+    const stampOf = (batchHex: string): PostageStamp => ({
+      ...makeSyncedAccount().postageStamps[0],
+      batchID: new BatchId(batchHex),
+      signerKey: new PrivateKey(
+        batchHex === BATCH_ID_HEX ? "22".repeat(32) : "23".repeat(32),
+      ),
+    })
+
+    /** Connect the dApp to an account with two drives, both granted. */
+    const connectWithTwoDrives = async (): Promise<void> => {
+      seedConnectedAccount({
+        account: {
+          postageStamps: [stampOf(BATCH_ID_HEX), stampOf(SECOND_BATCH_ID_HEX)],
+        },
+        connectedApps: [
+          {
+            appUrl: PARENT_ORIGIN,
+            appName: "dApp",
+            appSecret: "44".repeat(32),
+            lastConnectedAt: Date.now(),
+            connectedUntil: Date.now() + 60_000,
+            drives: [
+              new BatchId(BATCH_ID_HEX),
+              new BatchId(SECOND_BATCH_ID_HEX),
+            ],
+          },
+        ],
+      })
+      await dispatch(
+        { type: "parentIdentify", requestId: "r1", metadata: { name: "dApp" } },
+        PARENT_ORIGIN,
+        parentWindow,
+      )
+    }
+
+    /** Rewrite the stored account, which reaches the proxy as a storage event. */
+    const updateAccount = (
+      update: (account: SignedInAccount) => SignedInAccount,
+    ) => {
+      const shell = createAccountsStorageManager()
+      shell.save((shell.load() as SignedInAccount[]).map(update))
+    }
+
+    /** Move the dApp off the first drive: the second is all it has left. */
+    const dropFirstDrive = () =>
+      updateAccount((account) => ({
+        ...account,
+        defaultPostageStampBatchID: new BatchId(SECOND_BATCH_ID_HEX),
+        postageStamps: [stampOf(SECOND_BATCH_ID_HEX)],
+        connectedApps: account.connectedApps.map((app) => ({
+          ...app,
+          drives: [new BatchId(SECOND_BATCH_ID_HEX)],
+          drivesAt: Date.now(),
+        })),
+      }))
+
+    it("builds the primary drive's write path at connect, and no other", async () => {
+      nextStamper()
+      await connectWithTwoDrives()
+
+      expect(coordinatorFor(BATCH_ID_HEX)).toBeDefined()
+      expect(coordinatorFor(SECOND_BATCH_ID_HEX)).toBeUndefined()
+    })
+
+    it("builds another granted drive's write path on its first write", async () => {
+      nextStamper()
+      await connectWithTwoDrives()
+      nextStamper()
+
+      await internals().withModeAwareWriteLock(
+        undefined,
+        async () => undefined,
+        SECOND_BATCH_ID_HEX,
+      )
+      await internals().withModeAwareWriteLock(
+        undefined,
+        async () => undefined,
+        SECOND_BATCH_ID_HEX,
+      )
+
+      const second = coordinatorFor(SECOND_BATCH_ID_HEX)!
+      expect(second.withWrite).toHaveBeenCalledTimes(2)
+      expect(coordinatorFor(BATCH_ID_HEX)!.withWrite).not.toHaveBeenCalled()
+      expect(
+        vi
+          .mocked(BatchWriteCoordinator)
+          .mock.results.filter(
+            (result) =>
+              (result.value as CoordinatorFake).batchId === SECOND_BATCH_ID_HEX,
+          ),
+      ).toHaveLength(1)
+    })
+
+    it("refuses a write to a drive the app was not granted", async () => {
+      nextStamper()
+      await connectWithTwoDrives()
+
+      await expect(
+        internals().withModeAwareWriteLock(
+          undefined,
+          async () => undefined,
+          UNGRANTED_BATCH_ID_HEX,
+        ),
+      ).rejects.toMatchObject({ code: "upload-unavailable" })
+      expect(coordinatorFor(UNGRANTED_BATCH_ID_HEX)).toBeUndefined()
+    })
+
+    it("tears down only the drive that leaves the grant", async () => {
+      nextStamper()
+      await connectWithTwoDrives()
+      nextStamper()
+      await internals().withModeAwareWriteLock(
+        undefined,
+        async () => undefined,
+        SECOND_BATCH_ID_HEX,
+      )
+      const first = coordinatorFor(BATCH_ID_HEX)!
+      const second = coordinatorFor(SECOND_BATCH_ID_HEX)!
+
+      updateAccount((account) => ({
+        ...account,
+        connectedApps: account.connectedApps.map((app) => ({
+          ...app,
+          drives: [new BatchId(BATCH_ID_HEX)],
+          drivesAt: Date.now(),
+        })),
+      }))
+
+      await vi.waitFor(() => expect(second.teardown).toHaveBeenCalled())
+      expect(first.teardown).not.toHaveBeenCalled()
+    })
+
+    it("routes a lease-request to the drive it names", async () => {
+      nextStamper()
+      await connectWithTwoDrives()
+      nextStamper()
+      await internals().withModeAwareWriteLock(
+        undefined,
+        async () => undefined,
+        SECOND_BATCH_ID_HEX,
+      )
+      await awaitBusJoin()
+      const busChannel = new BroadcastChannel(accountChannelName)
+      try {
+        busChannel.postMessage({
+          type: "lease-request",
+          accountId: ACCOUNT_ID,
+          batchId: SECOND_BATCH_ID_HEX,
+          fromDeviceId: "peer-device",
+          requestId: "00000000",
+        })
+        await vi.waitFor(() =>
+          expect(
+            coordinatorFor(SECOND_BATCH_ID_HEX)!.yieldForPeer,
+          ).toHaveBeenCalledTimes(1),
+        )
+        expect(
+          coordinatorFor(BATCH_ID_HEX)!.yieldForPeer,
+        ).not.toHaveBeenCalled()
+      } finally {
+        busChannel.close()
+      }
+    })
+
+    it("folds a utilization delta into the drive it names", async () => {
+      const first = nextStamper()
+      await connectWithTwoDrives()
+      const second = nextStamper()
+      await internals().withModeAwareWriteLock(
+        undefined,
+        async () => undefined,
+        SECOND_BATCH_ID_HEX,
+      )
+      await awaitBusJoin()
+      const busChannel = new BroadcastChannel(accountChannelName)
+      try {
+        busChannel.postMessage({
+          type: "utilization-updated",
+          batchId: SECOND_BATCH_ID_HEX,
+          partition: 0,
+          partitionCount: 2,
+          buckets: [{ index: 3, value: 4 }],
+        })
+        await vi.waitFor(() =>
+          expect(second.applyUtilizationUpdate).toHaveBeenCalledTimes(1),
+        )
+        expect(first.applyUtilizationUpdate).not.toHaveBeenCalled()
+      } finally {
+        busChannel.close()
+      }
+    })
+
+    // The three below are what the single-drive proxy read at call time
+    // (docs/Multi-Drive-Plan.md, "Step 3 must bind each callback to its
+    // drive"). A coordinator torn down mid-write is still running them.
+    describe("a torn-down coordinator still reaches only its own drive", () => {
+      it("flushes its own stamper, not the next drive's", async () => {
+        nextStamper()
+        await connectWithTwoDrives()
+        const first = coordinatorFor(BATCH_ID_HEX)!
+        const next = nextStamper()
+        dropFirstDrive()
+        await vi.waitFor(() =>
+          expect(coordinatorFor(SECOND_BATCH_ID_HEX)).toBeDefined(),
+        )
+
+        await first.deps.flushStamperState()
+
+        expect(next.flush).not.toHaveBeenCalled()
+      })
+
+      it("is handed no worker pool signing for the next drive", async () => {
+        nextStamper()
+        await connectWithTwoDrives()
+        const first = coordinatorFor(BATCH_ID_HEX)!
+        nextStamper()
+        dropFirstDrive()
+        await vi.waitFor(() =>
+          expect(coordinatorFor(SECOND_BATCH_ID_HEX)).toBeDefined(),
+        )
+        const pools = vi.spyOn(
+          DriveWritePath.prototype,
+          "getOrCreateWorkerPool",
+        )
+
+        await first.deps.getWorkerPool(2)
+
+        const askedOf = pools.mock.contexts.map(
+          (drive) => (drive as DriveWritePath).batchId,
+        )
+        expect(askedOf).not.toContain(SECOND_BATCH_ID_HEX)
+      })
+
+      it("labels a utilization broadcast with its own batch when the drive changes mid-flush", async () => {
+        const stamper = nextStamper()
+        await connectWithTwoDrives()
+        const first = coordinatorFor(BATCH_ID_HEX)!
+        await awaitBusJoin()
+        let finishFlush: (() => void) | undefined
+        stamper.flush.mockImplementationOnce(
+          () =>
+            new Promise<void>((resolve) => {
+              finishFlush = resolve
+            }),
+        )
+        const busChannel = new BroadcastChannel(accountChannelName)
+        const published: { type: string; batchId?: string }[] = []
+        busChannel.onmessage = (event) =>
+          published.push(event.data as { type: string; batchId?: string })
+        try {
+          const flushed = first.deps.flushStamperState()
+          await vi.waitFor(() => expect(finishFlush).toBeDefined())
+          nextStamper()
+          dropFirstDrive()
+          await vi.waitFor(() =>
+            expect(coordinatorFor(SECOND_BATCH_ID_HEX)).toBeDefined(),
+          )
+
+          finishFlush!()
+          await flushed
+          await flushBus()
+
+          const labels = published
+            .filter((message) => message.type === "utilization-updated")
+            .map((message) => message.batchId)
+          expect(labels).toEqual([BATCH_ID_HEX])
+        } finally {
+          busChannel.close()
+        }
+      })
+    })
+  })
 
   // The stamper and the coordinator that writes through it belong to one
   // stamp. Each case is a moment the two could disagree: an upload has to go
@@ -2325,16 +2678,16 @@ describe("SwarmIdProxy partitioned write enablement", () => {
         busChannel.postMessage(
           accountDelta({
             lastModified: localAt - 10_000,
-            // The second stamp has to be one this app's pointers name, or the
+            // The second stamp has to be one this app's grant names, or the
             // narrowing (#578) drops it and the fold is unobservable here: the
-            // delta re-points the app at it in the same message.
+            // delta grants the app both drives in the same message.
             connectedApps: [
               {
                 appUrl: PARENT_ORIGIN,
                 appName: "dApp",
                 lastConnectedAt: Date.now(),
-                postageStampBatchID: new BatchId(OTHER_BATCH_ID_HEX),
-                postageStampBatchIDAt: Date.now() + 1,
+                drives: [stamp.batchID, new BatchId(OTHER_BATCH_ID_HEX)],
+                drivesAt: Date.now() + 1,
               },
             ],
             postageStamps: [
@@ -2733,11 +3086,11 @@ describe("SwarmIdProxy partitioned write enablement", () => {
     })
 
     /** What the narrowing filters BY has to be what the merge just decided —
-     *  the delta carries both the new pointer and the stamp it names, and a
-     *  narrowing that reads the pre-merge pointers throws the stamp away while
-     *  keeping the pointer. `resolveStampForApp` then falls through to the
-     *  account default and the session uploads to the wrong batch, until some
-     *  unrelated change happens to publish again. */
+     *  the delta carries both the new grant and the stamp it names, and a
+     *  narrowing that reads the pre-merge grant throws the stamp away while
+     *  keeping the grant. `resolveStampForApp` then resolves nothing and the
+     *  session cannot upload, until some unrelated change happens to publish
+     *  again. */
     function otherStamp(): PostageStamp {
       return {
         ...makeSyncedAccount().postageStamps[0],
@@ -2758,9 +3111,9 @@ describe("SwarmIdProxy partitioned write enablement", () => {
                 appName: "dApp",
                 lastConnectedAt: Date.now(),
                 // Strictly newer than the hydrated entry, so the fold cannot
-                // tie on a same-millisecond clock and keep the local pointer.
-                postageStampBatchIDAt: Date.now() + 1,
-                postageStampBatchID: new BatchId(OTHER_BATCH_ID_HEX),
+                // tie on a same-millisecond clock and keep the local grant.
+                drivesAt: Date.now() + 1,
+                drives: [new BatchId(OTHER_BATCH_ID_HEX)],
               },
             ],
             postageStamps: [makeSyncedAccount().postageStamps[0], otherStamp()],

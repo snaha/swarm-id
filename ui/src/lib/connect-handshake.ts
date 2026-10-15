@@ -79,11 +79,7 @@ export function partitionHandoverAccount(
   const app = account.connectedApps.find((entry) => entry.appUrl === appOrigin)
   return serializeSyncedAccount({
     ...account,
-    postageStamps: stampsReachableByApp(
-      { postageStampBatchID: app?.postageStampBatchID },
-      account,
-      account.postageStamps,
-    ),
+    postageStamps: stampsReachableByApp({ drives: app?.drives }, account, account.postageStamps),
   })
 }
 

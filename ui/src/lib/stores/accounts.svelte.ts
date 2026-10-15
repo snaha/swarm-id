@@ -11,6 +11,7 @@ import {
   PostageStampSchemaV1,
   type SyncedAccount,
   createAccountsStorageManager,
+  isScratchDrive,
   isSignedOutAccount,
   serializePostageStamp,
 } from '@snaha/swarm-id/internal'
@@ -376,21 +377,19 @@ export class Account {
   }
 
   /**
-   * Point an app at a specific drive — or back at the account default with
-   * `undefined`. The choice carries through the cross-device merge on its OWN
-   * clock: it says nothing about whether the app is still connected, and a
-   * clock that ranked the whole entry let this edit outrank a revoke made on
-   * another device (#681). No-op when the app has no entry (nothing to point).
+   * Set the drives an app may write to — or back to the account default with
+   * `undefined` (#862). The grant carries through the cross-device merge on
+   * its OWN clock: it says nothing about whether the app is still connected,
+   * and a clock that ranked the whole entry let this edit outrank a revoke
+   * made on another device (#681). No-op when the app has no entry.
    */
-  setAppStamp(appUrl: string, batchID: BatchId | undefined) {
+  setAppDrives(appUrl: string, drives: ConnectedApp['drives']) {
     if (!this.connectedApps.some((app) => app.appUrl === appUrl)) {
       return
     }
     const now = Date.now()
     this.connectedApps = this.connectedApps.map((app) =>
-      app.appUrl === appUrl
-        ? { ...app, postageStampBatchID: batchID, postageStampBatchIDAt: now }
-        : app,
+      app.appUrl === appUrl ? { ...app, drives, drivesAt: now } : app,
     )
     this.lastModified = now
     this.#commit()
@@ -433,7 +432,9 @@ export class Account {
       ...this.postageStamps.filter((existing) => !existing.batchID.equals(stamp.batchID)),
       newStamp,
     ]
-    if (this.defaultPostageStampBatchID === undefined) {
+    // The account syncs to its default drive, and a scratch drive overwrites
+    // its oldest data — so the first REGULAR drive becomes the default (#862).
+    if (this.defaultPostageStampBatchID === undefined && !isScratchDrive(newStamp)) {
       this.defaultPostageStampBatchID = newStamp.batchID
       this.defaultStampAt = now
     }
@@ -502,10 +503,11 @@ export class Account {
       stamp.batchID.equals(batchID) ? { ...stamp, deletedAt: now } : stamp,
     )
     // Never leave a default pointing at a stamp we just removed; fall back to a
-    // remaining live stamp so the account never references a deleted batch.
+    // remaining live regular stamp so the account never references a deleted
+    // batch, nor syncs to a scratch drive (#862).
     if (this.defaultPostageStampBatchID?.equals(batchID)) {
       this.defaultPostageStampBatchID = this.postageStamps.find(
-        (stamp) => stamp.deletedAt === undefined,
+        (stamp) => stamp.deletedAt === undefined && !isScratchDrive(stamp),
       )?.batchID
       this.defaultStampAt = now
     }
@@ -513,7 +515,10 @@ export class Account {
     this.#commit()
   }
 
+  /** No-op for a scratch drive: the account never syncs to one (#862). */
   setDefaultStamp(batchID: BatchId | undefined) {
+    const stamp = batchID && this.postageStamps.find((s) => s.batchID.equals(batchID))
+    if (stamp && isScratchDrive(stamp)) return
     const now = Date.now()
     this.defaultPostageStampBatchID = batchID
     this.defaultStampAt = now

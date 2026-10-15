@@ -8,8 +8,9 @@
   completeConnect, so every variant confirms and offers "Go to app"; the
   middle varies (SwarmID-MVP frames 396:17501 / 395:13966 / 395:13889):
   - first connect to an account with several drives: pick the drive this app
-    stores to (persisted as the app's postageStampBatchID; choosing the
-    default leaves the pointer unset so the app tracks the account default);
+    stores to (persisted as the app's drive grant; choosing the default
+    leaves the grant unset so the app tracks the account default). Regular
+    drives only: a scratch drive never takes an app's untargeted writes;
   - no drives yet: the drive pitch, demoted to a secondary card;
   - anything else: plain confirmation.
 -->
@@ -18,6 +19,7 @@
 
   import { BatchId } from '@ethersphere/bee-js'
   import ArrowRight from '@lucide/svelte/icons/arrow-right'
+  import { isScratchDrive } from '@snaha/swarm-id/internal'
 
   import { goto } from '$app/navigation'
   import { resolve } from '$app/paths'
@@ -42,7 +44,7 @@
   )
   const request = connectStore.request
 
-  const drives = $derived(account?.stamps ?? [])
+  const drives = $derived((account?.stamps ?? []).filter((drive) => !isScratchDrive(drive)))
   const defaultBatchHex = $derived(
     account?.defaultPostageStampBatchID?.toHex() ?? drives[0]?.batchID.toHex(),
   )
@@ -74,7 +76,7 @@
     // Persist the drive choice only when it deviates from the account default
     // — an untouched or default choice keeps following the default.
     if (account && request && showPicker && selectedBatchHex !== defaultBatchHex) {
-      account.setAppStamp(request.appOrigin, new BatchId(selectedBatchHex))
+      account.setAppDrives(request.appOrigin, [new BatchId(selectedBatchHex)])
     }
     connectStore.clear()
     window.close()
