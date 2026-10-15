@@ -136,15 +136,17 @@ export const ConnectedAppSchemaV1 = z.object({
   appDescription: z.string().optional(),
   connectedUntil: z.number().optional(),
   appSecret: z.string().optional(),
-  // Optional per-app postage-batch override. Absent → the account default
-  // (`account.defaultPostageStampBatchID`) pays for this app's uploads.
-  postageStampBatchID: StoredBatchId.optional(),
-  // The pointer above rides its own last-writer-wins clock, because it is the
+  // The drives this app may write to (#862). Absent → the account default
+  // (`account.defaultPostageStampBatchID`), followed wherever it moves.
+  // `"all"` → every drive the account has, including ones added later. A
+  // list → exactly those drives; an empty one opts the app out of drives.
+  drives: z.union([z.literal("all"), z.array(StoredBatchId)]).optional(),
+  // The grant above rides its own last-writer-wins clock, because it is the
   // one edit to an entry that says nothing about whether the app is still
   // connected. Ranking the whole entry on a clock this bumped let a drive
   // picked on a stale copy outrank a revoke made elsewhere and take the
   // tombstone with it (#681). Membership merges on the markers below instead.
-  postageStampBatchIDAt: z.number().optional(),
+  drivesAt: z.number().optional(),
   // Tombstone marker. A revoked app is kept in the snapshot (so the removal
   // propagates to other devices) but hidden from the UI and invalid for auth.
   revokedAt: z.number().optional(),
@@ -172,6 +174,11 @@ export const PostageStampSchemaV1 = z.object({
   // naming existed — and those bought outside the app — have none, and callers
   // fall back to a batch-ID-derived label.
   name: z.string().optional(),
+  // Fixed when the drive is created (#862). A scratch drive reuses its slots
+  // as a ring, overwriting its oldest data; a regular one never does, so the
+  // two cannot be mixed on one batch. Absent → regular: only a scratch drive
+  // is marked, the way only a deleted one carries `deletedAt`.
+  kind: z.enum(["regular", "scratch"]).optional(),
   // Rename clock. The name merges on its own last-writer-wins clock, separate
   // from the node-state clock below: a rename made over a stale copy must not
   // carry old batch fields past a concurrent dilute/top-up, nor resurrect a
