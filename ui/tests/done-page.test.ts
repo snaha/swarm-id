@@ -170,13 +170,14 @@ test('connect flow shows the done screen variants and closes the popup', async (
   await page.goto('/')
   const appDrive = await page.evaluate(() => {
     const doc = JSON.parse(localStorage.getItem('swarm-id-accounts') ?? '{}') as {
-      data?: { connectedApps?: { appUrl: string; postageStampBatchID?: string }[] }[]
+      data?: { connectedApps?: { appUrl: string; drives?: string[] | 'all' }[] }[]
     }
     return doc.data
       ?.flatMap((account) => account.connectedApps ?? [])
-      .find((app) => app.appUrl === 'http://localhost:3500')?.postageStampBatchID
+      .find((app) => app.appUrl === 'http://localhost:3500')?.drives
   })
-  expect(appDrive).toMatch(/^[0-9a-f]{64}$/)
+  // Granted exactly the drive the user picked.
+  expect(appDrive).toEqual([expect.stringMatching(/^[0-9a-f]{64}$/)])
 
   // Storage warnings (#437): mark one drive full → the home page shows the
   // attention alert (any tab), and its link jumps to Storage.

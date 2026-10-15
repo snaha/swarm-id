@@ -49,7 +49,7 @@ function makeAccount(appBatch?: BatchId): SyncedAccount {
         appUrl: APP_ORIGIN,
         appName: 'dApp',
         lastConnectedAt: 1_000_000,
-        postageStampBatchID: appBatch,
+        drives: appBatch && [appBatch],
       },
     ],
     postageStamps: [
@@ -67,14 +67,15 @@ const batchIds = (payload: Record<string, unknown>): string[] =>
   (payload.postageStamps as { batchID: string }[]).map((s) => s.batchID)
 
 describe('partitionHandoverAccount', () => {
-  it('hands over only the stamps this app can spend', () => {
+  // A list grant names exactly what the app may spend: not even the account
+  // default rides along when the grant does not name it (#862).
+  it('hands over only the drives the app was granted', () => {
     const payload = partitionHandoverAccount(makeAccount(new BatchId(APP_BATCH)), APP_ORIGIN)
 
-    expect(batchIds(payload).sort()).toEqual([APP_BATCH, DEFAULT_BATCH].sort())
-    expect(batchIds(payload)).not.toContain(UNRELATED_BATCH)
+    expect(batchIds(payload)).toEqual([APP_BATCH])
   })
 
-  it('hands over only the default when the app has no override', () => {
+  it('hands over only the default when the app has no grant', () => {
     const payload = partitionHandoverAccount(makeAccount(), APP_ORIGIN)
 
     expect(batchIds(payload)).toEqual([DEFAULT_BATCH])
