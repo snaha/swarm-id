@@ -84,11 +84,15 @@ test.skip(!chainUp || !sourceUp, 'requires both chains and the solver (pnpm dev:
  *
  * It starts on Ethereum mainnet deliberately: the payment screen selects the
  * source chain, so `pay()` has to negotiate a network switch first, and that
- * is a state the designs draw and the code has a branch for.
+ * is a state the designs draw and the code has a branch for. `onSourceChain`
+ * starts it on the source chain instead.
  */
-async function injectPayingWallet(page: Page, { misroutedGnosis = false } = {}) {
+async function injectPayingWallet(
+  page: Page,
+  { misroutedGnosis = false, onSourceChain = false } = {},
+) {
   await page.addInitScript(
-    ([sourceRpc, gnosisRpc, address, sourceChainId, gnosisChainId, misrouted]) => {
+    ([sourceRpc, gnosisRpc, address, sourceChainId, gnosisChainId, misrouted, onSource]) => {
       const sourceHex = `0x${Number(sourceChainId).toString(16)}`
       const gnosisHex = `0x${Number(gnosisChainId).toString(16)}`
       // Both chains a wallet can be asked to pay from: the destination itself
@@ -101,19 +105,24 @@ async function injectPayingWallet(page: Page, { misroutedGnosis = false } = {}) 
         // what having the real Gnosis selected looks like to this app.
         [gnosisHex]: misrouted ? (sourceRpc as string) : (gnosisRpc as string),
       }
-      let chainId = '0x1'
+      let chainId = onSource ? sourceHex : '0x1'
       // A wallet that has never seen these chains, which is every wallet the
       // first time. Until one is added, switching to it fails with 4902 — the
       // branch that drives `wallet_addEthereumChain`, and the one a fake that
       // silently accepts the switch never reaches. A misrouted wallet already
       // knows chain 100 — that is the whole trap.
       const added = new Set<string>(misrouted ? [gnosisHex] : [])
+      if (onSource) {
+        added.add(sourceHex)
+      }
       const listeners: Array<(value: unknown) => void> = []
       // Signature count, for asserting HOW MANY times the flow asked the user
       // to sign — one deposit for a native payment, approve + deposit for a
       // token one.
       let sends = 0
       Object.defineProperty(window, '__walletSends', { get: () => sends })
+      let switches = 0
+      Object.defineProperty(window, '__walletSwitches', { get: () => switches })
 
       async function rpc(method: string, params: unknown[]) {
         const response = await fetch(endpoints[chainId] ?? (sourceRpc as string), {
@@ -153,6 +162,7 @@ async function injectPayingWallet(page: Page, { misroutedGnosis = false } = {}) 
             case 'wallet_requestPermissions':
               return [{ parentCapability: 'eth_accounts' }]
             case 'wallet_addEthereumChain': {
+              switches += 1
               const chain = params[0] as { chainId?: string; rpcUrls?: string[] } | undefined
               const offered = chain?.rpcUrls?.[0]
               if (!chain?.chainId || !offered) {
@@ -170,6 +180,7 @@ async function injectPayingWallet(page: Page, { misroutedGnosis = false } = {}) 
               return null
             }
             case 'wallet_switchEthereumChain': {
+              switches += 1
               const target = (params[0] as { chainId?: string } | undefined)?.chainId
               // Only chains actually behind this provider; a switch anywhere
               // else would be a lie the deposit would expose.
@@ -205,6 +216,7 @@ async function injectPayingWallet(page: Page, { misroutedGnosis = false } = {}) 
       SOURCE_CHAIN_ID,
       GNOSIS_CHAIN_ID,
       misroutedGnosis,
+      onSourceChain,
     ] as const,
   )
 }
@@ -321,8 +333,11 @@ async function mintUsdcTo(address: string, units: bigint): Promise<void> {
 }
 
 /** Open the payment screens for a new drive and connect the injected wallet. */
-async function openPaymentAndConnect(page: Page, { misroutedGnosis = false } = {}) {
-  await injectPayingWallet(page, { misroutedGnosis })
+async function openPaymentAndConnect(
+  page: Page,
+  { misroutedGnosis = false, onSourceChain = false } = {},
+) {
+  await injectPayingWallet(page, { misroutedGnosis, onSourceChain })
   await seedPaidEnvironment(page)
 
   await page.goto('/')
@@ -449,6 +464,18 @@ test('paying in a token takes an approve first, and the solver pulls it', async 
   // The pull was real: the solver collected the token before it filled.
   expect(await sourceUsdc(LOCAL_SOLVER_ADDRESS)).toBeGreaterThan(pulledBefore)
   await expectDriveOwnedBySigner(page)
+})
+
+test('a wallet already on a chain on offer is not asked to switch', async ({ page }) => {
+  test.setTimeout(PAYMENT_TIMEOUT_MS)
+  await openPaymentAndConnect(page, { onSourceChain: true })
+
+  await expect(page.getByRole('dialog').getByRole('combobox').first()).toHaveValue(
+    String(SOURCE_CHAIN_ID),
+  )
+  expect(
+    await page.evaluate(() => (window as { __walletSwitches?: number }).__walletSwitches),
+  ).toBe(0)
 })
 
 test('changing wallet disconnects it and brings the picker back', async ({ page }) => {
