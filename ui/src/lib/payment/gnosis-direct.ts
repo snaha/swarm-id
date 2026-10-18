@@ -180,12 +180,7 @@ function isDirectHandle(handle: unknown): handle is DirectHandle {
   )
 }
 
-/**
- * The legs that send something, as charges against the wallet. A zero leg is
- * legitimate — an earlier transfer already covered the token, or the owner
- * address already holds the gas — but it sends nothing, so it is nothing the
- * wallet can be short of.
- */
+/** The legs that send anything: a covered leg costs the wallet nothing. */
 function sentLegs(legs: PaymentQuote['charges']): PaymentQuote['charges'] {
   return legs.filter((leg) => leg.amount > 0n)
 }
@@ -224,8 +219,7 @@ export async function quoteDirectPayment(request: QuoteRequest): Promise<Payment
       // xDAI is a dollar stablecoin, so the USD figure is the amount itself.
       amountUsd: displayUsd(amount),
       delivers: { input: 'xdai', amount: request.xdaiWei - request.gasXdaiWei },
-      // One transfer, gas share included, all of it out of the wallet's xDAI.
-      charges: sentLegs([{ currency: NATIVE_CURRENCY, amount: request.xdaiWei }]),
+      charges: [{ currency: NATIVE_CURRENCY, amount: request.xdaiWei }],
     }
   }
 
@@ -285,9 +279,7 @@ export async function quoteDirectPayment(request: QuoteRequest): Promise<Payment
     // there. Sizing the swap from the transfer alone would leave the residual
     // stranded exactly as the retry that credited it was meant to prevent.
     delivers: { input: accepted.input, amount },
-    // What the wallet sends, not what the swap spends: the transfer net of any
-    // residual, and the gas leg in xDAI beside it. Holding plenty of the token
-    // says nothing about the xDAI, so each leg is checked on its own.
+    // What the wallet sends: the transfer net of any residual, and the gas leg.
     charges: sentLegs([
       { currency: accepted.token.address, amount: transfer },
       { currency: NATIVE_CURRENCY, amount: gasXdaiWei },

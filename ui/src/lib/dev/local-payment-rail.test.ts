@@ -59,7 +59,6 @@ describe('quoteLocalPayment', () => {
     })
   })
 
-  /** What the deposit's value takes out of the wallet — Pay is checked against it. */
   it('charges the wallet the source amount it signs away, in the native coin', () => {
     const xdaiWei = parseEther('0.06')
     expect(quoteLocalPayment(request(xdaiWei)).charges).toEqual([
@@ -92,7 +91,6 @@ describe('quoteLocalPayment in USDC', () => {
     })
   })
 
-  /** The solver pulls exactly this much of the token, so the wallet must hold it. */
   it('charges the wallet the token amount the solver will pull', () => {
     const quote = quoteLocalPayment(request(parseEther('0.06'), LOCAL_SOURCE_USDC_ADDRESS))
     expect(quote.charges).toEqual([{ currency: LOCAL_SOURCE_USDC_ADDRESS, amount: 60_000n }])

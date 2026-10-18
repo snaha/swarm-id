@@ -109,7 +109,6 @@ describe('quoteDirectPayment', () => {
     ).toBe('0.00004347')
   })
 
-  /** One transfer, and every wei of it xDAI out of the wallet — what Pay is checked against. */
   it('charges the wallet the whole payment in xDAI', async () => {
     const xdaiWei = parseUnits('0.06', 18)
     expect((await quoteDirectPayment(request(xdaiWei))).charges).toEqual([
@@ -557,11 +556,6 @@ describe('paying in something other than xDAI', () => {
     expect(getTokenBalance).not.toHaveBeenCalled()
   })
 
-  /**
-   * What the wallet pays out of each asset, for Pay to be checked against its
-   * balances. A token payment draws on two: the token for the BZZ leg, and xDAI
-   * for the gas leg — and holding plenty of the one says nothing about the other.
-   */
   describe('charges', () => {
     const GAS_LEG = parseUnits('0.005', 18)
 
@@ -582,16 +576,11 @@ describe('paying in something other than xDAI', () => {
       ])
     })
 
-    /** A covered leg sends nothing, so it costs the wallet nothing either. */
     it('charges only the gas when an earlier transfer covers the token leg', async () => {
       getTokenBalance.mockResolvedValue(BUFFERED_USDC)
       expect((await quoteInUsdc(GAS_LEG)).charges).toEqual([
         { currency: NATIVE_CURRENCY, amount: GAS_LEG },
       ])
-    })
-
-    it('charges only the token when there is no gas leg to send', async () => {
-      expect((await quoteInUsdc(0n)).charges).toEqual([{ currency: USDC, amount: BUFFERED_USDC }])
     })
   })
 

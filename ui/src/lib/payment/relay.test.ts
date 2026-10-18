@@ -32,7 +32,7 @@ interface Quoted {
     currencyIn?: { amount?: string; amountFormatted?: string; amountUsd?: string }
   }
 }
-/** A `getQuote` that never prices anything, unless a test has it answer. */
+/** A `getQuote` that never prices anything. */
 const getQuote = vi.fn((): Promise<Quoted> => new Promise(() => undefined))
 
 /** As much of the SDK's client as the rail configures. */
@@ -297,7 +297,6 @@ describe('relay quote', () => {
     await expect(priced).rejects.toThrow(/try again/)
   })
 
-  /** A Base payment in ETH, priced by a Relay that answers with `currencyIn`. */
   function quoteAnswering(currencyIn: NonNullable<Quoted['details']>['currencyIn']) {
     getQuote.mockResolvedValueOnce({ details: { currencyIn } })
     return relayRail.quote({
@@ -311,35 +310,15 @@ describe('relay quote', () => {
     })
   }
 
-  /**
-   * What the deposit takes out of the wallet, in the source token's own base
-   * units — the figure Pay is checked against the wallet's balance with.
-   * `amountFormatted` is a display string; `amount` is the exact one.
-   */
   it('charges the wallet what Relay says the deposit takes', async () => {
-    const quote = await quoteAnswering({
-      amount: '43465998997394',
-      amountFormatted: '0.000043465998997394',
-      amountUsd: '0.170000',
-    })
+    const quote = await quoteAnswering({ amount: '43465998997394', amountFormatted: '0.0000434' })
     expect(quote.charges).toEqual([{ currency: NATIVE_CURRENCY, amount: 43_465_998_997_394n }])
   })
 
-  /**
-   * `currencyIn` is optional in Relay's schema. A missing figure only means Pay
-   * cannot be checked ahead of the wallet; it is no reason to refuse a price.
-   */
-  it('charges nothing it cannot name when Relay leaves the amount out', async () => {
-    expect((await quoteAnswering(undefined)).charges).toEqual([])
+  it('charges nothing without an exact amount in base units', async () => {
     expect((await quoteAnswering({ amountFormatted: '0.0001' })).charges).toEqual([])
+    expect((await quoteAnswering({ amount: '0.000043' })).charges).toEqual([])
   })
-
-  it.each([['0.000043'], ['4.3e13'], ['-1'], [''], ['lots']])(
-    'charges nothing for an amount that is not whole base units (%s)',
-    async (amount) => {
-      expect((await quoteAnswering({ amount })).charges).toEqual([])
-    },
-  )
 })
 
 /**

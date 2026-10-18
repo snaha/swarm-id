@@ -207,11 +207,7 @@ async function quotePayment(request: QuoteRequest): Promise<PaymentQuote> {
     // user's own token across would mean holding inventory in it. The gas
     // share arrives as xDAI too but is not swapped, so only the rest is.
     delivers: { input: 'xdai', amount: request.xdaiWei - request.gasXdaiWei },
-    // The deposit is one asset, the one picked, and `amount` is it in exact
-    // base units where `amountFormatted` is only a display string. It is
-    // optional in Relay's schema, and a missing figure only means Pay cannot
-    // be checked against the wallet before signing — no reason to refuse a
-    // price that is otherwise good.
+    // `amount` is optional in Relay's schema; without it Pay is not checked.
     charges: BASE_UNITS.test(amountIn)
       ? [{ currency: request.currency, amount: BigInt(amountIn) }]
       : [],
