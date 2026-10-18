@@ -63,14 +63,9 @@ export async function getGasPrice(
 }
 
 /**
- * The `gasPrice` source for ONE legacy send and its retries.
- *
- * Each call re-quotes `eth_gasPrice` and prices it with {@link legacyGasPrice},
- * against the offer this pricer returned last time. Create it once per send,
- * outside `withFeeTooLowRetry`, and call it inside the action: an attempt only
- * runs again because the one before it was refused, so the previous offer IS
- * the refused one, and the retry bids above it instead of re-sending the same
- * price.
+ * A `gasPrice` source for one legacy send: create it outside
+ * `withFeeTooLowRetry` and call it inside, so a retry bids above the offer the
+ * node just refused.
  */
 export function legacyGasPricer(
   settings: MultichainSettings,
