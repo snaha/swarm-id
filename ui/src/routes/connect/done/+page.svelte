@@ -75,6 +75,10 @@
   function goToApp() {
     // Persist the drive choice only when it deviates from the account default
     // — an untouched or default choice keeps following the default.
+    // A partitioned session was handed its stamps by `completeConnect`, before
+    // this page, so it still holds and spends the default until the next
+    // account delta carries the grant. Step 5 of #862 moves the picker ahead
+    // of the handover.
     if (account && request && showPicker && selectedBatchHex !== defaultBatchHex) {
       account.setAppDrives(request.appOrigin, [new BatchId(selectedBatchHex)])
     }

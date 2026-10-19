@@ -177,8 +177,9 @@ export const PostageStampSchemaV1 = z.object({
   // Fixed when the drive is created (#862). A scratch drive reuses its slots
   // as a ring, overwriting its oldest data; a regular one never does, so the
   // two cannot be mixed on one batch. Absent → regular: only a scratch drive
-  // is marked, the way only a deleted one carries `deletedAt`.
-  kind: z.enum(["regular", "scratch"]).optional(),
+  // is marked, the way only a deleted one carries `deletedAt`, so a regular
+  // drive has one encoding and no `kind === "regular"` check can miss it.
+  kind: z.literal("scratch").optional(),
   // Rename clock. The name merges on its own last-writer-wins clock, separate
   // from the node-state clock below: a rename made over a stale copy must not
   // carry old batch fields past a concurrent dilute/top-up, nor resurrect a

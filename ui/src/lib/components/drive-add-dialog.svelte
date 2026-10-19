@@ -488,15 +488,6 @@
         phase = 'error'
         return
       }
-      // Swarm ID needs a mutable batch: a partition's lock and state chunks
-      // overstamp their reserved slots, and a scratch drive reuses its data
-      // slots (#862).
-      if (stamp.immutableFlag) {
-        errorMessage =
-          'That batch is immutable. Swarm ID only works with mutable batches; buy a new drive instead.'
-        phase = 'error'
-        return
-      }
       // Existence isn't enough — upload one stamped test chunk to prove the
       // signer key can actually stamp uploads for this batch before attaching.
       pendingLabel = 'Verifying the batch…'

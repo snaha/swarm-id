@@ -1690,13 +1690,12 @@ export class SwarmIdProxy {
         // still runs, because the session must hear about ITS stamp — a
         // rotated signer key, a tombstone — and LWW is what tells it.
         //
-        // Narrowed by the pointers the fold just decided, never the pre-fold
-        // ones: one delta can carry both a re-pointed app (or a moved account
-        // default) and the stamp it now names, and filtering by the old
-        // pointers drops the stamp while keeping the pointer —
-        // `resolveStampForApp` then falls through, and the session spends the
-        // wrong batch or nothing at all, with nothing to correct it until some
-        // unrelated change publishes again.
+        // Narrowed by the grant the fold just decided, never the pre-fold
+        // one: one delta can carry both a re-granted app (or a moved account
+        // default) and the stamp it now names, and filtering by the old grant
+        // drops the stamp while keeping the grant — `resolveStampForApp` then
+        // resolves nothing, and the session cannot upload, with nothing to
+        // correct it until some unrelated change publishes again.
         postageStamps: stampsReachableByApp(
           connectedApps.find((app) => app.appUrl === connection.app.appUrl) ??
             connection.app,
@@ -2532,9 +2531,9 @@ export class SwarmIdProxy {
       }
       const { account, app } = connection
 
-      // Resolve the stamp this app should use: its per-app override if set,
-      // otherwise the account default — skipping a pointer whose stamp is
-      // missing so a stale pointer falls through instead of failing.
+      // The app's primary drive (#862): the account default for no grant or
+      // `"all"`, the first granted regular drive for a list. Never a drive the
+      // app was not granted.
       return resolveStampForApp(app, account, account.postageStamps)
     } catch (error) {
       console.error("[Proxy] Error looking up postage stamp:", error)

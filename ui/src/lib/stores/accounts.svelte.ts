@@ -415,10 +415,11 @@ export class Account {
   // --------------------------------------------------------------------------
 
   /**
-   * Add or replace a stamp (deduped by batch id). The first stamp added becomes
-   * the account default so uploads have something to spend against. Re-adding a
-   * previously removed batch revives it (a fresh `createdAt` beats the old
-   * tombstone on merge).
+   * Add or replace a stamp (deduped by batch id). The first REGULAR stamp
+   * added becomes the account default so uploads have something to spend
+   * against: the account syncs to its default drive, and a scratch drive
+   * overwrites its oldest data (#862). Re-adding a previously removed batch
+   * revives it (a fresh `createdAt` beats the old tombstone on merge).
    */
   addStamp(stamp: Omit<PostageStamp, 'createdAt' | 'deletedAt'>): PostageStamp {
     const now = Date.now()
@@ -432,8 +433,6 @@ export class Account {
       ...this.postageStamps.filter((existing) => !existing.batchID.equals(stamp.batchID)),
       newStamp,
     ]
-    // The account syncs to its default drive, and a scratch drive overwrites
-    // its oldest data — so the first REGULAR drive becomes the default (#862).
     if (this.defaultPostageStampBatchID === undefined && !isScratchDrive(newStamp)) {
       this.defaultPostageStampBatchID = newStamp.batchID
       this.defaultStampAt = now
@@ -595,6 +594,11 @@ function revoked(app: ConnectedApp, tombstone: boolean): ConnectedApp {
   const now = Date.now()
   return {
     ...app,
+    // Remove means "forget this app", and the grant is a permission, not
+    // routing: without this a removed app reconnects still granted the drives
+    // it had, and the picker's default choice writes nothing to clear them
+    // (#862). On the grant's own clock so the reset wins the merge.
+    ...(tombstone ? { drives: undefined, drivesAt: now } : {}),
     // Clear only the auth material; keep `lastConnectedAt` so the connect flow
     // can still order this account by when it was last used (a revoked app must
     // not read as "never used").

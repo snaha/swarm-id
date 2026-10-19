@@ -2826,7 +2826,9 @@ describe("SwarmIdProxy partitioned write enablement", () => {
             }
           }
         ).partitionAccount.postageStamps
-        expect(held.map((s) => s.batchID.toHex())).toContain(OTHER_BATCH_ID_HEX)
+        // Exactly the granted drive: the default the app no longer names is
+        // dropped with it.
+        expect(held.map((s) => s.batchID.toHex())).toEqual([OTHER_BATCH_ID_HEX])
       } finally {
         busChannel.close()
       }

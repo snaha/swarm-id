@@ -60,6 +60,15 @@ export async function fetchExistingBatchFromChain(
       `That batch is owned by ${owner.toChecksum()}, not by this signer key (${signerAddress.toChecksum()}). Check the signer key.`,
     )
   }
+  // Swarm ID needs a mutable batch: a partition's lock and state chunks
+  // overstamp their reserved slots, and a scratch drive reuses its data slots
+  // (#862). Refused here so every path that adopts a batch, the card shop's
+  // included, refuses it the same way.
+  if (batch.immutableFlag) {
+    throw new Error(
+      'That batch is immutable. Swarm ID only works with mutable batches; buy a new drive instead.',
+    )
+  }
   const ttl = calculateContractTTLSeconds(state)
   return {
     batchID: new BatchId(strip0x(batchId)),

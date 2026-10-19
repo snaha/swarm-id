@@ -358,6 +358,33 @@ describe('Account.setAppDrives', () => {
     expect(account.connectedApps[0].drives).toBeUndefined()
     expect(account.connectedApps).toHaveLength(1)
   })
+
+  // A removed app reconnects as a first connect, and the picker's default
+  // choice writes nothing — so the grant has to go with the Remove, on its own
+  // clock, or the app comes back still granted the drives it had.
+  it('is forgotten by Remove, with a fresh grant clock', () => {
+    const account = accountWithApp()
+    account.setAppDrives(APP_URL, [new BatchId(BATCH_HEX)])
+    const grantedAt = account.connectedApps[0].drivesAt ?? 0
+    vi.useFakeTimers({ toFake: ['Date'] })
+    try {
+      vi.setSystemTime(grantedAt + 1)
+      account.removeApp(APP_URL)
+    } finally {
+      vi.useRealTimers()
+    }
+    const app = account.connectedApps[0]
+    expect(app.drives).toBeUndefined()
+    expect(app.drivesAt).toBeGreaterThan(grantedAt)
+    expect(app.revokedAt).toEqual(expect.any(Number))
+  })
+
+  it('survives a plain Disconnect', () => {
+    const account = accountWithApp()
+    account.setAppDrives(APP_URL, [new BatchId(BATCH_HEX)])
+    account.disconnectApp(APP_URL)
+    expect(account.connectedApps[0].drives).toHaveLength(1)
+  })
 })
 
 // The account syncs to its default drive, and a scratch drive overwrites its

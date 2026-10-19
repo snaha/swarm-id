@@ -49,15 +49,14 @@ function saveConnection(account: Account, request: ConnectRequest, appSecret: st
 /**
  * The account view handed to a partitioned proxy iframe: the synced projection
  * (no vault, no app secrets) with the stamp collection narrowed to the ones
- * THIS app can spend — its own batch override and the account default it falls
- * through to (#578).
+ * THIS app's drive grant names (#578, #862).
  *
  * The iframe is on the SwarmID origin and an unpartitioned proxy reads the same
  * material out of shared storage, so this is least privilege rather than a
  * boundary being fixed. But before #547 a partitioned session held no
  * credentials at all, and it now holds real ones in a context embedded by an
  * arbitrary dApp page: anything that gains script execution there gets what it
- * was handed. It can only ever spend the one stamp resolved for it, so the rest
+ * was handed. It can only ever spend the drives it was granted, so the rest
  * of the collection's signer keys are pure exposure with no use.
  *
  * `derivationKey` stays, and that is the honest trade-off to state rather than
