@@ -8,6 +8,7 @@ import {
   type Avatar,
   type ConnectionInfo,
   type Drive,
+  type DriveRequest,
   type UploadUnavailableReason,
 } from '@snaha/swarm-id'
 import { resolveProxyOrigin } from '$lib/utils/environment'
@@ -32,6 +33,36 @@ const SUBSIDISED_GATEWAY_STORAGE_KEY = 'swarm-id-demo-subsidised-gateway'
 // that choice survives. (`connect()` did default the flag to on when a caller
 // omitted it, but the sidebar never omitted it — it passed `false`.)
 const SUBSIDISED_GATEWAY_DEFAULT = false
+const DRIVE_REQUEST_STORAGE_KEY = 'swarm-id-demo-drive-request'
+
+/** What the demo asks for at connect (#862); picked in the sidebar, applied on the next connect. */
+export const DRIVE_REQUEST_PRESETS = {
+  default: { label: 'Account default (no request)', request: undefined },
+  'regular-optional-scratch': {
+    label: 'Drive + optional scratch drive',
+    request: [{ kind: 'regular' }, { kind: 'scratch', optional: true }],
+  },
+  'regular-scratch': {
+    label: 'Drive + scratch drive',
+    request: [
+      { kind: 'regular', description: 'Used to store your contact list' },
+      { kind: 'scratch' },
+    ],
+  },
+  all: { label: 'All drives', request: 'all' },
+  none: { label: 'No drive', request: [] },
+} satisfies Record<string, { label: string; request: DriveRequest | undefined }>
+export type DriveRequestPreset = keyof typeof DRIVE_REQUEST_PRESETS
+
+function loadDriveRequestPreset(): DriveRequestPreset {
+  try {
+    const stored = localStorage.getItem(DRIVE_REQUEST_STORAGE_KEY)
+    if (stored !== null && stored in DRIVE_REQUEST_PRESETS) return stored as DriveRequestPreset
+  } catch {
+    // localStorage unavailable
+  }
+  return 'default'
+}
 
 const BEE_ICON =
   'data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iNTYiIGhlaWdodD0iNTYiIHZpZXdCb3g9IjAgMCA1NiA1NiIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj4KICA8cmVjdCB3aWR0aD0iNTYiIGhlaWdodD0iNTYiIGZpbGw9IndoaXRlIiByeD0iOCIvPgogIDx0ZXh0IHg9IjUwJSIgeT0iNTAlIiBmb250LXNpemU9IjMyIiBkb21pbmFudC1iYXNlbGluZT0ibWlkZGxlIiB0ZXh0LWFuY2hvcj0ibWlkZGxlIj7wn5CdPC90ZXh0Pgo8L3N2Zz4='
@@ -98,6 +129,9 @@ function loadSubsidisedGatewayPreference(): boolean {
 }
 
 let subsidisedGatewayEnabled = $state(loadSubsidisedGatewayPreference())
+let driveRequestPreset = $state<DriveRequestPreset>(loadDriveRequestPreset())
+// The preset the live client was built with, compared like the gateway above.
+let currentDriveRequestPreset: DriveRequestPreset | undefined = undefined
 
 let currentIdentityId: string | undefined
 let currentIdentityName: string | undefined
@@ -299,6 +333,7 @@ async function runInitialize(generation: number) {
     logStore.log(`User Agent: ${navigator.userAgent}`)
 
     currentSubsidisedGatewayUrl = subsidisedGatewayEnabled ? DEFAULT_BEE_NODE_URL : undefined
+    currentDriveRequestPreset = driveRequestPreset
 
     // Held locally as well: everything below runs across awaits, and `client`
     // can be cleared under us by a teardown in between.
@@ -307,6 +342,7 @@ async function runInitialize(generation: number) {
       iframePath: PROXY_PATH,
       timeout: CLIENT_TIMEOUT,
       subsidisedGatewayUrl: currentSubsidisedGatewayUrl,
+      drives: DRIVE_REQUEST_PRESETS[driveRequestPreset].request,
       onConnectionChange,
       metadata: {
         name: 'Swarm ID Demo',
@@ -403,10 +439,12 @@ async function runConnect(): Promise<void> {
   await ensureInitialized()
 
   const subsidisedUrl = subsidisedGatewayEnabled ? DEFAULT_BEE_NODE_URL : undefined
-  if (client && currentSubsidisedGatewayUrl !== subsidisedUrl) {
-    logStore.log(
-      `Subsidised gateway changed to ${subsidisedGatewayEnabled ? 'enabled' : 'disabled'}, reinitializing client...`,
-    )
+  if (
+    client &&
+    (currentSubsidisedGatewayUrl !== subsidisedUrl ||
+      currentDriveRequestPreset !== driveRequestPreset)
+  ) {
+    logStore.log('Connect options changed, reinitializing client...')
     teardownClient()
     await ensureInitialized()
   }
@@ -490,6 +528,18 @@ export const clientStore = {
   },
   get hasCustomBeeApiUrl() {
     return beeApiUrl !== undefined && beeApiUrl !== DEFAULT_BEE_NODE_URL
+  },
+
+  get driveRequestPreset() {
+    return driveRequestPreset
+  },
+  set driveRequestPreset(value: DriveRequestPreset) {
+    driveRequestPreset = value
+    try {
+      localStorage.setItem(DRIVE_REQUEST_STORAGE_KEY, value)
+    } catch {
+      logStore.log('Could not persist the drive request choice', 'warn')
+    }
   },
 
   get subsidisedGatewayEnabled() {

@@ -186,6 +186,26 @@ describe("SwarmIdClient connect()", () => {
   // (#613). A partitioned iframe can only be reached by the popup it opened
   // itself, and no user agent tells you which mode you are in.
   describe("shared storage", () => {
+    // The connect screen renders a row per requested drive, so the request
+    // has to reach it on this path too — the proxy is not opening this one.
+    it("puts the drive request on the popup URL (#862)", async () => {
+      client.destroy()
+      client = new SwarmIdClient({
+        iframeOrigin: "https://swarm-id.example.com",
+        metadata: { name: "Test App" },
+        drives: "all",
+      })
+      vi.spyOn(internals(client), "ensureReady").mockImplementation(() => {})
+      setStorageShared(true)
+
+      await client.connect()
+
+      expect(window.open).toHaveBeenCalledWith(
+        expect.stringContaining("drives=%22all%22"),
+        "_blank",
+      )
+    })
+
     it("opens the popup from the parent, keeping the user gesture", async () => {
       vi.spyOn(internals(client), "ensureReady").mockImplementation(() => {})
       setStorageShared(true)

@@ -82,12 +82,14 @@ import type {
   ButtonConfig,
   PostageBatch,
   Drive,
+  DriveRequest,
   DriveTargetOptions,
 } from "./types"
 import {
   IframeToParentMessageSchema,
   ParentToIframeMessageSchema,
   AppMetadataSchema,
+  DriveRequestSchema,
 } from "./types"
 import { EthAddress, Identifier, PrivateKey, Topic } from "@ethersphere/bee-js"
 import { generatedAvatar } from "./utils/avatar"
@@ -162,6 +164,7 @@ export class SwarmIdClient {
   private firstConnectionInfoReject?: (error: SwarmIdError) => void
   private iframeLoadReject?: (error: SwarmIdError) => void
   private popupMode: "popup" | "window"
+  private readonly drives: DriveRequest | undefined
   private metadata: AppMetadata
   private buttonConfig?: ButtonConfig
   private containerId?: string
@@ -247,10 +250,12 @@ export class SwarmIdClient {
     this.buttonConfig = options.buttonConfig
     this.containerId = options.containerId
     this.subsidisedGatewayUrl = options.subsidisedGatewayUrl
+    this.drives = options.drives
 
     // Validate metadata
     try {
       AppMetadataSchema.parse(this.metadata)
+      DriveRequestSchema.optional().parse(this.drives)
     } catch (error) {
       throw new SwarmIdError(
         "invalid-request",
@@ -418,6 +423,7 @@ export class SwarmIdClient {
       metadata: this.metadata,
       buttonConfig: this.buttonConfig,
       subsidisedGatewayUrl: this.subsidisedGatewayUrl,
+      drives: this.drives,
     })
 
     // Wait for iframe to be ready
@@ -1069,6 +1075,7 @@ export class SwarmIdClient {
       this.iframeOrigin + basePath,
       window.location.origin,
       this.metadata,
+      { drives: this.drives },
     )
 
     const effectivePopupMode = options.popupMode ?? this.popupMode

@@ -1,7 +1,7 @@
 // Copyright 2026 The Swarm Authors. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import type { AppMetadata } from "../types"
+import type { AppMetadata, DriveRequest } from "../types"
 
 /**
  * Normalize a URL by removing trailing slash.
@@ -36,6 +36,8 @@ export interface BuildAuthUrlOptions {
    * storage is partitioned.
    */
   challenge?: string
+  /** The drives the app asks for; the connect screen renders a row per entry (#862). */
+  drives?: DriveRequest
 }
 
 /**
@@ -82,6 +84,10 @@ export function buildAuthUrl(
 
   if (options?.challenge) {
     params.set("challenge", options.challenge)
+  }
+
+  if (options?.drives !== undefined) {
+    params.set("drives", JSON.stringify(options.drives))
   }
 
   return `${baseUrl}/connect#${params.toString()}`

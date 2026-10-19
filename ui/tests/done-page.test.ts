@@ -215,3 +215,72 @@ test('connect flow shows the done screen variants and closes the popup', async (
   await expect(storagePage.getByText('1 drive needs attention.')).toBeVisible()
   await expect(popup.getByText(`Connect to ${APP_NAME}`)).toBeVisible()
 })
+
+// Step 5 of #862: the app asks for drives, the done page shows a row per
+// requested drive, and "Go to app" commits the grant with the handshake.
+test('a drive request renders a row per drive and grants what was picked', async ({ page }) => {
+  test.setTimeout(CHAIN_TEST_TIMEOUT_MS * 2)
+  // Account with one regular drive, never connected.
+  await seedLocalChain(page)
+  await page.goto('/')
+  await page.getByRole('link', { name: 'Get started' }).first().click()
+  await completeCreateFlow(page)
+  await page.getByRole('button', { name: 'Stay local for now' }).click()
+  await expect(page).toHaveURL(/\/$/)
+  await fundPostageSigner(page)
+  await addDrive(page)
+  await expect(page.getByText(/^Drive [0-9a-f]{4}$/)).toBeVisible({
+    timeout: DRIVE_SETTLE_TIMEOUT_MS,
+  })
+
+  const grantOf = () =>
+    page.evaluate(() => {
+      const doc = JSON.parse(localStorage.getItem('swarm-id-accounts') ?? '{}') as {
+        data?: { connectedApps?: { appUrl: string; drives?: string[] | 'all' }[] }[]
+      }
+      return doc.data
+        ?.flatMap((account) => account.connectedApps ?? [])
+        .find((app) => app.appUrl === 'http://localhost:3500')?.drives
+    })
+
+  // The demo asks for a drive and an optional scratch drive.
+  await page.goto(DEMO_URL)
+  await page.evaluate(() =>
+    localStorage.setItem('swarm-id-demo-drive-request', 'regular-optional-scratch'),
+  )
+  await page.reload()
+  let popup = await openConnectPopup(page)
+  await popup.getByRole('button', { name: /0x[0-9a-fA-F]{4}/ }).click()
+  await popup.getByRole('textbox', { name: 'Account password' }).fill(PASSWORD)
+  await popup.getByRole('button', { name: 'Confirm' }).click()
+  // The regular row starts on the account default. The account has no
+  // scratch drive, so that row offers to create one — and, optional, does
+  // not hold the button.
+  await expect(popup.getByText('Used to store permanent data')).toBeVisible()
+  await expect(popup.getByRole('combobox')).toHaveValue(/^[0-9a-f]{64}$/)
+  await expect(popup.getByRole('button', { name: 'Add scratch drive' })).toBeVisible()
+  await expect(popup.getByRole('button', { name: 'Go to app' })).toBeEnabled()
+  await goToApp(popup)
+  const accountButton = page.getByRole('button', { name: /0x|[0-9a-f]{6}\.\.\./ }).first()
+  await expect(accountButton).toBeVisible({ timeout: 10000 })
+  await page.goto('/')
+  expect(await grantOf()).toEqual([expect.stringMatching(/^[0-9a-f]{64}$/)])
+
+  // "All drives" is one checkbox, and the only way on is through it.
+  await page.goto(DEMO_URL)
+  await accountButton.click()
+  await page.getByRole('button', { name: 'Disconnect', exact: true }).click()
+  await page.evaluate(() => localStorage.setItem('swarm-id-demo-drive-request', 'all'))
+  await page.reload()
+  popup = await openConnectPopup(page)
+  await popup.getByRole('button', { name: /0x[0-9a-fA-F]{4}/ }).click()
+  await popup.getByRole('textbox', { name: 'Account password' }).fill(PASSWORD)
+  await popup.getByRole('button', { name: 'Confirm' }).click()
+  await expect(popup.getByText('Grant this app full drive access')).toBeVisible()
+  await expect(popup.getByRole('button', { name: 'Go to app' })).toBeDisabled()
+  await popup.getByRole('checkbox').check()
+  await goToApp(popup)
+  await expect(accountButton).toBeVisible({ timeout: 10000 })
+  await page.goto('/')
+  expect(await grantOf()).toBe('all')
+})

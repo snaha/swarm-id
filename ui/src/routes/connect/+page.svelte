@@ -20,7 +20,7 @@
   import SignBackInDialog from '$lib/components/sign-back-in-dialog.svelte'
   import { Button } from '$lib/components/ui/button'
   import UnlockDialog from '$lib/components/unlock-dialog.svelte'
-  import { completeConnect, reuseConnection } from '$lib/connect-handshake'
+  import { canReuseConnection } from '$lib/connect-handshake'
   import { type DriveAttention, driveAttentionDescription } from '$lib/drives'
   import routes from '$lib/routes'
   import { accountsStore } from '$lib/stores/accounts.svelte'
@@ -74,9 +74,11 @@
     }
     // A still-valid prior connection carries the secret — no unlock needed.
     // (A signed-out account kept no connections, so it always falls through
-    // to the unlock, which doubles as its sign-back-in ceremony.)
-    if (reuseConnection(account, request)) {
+    // to the unlock, which doubles as its sign-back-in ceremony.) The done
+    // page commits the handshake once the drives are settled.
+    if (canReuseConnection(account, request.appOrigin)) {
       connectStore.setFirstConnect(false) // a valid entry exists by definition
+      connectStore.setPending({ account })
       sessionStore.setCurrentAccount(account.id)
       await goto(resolve(routes.CONNECT_DONE))
       return
@@ -84,18 +86,18 @@
     unlocking = account
   }
 
-  /** Shared tail of both ceremonies: hand the secret over and close up. */
+  /** Shared tail of both ceremonies: hand the unlocked account to the done
+   * page, which runs the handshake once the drives are settled (#862). */
   async function finishConnect(account: Account, entropy: Uint8Array) {
     if (!request) {
       return
     }
-    // Capture BEFORE the handshake writes the connected-app entry: whether the
-    // account has ever used this app (removed apps' tombstones don't count).
-    // The done page keys the drive-picker variant off it.
+    // Whether the account has ever used this app (removed apps' tombstones
+    // don't count). The done page keys the drive-picker variant off it.
     connectStore.setFirstConnect(
       account.activeApps.every((app) => app.appUrl !== request.appOrigin),
     )
-    await completeConnect(account, entropy, request)
+    connectStore.setPending({ account, entropy })
     sessionStore.setCurrentAccount(account.id)
     unlocking = undefined
     await goto(resolve(routes.CONNECT_DONE))

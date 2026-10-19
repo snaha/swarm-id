@@ -20,6 +20,7 @@
   import { Input } from '$lib/components/ui/input'
   import { Select } from '$lib/components/ui/select'
   import { strip0x } from '$lib/crypto/hex'
+  import type { DriveKind } from '$lib/drive-request'
   import {
     DRIVE_SIZE_BREAKPOINTS,
     LIFESPAN_UNIT_OPTIONS,
@@ -76,9 +77,12 @@
     account: Account
     onClose: () => void
     onAdded?: (message: string) => void
+    /** The kind the new drive is created as; regular unless told otherwise (#862). */
+    kind?: DriveKind
   }
 
-  let { account, onClose, onAdded }: Props = $props()
+  let { account, onClose, onAdded, kind = 'regular' }: Props = $props()
+  const kindFields = $derived(kind === 'scratch' ? { kind: 'scratch' as const } : {})
 
   type Storage = 'new' | 'existing'
   type Phase = 'form' | 'method' | 'pending' | 'success' | 'error' | 'unconfirmed'
@@ -406,7 +410,7 @@
             currentPrice === undefined
               ? undefined
               : stampTtlSeconds(BigInt(batch.amount), currentPrice)
-          account.addStamp(stampFromBatch(batch, signerKey, driveName, ttl))
+          account.addStamp({ ...stampFromBatch(batch, signerKey, driveName, ttl), ...kindFields })
           succeed()
         },
         onError: (error) => {
@@ -453,7 +457,7 @@
         phase = 'error'
         return
       }
-      account.addStamp(stamp)
+      account.addStamp({ ...stamp, ...kindFields })
       succeed()
     } catch (caught) {
       if (!attempt.current) {
@@ -500,7 +504,7 @@
         phase = 'error'
         return
       }
-      account.addStamp(stamp)
+      account.addStamp({ ...stamp, ...kindFields })
       succeed()
     } catch (caught) {
       if (!attempt.current) {
@@ -607,7 +611,7 @@
     onClose={close}
   />
 {:else}
-  <Dialog onclose={close} title="Add drive">
+  <Dialog onclose={close} title={kind === 'scratch' ? 'Add scratch drive' : 'Add drive'}>
     <div class="flex w-full flex-col gap-2">
       <label for="drive-name" class="text-sm font-medium">Name</label>
       <Input id="drive-name" bind:value={name} placeholder="Optional" />

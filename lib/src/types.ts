@@ -329,6 +329,31 @@ export type Drive = z.infer<typeof DriveSchema>
 /** Which drive a call that takes no upload options writes to */
 export type DriveTargetOptions = Pick<UploadOptions, "batchID">
 
+const DRIVE_DESCRIPTION_MAX_LENGTH = 120
+const DRIVE_REQUEST_MAX_ROWS = 8
+
+/** One drive an app asks for at connect (#862), shown as a row of the picker */
+export const DriveRequirementSchema = z.object({
+  kind: DriveKindSchema,
+  /** Helper text under the row, e.g. "Used to store your messages" */
+  description: z.string().max(DRIVE_DESCRIPTION_MAX_LENGTH).optional(),
+  /** The user may leave the row empty; the app finds out from `getDrives()` */
+  optional: z.boolean().optional(),
+})
+export type DriveRequirement = z.infer<typeof DriveRequirementSchema>
+
+/**
+ * What an app asks for at connect: `"all"` for every drive the account has
+ * and will add, or the drives it needs, one row each — regular ones first,
+ * then scratch. An empty list opts out of drives. Absent, the app gets the
+ * account default, picked among several on a first connect.
+ */
+export const DriveRequestSchema = z.union([
+  z.literal("all"),
+  z.array(DriveRequirementSchema).max(DRIVE_REQUEST_MAX_ROWS),
+])
+export type DriveRequest = z.infer<typeof DriveRequestSchema>
+
 // ============================================================================
 // SOC Types
 // ============================================================================
@@ -935,6 +960,7 @@ export const ParentIdentifyMessageSchema = z.object({
   metadata: AppMetadataSchema,
   buttonConfig: ButtonConfigSchema,
   subsidisedGatewayUrl: z.string().url().optional(),
+  drives: DriveRequestSchema.optional(),
 })
 
 export const CheckAuthMessageSchema = z.object({
@@ -2117,6 +2143,11 @@ export interface ClientOptions {
   metadata: AppMetadata
   buttonConfig?: ButtonConfig
   containerId?: string // ID of container element to place iframe in (optional)
+  /**
+   * The drives the app needs, asked for on the connect screen (#862): `"all"`,
+   * or one row per drive. Without it the app writes to the account default.
+   */
+  drives?: DriveRequest
   /** URL of a subsidised gateway for users without postage stamps. Gateway handles stamping server-side. */
   subsidisedGatewayUrl?: string
 }

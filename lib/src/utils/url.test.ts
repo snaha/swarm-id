@@ -82,6 +82,19 @@ describe("buildAuthUrl", () => {
     )
   })
 
+  it("carries the drive request as JSON (#862)", () => {
+    const url = buildAuthUrl(
+      "https://swarm-id.example.com",
+      "https://myapp.example.com",
+      undefined,
+      { drives: [{ kind: "scratch", optional: true }] },
+    )
+    const params = new URLSearchParams(url.split("#")[1])
+    expect(JSON.parse(params.get("drives")!)).toEqual([
+      { kind: "scratch", optional: true },
+    ])
+  })
+
   it("should include challenge when provided", () => {
     const url = buildAuthUrl(
       "https://swarm-id.example.com",

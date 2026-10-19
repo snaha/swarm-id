@@ -22,6 +22,8 @@ export type {
   PostageBatch,
   Drive,
   DriveKind,
+  DriveRequest,
+  DriveRequirement,
   DriveTargetOptions,
   AppMetadata,
   ButtonConfig,

@@ -29,10 +29,25 @@ import { networkSettingsStore } from '$lib/stores/network-settings.svelte'
 import type { Account } from '$lib/types'
 
 /**
- * Write the connected-app entry into the account record (this is what fires the
- * storage event the proxy iframe authenticates from).
+ * The drives the user granted on the connect screen (#862). Absent, the
+ * entry's grant is left as it was: nothing for a first connect, the earlier
+ * choice for a reconnect.
  */
-function saveConnection(account: Account, request: ConnectRequest, appSecret: string): void {
+export interface DriveGrant {
+  drives: ConnectedApp['drives']
+}
+
+/**
+ * Write the connected-app entry into the account record (this is what fires the
+ * storage event the proxy iframe authenticates from). The grant goes in with
+ * it, on its own clock, so the handover below already sees it.
+ */
+function saveConnection(
+  account: Account,
+  request: ConnectRequest,
+  appSecret: string,
+  grant: DriveGrant | undefined,
+): void {
   const now = Date.now()
   const connection: ConnectedApp = {
     appUrl: request.appOrigin,
@@ -42,6 +57,7 @@ function saveConnection(account: Account, request: ConnectRequest, appSecret: st
     appSecret,
     lastConnectedAt: now,
     connectedUntil: now + appSessionDuration(account.settings),
+    ...(grant ? { drives: grant.drives, drivesAt: now } : {}),
   }
   account.connectApp(connection)
 }
@@ -121,10 +137,11 @@ export async function completeConnect(
   account: Account,
   entropy: Uint8Array,
   request: ConnectRequest,
+  grant?: DriveGrant,
 ): Promise<void> {
   const masterKey = strip0x(privateKeyFromEntropy(entropy))
   const appSecret = await deriveSecret(masterKey, request.appOrigin)
-  saveConnection(account, request, appSecret)
+  saveConnection(account, request, appSecret, grant)
   sendSecretToOpener(account, request, appSecret)
 }
 
@@ -139,17 +156,26 @@ function findReusableConnection(account: Account, appOrigin: string): ConnectedA
   )
 }
 
+/** Whether `reuseConnection` has a secret to reuse, so no unlock is needed. */
+export function canReuseConnection(account: Account, appOrigin: string): boolean {
+  return findReusableConnection(account, appOrigin)?.appSecret !== undefined
+}
+
 /**
  * Reconnect with the secret of a still-valid prior connection, skipping the
  * unlock ceremony. Returns false when there is none and a full
  * unlock + derivation is required.
  */
-export function reuseConnection(account: Account, request: ConnectRequest): boolean {
+export function reuseConnection(
+  account: Account,
+  request: ConnectRequest,
+  grant?: DriveGrant,
+): boolean {
   const existing = findReusableConnection(account, request.appOrigin)
   if (!existing?.appSecret) {
     return false
   }
-  saveConnection(account, request, existing.appSecret)
+  saveConnection(account, request, existing.appSecret, grant)
   sendSecretToOpener(account, request, existing.appSecret)
   return true
 }
