@@ -20,7 +20,7 @@ const RPC = { rpcUrl: 'http://rpc.invalid', contractAddress: `0x${'c'.repeat(40)
 
 type OnChainBatchResult = Awaited<ReturnType<typeof fetchOnChainBatchStateResult>>
 
-function found(owner: string): OnChainBatchResult {
+function found(owner: string, immutableFlag = false): OnChainBatchResult {
   return {
     status: 'found',
     state: {
@@ -28,7 +28,7 @@ function found(owner: string): OnChainBatchResult {
         owner,
         depth: 20,
         bucketDepth: 16,
-        immutableFlag: false,
+        immutableFlag,
         normalisedBalance: 10n,
         lastUpdatedBlockNumber: 1n,
       },
@@ -61,6 +61,17 @@ describe('fetchExistingBatchFromChain checks the owner', () => {
     internal.fetchOnChainBatchStateResult.mockResolvedValue(found(other))
     await expect(fetchExistingBatchFromChain(BATCH_ID, SIGNER, undefined, RPC)).rejects.toThrow(
       /owned by 0x1{40}, not by this signer key/,
+    )
+  })
+
+  // A partition's lock and state chunks overstamp their slots, which an
+  // immutable batch refuses (#862). Checked after ownership, so the owner's
+  // own immutable batch is told why it cannot be a drive.
+  it('rejects an immutable batch, even one the signer owns', async () => {
+    const owner = SIGNER.publicKey().address().toChecksum()
+    internal.fetchOnChainBatchStateResult.mockResolvedValue(found(owner, true))
+    await expect(fetchExistingBatchFromChain(BATCH_ID, SIGNER, undefined, RPC)).rejects.toThrow(
+      /immutable/,
     )
   })
 

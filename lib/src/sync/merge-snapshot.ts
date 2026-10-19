@@ -117,7 +117,7 @@ export function mergeConnectedApps(
   //   bumped by every write ranked the entry instead, so a drive picked on a
   //   stale copy outranked a revoke and restored the credential it had cleared
   //   (#681).
-  // - The stamp pointer overlays on its own `postageStampBatchIDAt`. It moves
+  // - The drive grant overlays on its own `drivesAt`. It moves
   //   no membership field, so without a clock of its own it ties with every
   //   stale copy of the entry and loses — the same correction #663 made for a
   //   device's name.
@@ -125,7 +125,7 @@ export function mergeConnectedApps(
   // Distinct apps still both survive (union).
   const recency = (a: ConnectedApp) =>
     Math.max(a.revokedAt ?? 0, a.disconnectedAt ?? 0, a.lastConnectedAt ?? 0)
-  const stampRecency = (a: ConnectedApp) => a.postageStampBatchIDAt ?? 0
+  const drivesRecency = (a: ConnectedApp) => a.drivesAt ?? 0
   const merged = new Map<string, ConnectedApp>()
   // Process remote first, then local, so a tie favours local (most recent
   // observation here); a strictly-newer entry on either side wins.
@@ -139,12 +139,8 @@ export function mergeConnectedApps(
     const loser = winner === a ? existing : a
     merged.set(
       keyOf(a),
-      stampRecency(loser) > stampRecency(winner)
-        ? {
-            ...winner,
-            postageStampBatchID: loser.postageStampBatchID,
-            postageStampBatchIDAt: loser.postageStampBatchIDAt,
-          }
+      drivesRecency(loser) > drivesRecency(winner)
+        ? { ...winner, drives: loser.drives, drivesAt: loser.drivesAt }
         : winner,
     )
   }

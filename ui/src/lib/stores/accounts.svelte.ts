@@ -11,6 +11,7 @@ import {
   PostageStampSchemaV1,
   type SyncedAccount,
   createAccountsStorageManager,
+  isScratchDrive,
   isSignedOutAccount,
   serializePostageStamp,
 } from '@snaha/swarm-id/internal'
@@ -376,21 +377,19 @@ export class Account {
   }
 
   /**
-   * Point an app at a specific drive — or back at the account default with
-   * `undefined`. The choice carries through the cross-device merge on its OWN
-   * clock: it says nothing about whether the app is still connected, and a
-   * clock that ranked the whole entry let this edit outrank a revoke made on
-   * another device (#681). No-op when the app has no entry (nothing to point).
+   * Set the drives an app may write to — or back to the account default with
+   * `undefined` (#862). The grant carries through the cross-device merge on
+   * its OWN clock: it says nothing about whether the app is still connected,
+   * and a clock that ranked the whole entry let this edit outrank a revoke
+   * made on another device (#681). No-op when the app has no entry.
    */
-  setAppStamp(appUrl: string, batchID: BatchId | undefined) {
+  setAppDrives(appUrl: string, drives: ConnectedApp['drives']) {
     if (!this.connectedApps.some((app) => app.appUrl === appUrl)) {
       return
     }
     const now = Date.now()
     this.connectedApps = this.connectedApps.map((app) =>
-      app.appUrl === appUrl
-        ? { ...app, postageStampBatchID: batchID, postageStampBatchIDAt: now }
-        : app,
+      app.appUrl === appUrl ? { ...app, drives, drivesAt: now } : app,
     )
     this.lastModified = now
     this.#commit()
@@ -416,10 +415,11 @@ export class Account {
   // --------------------------------------------------------------------------
 
   /**
-   * Add or replace a stamp (deduped by batch id). The first stamp added becomes
-   * the account default so uploads have something to spend against. Re-adding a
-   * previously removed batch revives it (a fresh `createdAt` beats the old
-   * tombstone on merge).
+   * Add or replace a stamp (deduped by batch id). The first REGULAR stamp
+   * added becomes the account default so uploads have something to spend
+   * against: the account syncs to its default drive, and a scratch drive
+   * overwrites its oldest data (#862). Re-adding a previously removed batch
+   * revives it (a fresh `createdAt` beats the old tombstone on merge).
    */
   addStamp(stamp: Omit<PostageStamp, 'createdAt' | 'deletedAt'>): PostageStamp {
     const now = Date.now()
@@ -433,7 +433,7 @@ export class Account {
       ...this.postageStamps.filter((existing) => !existing.batchID.equals(stamp.batchID)),
       newStamp,
     ]
-    if (this.defaultPostageStampBatchID === undefined) {
+    if (this.defaultPostageStampBatchID === undefined && !isScratchDrive(newStamp)) {
       this.defaultPostageStampBatchID = newStamp.batchID
       this.defaultStampAt = now
     }
@@ -502,10 +502,11 @@ export class Account {
       stamp.batchID.equals(batchID) ? { ...stamp, deletedAt: now } : stamp,
     )
     // Never leave a default pointing at a stamp we just removed; fall back to a
-    // remaining live stamp so the account never references a deleted batch.
+    // remaining live regular stamp so the account never references a deleted
+    // batch, nor syncs to a scratch drive (#862).
     if (this.defaultPostageStampBatchID?.equals(batchID)) {
       this.defaultPostageStampBatchID = this.postageStamps.find(
-        (stamp) => stamp.deletedAt === undefined,
+        (stamp) => stamp.deletedAt === undefined && !isScratchDrive(stamp),
       )?.batchID
       this.defaultStampAt = now
     }
@@ -513,7 +514,10 @@ export class Account {
     this.#commit()
   }
 
+  /** No-op for a scratch drive: the account never syncs to one (#862). */
   setDefaultStamp(batchID: BatchId | undefined) {
+    const stamp = batchID && this.postageStamps.find((s) => s.batchID.equals(batchID))
+    if (stamp && isScratchDrive(stamp)) return
     const now = Date.now()
     this.defaultPostageStampBatchID = batchID
     this.defaultStampAt = now
@@ -590,6 +594,11 @@ function revoked(app: ConnectedApp, tombstone: boolean): ConnectedApp {
   const now = Date.now()
   return {
     ...app,
+    // Remove means "forget this app", and the grant is a permission, not
+    // routing: without this a removed app reconnects still granted the drives
+    // it had, and the picker's default choice writes nothing to clear them
+    // (#862). On the grant's own clock so the reset wins the merge.
+    ...(tombstone ? { drives: undefined, drivesAt: now } : {}),
     // Clear only the auth material; keep `lastConnectedAt` so the connect flow
     // can still order this account by when it was last used (a revoked app must
     // not read as "never used").

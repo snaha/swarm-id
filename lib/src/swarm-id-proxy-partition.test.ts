@@ -2376,16 +2376,16 @@ describe("SwarmIdProxy partitioned write enablement", () => {
         busChannel.postMessage(
           accountDelta({
             lastModified: localAt - 10_000,
-            // The second stamp has to be one this app's pointers name, or the
+            // The second stamp has to be one this app's grant names, or the
             // narrowing (#578) drops it and the fold is unobservable here: the
-            // delta re-points the app at it in the same message.
+            // delta grants the app both drives in the same message.
             connectedApps: [
               {
                 appUrl: PARENT_ORIGIN,
                 appName: "dApp",
                 lastConnectedAt: Date.now(),
-                postageStampBatchID: new BatchId(OTHER_BATCH_ID_HEX),
-                postageStampBatchIDAt: Date.now() + 1,
+                drives: [stamp.batchID, new BatchId(OTHER_BATCH_ID_HEX)],
+                drivesAt: Date.now() + 1,
               },
             ],
             postageStamps: [
@@ -2784,11 +2784,11 @@ describe("SwarmIdProxy partitioned write enablement", () => {
     })
 
     /** What the narrowing filters BY has to be what the merge just decided —
-     *  the delta carries both the new pointer and the stamp it names, and a
-     *  narrowing that reads the pre-merge pointers throws the stamp away while
-     *  keeping the pointer. `resolveStampForApp` then falls through to the
-     *  account default and the session uploads to the wrong batch, until some
-     *  unrelated change happens to publish again. */
+     *  the delta carries both the new grant and the stamp it names, and a
+     *  narrowing that reads the pre-merge grant throws the stamp away while
+     *  keeping the grant. `resolveStampForApp` then resolves nothing and the
+     *  session cannot upload, until some unrelated change happens to publish
+     *  again. */
     function otherStamp(): PostageStamp {
       return {
         ...makeSyncedAccount().postageStamps[0],
@@ -2809,9 +2809,9 @@ describe("SwarmIdProxy partitioned write enablement", () => {
                 appName: "dApp",
                 lastConnectedAt: Date.now(),
                 // Strictly newer than the hydrated entry, so the fold cannot
-                // tie on a same-millisecond clock and keep the local pointer.
-                postageStampBatchIDAt: Date.now() + 1,
-                postageStampBatchID: new BatchId(OTHER_BATCH_ID_HEX),
+                // tie on a same-millisecond clock and keep the local grant.
+                drivesAt: Date.now() + 1,
+                drives: [new BatchId(OTHER_BATCH_ID_HEX)],
               },
             ],
             postageStamps: [makeSyncedAccount().postageStamps[0], otherStamp()],
@@ -2826,7 +2826,9 @@ describe("SwarmIdProxy partitioned write enablement", () => {
             }
           }
         ).partitionAccount.postageStamps
-        expect(held.map((s) => s.batchID.toHex())).toContain(OTHER_BATCH_ID_HEX)
+        // Exactly the granted drive: the default the app no longer names is
+        // dropped with it.
+        expect(held.map((s) => s.batchID.toHex())).toEqual([OTHER_BATCH_ID_HEX])
       } finally {
         busChannel.close()
       }

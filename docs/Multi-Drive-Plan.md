@@ -76,7 +76,7 @@ batch.
 
 ### Drive kind
 
-Every drive has a `kind`, `"regular"` or `"scratch"`, **fixed when the drive is created**
+Every drive has a `kind`, `"scratch"` or absent for regular, **fixed when the drive is created**
 and synced with the rest of `PostageStampSchemaV1`. A regular drive never becomes scratch
 or the reverse: mixing counter-allocated and recycled slots on one batch would let an app
 overwrite regular data.
@@ -105,8 +105,10 @@ drive grant: a list of batch ids, or `"all"`, with one last-writer-wins clock as
 
 - **`"all"` is live and includes scratch drives**: it covers drives created after the grant.
 - **No stated requirement** means today's behaviour: one regular drive, the account default
-  preselected. The grant is then `"default"`, a third form beside the list and `"all"`: it
+  preselected. The grant is then **absent**, the third form beside the list and `"all"`: it
   tracks the account default, so "Set as default" moves such an app's writes with it.
+  (Absence, not a `"default"` literal: the entry has no grant the way it has no tombstone,
+  and `setAppDrives(url, undefined)` is how an app goes back to following the default.)
 - **Zero drives** is an explicit opt-out. Such an app uploads through the subsidised
   gateway when one is configured (`isSubsidisedModeActive`), and cannot upload otherwise.
 - **Scratch only** is allowed.
@@ -118,7 +120,7 @@ keys for granted drives only.
 ### Primary drive
 
 A write without `batchID` goes to the app's **primary drive**: its **first granted regular
-drive** — for an `"all"` or `"default"` grant, the account default drive. The primary is
+drive** — for an `"all"` grant, or no grant, the account default drive. The primary is
 derived by that rule, not stored, so when it leaves the grant the next granted regular
 drive becomes primary with nothing to update. Adding a drive —
 through a live `"all"` grant, or a later request — never breaks an app that writes
@@ -189,15 +191,15 @@ bucket overwrites its oldest chunk in that lane.
 
 One PR each, in order.
 
-| #   | PR                                                                                                                                                                                                 | Depends on   |
-| --- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------ |
-| 1   | **Refactor, no behaviour change**: per-drive write state extracted from `SwarmIdProxy`; the proxy holds exactly one (`DriveWritePath`). Tests change only where they set the moved private fields. | —            |
-| 2   | **Schemas**: the drive grant, drive `kind`, their merge, the single reachability rule, the partitioned handover, the default-drive rule, the immutable-import check (#864).                        | —            |
-| 3   | **Proxy map**: lazily created per-drive entries, bus routing by `batchId`, teardown and abort when a drive leaves the grant.                                                                       | 1, 2         |
-| 4   | **SDK**: `getDrives()`, optional `batchID` on every writer with the primary as fallback, the typed rejection. Docs-site pages and the demo's drive selector.                                       | 3            |
-| 5   | **Connect-time request**: the requirement in the client options → `connect` message → per-kind drive selection on the connect screen, including creating a drive there (#502), the primary shown.  | 4            |
-| 6   | **Later request and grant editing** (#711): `requestDrives()`, a popup opened by the iframe; approval only, no re-authentication; removing a drive from an app.                                    | 5, UI design |
-| 7   | **Scratch drive**: kind chosen in the Add drive flow and at import, the wrapping counter, uint32 counters, the never-full display, no "Set as default" on a scratch drive.                         | 4            |
+| #   | PR                                                                                                                                                                                                                                                                                                                   | Depends on   |
+| --- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------ |
+| 1   | **Refactor, no behaviour change**: per-drive write state extracted from `SwarmIdProxy`; the proxy holds exactly one (`DriveWritePath`). Tests change only where they set the moved private fields.                                                                                                                   | —            |
+| 2   | **Schemas**: the drive grant, drive `kind`, their merge, the single reachability rule, the partitioned handover, the default-drive rule, the immutable-import check (#864).                                                                                                                                          | —            |
+| 3   | **Proxy map**: lazily created per-drive entries, bus routing by `batchId`, teardown and abort when a drive leaves the grant.                                                                                                                                                                                         | 1, 2         |
+| 4   | **SDK**: `getDrives()`, optional `batchID` on every writer with the primary as fallback, the typed rejection. Docs-site pages and the demo's drive selector.                                                                                                                                                         | 3            |
+| 5   | **Connect-time request**: the requirement in the client options → `connect` message → per-kind drive selection on the connect screen, including creating a drive there (#502), the primary shown. The picker moves ahead of the partitioned handover, which today goes out before the done page writes a list grant. | 4            |
+| 6   | **Later request and grant editing** (#711): `requestDrives()`, a popup opened by the iframe; approval only, no re-authentication; removing a drive from an app.                                                                                                                                                      | 5, UI design |
+| 7   | **Scratch drive**: kind chosen in the Add drive flow and at import, the wrapping counter, uint32 counters, the never-full display, no "Set as default" on a scratch drive.                                                                                                                                           | 4            |
 
 Step 1 carries the risk and ships no feature.
 

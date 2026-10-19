@@ -320,7 +320,7 @@ describe('Account.signOut storage-warning remnant', () => {
   })
 })
 
-describe('Account.setAppStamp', () => {
+describe('Account.setAppDrives', () => {
   const APP_URL = 'https://app.example.com'
   const BATCH_HEX = 'c'.repeat(64)
 
@@ -334,29 +334,100 @@ describe('Account.setAppStamp', () => {
     )
   }
 
-  // On its own clock, not the entry's: the choice says nothing about whether
+  // On its own clock, not the entry's: the grant says nothing about whether
   // the app is still connected, and ranking the entry by it discarded a revoke
   // made on another device (#681).
-  it('points the app at a drive and stamps the pointer clock', () => {
+  it('grants the app drives and stamps the grant clock', () => {
     const account = accountWithApp()
-    account.setAppStamp(APP_URL, new BatchId(BATCH_HEX))
+    account.setAppDrives(APP_URL, [new BatchId(BATCH_HEX)])
     const app = account.connectedApps[0]
-    expect(app.postageStampBatchID?.toHex()).toBe(BATCH_HEX)
-    expect(app.postageStampBatchIDAt).toEqual(expect.any(Number))
+    expect(app.drives !== 'all' && app.drives?.map((b) => b.toHex())).toEqual([BATCH_HEX])
+    expect(app.drivesAt).toEqual(expect.any(Number))
   })
 
-  it('clears the pointer back to the account default', () => {
+  it('clears the grant back to the account default', () => {
     const account = accountWithApp()
-    account.setAppStamp(APP_URL, new BatchId(BATCH_HEX))
-    account.setAppStamp(APP_URL, undefined)
-    expect(account.connectedApps[0].postageStampBatchID).toBeUndefined()
+    account.setAppDrives(APP_URL, [new BatchId(BATCH_HEX)])
+    account.setAppDrives(APP_URL, undefined)
+    expect(account.connectedApps[0].drives).toBeUndefined()
   })
 
   it('is a no-op for an unknown app', () => {
     const account = accountWithApp()
-    account.setAppStamp('https://other.example.com', new BatchId(BATCH_HEX))
-    expect(account.connectedApps[0].postageStampBatchID).toBeUndefined()
+    account.setAppDrives('https://other.example.com', [new BatchId(BATCH_HEX)])
+    expect(account.connectedApps[0].drives).toBeUndefined()
     expect(account.connectedApps).toHaveLength(1)
+  })
+
+  // A removed app reconnects as a first connect, and the picker's default
+  // choice writes nothing — so the grant has to go with the Remove, on its own
+  // clock, or the app comes back still granted the drives it had.
+  it('is forgotten by Remove, with a fresh grant clock', () => {
+    const account = accountWithApp()
+    account.setAppDrives(APP_URL, [new BatchId(BATCH_HEX)])
+    const grantedAt = account.connectedApps[0].drivesAt ?? 0
+    vi.useFakeTimers({ toFake: ['Date'] })
+    try {
+      vi.setSystemTime(grantedAt + 1)
+      account.removeApp(APP_URL)
+    } finally {
+      vi.useRealTimers()
+    }
+    const app = account.connectedApps[0]
+    expect(app.drives).toBeUndefined()
+    expect(app.drivesAt).toBeGreaterThan(grantedAt)
+    expect(app.revokedAt).toEqual(expect.any(Number))
+  })
+
+  it('survives a plain Disconnect', () => {
+    const account = accountWithApp()
+    account.setAppDrives(APP_URL, [new BatchId(BATCH_HEX)])
+    account.disconnectApp(APP_URL)
+    expect(account.connectedApps[0].drives).toHaveLength(1)
+  })
+})
+
+// The account syncs to its default drive, and a scratch drive overwrites its
+// oldest data, so the default is always a regular drive (#862).
+describe('Account default drive', () => {
+  const REGULAR_HEX = 'c'.repeat(64)
+  const SCRATCH_HEX = 'e'.repeat(64)
+  const drive = (hex: string, kind?: 'scratch') => ({
+    batchID: new BatchId(hex),
+    signerKey: new PrivateKey('d'.repeat(64)),
+    ...(kind && { kind }),
+    utilization: 0,
+    usable: true,
+    depth: 20,
+    amount: 100000000n,
+    bucketDepth: 16,
+    blockNumber: 1,
+    immutableFlag: false,
+    exists: true,
+  })
+
+  it('is the first regular drive added, not an earlier scratch one', () => {
+    const account = new Account(signedInRecord(), noCommit)
+    account.addStamp(drive(SCRATCH_HEX, 'scratch'))
+    expect(account.defaultPostageStampBatchID).toBeUndefined()
+    account.addStamp(drive(REGULAR_HEX))
+    expect(account.defaultPostageStampBatchID?.toHex()).toBe(REGULAR_HEX)
+  })
+
+  it('never falls back to a scratch drive when the default is removed', () => {
+    const account = new Account(signedInRecord(), noCommit)
+    account.addStamp(drive(REGULAR_HEX))
+    account.addStamp(drive(SCRATCH_HEX, 'scratch'))
+    account.removeStamp(new BatchId(REGULAR_HEX))
+    expect(account.defaultPostageStampBatchID).toBeUndefined()
+  })
+
+  it('cannot be set to a scratch drive', () => {
+    const account = new Account(signedInRecord(), noCommit)
+    account.addStamp(drive(REGULAR_HEX))
+    account.addStamp(drive(SCRATCH_HEX, 'scratch'))
+    account.setDefaultStamp(new BatchId(SCRATCH_HEX))
+    expect(account.defaultPostageStampBatchID?.toHex()).toBe(REGULAR_HEX)
   })
 })
 

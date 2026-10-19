@@ -2,7 +2,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, it, expect } from "vitest"
-import { BatchId } from "@ethersphere/bee-js"
 
 import {
   accountDeltaFromSnapshot,
@@ -64,19 +63,19 @@ describe("restoreLocalSessionFields — a peer's Disconnect", () => {
   })
 
   it("keeps the session across a benign update", () => {
-    // A per-app drive choice from another context. It rides its own clock
-    // (#681) and wins the pointer without touching membership — and it is
+    // A per-app drive grant from another context. It rides its own clock
+    // (#681) and wins the grant without touching membership — and it is
     // nobody's logout.
     const local = localSession()
-    const repointed = onWire({
+    const regranted = onWire({
       ...local,
-      postageStampBatchID: new BatchId("cc".repeat(32)),
-      postageStampBatchIDAt: LATER,
+      drives: "all",
+      drivesAt: LATER,
     })
 
-    const [app] = fold([local], [repointed])
+    const [app] = fold([local], [regranted])
 
-    expect(app.postageStampBatchID?.toHex()).toBe("cc".repeat(32))
+    expect(app.drives).toBe("all")
     expect(app.appSecret).toBe("aabb")
     expect(app.connectedUntil).toBe(SESSION_END)
   })
@@ -156,9 +155,11 @@ describe("accountDeltaFromSnapshot", () => {
     }
   }
 
-  it("strips the session material but carries the disconnect marker", () => {
+  it("strips the session material but carries the disconnect marker and the grant", () => {
+    // `"all"` is the grant whose wire form is not a list: its serializer
+    // branch is covered here and nowhere else.
     const wire = accountDeltaFromSnapshot(
-      snapshot([localSession({ disconnectedAt: LATER })]),
+      snapshot([localSession({ disconnectedAt: LATER, drives: "all" })]),
     )
     const parsed = AccountDeltaMessageSchema.parse({
       type: "account-delta",
@@ -167,6 +168,7 @@ describe("accountDeltaFromSnapshot", () => {
 
     const [app] = parsed.snapshot.connectedApps
     expect(app.disconnectedAt).toBe(LATER)
+    expect(app.drives).toBe("all")
     expect("appSecret" in app).toBe(false)
     expect("connectedUntil" in app).toBe(false)
   })
