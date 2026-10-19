@@ -116,7 +116,8 @@ test('drive management: add, rename, set default, remove', async ({ page }) => {
   await expect(page.getByText(/^Drive [0-9a-f]{4}$/)).toBeVisible({
     timeout: DRIVE_SETTLE_TIMEOUT_MS,
   })
-  await expect(page.getByText('Default', { exact: true })).toBeVisible()
+  await expect(page.getByRole('img', { name: 'Default drive' })).toBeVisible()
+  await expect(page.getByRole('img', { name: 'Regular drive' })).toBeVisible()
 
   // Rename it (the name input renders in the expanded card).
   await page.getByRole('button', { name: 'Expand drive' }).click()
@@ -188,9 +189,10 @@ test('a funded account is still asked which payment method to use', async ({ pag
   await page.getByRole('tab', { name: 'Storage' }).click()
   await page.getByRole('button', { name: 'Add drive' }).click()
   const dialog = page.getByRole('dialog')
-  await dialog.getByRole('combobox').nth(1).selectOption({ index: 1 })
+  // Drive type, Storage, Size up to, lifespan unit.
+  await dialog.getByRole('combobox').nth(2).selectOption({ index: 1 })
   await dialog.getByRole('spinbutton').fill('30')
-  await dialog.getByRole('combobox').nth(2).selectOption('days')
+  await dialog.getByRole('combobox').nth(3).selectOption('days')
   await page.getByRole('button', { name: 'Proceed' }).click()
 
   // Both routes on offer, and the purchase not yet started.

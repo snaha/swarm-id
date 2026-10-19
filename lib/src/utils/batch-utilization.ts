@@ -153,6 +153,22 @@ export interface ChunkLayout {
 }
 
 /**
+ * The depth whose layout a drive's counters serialize at. A scratch drive's
+ * counter wraps within its lane (#862), so the lane no longer bounds it and
+ * uint16 would overflow: it always takes the uint32 layout. Every reader and
+ * writer of the counters goes through this, so all devices agree — the kind
+ * is fixed when the drive is created.
+ */
+export function counterLayoutDepth(
+  batchDepth: number,
+  scratch: boolean,
+): number {
+  return scratch
+    ? Math.max(batchDepth, UINT16_COUNTER_MAX_DEPTH + 1)
+    : batchDepth
+}
+
+/**
  * Pick the on-disk chunk layout for a given batch depth.
  */
 export function getChunkLayout(batchDepth: number): ChunkLayout {
@@ -1297,6 +1313,13 @@ export class UtilizationAwareStamper implements Stamper, SlotAssigner {
   readonly batchId: BatchId
   readonly depth: number
   readonly maxSlot: number
+  /**
+   * A scratch drive (#862): a full lane wraps onto its oldest slot instead of
+   * refusing. The counter keeps counting; only the slot is reduced.
+   */
+  readonly scratch: boolean
+  /** The depth the counters serialize at — {@link counterLayoutDepth}. */
+  readonly counterDepth: number
 
   /**
    * The next physical data slot per bucket, as core-sdk's `Stamper` means it.
@@ -1565,11 +1588,14 @@ export class UtilizationAwareStamper implements Stamper, SlotAssigner {
     encryptionKey: Uint8Array,
     utilizationState: BatchUtilizationState,
     now: () => number,
+    scratch: boolean,
   ) {
     this.signer = signer
     this.batchId = batchId
     this.depth = depth
     this.maxSlot = calculateMaxSlotsPerBucket(depth)
+    this.scratch = scratch
+    this.counterDepth = counterLayoutDepth(depth, scratch)
     this.cache = cache
     this.encryptionKey = encryptionKey
     this.utilizationState = utilizationState
@@ -1595,14 +1621,17 @@ export class UtilizationAwareStamper implements Stamper, SlotAssigner {
     owner: EthAddress,
     encryptionKey: Uint8Array,
     now: () => number = () => Date.now(),
+    options: { scratch?: boolean } = {},
   ): Promise<UtilizationAwareStamper> {
+    const scratch = options.scratch === true
+    const layoutDepth = counterLayoutDepth(depth, scratch)
     // Initialize utilization state (always, since owner is now required)
-    const utilizationState = initializeBatchUtilization(batchId, depth)
+    const utilizationState = initializeBatchUtilization(batchId, layoutDepth)
 
     // Try to load utilization state from cache
     try {
       const cachedChunks = await cache.getAllChunks(batchId.toHex())
-      const { numUtilizationChunks } = getChunkLayout(depth)
+      const { numUtilizationChunks } = getChunkLayout(layoutDepth)
       // Merge cached chunks into state; ignore any that fall outside the
       // current depth's layout (e.g. stale entries from a different depth)
       for (const cached of cachedChunks) {
@@ -1611,7 +1640,7 @@ export class UtilizationAwareStamper implements Stamper, SlotAssigner {
           utilizationState.dataCounters,
           cached.chunkIndex,
           cached.data,
-          depth,
+          layoutDepth,
         )
       }
     } catch (error) {
@@ -1629,6 +1658,7 @@ export class UtilizationAwareStamper implements Stamper, SlotAssigner {
       encryptionKey,
       utilizationState,
       now,
+      scratch,
     )
 
     // Restore the protected partition-state buckets so saves keep avoiding
@@ -1742,10 +1772,16 @@ export class UtilizationAwareStamper implements Stamper, SlotAssigner {
     // partition + partitionCount·j, where j is the per-partition counter.
     // Legacy single-device is partition 0, K=1 (data from slot 1, reserved
     // slot 0).
+    // On a scratch drive the lane is a ring: past its capacity `j` wraps onto
+    // the lane's oldest slot, which the new stamp's later timestamp lets Bee
+    // overwrite. The counter itself stays monotonic, so the partition-state
+    // publish's regression tripwire holds unchanged.
     const bucket = toBucket(chunkAddress)
+    const counter = this.utilizationState.dataCounters[bucket]
+    const capacity = partitionCapacity(this.depth, this.partitionCountValue)
     const slot = dataSlot(
       this.partition ?? 0,
-      this.utilizationState.dataCounters[bucket],
+      this.scratch && capacity > 0 ? counter % capacity : counter,
       this.partitionCountValue,
     )
     if (slot >= this.maxSlot) {
@@ -1801,7 +1837,7 @@ export class UtilizationAwareStamper implements Stamper, SlotAssigner {
     // Mark utilization chunks as dirty for the affected buckets
     const dirtyChunkIndexes = new Set<number>()
     for (const bucket of this.dirtyBuckets) {
-      const chunkIndex = getChunkIndexForBucket(bucket, this.depth)
+      const chunkIndex = getChunkIndexForBucket(bucket, this.counterDepth)
       dirtyChunkIndexes.add(chunkIndex)
       this.utilizationState.chunks[chunkIndex].dirty = true
     }
@@ -1836,7 +1872,7 @@ export class UtilizationAwareStamper implements Stamper, SlotAssigner {
         const chunkData = extractChunk(
           this.utilizationState.dataCounters,
           chunkIndex,
-          this.depth,
+          this.counterDepth,
         )
 
         const resolved = await chooseUtilizationChunkKey({

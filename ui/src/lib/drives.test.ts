@@ -338,3 +338,13 @@ describe('DRIVE_SIZE_BREAKPOINTS', () => {
     expect(depths.length).toBeGreaterThan(1)
   })
 })
+
+describe('describeDrive on a scratch drive (#862)', () => {
+  it('is never storage full, and so never needs attention for it', () => {
+    const full = makeDrive({ utilization: 1 })
+    expect(describeDrive(full).storageFull).toBe(true)
+    const scratch = { ...full, kind: 'scratch' as const }
+    expect(describeDrive(scratch)).toMatchObject({ storageFull: false, scratch: true })
+    expect(driveNeedsAttention(scratch)).toBe(false)
+  })
+})

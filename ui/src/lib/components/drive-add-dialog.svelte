@@ -4,11 +4,12 @@
 -->
 
 <script lang="ts">
-  import { onDestroy } from 'svelte'
+  import { onDestroy, untrack } from 'svelte'
 
   import { PrivateKey } from '@ethersphere/bee-js'
   import ArrowLeft from '@lucide/svelte/icons/arrow-left'
   import ArrowRight from '@lucide/svelte/icons/arrow-right'
+  import Info from '@lucide/svelte/icons/info'
   import TriangleAlert from '@lucide/svelte/icons/triangle-alert'
   import type { DriveKind } from '@snaha/swarm-id'
   import { BatchIdSchema, PrivateKeySchema } from '@snaha/swarm-id/internal'
@@ -21,6 +22,7 @@
   import { Input } from '$lib/components/ui/input'
   import { Select } from '$lib/components/ui/select'
   import { strip0x } from '$lib/crypto/hex'
+  import { DRIVE_KIND_DESCRIPTION, DRIVE_KIND_LABEL } from '$lib/drive-request'
   import {
     DRIVE_SIZE_BREAKPOINTS,
     LIFESPAN_UNIT_OPTIONS,
@@ -82,7 +84,17 @@
   }
 
   let { account, onClose, onAdded, kind = 'regular' }: Props = $props()
-  const kindFields = $derived(kind === 'scratch' ? { kind: 'scratch' as const } : {})
+  // The preset (a connect-screen row asking for one kind) is where the
+  // picker starts; the user may still change it.
+  let driveKind = $state<DriveKind>(untrack(() => kind))
+  const kindFields = $derived(driveKind === 'scratch' ? { kind: 'scratch' as const } : {})
+  const KIND_OPTIONS = (['regular', 'scratch'] as const).map((value) => ({
+    value,
+    label: DRIVE_KIND_LABEL[value],
+  }))
+  const KIND_HELP = (['regular', 'scratch'] as const)
+    .map((value) => `${DRIVE_KIND_LABEL[value]}: ${DRIVE_KIND_DESCRIPTION[value]}.`)
+    .join(' ')
 
   type Storage = 'new' | 'existing'
   type Phase = 'form' | 'method' | 'pending' | 'success' | 'error' | 'unconfirmed'
@@ -613,6 +625,21 @@
   />
 {:else}
   <Dialog onclose={close} title={kind === 'scratch' ? 'Add scratch drive' : 'Add drive'}>
+    <div class="flex w-full flex-col gap-2">
+      <span class="text-sm font-medium">Drive type</span>
+      <div class="flex w-full items-center gap-2">
+        <Select
+          options={KIND_OPTIONS}
+          value={driveKind}
+          onchange={(value) => (driveKind = value as DriveKind)}
+          class="flex-1"
+        />
+        <span title={KIND_HELP} aria-label={KIND_HELP} role="img">
+          <Info class="text-muted-foreground size-4" />
+        </span>
+      </div>
+    </div>
+
     <div class="flex w-full flex-col gap-2">
       <label for="drive-name" class="text-sm font-medium">Name</label>
       <Input id="drive-name" bind:value={name} placeholder="Optional" />

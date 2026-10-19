@@ -1,0 +1,33 @@
+---
+title: Scratch Drives
+description: Drives that overwrite their oldest data instead of filling up
+---
+
+A drive is **regular** or **scratch**, chosen when it is added in Swarm ID and fixed after that.
+
+- A **regular** drive stores data permanently. Once a part of it is full, uploads that land there are refused.
+- A **scratch** drive overwrites its oldest data instead. It never fills up, which suits streaming and live feeds: the newest data is what matters and older data may go.
+
+An app asks for a scratch drive at connect (`permissions: { drives: [{ kind: 'scratch' }] }`, see [`getDrives()`](../api/#getdrives)) and names it on each write with `batchID`. A scratch drive is never an app's primary drive, so a write that names no drive never goes to one.
+
+## No warranties
+
+Data on a scratch drive can be overwritten at any time. Swarm ID does not restrict what an app puts there, so anything that depends on older chunks being present is at risk:
+
+- **Files** span several chunks, and they can be evicted one at a time, leaving a file that no longer reads back whole.
+- **Sequential feeds** look updates up from index 0. Once early updates are evicted the feed can read as empty.
+- **Epoch feeds** find the latest update through older nodes of the epoch tree.
+- **ACT** keeps its grantee history as a feed, with the same exposure.
+
+Write data that must last to a regular drive, and keep only what can be lost on a scratch one.
+
+## How it works
+
+A postage batch is split into buckets, and each device of an account writes its own lane of every bucket ([Postage Batch Sharing](../multi-device-postage-batches/)). On a scratch drive a full lane wraps: the next chunk in that bucket reuses the lane's oldest slot, and Bee replaces the chunk stored there because the new stamp is newer. Nothing else changes, so two devices still never write the same lane at once.
+
+Consequences worth knowing:
+
+- **Device clocks must be correct.** An overwrite only lands when its stamp is newer than the one it replaces. A device whose clock runs behind can fail to overwrite after it takes over a lane.
+- **Apps sharing a scratch drive** share its lanes, so one app's writes overwrite another's once the lane wraps.
+- **Resizing** changes the size of each lane, so the next few writes after it land on slots that are not the oldest.
+- **Usage** is not shown for a scratch drive: once it wraps it always reads as full, which says nothing about whether it still accepts writes.

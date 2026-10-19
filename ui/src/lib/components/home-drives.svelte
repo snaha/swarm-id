@@ -6,12 +6,14 @@
 <script lang="ts">
   import { tick, untrack } from 'svelte'
 
+  import Archive from '@lucide/svelte/icons/archive'
   import ChevronsUpDown from '@lucide/svelte/icons/chevrons-up-down'
   import Copy from '@lucide/svelte/icons/copy'
   import EllipsisVertical from '@lucide/svelte/icons/ellipsis-vertical'
   import ExternalLink from '@lucide/svelte/icons/external-link'
   import Pencil from '@lucide/svelte/icons/pencil'
   import Plus from '@lucide/svelte/icons/plus'
+  import RefreshCw from '@lucide/svelte/icons/refresh-cw'
   import Star from '@lucide/svelte/icons/star'
   import Trash2 from '@lucide/svelte/icons/trash-2'
   import {
@@ -32,6 +34,7 @@
   import { Input } from '$lib/components/ui/input'
   import UtilizationBar from '$lib/components/utilization-bar.svelte'
   import { prefix0x, strip0x } from '$lib/crypto/hex'
+  import { DRIVE_KIND_DESCRIPTION, DRIVE_KIND_LABEL } from '$lib/drive-request'
   import { describeDrive } from '$lib/drives'
   import { toastStore } from '$lib/stores/toast.svelte'
   import type { Account } from '$lib/types'
@@ -168,10 +171,20 @@
               />
             {:else}
               <p class="truncate text-sm font-medium">{d.name}</p>
-              {#if isDefault}
-                <Badge>Default</Badge>
-              {/if}
             {/if}
+            <!-- Kind and default, as icons (SwarmID-MVP Frame 91): an archive box
+                 for a regular drive, a cycle for a scratch one, a star on the
+                 default (always regular). -->
+            <span class="flex shrink-0 items-center gap-1">
+              {#if d.scratch}
+                <RefreshCw class="size-4" role="img" aria-label="Scratch drive" />
+              {:else}
+                <Archive class="size-4" role="img" aria-label="Regular drive" />
+              {/if}
+              {#if isDefault}
+                <Star class="size-4 fill-current" role="img" aria-label="Default drive" />
+              {/if}
+            </span>
 
             <div class="flex flex-1 items-center justify-end gap-3">
               {#if d.status === 'expired'}
@@ -189,7 +202,9 @@
                   <Badge variant="destructive">Storage full</Badge>
                 {:else}
                   <span class="text-sm whitespace-nowrap">{d.sizeLabel}</span>
-                  <UtilizationBar percent={d.usedPercent} />
+                  {#if !d.scratch}
+                    <UtilizationBar percent={d.usedPercent} />
+                  {/if}
                 {/if}
               {/if}
 
@@ -207,6 +222,17 @@
           </div>
 
           {#if isOpen}
+            <!-- Drive type -->
+            <div class="border-border bg-muted flex flex-col border-t px-4 py-3">
+              <p class="text-sm font-medium">Drive type</p>
+              <p class="text-muted-foreground text-sm">
+                <span class="text-foreground">
+                  {DRIVE_KIND_LABEL[d.scratch ? 'scratch' : 'regular']}
+                </span>
+                · {DRIVE_KIND_DESCRIPTION[d.scratch ? 'scratch' : 'regular']}
+              </p>
+            </div>
+
             <!-- Size -->
             <div
               class={cn(
@@ -222,7 +248,7 @@
                     d.storageFull ? 'text-destructive' : 'text-muted-foreground',
                   )}
                 >
-                  Up to {d.sizeLabel} · {d.usedPercent}% used
+                  Up to {d.sizeLabel}{d.scratch ? '' : ` · ${d.usedPercent}% used`}
                 </p>
               </div>
               {#if d.modifiable}

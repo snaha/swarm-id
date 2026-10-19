@@ -277,8 +277,9 @@ export async function addDrive(
   await page.getByRole('tab', { name: 'Storage' }).click()
   await page.getByRole('button', { name: 'Add drive' }).click()
   const dialog = page.getByRole('dialog')
+  // The form's selects in order: Drive type, Storage, Size up to, lifespan unit.
   // The smallest size on offer — index 1, past the "Please select" placeholder.
-  await dialog.getByRole('combobox').nth(1).selectOption({ index: 1 })
+  await dialog.getByRole('combobox').nth(2).selectOption({ index: 1 })
   // ...and an explicit lifespan, rather than the dialog's default of a YEAR. A
   // drive costs `amountPerChunk << depth`, so both halves matter, and
   // `DRIVE_FUNDING` is a fixed 3 BZZ: a year at this size is ~15.8 BZZ, so the
@@ -291,7 +292,7 @@ export async function addDrive(
   // threshold reads "expires soon" the moment it settles, which quietly adds a
   // second drive to the home page's attention count.
   await dialog.getByRole('spinbutton').fill('30')
-  await dialog.getByRole('combobox').nth(2).selectOption('days')
+  await dialog.getByRole('combobox').nth(3).selectOption('days')
   await page.getByRole('button', { name: 'Proceed' }).click()
   // The chooser, which opens whatever the owner address holds.
   await dialog.getByRole('combobox').first().selectOption(method)

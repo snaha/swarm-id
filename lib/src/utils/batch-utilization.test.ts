@@ -13,6 +13,7 @@ import {
   PartitionLeaseLostError,
   UINT16_COUNTER_MAX_DEPTH,
   UtilizationAwareStamper,
+  counterLayoutDepth,
   dataSlot,
   partitionCapacity,
   deriveUtilizationChunkKey,
@@ -487,6 +488,63 @@ describe("UtilizationAwareStamper partition awareness", () => {
     const env = decodeIndex(stamper.stamp(counterChunk).index)
     expect(env.bucket).toBe(BUCKET)
     expect(env.slot).toBe(0)
+  })
+
+  // A scratch drive (#862): the lane is a ring. Past its capacity the next
+  // stamp lands on the lane's oldest slot, and the counter keeps counting.
+  it("wraps a scratch drive's full lane onto its oldest slot, the counter still rising", async () => {
+    const DEPTH = 20
+    const stamper = await UtilizationAwareStamper.create(
+      TEST_SIGNER_KEY,
+      TEST_BATCH_ID,
+      DEPTH,
+      makeEmptyCache(),
+      TEST_OWNER,
+      TEST_ENC_KEY,
+      undefined,
+      { scratch: true },
+    )
+    const PARTITION = 1
+    stamper.bindPartition({
+      partition: PARTITION,
+      partitionCount: PARTITION_COUNT,
+      localCounter: new Uint32Array(NUM_BUCKETS),
+    })
+
+    const BUCKET = 0x1234
+    const cap = partitionCapacity(DEPTH, PARTITION_COUNT)
+    const slots: number[] = []
+    for (let j = 0; j < 2 * cap + 1; j++) {
+      slots.push(
+        decodeIndex(stamper.stamp(makeAddressInBucket(BUCKET, j)).index).slot,
+      )
+    }
+
+    const lane = Array.from({ length: cap }, (_, j) =>
+      dataSlot(PARTITION, j, PARTITION_COUNT),
+    )
+    expect(slots).toEqual([...lane, ...lane, lane[0]])
+    expect(stamper.getLocalCounter()![BUCKET]).toBe(2 * cap + 1)
+  })
+
+  it("serializes a scratch drive's counters as uint32 at a uint16 depth", () => {
+    const DEPTH = 20
+    expect(
+      getChunkLayout(counterLayoutDepth(DEPTH, false)).counterByteSize,
+    ).toBe(2)
+    expect(
+      getChunkLayout(counterLayoutDepth(DEPTH, true)).counterByteSize,
+    ).toBe(4)
+
+    // Past uint16: a wrapped counter a uint16 layout would refuse.
+    const PAST_UINT16 = 70_000
+    const counters = new Uint32Array(NUM_BUCKETS)
+    counters[3] = PAST_UINT16
+    const layoutDepth = counterLayoutDepth(DEPTH, true)
+    const restored = new Uint32Array(NUM_BUCKETS)
+    mergeChunk(restored, 0, extractChunk(counters, 0, layoutDepth), layoutDepth)
+    expect(restored[3]).toBe(PAST_UINT16)
+    expect(() => extractChunk(counters, 0, DEPTH)).toThrow(/uint16/)
   })
 
   it("legacy mode (no partition bound) collapses to partition 0, K=1", async () => {
