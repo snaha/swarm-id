@@ -13,12 +13,6 @@
           sans-serif;
         margin: 12px;
       }
-      button {
-        display: block;
-        margin: 8px 0;
-        padding: 6px 10px;
-        font-size: 14px;
-      }
       pre {
         white-space: pre-wrap;
         font-size: 12px;
@@ -29,32 +23,46 @@
   </head>
   <body>
     <b>Identity iframe: <code id="origin"></code></b>
-    <div>Password: <input id="pw" value="probe-password" /></div>
-    <button id="b1">1. Mint seed + password vault (invisible signup)</button>
-    <button id="b2">2. Create passkey inside this iframe (PRF)</button>
-    <button id="b3">3. Sign in with a passkey inside this iframe (PRF)</button>
-    <button id="b4">4. Claim: hand the vault to a Swarm ID popup</button>
+    <p>Driven by the embedding page over <code>postMessage</code>; nothing to click here.</p>
     <pre id="out"></pre>
     <script src="common.js"></script>
     <script>
       const VAULT_KEY = 'safari-probe-vault'
       document.getElementById('origin').textContent = location.origin
-      ;(async () => {
-        localStorage.setItem('safari-probe-iframe-wrote', new Date().toISOString())
-        report('frame-load', {
-          ok: true,
-          hasStorageAccess: await storageAccess(),
-          existingVault: !!localStorage.getItem(VAULT_KEY),
-          seesFirstPartyMarker: !!localStorage.getItem('safari-probe-first-party-wrote'),
-        })
-      })()
 
-      document.getElementById('b1').onclick = async () => {
+      async function serviceWorkerState() {
+        if (!('serviceWorker' in navigator)) return { supported: false }
+        try {
+          const registration = await navigator.serviceWorker.register('sw.js', { scope: './' })
+          return {
+            supported: true,
+            registered: true,
+            active: !!registration.active,
+            controlled: !!navigator.serviceWorker.controller,
+          }
+        } catch (e) {
+          return { supported: true, registered: false, ...errorInfo(e) }
+        }
+      }
+
+      async function status(test) {
+        report(test, {
+          ok: true,
+          online: navigator.onLine,
+          hasStorageAccess: await storageAccess(),
+          hasFocus: document.hasFocus(),
+          visibility: document.visibilityState,
+          vaultFingerprint: JSON.parse(localStorage.getItem(VAULT_KEY) ?? '{}').fingerprint,
+          serviceWorker: await serviceWorkerState(),
+        })
+      }
+
+      async function mint(password) {
         try {
           const t0 = performance.now()
           const entropy = crypto.getRandomValues(new Uint8Array(16)) // 12-word seed
           const salt = crypto.getRandomValues(new Uint8Array(32))
-          const key = await passwordKey(document.getElementById('pw').value, salt)
+          const key = await passwordKey(password, salt)
           const encryptedSeed = await encrypt(entropy, key)
           const roundTrip = hex(await decrypt(encryptedSeed, key)) === hex(entropy)
           const fingerprint = hex(await crypto.subtle.digest('SHA-256', entropy)).slice(0, 16)
@@ -67,6 +75,8 @@
           const persisted = JSON.parse(localStorage.getItem(VAULT_KEY)).fingerprint === fingerprint
           report('mint-password-vault', {
             ok: roundTrip && persisted,
+            online: navigator.onLine,
+            controlledByServiceWorker: !!navigator.serviceWorker?.controller,
             roundTrip,
             persisted,
             fingerprint,
@@ -77,38 +87,54 @@
         }
       }
 
-      document.getElementById('b2').onclick = async () => {
-        try {
-          report('iframe-passkey-create', await createPasskey('safari-probe-iframe-' + Date.now()))
-        } catch (e) {
-          report('iframe-passkey-create', errorInfo(e))
-        }
-      }
-
-      document.getElementById('b3').onclick = async () => {
-        try {
-          // Discoverable, so the passkey made first-party (control A) can be picked.
-          report('iframe-passkey-get', await getPasskey(undefined))
-        } catch (e) {
-          report('iframe-passkey-get', errorInfo(e))
-        }
-      }
+      const focusInfo = () => ({
+        hasFocus: document.hasFocus(),
+        visibility: document.visibilityState,
+      })
 
       let popup
-      document.getElementById('b4').onclick = () => {
-        if (!localStorage.getItem(VAULT_KEY)) {
-          report('claim-open', { ok: false, errorMessage: 'run step 1 first' })
-          return
-        }
-        popup = window.open(
-          new URL('claim.html', location.href),
-          'safari-probe-claim',
-          'width=520,height=640',
-        )
-        report('claim-open', { ok: !!popup, popupReturned: !!popup })
+      const commands = {
+        status: () => status('frame-status'),
+        mint: (data) => mint(data.password),
+        'passkey-create': async () => {
+          const before = focusInfo()
+          try {
+            report('iframe-passkey-create', {
+              ...(await createPasskey('safari-probe-iframe-' + Date.now())),
+              ...before,
+            })
+          } catch (e) {
+            report('iframe-passkey-create', { ...errorInfo(e), ...before })
+          }
+        },
+        'passkey-get': async () => {
+          const before = focusInfo()
+          try {
+            // Discoverable, so any passkey for this host can be picked.
+            report('iframe-passkey-get', { ...(await getPasskey(undefined)), ...before })
+          } catch (e) {
+            report('iframe-passkey-get', { ...errorInfo(e), ...before })
+          }
+        },
+        claim: () => {
+          if (!localStorage.getItem(VAULT_KEY)) {
+            report('claim-open', { ok: false, errorMessage: 'sign up first' })
+            return
+          }
+          popup = window.open(
+            new URL('claim.html', location.href),
+            'safari-probe-claim',
+            'width=520,height=640',
+          )
+          report('claim-open', { ok: !!popup, popupReturned: !!popup })
+        },
       }
 
       window.addEventListener('message', (event) => {
+        if (event.source === window.parent && event.data?.type === 'probe-cmd') {
+          commands[event.data.cmd]?.(event.data)
+          return
+        }
         if (event.origin !== location.origin || event.source !== popup) return
         if (event.data?.type === 'probe-report') {
           window.parent.postMessage(event.data, '*')
@@ -124,6 +150,9 @@
           report('claim-ack', { ok: !!event.data.ok, popupResult: event.data })
         }
       })
+
+      localStorage.setItem('safari-probe-iframe-wrote', new Date().toISOString())
+      status('frame-load')
     </script>
   </body>
 </html>
