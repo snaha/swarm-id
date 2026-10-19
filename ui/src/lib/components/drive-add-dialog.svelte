@@ -310,6 +310,7 @@
         // Left blank, the drive stays unnamed and the UI falls back to its
         // stable batch-ID-derived label.
         name: name.trim(),
+        ...kindFields,
         requestFunding: funding.request,
         beforeSpend: () => attempt.guard(Promise.resolve()),
         onStep: (step) => (pendingLabel = describeStep(step, 'purchase')),

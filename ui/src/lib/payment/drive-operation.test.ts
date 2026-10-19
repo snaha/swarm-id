@@ -177,6 +177,29 @@ describe('runPurchase', () => {
     expect(account.stamps[0].depth).toBe(21)
   })
 
+  // #862: a scratch row on the connect screen opens this dialog preset to
+  // scratch. The built-in purchase records the stamp itself, so the kind has
+  // to reach it — on the chain read-back and on the projection alike.
+  it.each([
+    ['the chain read back', true],
+    ['the projection', false],
+  ])('records a scratch purchase as scratch, from %s', async (_label, readBack) => {
+    const account = makeAccount([])
+    const { createdAt: _createdAt, ...onChain } = stampRecord({ depth: 20, amount: REMAINING })
+    contract.fetchExistingBatchFromChain.mockResolvedValue(readBack ? onChain : undefined)
+
+    await runPurchase({
+      account,
+      depth: 20,
+      lifespanSeconds: 365 * DAY,
+      name: 'Stream',
+      requestFunding,
+      kind: 'scratch',
+    })
+
+    expect(account.stamps[0].kind).toBe('scratch')
+  })
+
   it('records what was bought when the chain cannot read the batch back yet', async () => {
     // A replica lagging the createBatch that just confirmed answers "no such
     // batch", so the purchase must still record the id it was given.
