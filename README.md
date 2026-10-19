@@ -71,7 +71,7 @@ progress is tracked.
 7. **Integration with browser Bee** — a Bee node running in the browser ([#306](https://github.com/snaha/swarm-id/issues/306))
 8. **Ethereum wallet** — visibility and consent over the funds the account already holds ([#866](https://github.com/snaha/swarm-id/issues/866))
 9. **App stores** — listing sites for Swarm ID apps, linked from the UI ([#867](https://github.com/snaha/swarm-id/issues/867))
-10. **Credit card payment without KYC/AML** — the card route is behind an experimental switch today ([#858](https://github.com/snaha/swarm-id/issues/858))
+10. **Credit card payment without KYC/AML** — keeping the card shop identity-free as it ships ([#875](https://github.com/snaha/swarm-id/issues/875)); the route is behind an experimental switch until its on-chain check is back ([#858](https://github.com/snaha/swarm-id/issues/858))
 
 ## Deployment
 
