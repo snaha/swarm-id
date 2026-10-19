@@ -284,3 +284,70 @@ test('a drive request renders a row per drive and grants what was picked', async
   await page.goto('/')
   expect(await grantOf()).toBe('all')
 })
+
+// Step 6 (#711): an app asks for more drives after connecting, and the user
+// edits what an app holds from the Apps tab.
+test('an app asks for a scratch drive later, and the Apps tab edits what it holds', async ({
+  page,
+}) => {
+  test.setTimeout(CHAIN_TEST_TIMEOUT_MS * 2)
+  await seedLocalChain(page)
+  await page.goto('/')
+  await page.getByRole('link', { name: 'Get started' }).first().click()
+  await completeCreateFlow(page)
+  await page.getByRole('button', { name: 'Stay local for now' }).click()
+  await expect(page).toHaveURL(/\/$/)
+  await fundPostageSigner(page)
+  await addDrive(page)
+  await expect(page.getByText(/^Drive [0-9a-f]{4}$/)).toBeVisible({
+    timeout: DRIVE_SETTLE_TIMEOUT_MS,
+  })
+
+  const grantOf = () =>
+    page.evaluate(() => {
+      const doc = JSON.parse(localStorage.getItem('swarm-id-accounts') ?? '{}') as {
+        data?: { connectedApps?: { appUrl: string; drives?: string[] | 'all' }[] }[]
+      }
+      return doc.data
+        ?.flatMap((account) => account.connectedApps ?? [])
+        .find((app) => app.appUrl === 'http://localhost:3500')?.drives
+    })
+
+  // Connect with no request: the app tracks the account default.
+  await page.goto(DEMO_URL)
+  let popup = await openConnectPopup(page)
+  await popup.getByRole('button', { name: /0x[0-9a-fA-F]{4}/ }).click()
+  await popup.getByRole('textbox', { name: 'Account password' }).fill(PASSWORD)
+  await popup.getByRole('button', { name: 'Confirm' }).click()
+  await goToApp(popup)
+  const accountButton = page.getByRole('button', { name: /0x|[0-9a-f]{6}\.\.\./ }).first()
+  await expect(accountButton).toBeVisible({ timeout: 10000 })
+
+  // The app asks for a scratch drive. The page shows only that, empty, and
+  // saving with nothing chosen grants nothing — no unlock on the way.
+  const popupPromise = page.waitForEvent('popup')
+  await page.getByRole('button', { name: 'Request a scratch drive' }).click()
+  popup = await popupPromise
+  await expect(popup.getByText(`Permissions for ${APP_NAME}`)).toBeVisible()
+  await expect(popup.getByText('Scratch drive', { exact: true })).toBeVisible()
+  await expect(popup.getByRole('combobox')).toHaveValue('')
+  await popup
+    .getByRole('button', { name: 'Save permissions' })
+    .click()
+    .catch(() => undefined)
+  await expect.poll(() => popup.isClosed()).toBe(true)
+
+  await page.goto('/')
+  expect(await grantOf()).toBeUndefined()
+
+  // The Apps tab opens the same page with everything the app holds: one Drive
+  // row on the account default, which saving leaves tracking the default.
+  await page.getByRole('tab', { name: 'Apps' }).click()
+  await page.getByRole('button', { name: 'App actions' }).click()
+  await page.getByRole('menuitem', { name: 'Permissions' }).click()
+  await expect(page.getByText(`Permissions for ${APP_NAME}`)).toBeVisible()
+  await expect(page.getByRole('combobox')).toHaveValue(/^[0-9a-f]{64}$/)
+  await page.getByRole('button', { name: 'Save permissions' }).click()
+  await expect(page.getByText('Permissions saved')).toBeVisible()
+  expect(await grantOf()).toBeUndefined()
+})

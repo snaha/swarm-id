@@ -2824,6 +2824,93 @@ describe("SwarmIdProxy partitioned write enablement", () => {
       return new BroadcastChannel(accountChannelName)
     }
 
+    // #711: the permissions popup. A partitioned session is handed the new
+    // grant by the popup it opened, as the delta the bus would carry.
+    describe("a permissions request", () => {
+      /** Past the popup watch's start delay and one poll. */
+      const POPUP_WATCH_MS = 3000
+
+      async function requestPermissions(popup: Window | null): Promise<string> {
+        vi.mocked(window.open).mockReturnValueOnce(popup)
+        await dispatch(
+          {
+            type: "requestPermissions",
+            requestId: "p1",
+            permissions: { drives: [{ kind: "scratch" }] },
+          },
+          PARENT_ORIGIN,
+          parentWindow,
+        )
+        return vi.mocked(window.open).mock.calls.at(-1)![0] as string
+      }
+
+      it(
+        "opens the permissions page for this session's account, and answers once it closes",
+        async () => {
+          const busChannel = await hydratedSession()
+          busChannel.close()
+
+          const url = await requestPermissions({ closed: true } as Window)
+
+          const params = new URLSearchParams(url.split("#")[1])
+          expect(url).toContain("/permissions#")
+          expect(params.get("account")).toBe(makeSyncedAccount().id.toHex())
+          expect(JSON.parse(params.get("permissions")!)).toEqual({
+            drives: [{ kind: "scratch" }],
+          })
+          expect(messagesOfType("requestPermissionsResponse")).toEqual([
+            expect.objectContaining({ requestId: "p1", opened: true }),
+          ])
+        },
+        POPUP_WATCH_MS * 2,
+      )
+
+      it("answers at once when the popup was blocked", async () => {
+        const busChannel = await hydratedSession()
+        busChannel.close()
+
+        await requestPermissions(null)
+
+        expect(messagesOfType("requestPermissionsResponse")).toEqual([
+          expect.objectContaining({ requestId: "p1", opened: false }),
+        ])
+      })
+
+      it(
+        "folds the popup's hand-off, and only with its challenge",
+        async () => {
+          const busChannel = await hydratedSession()
+          busChannel.close()
+          const url = await requestPermissions({ closed: true } as Window)
+          const challenge = new URLSearchParams(url.split("#")[1]).get(
+            "challenge",
+          )!
+          const handOff = (withChallenge: string) =>
+            dispatch(
+              {
+                type: "grantUpdated",
+                appOrigin: PARENT_ORIGIN,
+                challenge: withChallenge,
+                delta: accountDelta({
+                  connectedApps: [revoked(PARENT_ORIGIN)],
+                }),
+              },
+              ID_ORIGIN,
+            )
+
+          await handOff("not-this-popup")
+          await flushBus()
+          expect(messagesOfType("disconnectResponse")).toHaveLength(0)
+
+          await handOff(challenge)
+          await vi.waitFor(() =>
+            expect(messagesOfType("disconnectResponse")).toHaveLength(1),
+          )
+        },
+        POPUP_WATCH_MS * 2,
+      )
+    })
+
     it("disconnects a partitioned session when the delta revokes this app", async () => {
       const busChannel = await hydratedSession()
       try {

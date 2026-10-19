@@ -82,6 +82,7 @@ import type {
   ButtonConfig,
   PostageBatch,
   Drive,
+  DriveRequest,
   Permissions,
   DriveTargetOptions,
 } from "./types"
@@ -102,6 +103,22 @@ const DEFAULT_TIMEOUT_MS = 30000
 /** The largest delay `setTimeout` honours; past it, it fires almost at once. */
 const MAX_TIMER_DELAY_MS = 2 ** 31 - 1
 const DEFAULT_INITIALIZATION_TIMEOUT_MS = 30000
+/** How long a permissions popup may stay open: the user is choosing drives. */
+const PERMISSIONS_POPUP_TIMEOUT_MS = 10 * 60_000
+const POPUP_CLOSED_POLL_MS = 500
+
+/** Settles once `popup` is closed, or after `timeoutMs` whatever its state. */
+function untilClosed(popup: Window, timeoutMs: number): Promise<void> {
+  return new Promise((resolve) => {
+    const started = Date.now()
+    const poll = setInterval(() => {
+      if (popup.closed || Date.now() - started >= timeoutMs) {
+        clearInterval(poll)
+        resolve()
+      }
+    }, POPUP_CLOSED_POLL_MS)
+  })
+}
 
 /**
  * {@link withTimeout} for one of `initialize()`'s waits: a missed deadline
@@ -1078,6 +1095,77 @@ export class SwarmIdClient {
    * @returns whether the popup opened — a blocked one returns null, which the
    *   caller must not report as a connect in progress.
    */
+  /**
+   * Ask the user for more drives (#711). Opens the "Permissions for <app>"
+   * popup showing only what is asked; the user picks drives, may create one,
+   * or grants nothing. Resolves once the popup is closed with the drives the
+   * app now holds — the same as before when the user granted nothing or
+   * closed it. Call it from a user gesture, as `connect()`: a popup opened
+   * later is blocked.
+   *
+   * @example
+   * ```typescript
+   * const drives = await client.requestDrives([{ kind: 'scratch' }])
+   * const scratch = drives.find((drive) => drive.kind === 'scratch')
+   * ```
+   * @throws {SwarmIdError} `not-authenticated` when the app is not connected
+   * @throws {SwarmIdError} `popup-blocked` when the browser blocked the popup
+   */
+  async requestDrives(drives: DriveRequest): Promise<Drive[]> {
+    this.ensureReady()
+    await this.requestPermissions({ drives })
+    return this.getDrives()
+  }
+
+  /**
+   * The general form behind {@link requestDrives}: drives are the first
+   * permission, and the next ones join `permissions` rather than adding a
+   * method each. Opened the way `connect()` opens: from the parent while
+   * the iframe's store is shared, which keeps the click; otherwise by the
+   * iframe, so a partitioned session is handed the new grant directly.
+   */
+  private async requestPermissions(permissions: Permissions): Promise<void> {
+    const account = this.lastConnectionInfo?.identity?.id
+    if (!account) {
+      throw new SwarmIdError(
+        "not-authenticated",
+        "Connect to Swarm ID before asking for more permissions.",
+      )
+    }
+    if (this.storageShared !== true) {
+      const response = await this.sendRequest<{
+        type: "requestPermissionsResponse"
+        requestId: string
+        opened: boolean
+      }>({
+        type: "requestPermissions",
+        requestId: this.generateRequestId(),
+        permissions,
+        popupMode: this.popupMode,
+        requestOptions: { timeout: PERMISSIONS_POPUP_TIMEOUT_MS },
+      })
+      if (response.opened) return
+    }
+    const basePath = this.iframePath.replace(/\/proxy$/, "")
+    const url = buildAuthUrl(
+      this.iframeOrigin + basePath,
+      window.location.origin,
+      this.metadata,
+      { permissions, permissionsFor: account },
+    )
+    const popup =
+      this.popupMode === "popup"
+        ? window.open(url, "_blank", "width=500,height=600")
+        : window.open(url, "_blank")
+    if (!popup) {
+      throw new SwarmIdError(
+        "popup-blocked",
+        "Failed to open the permissions popup",
+      )
+    }
+    await untilClosed(popup, PERMISSIONS_POPUP_TIMEOUT_MS)
+  }
+
   private openAuthWindow(options: ConnectOptions): boolean {
     const basePath = this.iframePath.replace(/\/proxy$/, "")
     const authUrl = buildAuthUrl(

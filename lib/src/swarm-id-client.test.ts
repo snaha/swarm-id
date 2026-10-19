@@ -28,6 +28,7 @@ type ClientInternals = {
   ready: boolean
   iframe: unknown
   storageShared?: boolean
+  lastConnectionInfo?: unknown
   /** The in-flight requests `sendRequest` is holding open. */
   pendingRequests: Map<string, unknown>
 }
@@ -206,6 +207,50 @@ describe("SwarmIdClient connect()", () => {
         ),
         "_blank",
       )
+    })
+
+    // #711: the permissions popup opens the way connect's does, and the call
+    // resolves with the drives the app holds once it closes — granted or not.
+    it("opens the permissions page for the session's account and resolves with its drives", async () => {
+      vi.useFakeTimers()
+      try {
+        vi.spyOn(internals(client), "ensureReady").mockImplementation(() => {})
+        setStorageShared(true)
+        internals(client).lastConnectionInfo = {
+          identity: { id: "aa".repeat(20) },
+        }
+        const drives = [{ batchID: "ab".repeat(32) }]
+        const getDrives = vi
+          .spyOn(client, "getDrives")
+          .mockResolvedValue(drives as never)
+        const popup = { closed: false }
+        vi.mocked(window.open).mockReturnValueOnce(popup as Window)
+
+        const request = client.requestDrives([{ kind: "scratch" }])
+        await vi.advanceTimersByTimeAsync(1000)
+        expect(getDrives).not.toHaveBeenCalled()
+        popup.closed = true
+        await vi.advanceTimersByTimeAsync(1000)
+
+        await expect(request).resolves.toBe(drives)
+        const url = vi.mocked(window.open).mock.calls[0][0] as string
+        expect(url).toContain("/permissions#")
+        expect(new URLSearchParams(url.split("#")[1]).get("account")).toBe(
+          "aa".repeat(20),
+        )
+      } finally {
+        vi.useRealTimers()
+      }
+    })
+
+    it("refuses a permissions request without a session", async () => {
+      vi.spyOn(internals(client), "ensureReady").mockImplementation(() => {})
+      setStorageShared(true)
+
+      await expect(
+        client.requestDrives([{ kind: "scratch" }]),
+      ).rejects.toMatchObject({ code: "not-authenticated" })
+      expect(window.open).not.toHaveBeenCalled()
     })
 
     it("opens the popup from the parent, keeping the user gesture", async () => {

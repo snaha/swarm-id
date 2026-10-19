@@ -38,6 +38,11 @@ export interface BuildAuthUrlOptions {
   challenge?: string
   /** What the app asks for; the connect screen renders a row per drive (#862). */
   permissions?: Permissions
+  /**
+   * Opens the permissions page instead of connect (#711), for this account:
+   * the one the app's session is with.
+   */
+  permissionsFor?: string
 }
 
 /**
@@ -90,5 +95,9 @@ export function buildAuthUrl(
     params.set("permissions", JSON.stringify(options.permissions))
   }
 
+  if (options?.permissionsFor !== undefined) {
+    params.set("account", options.permissionsFor)
+    return `${baseUrl}/permissions#${params.toString()}`
+  }
   return `${baseUrl}/connect#${params.toString()}`
 }

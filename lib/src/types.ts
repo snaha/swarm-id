@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { z } from "zod"
+import { AccountDeltaMessageSchema } from "./bus/messages"
 import type {
   PrivateKey as BeePrivateKey,
   Topic as BeeTopic,
@@ -1338,6 +1339,19 @@ export const GetDrivesMessageSchema = z.object({
   requestId: z.string(),
 })
 
+/**
+ * Ask the user for more (#711): the proxy opens the permissions popup and
+ * answers once it closes, or at once with `opened: false` when the browser
+ * blocked it, so the client can open it from the parent instead.
+ */
+export const RequestPermissionsMessageSchema = z.object({
+  type: z.literal("requestPermissions"),
+  requestId: z.string(),
+  permissions: PermissionsSchema,
+  popupMode: z.enum(["popup", "window"]).optional(),
+  requestOptions: RequestOptionsSchema,
+})
+
 export const ConnectMessageSchema = z.object({
   type: z.literal("connect"),
   requestId: z.string(),
@@ -1385,6 +1399,7 @@ export const ParentToIframeMessageSchema = z.discriminatedUnion("type", [
   GetPostageBatchMessageSchema,
   GetDrivesMessageSchema,
   ConnectMessageSchema,
+  RequestPermissionsMessageSchema,
 ])
 
 export type ParentIdentifyMessage = z.infer<typeof ParentIdentifyMessageSchema>
@@ -1455,6 +1470,9 @@ export type GetPostageBatchMessage = z.infer<
 >
 export type GetDrivesMessage = z.infer<typeof GetDrivesMessageSchema>
 export type ConnectMessage = z.infer<typeof ConnectMessageSchema>
+export type RequestPermissionsMessage = z.infer<
+  typeof RequestPermissionsMessageSchema
+>
 export type ParentToIframeMessage = z.infer<typeof ParentToIframeMessageSchema>
 
 // ============================================================================
@@ -1883,6 +1901,13 @@ export const GetDrivesResponseMessageSchema = z.object({
   drives: z.array(DriveSchema),
 })
 
+export const RequestPermissionsResponseMessageSchema = z.object({
+  type: z.literal("requestPermissionsResponse"),
+  requestId: z.string(),
+  /** False when the browser blocked the proxy's popup */
+  opened: z.boolean(),
+})
+
 export const IframeToParentMessageSchema = z.discriminatedUnion("type", [
   ProxyReadyMessageSchema,
   InitErrorMessageSchema,
@@ -1929,6 +1954,7 @@ export const IframeToParentMessageSchema = z.discriminatedUnion("type", [
   ActGetGranteesResponseMessageSchema,
   GetPostageBatchResponseMessageSchema,
   GetDrivesResponseMessageSchema,
+  RequestPermissionsResponseMessageSchema,
 ])
 
 export type ProxyReadyMessage = z.infer<typeof ProxyReadyMessageSchema>
@@ -2118,6 +2144,19 @@ export const PartitionSessionSchemaV1 = z.object({
 
 export type PartitionSession = z.infer<typeof PartitionSessionSchemaV1>
 
+/**
+ * The permissions popup's hand-off to a partitioned iframe (#711): the account
+ * with the new grant, as the account bus would carry it. The proxy folds it
+ * like any delta and narrows it back to the grant; it is not a sign-in, so
+ * it touches neither the secret nor the session.
+ */
+export const GrantUpdatedMessageSchema = z.object({
+  type: z.literal("grantUpdated"),
+  appOrigin: z.string(),
+  challenge: z.string(),
+  delta: AccountDeltaMessageSchema,
+})
+
 export const SetSecretMessageSchema = z.object({
   type: z.literal("setSecret"),
   appOrigin: z.string(),
@@ -2127,6 +2166,7 @@ export const SetSecretMessageSchema = z.object({
 
 export const PopupToIframeMessageSchema = z.discriminatedUnion("type", [
   SetSecretMessageSchema,
+  GrantUpdatedMessageSchema,
 ])
 
 export type SetSecretMessage = z.infer<typeof SetSecretMessageSchema>

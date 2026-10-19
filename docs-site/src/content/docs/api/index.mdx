@@ -518,6 +518,28 @@ const scratch = (await client.getDrives()).find((drive) => drive.kind === 'scrat
 await client.uploadData(frame, { batchID: scratch?.batchID })
 ```
 
+### `requestDrives(drives)`
+
+Asks the user for more drives while the app is connected — a viewer who starts streaming and now needs a scratch drive, say. It opens the **Permissions for &lt;app&gt;** popup, which shows only what the app asks for; the user picks a drive for each row, can create one there, or grants nothing. The rows take the same shape as `options.permissions.drives` at connect, and what the user picks is **added** to what the app already holds.
+
+**Returns:** `Promise<Drive[]>` — the drives the app holds once the popup is closed, as [`getDrives()`](#getdrives) reports them. When the user granted nothing, or closed the popup, that is what the app held before.
+
+**Throws:**
+
+- `not-authenticated` if the app is not connected
+- `popup-blocked` if the browser blocked the popup — call it from a click, as `connect()`
+
+```typescript
+button.onclick = async () => {
+  const drives = await client.requestDrives([{ kind: 'scratch' }])
+  const scratch = drives.find((drive) => drive.kind === 'scratch')
+  if (!scratch) return showStreamingUnavailable()
+  startStreaming(scratch.batchID)
+}
+```
+
+The user can also change what an app holds from Swarm ID itself: **Apps → Permissions** lists every drive the app was granted, and setting one to **None** takes it away. A write in flight on a drive taken away is aborted.
+
 ---
 
 ## Bee Connectivity Methods
