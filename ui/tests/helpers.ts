@@ -6,7 +6,7 @@
  * decides which chain and which payment arrangement a suite runs against.
  */
 import { PrivateKey } from '@ethersphere/bee-js'
-import { type BrowserContext, type Page, expect, test } from '@playwright/test'
+import { type BrowserContext, type Locator, type Page, expect, test } from '@playwright/test'
 import { gnosisMainnetSettings } from '@swarm-id/multichain'
 import { fundLocalAccount } from '@swarm-id/multichain/dev'
 
@@ -275,16 +275,40 @@ export async function addDrive(
   {
     settle = true,
     method = 'built-in',
-    kind = 'regular',
+    kind,
   }: { settle?: boolean; method?: 'built-in' | 'widget'; kind?: 'regular' | 'scratch' } = {},
 ) {
   await page.getByRole('tab', { name: 'Storage' }).click()
   await page.getByRole('button', { name: 'Add drive' }).click()
-  const dialog = page.getByRole('dialog')
-  // The form's selects in order: Drive type, Storage, Size up to, lifespan unit.
-  await dialog.getByRole('combobox').first().selectOption(kind)
+  await buyDriveInDialog(page.getByRole('dialog'), { settle, method, kind })
+}
+
+/** The Add drive dialog's field labelled `label`: its innermost wrapper. */
+function dialogField(dialog: Locator, label: string): Locator {
+  return dialog
+    .locator('div')
+    .filter({ has: dialog.page().getByText(label, { exact: true }) })
+    .last()
+}
+
+/**
+ * Fill an open Add drive dialog and buy the drive — wherever the dialog was
+ * opened: the Storage tab, a connect screen's "Add drive" row, or the
+ * permissions page's "Add new drive…". Fields are found by their labels, so
+ * a field added to the form does not shift the others.
+ */
+export async function buyDriveInDialog(
+  dialog: Locator,
+  {
+    settle = true,
+    method = 'built-in',
+    kind,
+  }: { settle?: boolean; method?: 'built-in' | 'widget'; kind?: 'regular' | 'scratch' } = {},
+) {
+  // The dialog's own default otherwise: a popup's "Add drive" row presets it.
+  if (kind) await dialogField(dialog, 'Drive type').getByRole('combobox').selectOption(kind)
   // The smallest size on offer — index 1, past the "Please select" placeholder.
-  await dialog.getByRole('combobox').nth(2).selectOption({ index: 1 })
+  await dialogField(dialog, 'Size up to').getByRole('combobox').selectOption({ index: 1 })
   // ...and an explicit lifespan, rather than the dialog's default of a YEAR. A
   // drive costs `amountPerChunk << depth`, so both halves matter, and
   // `DRIVE_FUNDING` is a fixed 3 BZZ: a year at this size is ~15.8 BZZ, so the
@@ -296,9 +320,9 @@ export async function addDrive(
   // `EXPIRES_SOON_THRESHOLD_SECONDS` by a wide margin. A drive bought AT that
   // threshold reads "expires soon" the moment it settles, which quietly adds a
   // second drive to the home page's attention count.
-  await dialog.getByRole('spinbutton').fill('30')
-  await dialog.getByRole('combobox').nth(3).selectOption('days')
-  await page.getByRole('button', { name: 'Proceed' }).click()
+  await dialogField(dialog, 'Lifespan up to').getByRole('spinbutton').fill('30')
+  await dialogField(dialog, 'Lifespan up to').getByRole('combobox').selectOption('days')
+  await dialog.getByRole('button', { name: 'Proceed' }).click()
   // The chooser, which opens whatever the owner address holds.
   await dialog.getByRole('combobox').first().selectOption(method)
   await dialog
