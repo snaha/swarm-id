@@ -7,6 +7,7 @@ import {
   DEFAULT_BEE_NODE_URL,
   type Avatar,
   type ConnectionInfo,
+  type Drive,
   type UploadUnavailableReason,
 } from '@snaha/swarm-id'
 import { resolveProxyOrigin } from '$lib/utils/environment'
@@ -76,6 +77,10 @@ let uploadUnavailableReason = $state<UploadUnavailableReason | undefined>(undefi
 let identity = $state<IdentityInfo | undefined>(undefined)
 let appKey = $state<AppKeyInfo | undefined>(undefined)
 let stamp = $state<StampInfo | undefined>(undefined)
+// Every drive the app was granted, and the one its writes name — `undefined`
+// leaves each write to the primary.
+let drives = $state<Drive[]>([])
+let targetBatchID = $state<string | undefined>(undefined)
 let partition = $state<number | undefined>(undefined)
 let deferred = $state(false)
 let initializing = $state(false)
@@ -136,6 +141,9 @@ async function updatePostageStampInfo(generation: number) {
   try {
     const batch = await client.getPostageBatch()
     if (generation !== connectionGeneration) return
+    drives = await client.getDrives()
+    if (generation !== connectionGeneration) return
+    if (!drives.some((drive) => drive.batchID === targetBatchID)) targetBatchID = undefined
     if (batch) {
       const batchIdStr = String(batch.batchID)
       const previous = stamp
@@ -252,6 +260,8 @@ async function onConnectionChange(info: ConnectionInfo) {
     await updatePostageStampInfo(generation)
   } else {
     stamp = undefined
+    drives = []
+    targetBatchID = undefined
   }
 }
 
@@ -447,6 +457,19 @@ export const clientStore = {
   get stamp() {
     return stamp
   },
+  get drives() {
+    return drives
+  },
+  get targetBatchID() {
+    return targetBatchID
+  },
+  set targetBatchID(value: string | undefined) {
+    targetBatchID = value
+  },
+  /** Spread into any write's options: the drive the user picked, or none. */
+  get uploadTarget(): { batchID?: string } {
+    return { batchID: targetBatchID }
+  },
   get partition() {
     return partition
   },
@@ -521,6 +544,8 @@ export const clientStore = {
     identity = undefined
     appKey = undefined
     stamp = undefined
+    drives = []
+    targetBatchID = undefined
     partition = undefined
   },
 }

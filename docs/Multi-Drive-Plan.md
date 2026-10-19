@@ -148,11 +148,14 @@ connect, removing a drive included, belongs to #711 as well.
 
 ### SDK
 
-- `getPostageBatch()` → `getDrives()`: the granted drives, each with today's
-  `PostageBatch` fields plus `kind` and a primary marker, possibly extended (e.g. size).
+- `getDrives()`: the granted drives, each with today's `PostageBatch` fields plus `kind` and a
+  primary marker, possibly extended (e.g. size). `getPostageBatch()` stays as the primary
+  drive's shortcut (departure, step 4): every dApp calls it, and the primary is what it
+  always returned.
 - Every writer takes an optional `batchID`: data, file, chunk, SOC, GSOC, sequential and
   epoch feeds, feed manifest, ACT. Without it the write goes to the primary drive.
-- A target outside the grant is rejected with a typed error.
+- A target outside the grant is rejected with a typed error, `drive-not-granted`. The id is
+  normalised at the bridge (`0x`, uppercase), so a valid spelling never reads as ungranted.
 - A feed's payload and its SOC always go to the same drive.
 
 ### Scratch drive: a ring in the lane
@@ -234,11 +237,8 @@ a teardown overtook, since nothing else would.
 - Step 1: the existing suite is the test; only the helpers that set the moved private fields change.
 - Steps 2–4: unit tests per `lib/AGENTS.md`, including that an account-bus delta hands a
   partitioned session only its granted drives' signer keys (a live `"all"` grant learns of
-  new drives that way); an integration test against the local Bee
-  cluster with one session writing two drives and a second device taking over each lane
-  independently. That test lands in step 4 (departure): before the SDK's `batchID`, a second
-  drive is reachable only through a private method, and `lib/src/sync/` — where the lanes
-  live — does not change in step 3.
+  new drives that way); an integration test with one session writing two drives and a second
+  device taking over each lane independently. Still open after step 4, tracked in #882: `lib/test/integration` calls the library's functions against the cluster and never builds a proxy session, so it belongs to the browser suites (`ui/tests`), next to the three-device scenarios.
 - Step 7: unit tests for the wrap (slot sequence, counter monotonicity across a publish); an
   integration test that fills a lane past its capacity and reads back the newest data; a
   live test that the overwrite evicts on a real network.

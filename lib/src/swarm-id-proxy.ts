@@ -42,6 +42,8 @@ import type {
   ActRevokeGranteesMessage,
   ActGetGranteesMessage,
   GetPostageBatchMessage,
+  GetDrivesMessage,
+  Drive,
   CreateFeedManifestMessage,
   AppMetadata,
   PostageStamp,
@@ -800,7 +802,7 @@ export class SwarmIdProxy {
       )
       if (!stamp) {
         throw new SwarmIdError(
-          "upload-unavailable",
+          "drive-not-granted",
           "This app has not been granted that drive in Swarm ID.",
         )
       }
@@ -2428,6 +2430,10 @@ export class SwarmIdProxy {
         await this.handleGetPostageBatch(message, event)
         break
 
+      case "getDrives":
+        await this.handleGetDrives(message, event)
+        break
+
       case "createFeedManifest":
         await this.handleCreateFeedManifest(message, event)
         break
@@ -3872,7 +3878,8 @@ export class SwarmIdProxy {
     } = message
 
     try {
-      this.ensureCanUpload()
+      const batchID = options?.batchID
+      this.ensureCanUpload(batchID)
 
       // Create progress callback if enabled (works in both modes)
       const onProgress = this.createProgressCallback(
@@ -3897,6 +3904,7 @@ export class SwarmIdProxy {
           })
           return result
         },
+        batchID,
       )
 
       // Send response
@@ -3956,7 +3964,8 @@ export class SwarmIdProxy {
     const fileName = name || "index.bin"
 
     try {
-      this.ensureCanUpload()
+      const batchID = options?.batchID
+      this.ensureCanUpload(batchID)
 
       // Create progress callback if enabled
       const onProgress = this.createProgressCallback(
@@ -4016,6 +4025,7 @@ export class SwarmIdProxy {
 
           return result
         },
+        batchID,
       )
 
       // Send response
@@ -4114,7 +4124,8 @@ export class SwarmIdProxy {
     } = message
 
     try {
-      this.ensureCanUpload()
+      const batchID = options?.batchID
+      this.ensureCanUpload(batchID)
       const onProgress = this.createProgressCallback(
         event,
         requestId,
@@ -4131,6 +4142,7 @@ export class SwarmIdProxy {
             onProgress,
             requestOptions,
           }),
+        batchID,
       )
 
       this.postMessage(event, {
@@ -4165,7 +4177,8 @@ export class SwarmIdProxy {
     const { requestId, data, options, requestOptions } = message
 
     try {
-      this.ensureCanUpload()
+      const batchID = options?.batchID
+      this.ensureCanUpload(batchID)
 
       // Validate chunk size (must be between 1 and 4096 bytes)
       if (data.length < 1 || data.length > 4096) {
@@ -4178,14 +4191,18 @@ export class SwarmIdProxy {
       const chunk = makeContentAddressedChunk(data)
 
       // Execute upload with mode-aware locking
-      await this.withModeAwareWriteLock(undefined, async (target) => {
-        await uploadChunk(target, chunk.data, {
-          pin: options?.pin,
-          deferred: options?.deferred ?? false,
-          tag: options?.tag,
-          requestOptions,
-        })
-      })
+      await this.withModeAwareWriteLock(
+        undefined,
+        async (target) => {
+          await uploadChunk(target, chunk.data, {
+            pin: options?.pin,
+            deferred: options?.deferred ?? false,
+            tag: options?.tag,
+            requestOptions,
+          })
+        },
+        batchID,
+      )
 
       this.postMessage(event, {
         type: "uploadChunkResponse",
@@ -4248,7 +4265,8 @@ export class SwarmIdProxy {
     const { requestId, signer, identifier, data, options } = message
 
     try {
-      this.ensureCanUpload()
+      const batchID = options?.batchID
+      this.ensureCanUpload(batchID)
 
       const signerKey = new PrivateKey(signer)
       const id = new Identifier(identifier)
@@ -4262,6 +4280,7 @@ export class SwarmIdProxy {
             tag: options?.tag,
           })
         },
+        batchID,
       )
 
       this.postMessage(event, {
@@ -4286,7 +4305,8 @@ export class SwarmIdProxy {
     const { requestId, identifier, data, signer, options } = message
 
     try {
-      this.ensureCanUpload()
+      const batchID = options?.batchID
+      this.ensureCanUpload(batchID)
 
       const signerKey = signer ?? this.appSecret!
       const signerKeyObj = new PrivateKey(signerKey)
@@ -4302,6 +4322,7 @@ export class SwarmIdProxy {
             tag: options?.tag,
           })
         },
+        batchID,
       )
 
       this.postMessage(event, {
@@ -4326,7 +4347,8 @@ export class SwarmIdProxy {
     const { requestId, identifier, data, signer, options } = message
 
     try {
-      this.ensureCanUpload()
+      const batchID = options?.batchID
+      this.ensureCanUpload(batchID)
 
       const signerKey = signer ?? this.appSecret!
       const signerKeyObj = new PrivateKey(signerKey)
@@ -4341,6 +4363,7 @@ export class SwarmIdProxy {
             tag: options?.tag,
           })
         },
+        batchID,
       )
 
       this.postMessage(event, {
@@ -4659,11 +4682,19 @@ export class SwarmIdProxy {
     message: EpochFeedUploadReferenceMessage,
     event: MessageEvent,
   ): Promise<void> {
-    const { requestId, topic, signer, at, reference, encryptionKey, hints } =
-      message
+    const {
+      requestId,
+      topic,
+      signer,
+      at,
+      reference,
+      encryptionKey,
+      hints,
+      batchID,
+    } = message
 
     try {
-      this.ensureCanUpload()
+      this.ensureCanUpload(batchID)
 
       const signerKey = signer ?? this.appSecret!
       const signerKeyObj = new PrivateKey(signerKey)
@@ -4717,6 +4748,7 @@ export class SwarmIdProxy {
 
           return result
         },
+        batchID,
       )
 
       // Verify upload with read-back
@@ -5156,7 +5188,8 @@ export class SwarmIdProxy {
     } = message
 
     try {
-      this.ensureCanUpload()
+      const batchID = options?.batchID
+      this.ensureCanUpload(batchID)
 
       const signerKey = signer ?? this.appSecret!
       const signerKeyObj = new PrivateKey(signerKey)
@@ -5206,6 +5239,7 @@ export class SwarmIdProxy {
             tag: options?.tag,
           })
         },
+        batchID,
       )
 
       this.postMessage(event, {
@@ -5248,7 +5282,8 @@ export class SwarmIdProxy {
     } = message
 
     try {
-      this.ensureCanUpload()
+      const batchID = options?.batchID
+      this.ensureCanUpload(batchID)
 
       const signerKey = signer ?? this.appSecret!
       const signerKeyObj = new PrivateKey(signerKey)
@@ -5300,6 +5335,7 @@ export class SwarmIdProxy {
             tag: options?.tag,
           })
         },
+        batchID,
       )
 
       this.postMessage(event, {
@@ -5339,7 +5375,8 @@ export class SwarmIdProxy {
     } = message
 
     try {
-      this.ensureCanUpload()
+      const batchID = options?.batchID
+      this.ensureCanUpload(batchID)
 
       const signerKey = signer ?? this.appSecret!
       const signerKeyObj = new PrivateKey(signerKey)
@@ -5394,6 +5431,7 @@ export class SwarmIdProxy {
             tag: options?.tag,
           })
         },
+        batchID,
       )
 
       this.postMessage(event, {
@@ -5455,7 +5493,8 @@ export class SwarmIdProxy {
     } = message
 
     try {
-      this.ensureCanUpload()
+      const batchID = options?.batchID
+      this.ensureCanUpload(batchID)
 
       // Parse grantee public keys from compressed hex
       const granteePublicKeys = grantees.map((hex) =>
@@ -5540,6 +5579,7 @@ export class SwarmIdProxy {
             contentUpload: contentUploadResult,
           }
         },
+        batchID,
       )
 
       // Send final response
@@ -5640,10 +5680,11 @@ export class SwarmIdProxy {
     message: ActAddGranteesMessage,
     event: MessageEvent,
   ): Promise<void> {
-    const { requestId, historyReference, grantees, requestOptions } = message
+    const { requestId, historyReference, grantees, batchID, requestOptions } =
+      message
 
     try {
-      this.ensureCanUpload()
+      this.ensureCanUpload(batchID)
 
       const publisherPrivateKey = this.actKeys()
 
@@ -5666,6 +5707,7 @@ export class SwarmIdProxy {
             requestOptions,
           )
         },
+        batchID,
       )
 
       this.postMessage(event, {
@@ -5689,11 +5731,12 @@ export class SwarmIdProxy {
       historyReference,
       encryptedReference,
       revokeGrantees,
+      batchID,
       requestOptions,
     } = message
 
     try {
-      this.ensureCanUpload()
+      this.ensureCanUpload(batchID)
 
       const publisherPrivateKey = this.actKeys()
 
@@ -5717,6 +5760,7 @@ export class SwarmIdProxy {
             requestOptions,
           )
         },
+        batchID,
       )
 
       this.postMessage(event, {
@@ -5776,16 +5820,37 @@ export class SwarmIdProxy {
     event: MessageEvent,
   ): Promise<void> {
     const stamp = this.lookupDrivesForApp().primary
+    this.postMessage(event, {
+      type: "getPostageBatchResponse",
+      requestId: message.requestId,
+      postageBatch: stamp ? await this.describeStamp(stamp) : undefined,
+    })
+  }
 
-    if (!stamp) {
-      this.postMessage(event, {
-        type: "getPostageBatchResponse",
-        requestId: message.requestId,
-        postageBatch: undefined,
-      })
-      return
-    }
+  /** Every drive the app was granted, the primary marked (#862). */
+  private async handleGetDrives(
+    message: GetDrivesMessage,
+    event: MessageEvent,
+  ): Promise<void> {
+    const { primary, granted } = this.lookupDrivesForApp()
+    const drives = await Promise.all(
+      granted.map(
+        async (stamp): Promise<Drive> => ({
+          ...(await this.describeStamp(stamp)),
+          kind: stamp.kind ?? "regular",
+          primary: stamp.batchID.toHex() === primary?.batchID.toHex(),
+        }),
+      ),
+    )
+    this.postMessage(event, {
+      type: "getDrivesResponse",
+      requestId: message.requestId,
+      drives,
+    })
+  }
 
+  /** A stored stamp as the dApp sees it: live `usable`/`exists` and TTL, no signer key. */
+  private async describeStamp(stamp: PostageStamp): Promise<PostageBatch> {
     // The stored stamp's `usable`/`exists` are a snapshot from assignment time
     // and can be stale (e.g. a batch assigned during its ~30s warm-up stays
     // `usable: false` in storage forever), so read live batch details from the
@@ -5815,8 +5880,7 @@ export class SwarmIdProxy {
       }
     }
 
-    // Map PostageStamp to public PostageBatch (exclude signerKey)
-    const postageBatch: PostageBatch = {
+    return {
       batchID: stamp.batchID.toHex(),
       utilization: stamp.utilization,
       usable: details?.usable ?? stamp.usable,
@@ -5829,12 +5893,6 @@ export class SwarmIdProxy {
       exists: details?.exists ?? stamp.exists,
       batchTTL,
     }
-
-    this.postMessage(event, {
-      type: "getPostageBatchResponse",
-      requestId: message.requestId,
-      postageBatch,
-    })
   }
 
   /**
@@ -5868,7 +5926,8 @@ export class SwarmIdProxy {
     }
 
     try {
-      this.ensureCanUpload()
+      const batchID = uploadOptions?.batchID
+      this.ensureCanUpload(batchID)
 
       const result = await this.withModeAwareWriteLock(
         undefined,
@@ -5884,6 +5943,7 @@ export class SwarmIdProxy {
             uploadOptions,
           )
         },
+        batchID,
       )
 
       this.postMessage(event, {

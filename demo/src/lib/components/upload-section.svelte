@@ -47,6 +47,7 @@
       const uint8Data = encoder.encode(data)
 
       const uploadResult = await clientStore.client!.uploadData(uint8Data, {
+        ...clientStore.uploadTarget,
         encrypt,
         deferred: clientStore.deferred,
         useWebSocket,

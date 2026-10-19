@@ -442,9 +442,9 @@ if (info.canUpload) {
 
 ### `getPostageBatch()`
 
-Gets the current postage batch for the authenticated identity.
+Gets the app's **primary drive**: the one a write goes to when it names none. The app's other drives, if it was granted any, are listed by [`getDrives()`](#getdrives).
 
-Returns information about the postage stamp associated with the connected identity, including batch ID, utilization, depth, and TTL.
+Returns information about the postage stamp behind it, including batch ID, utilization, depth, and TTL.
 
 **Returns:** `Promise<PostageBatch | undefined>` - The postage batch info, or `undefined` if none is configured
 
@@ -479,6 +479,28 @@ if (batch) {
 } else {
   console.log('No postage batch configured')
 }
+```
+
+---
+
+### `getDrives()`
+
+Lists every drive the app was granted in Swarm ID. Each entry carries the fields of [`getPostageBatch()`](#getpostagebatch) plus:
+
+| Property  | Type                     | Description                                                                                                                                                         |
+| --------- | ------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `kind`    | `'regular' \| 'scratch'` | A scratch drive overwrites its oldest data once full; its contents carry no warranty                                                                                |
+| `primary` | `boolean`                | The drive a write goes to when it names none: the account default for an `'all'` grant, otherwise the first granted regular drive. A scratch drive is never primary |
+
+**Returns:** `Promise<Drive[]>` — empty when the app was granted no drive
+
+Every write takes an optional `batchID` (in its upload options, or as its own `options` where there are none) naming one of these drives. A feed update's payload and its SOC always go to the same drive. Naming a drive outside the grant rejects with `drive-not-granted`.
+
+**Example:**
+
+```typescript
+const scratch = (await client.getDrives()).find((drive) => drive.kind === 'scratch')
+await client.uploadData(frame, { batchID: scratch?.batchID })
 ```
 
 ---
@@ -555,6 +577,7 @@ The data is uploaded using the authenticated user's postage stamp. Progress can 
 | ------------------------------- | ------------------------ | -------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `data`                          | `Uint8Array`             | Yes      | The binary data to upload                                                                                                                                                                                                                                                                |
 | `options`                       | `UploadOptions`          | No       | Upload configuration                                                                                                                                                                                                                                                                     |
+| `options.batchID`               | `string`                 | No       | The drive to write to, from [`getDrives()`](#getdrives). Defaults to the primary drive. Every writer takes it                                                                                                                                                                            |
 | `options.pin`                   | `boolean`                | No       | Whether to pin the data locally (defaults to `false`; ignored on a subsidised gateway)                                                                                                                                                                                                   |
 | `options.encrypt`               | `boolean`                | No       | Whether to encrypt the data (defaults to `false`). The 128-hex reference then contains the decryption key: a capability, not an address — see [Quick Start](../getting-started/#upload-and-download-bytes)                                                                               |
 | `options.tag`                   | `number`                 | No       | Tag ID for tracking upload progress (ignored on a subsidised gateway)                                                                                                                                                                                                                    |
@@ -1484,7 +1507,7 @@ console.log('Decrypted:', text)
 
 ---
 
-### `actAddGrantees(historyReference, grantees, requestOptions?)`
+### `actAddGrantees(historyReference, grantees, options?, requestOptions?)`
 
 Adds new grantees to an existing ACT.
 
@@ -1530,7 +1553,7 @@ console.log('New History Reference:', result.historyReference)
 
 ---
 
-### `actRevokeGrantees(historyReference, encryptedReference, revokeGrantees, requestOptions?)`
+### `actRevokeGrantees(historyReference, encryptedReference, revokeGrantees, options?, requestOptions?)`
 
 Revokes access from grantees by removing them from the ACT.
 
@@ -1656,6 +1679,7 @@ try {
 | --------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------- |
 | `not-authenticated`   | No session for this origin                                                                                                                                                                                             |                               |
 | `upload-unavailable`  | The session refuses to stamp; see [Why Uploads Are Unavailable](../subsidised-gateway/#why-uploads-are-unavailable)                                                                                                    | `reason`                      |
+| `drive-not-granted`   | The write names a drive this app was not granted; see [`getDrives()`](#getdrives)                                                                                                                                      |                               |
 | `partition-contended` | Every partition of the batch is held by other devices and none yielded in time                                                                                                                                         |                               |
 | `lease-lost`          | This device's partition was reclaimed mid-write                                                                                                                                                                        |                               |
 | `bee-rejected`        | Bee or the gateway answered with a non-2xx status. A `404` on `/bzz` and on a chunk mean different things; `url` — the request's path, never the node's host — says which                                              | `status`, `beeMessage`, `url` |
@@ -1682,6 +1706,9 @@ import type {
   Avatar,
   AvatarSource,
   PostageBatch,
+  Drive,
+  DriveKind,
+  DriveTargetOptions,
   AppMetadata,
   ButtonConfig,
   RequestOptions,
