@@ -57,6 +57,22 @@ client.destroy()
 
 [Full integration guide →](https://swarm.snaha.net/docs/getting-started)
 
+## Roadmap
+
+Topics in research or planned for later, roughly in priority order. Each links to the issue where
+progress is tracked.
+
+1. **Multiple drive support** — an app granted any mix of regular and scratch drives ([#862](https://github.com/snaha/swarm-id/issues/862))
+2. **Permissions** — a permission request flow apps can open after connecting ([#711](https://github.com/snaha/swarm-id/issues/711), [#505](https://github.com/snaha/swarm-id/issues/505))
+3. **Server-side and desktop integrations** — headless Swarm ID for agents and servers ([#770](https://github.com/snaha/swarm-id/issues/770)), a CLI ([#312](https://github.com/snaha/swarm-id/issues/312))
+4. **SWIPs** — the portable batch format, the account serialization and the account bus as Swarm improvement proposals ([#865](https://github.com/snaha/swarm-id/issues/865))
+5. **Decentralize the UI** — the user chooses their identity site, not the app ([#849](https://github.com/snaha/swarm-id/issues/849), [#521](https://github.com/snaha/swarm-id/issues/521))
+6. **Privacy improvements** — batch ids hidden from apps ([#746](https://github.com/snaha/swarm-id/issues/746)), anonymous RPC ([#859](https://github.com/snaha/swarm-id/issues/859))
+7. **Integration with browser Bee** — a Bee node running in the browser ([#306](https://github.com/snaha/swarm-id/issues/306))
+8. **Ethereum wallet** — visibility and consent over the funds the account already holds ([#866](https://github.com/snaha/swarm-id/issues/866))
+9. **App stores** — listing sites for Swarm ID apps, linked from the UI ([#867](https://github.com/snaha/swarm-id/issues/867))
+10. **Credit card payment without KYC/AML** — keeping the card shop identity-free as it ships ([#875](https://github.com/snaha/swarm-id/issues/875)); the route is behind an experimental switch until its on-chain check is back ([#858](https://github.com/snaha/swarm-id/issues/858))
+
 ## Deployment
 
 ### GitHub Pages — `swarm.snaha.net`
