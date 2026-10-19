@@ -791,13 +791,18 @@ describe("SwarmIdProxy partitioned write enablement", () => {
       teardown: ReturnType<typeof vi.fn>
       withWrite: ReturnType<typeof vi.fn>
       yieldForPeer: ReturnType<typeof vi.fn>
+      notifySlotMaybeFree: ReturnType<typeof vi.fn>
+      currentPartition: number | undefined
       deps: {
         flushStamperState(): Promise<void>
         getWorkerPool(count?: number): Promise<unknown>
+        onLeaseAcquired(partition: number): void
       }
     }
 
     type DriveInternals = {
+      ensureCanUpload(batchId?: string): void
+      pendingLaneUpdates: Map<string, unknown>
       withModeAwareWriteLock<T>(
         targetOptions: undefined,
         operation: (target: unknown) => Promise<T>,
@@ -853,11 +858,11 @@ describe("SwarmIdProxy partitioned write enablement", () => {
     })
 
     /** Connect the dApp to an account with two drives, both granted. */
-    const connectWithTwoDrives = async (): Promise<void> => {
+    const connectWithTwoDrives = async (
+      postageStamps = [stampOf(BATCH_ID_HEX), stampOf(SECOND_BATCH_ID_HEX)],
+    ): Promise<void> => {
       seedConnectedAccount({
-        account: {
-          postageStamps: [stampOf(BATCH_ID_HEX), stampOf(SECOND_BATCH_ID_HEX)],
-        },
+        account: { postageStamps },
         connectedApps: [
           {
             appUrl: PARENT_ORIGIN,
@@ -1036,9 +1041,224 @@ describe("SwarmIdProxy partitioned write enablement", () => {
       }
     })
 
-    // The three below are what the single-drive proxy read at call time
-    // (docs/Multi-Drive-Plan.md, "Step 3 must bind each callback to its
-    // drive"). A coordinator torn down mid-write is still running them.
+    /** Both drives built, each holder at rank 1 for a request id of 0: its
+     *  answer waits a rank step, long enough for a claim, a release or a
+     *  teardown to reach it first. */
+    const connectWithTwoHolders = async (): Promise<{
+      first: CoordinatorFake
+      second: CoordinatorFake
+    }> => {
+      nextStamper()
+      await connectWithTwoDrives()
+      nextStamper()
+      await internals().withModeAwareWriteLock(
+        undefined,
+        async () => undefined,
+        SECOND_BATCH_ID_HEX,
+      )
+      const first = coordinatorFor(BATCH_ID_HEX)!
+      const second = coordinatorFor(SECOND_BATCH_ID_HEX)!
+      first.currentPartition = 1
+      second.currentPartition = 1
+      await awaitBusJoin()
+      return { first, second }
+    }
+
+    const requestLeaseOf = (
+      channel: BroadcastChannel,
+      batchId: string,
+      requestId: string,
+    ): void =>
+      channel.postMessage({
+        type: "lease-request",
+        accountId: ACCOUNT_ID,
+        batchId,
+        fromDeviceId: "peer-device",
+        requestId,
+      })
+
+    const laneUpdateFor = (channel: BroadcastChannel, batchId: string): void =>
+      channel.postMessage({
+        type: "utilization-updated",
+        batchId,
+        partition: 0,
+        partitionCount: 2,
+        buckets: [{ index: 3, value: 4 }],
+      })
+
+    /** Past rank 1's step, and past the mocked yield had it started. */
+    const PAST_RANK_1_AND_YIELD_MS = 300 + SLOW_YIELD_MS
+
+    it("routes a lease-claim to the drive it names", async () => {
+      const { second } = await connectWithTwoHolders()
+      const busChannel = new BroadcastChannel(accountChannelName)
+      try {
+        requestLeaseOf(busChannel, SECOND_BATCH_ID_HEX, "00000000")
+        busChannel.postMessage({
+          type: "lease-claim",
+          accountId: ACCOUNT_ID,
+          batchId: SECOND_BATCH_ID_HEX,
+          fromDeviceId: "peer-device",
+          requestId: "00000000",
+        })
+        await new Promise((resolve) =>
+          setTimeout(resolve, PAST_RANK_1_AND_YIELD_MS),
+        )
+        expect(second.yieldForPeer).not.toHaveBeenCalled()
+      } finally {
+        busChannel.close()
+      }
+    })
+
+    it("routes a lease-released to the drive it names", async () => {
+      const { first, second } = await connectWithTwoHolders()
+      const busChannel = new BroadcastChannel(accountChannelName)
+      try {
+        busChannel.postMessage({
+          type: "lease-released",
+          accountId: ACCOUNT_ID,
+          batchId: SECOND_BATCH_ID_HEX,
+          partition: 0,
+          fromDeviceId: "peer-device",
+        })
+        await vi.waitFor(() =>
+          expect(second.notifySlotMaybeFree).toHaveBeenCalledTimes(1),
+        )
+        expect(first.notifySlotMaybeFree).not.toHaveBeenCalled()
+      } finally {
+        busChannel.close()
+      }
+    })
+
+    it("cancels only the torn-down drive's scheduled answer", async () => {
+      const { first, second } = await connectWithTwoHolders()
+      const busChannel = new BroadcastChannel(accountChannelName)
+      try {
+        requestLeaseOf(busChannel, BATCH_ID_HEX, "00000000")
+        // Seed 1: rank 2, a step behind the first drive's answer.
+        requestLeaseOf(busChannel, SECOND_BATCH_ID_HEX, "00000001")
+        updateAccount((account) => ({
+          ...account,
+          connectedApps: account.connectedApps.map((app) => ({
+            ...app,
+            drives: [new BatchId(BATCH_ID_HEX)],
+            drivesAt: Date.now(),
+          })),
+        }))
+        await vi.waitFor(() => expect(second.teardown).toHaveBeenCalled())
+
+        await vi.waitFor(() =>
+          expect(first.yieldForPeer).toHaveBeenCalledTimes(1),
+        )
+        await new Promise((resolve) =>
+          setTimeout(resolve, PAST_RANK_1_AND_YIELD_MS),
+        )
+        expect(second.yieldForPeer).not.toHaveBeenCalled()
+      } finally {
+        busChannel.close()
+      }
+    })
+
+    it("keeps another drive's buffered lanes when one drive binds", async () => {
+      const first = nextStamper()
+      await connectWithTwoDrives()
+      const second = nextStamper()
+      await internals().withModeAwareWriteLock(
+        undefined,
+        async () => undefined,
+        SECOND_BATCH_ID_HEX,
+      )
+      first.currentPartition = undefined
+      second.currentPartition = undefined
+      await awaitBusJoin()
+      const busChannel = new BroadcastChannel(accountChannelName)
+      try {
+        laneUpdateFor(busChannel, BATCH_ID_HEX)
+        laneUpdateFor(busChannel, SECOND_BATCH_ID_HEX)
+        await flushBus()
+        expect(second.applyUtilizationUpdate).not.toHaveBeenCalled()
+
+        first.currentPartition = 0
+        coordinatorFor(BATCH_ID_HEX)!.deps.onLeaseAcquired(0)
+        second.currentPartition = 0
+        coordinatorFor(SECOND_BATCH_ID_HEX)!.deps.onLeaseAcquired(0)
+
+        expect(second.applyUtilizationUpdate).toHaveBeenCalledWith([
+          { index: 3, value: 4 },
+        ])
+      } finally {
+        busChannel.close()
+      }
+    })
+
+    it("drops a torn-down drive's buffered lanes", async () => {
+      nextStamper()
+      await connectWithTwoDrives()
+      const second = nextStamper()
+      await internals().withModeAwareWriteLock(
+        undefined,
+        async () => undefined,
+        SECOND_BATCH_ID_HEX,
+      )
+      second.currentPartition = undefined
+      await awaitBusJoin()
+      const busChannel = new BroadcastChannel(accountChannelName)
+      const bufferedForSecond = () =>
+        [...internals().pendingLaneUpdates.keys()].filter((lane) =>
+          lane.startsWith(`${SECOND_BATCH_ID_HEX}:`),
+        )
+      try {
+        laneUpdateFor(busChannel, SECOND_BATCH_ID_HEX)
+        await vi.waitFor(() => expect(bufferedForSecond()).toHaveLength(1))
+
+        updateAccount((account) => ({
+          ...account,
+          connectedApps: account.connectedApps.map((app) => ({
+            ...app,
+            drives: [new BatchId(BATCH_ID_HEX)],
+            drivesAt: Date.now(),
+          })),
+        }))
+        await vi.waitFor(() =>
+          expect(
+            coordinatorFor(SECOND_BATCH_ID_HEX)!.teardown,
+          ).toHaveBeenCalled(),
+        )
+
+        expect(bufferedForSecond()).toHaveLength(0)
+      } finally {
+        busChannel.close()
+      }
+    })
+
+    it("refuses a write naming a drive on that drive, not on the primary", async () => {
+      nextStamper()
+      await connectWithTwoDrives([
+        {
+          ...stampOf(BATCH_ID_HEX),
+          batchTTL: 60,
+          updatedAt: Date.now() - 120_000,
+        },
+        stampOf(SECOND_BATCH_ID_HEX),
+      ])
+      nextStamper()
+
+      expect(() => internals().ensureCanUpload()).toThrow(/expired/)
+      expect(() =>
+        internals().ensureCanUpload(SECOND_BATCH_ID_HEX),
+      ).not.toThrow()
+      await internals().withModeAwareWriteLock(
+        undefined,
+        async () => undefined,
+        SECOND_BATCH_ID_HEX,
+      )
+      expect(
+        coordinatorFor(SECOND_BATCH_ID_HEX)!.withWrite,
+      ).toHaveBeenCalledTimes(1)
+    })
+
+    // Each runs from a coordinator torn down mid-write, and must reach the
+    // drive it was built for.
     describe("a torn-down coordinator still reaches only its own drive", () => {
       it("flushes its own stamper, not the next drive's", async () => {
         nextStamper()

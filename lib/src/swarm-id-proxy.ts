@@ -736,8 +736,8 @@ export class SwarmIdProxy {
   }
 
   /**
-   * The only way the write paths change. Each belongs to the stamp it was
-   * built for, so it goes whenever that stamp leaves the grant or the fields
+   * Brings the write paths in line with the grant. Each belongs to the stamp
+   * it was built for, so it goes whenever that stamp leaves the grant or the fields
    * naming it change — the batch's signer key, its lifetime (a renewal keeps
    * the batch and the key), or the account inputs baked into its stamper (a
    * local account migrating to a synced one keeps the stamp) — before
@@ -816,8 +816,10 @@ export class SwarmIdProxy {
 
   /** Tear one drive's write path down and forget it. */
   private teardownDrive(drive: DriveWritePath): void {
-    // Scheduled answers describe a lease we are about to drop anyway.
+    // Scheduled answers describe a lease we are about to drop anyway, and
+    // buffered lane deltas a lane we will not bind.
     this.cancelPendingYields(drive.batchId)
+    this.dropBufferedLanes(drive.batchId)
     drive.teardown()
     this.drives.delete(drive.batchId)
   }
@@ -1404,16 +1406,18 @@ export class SwarmIdProxy {
         : undefined
     const buckets =
       key === undefined ? undefined : this.pendingLaneUpdates.get(key)
-    for (const buffered of [...this.pendingLaneUpdates.keys()]) {
-      if (buffered.startsWith(`${drive.batchId}:`)) {
-        this.pendingLaneUpdates.delete(buffered)
-      }
-    }
+    this.dropBufferedLanes(drive.batchId)
     if (!stamper || !buckets) return
-    if (!buckets) return
     stamper.applyUtilizationUpdate(
       [...buckets].map(([index, value]) => ({ index, value })),
     )
+  }
+
+  /** Forget every lane buffered for `batchId`. */
+  private dropBufferedLanes(batchId: string): void {
+    for (const lane of [...this.pendingLaneUpdates.keys()]) {
+      if (lane.startsWith(`${batchId}:`)) this.pendingLaneUpdates.delete(lane)
+    }
   }
 
   /**
@@ -3310,7 +3314,12 @@ export class SwarmIdProxy {
     }
   }
 
-  private ensureCanUpload(): void {
+  /**
+   * A write naming a drive (`batchId`) is refused on that drive alone, in
+   * `withModeAwareWriteLock` once its write path is built; only an unnamed
+   * write answers for the primary here.
+   */
+  private ensureCanUpload(batchId?: string): void {
     if (!this.authenticated || !this.appSecret) {
       throw new SwarmIdError(
         "not-authenticated",
@@ -3321,7 +3330,7 @@ export class SwarmIdProxy {
     if (this.isSubsidisedModeActive()) {
       return
     }
-    if (this.drive) this.refuseDrive(this.drive)
+    if (batchId === undefined && this.drive) this.refuseDrive(this.drive)
     // NB: the multi-device "all partitions held" case is NOT checked here.
     // It's deferred to the coordinator's `withWrite`, which runs a fresh
     // acquisition attempt (with slot-wait) under the write lock and then throws

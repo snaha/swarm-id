@@ -226,8 +226,8 @@ as soon as there were two entries, so step 3 scopes them by batch:
   only its own batch's lanes, and a teardown drops them;
 - `pendingYields`: tearing a drive down cancelled every scheduled yield, not only its own.
 
-Done in step 3; a torn-down drive also refuses to build a worker pool, which nothing would
-terminate.
+Done in step 3; a torn-down drive also builds no worker pool, and terminates one whose build
+a teardown overtook, since nothing else would.
 
 ### Testing
 

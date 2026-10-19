@@ -111,6 +111,9 @@ export class DriveWritePath {
 
     // A coordinator torn down mid-write still asks; a pool built for it now
     // would never be terminated. It signs on the main thread instead.
+    // Checked again after the build: a teardown landing while the workers
+    // spawn finds no pool to stop, and the one that then resolves would hold
+    // the signer key until the iframe unloads.
     if (this.tornDown) return undefined
 
     if (
@@ -125,12 +128,17 @@ export class DriveWritePath {
     if (!this.stamper) return undefined
 
     try {
-      this.workerPool = await StampWorkerPool.create(
+      const pool = await StampWorkerPool.create(
         this.signerKey,
         this.stamper,
         desiredCount,
       )
-      return this.workerPool
+      if (this.tornDown) {
+        pool.terminate()
+        return undefined
+      }
+      this.workerPool = pool
+      return pool
     } catch (error) {
       console.warn("[Proxy] Failed to create StampWorkerPool:", error)
       return undefined
