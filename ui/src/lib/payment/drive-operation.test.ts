@@ -13,7 +13,13 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { Account } from '$lib/stores/accounts.svelte'
 
-import { SizeIncreasePendingError, runExtend, runPurchase, runResize } from './drive-operation'
+import {
+  SizeIncreasePendingError,
+  reconciledChainDepth,
+  runExtend,
+  runPurchase,
+  runResize,
+} from './drive-operation'
 import { CreatePendingError } from './postage-onchain'
 import { stampAmountForSeconds, ttlSecondsFor } from './purchase'
 
@@ -267,6 +273,24 @@ describe('runPurchase', () => {
 
     expect(onchain.ensureBzzAllowance).toHaveBeenCalled()
     expect(account.stamps).toHaveLength(1)
+  })
+})
+
+describe('reconciledChainDepth', () => {
+  it('trues the record up on a top-up the dialog never saw, which leaves the depth alone', async () => {
+    // The card popup closed before the shop posted `topup`: the chain's balance
+    // is ahead of the record's at the same depth, and the record must follow,
+    // or the drive keeps its old lifespan and the user pays again.
+    const account = makeAccount([stampRecord({ depth: 20, amount: REMAINING - 1n })])
+    await expect(reconciledChainDepth(account, account.stamps[0])).resolves.toBe(20)
+    expect(account.stamps[0].amount).toBe(REMAINING)
+    expect(account.stamps[0].batchTTL).toBe(ttlSecondsFor(REMAINING, PRICE))
+  })
+
+  it('leaves a record the chain has only aged', async () => {
+    const account = makeAccount([stampRecord({ depth: 20, amount: REMAINING + 1n })])
+    await expect(reconciledChainDepth(account, account.stamps[0])).resolves.toBe(20)
+    expect(account.stamps[0].amount).toBe(REMAINING + 1n)
   })
 })
 

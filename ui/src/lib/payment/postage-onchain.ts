@@ -15,7 +15,7 @@
  */
 import type { PrivateKey } from '@ethersphere/bee-js'
 import { TimeoutError, withTimeout } from '@snaha/swarm-id'
-import { type PostageStamp } from '@snaha/swarm-id/internal'
+import { type PostageStamp, sleep } from '@snaha/swarm-id/internal'
 import {
   MultichainClient,
   type PostageBatch,
@@ -455,7 +455,7 @@ export async function confirmTopUp(
   const chain = client ?? (await postageChain())
   for (let read = 0; read < TOP_UP_READS; read++) {
     if (read > 0) {
-      await new Promise((resolve) => setTimeout(resolve, intervalMs))
+      await sleep(intervalMs)
     }
     const balance = await readNormalisedBalance(stamp, chain)
     if (balance !== undefined && balance > before) {

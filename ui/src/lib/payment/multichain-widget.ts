@@ -73,9 +73,8 @@ export interface BatchEvent {
   blockNumber: string // "0x2a828b8" (hex)
 }
 
-/** Options for opening the stamp purchase widget. */
-export interface PurchaseStampOptions {
-  destination: string // Batch owner address (0x...)
+/** What every popup reports back, whichever shop and whatever it does. */
+interface PopupCallbacks {
   onSuccess: (batch: BatchEvent) => void
   onError: (error: Error) => void
   // The user backed out before any money moved — no `payment` event was seen, so
@@ -85,6 +84,11 @@ export interface PurchaseStampOptions {
   // us money is already in flight. The caller MUST NOT treat this as a clean
   // cancel: the purchase may still settle on-chain.
   onUnconfirmedClose: () => void
+}
+
+/** Buy a batch: the widget, or the card shop with `card`. */
+export interface BuyStampOptions extends PopupCallbacks {
+  destination: string // Batch owner address (0x...)
   mocked?: boolean // For testing - simulate the settlement instead of paying
   mockPopup?: boolean // For testing - also open the widget's `?mocked=true` popup
   mockError?: boolean // For testing - simulate error instead of success
@@ -100,13 +104,24 @@ export interface PurchaseStampOptions {
   // from the moment the popup opens, a close without a `batch` may have left a
   // paid-for batch behind — `onUnconfirmedClose`, never `onCancel`.
   card?: boolean
-  // With `card`: extend this batch (bare or 0x hex) instead of buying one. The
-  // shop opens its extend page with `amount` as the PLUR per chunk to add, tops
-  // the batch up from its own treasury and posts `topup`, which settles only
-  // for this batch id; a `batch` event is ignored, so a top-up can never be
-  // recorded as a new drive. The widget cannot extend at all.
-  topUpBatchId?: string
 }
+
+/**
+ * Extend a batch (bare or 0x hex) through the card shop instead of buying one.
+ * The shop opens its extend page with `amount` as the PLUR per chunk to add,
+ * tops the batch up from its own treasury and posts `topup`, which settles
+ * only for this batch id; a `batch` event is ignored, so a top-up can never be
+ * recorded as a new drive. The widget cannot extend at all, and the shop has
+ * no mocked mode, so this shape carries no owner, no depth and no mock: the
+ * type rules out an extend popup that could get a clean `onCancel` (#860).
+ */
+export interface TopUpStampOptions extends PopupCallbacks {
+  card: true
+  topUpBatchId: string
+  amount?: bigint
+}
+
+export type PurchaseStampOptions = BuyStampOptions | TopUpStampOptions
 
 /** How long to keep listening for a trailing `batch` message after the popup
  * is observed closed, before concluding the close was unconfirmed. */
@@ -386,21 +401,10 @@ export interface StampPurchaseHandle {
  *   keeps running until the popup is closed by hand.
  */
 export function openStampPurchaseWidget(options: PurchaseStampOptions): StampPurchaseHandle {
-  const {
-    destination,
-    onSuccess,
-    onError,
-    onCancel,
-    onUnconfirmedClose,
-    mocked,
-    mockPopup,
-    mockError,
-    depth,
-    amount,
-    card,
-    topUpBatchId,
-  } = options
-  const topUpHex = topUpBatchId === undefined ? undefined : strip0x(topUpBatchId).toLowerCase()
+  const { onSuccess, onError, onCancel, onUnconfirmedClose, amount } = options
+  const card = options.card === true
+  const topUpHex =
+    'topUpBatchId' in options ? strip0x(options.topUpBatchId).toLowerCase() : undefined
 
   // Mocked mode (the /dev toggle): settle locally without a real cross-chain
   // payment. `mockPopup` still opens the widget's own `?mocked=true` popup (which
@@ -408,7 +412,8 @@ export function openStampPurchaseWidget(options: PurchaseStampOptions): StampPur
   // in a real browser. Without it, no `window.open` at all, so the mock also
   // works where popups are blocked (previews) or the widget origin is offline.
   // Either way the settlement is simulated after a short, visible delay.
-  if (mocked) {
+  if (!('topUpBatchId' in options) && options.mocked) {
+    const { destination, depth, mockPopup, mockError } = options
     // The shop has no mocked mode: opened with `?mocked=true` it would show its
     // live payment form for the mock's delay, so the card mock opens nothing.
     const popup =
@@ -452,9 +457,9 @@ export function openStampPurchaseWidget(options: PurchaseStampOptions): StampPur
     return { cancel: () => false }
   }
   const url =
-    topUpHex === undefined
-      ? buildWidgetUrl(destination, { depth, amount }, false, card)
-      : buildCardTopUpUrl(topUpHex, amount)
+    'topUpBatchId' in options
+      ? buildCardTopUpUrl(options.topUpBatchId, amount)
+      : buildWidgetUrl(options.destination, { depth: options.depth, amount }, false, card)
   const popup = window.open(url, 'stamp-purchase', POPUP_FEATURES)
 
   if (!popup) {

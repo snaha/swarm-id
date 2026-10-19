@@ -403,7 +403,6 @@ describe('openStampPurchaseWidget', () => {
       const OTHER_BATCH_ID = 'cd'.repeat(32)
       const openTopUp = () =>
         openStampPurchaseWidget({
-          destination: DESTINATION,
           card: true,
           topUpBatchId: BATCH_ID,
           amount: 10453363201n,

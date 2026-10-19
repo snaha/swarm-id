@@ -36,15 +36,20 @@
     createFundingRequester,
     describeStep,
   } from '$lib/payment/funding-request.svelte'
-  import { type StampPurchaseHandle, openStampPurchaseWidget } from '$lib/payment/multichain-widget'
+  import {
+    CARD_SHOP_HOST,
+    type StampPurchaseHandle,
+    openStampPurchaseWidget,
+  } from '$lib/payment/multichain-widget'
   import { CARD_AVAILABLE } from '$lib/payment/payment-method'
   import {
     confirmTopUp,
     readNormalisedBalance,
     reconcileStampFromChain,
   } from '$lib/payment/postage-onchain'
-  import { derivePostageSigner, stampAmountForSeconds } from '$lib/payment/purchase'
+  import { stampAmountForSeconds } from '$lib/payment/purchase'
   import { devSettingsStore } from '$lib/stores/dev-settings.svelte'
+  import { toastStore } from '$lib/stores/toast.svelte'
   import type { Account } from '$lib/types'
 
   const MS_PER_SECOND = 1000
@@ -59,7 +64,6 @@
 
   type Phase = 'form' | 'pending' | 'success' | 'error'
 
-  // Opens on one month rather than empty.
   let count = $state('1')
   let unit = $state<LifespanUnit>('months')
   let phase = $state<Phase>('form')
@@ -125,12 +129,26 @@
     count = String(Math.max(0, (Number(count) || 0) + delta))
   }
 
+  /**
+   * Let go of the card shop's popup. A card already charged is not lost by
+   * closing: the shop extends the batch server-side, and `reconciledChainDepth`
+   * writes the raised balance to the record when the dialog next opens. The
+   * user is told so — `cancel()` fires no callback — so they do not pay again.
+   */
+  function abandonCardPopup() {
+    const stillPaying = cardPopup?.cancel()
+    cardPopup = undefined
+    if (stillPaying) {
+      toastStore.show(
+        `If you already paid at ${CARD_SHOP_HOST}, the drive is still extended — don’t pay again. Open it again in a few minutes to see the new lifespan.`,
+      )
+    }
+  }
+
   function close() {
     attempts.supersede()
     funding.cancel()
-    // A card already charged is not lost by closing: the shop extends the batch
-    // server-side, and the record catches up when the dialog next reconciles.
-    cardPopup?.cancel()
+    abandonCardPopup()
     onClose()
   }
 
@@ -140,7 +158,7 @@
   // the requester keeps that one armed, and its own outcome settles it.
   onDestroy(() => {
     funding.cancel()
-    cardPopup?.cancel()
+    abandonCardPopup()
   })
 
   async function proceed() {
@@ -214,9 +232,6 @@
     phase = 'pending'
     popupLabel = 'Complete the payment in the popup window.'
     try {
-      // The opener needs an owner address, which a top-up does not use; the
-      // user may cancel during the derivation, so bail before a popup appears.
-      const { destination } = await attempt.guard(derivePostageSigner(account.derivationKey))
       // The balance the shop's top-up has to raise. Unreadable, there would be
       // no way to tell a real extension from a claimed one, so no popup.
       const before = await attempt.guard(readNormalisedBalance(drive))
@@ -224,7 +239,6 @@
         throw new Error(CARD_UNREADABLE)
       }
       cardPopup = openStampPurchaseWidget({
-        destination,
         card: true,
         topUpBatchId: drive.batchID.toHex(),
         // The form's choice, as the shop's default. Unset when the chain price
