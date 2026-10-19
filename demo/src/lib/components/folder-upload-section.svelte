@@ -51,6 +51,7 @@
     try {
       logStore.log(`Uploading folder: ${files.length} files, ${formatBytes(totalBytes)}...`)
       const uploadResult = await clientStore.client!.uploadFiles(files, {
+        ...clientStore.uploadTarget,
         encrypt,
         indexDocument: indexDocument || undefined,
         deferred: clientStore.deferred,

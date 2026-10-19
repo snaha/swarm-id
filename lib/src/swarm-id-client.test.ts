@@ -779,6 +779,68 @@ describe("SwarmIdClient request seam", () => {
     await expect(promise).resolves.toEqual(entries)
   })
 
+  it("getDrives returns the proxy's list as it is", async () => {
+    const drives = [
+      {
+        batchID: "ab".repeat(32),
+        utilization: 1,
+        usable: true,
+        label: "",
+        depth: 20,
+        amount: "1000",
+        bucketDepth: 16,
+        blockNumber: 1,
+        immutableFlag: false,
+        exists: true,
+        batchTTL: 3600,
+        kind: "regular",
+        primary: true,
+      },
+    ]
+    const promise = client.getDrives()
+    const sent = lastPostedMessage()
+    expect(sent).toMatchObject({ type: "getDrives" })
+
+    deliver({ type: "getDrivesResponse", requestId: sent.requestId, drives })
+    await expect(promise).resolves.toEqual(drives)
+  })
+
+  it("carries the drive a write names (#862)", async () => {
+    const batchID = "cd".repeat(32)
+    void client.uploadData(new Uint8Array([1]), { batchID }).catch(() => {})
+    expect(lastPostedMessage()).toMatchObject({
+      type: "uploadData",
+      options: { batchID },
+    })
+
+    void client.actAddGrantees("ef".repeat(32), [], { batchID }).catch(() => {})
+    expect(lastPostedMessage()).toMatchObject({
+      type: "actAddGrantees",
+      batchID,
+    })
+
+    // An epoch update's payload and its SOC go to the one drive named.
+    const writer = client.makeEpochFeedWriter({ topic: "12".repeat(32) })
+    const upload = writer.uploadPayload(new Uint8Array([1]), { batchID })
+    const payloadUpload = lastPostedMessage()
+    expect(payloadUpload).toMatchObject({
+      type: "uploadData",
+      options: { batchID },
+    })
+    deliver({
+      type: "uploadDataResponse",
+      requestId: payloadUpload.requestId,
+      reference: "ab".repeat(32),
+    })
+    await vi.waitFor(() =>
+      expect(lastPostedMessage()).toMatchObject({
+        type: "epochFeedUploadReference",
+        batchID,
+      }),
+    )
+    void upload.catch(() => {})
+  })
+
   it("getPostageBatch rejects on a proxy error message", async () => {
     const promise = client.getPostageBatch()
 

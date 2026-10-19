@@ -71,6 +71,7 @@
       const uint8Data = encoder.encode(data)
 
       const actResult = await clientStore.client!.actUploadData(uint8Data, grantees, {
+        ...clientStore.uploadTarget,
         deferred: clientStore.deferred,
         beeCompatible,
         publisher: publishAsIdentity ? 'identity' : 'app',

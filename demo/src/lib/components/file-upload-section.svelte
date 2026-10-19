@@ -64,6 +64,7 @@
 
       const progressTracker = { total: 0 }
       const uploadResult = await clientStore.client!.uploadFile(selectedFile, selectedFile.name, {
+        ...clientStore.uploadTarget,
         encrypt: enableEncryption,
         encryptManifest: enableEncryption,
         useWebSocket,

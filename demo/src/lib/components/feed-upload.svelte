@@ -69,7 +69,7 @@
   }
 
   function getUploadOptions(): Record<string, string> {
-    const opts: Record<string, string> = {}
+    const opts: Record<string, string> = { ...clientStore.uploadTarget }
     if (feedIndex) opts.index = feedIndex
     if (feedAt) opts.at = feedAt
     return opts
@@ -107,6 +107,7 @@
           `Step 1: Uploading content (${uint8Data.length} bytes, deferred: ${deferred})...`,
         )
         const uploadResult = await clientStore.client!.uploadData(uint8Data, {
+          ...clientStore.uploadTarget,
           encrypt: false,
           deferred,
         })
@@ -122,6 +123,7 @@
           async (data: Uint8Array, isRoot: boolean) => {
             logStore.log(`  Uploading ${isRoot ? 'root' : 'child'} node (${data.length} bytes)...`)
             const uploadResult = await clientStore.client!.uploadData(data, {
+              ...clientStore.uploadTarget,
               encrypt: false,
               deferred,
             })
@@ -202,6 +204,7 @@
             return
           }
           const uploadResult = await writer.uploadPayload(payload, {
+            ...clientStore.uploadTarget,
             at: atRaw,
             encryptionKey: epochEncKey,
           })
@@ -302,6 +305,7 @@
           return
         }
         const uploadResult = await writer.uploadReference(ref, {
+          ...clientStore.uploadTarget,
           at: atRaw,
           encryptionKey: epochEncKey,
         })

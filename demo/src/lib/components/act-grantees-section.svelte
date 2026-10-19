@@ -69,7 +69,11 @@
       logStore.log(`Adding ${grantees.length} grantee(s) to ACT...`)
       logStore.log(`Current History Ref: ${hist}`)
 
-      const addResult = await clientStore.client!.actAddGrantees(hist, grantees)
+      const addResult = await clientStore.client!.actAddGrantees(
+        hist,
+        grantees,
+        clientStore.uploadTarget,
+      )
 
       logStore.log('Grantees added successfully!')
       logStore.log(`New History Reference: ${addResult.historyReference}`)

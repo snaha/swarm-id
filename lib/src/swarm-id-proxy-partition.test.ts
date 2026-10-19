@@ -92,6 +92,19 @@ vi.mock("./sync/fold-account-from-swarm", async (importActual) => {
   }
 })
 
+// `getDrives` describes each drive with live node and chain reads; none is
+// reachable here, and the shape is what the test is after.
+vi.mock("./utils/ttl", async (importActual) => ({
+  ...(await importActual<typeof import("./utils/ttl")>()),
+  fetchBatchDetails: vi.fn(async () => undefined),
+  fetchSwarmPrice: vi.fn(async () => {
+    throw new Error("offline")
+  }),
+}))
+vi.mock("./utils/postage-contract", async (importActual) => ({
+  ...(await importActual<typeof import("./utils/postage-contract")>()),
+  fetchAuthoritativeBatchTTL: vi.fn(async () => 3600),
+}))
 vi.mock("./storage/utilization-store", () => ({
   UtilizationStoreDB: vi.fn(function () {
     return {}
@@ -952,8 +965,105 @@ describe("SwarmIdProxy partitioned write enablement", () => {
           async () => undefined,
           UNGRANTED_BATCH_ID_HEX,
         ),
-      ).rejects.toMatchObject({ code: "upload-unavailable" })
+      ).rejects.toMatchObject({ code: "drive-not-granted" })
       expect(coordinatorFor(UNGRANTED_BATCH_ID_HEX)).toBeUndefined()
+    })
+
+    it("answers a write naming an ungranted drive with drive-not-granted", async () => {
+      nextStamper()
+      await connectWithTwoDrives()
+
+      await dispatch(
+        {
+          type: "uploadData",
+          requestId: "w1",
+          data: new Uint8Array([1]),
+          options: { batchID: UNGRANTED_BATCH_ID_HEX },
+        },
+        PARENT_ORIGIN,
+        parentWindow,
+      )
+
+      await vi.waitFor(() =>
+        expect(messagesOfType("error")).toContainEqual(
+          expect.objectContaining({
+            requestId: "w1",
+            code: "drive-not-granted",
+          }),
+        ),
+      )
+    })
+
+    // The grant is keyed by bare lowercase hex; a dApp may well pass the id
+    // back `0x`-prefixed or uppercase, and that must not read as "not granted".
+    it("writes through a granted drive spelled with 0x and uppercase", async () => {
+      nextStamper()
+      await connectWithTwoDrives()
+      nextStamper()
+
+      await dispatch(
+        {
+          type: "uploadData",
+          requestId: "w2",
+          data: new Uint8Array([1]),
+          options: { batchID: `0x${SECOND_BATCH_ID_HEX.toUpperCase()}` },
+        },
+        PARENT_ORIGIN,
+        parentWindow,
+      )
+
+      await vi.waitFor(() =>
+        expect(
+          coordinatorFor(SECOND_BATCH_ID_HEX)!.withWrite,
+        ).toHaveBeenCalledTimes(1),
+      )
+    })
+
+    it("lists the granted drives with the primary marked and each one's kind", async () => {
+      nextStamper()
+      await connectWithTwoDrives([
+        stampOf(BATCH_ID_HEX),
+        { ...stampOf(SECOND_BATCH_ID_HEX), kind: "scratch" },
+      ])
+
+      await dispatch(
+        { type: "getDrives", requestId: "g1" },
+        PARENT_ORIGIN,
+        parentWindow,
+      )
+
+      await vi.waitFor(() =>
+        expect(messagesOfType("getDrivesResponse")).toHaveLength(1),
+      )
+      const [response] = messagesOfType("getDrivesResponse")
+      expect(
+        (
+          response.drives as {
+            batchID: string
+            kind: string
+            primary: boolean
+            batchTTL: number
+          }[]
+        ).map(({ batchID, kind, primary, batchTTL }) => ({
+          batchID,
+          kind,
+          primary,
+          batchTTL,
+        })),
+      ).toEqual([
+        {
+          batchID: BATCH_ID_HEX,
+          kind: "regular",
+          primary: true,
+          batchTTL: 3600,
+        },
+        {
+          batchID: SECOND_BATCH_ID_HEX,
+          kind: "scratch",
+          primary: false,
+          batchTTL: 3600,
+        },
+      ])
     })
 
     it("tears down only the drive that leaves the grant", async () => {

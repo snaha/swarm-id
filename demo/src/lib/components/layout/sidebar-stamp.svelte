@@ -50,6 +50,24 @@
     {/if}
   </button>
 
+  {#if clientStore.drives.length > 1}
+    <label class="block pl-6 text-xs text-muted-foreground">
+      Write to
+      <select
+        class="mt-1 w-full rounded-md border border-border bg-background px-2 py-1 font-mono text-xs text-foreground"
+        value={clientStore.targetBatchID ?? ''}
+        onchange={(event) => (clientStore.targetBatchID = event.currentTarget.value || undefined)}
+      >
+        <option value="">Primary drive</option>
+        {#each clientStore.drives as drive (drive.batchID)}
+          <option value={drive.batchID}>
+            {drive.batchID.slice(0, 8)}… · {drive.kind}{drive.primary ? ' · primary' : ''}
+          </option>
+        {/each}
+      </select>
+    </label>
+  {/if}
+
   {#if clientStore.stamp}
     <div class="text-xs text-muted-foreground pl-6">TTL: {clientStore.stamp.ttl}</div>
     <div class="text-xs text-muted-foreground pl-6">

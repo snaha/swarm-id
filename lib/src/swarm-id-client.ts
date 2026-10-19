@@ -81,6 +81,8 @@ import type {
   AppMetadata,
   ButtonConfig,
   PostageBatch,
+  Drive,
+  DriveTargetOptions,
 } from "./types"
 import {
   IframeToParentMessageSchema,
@@ -893,6 +895,34 @@ export class SwarmIdClient {
     })
 
     return response.postageBatch
+  }
+
+  /**
+   * The drives this app was granted (#862): each with the fields of
+   * {@link getPostageBatch}, its `kind`, and whether it is the primary — the
+   * one a write goes to when it names none. Name any of them on a write with
+   * `batchID`; one outside the grant rejects with `drive-not-granted`.
+   *
+   * @example
+   * ```typescript
+   * const scratch = (await client.getDrives()).find((d) => d.kind === 'scratch')
+   * await client.uploadData(frame, { batchID: scratch?.batchID })
+   * ```
+   */
+  async getDrives(): Promise<Drive[]> {
+    this.ensureReady()
+    const requestId = this.generateRequestId()
+
+    const response = await this.sendRequest<{
+      type: "getDrivesResponse"
+      requestId: string
+      drives: Drive[]
+    }>({
+      type: "getDrives",
+      requestId,
+    })
+
+    return response.drives
   }
 
   /**
@@ -2330,6 +2360,7 @@ export class SwarmIdClient {
         encryptionKey:
           feedKey !== undefined ? this.normalizeSocKey(feedKey) : undefined,
         hints: options?.hints,
+        batchID: options?.batchID ?? options?.uploadOptions?.batchID,
         requestOptions,
       })
       const socAddress = response.socAddress
@@ -2352,9 +2383,11 @@ export class SwarmIdClient {
           ? options.at
           : BigInt(Math.floor(Date.now() / 1000))
       const encrypt = options?.encrypt !== false
+      // Payload and SOC go to one drive, whichever option named it.
+      const batchID = options?.batchID ?? options?.uploadOptions?.batchID
       const uploadResult = await this.uploadData(
         this.normalizePayload(data),
-        { ...options?.uploadOptions, encrypt },
+        { ...options?.uploadOptions, encrypt, batchID },
         requestOptions,
       )
       const cleanRef = uploadResult.reference.startsWith("0x")
@@ -2377,6 +2410,7 @@ export class SwarmIdClient {
         encryptionKey:
           feedKey !== undefined ? this.normalizeSocKey(feedKey) : undefined,
         hints: options?.hints,
+        batchID,
         requestOptions,
       })
       const socAddress = response.socAddress
@@ -3296,6 +3330,7 @@ export class SwarmIdClient {
    *
    * @param historyReference - The current history reference
    * @param grantees - Array of new grantee public keys as compressed hex strings
+   * @param options - Optional `batchID`: the drive the new history and grantee list go to (#862)
    * @param requestOptions - Optional request configuration (timeout, headers, endlesslyRetry). `timeout` replaces the client default for this call's whole round trip, not only the Bee request
    * @returns A promise resolving to the new references
    * @returns return.historyReference - The new history reference after adding grantees
@@ -3316,6 +3351,7 @@ export class SwarmIdClient {
   async actAddGrantees(
     historyReference: string,
     grantees: string[],
+    options?: DriveTargetOptions,
     requestOptions?: RequestOptions,
   ): Promise<{
     historyReference: string
@@ -3336,6 +3372,7 @@ export class SwarmIdClient {
       requestId,
       historyReference,
       grantees,
+      batchID: options?.batchID,
       requestOptions,
     })
 
@@ -3362,6 +3399,7 @@ export class SwarmIdClient {
    * @param historyReference - The current history reference
    * @param encryptedReference - The current encrypted reference
    * @param revokeGrantees - Array of grantee public keys to revoke as compressed hex strings
+   * @param options - Optional `batchID`: the drive the rotated history goes to (#862)
    * @param requestOptions - Optional request configuration (timeout, headers, endlesslyRetry). `timeout` replaces the client default for this call's whole round trip, not only the Bee request
    * @returns A promise resolving to the new references after revocation
    * @returns return.encryptedReference - The content reference, unchanged
@@ -3384,6 +3422,7 @@ export class SwarmIdClient {
     historyReference: string,
     encryptedReference: string,
     revokeGrantees: string[],
+    options?: DriveTargetOptions,
     requestOptions?: RequestOptions,
   ): Promise<{
     encryptedReference: string
@@ -3407,6 +3446,7 @@ export class SwarmIdClient {
       historyReference,
       encryptedReference,
       revokeGrantees,
+      batchID: options?.batchID,
       requestOptions,
     })
 

@@ -110,7 +110,23 @@ export function partitionSessionStorageKey(parentOrigin: string): string {
 // Upload/Download Options
 // ============================================================================
 
+/**
+ * The drive a write names, as a dApp may spell it: `0x`-prefixed or uppercase
+ * hex is taken, and the proxy sees bare lowercase — how `getDrives()` reports
+ * it and how the grant is keyed (#862).
+ */
+export const DriveTargetSchema = z
+  .preprocess(
+    (value) =>
+      typeof value === "string"
+        ? value.replace(/^0x/i, "").toLowerCase()
+        : value,
+    BatchIdSchema,
+  )
+  .optional()
+
 const UploadOptionsObjectSchema = z.object({
+  batchID: DriveTargetSchema,
   pin: z.boolean().optional(),
   encrypt: z.boolean().optional(),
   encryptManifest: z.boolean().optional(),
@@ -158,6 +174,12 @@ export interface UploadProgress {
 }
 
 export interface UploadOptions {
+  /**
+   * The drive to write to, by batch id, from `getDrives()`. Without it the
+   * write goes to the app's primary drive. A drive the app was not granted
+   * rejects with `drive-not-granted` (#862).
+   */
+  batchID?: string
   /** Pin on the user's own node. Ignored on a subsidised gateway (#752). */
   pin?: boolean
   encrypt?: boolean
@@ -185,6 +207,7 @@ export type DownloadOptions = z.infer<typeof DownloadOptionsSchema>
  */
 export interface UploadFilesOptions extends Pick<
   UploadOptions,
+  | "batchID"
   | "pin"
   | "encrypt"
   | "encryptManifest"
@@ -285,6 +308,20 @@ export type SocUploadResult = z.infer<typeof SocUploadResultSchema>
 export type SocRawUploadResult = z.infer<typeof SocRawUploadResultSchema>
 export type FileData = z.infer<typeof FileDataSchema>
 export type PostageBatch = z.infer<typeof PostageBatchSchema>
+
+export const DriveKindSchema = z.enum(["regular", "scratch"])
+export type DriveKind = z.infer<typeof DriveKindSchema>
+
+/** One drive the app was granted (#862), as `getDrives()` reports it */
+export const DriveSchema = PostageBatchSchema.extend({
+  kind: DriveKindSchema,
+  /** The drive an untargeted write goes to: the first granted regular drive */
+  primary: z.boolean(),
+})
+export type Drive = z.infer<typeof DriveSchema>
+
+/** Which drive a call that takes no upload options writes to */
+export type DriveTargetOptions = Pick<UploadOptions, "batchID">
 
 // ============================================================================
 // SOC Types
@@ -405,6 +442,11 @@ export interface EpochFeedDownloadOptions {
 export interface EpochFeedUploadOptions {
   /** Unix timestamp (seconds). */
   at?: bigint | number | string
+  /**
+   * The drive the update goes to, payload and SOC both (#862). Without it,
+   * `uploadOptions.batchID`, then the primary drive.
+   */
+  batchID?: string
   /** Optional upload options for the payload upload. */
   uploadOptions?: UploadOptions
   /** Whether to encrypt payload uploads (defaults to true). */
@@ -1090,6 +1132,7 @@ export const EpochFeedUploadReferenceMessageSchema = z.object({
   reference: ReferenceSchema,
   encryptionKey: EncryptionKeySchema.optional(),
   hints: EpochHintsSchema,
+  batchID: DriveTargetSchema,
   requestOptions: RequestOptionsSchema,
 })
 
@@ -1222,6 +1265,7 @@ export const ActAddGranteesMessageSchema = z.object({
   requestId: z.string(),
   historyReference: ReferenceSchema,
   grantees: z.array(z.string()), // Compressed public keys to add
+  batchID: DriveTargetSchema,
   requestOptions: RequestOptionsSchema,
 })
 
@@ -1231,6 +1275,7 @@ export const ActRevokeGranteesMessageSchema = z.object({
   historyReference: ReferenceSchema,
   encryptedReference: ReferenceSchema, // Needed for key rotation
   revokeGrantees: z.array(z.string()), // Compressed public keys to revoke
+  batchID: DriveTargetSchema,
   requestOptions: RequestOptionsSchema,
 })
 
@@ -1243,6 +1288,11 @@ export const ActGetGranteesMessageSchema = z.object({
 
 export const GetPostageBatchMessageSchema = z.object({
   type: z.literal("getPostageBatch"),
+  requestId: z.string(),
+})
+
+export const GetDrivesMessageSchema = z.object({
+  type: z.literal("getDrives"),
   requestId: z.string(),
 })
 
@@ -1291,6 +1341,7 @@ export const ParentToIframeMessageSchema = z.discriminatedUnion("type", [
   ActRevokeGranteesMessageSchema,
   ActGetGranteesMessageSchema,
   GetPostageBatchMessageSchema,
+  GetDrivesMessageSchema,
   ConnectMessageSchema,
 ])
 
@@ -1360,6 +1411,7 @@ export type ActGetGranteesMessage = z.infer<typeof ActGetGranteesMessageSchema>
 export type GetPostageBatchMessage = z.infer<
   typeof GetPostageBatchMessageSchema
 >
+export type GetDrivesMessage = z.infer<typeof GetDrivesMessageSchema>
 export type ConnectMessage = z.infer<typeof ConnectMessageSchema>
 export type ParentToIframeMessage = z.infer<typeof ParentToIframeMessageSchema>
 
@@ -1476,6 +1528,7 @@ export const UploadProgressMessageSchema = z.object({
  * - `not-authenticated` — no session for this origin
  * - `upload-unavailable` — the session refuses to stamp; `reason` says why,
  *   in the same vocabulary as `ConnectionInfo.uploadUnavailableReason`
+ * - `drive-not-granted` — the write names a drive this app was not granted
  * - `partition-contended` — every partition of the batch is held by other
  *   devices and none yielded in time
  * - `lease-lost` — this device's partition was reclaimed mid-write
@@ -1499,6 +1552,7 @@ export const UploadProgressMessageSchema = z.object({
 export const SwarmIdErrorCodeSchema = z.enum([
   "not-authenticated",
   "upload-unavailable",
+  "drive-not-granted",
   "partition-contended",
   "lease-lost",
   "bee-rejected",
@@ -1781,6 +1835,12 @@ export const GetPostageBatchResponseMessageSchema = z.object({
   postageBatch: PostageBatchSchema.optional(),
 })
 
+export const GetDrivesResponseMessageSchema = z.object({
+  type: z.literal("getDrivesResponse"),
+  requestId: z.string(),
+  drives: z.array(DriveSchema),
+})
+
 export const IframeToParentMessageSchema = z.discriminatedUnion("type", [
   ProxyReadyMessageSchema,
   InitErrorMessageSchema,
@@ -1826,6 +1886,7 @@ export const IframeToParentMessageSchema = z.discriminatedUnion("type", [
   ActRevokeGranteesResponseMessageSchema,
   ActGetGranteesResponseMessageSchema,
   GetPostageBatchResponseMessageSchema,
+  GetDrivesResponseMessageSchema,
 ])
 
 export type ProxyReadyMessage = z.infer<typeof ProxyReadyMessageSchema>
@@ -1949,6 +2010,9 @@ export type ActGetGranteesResponseMessage = z.infer<
 >
 export type GetPostageBatchResponseMessage = z.infer<
   typeof GetPostageBatchResponseMessageSchema
+>
+export type GetDrivesResponseMessage = z.infer<
+  typeof GetDrivesResponseMessageSchema
 >
 export type IframeToParentMessage = z.infer<typeof IframeToParentMessageSchema>
 
