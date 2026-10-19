@@ -354,6 +354,16 @@ export const DriveRequestSchema = z.union([
 ])
 export type DriveRequest = z.infer<typeof DriveRequestSchema>
 
+/**
+ * What an app asks the user for: at connect (`ClientOptions.permissions`)
+ * and, later, from a live session (#711). Drives are the first permission;
+ * others join as fields here, so one message and one screen carry them all.
+ */
+export const PermissionsSchema = z.object({
+  drives: DriveRequestSchema.optional(),
+})
+export type Permissions = z.infer<typeof PermissionsSchema>
+
 // ============================================================================
 // SOC Types
 // ============================================================================
@@ -960,7 +970,7 @@ export const ParentIdentifyMessageSchema = z.object({
   metadata: AppMetadataSchema,
   buttonConfig: ButtonConfigSchema,
   subsidisedGatewayUrl: z.string().url().optional(),
-  drives: DriveRequestSchema.optional(),
+  permissions: PermissionsSchema.optional(),
 })
 
 export const CheckAuthMessageSchema = z.object({
@@ -2144,10 +2154,11 @@ export interface ClientOptions {
   buttonConfig?: ButtonConfig
   containerId?: string // ID of container element to place iframe in (optional)
   /**
-   * The drives the app needs, asked for on the connect screen (#862): `"all"`,
-   * or one row per drive. Without it the app writes to the account default.
+   * What the app asks the user for on the connect screen (#862): `drives` is
+   * `"all"`, or one row per drive. Without it the app writes to the account
+   * default.
    */
-  drives?: DriveRequest
+  permissions?: Permissions
   /** URL of a subsidised gateway for users without postage stamps. Gateway handles stamping server-side. */
   subsidisedGatewayUrl?: string
 }

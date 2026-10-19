@@ -1,8 +1,8 @@
 // Copyright 2026 The Swarm Authors. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 import {
-  type DriveRequest,
-  DriveRequestSchema,
+  type Permissions,
+  PermissionsSchema,
   STORAGE_CHALLENGE_KEY,
 } from '@snaha/swarm-id/internal'
 
@@ -26,11 +26,11 @@ export interface ConnectRequest {
    */
   partitionChallenge?: string
   /**
-   * The drives the app asked for (#862): `"all"`, or a row per drive for the
-   * done page's picker. Absent when the app asked for nothing, which keeps
-   * the account default.
+   * What the app asked for (#862): `drives` is `"all"`, or a row per drive
+   * for the done page's picker. Absent when the app asked for nothing, which
+   * keeps the account default.
    */
-  drives?: DriveRequest
+  permissions?: Permissions
 }
 
 /**
@@ -68,10 +68,10 @@ let request = $state<ConnectRequest | undefined>(undefined)
 let firstConnect = $state(false)
 let pending = $state<PendingConnect | undefined>(undefined)
 
-function parseDriveRequest(raw: string | null): DriveRequest | undefined {
+function parsePermissions(raw: string | null): Permissions | undefined {
   if (raw === null) return undefined
   try {
-    const parsed = DriveRequestSchema.safeParse(JSON.parse(raw))
+    const parsed = PermissionsSchema.safeParse(JSON.parse(raw))
     return parsed.success ? parsed.data : undefined
   } catch {
     return undefined
@@ -131,7 +131,7 @@ export const connectStore = {
       appDescription: params.get('appDescription') ?? undefined,
       appIcon: params.get('appIcon') ?? undefined,
       partitionChallenge,
-      drives: parseDriveRequest(params.get('drives')),
+      permissions: parsePermissions(params.get('permissions')),
     }
     return true
   },

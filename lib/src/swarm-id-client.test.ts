@@ -188,12 +188,12 @@ describe("SwarmIdClient connect()", () => {
   describe("shared storage", () => {
     // The connect screen renders a row per requested drive, so the request
     // has to reach it on this path too — the proxy is not opening this one.
-    it("puts the drive request on the popup URL (#862)", async () => {
+    it("puts the permissions request on the popup URL (#862)", async () => {
       client.destroy()
       client = new SwarmIdClient({
         iframeOrigin: "https://swarm-id.example.com",
         metadata: { name: "Test App" },
-        drives: "all",
+        permissions: { drives: "all" },
       })
       vi.spyOn(internals(client), "ensureReady").mockImplementation(() => {})
       setStorageShared(true)
@@ -201,7 +201,9 @@ describe("SwarmIdClient connect()", () => {
       await client.connect()
 
       expect(window.open).toHaveBeenCalledWith(
-        expect.stringContaining("drives=%22all%22"),
+        expect.stringContaining(
+          `permissions=${encodeURIComponent(JSON.stringify({ drives: "all" }))}`,
+        ),
         "_blank",
       )
     })

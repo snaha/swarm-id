@@ -24,6 +24,7 @@ export type {
   DriveKind,
   DriveRequest,
   DriveRequirement,
+  Permissions,
   DriveTargetOptions,
   AppMetadata,
   ButtonConfig,

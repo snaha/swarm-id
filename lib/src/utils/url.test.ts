@@ -82,17 +82,17 @@ describe("buildAuthUrl", () => {
     )
   })
 
-  it("carries the drive request as JSON (#862)", () => {
+  it("carries the permissions request as JSON (#862)", () => {
     const url = buildAuthUrl(
       "https://swarm-id.example.com",
       "https://myapp.example.com",
       undefined,
-      { drives: [{ kind: "scratch", optional: true }] },
+      { permissions: { drives: [{ kind: "scratch", optional: true }] } },
     )
     const params = new URLSearchParams(url.split("#")[1])
-    expect(JSON.parse(params.get("drives")!)).toEqual([
-      { kind: "scratch", optional: true },
-    ])
+    expect(JSON.parse(params.get("permissions")!)).toEqual({
+      drives: [{ kind: "scratch", optional: true }],
+    })
   })
 
   it("should include challenge when provided", () => {

@@ -9,6 +9,7 @@ import {
   type ConnectionInfo,
   type Drive,
   type DriveRequest,
+  type Permissions,
   type UploadUnavailableReason,
 } from '@snaha/swarm-id'
 import { resolveProxyOrigin } from '$lib/utils/environment'
@@ -53,6 +54,10 @@ export const DRIVE_REQUEST_PRESETS = {
   none: { label: 'No drive', request: [] },
 } satisfies Record<string, { label: string; request: DriveRequest | undefined }>
 export type DriveRequestPreset = keyof typeof DRIVE_REQUEST_PRESETS
+
+function requestedPermissions(drives: DriveRequest | undefined): Permissions | undefined {
+  return drives === undefined ? undefined : { drives }
+}
 
 function loadDriveRequestPreset(): DriveRequestPreset {
   try {
@@ -342,7 +347,7 @@ async function runInitialize(generation: number) {
       iframePath: PROXY_PATH,
       timeout: CLIENT_TIMEOUT,
       subsidisedGatewayUrl: currentSubsidisedGatewayUrl,
-      drives: DRIVE_REQUEST_PRESETS[driveRequestPreset].request,
+      permissions: requestedPermissions(DRIVE_REQUEST_PRESETS[driveRequestPreset].request),
       onConnectionChange,
       metadata: {
         name: 'Swarm ID Demo',

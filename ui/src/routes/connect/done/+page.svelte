@@ -60,7 +60,7 @@
   )
   const request = connectStore.request
   const pending = connectStore.pending
-  const requested = request?.drives
+  const requested = request?.permissions?.drives
 
   const drives = $derived(account?.stamps ?? [])
   const regularDrives = $derived(drives.filter((drive) => kindOf(drive) === 'regular'))

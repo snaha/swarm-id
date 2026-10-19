@@ -49,22 +49,22 @@ Creates a new SwarmIdClient instance.
 
 **Parameters:**
 
-| Parameter                       | Type                             | Required | Description                                                                                                                                                                                                |
-| ------------------------------- | -------------------------------- | -------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `options.iframeOrigin`          | `string`                         | Yes      | The origin URL where the Swarm ID proxy iframe is hosted                                                                                                                                                   |
-| `options.iframePath`            | `string`                         | No       | The path to the proxy iframe (defaults to `"/proxy"`)                                                                                                                                                      |
-| `options.timeout`               | `number`                         | No       | Request timeout in milliseconds (defaults to `30000`). Bounds each call's whole round trip through the iframe; a call's own `requestOptions.timeout` replaces it for that call                             |
-| `options.initializationTimeout` | `number`                         | No       | Initialization timeout in milliseconds (defaults to `30000`)                                                                                                                                               |
-| `options.onConnectionChange`    | `(info: ConnectionInfo) => void` | No       | Callback invoked when the app-visible connection state changes (identity, app key, postage stamp, account, auth). The current snapshot is also available synchronously via `client.connectionInfo`.        |
-| `options.popupMode`             | `"popup" \| "window"`            | No       | How to display the authentication popup (defaults to `"window"`)                                                                                                                                           |
-| `options.metadata`              | `AppMetadata`                    | Yes      | Application metadata shown to users during authentication                                                                                                                                                  |
-| `options.metadata.name`         | `string`                         | Yes      | Application name (1-100 characters)                                                                                                                                                                        |
-| `options.metadata.description`  | `string`                         | No       | Application description (max 500 characters)                                                                                                                                                               |
-| `options.metadata.icon`         | `string`                         | No       | Application icon as a data URL (SVG or PNG, max 4KB)                                                                                                                                                       |
-| `options.buttonConfig`          | `ButtonConfig`                   | No       | Button configuration for the authentication UI                                                                                                                                                             |
-| `options.containerId`           | `string`                         | No       | ID of container element to place iframe in (optional)                                                                                                                                                      |
-| `options.subsidisedGatewayUrl`  | `string`                         | No       | URL of a subsidised gateway for uploads without user's postage stamp. See [Subsidised Gateway](../subsidised-gateway/) for details.                                                                        |
-| `options.drives`                | `DriveRequest`                   | No       | The drives the app needs, asked for on the connect screen: `'all'`, or a row per drive (`{ kind, description?, optional? }`), regular ones first. `[]` opts out of drives. See [`getDrives()`](#getdrives) |
+| Parameter                       | Type                             | Required | Description                                                                                                                                                                                                                   |
+| ------------------------------- | -------------------------------- | -------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `options.iframeOrigin`          | `string`                         | Yes      | The origin URL where the Swarm ID proxy iframe is hosted                                                                                                                                                                      |
+| `options.iframePath`            | `string`                         | No       | The path to the proxy iframe (defaults to `"/proxy"`)                                                                                                                                                                         |
+| `options.timeout`               | `number`                         | No       | Request timeout in milliseconds (defaults to `30000`). Bounds each call's whole round trip through the iframe; a call's own `requestOptions.timeout` replaces it for that call                                                |
+| `options.initializationTimeout` | `number`                         | No       | Initialization timeout in milliseconds (defaults to `30000`)                                                                                                                                                                  |
+| `options.onConnectionChange`    | `(info: ConnectionInfo) => void` | No       | Callback invoked when the app-visible connection state changes (identity, app key, postage stamp, account, auth). The current snapshot is also available synchronously via `client.connectionInfo`.                           |
+| `options.popupMode`             | `"popup" \| "window"`            | No       | How to display the authentication popup (defaults to `"window"`)                                                                                                                                                              |
+| `options.metadata`              | `AppMetadata`                    | Yes      | Application metadata shown to users during authentication                                                                                                                                                                     |
+| `options.metadata.name`         | `string`                         | Yes      | Application name (1-100 characters)                                                                                                                                                                                           |
+| `options.metadata.description`  | `string`                         | No       | Application description (max 500 characters)                                                                                                                                                                                  |
+| `options.metadata.icon`         | `string`                         | No       | Application icon as a data URL (SVG or PNG, max 4KB)                                                                                                                                                                          |
+| `options.buttonConfig`          | `ButtonConfig`                   | No       | Button configuration for the authentication UI                                                                                                                                                                                |
+| `options.containerId`           | `string`                         | No       | ID of container element to place iframe in (optional)                                                                                                                                                                         |
+| `options.subsidisedGatewayUrl`  | `string`                         | No       | URL of a subsidised gateway for uploads without user's postage stamp. See [Subsidised Gateway](../subsidised-gateway/) for details.                                                                                           |
+| `options.permissions`           | `Permissions`                    | No       | What the app asks the user for on the connect screen. `permissions.drives` is `'all'`, or a row per drive (`{ kind, description?, optional? }`), regular ones first; `[]` opts out of drives. See [`getDrives()`](#getdrives) |
 
 **Throws:**
 
@@ -497,15 +497,17 @@ Lists every drive the app was granted in Swarm ID. Each entry carries the fields
 
 Every write takes an optional `batchID` (in its upload options, or as its own `options` where there are none) naming one of these drives. A feed update's payload and its SOC always go to the same drive. Naming a drive outside the grant rejects with `drive-not-granted`.
 
-**Asking for drives.** Without `options.drives` the app gets the account's default drive. With it, the connect screen asks the user for what the app needs: one row per entry, each a select over the user's drives of that kind with a way to create one there, or a single "full drive access" checkbox for `'all'`, which also covers drives the user adds later. A row's `description` replaces the helper text under it ("Used to store permanent data" / "Used to store streaming data"); an `optional` row may be left empty, and the app sees what it got from `getDrives()`. Rows are granted in order, regular drives first, and the first regular one is the primary.
+**Asking for drives.** Without `options.permissions.drives` the app gets the account's default drive. With it, the connect screen asks the user for what the app needs: one row per entry, each a select over the user's drives of that kind with a way to create one there, or a single "full drive access" checkbox for `'all'`, which also covers drives the user adds later. A row's `description` replaces the helper text under it ("Used to store permanent data" / "Used to store streaming data"); an `optional` row may be left empty, and the app sees what it got from `getDrives()`. Rows are granted in order, regular drives first, and the first regular one is the primary.
 
 ```typescript
 const client = new SwarmIdClient({
   // …
-  drives: [
-    { kind: 'regular', description: 'Used to store your messages' },
-    { kind: 'scratch', optional: true },
-  ],
+  permissions: {
+    drives: [
+      { kind: 'regular', description: 'Used to store your messages' },
+      { kind: 'scratch', optional: true },
+    ],
+  },
 })
 ```
 
@@ -1723,6 +1725,7 @@ import type {
   DriveKind,
   DriveRequest,
   DriveRequirement,
+  Permissions,
   DriveTargetOptions,
   AppMetadata,
   ButtonConfig,
