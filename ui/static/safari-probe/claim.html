@@ -1,0 +1,67 @@
+<!doctype html>
+<!-- Copyright 2026 The Swarm Authors. All rights reserved. -->
+<!-- SPDX-License-Identifier: Apache-2.0 -->
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>Safari probe: claim popup</title>
+    <style>
+      body {
+        font:
+          14px -apple-system,
+          system-ui,
+          sans-serif;
+        margin: 12px;
+      }
+      pre {
+        white-space: pre-wrap;
+        font-size: 12px;
+        background: #f6f6f6;
+        padding: 8px;
+      }
+    </style>
+  </head>
+  <body>
+    <b>Swarm ID claim popup, first-party: <code id="origin"></code></b>
+    <div>Password: <input id="pw" value="probe-password" /></div>
+    <pre id="out"></pre>
+    <script src="common.js"></script>
+    <script>
+      document.getElementById('origin').textContent = location.origin
+      ;(async () => {
+        report('claim-popup-load', {
+          ok: !!window.opener,
+          hasOpener: !!window.opener,
+          seesIframeVaultDirectly: !!localStorage.getItem('safari-probe-vault'),
+          seesIframeMarker: !!localStorage.getItem('safari-probe-iframe-wrote'),
+        })
+        if (!window.opener) return
+        window.addEventListener('message', async (event) => {
+          if (event.origin !== location.origin || event.source !== window.opener) return
+          if (event.data?.type !== 'claim-vault') return
+          let result
+          try {
+            const vault = JSON.parse(event.data.vault)
+            const key = await passwordKey(
+              document.getElementById('pw').value,
+              unhex(vault.access.kdfSalt),
+            )
+            const entropy = await decrypt(vault.encryptedSeed, key)
+            const fingerprint = hex(await crypto.subtle.digest('SHA-256', entropy)).slice(0, 16)
+            localStorage.setItem('safari-probe-imported-vault', event.data.vault)
+            result = {
+              ok: fingerprint === vault.fingerprint,
+              fingerprint,
+              decryptedFirstParty: true,
+            }
+          } catch (e) {
+            result = errorInfo(e)
+          }
+          report('claim-import', result)
+          window.opener.postMessage({ type: 'claim-done', ...result }, location.origin)
+        })
+        window.opener.postMessage({ type: 'claim-ready' }, location.origin)
+      })()
+    </script>
+  </body>
+</html>

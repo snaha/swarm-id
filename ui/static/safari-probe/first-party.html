@@ -1,0 +1,73 @@
+<!doctype html>
+<!-- Copyright 2026 The Swarm Authors. All rights reserved. -->
+<!-- SPDX-License-Identifier: Apache-2.0 -->
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>Safari probe: identity first-party</title>
+    <style>
+      body {
+        font:
+          14px -apple-system,
+          system-ui,
+          sans-serif;
+        margin: 16px;
+      }
+      button {
+        display: block;
+        margin: 8px 0;
+        padding: 6px 10px;
+        font-size: 14px;
+      }
+      pre {
+        white-space: pre-wrap;
+        font-size: 12px;
+        background: #f6f6f6;
+        padding: 8px;
+      }
+    </style>
+  </head>
+  <body>
+    <h3>Swarm ID first-party: <code id="origin"></code></h3>
+    <button id="c1">Control A: create a passkey here, first-party (PRF)</button>
+    <button id="c2">Control B: sign in with that passkey here (PRF)</button>
+    <button id="c3">Re-check storage</button>
+    <pre id="out"></pre>
+    <script src="common.js"></script>
+    <script>
+      const CRED_KEY = 'safari-probe-first-party-cred'
+      document.getElementById('origin').textContent = location.origin
+      function checkStorage() {
+        localStorage.setItem('safari-probe-first-party-wrote', new Date().toISOString())
+        const imported = localStorage.getItem('safari-probe-imported-vault')
+        report('first-party-storage', {
+          ok: true,
+          seesIframeMarker: !!localStorage.getItem('safari-probe-iframe-wrote'),
+          seesIframeVault: !!localStorage.getItem('safari-probe-vault'),
+          importedVaultFingerprint: imported ? JSON.parse(imported).fingerprint : undefined,
+        })
+      }
+      checkStorage()
+      document.getElementById('c3').onclick = checkStorage
+      document.getElementById('c1').onclick = async () => {
+        try {
+          const r = await createPasskey('safari-probe-first-party-' + Date.now())
+          localStorage.setItem(CRED_KEY, r.credentialId)
+          report('first-party-passkey-create', r)
+        } catch (e) {
+          report('first-party-passkey-create', errorInfo(e))
+        }
+      }
+      document.getElementById('c2').onclick = async () => {
+        try {
+          report(
+            'first-party-passkey-get',
+            await getPasskey(localStorage.getItem(CRED_KEY) ?? undefined),
+          )
+        } catch (e) {
+          report('first-party-passkey-get', errorInfo(e))
+        }
+      }
+    </script>
+  </body>
+</html>
