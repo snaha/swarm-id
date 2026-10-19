@@ -28,7 +28,10 @@ type ProxyInternals = {
   ) => Promise<void>
   authenticated: boolean
   appSecret: string
-  drive?: DriveWritePath
+  /** The primary drive's write path (read-only: a getter over `drives`). */
+  readonly drive?: DriveWritePath
+  drives: Map<string, DriveWritePath>
+  primaryBatchId?: string
   buildConnectionInfo: () => {
     canUpload: boolean
     uploadMode: string
@@ -541,7 +544,9 @@ describe("SwarmIdProxy subsidised-mode selection", () => {
         >,
       )
     }
-    internals(proxy).drive = drive
+    internals(proxy).drives.clear()
+    if (drive) internals(proxy).drives.set(drive.batchId, drive)
+    internals(proxy).primaryBatchId = drive?.batchId
   }
 
   const connectionInfo = () => internals(proxy).buildConnectionInfo()

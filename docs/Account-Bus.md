@@ -315,7 +315,9 @@ Each landed as its own PR chain, in this order:
    is untouched as the authority and offline fallback.
 
    **Scoped to the batch, like the lock it front-runs** (#589). Every lease message carries a
-   `batchId`, and a receiver drops one naming a batch it does not serve. A lane is
+   `batchId`, and a receiver routes it to the write path of the drive it names, or drops it
+   when it holds none for that batch: a session writing several drives runs one coordinator
+   per drive, each answering for its own lanes (#862). A lane is
    `(batchId, partition)` — the lock, intent and occupancy addresses all hash the batch — so a
    holder on batch X and a waiter on batch Y contend for nothing, and answering across batches
    would drop a lease that helps neither. The bus must be neither broader nor narrower than the

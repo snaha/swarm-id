@@ -56,8 +56,10 @@ other.
 **The primary drive's entry is created at connect, every other entry on the first write to
 that drive.** An entry costs a lane acquire and a heartbeat, so an "all drives" app must not
 pay for drives it never writes; the coordinator's existing idle-yield releases the lane
-again. The primary's entry is the one the proxy builds today, and it keeps today's job: the
-proxy's own account-state publish (`runAccountStatePublish`, for multi-device accounts)
+again. The primary's entry is the one the proxy builds today (`uploadMode` and
+`uploadUnavailableReason` report whether its stamper built, and its eager lease spares the
+first upload the acquire), and it keeps today's job: the proxy's own account-state publish
+(`runAccountStatePublish`, for multi-device accounts)
 writes this device's state feed through the primary drive's coordinator, announced by that
 coordinator's first lease acquire as now. An app with no regular drive granted (zero drives,
 or scratch only) has no entry at connect and publishes no feed: it sends the bus delta, as a
@@ -215,14 +217,17 @@ they cross drives, so step 3 binds each to its own `DriveWritePath`, test first:
   flush, so a rebind mid-flush mislabels the buckets.
 
 Each reaches across drives today only when a coordinator torn down mid-write is still
-running. Two more pieces of per-drive state stayed proxy-wide in step 1 and cross drives as
-soon as there are two entries, so step 3 moves them into the entry:
+running. Two more pieces of per-drive state stayed proxy-wide in step 1 and crossed drives
+as soon as there were two entries, so step 3 scopes them by batch:
 
 - `pendingLaneUpdates`: `applyPendingLaneUpdate`, run from a coordinator's `onLeaseAcquired`,
-  replaces the whole map, so drive A's acquire drops the deltas buffered for drive B's unbound
-  lane — the resume-pointer skip the buffer exists to prevent;
-- `pendingYields`: `teardownCoordinator` calls `cancelPendingYields()`, which clears every
-  scheduled yield, not only the torn-down drive's.
+  replaced the whole map, so drive A's acquire dropped the deltas buffered for drive B's
+  unbound lane — the resume-pointer skip the buffer exists to prevent. Now an acquire takes
+  only its own batch's lanes, and a teardown drops them;
+- `pendingYields`: tearing a drive down cancelled every scheduled yield, not only its own.
+
+Done in step 3; a torn-down drive also builds no worker pool, and terminates one whose build
+a teardown overtook, since nothing else would.
 
 ### Testing
 
@@ -231,7 +236,9 @@ soon as there are two entries, so step 3 moves them into the entry:
   partitioned session only its granted drives' signer keys (a live `"all"` grant learns of
   new drives that way); an integration test against the local Bee
   cluster with one session writing two drives and a second device taking over each lane
-  independently.
+  independently. That test lands in step 4 (departure): before the SDK's `batchID`, a second
+  drive is reachable only through a private method, and `lib/src/sync/` — where the lanes
+  live — does not change in step 3.
 - Step 7: unit tests for the wrap (slot sequence, counter monotonicity across a publish); an
   integration test that fills a lane past its capacity and reads back the newest data; a
   live test that the overwrite evicts on a real network.
