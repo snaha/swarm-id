@@ -8,7 +8,7 @@
  */
 import type { FundingNeed, OperationStep, RequestFunding } from '$lib/payment/drive-operation'
 import { type FundingQuote, swapDelivered } from '$lib/payment/funding'
-import { WIDGET_HOST } from '$lib/payment/multichain-widget'
+import { CARD_SHOP_HOST, WIDGET_HOST } from '$lib/payment/multichain-widget'
 import type { PaymentRail } from '$lib/payment/payment-rail'
 import { resolvePaymentRail } from '$lib/payment/resolve-rail'
 import type { Account } from '$lib/types'
@@ -67,6 +67,18 @@ export class UseWidgetError extends Error {
 }
 
 /**
+ * The user chose to pay by card on the card shop, which settles the whole
+ * operation itself. Like `UseWidgetError`, not a cancel: nothing was spent, and
+ * the operation goes ahead by another route.
+ */
+export class UseCardError extends Error {
+  constructor() {
+    super(`Paying through ${CARD_SHOP_HOST} instead.`)
+    this.name = 'UseCardError'
+  }
+}
+
+/**
  * A need awaiting payment, with the rail it would be paid through. Not the
  * quote: the default method needs none, so pricing is deferred to the screen
  * that chose the built-in engine rather than held in front of the dialog.
@@ -111,6 +123,8 @@ export type CancelOptions =
    * engine operation is let go, and the caller takes over from the widget.
    */
   | { reason: 'use-widget' }
+  /** The same hand-off, to the card shop. */
+  | { reason: 'use-card' }
 
 export interface FundingRequester {
   /** The payment currently awaiting the user, or undefined. */
@@ -230,6 +244,9 @@ export function createFundingRequester(account: () => Account): FundingRequester
           return
         case 'use-widget':
           fail(new UseWidgetError())
+          return
+        case 'use-card':
+          fail(new UseCardError())
           return
         case 'payment-unconfirmed':
           fail(options.error)

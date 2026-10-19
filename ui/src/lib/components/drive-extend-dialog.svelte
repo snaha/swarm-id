@@ -11,7 +11,7 @@
   import Plus from '@lucide/svelte/icons/plus'
   import type { PostageStamp } from '@snaha/swarm-id/internal'
 
-  import { createAttemptTracker } from '$lib/attempt'
+  import { type Attempt, createAttemptTracker } from '$lib/attempt'
   import DriveDialogStatus from '$lib/components/drive-dialog-status.svelte'
   import DriveInfoStrip from '$lib/components/drive-info-strip.svelte'
   import PaymentDialog from '$lib/components/payment-dialog.svelte'
@@ -32,10 +32,24 @@
   import { type OperationStep, reconciledChainDepth, runExtend } from '$lib/payment/drive-operation'
   import {
     PaymentCancelledError,
+    UseCardError,
     createFundingRequester,
     describeStep,
   } from '$lib/payment/funding-request.svelte'
+  import {
+    CARD_SHOP_HOST,
+    type StampPurchaseHandle,
+    openStampPurchaseWidget,
+  } from '$lib/payment/multichain-widget'
+  import { CARD_AVAILABLE } from '$lib/payment/payment-method'
+  import {
+    confirmTopUp,
+    readNormalisedBalance,
+    reconcileStampFromChain,
+  } from '$lib/payment/postage-onchain'
   import { stampAmountForSeconds } from '$lib/payment/purchase'
+  import { devSettingsStore } from '$lib/stores/dev-settings.svelte'
+  import { toastStore } from '$lib/stores/toast.svelte'
   import type { Account } from '$lib/types'
 
   const MS_PER_SECOND = 1000
@@ -50,7 +64,7 @@
 
   type Phase = 'form' | 'pending' | 'success' | 'error'
 
-  let count = $state('0')
+  let count = $state('1')
   let unit = $state<LifespanUnit>('months')
   let phase = $state<Phase>('form')
   let errorMessage = $state('')
@@ -63,6 +77,13 @@
   const attempts = createAttemptTracker()
   // Owns the funding seam: it surfaces the payment dialog and resolves once paid.
   const funding = createFundingRequester(() => account)
+  // The card shop's popup, while one is open.
+  let cardPopup: StampPurchaseHandle | undefined
+  // What the pending screen says while the card shop's popup has the user.
+  let popupLabel = $state('')
+  // The card shop is experimental: offered only behind the dev-settings switch,
+  // as it is for buying a drive (#858).
+  const cardOffered = $derived(CARD_AVAILABLE && devSettingsStore.data.cardPaymentEnabled)
 
   const addedSeconds = $derived(lifespanToSeconds(Number(count), unit))
 
@@ -108,9 +129,26 @@
     count = String(Math.max(0, (Number(count) || 0) + delta))
   }
 
+  /**
+   * Let go of the card shop's popup. A card already charged is not lost by
+   * closing: the shop extends the batch server-side, and `reconciledChainDepth`
+   * writes the raised balance to the record when the dialog next opens. The
+   * user is told so — `cancel()` fires no callback — so they do not pay again.
+   */
+  function abandonCardPopup() {
+    const stillPaying = cardPopup?.cancel()
+    cardPopup = undefined
+    if (stillPaying) {
+      toastStore.show(
+        `If you already paid at ${CARD_SHOP_HOST}, the drive is still extended — don’t pay again. Open it again in a few minutes to see the new lifespan.`,
+      )
+    }
+  }
+
   function close() {
     attempts.supersede()
     funding.cancel()
+    abandonCardPopup()
     onClose()
   }
 
@@ -118,7 +156,10 @@
   // any pending payment request so nothing is left waiting on a dialog that no
   // longer exists. A payment already with the wallet is not abandoned by this:
   // the requester keeps that one armed, and its own outcome settles it.
-  onDestroy(() => funding.cancel())
+  onDestroy(() => {
+    funding.cancel()
+    abandonCardPopup()
+  })
 
   async function proceed() {
     if (!changed) {
@@ -131,6 +172,7 @@
     // previous run's last label, and a failure that sets just `errorMessage`
     // would put the previous run's detail behind "View details".
     step = 'checking'
+    popupLabel = ''
     errorMessage = ''
     errorDetail = ''
     try {
@@ -163,9 +205,98 @@
         phase = 'form'
         return
       }
-      errorDetail = failureDetail(caught)
-      errorMessage = caught instanceof Error ? caught.message : 'Could not extend the lifespan.'
-      phase = 'error'
+      // The payment screen handed the extension to the card shop. Nothing was
+      // spent — the funding seam is raised before any spend — so carry on in the
+      // shop's popup on the same attempt, which a close still supersedes.
+      if (caught instanceof UseCardError) {
+        void extendWithCard(attempt)
+        return
+      }
+      fail(caught)
+    }
+  }
+
+  function fail(caught: unknown) {
+    errorDetail = failureDetail(caught)
+    errorMessage = caught instanceof Error ? caught.message : 'Could not extend the lifespan.'
+    phase = 'error'
+  }
+
+  /**
+   * Extend through the card shop's popup: the user pays by card and the shop
+   * tops the batch up from its own treasury, so nothing reaches the owner
+   * address and nothing here touches the rail or the engine.
+   */
+  async function extendWithCard(attempt: Attempt) {
+    cardPopup?.cancel()
+    phase = 'pending'
+    popupLabel = 'Complete the payment in the popup window.'
+    try {
+      // The balance the shop's top-up has to raise. Unreadable, there would be
+      // no way to tell a real extension from a claimed one, so no popup.
+      const before = await attempt.guard(readNormalisedBalance(drive))
+      if (before === undefined) {
+        throw new Error(CARD_UNREADABLE)
+      }
+      cardPopup = openStampPurchaseWidget({
+        card: true,
+        topUpBatchId: drive.batchID.toHex(),
+        // The form's choice, as the shop's default. Unset when the chain price
+        // never loaded; the shop then opens without a lifespan.
+        amount: topUpPerChunk,
+        onSuccess: () => void recordTopUp(attempt, before),
+        onError: (error) => {
+          if (attempt.current) {
+            fail(error)
+          }
+        },
+        onCancel: () => {
+          if (attempt.current) {
+            phase = 'form'
+          }
+        },
+        onUnconfirmedClose: () => {
+          if (attempt.current) {
+            fail(new Error(CARD_UNCONFIRMED))
+          }
+        },
+      })
+    } catch (caught) {
+      if (attempt.current) {
+        fail(caught)
+      }
+    }
+  }
+
+  const CARD_UNREADABLE = 'Could not read this drive from the chain. Try again in a moment.'
+  const CARD_UNCONFIRMED =
+    'The popup closed before the shop confirmed the extension. If you paid, the shop still extends the drive — open it again in a few minutes to see the new lifespan.'
+  const CARD_NOT_ON_CHAIN =
+    'The card shop reported the extension, but the chain does not show it, so the drive’s lifespan is unchanged. If your card was charged, the shop will follow up.'
+
+  /**
+   * The shop says the top-up landed. The chain decides: success once the
+   * batch's balance has risen past `before`, and the record is re-read from the
+   * chain either way, so it never shows a lifespan the batch does not have.
+   *
+   * Not while the route is experimental, as for buying: the shop to test
+   * against runs in dry-run mode, whose top-up never reaches the chain, so the
+   * switch that offers the card also waives the check until #858 turns it back
+   * on for good. The re-read still leaves the lifespan as the chain has it.
+   */
+  async function recordTopUp(attempt: Attempt, before: bigint) {
+    popupLabel = ''
+    step = 'recording'
+    const confirmed =
+      devSettingsStore.data.cardPaymentEnabled || (await confirmTopUp(drive, before))
+    await reconcileStampFromChain(account, drive)
+    if (!attempt.current) {
+      return
+    }
+    if (confirmed) {
+      phase = 'success'
+    } else {
+      fail(new Error(CARD_NOT_ON_CHAIN))
     }
   }
 </script>
@@ -176,12 +307,13 @@
     rail={funding.pending.rail}
     onPaid={funding.resolve}
     onCancel={funding.cancel}
+    onUseCard={cardOffered ? () => funding.cancel({ reason: 'use-card' }) : undefined}
   />
 {:else if phase !== 'form'}
   <DriveDialogStatus
     title={drive.name || 'Drive'}
     {phase}
-    pendingLabel={describeStep(step, 'extend')}
+    pendingLabel={popupLabel || describeStep(step, 'extend')}
     {errorMessage}
     errorDetails={errorDetail}
     successTitle="Lifespan extended!"

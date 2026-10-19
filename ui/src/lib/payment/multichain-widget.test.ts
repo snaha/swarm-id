@@ -399,6 +399,44 @@ describe('openStampPurchaseWidget', () => {
       expect(handle.cancel()).toBe(false)
     })
 
+    describe('top-up', () => {
+      const OTHER_BATCH_ID = 'cd'.repeat(32)
+      const openTopUp = () =>
+        openStampPurchaseWidget({
+          card: true,
+          topUpBatchId: BATCH_ID,
+          amount: 10453363201n,
+          ...callbacks,
+        })
+
+      it('opens the shop’s extend page on the batch and the amount to add', () => {
+        openTopUp()
+        const url = new URL(openedUrl ?? '')
+        expect(url.origin).toBe(CARD_SHOP_ORIGIN)
+        expect(url.pathname.endsWith('/extend')).toBe(true)
+        expect(url.searchParams.get('batchId')).toBe(BATCH_ID)
+        expect(url.searchParams.get('amount')).toBe('10453363201')
+        expect(url.searchParams.has('destination')).toBe(false)
+      })
+
+      it('settles only on a `topup` for the batch it opened, never on `batch`', () => {
+        openTopUp()
+        post(makeEvent(), popup, CARD_SHOP_ORIGIN)
+        post(makeEvent({ event: 'topup', batchId: OTHER_BATCH_ID }), popup, CARD_SHOP_ORIGIN)
+        expect(callbacks.onSuccess).not.toHaveBeenCalled()
+        post(makeEvent({ event: 'topup', batchId: `0x${BATCH_ID}` }), popup, CARD_SHOP_ORIGIN)
+        expect(callbacks.onSuccess).toHaveBeenCalledWith(
+          expect.objectContaining({ event: 'topup', batchId: BATCH_ID }),
+        )
+      })
+
+      it('a purchase popup ignores a `topup`', () => {
+        open(true)
+        post(makeEvent({ event: 'topup' }), popup, CARD_SHOP_ORIGIN)
+        expect(callbacks.onSuccess).not.toHaveBeenCalled()
+      })
+    })
+
     it('the mock opens no popup for the card shop, which has no mocked mode', () => {
       openStampPurchaseWidget({
         destination: DESTINATION,

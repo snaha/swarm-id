@@ -1590,11 +1590,12 @@ Check console logs for details:
 
       <h3 class="text-lg font-semibold">Experimental card payment</h3>
       <p class="text-muted-foreground text-sm">
-        Offer <strong>Pay with card ({CARD_SHOP_HOST})</strong> in <strong>Add drive</strong>. The
-        batch the shop reports is then recorded on trust, without the on-chain check a shipped route
-        will have (#858), so a shop in dry-run mode can be driven end to end. This page is not in a
-        build: there, set <code>dev-card-payment-enabled</code> to <code>true</code> in local storage
-        by hand.
+        Offer <strong>Pay with card ({CARD_SHOP_HOST})</strong> in <strong>Add drive</strong> and
+        when extending a drive. The batch or top-up the shop reports is then recorded on trust,
+        without the on-chain check a shipped route will have (#858), so a shop in dry-run mode can
+        be driven end to end. This page is not in a build: there, set
+        <code>dev-card-payment-enabled</code>
+        to <code>true</code> in local storage by hand.
       </p>
       <label class="flex items-center gap-2">
         <Switch

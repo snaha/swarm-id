@@ -19,8 +19,10 @@ interface DevSettings {
   // popup path in a real browser). Off → pure local simulation, no `window.open`.
   mockStampPopup: boolean
   mockStampResult: MockStampResult
-  // Offer "Pay with card" in the add-drive chooser. Off by default everywhere
-  // until the route leaves the experiment (#858).
+  // Offer "Pay with card" in the add-drive chooser and on the extend payment
+  // screen, and take the shop's word for both without the on-chain check a
+  // shipped route will have. Off by default everywhere until the route leaves
+  // the experiment (#858).
   cardPaymentEnabled: boolean
 }
 

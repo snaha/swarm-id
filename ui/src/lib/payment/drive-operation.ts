@@ -461,7 +461,11 @@ export async function runResize(options: ResizeOptions): Promise<void> {
  * preflight already in hand — this is the "reconciles on dialog open" the
  * interrupted-resize recovery relies on. The size list starts at the drive's
  * real size, so there is no stale option left to re-run the landed resize
- * through; the record catching up IS the resumption.
+ * through; the record catching up IS the resumption. A top-up moves the chain
+ * past the record too, without touching the depth: the card shop extends the
+ * batch server-side, and a popup closed before it could say so leaves the
+ * record on the old lifespan. The remaining balance only ever falls between
+ * reads, so one above the record's can only be a top-up this dialog missed.
  *
  * @returns undefined when the chain cannot answer, leaving the caller with the
  *   record it had before.
@@ -473,7 +477,8 @@ export async function reconciledChainDepth(
   try {
     const client = await postageChain()
     const preflight = await preflightExtend(drive, client)
-    if (preflight.batch.depth !== drive.depth && account.hasLiveStamp(drive.batchID)) {
+    const moved = preflight.batch.depth !== drive.depth || preflight.remaining > drive.amount
+    if (moved && account.hasLiveStamp(drive.batchID)) {
       account.updateStamp(drive.batchID, {
         depth: preflight.batch.depth,
         amount: preflight.remaining,

@@ -13,6 +13,7 @@ import type { Account } from '$lib/types'
 import {
   type FundingRequester,
   PaymentCancelledError,
+  UseCardError,
   UseWidgetError,
   createFundingRequester,
 } from './funding-request.svelte'
@@ -161,6 +162,7 @@ describe('createFundingRequester', () => {
       (requester: FundingRequester) => requester.cancel(),
       (requester: FundingRequester) => requester.cancel({ reason: 'wallet-rejected' }),
       (requester: FundingRequester) => requester.cancel({ reason: 'use-widget' }),
+      (requester: FundingRequester) => requester.cancel({ reason: 'use-card' }),
       (requester: FundingRequester) =>
         requester.cancel({ reason: 'payment-unconfirmed', error: new Error('unconfirmed') }),
     ]) {
@@ -218,6 +220,19 @@ describe('createFundingRequester', () => {
 
     requester.cancel({ reason: 'use-widget' })
     await expect(running).rejects.toBeInstanceOf(UseWidgetError)
+    expect(requester.pending).toBeUndefined()
+    expect(swapDelivered).not.toHaveBeenCalled()
+  })
+
+  // The extend dialog opens the card shop's popup on exactly this type; any
+  // other rejection lands on its error screen with no popup.
+  it('fails the request with its own type when the card is chosen', async () => {
+    const requester = createFundingRequester(account)
+    const running = requester.request(need)
+    await vi.waitFor(() => expect(requester.pending).toBeDefined())
+
+    requester.cancel({ reason: 'use-card' })
+    await expect(running).rejects.toBeInstanceOf(UseCardError)
     expect(requester.pending).toBeUndefined()
     expect(swapDelivered).not.toHaveBeenCalled()
   })

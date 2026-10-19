@@ -29,7 +29,11 @@
   import type { CancelOptions } from '$lib/payment/funding-request.svelte'
   import {
     BUILT_IN_LABEL,
+    CARD_CONTINUE_LABEL,
+    CARD_LABEL,
+    CARD_TOP_UP_EXPLAINER,
     type FundingMethod,
+    type PaymentMethod,
     WIDGET_CONTINUE_LABEL,
     WIDGET_EXPLAINER,
     WIDGET_LABEL,
@@ -81,6 +85,12 @@
      */
     onUseWidget?: () => void
     /**
+     * Hand the payment to the card shop instead, which extends the drive from
+     * its own treasury. Passed only by the extend dialog, and only while the
+     * card route is switched on; buying chooses the card before it gets here.
+     */
+    onUseCard?: () => void
+    /**
      * Which method the chooser opens on. Passed by a caller that has already
      * asked — buying a drive chooses before it touches the chain, and finding
      * the choice flipped back here would read as the answer not having landed.
@@ -91,7 +101,7 @@
     initialMethod?: FundingMethod
   }
 
-  let { need, rail, onPaid, onCancel, onUseWidget, initialMethod }: Props = $props()
+  let { need, rail, onPaid, onCancel, onUseWidget, onUseCard, initialMethod }: Props = $props()
 
   type Screen = 'method' | 'connecting' | 'configure' | 'switching' | 'approving' | 'relaying'
 
@@ -127,9 +137,11 @@
   /** Which method the chooser is on. Which methods exist is fixed for the life
    * of one payment — the dialog is created fresh per pending request — so this
    * is read ONCE, as the user's starting selection, not tracked. */
-  let method = $state<FundingMethod>(
-    untrack(() => initialMethod ?? (onUseWidget ? 'widget' : 'built-in')),
+  let method = $state<PaymentMethod>(
+    untrack(() => initialMethod ?? (onUseWidget ? 'widget' : onUseCard ? 'card' : 'built-in')),
   )
+  /** A popup method is on offer, so a built-in method that cannot price has a fallback. */
+  const hasPopupMethod = $derived(onUseWidget !== undefined || onUseCard !== undefined)
   /** True while `quoteFunding` is pricing the built-in method's side. */
   let pricing = $state(false)
   /**
@@ -170,10 +182,11 @@
    */
   const methodOptions = $derived([
     ...(onUseWidget ? [{ value: 'widget', label: WIDGET_LABEL }] : []),
+    ...(onUseCard ? [{ value: 'card', label: CARD_LABEL }] : []),
     {
       value: 'built-in',
       label: BUILT_IN_LABEL,
-      disabled: onUseWidget !== undefined && builtInRefusal !== '',
+      disabled: hasPopupMethod && builtInRefusal !== '',
     },
   ])
 
@@ -287,12 +300,14 @@
       if (!attempt.current) {
         return
       }
-      // Only this method is out. The widget prices nothing through us, so it
-      // is unaffected — fall back to it where it is offered, rather than
-      // leaving the user on a method that cannot proceed.
+      // Only this method is out. The popups (widget, card shop) price nothing
+      // through us, so they are unaffected — fall back to one where it is
+      // offered, rather than leaving the user on a method that cannot proceed.
       builtInRefusal = caught instanceof Error ? caught.message : 'Could not price this payment.'
       if (onUseWidget) {
         method = 'widget'
+      } else if (onUseCard) {
+        method = 'card'
       }
     } finally {
       if (attempt.current) {
@@ -686,11 +701,11 @@
     cancel()
   }
 
-  // Price whatever the dialog opens on. Extend and resize list no widget, so
-  // the built-in method is the selection from the outset — price it now rather
-  // than wait for a choice there is no way to make. Buying a drive reaches here
-  // having already chosen the engine (`initialMethod`), so it prices now too;
-  // only a chooser sitting on the widget prices nothing. Read once, at setup: a
+  // Price whatever the dialog opens on. Resize, and extend without the card,
+  // list no popup, so the built-in method is the selection from the outset —
+  // price it now rather than wait for a choice there is no way to make. Buying a
+  // drive reaches here having already chosen the engine (`initialMethod`), so it
+  // prices now too; only a chooser sitting on a popup prices nothing. Read once, at setup: a
   // later switch to the built-in method prices through `chooseMethod`, not
   // here.
   if (untrack(() => method) === 'built-in') {
@@ -754,8 +769,16 @@
           {WIDGET_CONTINUE_LABEL}
           <ArrowRight />
         </Button>
+      {:else if method === 'card'}
+        <p class="bg-muted rounded-md px-3 py-2 text-sm">
+          {builtInRefusal || CARD_TOP_UP_EXPLAINER}
+        </p>
+        <Button class="w-full" onclick={() => onUseCard?.()}>
+          {CARD_CONTINUE_LABEL}
+          <ArrowRight />
+        </Button>
       {:else if builtInRefusal}
-        <!-- Reachable only where this is the sole method; with a widget beside
+        <!-- Reachable only where this is the sole method; with a popup beside
              it the chooser has already fallen back to that one. -->
         <p class="text-destructive w-full text-sm">{builtInRefusal}</p>
         <Button class="w-full" onclick={() => void priceBuiltIn()}>Try again</Button>

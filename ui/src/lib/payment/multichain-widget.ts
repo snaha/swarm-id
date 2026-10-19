@@ -63,18 +63,18 @@ const ALLOWED_ORIGINS = [
 ]
 const POPUP_FEATURES = 'popup,width=500,height=700'
 
-/** Batch event posted by the multichain widget once a purchase settles. */
+/** Batch event posted by the multichain widget once a purchase settles — or, as
+ *  `topup`, by the card shop once it extended the batch it was opened on. */
 export interface BatchEvent {
-  event: 'batch'
+  event: 'batch' | 'topup'
   batchId: string // bare 64-hex (parseBatchEvent strips any 0x prefix)
   depth: number // e.g., 21
   amount: string // "10453363201" (PLUR units)
   blockNumber: string // "0x2a828b8" (hex)
 }
 
-/** Options for opening the stamp purchase widget. */
-export interface PurchaseStampOptions {
-  destination: string // Batch owner address (0x...)
+/** What every popup reports back, whichever shop and whatever it does. */
+interface PopupCallbacks {
   onSuccess: (batch: BatchEvent) => void
   onError: (error: Error) => void
   // The user backed out before any money moved — no `payment` event was seen, so
@@ -84,6 +84,11 @@ export interface PurchaseStampOptions {
   // us money is already in flight. The caller MUST NOT treat this as a clean
   // cancel: the purchase may still settle on-chain.
   onUnconfirmedClose: () => void
+}
+
+/** Buy a batch: the widget, or the card shop with `card`. */
+export interface BuyStampOptions extends PopupCallbacks {
+  destination: string // Batch owner address (0x...)
   mocked?: boolean // For testing - simulate the settlement instead of paying
   mockPopup?: boolean // For testing - also open the widget's `?mocked=true` popup
   mockError?: boolean // For testing - simulate error instead of success
@@ -100,6 +105,23 @@ export interface PurchaseStampOptions {
   // paid-for batch behind — `onUnconfirmedClose`, never `onCancel`.
   card?: boolean
 }
+
+/**
+ * Extend a batch (bare or 0x hex) through the card shop instead of buying one.
+ * The shop opens its extend page with `amount` as the PLUR per chunk to add,
+ * tops the batch up from its own treasury and posts `topup`, which settles
+ * only for this batch id; a `batch` event is ignored, so a top-up can never be
+ * recorded as a new drive. The widget cannot extend at all, and the shop has
+ * no mocked mode, so this shape carries no owner, no depth and no mock: the
+ * type rules out an extend popup that could get a clean `onCancel` (#860).
+ */
+export interface TopUpStampOptions extends PopupCallbacks {
+  card: true
+  topUpBatchId: string
+  amount?: bigint
+}
+
+export type PurchaseStampOptions = BuyStampOptions | TopUpStampOptions
 
 /** How long to keep listening for a trailing `batch` message after the popup
  * is observed closed, before concluding the close was unconfirmed. */
@@ -150,6 +172,15 @@ export function buildWidgetUrl(
   }
 
   return `${card ? (CARD_SHOP?.href ?? DEFAULT_CARD_SHOP_URL) : WIDGET_BASE_URL}?${params.toString()}`
+}
+
+/** The card shop's extend page for `batchId`, adding `amount` per chunk. */
+function buildCardTopUpUrl(batchId: string, amount: bigint | undefined): string {
+  const params = new URLSearchParams({ batchId: strip0x(batchId) })
+  if (amount !== undefined) {
+    params.set('amount', amount.toString())
+  }
+  return `${new URL('extend', CARD_SHOP?.href ?? DEFAULT_CARD_SHOP_URL).href}?${params.toString()}`
 }
 
 /** Check if the message origin is from an allowed widget domain. */
@@ -309,9 +340,12 @@ function toStringField(value: unknown): string | undefined {
  * or numeric strings. A too-strict parser silently drops a successful purchase
  * (the message is ignored, then the popup-close path reverts the UI).
  */
-export function parseBatchEvent(data: unknown): BatchEvent | undefined {
+export function parseBatchEvent(
+  data: unknown,
+  expected: BatchEvent['event'] = 'batch',
+): BatchEvent | undefined {
   const obj = coerceObject(data)
-  if (!obj || obj.event !== 'batch') {
+  if (!obj || obj.event !== expected) {
     return undefined
   }
 
@@ -330,7 +364,7 @@ export function parseBatchEvent(data: unknown): BatchEvent | undefined {
   }
 
   return {
-    event: 'batch',
+    event: expected,
     batchId: batchIdHex, // Store without 0x prefix
     depth,
     amount,
@@ -367,19 +401,10 @@ export interface StampPurchaseHandle {
  *   keeps running until the popup is closed by hand.
  */
 export function openStampPurchaseWidget(options: PurchaseStampOptions): StampPurchaseHandle {
-  const {
-    destination,
-    onSuccess,
-    onError,
-    onCancel,
-    onUnconfirmedClose,
-    mocked,
-    mockPopup,
-    mockError,
-    depth,
-    amount,
-    card,
-  } = options
+  const { onSuccess, onError, onCancel, onUnconfirmedClose, amount } = options
+  const card = options.card === true
+  const topUpHex =
+    'topUpBatchId' in options ? strip0x(options.topUpBatchId).toLowerCase() : undefined
 
   // Mocked mode (the /dev toggle): settle locally without a real cross-chain
   // payment. `mockPopup` still opens the widget's own `?mocked=true` popup (which
@@ -387,7 +412,8 @@ export function openStampPurchaseWidget(options: PurchaseStampOptions): StampPur
   // in a real browser. Without it, no `window.open` at all, so the mock also
   // works where popups are blocked (previews) or the widget origin is offline.
   // Either way the settlement is simulated after a short, visible delay.
-  if (mocked) {
+  if (!('topUpBatchId' in options) && options.mocked) {
+    const { destination, depth, mockPopup, mockError } = options
     // The shop has no mocked mode: opened with `?mocked=true` it would show its
     // live payment form for the mock's delay, so the card mock opens nothing.
     const popup =
@@ -430,7 +456,10 @@ export function openStampPurchaseWidget(options: PurchaseStampOptions): StampPur
     onError(new Error('The card shop is not configured.'))
     return { cancel: () => false }
   }
-  const url = buildWidgetUrl(destination, { depth, amount }, false, card)
+  const url =
+    'topUpBatchId' in options
+      ? buildCardTopUpUrl(options.topUpBatchId, amount)
+      : buildWidgetUrl(options.destination, { depth: options.depth, amount }, false, card)
   const popup = window.open(url, 'stamp-purchase', POPUP_FEATURES)
 
   if (!popup) {
@@ -458,8 +487,9 @@ export function openStampPurchaseWidget(options: PurchaseStampOptions): StampPur
 
     const data = event.data
 
-    const batchEvent = parseBatchEvent(data)
-    if (batchEvent) {
+    const batchEvent = parseBatchEvent(data, topUpHex === undefined ? 'batch' : 'topup')
+    // A top-up of some other batch is no answer to this popup.
+    if (batchEvent && (topUpHex === undefined || batchEvent.batchId.toLowerCase() === topUpHex)) {
       // Record the batch, but leave the popup running: `create-batch` is not the
       // last step — the trailing transfer steps sweep leftover xDAI off the
       // widget's temporary wallet back to the owner. Closing here would strand
