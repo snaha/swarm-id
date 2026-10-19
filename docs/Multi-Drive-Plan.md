@@ -42,29 +42,37 @@ That design is no longer needed. Since #537 was written:
 
 So two batches of one account no longer share any write state. Multi-drive is **N
 independent copies of the existing single-batch stack**, and `lib/src/sync/` does not
-change. #537 is to be closed.
+change. #537 is closed.
 
 ## Design
 
 ### Per-drive write state
 
-`SwarmIdProxy` holds its write state as single-valued fields — `postageBatchId`, `stamper`,
-`coordinator`, `stampWorkerPool`, `signerKey`, `stamperAccountFingerprint`,
-`stamperInitGeneration` — referenced about 59 times. These move into one per-drive object;
-the proxy holds a map of them keyed by batch id.
+Each drive's write state is one `DriveWritePath` (`lib/src/proxy/drive-write-path.ts`): its
+stamp's batch id, signer key and lifetime, and the stamper, coordinator and worker pool
+built from it. The proxy holds a map of them keyed by batch id. Entries never reference each
+other.
 
-Each entry is the stack `initializeStamper` builds today: one `UtilizationAwareStamper`, one
-`BatchWriteCoordinator`, one worker pool. Entries never reference each other.
-
-**Created lazily, on the first write to that drive** — never at connect. An entry costs a
-lane acquire and a heartbeat, so an "all drives" app must not pay for drives it never
-writes. The coordinator's existing idle-yield releases the lane again.
+**The primary drive's entry is created at connect, every other entry on the first write to
+that drive.** An entry costs a lane acquire and a heartbeat, so an "all drives" app must not
+pay for drives it never writes; the coordinator's existing idle-yield releases the lane
+again. The primary's entry is the one the proxy builds today, and it keeps today's job: the
+proxy's own account-state publish (`runAccountStatePublish`, for multi-device accounts)
+writes this device's state feed through the primary drive's coordinator, announced by that
+coordinator's first lease acquire as now. An app with no regular drive granted (zero drives,
+or scratch only) has no entry at connect and publishes no feed: it sends the bus delta, as a
+session with no drive does today, and the feed is written by the identity UI or by a session
+that holds the account's default drive. Scratch drives never carry the publish, which keeps
+"never to a scratch drive" below.
 
 Bus handlers route by the `batchId` already on each message, to the matching entry or to
 none.
 
 A drive that leaves the grant (revoked, deleted, expired out) has its entry torn down; an
-upload in flight on it is **aborted**, as a stamp change aborts one today.
+upload in flight on it is **aborted**. That abort is new code in step 3: today a torn-down
+coordinator's in-flight upload is only stopped where it held a lease (`invalidateLease`),
+and a single-partition account never leases, so there the upload keeps stamping the old
+batch.
 
 ### Drive kind
 
@@ -181,15 +189,15 @@ bucket overwrites its oldest chunk in that lane.
 
 One PR each, in order.
 
-| #   | PR                                                                                                                                                                                                           | Depends on   |
-| --- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------ |
-| 1   | **Refactor, no behaviour change**: per-drive write state extracted from `SwarmIdProxy`; the proxy holds exactly one (`DriveWritePath`). Tests change only where they set the moved private fields.           | —            |
-| 2   | **Schemas**: the drive grant, drive `kind`, their merge, the single reachability rule, the partitioned handover, the default-drive rule, the immutable-import check (#864). The kind picker moved to step 7. | —            |
-| 3   | **Proxy map**: lazily created per-drive entries, bus routing by `batchId`, teardown and abort when a drive leaves the grant.                                                                                 | 1, 2         |
-| 4   | **SDK**: `getDrives()`, optional `batchID` on every writer with the primary as fallback, the typed rejection. Docs-site pages and the demo's drive selector.                                                 | 3            |
-| 5   | **Connect-time request**: the requirement in the client options → `connect` message → per-kind drive selection on the connect screen, including creating a drive there (#502), the primary shown.            | 4            |
-| 6   | **Later request and grant editing** (#711): `requestDrives()`, a popup opened by the iframe; approval only, no re-authentication; removing a drive from an app.                                              | 5, UI design |
-| 7   | **Scratch drive**: kind chosen in the Add drive flow and at import, the wrapping counter, uint32 counters, the never-full display, no "Set as default" on a scratch drive.                                   | 4            |
+| #   | PR                                                                                                                                                                                                 | Depends on   |
+| --- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------ |
+| 1   | **Refactor, no behaviour change**: per-drive write state extracted from `SwarmIdProxy`; the proxy holds exactly one (`DriveWritePath`). Tests change only where they set the moved private fields. | —            |
+| 2   | **Schemas**: the drive grant, drive `kind`, their merge, the single reachability rule, the partitioned handover, the default-drive rule, the immutable-import check (#864).                        | —            |
+| 3   | **Proxy map**: lazily created per-drive entries, bus routing by `batchId`, teardown and abort when a drive leaves the grant.                                                                       | 1, 2         |
+| 4   | **SDK**: `getDrives()`, optional `batchID` on every writer with the primary as fallback, the typed rejection. Docs-site pages and the demo's drive selector.                                       | 3            |
+| 5   | **Connect-time request**: the requirement in the client options → `connect` message → per-kind drive selection on the connect screen, including creating a drive there (#502), the primary shown.  | 4            |
+| 6   | **Later request and grant editing** (#711): `requestDrives()`, a popup opened by the iframe; approval only, no re-authentication; removing a drive from an app.                                    | 5, UI design |
+| 7   | **Scratch drive**: kind chosen in the Add drive flow and at import, the wrapping counter, uint32 counters, the never-full display, no "Set as default" on a scratch drive.                         | 4            |
 
 Step 1 carries the risk and ships no feature.
 
@@ -205,7 +213,14 @@ they cross drives, so step 3 binds each to its own `DriveWritePath`, test first:
   flush, so a rebind mid-flush mislabels the buckets.
 
 Each reaches across drives today only when a coordinator torn down mid-write is still
-running.
+running. Two more pieces of per-drive state stayed proxy-wide in step 1 and cross drives as
+soon as there are two entries, so step 3 moves them into the entry:
+
+- `pendingLaneUpdates`: `applyPendingLaneUpdate`, run from a coordinator's `onLeaseAcquired`,
+  replaces the whole map, so drive A's acquire drops the deltas buffered for drive B's unbound
+  lane — the resume-pointer skip the buffer exists to prevent;
+- `pendingYields`: `teardownCoordinator` calls `cancelPendingYields()`, which clears every
+  scheduled yield, not only the torn-down drive's.
 
 ### Testing
 

@@ -521,7 +521,7 @@ describe("SwarmIdProxy subsidised-mode selection", () => {
     internals(proxy).authenticated = true
     internals(proxy).appSecret = APP_SECRET_HEX
     // A record with no measured TTL and no node verdict refuses nothing,
-    // which is what leaving `stampLifetime` out has always meant here.
+    // which is what leaving `stampLifetime` out means here.
     const drive =
       state.postageBatchId && state.signerKey
         ? new DriveWritePath(
@@ -531,9 +531,15 @@ describe("SwarmIdProxy subsidised-mode selection", () => {
           )
         : undefined
     if (drive && state.stamper) {
-      drive.stamper = {
-        mock: "stamper",
-      } as unknown as DriveWritePath["stamper"]
+      drive.attach(
+        { mock: "stamper" } as unknown as NonNullable<
+          DriveWritePath["stamper"]
+        >,
+        "test-fingerprint",
+        { mock: "coordinator" } as unknown as NonNullable<
+          DriveWritePath["coordinator"]
+        >,
+      )
     }
     internals(proxy).drive = drive
   }

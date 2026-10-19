@@ -659,6 +659,53 @@ describe("SwarmIdProxy partitioned write enablement", () => {
     )
   })
 
+  // The case a batch/key compare would miss: a re-resolve of the SAME stamp
+  // whose stale init's create RESOLVES after the newer init built its
+  // coordinator. Only identity tells the two inits apart. A stale init that
+  // gets through builds a coordinator on an orphaned write path, which nothing
+  // tears down: its lease and refresh timer run until the iframe goes away.
+  it("drops a stale init of the same drive whose create resolves after the newer init", async () => {
+    seedConnectedAccount()
+    const coordinatorsBefore = vi.mocked(BatchWriteCoordinator).mock.results
+      .length
+    let finishCreate: (() => void) | undefined
+    vi.mocked(UtilizationAwareStamper.create).mockImplementationOnce(
+      (_signerKey, batchId) =>
+        new Promise<UtilizationAwareStamper>((resolve) => {
+          finishCreate = () =>
+            resolve(
+              Object.assign(stamperStub, {
+                mock: "stamper",
+                batchId,
+              }) as unknown as UtilizationAwareStamper,
+            )
+        }),
+    )
+    const identified = dispatch(
+      { type: "parentIdentify", requestId: "r1", metadata: { name: "dApp" } },
+      PARENT_ORIGIN,
+      parentWindow,
+    )
+    await vi.waitFor(() => expect(finishCreate).toBeDefined())
+
+    // A storage event during the first init finds no fingerprint yet and
+    // resolves the same stamp again; that init builds the coordinator.
+    const shell = createAccountsStorageManager()
+    shell.save(shell.load())
+    await vi.waitFor(() =>
+      expect(vi.mocked(BatchWriteCoordinator).mock.results).toHaveLength(
+        coordinatorsBefore + 1,
+      ),
+    )
+
+    finishCreate!()
+    await identified
+
+    expect(vi.mocked(BatchWriteCoordinator).mock.results).toHaveLength(
+      coordinatorsBefore + 1,
+    )
+  })
+
   // The branch the guard above does not take: the stale init's create REJECTS
   // — a batch just removed is the likeliest reason — and its catch used to
   // clear the stamper the superseding refresh had installed, so the session

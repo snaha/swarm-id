@@ -1825,22 +1825,17 @@ export class SwarmIdProxy {
     // (`startLease`) so the first upload doesn't pay the acquire latency; a
     // concurrent first upload queues on the same write lock and then finds the
     // lease already held. Single-device accounts get a lock-only coordinator.
-    // No await from here to `startLease`: the stamper and the coordinator that
-    // writes through it are assigned together, because a stamper without its
-    // coordinator tells an upload it is in user-stamp mode and then has nothing
-    // to write through. It also means the stamper is assigned the moment
-    // `create` returns: a utilization delta that arrives while there is no
-    // stamper is dropped, so one a peer broadcast after `create` read the
-    // stored counters would end up in neither.
-    drive.stamper = stamper
-    drive.accountFingerprint = `${accountInfo.owner.toHex()}-${uint8ArrayToHex(accountInfo.encryptionKey)}`
+    // No await from here to `startLease`: the stamper is attached the moment
+    // `create` returns, because a utilization delta that arrives while there
+    // is no stamper is dropped, so one a peer broadcast after `create` read
+    // the stored counters would end up in neither.
     const tuning = readPartitionTuningOverride()
     // The callbacks below outlive this narrowing, and the batch they name has
     // to be the one the coordinator serves, on both counts: its lease cache is
     // keyed on it, so a snapshot filed under a batch we have since moved off
     // hints at a lane nobody holds (#684), and a lease message naming that
     // batch answers nobody (#589). `batchId` is the capture from the top.
-    drive.coordinator = new BatchWriteCoordinator({
+    const coordinator = new BatchWriteCoordinator({
       bee: this.nodeBee,
       batchId,
       stamper,
@@ -1913,7 +1908,12 @@ export class SwarmIdProxy {
         })
       },
     })
-    drive.coordinator.startLease()
+    drive.attach(
+      stamper,
+      `${accountInfo.owner.toHex()}-${uint8ArrayToHex(accountInfo.encryptionKey)}`,
+      coordinator,
+    )
+    coordinator.startLease()
   }
 
   /**
@@ -1955,7 +1955,7 @@ export class SwarmIdProxy {
   /**
    * The current drive's worker pool. Read at call time, not bound to the
    * coordinator's own drive: a coordinator torn down mid-write that asks after
-   * a rebind is handed the new drive's pool, as before the extraction (#862).
+   * a rebind is handed the new drive's pool.
    */
   private async getOrCreateWorkerPool(
     requestedCount?: number,
@@ -1993,8 +1993,8 @@ export class SwarmIdProxy {
       // lane, so a remote copy is dropped at the receive guard after paying for
       // encryption and a frame the signaling server's payload cap may refuse
       // outright (one entry per dirty bucket, up to NUM_BUCKETS of them).
-      // The batch is read after the flush, as it always was; a rebind landing
-      // mid-flush labels these buckets with the next drive's batch (#862).
+      // The batch is read after the flush, so a rebind landing mid-flush
+      // labels these buckets with the next drive's batch.
       const batchId = this.drive?.batchId
       if (batchId && buckets.length > 0) {
         this.bus.publish(
