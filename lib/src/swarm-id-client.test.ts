@@ -805,6 +805,32 @@ describe("SwarmIdClient request seam", () => {
     await expect(promise).resolves.toEqual(drives)
   })
 
+  // The identity site and a dApp's client deploy separately: a kind this
+  // client does not know must not fail the whole list.
+  it("reads a drive kind it does not know as scratch", () => {
+    const parsed = IframeToParentMessageSchema.parse({
+      type: "getDrivesResponse",
+      requestId: "r",
+      drives: [
+        {
+          batchID: "ab".repeat(32),
+          utilization: 0,
+          usable: true,
+          label: "",
+          depth: 20,
+          amount: "1",
+          bucketDepth: 16,
+          blockNumber: 1,
+          immutableFlag: false,
+          exists: true,
+          kind: "archival",
+          primary: false,
+        },
+      ],
+    })
+    expect(parsed).toMatchObject({ drives: [{ kind: "scratch" }] })
+  })
+
   it("carries the drive a write names (#862)", async () => {
     const batchID = "cd".repeat(32)
     void client.uploadData(new Uint8Array([1]), { batchID }).catch(() => {})

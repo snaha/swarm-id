@@ -238,11 +238,7 @@ a teardown overtook, since nothing else would.
 - Steps 2–4: unit tests per `lib/AGENTS.md`, including that an account-bus delta hands a
   partitioned session only its granted drives' signer keys (a live `"all"` grant learns of
   new drives that way); an integration test with one session writing two drives and a second
-  device taking over each lane independently. Still open after step 4: `lib/test/integration`
-  calls the library's functions against the cluster and never builds a proxy session, so this
-  one belongs to the browser suites (`ui/tests`), next to the three-device scenarios. That test lands in step 4 (departure): before the SDK's `batchID`, a second
-  drive is reachable only through a private method, and `lib/src/sync/` — where the lanes
-  live — does not change in step 3.
+  device taking over each lane independently. Still open after step 4, tracked in #882: `lib/test/integration` calls the library's functions against the cluster and never builds a proxy session, so it belongs to the browser suites (`ui/tests`), next to the three-device scenarios.
 - Step 7: unit tests for the wrap (slot sequence, counter monotonicity across a publish); an
   integration test that fills a lane past its capacity and reads back the newest data; a
   live test that the overwrite evicts on a real network.

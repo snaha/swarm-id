@@ -314,8 +314,14 @@ export type DriveKind = z.infer<typeof DriveKindSchema>
 
 /** One drive the app was granted (#862), as `getDrives()` reports it */
 export const DriveSchema = PostageBatchSchema.extend({
-  kind: DriveKindSchema,
-  /** The drive an untargeted write goes to: the first granted regular drive */
+  // An identity site newer than this client may report a kind it does not
+  // know. Read it as scratch, the kind that promises nothing, rather than
+  // failing the whole response and every drive in it (as #811 did for codes).
+  kind: DriveKindSchema.catch("scratch"),
+  /**
+   * The drive an untargeted write goes to: the account default for an
+   * `"all"` grant, otherwise the first granted regular drive
+   */
   primary: z.boolean(),
 })
 export type Drive = z.infer<typeof DriveSchema>

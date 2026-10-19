@@ -487,10 +487,10 @@ if (batch) {
 
 Lists every drive the app was granted in Swarm ID. Each entry carries the fields of [`getPostageBatch()`](#getpostagebatch) plus:
 
-| Property  | Type                     | Description                                                                                                     |
-| --------- | ------------------------ | --------------------------------------------------------------------------------------------------------------- |
-| `kind`    | `'regular' \| 'scratch'` | A scratch drive overwrites its oldest data once full; its contents carry no warranty                            |
-| `primary` | `boolean`                | The drive a write goes to when it names none: the first granted regular drive. A scratch drive is never primary |
+| Property  | Type                     | Description                                                                                                                                                         |
+| --------- | ------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `kind`    | `'regular' \| 'scratch'` | A scratch drive overwrites its oldest data once full; its contents carry no warranty                                                                                |
+| `primary` | `boolean`                | The drive a write goes to when it names none: the account default for an `'all'` grant, otherwise the first granted regular drive. A scratch drive is never primary |
 
 **Returns:** `Promise<Drive[]>` — empty when the app was granted no drive
 
