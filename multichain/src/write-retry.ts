@@ -3,7 +3,7 @@
 // Adapted from @upcoming/multichain-library (ISC)
 // https://github.com/ethersphere/multichain-library
 
-import { Dates, Objects, System } from "cafe-utility"
+import { Dates, System } from "cafe-utility"
 
 const ATTEMPTS = 4
 const BACKOFF_MILLIS = Dates.seconds(2)
@@ -16,6 +16,14 @@ const BACKOFF_MILLIS = Dates.seconds(2)
  * reaches us through different wrappers.
  */
 const ALREADY_KNOWN = /already ?known|already imported|known transaction/i
+
+/**
+ * Nethermind `FeeTooLow`, and `transaction underpriced` from geth, erigon and
+ * the Gnosis nodes. Not `replacement transaction underpriced` (geth,
+ * Nethermind, Besu): that is a nonce collision with a pending transaction, and
+ * retrying it would race whatever holds the nonce.
+ */
+const FEE_TOO_LOW = /FeeTooLow|(?<!replacement transaction )underpriced/i
 
 /**
  * Whether the node is saying it ALREADY HAS this transaction.
@@ -60,22 +68,23 @@ export interface RetryOptions<T> {
 }
 
 /**
- * Retry a transaction send when the node rejects it with FeeTooLow (the gas
- * price moved between quoting and sending, or the offer was too low to begin
- * with). Any other error propagates immediately — a revert or nonce clash must
- * not be retried blindly.
+ * Retry a transaction send when the node rejects it with FeeTooLow or as
+ * underpriced, depending on the client (the gas price moved between quoting
+ * and sending, or the offer was too low to begin with). Any other error
+ * propagates immediately — a revert or nonce clash must not be retried blindly.
  *
- * `action` is handed its attempt number so it can RAISE its offer. Without
- * that the retry re-sends bytes the node has already refused and waits for the
- * network to move instead, which is backwards.
+ * `action` must RAISE its offer each time it is called, or the retry re-sends
+ * bytes the node has already refused and waits for the network to move
+ * instead. Every caller does it by pricing through a closure created outside
+ * the retry (`legacyGasPricer`, or the bundled path's last offer).
  */
 export async function withFeeTooLowRetry<T>(
-  action: (attempt: number) => Promise<T>,
+  action: () => Promise<T>,
   options: RetryOptions<T> = {},
 ): Promise<T> {
   for (let attempt = 0; attempt < ATTEMPTS; attempt++) {
     try {
-      return await action(attempt)
+      return await action()
     } catch (error) {
       if (isAlreadyKnown(error)) {
         // Already broadcast. Retrying can only produce this same answer, and
@@ -85,7 +94,7 @@ export async function withFeeTooLowRetry<T>(
         }
         return options.onAlreadyKnown()
       }
-      if (Objects.errorMatches(error, "FeeTooLow")) {
+      if (error instanceof Error && FEE_TOO_LOW.test(error.message)) {
         await System.sleepMillis(BACKOFF_MILLIS)
       } else {
         throw error

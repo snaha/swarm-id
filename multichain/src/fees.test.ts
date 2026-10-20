@@ -1,17 +1,20 @@
 // Copyright 2026 The Swarm Authors. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 /**
- * The fee fields of a bundled EIP-7702 transaction (#618).
+ * The fee fields of a bundled EIP-7702 transaction (#618), and a legacy write's
+ * `gasPrice`.
  *
  * The failure these exist for: a purchase on Gnosis mainnet was signed with
  * `maxPriorityFeePerGas: 0` and `maxFeePerGas: 13` wei, so no validator would
  * ever include it. The node answered `FeeTooLow` and the retry loop gave up.
  */
 import { describe, expect, it } from "vitest"
-import { MIN_PRIORITY_FEE_WEI, bundleFeeFields } from "./bundle-fees"
+import { MIN_PRIORITY_FEE_WEI, bundleFeeFields, legacyGasPrice } from "./fees"
 
 /** What `eth_gasPrice` answered on the endpoint that produced the 13-wei tx. */
 const REPORTED_GAS_PRICE = 13n
+/** What it answered for a legacy swap refused as underpriced. */
+const SWAP_GAS_PRICE = 12n
 const GWEI = 1_000_000_000n
 
 describe("bundleFeeFields", () => {
@@ -70,6 +73,26 @@ describe("bundleFeeFields", () => {
     )
     expect(third.maxPriorityFeePerGas).toBeGreaterThan(
       second.maxPriorityFeePerGas,
+    )
+  })
+})
+
+describe("legacyGasPrice", () => {
+  it("adds the tip floor on top of the quote", () => {
+    expect(legacyGasPrice(SWAP_GAS_PRICE)).toBe(
+      SWAP_GAS_PRICE + MIN_PRIORITY_FEE_WEI,
+    )
+  })
+
+  it("bids above the refused offer even when the fresh quote dropped", () => {
+    const refused = legacyGasPrice(5n * GWEI)
+    expect(legacyGasPrice(SWAP_GAS_PRICE, refused)).toBeGreaterThan(refused)
+  })
+
+  it("takes the fresh quote when it rose past the bump", () => {
+    const refused = legacyGasPrice(SWAP_GAS_PRICE)
+    expect(legacyGasPrice(5n * GWEI, refused)).toBe(
+      5n * GWEI + MIN_PRIORITY_FEE_WEI,
     )
   })
 })

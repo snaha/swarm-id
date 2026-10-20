@@ -7,7 +7,11 @@ import { RollingValueProvider } from "cafe-utility"
 import { privateKeyToAccount } from "viem/accounts"
 import { ERC20_ABI } from "./abi"
 import { chainFromSettings, publicClientFor, walletClientFor } from "./chain"
-import { estimateTransferGas, getGasPrice, getTransactionCount } from "./rpc"
+import {
+  estimateTransferGas,
+  getTransactionCount,
+  legacyGasPricer,
+} from "./rpc"
 import type { MultichainSettings } from "./settings"
 import { withFeeTooLowRetry } from "./write-retry"
 
@@ -84,11 +88,12 @@ export async function transferNative(
     settings,
     rpcProvider,
   )
+  const gasPrice = legacyGasPricer(settings, rpcProvider)
   return withFeeTooLowRetry(async () => {
     const serializedTransaction = await account.signTransaction({
       chainId: settings.chainId,
       gas: gas * NATIVE_TRANSFER_GAS_MARGIN,
-      gasPrice: await getGasPrice(settings, rpcProvider),
+      gasPrice: await gasPrice(),
       type: "legacy",
       to: options.to,
       value: options.amount,
@@ -122,6 +127,7 @@ export async function transferToken(
 ): Promise<`0x${string}`> {
   const account = privateKeyToAccount(options.originPrivateKey)
   const client = walletClientFor(settings, rpcProvider)
+  const gasPrice = legacyGasPricer(settings, rpcProvider)
   return withFeeTooLowRetry(async () =>
     client.writeContract({
       account,
@@ -130,7 +136,7 @@ export async function transferToken(
       functionName: "transfer",
       args: [options.to, options.amount],
       gas: ERC20_GAS,
-      gasPrice: await getGasPrice(settings, rpcProvider),
+      gasPrice: await gasPrice(),
       type: "legacy",
       chain: chainFromSettings(settings),
       nonce:
@@ -175,6 +181,7 @@ export async function approveBzz(
 ): Promise<`0x${string}`> {
   const account = privateKeyToAccount(options.originPrivateKey)
   const client = walletClientFor(settings, rpcProvider)
+  const gasPrice = legacyGasPricer(settings, rpcProvider)
   return withFeeTooLowRetry(async () =>
     client.writeContract({
       account,
@@ -183,7 +190,7 @@ export async function approveBzz(
       functionName: "approve",
       args: [options.spender, options.amount],
       gas: ERC20_GAS,
-      gasPrice: await getGasPrice(settings, rpcProvider),
+      gasPrice: await gasPrice(),
       type: "legacy",
       chain: chainFromSettings(settings),
       nonce:

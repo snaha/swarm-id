@@ -5,6 +5,7 @@
 
 import { RollingValueProvider, Types } from "cafe-utility"
 import { jsonRpc, jsonRpcOrUndefined } from "./fetch"
+import { legacyGasPrice } from "./fees"
 import type { MultichainSettings } from "./settings"
 
 export interface TransactionReceipt {
@@ -59,6 +60,22 @@ export async function getGasPrice(
 ): Promise<bigint> {
   const result = await jsonRpc(rpcProvider, settings, "eth_gasPrice", [])
   return BigInt(Types.asString(result))
+}
+
+/**
+ * A `gasPrice` source for one legacy send: create it outside
+ * `withFeeTooLowRetry` and call it inside, so a retry bids above the offer the
+ * node just refused.
+ */
+export function legacyGasPricer(
+  settings: MultichainSettings,
+  rpcProvider: RollingValueProvider<string>,
+): () => Promise<bigint> {
+  let last: bigint | undefined
+  return async () => {
+    last = legacyGasPrice(await getGasPrice(settings, rpcProvider), last)
+    return last
+  }
 }
 
 /**

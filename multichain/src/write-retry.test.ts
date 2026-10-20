@@ -38,6 +38,16 @@ function feeTooLow(): Error {
   return new Error("err: FeeTooLow: transaction underpriced")
 }
 
+/** How a Gnosis RPC refuses a zero tip, as viem wraps it. */
+function underpriced(): Error {
+  return new Error(
+    "Missing or invalid parameters. Double check you have provided the correct parameters.\n" +
+      "URL: https://rpc.gnosischain.com/\n" +
+      "Details: transaction underpriced, EffectivePriorityFeePerGas too low 0 < 1\n" +
+      "Version: viem@2.55.13",
+  )
+}
+
 describe("isAlreadyKnown", () => {
   it("recognises the node's answer", () => {
     expect(isAlreadyKnown(alreadyKnown())).toBe(true)
@@ -97,20 +107,39 @@ describe("withFeeTooLowRetry", () => {
     )
   })
 
-  // The point of retrying at all: the attempt index is what lets the next send
-  // differ from the one that was refused.
-  it("hands the action its attempt number so the offer can change", async () => {
-    const seen: number[] = []
-    const action = vi.fn(async (attempt: number) => {
-      seen.push(attempt)
-      if (attempt < 2) {
-        throw feeTooLow()
-      }
-      return "0xhash"
-    })
+  it("retries a send the node refuses with FeeTooLow", async () => {
+    const action = vi
+      .fn<() => Promise<string>>()
+      .mockRejectedValueOnce(feeTooLow())
+      .mockRejectedValueOnce(feeTooLow())
+      .mockResolvedValue("0xhash")
 
     await expect(run(withFeeTooLowRetry(action))).resolves.toBe("0xhash")
-    expect(seen).toEqual([0, 1, 2])
+    expect(action).toHaveBeenCalledTimes(3)
+  })
+
+  it("retries a send the node calls underpriced", async () => {
+    const action = vi
+      .fn<() => Promise<string>>()
+      .mockRejectedValueOnce(underpriced())
+      .mockResolvedValue("0xhash")
+
+    await expect(run(withFeeTooLowRetry(action))).resolves.toBe("0xhash")
+    expect(action).toHaveBeenCalledTimes(2)
+  })
+
+  // A nonce collision with a pending transaction, not a fee the network moved
+  // past: retrying it would race whatever holds the nonce.
+  it.each([
+    ["geth / nethermind", "replacement transaction underpriced"],
+    ["besu", "Replacement transaction underpriced"],
+  ])("propagates the %s replacement refusal", async (_, message) => {
+    const action = vi.fn(async () => {
+      throw new Error(message)
+    })
+
+    await expect(run(withFeeTooLowRetry(action))).rejects.toThrow(message)
+    expect(action).toHaveBeenCalledTimes(1)
   })
 
   it("gives up with a readable message when every attempt is underpriced", async () => {
@@ -137,12 +166,10 @@ describe("withFeeTooLowRetry", () => {
   // failed. Retrying can only produce the same answer, so the loop stops — and
   // says what happened rather than passing on the node's raw complaint.
   it("stops on AlreadyKnown instead of retrying it", async () => {
-    const action = vi.fn(async (attempt: number) => {
-      if (attempt === 0) {
-        throw feeTooLow()
-      }
-      throw alreadyKnown()
-    })
+    const action = vi
+      .fn<() => Promise<string>>()
+      .mockRejectedValueOnce(feeTooLow())
+      .mockRejectedValue(alreadyKnown())
 
     await expect(run(withFeeTooLowRetry(action))).rejects.toBeInstanceOf(
       TransactionAlreadyKnownError,

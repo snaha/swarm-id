@@ -1,7 +1,8 @@
 // Copyright 2026 The Swarm Authors. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 /**
- * What a bundled EIP-7702 transaction offers to pay (#618).
+ * What a write offers to pay: a bundled EIP-7702 transaction's fee fields
+ * (#618), and a legacy write's `gasPrice`.
  *
  * Split out and pure because it is the part worth testing: the bundled path is
  * the only one in this package that prices itself in EIP-1559 fields. Every
@@ -74,4 +75,14 @@ export function bundleFeeFields(
       ? max(quotedCap, bumped(refused.maxFeePerGas))
       : quotedCap,
   }
+}
+
+/**
+ * The `gasPrice` for one legacy send: the quote plus {@link MIN_PRIORITY_FEE_WEI},
+ * since the few wei of tip in `eth_gasPrice` are eaten by any base-fee rise
+ * before inclusion. On a retry, at least a bump above `refused`.
+ */
+export function legacyGasPrice(quoted: bigint, refused?: bigint): bigint {
+  const offer = quoted + MIN_PRIORITY_FEE_WEI
+  return refused === undefined ? offer : max(offer, bumped(refused))
 }

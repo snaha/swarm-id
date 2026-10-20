@@ -7,7 +7,11 @@ import { RollingValueProvider, System } from "cafe-utility"
 import { privateKeyToAccount } from "viem/accounts"
 import { POSTAGE_STAMP_ABI } from "./abi"
 import { chainFromSettings, publicClientFor, walletClientFor } from "./chain"
-import { getGasPrice, getTransactionCount, getTransactionReceipt } from "./rpc"
+import {
+  getTransactionCount,
+  getTransactionReceipt,
+  legacyGasPricer,
+} from "./rpc"
 import type { MultichainSettings } from "./settings"
 import { withFeeTooLowRetry } from "./write-retry"
 import { withGasMargin } from "./gas"
@@ -79,6 +83,7 @@ export async function createBatch(
       args,
     }),
   )
+  const gasPrice = legacyGasPricer(settings, rpcProvider)
   const transactionHash = await withFeeTooLowRetry(async () =>
     client.writeContract({
       account,
@@ -87,7 +92,7 @@ export async function createBatch(
       functionName: "createBatch",
       args,
       gas,
-      gasPrice: await getGasPrice(settings, rpcProvider),
+      gasPrice: await gasPrice(),
       type: "legacy",
       chain: chainFromSettings(settings),
       nonce:
@@ -157,6 +162,7 @@ export async function topUpBatch(
       args,
     }),
   )
+  const gasPrice = legacyGasPricer(settings, rpcProvider)
   return withFeeTooLowRetry(async () =>
     client.writeContract({
       account,
@@ -165,7 +171,7 @@ export async function topUpBatch(
       functionName: "topUp",
       args,
       gas,
-      gasPrice: await getGasPrice(settings, rpcProvider),
+      gasPrice: await gasPrice(),
       type: "legacy",
       chain: chainFromSettings(settings),
       nonce:
@@ -213,6 +219,7 @@ export async function increaseDepth(
       args,
     }),
   )
+  const gasPrice = legacyGasPricer(settings, rpcProvider)
   return withFeeTooLowRetry(async () =>
     client.writeContract({
       account,
@@ -221,7 +228,7 @@ export async function increaseDepth(
       functionName: "increaseDepth",
       args,
       gas,
-      gasPrice: await getGasPrice(settings, rpcProvider),
+      gasPrice: await gasPrice(),
       type: "legacy",
       chain: chainFromSettings(settings),
       nonce:

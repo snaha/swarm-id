@@ -42,8 +42,8 @@ import type { CreateBatchResult } from "./postage-write"
 import type { MultichainSettings } from "./settings"
 import { publicClientFor, walletClientFor } from "./chain"
 import { TransactionAlreadyKnownError, withFeeTooLowRetry } from "./write-retry"
-import { bundleFeeFields } from "./bundle-fees"
-import type { FeeFields } from "./bundle-fees"
+import { bundleFeeFields } from "./fees"
+import type { FeeFields } from "./fees"
 
 /** One call inside the bundle. */
 interface BundledCall {
