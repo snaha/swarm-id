@@ -365,7 +365,9 @@
         chainId = String(starting)
         tokenAddress = rail.tokens(starting)[0].address
       }
-      if (current !== starting) {
+      if (current === starting) {
+        walletChain.note(starting)
+      } else {
         screen = 'switching'
         await attempt.guard(ensureWalletChain().catch(() => undefined))
       }

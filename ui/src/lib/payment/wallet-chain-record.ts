@@ -51,6 +51,10 @@ export function createWalletChainRecord() {
       await switchWalletChain(provider, chainId, chains)
       recorded = chainId
     },
+    /** The wallet reported being on `chainId` — its word, not a switch we proved. */
+    note(chainId: number): void {
+      recorded = chainId
+    },
     /** The wallet moved, or a new one arrived: where it is, is not known. */
     forget(): void {
       recorded = undefined

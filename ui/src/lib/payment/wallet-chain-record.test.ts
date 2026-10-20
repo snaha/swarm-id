@@ -84,6 +84,15 @@ describe('the wallet chain record', () => {
     expect(switches()).toBe(2)
   })
 
+  it('asks nothing for a chain the wallet reported being on', async () => {
+    const { provider, switches, probes } = wallet({ genesis: OUR_GENESIS })
+    const record = createWalletChainRecord()
+    record.note(gnosis.id)
+    await record.ensure(provider, gnosis.id, chains)
+    expect(switches()).toBe(0)
+    expect(probes()).toBe(0)
+  })
+
   it('records nothing from a switch the wallet declined', async () => {
     const { provider, switches } = wallet({ declines: true })
     const record = createWalletChainRecord()
