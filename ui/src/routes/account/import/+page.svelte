@@ -20,6 +20,7 @@
   import AppHeader from '$lib/components/app-header.svelte'
   import { Button } from '$lib/components/ui/button'
   import { Textarea } from '$lib/components/ui/textarea'
+  import { deriveAppSecret } from '$lib/connect-handshake'
   import { strip0x } from '$lib/crypto/hex'
   import { isValidPhrase, normalizePhrase, walletFromPhrase } from '$lib/crypto/mnemonic'
   import { noteAccountFolded } from '$lib/dev/account-refresh'
@@ -66,7 +67,10 @@
         // settled (#862).
         const request = connectStore.request
         if (request) {
-          connectStore.setPending({ account: existing, entropy: wallet.entropy })
+          connectStore.setPending({
+            account: existing,
+            appSecret: await deriveAppSecret(wallet.entropy, request.appOrigin),
+          })
           await goto(resolve(routes.CONNECT_DONE))
           return
         }

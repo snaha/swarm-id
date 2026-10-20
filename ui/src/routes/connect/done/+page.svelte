@@ -33,7 +33,7 @@
   import DriveAddDialog from '$lib/components/drive-add-dialog.svelte'
   import { Button } from '$lib/components/ui/button'
   import { Select, type SelectOption } from '$lib/components/ui/select'
-  import { type DriveGrant, completeConnect, reuseConnection } from '$lib/connect-handshake'
+  import { type DriveGrant, commitConnect } from '$lib/connect-handshake'
   import {
     ADD_NEW_DRIVE,
     type PickerRow,
@@ -159,16 +159,11 @@
     return undefined
   }
 
-  async function goToApp() {
+  function goToApp() {
     if (!account || !request || !pending || !canGo) {
       return
     }
-    const grant = grantFor()
-    if (pending.entropy) {
-      await completeConnect(account, pending.entropy, request, grant)
-    } else {
-      reuseConnection(account, request, grant)
-    }
+    commitConnect(account, request, pending.appSecret, grantFor())
     connectStore.clear()
     window.close()
   }
@@ -191,9 +186,7 @@
           </div>
         </div>
         <div class="flex w-full flex-col gap-4">
-          <p class="text-center text-base">
-            Your Swarm ID is now connected to {request.appName}!
-          </p>
+          <p class="text-center text-base">Connect your Swarm ID to {request.appName}</p>
           {#if requested === 'all'}
             <label class="flex w-full items-start gap-2 text-sm">
               <input type="checkbox" bind:checked={grantAll} class="mt-0.5 size-4 shrink-0" />

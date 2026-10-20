@@ -129,53 +129,40 @@ function sendSecretToOpener(account: Account, request: ConnectRequest, appSecret
 }
 
 /**
- * Derive the app secret from the unlocked account and persist the connection.
- * The proxy iframe in the dApp picks it up via storage event (or postMessage
- * when partitioned) and authenticates.
+ * The app secret for this account and app, derived at unlock. Only this
+ * crosses to the done page: the seed entropy itself stays with the ceremony
+ * that produced it.
  */
-export async function completeConnect(
-  account: Account,
-  entropy: Uint8Array,
-  request: ConnectRequest,
-  grant?: DriveGrant,
-): Promise<void> {
+export async function deriveAppSecret(entropy: Uint8Array, appOrigin: string): Promise<string> {
   const masterKey = strip0x(privateKeyFromEntropy(entropy))
-  const appSecret = await deriveSecret(masterKey, request.appOrigin)
-  saveConnection(account, request, appSecret, grant)
-  sendSecretToOpener(account, request, appSecret)
+  return deriveSecret(masterKey, appOrigin)
 }
 
-/** The still-valid prior connection to this app, if the account has one. */
-function findReusableConnection(account: Account, appOrigin: string): ConnectedApp | undefined {
+/**
+ * The secret of a still-valid prior connection to this app, so no unlock is
+ * needed; undefined when a full unlock + derivation is required.
+ */
+export function reusableAppSecret(account: Account, appOrigin: string): string | undefined {
   return account.connectedApps.find(
     (app) =>
       app.appUrl === appOrigin &&
       app.appSecret !== undefined &&
       app.revokedAt === undefined &&
       (app.connectedUntil ?? 0) > Date.now(),
-  )
-}
-
-/** Whether `reuseConnection` has a secret to reuse, so no unlock is needed. */
-export function canReuseConnection(account: Account, appOrigin: string): boolean {
-  return findReusableConnection(account, appOrigin)?.appSecret !== undefined
+  )?.appSecret
 }
 
 /**
- * Reconnect with the secret of a still-valid prior connection, skipping the
- * unlock ceremony. Returns false when there is none and a full
- * unlock + derivation is required.
+ * Persist the connection with the secret in hand, fresh or reused, and hand
+ * it to a partitioned iframe. The proxy iframe in the dApp picks it up via
+ * storage event (or postMessage when partitioned) and authenticates.
  */
-export function reuseConnection(
+export function commitConnect(
   account: Account,
   request: ConnectRequest,
+  appSecret: string,
   grant?: DriveGrant,
-): boolean {
-  const existing = findReusableConnection(account, request.appOrigin)
-  if (!existing?.appSecret) {
-    return false
-  }
-  saveConnection(account, request, existing.appSecret, grant)
-  sendSecretToOpener(account, request, existing.appSecret)
-  return true
+): void {
+  saveConnection(account, request, appSecret, grant)
+  sendSecretToOpener(account, request, appSecret)
 }

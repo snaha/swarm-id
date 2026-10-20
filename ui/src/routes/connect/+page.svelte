@@ -20,7 +20,7 @@
   import SignBackInDialog from '$lib/components/sign-back-in-dialog.svelte'
   import { Button } from '$lib/components/ui/button'
   import UnlockDialog from '$lib/components/unlock-dialog.svelte'
-  import { canReuseConnection } from '$lib/connect-handshake'
+  import { deriveAppSecret, reusableAppSecret } from '$lib/connect-handshake'
   import { type DriveAttention, driveAttentionDescription } from '$lib/drives'
   import routes from '$lib/routes'
   import { accountsStore } from '$lib/stores/accounts.svelte'
@@ -76,9 +76,10 @@
     // (A signed-out account kept no connections, so it always falls through
     // to the unlock, which doubles as its sign-back-in ceremony.) The done
     // page commits the handshake once the drives are settled.
-    if (canReuseConnection(account, request.appOrigin)) {
+    const appSecret = reusableAppSecret(account, request.appOrigin)
+    if (appSecret !== undefined) {
       connectStore.setFirstConnect(false) // a valid entry exists by definition
-      connectStore.setPending({ account })
+      connectStore.setPending({ account, appSecret })
       sessionStore.setCurrentAccount(account.id)
       await goto(resolve(routes.CONNECT_DONE))
       return
@@ -97,7 +98,10 @@
     connectStore.setFirstConnect(
       account.activeApps.every((app) => app.appUrl !== request.appOrigin),
     )
-    connectStore.setPending({ account, entropy })
+    connectStore.setPending({
+      account,
+      appSecret: await deriveAppSecret(entropy, request.appOrigin),
+    })
     sessionStore.setCurrentAccount(account.id)
     unlocking = undefined
     await goto(resolve(routes.CONNECT_DONE))

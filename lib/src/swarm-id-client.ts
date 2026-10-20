@@ -252,14 +252,23 @@ export class SwarmIdClient {
     this.subsidisedGatewayUrl = options.subsidisedGatewayUrl
     this.permissions = options.permissions
 
-    // Validate metadata
+    // Validate metadata and permissions, each named in its own error so a
+    // dApp author looks at the right option.
     try {
       AppMetadataSchema.parse(this.metadata)
-      PermissionsSchema.optional().parse(this.permissions)
     } catch (error) {
       throw new SwarmIdError(
         "invalid-request",
         `Invalid app metadata: ${error}`,
+        { cause: error },
+      )
+    }
+    try {
+      PermissionsSchema.optional().parse(this.permissions)
+    } catch (error) {
+      throw new SwarmIdError(
+        "invalid-request",
+        `Invalid permissions: ${error}`,
         { cause: error },
       )
     }

@@ -1503,6 +1503,23 @@ describe("SwarmIdClient lifecycle errors", () => {
     expect((error as SwarmIdError).message).toMatch(/^Invalid app metadata: /)
     expect((error as SwarmIdError).cause).toBeInstanceOf(ZodError)
   })
+
+  it("names permissions, not metadata, when the drive request is invalid", () => {
+    const error = thrownBy(
+      () =>
+        new SwarmIdClient({
+          iframeOrigin: IFRAME_ORIGIN,
+          metadata: { name: "App" },
+          permissions: {
+            drives: [{ kind: "regular", description: "x".repeat(121) }],
+          },
+        }),
+    )
+    expect(error).toBeInstanceOf(SwarmIdError)
+    expect(error).toMatchObject({ code: "invalid-request" })
+    expect((error as SwarmIdError).message).toMatch(/^Invalid permissions: /)
+    expect((error as SwarmIdError).cause).toBeInstanceOf(ZodError)
+  })
 })
 
 /** Let the microtask queue drain so an `await` chain can move on. */

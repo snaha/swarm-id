@@ -72,7 +72,7 @@ test('first connect with a single drive confirms without picker or pitch', async
   await popup.getByRole('textbox', { name: 'Account password' }).fill(PASSWORD)
   await popup.getByRole('button', { name: 'Confirm' }).click()
 
-  await expect(popup.getByText(`Your Swarm ID is now connected to ${APP_NAME}!`)).toBeVisible()
+  await expect(popup.getByText(`Connect your Swarm ID to ${APP_NAME}`)).toBeVisible()
   await expect(popup.getByText('Select drive')).not.toBeVisible()
   await expect(popup.getByText('Want the full experience?')).not.toBeVisible()
   await goToApp(popup)
@@ -88,7 +88,7 @@ test('connect flow shows the done screen variants and closes the popup', async (
   await completeCreateFlow(popup)
 
   await expect(popup).toHaveURL(/\/connect\/done$/)
-  await expect(popup.getByText(`Your Swarm ID is now connected to ${APP_NAME}!`)).toBeVisible()
+  await expect(popup.getByText(`Connect your Swarm ID to ${APP_NAME}`)).toBeVisible()
   await expect(popup.getByText('Want the full experience?')).toBeVisible()
   await expect(popup.getByRole('button', { name: 'Set up a drive' })).toBeVisible()
 
@@ -125,7 +125,7 @@ test('connect flow shows the done screen variants and closes the popup', async (
   await popup.getByRole('textbox', { name: 'Account password' }).fill(PASSWORD)
   await popup.getByRole('button', { name: 'Confirm' }).click()
 
-  await expect(popup.getByText(`Your Swarm ID is now connected to ${APP_NAME}!`)).toBeVisible()
+  await expect(popup.getByText(`Connect your Swarm ID to ${APP_NAME}`)).toBeVisible()
   await expect(popup.getByText('Select drive')).not.toBeVisible()
   await expect(popup.getByText('Want the full experience?')).not.toBeVisible()
   await goToApp(popup)

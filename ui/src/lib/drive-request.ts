@@ -5,9 +5,8 @@
  * app asked for, regular rows first, then scratch. The page renders rows;
  * this decides what each row starts with, may pick, and amounts to.
  */
+import type { DriveKind } from '@snaha/swarm-id'
 import { type DriveRequirement, type PostageStamp, isScratchDrive } from '@snaha/swarm-id/internal'
-
-export type DriveKind = 'regular' | 'scratch'
 
 /** The select entry that opens the Add drive dialog for the row. */
 export const ADD_NEW_DRIVE = '__add-new-drive__'

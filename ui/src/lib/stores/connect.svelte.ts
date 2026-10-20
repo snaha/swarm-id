@@ -36,12 +36,13 @@ export interface ConnectRequest {
 /**
  * An approved connection the done page has yet to commit: the handshake
  * runs on "Go to app", after the drive picker, so a partitioned session is
- * handed exactly the drives the grant names. `entropy` is absent when a
- * still-valid prior connection is being reused.
+ * handed exactly the drives the grant names. `appSecret` is this one app's
+ * secret, derived at unlock or reused from a still-valid prior connection;
+ * the master key material never reaches this store.
  */
 export interface PendingConnect {
   account: Account
-  entropy?: Uint8Array
+  appSecret: string
 }
 
 /**

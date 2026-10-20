@@ -10,6 +10,7 @@
   import ArrowLeft from '@lucide/svelte/icons/arrow-left'
   import ArrowRight from '@lucide/svelte/icons/arrow-right'
   import TriangleAlert from '@lucide/svelte/icons/triangle-alert'
+  import type { DriveKind } from '@snaha/swarm-id'
   import { BatchIdSchema, PrivateKeySchema } from '@snaha/swarm-id/internal'
 
   import { type Attempt, createAttemptTracker } from '$lib/attempt'
@@ -20,7 +21,6 @@
   import { Input } from '$lib/components/ui/input'
   import { Select } from '$lib/components/ui/select'
   import { strip0x } from '$lib/crypto/hex'
-  import type { DriveKind } from '$lib/drive-request'
   import {
     DRIVE_SIZE_BREAKPOINTS,
     LIFESPAN_UNIT_OPTIONS,
