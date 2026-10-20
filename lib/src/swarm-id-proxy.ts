@@ -185,6 +185,7 @@ import {
 } from "./schemas"
 import { appSessionDuration } from "./utils/constants"
 import { buildAuthUrl } from "./utils/url"
+import { createWeeb3Bee, type Weeb3Node } from "./proxy/weeb3-bee"
 import {
   createActForContent,
   decryptActReference,
@@ -382,6 +383,10 @@ export class SwarmIdProxy {
   private pendingLaneUpdates = new Map<string, Map<number, number>>()
   private utilizationStore: UtilizationStoreDB | undefined
   private beeApiUrl: string
+  /** Experimental (#306): route the configured node's traffic through weeb-3. */
+  private useWeeb3: boolean
+  private weeb3Bee: Bee | undefined
+  private startWeeb3: (() => Promise<Weeb3Node>) | undefined
   private gnosisRpcUrl: string
   private postageStampContractAddress: string
   private signalingUrl: string | undefined
@@ -438,6 +443,11 @@ export class SwarmIdProxy {
 
   /** A client for `url`, rebuilt only when the URL differs from the last. */
   private beeClientFor(url: string): Bee {
+    if (this.useWeeb3 && url === this.beeApiUrl && this.startWeeb3) {
+      // Started on first use, then kept: the node is expensive to bring up.
+      this.weeb3Bee ??= createWeeb3Bee(this.startWeeb3())
+      return this.weeb3Bee
+    }
     if (this.beeClient?.url !== url) {
       this.beeClient = { url, bee: new Bee(url) }
     }
@@ -471,6 +481,8 @@ export class SwarmIdProxy {
     // Load Bee API URL from network settings, falling back to default
     const networkSettings = createNetworkSettingsStorageManager().load()
     this.beeApiUrl = networkSettings?.beeNodeUrl || DEFAULT_BEE_NODE_URL
+    this.useWeeb3 = networkSettings?.useWeeb3 ?? false
+    this.startWeeb3 = config?.startWeeb3
     this.gnosisRpcUrl = networkSettings?.gnosisRpcUrl || DEFAULT_GNOSIS_RPC_URL
     // PostageStamp contract address for on-chain TTL reads. The host app
     // supplies this from a build-time env so local dev can point at the
@@ -606,6 +618,11 @@ export class SwarmIdProxy {
     settings: NetworkSettings | undefined,
   ): void {
     this.gnosisRpcUrl = settings?.gnosisRpcUrl || DEFAULT_GNOSIS_RPC_URL
+    this.useWeeb3 = settings?.useWeeb3 ?? false
+    // weeb-3 is a node of its own, so a dApp's gateway would bypass it.
+    if (this.useWeeb3) {
+      this.subsidisedGatewayUrl = undefined
+    }
 
     const beeNodeUrl = settings?.beeNodeUrl || DEFAULT_BEE_NODE_URL
     if (beeNodeUrl === this.beeApiUrl) {
@@ -2265,7 +2282,10 @@ export class SwarmIdProxy {
     }
 
     // Override: disable subsidised gateway when using custom Bee API URL
-    if (this.beeApiUrl !== DEFAULT_BEE_NODE_URL && this.subsidisedGatewayUrl) {
+    if (
+      (this.beeApiUrl !== DEFAULT_BEE_NODE_URL || this.useWeeb3) &&
+      this.subsidisedGatewayUrl
+    ) {
       this.subsidisedGatewayUrl = undefined
     }
 
@@ -5978,6 +5998,12 @@ export interface ProxyConfig {
    * cross-device bus transport (docs/Account-Bus.md).
    */
   signalingUrl?: string
+  /**
+   * Experimental (#306): boots a weeb-3 node, used instead of the Bee node when
+   * the network settings say `useWeeb3`. Injected so the library does not ship
+   * weeb-3's wasm to every dApp.
+   */
+  startWeeb3?: () => Promise<Weeb3Node>
 }
 
 /**

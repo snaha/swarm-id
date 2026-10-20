@@ -10,6 +10,7 @@
   import { Button } from '$lib/components/ui/button'
   import { Dialog } from '$lib/components/ui/dialog'
   import { Input } from '$lib/components/ui/input'
+  import { Switch } from '$lib/components/ui/switch'
   import { chainIdentity, probeChainId } from '$lib/payment/chain'
   // Through the seam, never `$lib/dev/*` directly: a direct import puts the
   // local rail, the anvil cheat codes and the dev faucet key back in the
@@ -24,6 +25,7 @@
   let { onclose }: Props = $props()
 
   let beeNodeUrl = $state(networkSettingsStore.beeNodeUrl)
+  let useWeeb3 = $state(networkSettingsStore.useWeeb3)
   let gnosisRpcUrl = $state(networkSettingsStore.gnosisRpcUrl)
   // Captured once so the narrowing survives into the closures below.
   const source = devSourceChain
@@ -107,6 +109,7 @@
     networkSettingsStore.updateSettings({
       beeNodeUrl: beeNodeUrl.trim(),
       gnosisRpcUrl: gnosisRpcUrl.trim(),
+      useWeeb3,
     })
     // Kept out of the shared settings record: it is dev-only and never syncs.
     // The rail reads it per access, so this takes effect without a reload.
@@ -118,10 +121,26 @@
   function resetToDefaults() {
     beeNodeUrl = DEFAULT_BEE_NODE_URL
     gnosisRpcUrl = DEFAULT_GNOSIS_RPC_URL
+    useWeeb3 = false
   }
 </script>
 
 <Dialog title="Network settings" {onclose}>
+  <div class="flex w-full flex-col gap-2">
+    <div class="flex items-center justify-between gap-2">
+      <label for="use-weeb3" class="text-sm font-medium">Browser node (experimental)</label>
+      <Switch id="use-weeb3" bind:checked={useWeeb3} />
+    </div>
+    <p class="text-muted-foreground text-xs">
+      Apps reach Swarm through <a
+        href="https://github.com/lat-murmeldjur/weeb-3"
+        target="_blank"
+        rel="noreferrer"
+        class="underline">weeb-3</a
+      >, a node running in this browser, instead of the Bee address below.
+    </p>
+  </div>
+
   <div class="flex w-full flex-col gap-2">
     <label for="bee-node-url" class="text-sm font-medium">Bee address</label>
     <Input
@@ -130,6 +149,7 @@
       placeholder={DEFAULT_BEE_NODE_URL}
       class="font-mono"
       aria-invalid={beeNodeUrlError}
+      disabled={useWeeb3}
     />
     {#if beeNodeUrlError}
       <p class="text-destructive text-xs">Please enter a valid URL</p>

@@ -75,6 +75,7 @@ export default typescriptEslint.config(
       '**/.cache',
       '**/playwright-report',
       '**/test-results',
+      'static/weeb-3',
     ],
   },
 )
