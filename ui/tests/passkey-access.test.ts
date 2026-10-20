@@ -80,7 +80,7 @@ async function gotoAccessStep(page: Page) {
 }
 
 test('passkey happy path creates a usable local account', async ({ page }) => {
-  await installVirtualAuthenticator(page)
+  const authenticator = await installVirtualAuthenticator(page)
 
   // The access step defaults to the Passkey tab; the virtual authenticator
   // answers the ceremony automatically.
@@ -94,6 +94,8 @@ test('passkey happy path creates a usable local account', async ({ page }) => {
   await page.getByRole('button', { name: 'Stay local for now' }).click()
   await expect(page).toHaveURL(/\/$/)
   await expect(page.getByRole('tab', { name: 'Account' })).toBeVisible()
+  // A working passkey is never signalled away.
+  expect(await authenticator.storedCredentials()).toBe(1)
 })
 
 test('cancel during finalization does not create the account (#423)', async ({ page }) => {
@@ -143,10 +145,37 @@ test('a passkey without PRF is rejected, explained, and signalled for removal (#
   // signalUnknownCredential reached the authenticator: the orphan is gone.
   expect(await authenticator.storedCredentials()).toBe(0)
 
-  // The other methods are right there: password still completes the flow.
+  // The other methods are right there: switching tabs drops the stale error
+  // and password still completes the flow.
   await page.getByRole('tab', { name: 'Password' }).click()
+  await expect(page.getByText(/cannot unlock this account/)).toBeHidden()
   await page.locator('#new-password').fill('correct horse battery staple')
   await page.locator('#verify-password').fill('correct horse battery staple')
   await page.getByRole('button', { name: 'Confirm', exact: true }).click()
   await expect(page).toHaveURL(/\/account\/new\/done$/)
+})
+
+test('a passkey whose follow-up assertion returns no PRF output is dropped too (#870)', async ({
+  page,
+}) => {
+  // The other PRF failure: registration claims PRF but evaluates nothing, and
+  // the follow-up get() returns nothing either. No virtual authenticator does
+  // this on its own, so the extension results are faked on top of a PRF-capable one.
+  const authenticator = await installVirtualAuthenticator(page)
+  await page.addInitScript(() => {
+    const original = PublicKeyCredential.prototype.getClientExtensionResults
+    PublicKeyCredential.prototype.getClientExtensionResults = function () {
+      return this.response instanceof AuthenticatorAttestationResponse
+        ? { prf: { enabled: true } }
+        : { ...original.call(this), prf: {} }
+    }
+  })
+  await gotoAccessStep(page)
+  await page.getByRole('button', { name: 'Confirm with passkey' }).click()
+
+  await expect(
+    page.getByText(/did not return PRF results.*cannot unlock this account/),
+  ).toBeVisible()
+  expect(await page.evaluate((key) => localStorage.getItem(key), STORAGE_KEY_ACCOUNTS)).toBeNull()
+  expect(await authenticator.storedCredentials()).toBe(0)
 })

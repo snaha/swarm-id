@@ -55,6 +55,12 @@
 
   const passwordValid = $derived(isNewPasswordValid(password, verifyPassword))
 
+  // A failed method's error does not belong under the next tab's form.
+  $effect(() => {
+    void method
+    error = undefined
+  })
+
   const backHref = $derived(
     sessionStore.draft?.flow === 'sign-in'
       ? resolve(routes.ACCOUNT_IMPORT)
