@@ -3,11 +3,30 @@
 /** Whether the connected wallet is known to be short of what a payment charges. */
 import { formatUnits } from 'viem'
 
-import { type PaymentQuote, type PaymentToken, displayAmount } from '$lib/payment/payment-rail'
+import {
+  AMOUNT_PRECISION_DIGITS,
+  type PaymentQuote,
+  type PaymentToken,
+} from '$lib/payment/payment-rail'
 
-/** A balance for display. Unlike a price, zero is a figure: `displayAmount` would blank it. */
+/**
+ * `value` cut to the digits a price shows, rounded up or down rather than to
+ * nearest: a balance shown rounded up would claim money the wallet lacks, and a
+ * need shown rounded down would leave a top-up of that figure short.
+ */
+function toPrecision(value: bigint, direction: 'up' | 'down'): bigint {
+  const dropped = value.toString().length - AMOUNT_PRECISION_DIGITS
+  if (dropped <= 0) {
+    return value
+  }
+  const unit = 10n ** BigInt(dropped)
+  const down = (value / unit) * unit
+  return direction === 'up' && down !== value ? down + unit : down
+}
+
+/** A balance for display, rounded down. Unlike a price, zero is a figure: "0", not blank. */
 export function formatBalance(value: bigint, decimals: number): string {
-  return value === 0n ? '0' : displayAmount(formatUnits(value, decimals))
+  return formatUnits(toPrecision(value, 'down'), decimals)
 }
 
 /**
@@ -24,7 +43,7 @@ export function shortfallMessage(
     const token = tokens.find((candidate) => candidate.address === charge.currency)
     const balance = held(charge.currency)
     if (token && balance !== undefined && balance < charge.amount) {
-      const needed = displayAmount(formatUnits(charge.amount, token.decimals))
+      const needed = formatUnits(toPrecision(charge.amount, 'up'), token.decimals)
       return `Your wallet has ${formatBalance(balance, token.decimals)} ${token.symbol} on ${chainName}, and this payment needs ${needed} ${token.symbol}. Choose another chain or token, or add funds to this one.`
     }
   }

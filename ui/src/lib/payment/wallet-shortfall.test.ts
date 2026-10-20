@@ -5,7 +5,7 @@ import { describe, expect, it } from 'vitest'
 
 import { NATIVE_CURRENCY } from '$lib/payment/payment-rail'
 
-import { shortfallMessage } from './wallet-shortfall'
+import { formatBalance, shortfallMessage } from './wallet-shortfall'
 
 const XDAI = { address: NATIVE_CURRENCY, symbol: 'xDAI', name: 'xDAI', decimals: 18 }
 const USDC = {
@@ -38,6 +38,18 @@ describe('shortfallMessage', () => {
     ).toMatch(/has 2\.5 USDC on Gnosis Chain, and this payment needs 10\.84 USDC/)
   })
 
+  it('never shows a near miss as the same figure twice', () => {
+    expect(
+      message([{ currency: USDC.address, amount: 10_836_000n }], { [USDC.address]: 10_835_000n }),
+    ).toMatch(/has 10\.83 USDC on Gnosis Chain, and this payment needs 10\.84 USDC/)
+  })
+
+  it('rounds what is needed up, so adding the figure shown is enough', () => {
+    expect(
+      message([{ currency: USDC.address, amount: 10_834_900n }], { [USDC.address]: 0n }),
+    ).toMatch(/needs 10\.84 USDC/)
+  })
+
   it('lets through a wallet holding exactly what is charged', () => {
     expect(
       message([{ currency: NATIVE_CURRENCY, amount: PRICE }], { [NATIVE_CURRENCY]: PRICE }),
@@ -63,5 +75,15 @@ describe('shortfallMessage', () => {
         { [USDC.address]: 50_000_000n, [NATIVE_CURRENCY]: parseUnits('0.001', XDAI.decimals) },
       ),
     ).toMatch(/has 0\.001 xDAI on Gnosis Chain, and this payment needs 0\.005 xDAI/)
+  })
+})
+
+describe('formatBalance', () => {
+  it('shows an empty balance as 0', () => {
+    expect(formatBalance(0n, USDC.decimals)).toBe('0')
+  })
+
+  it('never rounds a balance up past what the wallet holds', () => {
+    expect(formatBalance(10_839_999n, USDC.decimals)).toBe('10.83')
   })
 })

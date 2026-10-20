@@ -86,7 +86,7 @@ export interface QuoteRequest {
 }
 
 /** Significant digits in a displayed price. */
-const AMOUNT_PRECISION_DIGITS = 4
+export const AMOUNT_PRECISION_DIGITS = 4
 const USD_DECIMALS = 2
 /** The dollar figure below which cents are all zeros. */
 const CENT = 0.01
