@@ -178,13 +178,13 @@
 <td><code dir="auto">options.permissions</code></td>
 <td><code dir="auto">Permissions</code></td>
 <td>No</td>
-<td>What the app asks the user for on the connect screen. <code dir="auto">permissions.drives</code> is <code dir="auto">'all'</code>, or a row per drive (<code dir="auto">{ kind, description?, optional? }</code>), regular ones first; <code dir="auto">[]</code> opts out of drives. See <a href="#getdrives"><code dir="auto">getDrives()</code></a></td>
+<td>What the app asks the user for on the connect screen. <code dir="auto">permissions.drives</code> is <code dir="auto">'all'</code>, or a row per drive (<code dir="auto">{ kind, description?, optional? }</code>), regular ones first (up to 8 rows, <code dir="auto">description</code> max 120 characters); <code dir="auto">[]</code> opts out of drives. See <a href="#getdrives"><code dir="auto">getDrives()</code></a></td>
 </tr>
 </tbody>
 </table>
 <p><strong>Throws:</strong></p>
 <ul>
-<li><code dir="auto">invalid-request</code> if the provided app metadata is invalid</li>
+<li><code dir="auto">invalid-request</code> if the provided app metadata or permissions are invalid</li>
 <li>a plain <code dir="auto">Error</code> if constructed where there is no <code dir="auto">window</code> (a server render)</li>
 </ul>
 <p><strong>Example:</strong></p>
