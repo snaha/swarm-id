@@ -1,1 +1,0 @@
-import{E as b,F as h,x as k,G as x,S as E}from"./BAGa8z0Z.js";function u(r,i){return r===i||r?.[E]===i}function c(r={},i,a,S){return b(()=>{var f,s;return h(()=>{f=s,s=S?.()||[],k(()=>{r!==a(...s)&&(i(r,...s),f&&u(a(...f),r)&&i(null,...f))})}),()=>{x(()=>{s&&u(a(...s),r)&&i(null,...s)})}}),r}export{c as b};
