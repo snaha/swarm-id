@@ -79,14 +79,17 @@
     account: Account
     onClose: () => void
     onAdded?: (message: string) => void
-    /** The kind the new drive is created as; regular unless told otherwise (#862). */
+    /**
+     * The kind the new drive must be created as, and the picker is locked to
+     * it: a connect-screen row asking for one kind takes whatever this dialog
+     * adds, so a drive of the other kind would fill the row unseen (#862).
+     * Absent, the picker is free and starts on regular.
+     */
     kind?: DriveKind
   }
 
-  let { account, onClose, onAdded, kind = 'regular' }: Props = $props()
-  // The preset (a connect-screen row asking for one kind) is where the
-  // picker starts; the user may still change it.
-  let driveKind = $state<DriveKind>(untrack(() => kind))
+  let { account, onClose, onAdded, kind }: Props = $props()
+  let driveKind = $state<DriveKind>(untrack(() => kind ?? 'regular'))
   const kindFields = $derived(driveKind === 'scratch' ? { kind: 'scratch' as const } : {})
   const KIND_OPTIONS = (['regular', 'scratch'] as const).map((value) => ({
     value,
@@ -624,13 +627,14 @@
     onClose={close}
   />
 {:else}
-  <Dialog onclose={close} title={kind === 'scratch' ? 'Add scratch drive' : 'Add drive'}>
+  <Dialog onclose={close} title={driveKind === 'scratch' ? 'Add scratch drive' : 'Add drive'}>
     <div class="flex w-full flex-col gap-2">
       <span class="text-sm font-medium">Drive type</span>
       <div class="flex w-full items-center gap-2">
         <Select
           options={KIND_OPTIONS}
           value={driveKind}
+          disabled={kind !== undefined}
           onchange={(value) => (driveKind = value as DriveKind)}
           class="flex-1"
         />

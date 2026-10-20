@@ -257,7 +257,7 @@
     {#if addingFor !== undefined}
       <DriveAddDialog
         {account}
-        kind={addingFor === NO_ROW ? 'regular' : rows[addingFor].kind}
+        kind={addingFor === NO_ROW ? undefined : rows[addingFor].kind}
         onClose={closeAddDialog}
         onAdded={onDriveAdded}
       />
