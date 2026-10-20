@@ -10,6 +10,7 @@
     checked: boolean
     class?: string
     disabled?: boolean
+    id?: string
     'aria-label'?: string
   }
 
