@@ -5,9 +5,22 @@
  * is the key material for encrypting the seed — the passkey never holds the
  * seed itself, it only gates the decryption key.
  */
+import { withTimeout } from '@snaha/swarm-id'
 import { deriveKeyFromPrf } from '@snaha/swarm-id/internal'
 
 const WEBAUTHN_TIMEOUT_MS = 60_000
+
+/** Upper bound on the best-effort cleanup signal — the error must not wait on a slow manager. */
+const SIGNAL_TIMEOUT_MS = 5_000
+const PRF_NOT_RETURNED = 'Your passkey manager did not return PRF results.'
+
+/** The authenticator answered but without PRF output — the passkey cannot derive the key. */
+class PrfMissingError extends Error {
+  constructor() {
+    super(`${PRF_NOT_RETURNED} Unlock with the passkey manager this account was set up with.`)
+    this.name = 'PrfMissingError'
+  }
+}
 
 export interface PasskeyKey {
   credentialId: string
@@ -69,6 +82,37 @@ function friendlyWebAuthnError(error: unknown): never {
 }
 
 /**
+ * Ask the passkey manager to drop a passkey no account will ever reference
+ * (WebAuthn Signal API, Chromium 132+ — TypeScript's lib.dom does not type it
+ * yet). Best-effort: browsers without it, and managers that ignore it, leave
+ * the passkey in place, which is why the error still says it can be deleted.
+ */
+async function signalOrphanPasskey(credential: PublicKeyCredential): Promise<void> {
+  const { signalUnknownCredential } = PublicKeyCredential as {
+    signalUnknownCredential?: (options: { rpId: string; credentialId: string }) => Promise<void>
+  }
+  if (!signalUnknownCredential) {
+    return
+  }
+  try {
+    await withTimeout(
+      signalUnknownCredential({ rpId: window.location.hostname, credentialId: credential.id }),
+      SIGNAL_TIMEOUT_MS,
+      'Passkey cleanup signal timed out',
+    )
+  } catch {
+    // Best-effort — the caller's error is what matters.
+  }
+}
+
+/** What a passkey created without PRF leaves the user with, and what works instead. */
+function prflessPasskeyError(cause: string): Error {
+  return new Error(
+    `${cause} The passkey it just created cannot unlock this account; if your passkey manager still lists it, you can delete it. Choose Password or ETH wallet above, or use a passkey manager with PRF support — Touch ID, Face ID, Windows Hello, or a password manager that supports PRF.`,
+  )
+}
+
+/**
  * Register a new passkey and derive the seed-encryption key from its PRF
  * output. Falls back to an extra authentication when the authenticator does
  * not return PRF results during registration.
@@ -119,9 +163,8 @@ export async function createPasskeyKey(
 
   const extensionResults = credential.getClientExtensionResults()
   if (!extensionResults.prf?.enabled) {
-    throw new Error(
-      'Your authenticator does not support the PRF extension. Try a device with Touch ID, Face ID, or Windows Hello.',
-    )
+    await signalOrphanPasskey(credential)
+    throw prflessPasskeyError('Your passkey manager does not support the PRF extension.')
   }
 
   const credentialId = bufferToBase64url(credential.rawId)
@@ -132,7 +175,14 @@ export async function createPasskeyKey(
   }
 
   // Registration did not evaluate PRF — authenticate once to get the output.
-  return authenticateWithPasskey(credentialId, signal)
+  try {
+    return await authenticateWithPasskey(credentialId, signal)
+  } catch (error) {
+    // Whatever stopped the follow-up — no PRF, a cancel, a timeout — no
+    // account will reference this passkey, so it is dropped either way.
+    await signalOrphanPasskey(credential)
+    throw error instanceof PrfMissingError ? prflessPasskeyError(PRF_NOT_RETURNED) : error
+  }
 }
 
 /** Authenticate with an existing passkey and re-derive the seed-encryption key. */
@@ -168,9 +218,7 @@ export async function authenticateWithPasskey(
 
   const prfOutput = credential.getClientExtensionResults().prf?.results?.first
   if (!prfOutput) {
-    throw new Error(
-      'Your authenticator did not return PRF results. Try a device with Touch ID, Face ID, or Windows Hello.',
-    )
+    throw new PrfMissingError()
   }
 
   return {

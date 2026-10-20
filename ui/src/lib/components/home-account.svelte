@@ -125,6 +125,12 @@
   let abortController: AbortController | undefined
 
   let newMethod = $state('passkey')
+
+  // A failed method's error does not belong under the next tab's form.
+  $effect(() => {
+    void newMethod
+    dialogError = undefined
+  })
   let newPassword = $state('')
   let verifyNewPassword = $state('')
 
