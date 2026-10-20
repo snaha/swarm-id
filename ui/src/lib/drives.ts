@@ -5,6 +5,7 @@ import {
   MIN_USABLE_BATCH_DEPTH,
   PARTITION_COUNT,
   type PostageStamp,
+  isScratchDrive,
   remainingLifespanSeconds,
 } from '@snaha/swarm-id/internal'
 
@@ -107,7 +108,10 @@ export interface DriveDisplay {
   name: string
   sizeLabel: string
   usedPercent: number
+  /** Never on a scratch drive: its lane wraps instead of filling (#862). */
   storageFull: boolean
+  /** A scratch drive shows no usage at all — it reads near 100% once it wraps. */
+  scratch: boolean
   status: DriveStatus
   /**
    * Whether the drive can still be changed. An expired batch can be neither
@@ -354,7 +358,8 @@ export function describeDrive(drive: PostageStamp, now = Date.now()): DriveDispl
     name: driveDisplayName(drive),
     sizeLabel: driveSizeLabel(drive),
     usedPercent: driveUsedPercent(drive),
-    storageFull: drive.utilization >= STORAGE_FULL_FRACTION,
+    storageFull: !isScratchDrive(drive) && drive.utilization >= STORAGE_FULL_FRACTION,
+    scratch: isScratchDrive(drive),
     status: expired ? 'expired' : expiresSoon ? 'expires-soon' : 'active',
     modifiable: !expired,
     timeLeftLabel: hasLifespan ? formatRemaining(ttl) : '',

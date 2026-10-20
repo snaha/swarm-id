@@ -1114,6 +1114,31 @@ describe("SwarmIdProxy partitioned write enablement", () => {
       )
     })
 
+    it("builds a scratch drive's stamper as a ring (#862)", async () => {
+      nextStamper()
+      await connectWithTwoDrives([
+        stampOf(BATCH_ID_HEX),
+        { ...stampOf(SECOND_BATCH_ID_HEX), kind: "scratch" },
+      ])
+      nextStamper()
+      await internals().withModeAwareWriteLock(
+        undefined,
+        async () => undefined,
+        SECOND_BATCH_ID_HEX,
+      )
+
+      const options = vi
+        .mocked(UtilizationAwareStamper.create)
+        .mock.calls.map((call) => ({
+          batchId: (call[1] as BatchId).toHex(),
+          scratch: call[7]?.scratch === true,
+        }))
+      expect(options).toEqual([
+        { batchId: BATCH_ID_HEX, scratch: false },
+        { batchId: SECOND_BATCH_ID_HEX, scratch: true },
+      ])
+    })
+
     it("lists the granted drives with the primary marked and each one's kind", async () => {
       nextStamper()
       await connectWithTwoDrives([

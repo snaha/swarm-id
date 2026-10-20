@@ -108,6 +108,7 @@ import {
 } from "./proxy/collection"
 import { createFeedManifestDirect } from "./proxy/feed-manifest"
 import {
+  isScratchDrive,
   resolveStampForApp,
   stampsReachableByApp,
 } from "./utils/postage-stamp-association"
@@ -789,7 +790,11 @@ export class SwarmIdProxy {
       stamp,
     )
     this.drives.set(drive.batchId, drive)
-    drive.ready = this.initializeStamper(drive, stamp.depth)
+    drive.ready = this.initializeStamper(
+      drive,
+      stamp.depth,
+      isScratchDrive(stamp),
+    )
     return drive
   }
 
@@ -1851,6 +1856,7 @@ export class SwarmIdProxy {
   private async initializeStamper(
     drive: DriveWritePath,
     stampDepth: number,
+    scratch: boolean,
   ): Promise<void> {
     const { signerKey, batchId } = drive
     // `loadAuthData` calls this off the reconcile queue, so a storage event's
@@ -1885,6 +1891,8 @@ export class SwarmIdProxy {
         this.utilizationStore,
         accountInfo.owner,
         accountInfo.encryptionKey,
+        undefined,
+        { scratch },
       )
     } catch (error) {
       // Nothing to clear: the write path was dropped when the stamp was

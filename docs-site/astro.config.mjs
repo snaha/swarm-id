@@ -37,6 +37,7 @@ export default defineConfig({
             { label: 'Key Derivation', slug: 'key-derivation' },
             { label: 'Storage Layout', slug: 'storage-layout' },
             { label: 'Subsidised Gateway', slug: 'subsidised-gateway' },
+            { label: 'Scratch Drives', slug: 'scratch-drives' },
             { label: 'The Public Gateway', slug: 'public-gateway' },
             { label: 'Self-Hosting the Identity Site', slug: 'self-hosting' },
             { label: 'Using Your Own Bee Node', slug: 'own-bee-node' },

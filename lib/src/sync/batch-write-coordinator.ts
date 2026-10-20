@@ -573,7 +573,8 @@ export class BatchWriteCoordinator {
         bee: this.deps.bee,
         deviceId: this.deps.deviceId,
         batchId: new BatchId(this.deps.batchId),
-        batchDepth: stamper.depth,
+        // The depth the counters serialize at: wider on a scratch drive.
+        batchDepth: stamper.counterDepth,
         swarmEncryptionKey,
         stamper,
         knownDeviceIds: this.deps.knownDeviceIds,

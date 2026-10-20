@@ -19,6 +19,16 @@ export interface PickerRow {
   chosen: string
 }
 
+/** The drive types as the Add drive dialog and the drive card name them. */
+export const DRIVE_KIND_LABEL: Record<DriveKind, string> = {
+  regular: 'Regular',
+  scratch: 'Scratch',
+}
+export const DRIVE_KIND_DESCRIPTION: Record<DriveKind, string> = {
+  regular: 'Stores data permanently, no overwrites',
+  scratch: 'Data can be overwritten, ideal for streaming and live feeds',
+}
+
 const DEFAULT_DESCRIPTION: Record<DriveKind, string> = {
   regular: 'Used to store permanent data',
   scratch: 'Used to store streaming data',
