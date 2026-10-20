@@ -2,24 +2,28 @@
   Copyright 2026 The Swarm Authors. All rights reserved.
   SPDX-License-Identifier: Apache-2.0
 -->
-
 <!--
-  Post-connect confirmation. The secret was already delivered by
-  completeConnect, so every variant confirms and offers "Go to app"; the
-  middle varies (SwarmID-MVP frames 396:17501 / 395:13966 / 395:13889):
-  - first connect to an account with several drives: pick the drive this app
-    stores to (persisted as the app's drive grant; choosing the default
-    leaves the grant unset so the app tracks the account default). Regular
-    drives only: a scratch drive never takes an app's untargeted writes;
-  - no drives yet: the drive pitch, demoted to a secondary card;
-  - anything else: plain confirmation.
+  Post-connect confirmation, and where the connection is committed: the
+  chooser hands over the unlocked account (`connectStore.pending`), the user
+  settles the drives, and "Go to app" runs the handshake with the grant —
+  so a partitioned session is handed exactly the drives the grant names
+  (#862). The middle varies with what the app asked for (SwarmID-MVP,
+  sections OPTION 1 / OPTION 2):
+  - a list of drives: one row each, regular rows first, with a select over
+    the account's drives of that kind — "Add new drive…" last — or an Add
+    button when it has none. Required rows gate "Go to app";
+  - "all": one checkbox, with the live-grant warning;
+  - an empty list: no drive at all, nothing to pick;
+  - no request: the account default, picked among several on a first
+    connect (persisted only when it deviates from the default, so the app
+    keeps tracking the default otherwise), or the drive pitch when there is
+    none.
 -->
 <script lang="ts">
   import { onMount } from 'svelte'
 
   import { BatchId } from '@ethersphere/bee-js'
   import ArrowRight from '@lucide/svelte/icons/arrow-right'
-  import { isScratchDrive } from '@snaha/swarm-id/internal'
 
   import { goto } from '$app/navigation'
   import { resolve } from '$app/paths'
@@ -29,6 +33,16 @@
   import DriveAddDialog from '$lib/components/drive-add-dialog.svelte'
   import { Button } from '$lib/components/ui/button'
   import { Select, type SelectOption } from '$lib/components/ui/select'
+  import { type DriveGrant, commitConnect } from '$lib/connect-handshake'
+  import {
+    ADD_NEW_DRIVE,
+    type PickerRow,
+    kindOf,
+    pickerRows,
+    rowChoices,
+    rowsComplete,
+    rowsGrant,
+  } from '$lib/drive-request'
   import { driveDisplayName } from '$lib/drives'
   import routes from '$lib/routes'
   import { accountsStore } from '$lib/stores/accounts.svelte'
@@ -38,50 +52,118 @@
   import { truncateAddress } from '$lib/utils'
 
   const AVATAR_SIZE = 80
+  /** The pitch's dialog creates for no row. */
+  const NO_ROW = -1
 
   const account = $derived(
     sessionStore.currentAccountId ? accountsStore.get(sessionStore.currentAccountId) : undefined,
   )
   const request = connectStore.request
+  const pending = connectStore.pending
+  const requested = request?.permissions?.drives
 
-  const drives = $derived((account?.stamps ?? []).filter((drive) => !isScratchDrive(drive)))
+  const drives = $derived(account?.stamps ?? [])
+  const regularDrives = $derived(drives.filter((drive) => kindOf(drive) === 'regular'))
   const defaultBatchHex = $derived(
-    account?.defaultPostageStampBatchID?.toHex() ?? drives[0]?.batchID.toHex(),
+    account?.defaultPostageStampBatchID?.toHex() ?? regularDrives[0]?.batchID.toHex(),
   )
-  const showPicker = $derived(connectStore.firstConnect && drives.length > 1)
-  const showPitch = $derived(drives.length === 0)
+  const legacyPicker = $derived(
+    requested === undefined && connectStore.firstConnect && regularDrives.length > 1,
+  )
+  const showPitch = $derived(requested === undefined && regularDrives.length === 0)
 
-  const driveOptions = $derived<SelectOption[]>(
-    drives.map((drive) => ({
-      value: drive.batchID.toHex(),
-      label:
-        driveDisplayName(drive) + (drive.batchID.toHex() === defaultBatchHex ? ' (default)' : ''),
-    })),
-  )
-  /** The user's explicit choice; the account default until they touch it. */
+  let rows = $state<PickerRow[]>([])
+  let grantAll = $state(false)
+  /** The legacy picker's explicit choice; the account default until touched. */
   let chosenBatchHex = $state<string | undefined>(undefined)
   const selectedBatchHex = $derived(chosenBatchHex ?? defaultBatchHex)
+  /** The row the Add drive dialog is creating for; `NO_ROW` for the pitch. */
+  let addingFor = $state<number | undefined>(undefined)
+  /** Re-mounts the selects after the dialog closes: a cancelled "Add new
+   * drive…" left the native select on that entry with the row unchanged. */
+  let selectEpoch = $state(0)
+  let batchesBeforeAdd = new Set<string>()
 
-  let addDriveOpen = $state(false)
+  const canGo = $derived(requested === 'all' ? grantAll : rowsComplete(rows))
+
+  const legacyOptions = $derived<SelectOption[]>(
+    regularDrives.map((drive) => ({
+      value: drive.batchID.toHex(),
+      label: labelFor(drive.batchID.toHex(), driveDisplayName(drive)),
+    })),
+  )
+
+  function labelFor(batchHex: string, name: string): string {
+    return name + (batchHex === defaultBatchHex ? ' (default)' : '')
+  }
+
+  function optionsFor(index: number): SelectOption[] {
+    const choices = rowChoices(rows, index, drives).map((drive) => ({
+      value: drive.batchID.toHex(),
+      label: labelFor(drive.batchID.toHex(), driveDisplayName(drive)),
+    }))
+    return [
+      ...(rows[index].optional ? [{ value: '', label: 'None' }] : []),
+      ...choices,
+      { value: ADD_NEW_DRIVE, label: 'Add new drive…' },
+    ]
+  }
+
+  function choose(index: number, value: string) {
+    if (value === ADD_NEW_DRIVE) {
+      openAddDialog(index)
+    } else {
+      rows[index].chosen = value
+    }
+  }
+
+  function openAddDialog(index: number) {
+    batchesBeforeAdd = new Set(drives.map((drive) => drive.batchID.toHex()))
+    addingFor = index
+  }
+
+  function closeAddDialog() {
+    addingFor = undefined
+    selectEpoch += 1
+  }
+
+  /** The dialog added a drive: the row it was opened for takes it. */
+  function onDriveAdded(message: string) {
+    toastStore.show(message)
+    const added = drives.find((drive) => !batchesBeforeAdd.has(drive.batchID.toHex()))
+    if (addingFor !== undefined && addingFor !== NO_ROW && added) {
+      rows[addingFor].chosen = added.batchID.toHex()
+    }
+  }
 
   onMount(() => {
-    if (!account || !request) {
+    if (!account || !request || !pending) {
       goto(resolve(routes.ROOT))
       return
     }
-    toastStore.show(`Connected to ${request.appName}!`)
+    if (Array.isArray(requested)) {
+      rows = pickerRows(requested, drives, defaultBatchHex)
+    }
   })
 
-  function goToApp() {
-    // Persist the drive choice only when it deviates from the account default
-    // — an untouched or default choice keeps following the default.
-    // A partitioned session was handed its stamps by `completeConnect`, before
-    // this page, so it still holds and spends the default until the next
-    // account delta carries the grant. Step 5 of #862 moves the picker ahead
-    // of the handover.
-    if (account && request && showPicker && selectedBatchHex !== defaultBatchHex) {
-      account.setAppDrives(request.appOrigin, [new BatchId(selectedBatchHex)])
+  function grantFor(): DriveGrant | undefined {
+    if (requested === 'all') {
+      return { drives: 'all' }
     }
+    if (Array.isArray(requested)) {
+      return { drives: rowsGrant(rows).map((batchHex) => new BatchId(batchHex)) }
+    }
+    if (legacyPicker && selectedBatchHex !== defaultBatchHex) {
+      return { drives: [new BatchId(selectedBatchHex)] }
+    }
+    return undefined
+  }
+
+  function goToApp() {
+    if (!account || !request || !pending || !canGo) {
+      return
+    }
+    commitConnect(account, request, pending.appSecret, grantFor())
     connectStore.clear()
     window.close()
   }
@@ -90,7 +172,6 @@
 {#if account && request}
   <div class="flex min-h-svh flex-col">
     <AppHeader />
-
     <main class="flex w-full flex-1 flex-col items-center justify-center px-8 pb-24">
       <div class="flex w-full max-w-96 flex-col items-center gap-8">
         <div class="flex w-full flex-col items-center gap-4">
@@ -104,30 +185,59 @@
             <p class="text-sm">{truncateAddress(account.id.toChecksum())}</p>
           </div>
         </div>
-
         <div class="flex w-full flex-col gap-4">
-          <p class="text-center text-base">
-            Your Swarm ID is now connected to {request.appName}!
-          </p>
-
-          {#if showPicker}
+          <p class="text-center text-base">Connect your Swarm ID to {request.appName}</p>
+          {#if requested === 'all'}
+            <label class="flex w-full items-start gap-2 text-sm">
+              <input type="checkbox" bind:checked={grantAll} class="mt-0.5 size-4 shrink-0" />
+              <span class="flex flex-col gap-1">
+                <span class="font-medium">Grant this app full drive access</span>
+                <span class="text-muted-foreground">
+                  This app is requesting access to all drives in your account, including any drives
+                  you add in the future. Only grant this if you trust the app developer.
+                </span>
+              </span>
+            </label>
+          {:else if Array.isArray(requested)}
+            {#each rows as row, index (index)}
+              <div class="flex w-full flex-col gap-2">
+                <p class="text-sm">
+                  {row.kind === 'scratch' ? 'Scratch drive' : 'Drive'}{row.optional
+                    ? ' (optional)'
+                    : ''}
+                </p>
+                {#if rowChoices(rows, index, drives).length > 0}
+                  {#key selectEpoch}
+                    <Select
+                      options={optionsFor(index)}
+                      value={row.chosen}
+                      onchange={(value) => choose(index, value)}
+                    />
+                  {/key}
+                {:else}
+                  <Button variant="outline" class="w-full" onclick={() => openAddDialog(index)}>
+                    {row.kind === 'scratch' ? 'Add scratch drive' : 'Add drive'}
+                  </Button>
+                {/if}
+                <p class="text-muted-foreground text-sm">{row.description}</p>
+              </div>
+            {/each}
+          {:else if legacyPicker}
             <div class="flex w-full flex-col gap-2">
               <p class="text-sm">Select drive</p>
               <Select
-                options={driveOptions}
+                options={legacyOptions}
                 value={selectedBatchHex}
                 onchange={(value) => (chosenBatchHex = value)}
               />
               <p class="text-muted-foreground text-sm">Where this app will store data</p>
             </div>
           {/if}
-
-          <Button class="w-full" onclick={goToApp}>
+          <Button class="w-full" onclick={goToApp} disabled={!canGo}>
             Go to app
             <ArrowRight />
           </Button>
         </div>
-
         {#if showPitch}
           <div class="bg-muted flex w-full flex-col gap-2 rounded-xl p-2 text-center">
             <div class="flex flex-col">
@@ -136,7 +246,7 @@
                 Upload data and sync your Swarm ID across devices with a Swarm drive.
               </p>
             </div>
-            <Button variant="outline" class="w-full" onclick={() => (addDriveOpen = true)}>
+            <Button variant="outline" class="w-full" onclick={() => openAddDialog(NO_ROW)}>
               Set up a drive
             </Button>
           </div>
@@ -144,8 +254,13 @@
       </div>
     </main>
 
-    {#if addDriveOpen}
-      <DriveAddDialog {account} onClose={() => (addDriveOpen = false)} onAdded={toastStore.show} />
+    {#if addingFor !== undefined}
+      <DriveAddDialog
+        {account}
+        kind={addingFor === NO_ROW ? 'regular' : rows[addingFor].kind}
+        onClose={closeAddDialog}
+        onAdded={onDriveAdded}
+      />
     {/if}
   </div>
 {/if}

@@ -20,7 +20,7 @@
   import AppHeader from '$lib/components/app-header.svelte'
   import { Button } from '$lib/components/ui/button'
   import { Textarea } from '$lib/components/ui/textarea'
-  import { completeConnect } from '$lib/connect-handshake'
+  import { deriveAppSecret } from '$lib/connect-handshake'
   import { strip0x } from '$lib/crypto/hex'
   import { isValidPhrase, normalizePhrase, walletFromPhrase } from '$lib/crypto/mnemonic'
   import { noteAccountFolded } from '$lib/dev/account-refresh'
@@ -63,10 +63,14 @@
         sessionStore.setCurrentAccount(existing.id)
 
         // Came from a dApp connect popup — the phrase already unlocked the
-        // account, so finish the handshake right away.
+        // account; the done page runs the handshake once the drives are
+        // settled (#862).
         const request = connectStore.request
         if (request) {
-          await completeConnect(existing, wallet.entropy, request)
+          connectStore.setPending({
+            account: existing,
+            appSecret: await deriveAppSecret(wallet.entropy, request.appOrigin),
+          })
           await goto(resolve(routes.CONNECT_DONE))
           return
         }

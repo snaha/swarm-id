@@ -129,6 +129,8 @@ export interface PurchaseOptions {
   lifespanSeconds: number
   /** What to call the drive. */
   name: string
+  /** A scratch drive (#862); absent for a regular one. */
+  kind?: 'scratch'
   requestFunding: RequestFunding
   beforeSpend?: BeforeSpend
   onStep?: (step: OperationStep) => void
@@ -145,7 +147,8 @@ export interface PurchaseOptions {
  * @returns the new batch id, already recorded on the account.
  */
 export async function runPurchase(options: PurchaseOptions): Promise<string> {
-  const { account, depth, lifespanSeconds, name, requestFunding, beforeSpend, onStep } = options
+  const { account, depth, lifespanSeconds, name, kind, requestFunding, beforeSpend, onStep } =
+    options
   const client = await postageChain()
   onStep?.('checking')
 
@@ -167,6 +170,7 @@ export async function runPurchase(options: PurchaseOptions): Promise<string> {
     account,
     signerKey,
     name,
+    kind,
     depth,
     amountPerChunk,
     lastPrice: constraints.lastPrice,
@@ -208,6 +212,7 @@ interface PurchaseRecord {
   signerKey: PrivateKey
   batchId: string
   name: string
+  kind: 'scratch' | undefined
   /** The parameters the batch was bought with, for the projection below. */
   depth: number
   amountPerChunk: bigint
@@ -226,10 +231,11 @@ interface PurchaseRecord {
  * it.
  */
 async function recordPurchase(record: PurchaseRecord): Promise<string> {
-  const { account, signerKey, batchId, name, onStep } = record
+  const { account, signerKey, batchId, name, kind, onStep } = record
   onStep?.('recording')
   const stamp = await fetchExistingBatchFromChain(batchId, signerKey, name).catch(() => undefined)
-  account.addStamp(stamp ?? projectedStamp(record))
+  // The chain knows nothing of the kind: it is the account's, fixed here.
+  account.addStamp({ ...(stamp ?? projectedStamp(record)), ...(kind ? { kind } : {}) })
   return batchId
 }
 

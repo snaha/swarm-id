@@ -10,6 +10,7 @@
   import ArrowLeft from '@lucide/svelte/icons/arrow-left'
   import ArrowRight from '@lucide/svelte/icons/arrow-right'
   import TriangleAlert from '@lucide/svelte/icons/triangle-alert'
+  import type { DriveKind } from '@snaha/swarm-id'
   import { BatchIdSchema, PrivateKeySchema } from '@snaha/swarm-id/internal'
 
   import { type Attempt, createAttemptTracker } from '$lib/attempt'
@@ -76,9 +77,12 @@
     account: Account
     onClose: () => void
     onAdded?: (message: string) => void
+    /** The kind the new drive is created as; regular unless told otherwise (#862). */
+    kind?: DriveKind
   }
 
-  let { account, onClose, onAdded }: Props = $props()
+  let { account, onClose, onAdded, kind = 'regular' }: Props = $props()
+  const kindFields = $derived(kind === 'scratch' ? { kind: 'scratch' as const } : {})
 
   type Storage = 'new' | 'existing'
   type Phase = 'form' | 'method' | 'pending' | 'success' | 'error' | 'unconfirmed'
@@ -306,6 +310,7 @@
         // Left blank, the drive stays unnamed and the UI falls back to its
         // stable batch-ID-derived label.
         name: name.trim(),
+        ...kindFields,
         requestFunding: funding.request,
         beforeSpend: () => attempt.guard(Promise.resolve()),
         onStep: (step) => (pendingLabel = describeStep(step, 'purchase')),
@@ -406,7 +411,7 @@
             currentPrice === undefined
               ? undefined
               : stampTtlSeconds(BigInt(batch.amount), currentPrice)
-          account.addStamp(stampFromBatch(batch, signerKey, driveName, ttl))
+          account.addStamp({ ...stampFromBatch(batch, signerKey, driveName, ttl), ...kindFields })
           succeed()
         },
         onError: (error) => {
@@ -453,7 +458,7 @@
         phase = 'error'
         return
       }
-      account.addStamp(stamp)
+      account.addStamp({ ...stamp, ...kindFields })
       succeed()
     } catch (caught) {
       if (!attempt.current) {
@@ -500,7 +505,7 @@
         phase = 'error'
         return
       }
-      account.addStamp(stamp)
+      account.addStamp({ ...stamp, ...kindFields })
       succeed()
     } catch (caught) {
       if (!attempt.current) {
@@ -607,7 +612,7 @@
     onClose={close}
   />
 {:else}
-  <Dialog onclose={close} title="Add drive">
+  <Dialog onclose={close} title={kind === 'scratch' ? 'Add scratch drive' : 'Add drive'}>
     <div class="flex w-full flex-col gap-2">
       <label for="drive-name" class="text-sm font-medium">Name</label>
       <Input id="drive-name" bind:value={name} placeholder="Optional" />

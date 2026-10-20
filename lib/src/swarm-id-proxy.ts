@@ -44,6 +44,7 @@ import type {
   GetPostageBatchMessage,
   GetDrivesMessage,
   Drive,
+  Permissions,
   CreateFeedManifestMessage,
   AppMetadata,
   PostageStamp,
@@ -389,6 +390,8 @@ export class SwarmIdProxy {
   private buttonConfig: ButtonConfig | undefined
   private popupMode: "popup" | "window" = "window"
   private appMetadata: AppMetadata | undefined
+  /** What the dApp asks for, carried to the connect popup (#862). */
+  private permissionsRequest: Permissions | undefined
   /**
    * The last Bee client built, with the URL it was asked for. Keyed on that
    * input URL, not on the client's own `url`, which bee-js keeps without the
@@ -2252,6 +2255,7 @@ export class SwarmIdProxy {
     if (parentMetadata) {
       this.appMetadata = parentMetadata
     }
+    this.permissionsRequest = message.permissions
 
     // Store button config from parent
     if (parentButtonConfig) {
@@ -3764,7 +3768,7 @@ export class SwarmIdProxy {
       window.location.origin + basePath,
       this.parentOrigin,
       this.appMetadata,
-      { challenge },
+      { challenge, permissions: this.permissionsRequest },
     )
 
     // Open as popup or full window based on popupMode (per-call override takes precedence)

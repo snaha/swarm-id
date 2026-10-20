@@ -186,6 +186,28 @@ describe("SwarmIdClient connect()", () => {
   // (#613). A partitioned iframe can only be reached by the popup it opened
   // itself, and no user agent tells you which mode you are in.
   describe("shared storage", () => {
+    // The connect screen renders a row per requested drive, so the request
+    // has to reach it on this path too — the proxy is not opening this one.
+    it("puts the permissions request on the popup URL (#862)", async () => {
+      client.destroy()
+      client = new SwarmIdClient({
+        iframeOrigin: "https://swarm-id.example.com",
+        metadata: { name: "Test App" },
+        permissions: { drives: "all" },
+      })
+      vi.spyOn(internals(client), "ensureReady").mockImplementation(() => {})
+      setStorageShared(true)
+
+      await client.connect()
+
+      expect(window.open).toHaveBeenCalledWith(
+        expect.stringContaining(
+          `permissions=${encodeURIComponent(JSON.stringify({ drives: "all" }))}`,
+        ),
+        "_blank",
+      )
+    })
+
     it("opens the popup from the parent, keeping the user gesture", async () => {
       vi.spyOn(internals(client), "ensureReady").mockImplementation(() => {})
       setStorageShared(true)
@@ -1479,6 +1501,23 @@ describe("SwarmIdClient lifecycle errors", () => {
     expect(error).toBeInstanceOf(SwarmIdError)
     expect(error).toMatchObject({ code: "invalid-request" })
     expect((error as SwarmIdError).message).toMatch(/^Invalid app metadata: /)
+    expect((error as SwarmIdError).cause).toBeInstanceOf(ZodError)
+  })
+
+  it("names permissions, not metadata, when the drive request is invalid", () => {
+    const error = thrownBy(
+      () =>
+        new SwarmIdClient({
+          iframeOrigin: IFRAME_ORIGIN,
+          metadata: { name: "App" },
+          permissions: {
+            drives: [{ kind: "regular", description: "x".repeat(121) }],
+          },
+        }),
+    )
+    expect(error).toBeInstanceOf(SwarmIdError)
+    expect(error).toMatchObject({ code: "invalid-request" })
+    expect((error as SwarmIdError).message).toMatch(/^Invalid permissions: /)
     expect((error as SwarmIdError).cause).toBeInstanceOf(ZodError)
   })
 })

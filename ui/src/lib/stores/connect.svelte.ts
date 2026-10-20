@@ -1,6 +1,12 @@
 // Copyright 2026 The Swarm Authors. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
-import { STORAGE_CHALLENGE_KEY } from '@snaha/swarm-id/internal'
+import {
+  type Permissions,
+  PermissionsSchema,
+  STORAGE_CHALLENGE_KEY,
+} from '@snaha/swarm-id/internal'
+
+import type { Account } from '$lib/types'
 
 /**
  * A dApp connection request, parsed from the URL hash the @snaha/swarm-id
@@ -19,6 +25,24 @@ export interface ConnectRequest {
    * a `setSecret` postMessage instead of a storage event.
    */
   partitionChallenge?: string
+  /**
+   * What the app asked for (#862): `drives` is `"all"`, or a row per drive
+   * for the done page's picker. Absent when the app asked for nothing, which
+   * keeps the account default.
+   */
+  permissions?: Permissions
+}
+
+/**
+ * An approved connection the done page has yet to commit: the handshake
+ * runs on "Go to app", after the drive picker, so a partitioned session is
+ * handed exactly the drives the grant names. `appSecret` is this one app's
+ * secret, derived at unlock or reused from a still-valid prior connection;
+ * the master key material never reaches this store.
+ */
+export interface PendingConnect {
+  account: Account
+  appSecret: string
 }
 
 /**
@@ -43,6 +67,17 @@ let request = $state<ConnectRequest | undefined>(undefined)
 // (no active connected-app entry at select time). Set by the chooser right
 // before the handshake; the done page keys the drive-picker variant off it.
 let firstConnect = $state(false)
+let pending = $state<PendingConnect | undefined>(undefined)
+
+function parsePermissions(raw: string | null): Permissions | undefined {
+  if (raw === null) return undefined
+  try {
+    const parsed = PermissionsSchema.safeParse(JSON.parse(raw))
+    return parsed.success ? parsed.data : undefined
+  } catch {
+    return undefined
+  }
+}
 
 export const connectStore = {
   get request() {
@@ -55,6 +90,12 @@ export const connectStore = {
 
   setFirstConnect(value: boolean) {
     firstConnect = value
+  },
+  get pending() {
+    return pending
+  },
+  setPending(value: PendingConnect) {
+    pending = value
   },
 
   /**
@@ -91,6 +132,7 @@ export const connectStore = {
       appDescription: params.get('appDescription') ?? undefined,
       appIcon: params.get('appIcon') ?? undefined,
       partitionChallenge,
+      permissions: parsePermissions(params.get('permissions')),
     }
     return true
   },
@@ -98,5 +140,6 @@ export const connectStore = {
   clear() {
     request = undefined
     firstConnect = false
+    pending = undefined
   },
 }

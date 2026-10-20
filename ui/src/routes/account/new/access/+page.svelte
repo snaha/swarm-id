@@ -25,7 +25,7 @@
   import NewPasswordFields, { isNewPasswordValid } from '$lib/components/new-password-fields.svelte'
   import { Button } from '$lib/components/ui/button'
   import { Tabs } from '$lib/components/ui/tabs'
-  import { completeConnect } from '$lib/connect-handshake'
+  import { deriveAppSecret } from '$lib/connect-handshake'
   import { createAccess } from '$lib/crypto/access-setup'
   import { strip0x } from '$lib/crypto/hex'
   import { walletFromPhrase } from '$lib/crypto/mnemonic'
@@ -131,15 +131,14 @@
     triggerSync(liveAccount.id.toHex())
     const flow = draft.flow
 
-    // Came from a dApp connect popup — finish the handshake and hand back.
-    // The draft is cleared only once the handshake succeeded, so a failure
-    // leaves the Confirm buttons functional for a retry.
+    // Came from a dApp connect popup — the done page runs the handshake once
+    // the drives are settled (#862), so hand it the unlocked account.
     const request = connectStore.request
     if (request) {
-      // Cancelled while the handshake was in flight: the account exists and
-      // the dApp got its secret, but stay put — the intact draft lets the
-      // user confirm again rather than being yanked to the done page.
-      await attempt.guard(completeConnect(liveAccount, wallet.entropy, request))
+      connectStore.setPending({
+        account: liveAccount,
+        appSecret: await deriveAppSecret(wallet.entropy, request.appOrigin),
+      })
       sessionStore.setCompletedFlow(flow)
       sessionStore.clearDraft()
       goto(resolve(routes.CONNECT_DONE))
