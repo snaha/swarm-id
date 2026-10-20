@@ -17,22 +17,26 @@ interface EncryptGate {
 // resolves without real hardware. It must expose the PRF extension (hmac-secret)
 // and be a resident-key, user-verifying platform authenticator — passkey.ts
 // derives the seed-encryption key from PRF output and requires all three.
-async function installVirtualAuthenticator(page: Page) {
+async function installVirtualAuthenticator(page: Page, { hasPrf = true } = {}) {
   const client = await page.context().newCDPSession(page)
   await client.send('WebAuthn.enable')
-  await client.send('WebAuthn.addVirtualAuthenticator', {
+  const { authenticatorId } = await client.send('WebAuthn.addVirtualAuthenticator', {
     options: {
       protocol: 'ctap2',
       ctap2Version: 'ctap2_1',
       transport: 'internal',
       hasResidentKey: true,
       hasUserVerification: true,
-      hasPrf: true,
+      hasPrf,
       // Auto-satisfy user presence/verification so create() needs no interaction.
       automaticPresenceSimulation: true,
       isUserVerified: true,
     },
   })
+  return {
+    storedCredentials: async () =>
+      (await client.send('WebAuthn.getCredentials', { authenticatorId })).credentials.length,
+  }
 }
 
 // Holds every crypto.subtle.encrypt call until the test releases it. In the
@@ -117,4 +121,32 @@ test('cancel during finalization does not create the account (#423)', async ({ p
   await page.getByRole('button', { name: 'Confirm with passkey' }).click()
   await expect(page).toHaveURL(/\/account\/new\/done$/)
   await expect(page.getByText('Account created successfully!')).toBeVisible()
+})
+
+test('a passkey without PRF is rejected, explained, and signalled for removal (#870)', async ({
+  page,
+}) => {
+  // A passkey manager without PRF (e.g. KeePassXC) stores the passkey before
+  // the page can tell PRF is missing — the orphan must be signalled away and
+  // the user told what happened and what works instead.
+  const authenticator = await installVirtualAuthenticator(page, { hasPrf: false })
+  await gotoAccessStep(page)
+  await page.getByRole('button', { name: 'Confirm with passkey' }).click()
+
+  await expect(
+    page.getByText(
+      /does not support the PRF extension.*cannot unlock this account.*Password or ETH wallet/,
+    ),
+  ).toBeVisible()
+  await expect(page).toHaveURL(/\/account\/new\/access$/)
+  expect(await page.evaluate((key) => localStorage.getItem(key), STORAGE_KEY_ACCOUNTS)).toBeNull()
+  // signalUnknownCredential reached the authenticator: the orphan is gone.
+  expect(await authenticator.storedCredentials()).toBe(0)
+
+  // The other methods are right there: password still completes the flow.
+  await page.getByRole('tab', { name: 'Password' }).click()
+  await page.locator('#new-password').fill('correct horse battery staple')
+  await page.locator('#verify-password').fill('correct horse battery staple')
+  await page.getByRole('button', { name: 'Confirm', exact: true }).click()
+  await expect(page).toHaveURL(/\/account\/new\/done$/)
 })
