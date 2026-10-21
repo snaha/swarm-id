@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import type {
+  PermissionName,
   SwarmIdErrorCode,
   UploadUnavailableReason,
   WireError,
@@ -11,6 +12,8 @@ import type {
 export interface SwarmIdErrorDetails {
   /** With `upload-unavailable`: why the session refuses to stamp */
   reason?: UploadUnavailableReason
+  /** With `permission-denied`: the switch the user has to turn on (#885) */
+  permission?: PermissionName
   /** With `bee-rejected`: the HTTP status Bee or the gateway answered */
   status?: number
   /** With `bee-rejected`: Bee's own message from the response body */
@@ -34,6 +37,7 @@ export interface SwarmIdErrorDetails {
 export class SwarmIdError extends Error {
   readonly code: SwarmIdErrorCode
   readonly reason?: UploadUnavailableReason
+  readonly permission?: PermissionName
   readonly status?: number
   readonly beeMessage?: string
   readonly url?: string
@@ -50,6 +54,7 @@ export class SwarmIdError extends Error {
     this.name = "SwarmIdError"
     this.code = code
     if (details.reason !== undefined) this.reason = details.reason
+    if (details.permission !== undefined) this.permission = details.permission
     if (details.status !== undefined) this.status = details.status
     if (details.beeMessage !== undefined) this.beeMessage = details.beeMessage
     if (details.url !== undefined) this.url = details.url
@@ -61,6 +66,7 @@ export class SwarmIdError extends Error {
       error: this.message,
       code: this.code,
       ...(this.reason !== undefined && { reason: this.reason }),
+      ...(this.permission !== undefined && { permission: this.permission }),
       ...(this.status !== undefined && { status: this.status }),
       ...(this.beeMessage !== undefined && { beeMessage: this.beeMessage }),
       ...(this.url !== undefined && { url: this.url }),

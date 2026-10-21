@@ -3,13 +3,16 @@
 /**
  * The "Permissions for <app>" page as data (#711): what a request or the
  * Apps tab opens it with, the rows it shows, and the grant a save writes.
- * Drives are the only permission so far; the page reads `permissions` whole
- * so the next ones join it without a new route.
+ * Drives, and the two sharing switches (#885): the page reads `permissions`
+ * whole, so one route carries them all.
  */
 import { BatchId } from '@ethersphere/bee-js'
 import {
+  type AccountSettings,
+  type AppPermissions,
   type ConnectedApp,
   type DriveRequirement,
+  type PermissionName,
   type Permissions,
   PermissionsSchema,
   type PostageStamp,
@@ -189,4 +192,91 @@ export function sameGrant(a: Grant, b: Grant): boolean {
 
 function toBatchId(hex: string): BatchId {
   return new BatchId(hex)
+}
+
+// ----------------------------------------------------------------------------
+// The sharing switches (#885)
+// ----------------------------------------------------------------------------
+
+export const PERMISSION_NAMES: readonly PermissionName[] = ['dataSharing', 'writeAccess']
+
+/** The two switches as the designs word them (SwarmID-MVP, PERMISSIONS). */
+export const SWITCH_COPY: Record<PermissionName, { label: string; description: string }> = {
+  dataSharing: {
+    label: 'Data sharing',
+    description: 'Allow this app to access data shared by other apps',
+  },
+  writeAccess: {
+    label: 'Write access',
+    description: 'Allow this app to share data with other apps',
+  },
+}
+
+/** The account-wide default of a switch: what an unpinned app gets. */
+export function sharingDefault(
+  settings: AccountSettings | undefined,
+  name: PermissionName,
+): boolean {
+  return settings?.[name] ?? true
+}
+
+/**
+ * What each switch shows: the app's pin, else the account default. Each on
+ * its own — write access is only SHOWN once data sharing is on, which is how
+ * the implication is kept, so its own value need not follow.
+ */
+export function switchValues(
+  app: Pick<ConnectedApp, 'dataSharing' | 'writeAccess'> | undefined,
+  settings: AccountSettings | undefined,
+): AppPermissions {
+  return {
+    dataSharing: app?.dataSharing ?? sharingDefault(settings, 'dataSharing'),
+    writeAccess: app?.writeAccess ?? sharingDefault(settings, 'writeAccess'),
+  }
+}
+
+/**
+ * Which switches the page shows: on a request, the ones asked for — data
+ * sharing whenever write access is, since the latter implies it; on an
+ * edit, both.
+ */
+export function switchesToShow(requested: Permissions | undefined): PermissionName[] {
+  if (requested === undefined) return [...PERMISSION_NAMES]
+  const names: PermissionName[] = []
+  if (requested.dataSharing || requested.writeAccess) names.push('dataSharing')
+  if (requested.writeAccess) names.push('writeAccess')
+  return names
+}
+
+/** The switches an app pins to something other than the account default. */
+export function pinnedDifferently(
+  app: Pick<ConnectedApp, 'dataSharing' | 'writeAccess'>,
+  settings: AccountSettings | undefined,
+): PermissionName[] {
+  return PERMISSION_NAMES.filter(
+    (name) => app[name] !== undefined && app[name] !== sharingDefault(settings, name),
+  )
+}
+
+/**
+ * The sharing patch a save writes: a pin for each switch moved off what it
+ * showed, a cleared pin (`undefined`) for one put back to the account default
+ * after "Use account default", nothing for the rest — an untouched switch
+ * keeps following, or stays pinned, as it was.
+ */
+export function sharingAfterSave(
+  initial: AppPermissions,
+  values: AppPermissions,
+  resets: readonly PermissionName[],
+  settings: AccountSettings | undefined,
+): Partial<Pick<ConnectedApp, 'dataSharing' | 'writeAccess'>> {
+  const patch: Partial<Pick<ConnectedApp, 'dataSharing' | 'writeAccess'>> = {}
+  for (const name of PERMISSION_NAMES) {
+    if (resets.includes(name) && values[name] === sharingDefault(settings, name)) {
+      patch[name] = undefined
+    } else if (values[name] !== initial[name]) {
+      patch[name] = values[name]
+    }
+  }
+  return patch
 }

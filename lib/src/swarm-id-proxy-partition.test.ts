@@ -914,7 +914,7 @@ describe("SwarmIdProxy partitioned write enablement", () => {
         connectedApps: account.connectedApps.map((app) => ({
           ...app,
           drives: [new BatchId(SECOND_BATCH_ID_HEX)],
-          drivesAt: Date.now(),
+          permissionsAt: Date.now(),
         })),
       }))
 
@@ -1064,6 +1064,128 @@ describe("SwarmIdProxy partitioned write enablement", () => {
       expect(coordinatorFor(UNGRANTED_BATCH_ID_HEX)).toBeUndefined()
     })
 
+    // #885: the sharing switches. Enforced where the sharing key is used,
+    // reported on the snapshot, and the key itself withheld while the app may
+    // not read with it.
+    describe("the sharing switches", () => {
+      const connectWith = async (
+        app: Partial<ConnectedApp>,
+        settings?: SyncedAccount["settings"],
+      ) => {
+        nextStamper()
+        seedConnectedAccount({
+          account: { settings },
+          connectedApps: [
+            {
+              appUrl: PARENT_ORIGIN,
+              appName: "dApp",
+              appSecret: "44".repeat(32),
+              lastConnectedAt: Date.now(),
+              connectedUntil: Date.now() + 60_000,
+              ...app,
+            },
+          ],
+        })
+        await dispatch(
+          {
+            type: "parentIdentify",
+            requestId: "r1",
+            metadata: { name: "dApp" },
+          },
+          PARENT_ORIGIN,
+          parentWindow,
+        )
+      }
+      const lastInfo = () => messagesOfType("connectionInfoChanged").at(-1)!
+      const getPermissions = async () => {
+        await dispatch(
+          { type: "getPermissions", requestId: "gp" },
+          PARENT_ORIGIN,
+          parentWindow,
+        )
+        return messagesOfType("getPermissionsResponse").at(-1)!.permissions
+      }
+
+      it("are on by default, and the snapshot carries the sharing key", async () => {
+        await connectWith({})
+
+        await expect(getPermissions()).resolves.toEqual({
+          dataSharing: true,
+          writeAccess: true,
+        })
+        expect(lastInfo().permissions).toEqual({
+          dataSharing: true,
+          writeAccess: true,
+        })
+        expect(lastInfo().identity.sharingPublicKey).toMatch(/^0[23]/)
+      })
+
+      it("follow the account defaults, and a pinned app value wins", async () => {
+        await connectWith({ writeAccess: true }, { writeAccess: false })
+        await expect(getPermissions()).resolves.toEqual({
+          dataSharing: true,
+          writeAccess: true,
+        })
+      })
+
+      it("withhold the sharing key while data sharing is off", async () => {
+        await connectWith({}, { dataSharing: false })
+
+        expect(lastInfo().permissions).toEqual({
+          dataSharing: false,
+          writeAccess: false,
+        })
+        expect(lastInfo().identity.sharingPublicKey).toBeUndefined()
+      })
+
+      it("refuse to publish as the identity without write access", async () => {
+        await connectWith({ writeAccess: false })
+
+        await dispatch(
+          {
+            type: "actUploadData",
+            requestId: "a1",
+            data: new Uint8Array([1]),
+            grantees: [],
+            options: { publisher: "identity" },
+          },
+          PARENT_ORIGIN,
+          parentWindow,
+        )
+
+        await vi.waitFor(() =>
+          expect(messagesOfType("error")).toContainEqual(
+            expect.objectContaining({
+              requestId: "a1",
+              code: "permission-denied",
+              permission: "writeAccess",
+            }),
+          ),
+        )
+      })
+
+      it("take effect when the user flips a switch, as a storage event", async () => {
+        await connectWith({})
+
+        updateAccount((account) => ({
+          ...account,
+          settings: { dataSharing: false },
+          settingsAt: Date.now(),
+        }))
+
+        await vi.waitFor(() =>
+          expect(lastInfo().permissions).toEqual({
+            dataSharing: false,
+            writeAccess: false,
+          }),
+        )
+        await expect(getPermissions()).resolves.toEqual({
+          dataSharing: false,
+          writeAccess: false,
+        })
+      })
+    })
+
     it("answers a write naming an ungranted drive with drive-not-granted", async () => {
       nextStamper()
       await connectWithTwoDrives()
@@ -1203,7 +1325,7 @@ describe("SwarmIdProxy partitioned write enablement", () => {
         connectedApps: account.connectedApps.map((app) => ({
           ...app,
           drives: [new BatchId(BATCH_ID_HEX)],
-          drivesAt: Date.now(),
+          permissionsAt: Date.now(),
         })),
       }))
 
@@ -1372,7 +1494,7 @@ describe("SwarmIdProxy partitioned write enablement", () => {
           connectedApps: account.connectedApps.map((app) => ({
             ...app,
             drives: [new BatchId(BATCH_ID_HEX)],
-            drivesAt: Date.now(),
+            permissionsAt: Date.now(),
           })),
         }))
         await vi.waitFor(() => expect(second.teardown).toHaveBeenCalled())
@@ -1446,7 +1568,7 @@ describe("SwarmIdProxy partitioned write enablement", () => {
           connectedApps: account.connectedApps.map((app) => ({
             ...app,
             drives: [new BatchId(BATCH_ID_HEX)],
-            drivesAt: Date.now(),
+            permissionsAt: Date.now(),
           })),
         }))
         await vi.waitFor(() =>
@@ -2966,7 +3088,7 @@ describe("SwarmIdProxy partitioned write enablement", () => {
               appName: "dApp",
               lastConnectedAt: Date.now(),
               drives: "all",
-              drivesAt: Date.now(),
+              permissionsAt: Date.now(),
             },
           ],
         }),
@@ -3362,7 +3484,7 @@ describe("SwarmIdProxy partitioned write enablement", () => {
                 appName: "dApp",
                 lastConnectedAt: Date.now(),
                 drives: [stamp.batchID, new BatchId(OTHER_BATCH_ID_HEX)],
-                drivesAt: Date.now() + 1,
+                permissionsAt: Date.now() + 1,
               },
             ],
             postageStamps: [
@@ -3787,7 +3909,7 @@ describe("SwarmIdProxy partitioned write enablement", () => {
                 lastConnectedAt: Date.now(),
                 // Strictly newer than the hydrated entry, so the fold cannot
                 // tie on a same-millisecond clock and keep the local grant.
-                drivesAt: Date.now() + 1,
+                permissionsAt: Date.now() + 1,
                 drives: [new BatchId(OTHER_BATCH_ID_HEX)],
               },
             ],

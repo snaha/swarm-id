@@ -57,7 +57,7 @@ function saveConnection(
     appSecret,
     lastConnectedAt: now,
     connectedUntil: now + appSessionDuration(account.settings),
-    ...(grant ? { drives: grant.drives, drivesAt: now } : {}),
+    ...(grant ? { drives: grant.drives, permissionsAt: now } : {}),
   }
   account.connectApp(connection)
 }

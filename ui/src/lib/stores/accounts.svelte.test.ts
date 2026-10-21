@@ -342,7 +342,7 @@ describe('Account.setAppDrives', () => {
     account.setAppDrives(APP_URL, [new BatchId(BATCH_HEX)])
     const app = account.connectedApps[0]
     expect(app.drives !== 'all' && app.drives?.map((b) => b.toHex())).toEqual([BATCH_HEX])
-    expect(app.drivesAt).toEqual(expect.any(Number))
+    expect(app.permissionsAt).toEqual(expect.any(Number))
   })
 
   it('clears the grant back to the account default', () => {
@@ -365,7 +365,7 @@ describe('Account.setAppDrives', () => {
   it('is forgotten by Remove, with a fresh grant clock', () => {
     const account = accountWithApp()
     account.setAppDrives(APP_URL, [new BatchId(BATCH_HEX)])
-    const grantedAt = account.connectedApps[0].drivesAt ?? 0
+    const grantedAt = account.connectedApps[0].permissionsAt ?? 0
     vi.useFakeTimers({ toFake: ['Date'] })
     try {
       vi.setSystemTime(grantedAt + 1)
@@ -375,7 +375,7 @@ describe('Account.setAppDrives', () => {
     }
     const app = account.connectedApps[0]
     expect(app.drives).toBeUndefined()
-    expect(app.drivesAt).toBeGreaterThan(grantedAt)
+    expect(app.permissionsAt).toBeGreaterThan(grantedAt)
     expect(app.revokedAt).toEqual(expect.any(Number))
   })
 
@@ -389,6 +389,46 @@ describe('Account.setAppDrives', () => {
 
 // The account syncs to its default drive, and a scratch drive overwrites its
 // oldest data, so the default is always a regular drive (#862).
+// #885: the sharing switches, pinned per app on the grant's clock, or set
+// account-wide on the settings clock.
+describe('Account sharing switches', () => {
+  const APP_URL = 'https://app.example.com'
+
+  function accountWithApp(): Account {
+    return new Account(
+      {
+        ...signedInRecord(),
+        connectedApps: [{ appUrl: APP_URL, appName: 'Test App', lastConnectedAt: 1 }],
+      },
+      noCommit,
+    )
+  }
+
+  it('pins and unpins an app, stamping the grant clock', () => {
+    const account = accountWithApp()
+    account.setAppPermissions(APP_URL, { dataSharing: false })
+    expect(account.connectedApps[0].dataSharing).toBe(false)
+    expect(account.connectedApps[0].permissionsAt).toEqual(expect.any(Number))
+    account.setAppPermissions(APP_URL, { dataSharing: undefined })
+    expect(account.connectedApps[0].dataSharing).toBeUndefined()
+  })
+
+  it('sets the account-wide default on the settings clock', () => {
+    const account = accountWithApp()
+    account.setSharingDefault('writeAccess', false)
+    expect(account.settings).toEqual({ writeAccess: false })
+    expect(account.settingsAt).toEqual(expect.any(Number))
+  })
+
+  it('forgets the pins with Remove, as it forgets the drives', () => {
+    const account = accountWithApp()
+    account.setAppPermissions(APP_URL, { dataSharing: false, writeAccess: false })
+    account.removeApp(APP_URL)
+    expect(account.connectedApps[0].dataSharing).toBeUndefined()
+    expect(account.connectedApps[0].writeAccess).toBeUndefined()
+  })
+})
+
 describe('Account default drive', () => {
   const REGULAR_HEX = 'c'.repeat(64)
   const SCRATCH_HEX = 'e'.repeat(64)

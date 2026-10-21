@@ -4,9 +4,11 @@ import { BatchId, EthAddress } from '@ethersphere/bee-js'
 import {
   type AccessMethod,
   type Account as AccountRecord,
+  type AccountSettings,
   type ConnectedApp,
   type Device,
   type LocalVault,
+  type PermissionName,
   type PostageStamp,
   PostageStampSchemaV1,
   type SyncedAccount,
@@ -20,8 +22,6 @@ import { browser } from '$app/environment'
 
 import { drivesNeedingAttention, soonestDriveExpiry } from '$lib/drives'
 import { daysToMs } from '$lib/duration'
-
-type AccountSettings = { appSessionDuration?: number }
 
 /**
  * The device-local tail of the account record, mirroring the lib's `Account`
@@ -343,8 +343,17 @@ export class Account {
 
   /** How long app connections stay valid, set in days (stored as ms). */
   setAppConnectionDays(days: number) {
+    this.#setSettings({ appSessionDuration: daysToMs(days) })
+  }
+
+  /** The account-wide default of a sharing switch, every unpinned app follows (#885). */
+  setSharingDefault(permission: PermissionName, on: boolean) {
+    this.#setSettings({ [permission]: on })
+  }
+
+  #setSettings(patch: AccountSettings) {
     const now = Date.now()
-    this.settings = { ...this.settings, appSessionDuration: daysToMs(days) }
+    this.settings = { ...this.settings, ...patch }
     this.settingsAt = now
     this.lastModified = now
     this.#commit()
@@ -384,12 +393,24 @@ export class Account {
    * made on another device (#681). No-op when the app has no entry.
    */
   setAppDrives(appUrl: string, drives: ConnectedApp['drives']) {
+    this.setAppPermissions(appUrl, { drives })
+  }
+
+  /**
+   * Change part of what an app holds — its drives, or a sharing switch
+   * pinned (or unpinned with `undefined`, to follow the account default
+   * again, #885) — on the grant's own clock.
+   */
+  setAppPermissions(
+    appUrl: string,
+    patch: Partial<Pick<ConnectedApp, 'drives' | 'dataSharing' | 'writeAccess'>>,
+  ) {
     if (!this.connectedApps.some((app) => app.appUrl === appUrl)) {
       return
     }
     const now = Date.now()
     this.connectedApps = this.connectedApps.map((app) =>
-      app.appUrl === appUrl ? { ...app, drives, drivesAt: now } : app,
+      app.appUrl === appUrl ? { ...app, ...patch, permissionsAt: now } : app,
     )
     this.lastModified = now
     this.#commit()
@@ -598,7 +619,9 @@ function revoked(app: ConnectedApp, tombstone: boolean): ConnectedApp {
     // routing: without this a removed app reconnects still granted the drives
     // it had, and the picker's default choice writes nothing to clear them
     // (#862). On the grant's own clock so the reset wins the merge.
-    ...(tombstone ? { drives: undefined, drivesAt: now } : {}),
+    ...(tombstone
+      ? { drives: undefined, dataSharing: undefined, writeAccess: undefined, permissionsAt: now }
+      : {}),
     // Clear only the auth material; keep `lastConnectedAt` so the connect flow
     // can still order this account by when it was last used (a revoked app must
     // not read as "never used").

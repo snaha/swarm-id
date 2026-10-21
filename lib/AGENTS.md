@@ -13,7 +13,7 @@ The full unions live in `types.ts` (`ParentToIframeMessageSchema`, `IframeToPare
 `PopupToIframeMessageSchema`) — 41 and 46 members, one `…Response` per request. The ones worth
 knowing by name:
 
-- **Parent → Iframe**: `parentIdentify`, `checkAuth`, `connect`, `requestPermissions` (#711),
+- **Parent → Iframe**: `parentIdentify`, `checkAuth`, `connect`, `requestPermissions` (#711), `getPermissions` (#885),
   `disconnect`, `uploadData`, `downloadData`, `deriveAppSecret`
 - **Iframe → Parent**: `proxyReady`, `initError`, `authStatusResponse`, `authSuccess`,
   `connectResponse`, `connectionInfoChanged` (what `initialize()` awaits), `uploadDataResponse`,

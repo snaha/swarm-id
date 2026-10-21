@@ -11,6 +11,10 @@
   - the Apps tab's "Permissions": everything the app holds, where a drive
     set to "None" is taken away and unticking "all" falls back to the
     account default.
+  Beside the drives, the two sharing switches (#885): a request shows the
+  ones asked for, an edit both (write access once data sharing is on). Each
+  shows the app's pin or the account default; moving one pins it, and "Use
+  account default" unpins it.
   A grant is a write to the account record, so nothing is unlocked here —
   which is why the page refuses to render inside a frame, and grants on
   request only to an app with a live connection. Editing is reachable by URL
@@ -24,6 +28,7 @@
   import { onMount } from 'svelte'
 
   import { accountDeltaSnapshot } from '@snaha/swarm-id/internal'
+  import type { AppPermissions, PermissionName } from '@snaha/swarm-id/internal'
 
   import { goto } from '$app/navigation'
   import { resolve } from '$app/paths'
@@ -33,17 +38,24 @@
   import DriveAddDialog from '$lib/components/drive-add-dialog.svelte'
   import { Button } from '$lib/components/ui/button'
   import { Select, type SelectOption } from '$lib/components/ui/select'
+  import { Switch } from '$lib/components/ui/switch'
   import { ADD_NEW_DRIVE, type PickerRow, kindOf, rowChoices, rowsGrant } from '$lib/drive-request'
   import { driveDisplayName } from '$lib/drives'
   import {
     type PermissionsPageRequest,
+    SWITCH_COPY,
     editRows,
     grantAfterEdit,
     grantAfterRequest,
     grantableOnRequest,
     parsePermissionsHash,
+    pinnedDifferently,
     requestRows,
     sameGrant,
+    sharingAfterSave,
+    sharingDefault,
+    switchValues,
+    switchesToShow,
     unknownDriveLabel,
   } from '$lib/permissions-request'
   import routes from '$lib/routes'
@@ -57,6 +69,11 @@
   let page = $state<PermissionsPageRequest | undefined>(undefined)
   let rows = $state<PickerRow[]>([])
   let allTicked = $state(false)
+  /** The sharing switches (#885): what they showed at load, and show now. */
+  let initialSharing: AppPermissions = { dataSharing: true, writeAccess: true }
+  let sharing = $state<AppPermissions>({ dataSharing: true, writeAccess: true })
+  // An array, not a Set: `$state` proxies arrays, so the helper line reacts.
+  let resets = $state<PermissionName[]>([])
   let addingFor = $state<number | undefined>(undefined)
   /** Re-mounts the selects after the dialog closes (see the connect done page). */
   let selectEpoch = $state(0)
@@ -85,6 +102,13 @@
   let now = $state(Date.now())
   const connected = $derived(grantableOnRequest(app, now))
   const showAllCheckbox = $derived(requesting ? requested === 'all' : app?.drives === 'all')
+  // Write access is shown once data sharing is on, as designed.
+  const switches = $derived(
+    switchesToShow(page?.permissions).filter(
+      (name) => name !== 'writeAccess' || sharing.dataSharing,
+    ),
+  )
+  const pinned = $derived(app ? pinnedDifferently(app, account?.settings) : [])
 
   /** Why the page cannot grant anything, if it cannot. */
   const refusal = $derived.by(() => {
@@ -115,7 +139,15 @@
       rows = editRows(app.drives, drives, defaultBatchHex)
       allTicked = app.drives === 'all'
     }
+    initialSharing = switchValues(app, account?.settings)
+    sharing = { ...initialSharing }
   })
+
+  /** "Use account default": the switch follows the account again on save. */
+  function useDefault(name: PermissionName) {
+    sharing[name] = sharingDefault(account?.settings, name)
+    if (!resets.includes(name)) resets.push(name)
+  }
 
   function optionsFor(index: number): SelectOption[] {
     const choices = rowChoices(rows, index, drives).map((drive) => ({
@@ -170,8 +202,15 @@
           ? 'all'
           : current
         : grantAfterRequest(current, defaultBatchHex, rowsGrant(rows))
-    const changed = !sameGrant(grant, current)
-    if (changed) account.setAppDrives(page.appOrigin, grant)
+    const grantChanged = !sameGrant(grant, current)
+    const sharingPatch = sharingAfterSave(initialSharing, sharing, resets, account.settings)
+    const changed = grantChanged || Object.keys(sharingPatch).length > 0
+    if (changed) {
+      account.setAppPermissions(page.appOrigin, {
+        ...(grantChanged ? { drives: grant } : {}),
+        ...sharingPatch,
+      })
+    }
 
     if (!requesting) {
       toastStore.show('Permissions saved')
@@ -240,6 +279,26 @@
                   />
                 {/key}
                 <p class="text-muted-foreground text-sm">{row.description}</p>
+              </div>
+            {/each}
+            {#if switches.length > 0 && (rows.length > 0 || showAllCheckbox)}
+              <div class="bg-border h-px w-full"></div>
+            {/if}
+            {#each switches as name (name)}
+              <div class="flex w-full items-start gap-3">
+                <Switch bind:checked={sharing[name]} aria-label={SWITCH_COPY[name].label} />
+                <div class="flex flex-col gap-1 text-sm">
+                  <span class="font-medium">{SWITCH_COPY[name].label}</span>
+                  <span class="text-muted-foreground">{SWITCH_COPY[name].description}</span>
+                  {#if !requesting && pinned.includes(name) && !resets.includes(name)}
+                    <span class="text-muted-foreground">
+                      Account default: {sharingDefault(account?.settings, name) ? 'on' : 'off'} ·
+                      <button type="button" class="underline" onclick={() => useDefault(name)}>
+                        Use account default
+                      </button>
+                    </span>
+                  {/if}
+                </div>
               </div>
             {/each}
             <Button class="w-full" onclick={save} disabled={saving}>

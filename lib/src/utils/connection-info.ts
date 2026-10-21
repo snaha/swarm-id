@@ -29,6 +29,10 @@ export function connectionInfoEqual(
     a.identity?.name === b.identity?.name &&
     a.identity?.address === b.identity?.address &&
     a.identity?.publicKey === b.identity?.publicKey &&
+    // Both move when the user flips a sharing switch (#885).
+    a.identity?.sharingPublicKey === b.identity?.sharingPublicKey &&
+    a.permissions?.dataSharing === b.permissions?.dataSharing &&
+    a.permissions?.writeAccess === b.permissions?.writeAccess &&
     // Compared explicitly rather than assumed to follow the id: an avatar not
     // derived from the id could change while the id stays put.
     a.identity?.avatar.source === b.identity?.avatar.source &&

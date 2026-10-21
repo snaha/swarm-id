@@ -362,8 +362,27 @@ export type DriveRequest = z.infer<typeof DriveRequestSchema>
  */
 export const PermissionsSchema = z.object({
   drives: DriveRequestSchema.optional(),
+  /** Ask to read what was shared with the account-wide sharing key (#885) */
+  dataSharing: z.literal(true).optional(),
+  /** Ask to publish and manage ACTs with that key; implies `dataSharing` */
+  writeAccess: z.literal(true).optional(),
 })
 export type Permissions = z.infer<typeof PermissionsSchema>
+
+/** The two sharing switches, as the account and its apps store them (#885) */
+export const PermissionNameSchema = z.enum(["dataSharing", "writeAccess"])
+export type PermissionName = z.infer<typeof PermissionNameSchema>
+
+/**
+ * What the app holds of the account-wide sharing key right now (#885): its
+ * own pinned values, else the account defaults, else on. `writeAccess` is
+ * never on without `dataSharing`.
+ */
+export const AppPermissionsSchema = z.object({
+  dataSharing: z.boolean(),
+  writeAccess: z.boolean(),
+})
+export type AppPermissions = z.infer<typeof AppPermissionsSchema>
 
 // ============================================================================
 // SOC Types
@@ -822,7 +841,9 @@ export const ConnectionIdentitySchema = z.object({
   /**
    * The account-wide ACT key (#519): grant to this to share with the person
    * across every app they use, rather than with one app origin (`appKey`).
-   * Every app the account connects can read what is granted to it.
+   * Every app the account connects can read what is granted to it — while the
+   * user allows it: absent when this app's data sharing is off (#885), so an
+   * app never advertises a key it cannot read with.
    */
   sharingPublicKey: CompressedPublicKeySchema.optional(),
   /**
@@ -888,6 +909,12 @@ export const ConnectionInfoSchema = z.object({
       publicKey: CompressedPublicKeySchema,
     })
     .optional(),
+  /**
+   * What this app may do with the account-wide sharing key (#885). Changes
+   * when the user flips a switch in Swarm ID, like a drive change does;
+   * absent without a session.
+   */
+  permissions: AppPermissionsSchema.optional(),
 })
 
 export type ConnectionInfo = z.infer<typeof ConnectionInfoSchema>
@@ -1339,6 +1366,11 @@ export const GetDrivesMessageSchema = z.object({
   requestId: z.string(),
 })
 
+export const GetPermissionsMessageSchema = z.object({
+  type: z.literal("getPermissions"),
+  requestId: z.string(),
+})
+
 /**
  * Ask the user for more (#711): the proxy opens the permissions popup and
  * answers once it closes, or at once with `opened: false` when the browser
@@ -1398,6 +1430,7 @@ export const ParentToIframeMessageSchema = z.discriminatedUnion("type", [
   ActGetGranteesMessageSchema,
   GetPostageBatchMessageSchema,
   GetDrivesMessageSchema,
+  GetPermissionsMessageSchema,
   ConnectMessageSchema,
   RequestPermissionsMessageSchema,
 ])
@@ -1469,6 +1502,7 @@ export type GetPostageBatchMessage = z.infer<
   typeof GetPostageBatchMessageSchema
 >
 export type GetDrivesMessage = z.infer<typeof GetDrivesMessageSchema>
+export type GetPermissionsMessage = z.infer<typeof GetPermissionsMessageSchema>
 export type ConnectMessage = z.infer<typeof ConnectMessageSchema>
 export type RequestPermissionsMessage = z.infer<
   typeof RequestPermissionsMessageSchema
@@ -1589,6 +1623,10 @@ export const UploadProgressMessageSchema = z.object({
  * - `upload-unavailable` — the session refuses to stamp; `reason` says why,
  *   in the same vocabulary as `ConnectionInfo.uploadUnavailableReason`
  * - `drive-not-granted` — the write names a drive this app was not granted
+ * - `permission-denied` — the call needs the account-wide sharing key and the
+ *   user has not allowed this app to use it that way; `permission` names the
+ *   switch (#885). Ask with `requestPermissions()`, or check `getPermissions()`
+ *   first
  * - `partition-contended` — every partition of the batch is held by other
  *   devices and none yielded in time
  * - `lease-lost` — this device's partition was reclaimed mid-write
@@ -1613,6 +1651,7 @@ export const SwarmIdErrorCodeSchema = z.enum([
   "not-authenticated",
   "upload-unavailable",
   "drive-not-granted",
+  "permission-denied",
   "partition-contended",
   "lease-lost",
   "bee-rejected",
@@ -1635,6 +1674,7 @@ export const WireErrorSchema = z.object({
   // schema rejects and a request that never settles.
   code: SwarmIdErrorCodeSchema.catch("internal"),
   reason: UploadUnavailableReasonSchema.optional().catch(undefined),
+  permission: PermissionNameSchema.optional().catch(undefined),
   status: z.number().int().optional(),
   beeMessage: z.string().optional(),
   url: z.string().optional(),
@@ -1671,6 +1711,7 @@ export const ConnectionInfoChangedMessageSchema = z.object({
     })
     .optional(),
   partition: z.number().int().min(0).optional(),
+  permissions: AppPermissionsSchema.optional(),
 })
 
 export const ConnectResponseMessageSchema = z.object({
@@ -1901,6 +1942,12 @@ export const GetDrivesResponseMessageSchema = z.object({
   drives: z.array(DriveSchema),
 })
 
+export const GetPermissionsResponseMessageSchema = z.object({
+  type: z.literal("getPermissionsResponse"),
+  requestId: z.string(),
+  permissions: AppPermissionsSchema,
+})
+
 export const RequestPermissionsResponseMessageSchema = z.object({
   type: z.literal("requestPermissionsResponse"),
   requestId: z.string(),
@@ -1954,6 +2001,7 @@ export const IframeToParentMessageSchema = z.discriminatedUnion("type", [
   ActGetGranteesResponseMessageSchema,
   GetPostageBatchResponseMessageSchema,
   GetDrivesResponseMessageSchema,
+  GetPermissionsResponseMessageSchema,
   RequestPermissionsResponseMessageSchema,
 ])
 
@@ -2196,7 +2244,8 @@ export interface ClientOptions {
   /**
    * What the app asks the user for on the connect screen (#862): `drives` is
    * `"all"`, or one row per drive. Without it the app writes to the account
-   * default.
+   * default. The sharing switches are not asked at connect — the app gets
+   * the account defaults and asks later with `requestPermissions()` (#885).
    */
   permissions?: Permissions
   /** URL of a subsidised gateway for users without postage stamps. Gateway handles stamping server-side. */
@@ -2224,6 +2273,7 @@ export interface ConnectOptions {
 
 export type {
   Account,
+  AccountSettings,
   SyncedAccount,
   ConnectedApp,
   PostageStamp,

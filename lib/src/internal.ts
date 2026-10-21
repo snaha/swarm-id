@@ -100,6 +100,9 @@ export {
   type DriveRequest,
   type DriveRequirement,
   type Permissions,
+  type AppPermissions,
+  type PermissionName,
+  type AccountSettings,
   STORAGE_CHALLENGE_KEY,
   STORAGE_KEY_ACCOUNTS,
   STORAGE_KEY_NETWORK_SETTINGS,
@@ -107,6 +110,8 @@ export {
 } from "./types"
 
 export type { AccountStateSnapshot } from "./utils/account-state-snapshot"
+
+export { effectivePermissions } from "./permissions"
 
 export {
   BUCKET_DEPTH,

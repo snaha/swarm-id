@@ -13,10 +13,13 @@
   import { resolve } from '$app/paths'
 
   import AppIcon from '$lib/components/app-icon.svelte'
+  import { Badge } from '$lib/components/ui/badge'
   import { Button } from '$lib/components/ui/button'
   import { DropdownMenu, DropdownMenuItem } from '$lib/components/ui/dropdown-menu'
   import { Select } from '$lib/components/ui/select'
+  import { Switch } from '$lib/components/ui/switch'
   import { msToDays } from '$lib/duration'
+  import { pinnedDifferently, sharingDefault } from '$lib/permissions-request'
   import routes from '$lib/routes'
   import type { Account } from '$lib/types'
 
@@ -43,6 +46,10 @@
   )
   // Revoked tombstones stay in the record for sync; only show live entries.
   const activeApps = $derived(account.activeApps)
+  // The account-wide sharing switches (#885), on unless turned off here;
+  // write access is shown once data sharing is on, as on the app's own page.
+  const dataSharing = $derived(sharingDefault(account.settings, 'dataSharing'))
+  const writeAccess = $derived(sharingDefault(account.settings, 'writeAccess'))
 
   /** The app's "Permissions for <app>" page (#711), keyed by its origin. */
   function openPermissions(appUrl: string) {
@@ -75,6 +82,31 @@
     />
   </div>
 
+  <div class="flex w-full items-start justify-between gap-4">
+    <div class="flex flex-col gap-1 text-sm">
+      <p>Data sharing</p>
+      <p class="text-muted-foreground">Allow apps to access data shared by other apps</p>
+    </div>
+    <Switch
+      checked={dataSharing}
+      aria-label="Data sharing"
+      onclick={() => account.setSharingDefault('dataSharing', !dataSharing)}
+    />
+  </div>
+  {#if dataSharing}
+    <div class="flex w-full items-start justify-between gap-4">
+      <div class="flex flex-col gap-1 text-sm">
+        <p>Write access</p>
+        <p class="text-muted-foreground">Allow apps to share data with other apps</p>
+      </div>
+      <Switch
+        checked={writeAccess}
+        aria-label="Write access"
+        onclick={() => account.setSharingDefault('writeAccess', !writeAccess)}
+      />
+    </div>
+  {/if}
+
   <div class="bg-border h-px w-full"></div>
 
   {#if activeApps.length === 0}
@@ -88,6 +120,9 @@
             <p class="truncate text-sm font-medium">{app.appName}</p>
             <p class="text-muted-foreground truncate text-sm">{app.appUrl}</p>
           </div>
+          {#if pinnedDifferently(app, account.settings).length > 0}
+            <Badge variant="outline">Custom permissions</Badge>
+          {/if}
           {#if isConnected(app.connectedUntil)}
             <span class="bg-secondary text-secondary-foreground rounded-md px-2 py-0.5 text-xs">
               Connected

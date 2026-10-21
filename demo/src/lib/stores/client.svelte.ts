@@ -2,6 +2,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import {
+  type AppPermissions,
+  type PermissionName,
   SwarmIdClient,
   formatTTL,
   DEFAULT_BEE_NODE_URL,
@@ -116,6 +118,8 @@ let stamp = $state<StampInfo | undefined>(undefined)
 // Every drive the app was granted, and the one its writes name — `undefined`
 // leaves each write to the primary.
 let drives = $state<Drive[]>([])
+// The sharing switches (#885), off the snapshot: the user flips them in Swarm ID.
+let permissions = $state<AppPermissions | undefined>(undefined)
 let targetBatchID = $state<string | undefined>(undefined)
 let partition = $state<number | undefined>(undefined)
 let deferred = $state(false)
@@ -268,6 +272,7 @@ async function onConnectionChange(info: ConnectionInfo) {
     : undefined
   logStore.log(`Connection info: canUpload=${info.canUpload}, identity=${loggableIdentity}`)
   partition = info.partition
+  permissions = info.permissions
 
   if (isAuthenticated && !info.canUpload) {
     // Say which of the three it is rather than guessing from `storagePartitioned`:
@@ -499,6 +504,27 @@ export const clientStore = {
   },
   get stamp() {
     return stamp
+  },
+  get permissions() {
+    return permissions
+  },
+  /**
+   * Ask for a sharing switch the user turned off (#885): opens the
+   * "Permissions for Swarm ID Demo" popup, or nothing when it is already on.
+   */
+  async requestSharing(permission: PermissionName): Promise<void> {
+    if (!client) return
+    try {
+      const held = await client.requestPermissions({ [permission]: true })
+      logStore.log(
+        `Permissions after the request: data sharing ${held.dataSharing ? 'on' : 'off'}, write access ${held.writeAccess ? 'on' : 'off'}`,
+      )
+    } catch (error) {
+      logStore.log(
+        `Permission request failed: ${error instanceof Error ? error.message : String(error)}`,
+        'warn',
+      )
+    }
   },
   get drives() {
     return drives

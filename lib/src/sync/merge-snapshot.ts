@@ -117,7 +117,8 @@ export function mergeConnectedApps(
   //   bumped by every write ranked the entry instead, so a drive picked on a
   //   stale copy outranked a revoke and restored the credential it had cleared
   //   (#681).
-  // - The drive grant overlays on its own `drivesAt`. It moves
+  // - The grant (drives and the sharing switches) overlays on its own
+  //   `permissionsAt`. It moves
   //   no membership field, so without a clock of its own it ties with every
   //   stale copy of the entry and loses — the same correction #663 made for a
   //   device's name.
@@ -125,7 +126,7 @@ export function mergeConnectedApps(
   // Distinct apps still both survive (union).
   const recency = (a: ConnectedApp) =>
     Math.max(a.revokedAt ?? 0, a.disconnectedAt ?? 0, a.lastConnectedAt ?? 0)
-  const drivesRecency = (a: ConnectedApp) => a.drivesAt ?? 0
+  const permissionsRecency = (a: ConnectedApp) => a.permissionsAt ?? 0
   const merged = new Map<string, ConnectedApp>()
   // Process remote first, then local, so a tie favours local (most recent
   // observation here); a strictly-newer entry on either side wins.
@@ -139,8 +140,14 @@ export function mergeConnectedApps(
     const loser = winner === a ? existing : a
     merged.set(
       keyOf(a),
-      drivesRecency(loser) > drivesRecency(winner)
-        ? { ...winner, drives: loser.drives, drivesAt: loser.drivesAt }
+      permissionsRecency(loser) > permissionsRecency(winner)
+        ? {
+            ...winner,
+            drives: loser.drives,
+            dataSharing: loser.dataSharing,
+            writeAccess: loser.writeAccess,
+            permissionsAt: loser.permissionsAt,
+          }
         : winner,
     )
   }

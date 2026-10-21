@@ -10,7 +10,11 @@ import {
   grantAfterRequest,
   grantableOnRequest,
   parsePermissionsHash,
+  pinnedDifferently,
   requestRows,
+  sharingAfterSave,
+  switchValues,
+  switchesToShow,
   unknownDriveLabel,
 } from '$lib/permissions-request'
 
@@ -128,5 +132,62 @@ describe('an edit', () => {
   it('falls back to the account default when "all" is unticked', () => {
     expect(grantAfterEdit('all', [], true, A)).toBe('all')
     expect(grantAfterEdit('all', [], false, A)).toBeUndefined()
+  })
+})
+
+// #885: the two sharing switches beside the drives.
+describe('the sharing switches', () => {
+  it('show the pin, else the account default, else on', () => {
+    expect(switchValues(undefined, undefined)).toEqual({ dataSharing: true, writeAccess: true })
+    expect(switchValues({}, { dataSharing: false })).toEqual({
+      dataSharing: false,
+      writeAccess: true,
+    })
+    expect(switchValues({ writeAccess: false }, { writeAccess: true })).toEqual({
+      dataSharing: true,
+      writeAccess: false,
+    })
+  })
+
+  it('are both shown on an edit, and on a request only what was asked, write access implying data sharing', () => {
+    expect(switchesToShow(undefined)).toEqual(['dataSharing', 'writeAccess'])
+    expect(switchesToShow({ drives: [] })).toEqual([])
+    expect(switchesToShow({ dataSharing: true })).toEqual(['dataSharing'])
+    expect(switchesToShow({ writeAccess: true })).toEqual(['dataSharing', 'writeAccess'])
+  })
+
+  it('tell a pin that differs from the account default from one that matches it', () => {
+    expect(pinnedDifferently({}, undefined)).toEqual([])
+    expect(pinnedDifferently({ dataSharing: true }, undefined)).toEqual([])
+    expect(pinnedDifferently({ dataSharing: false }, undefined)).toEqual(['dataSharing'])
+    expect(pinnedDifferently({ writeAccess: true }, { writeAccess: false })).toEqual([
+      'writeAccess',
+    ])
+  })
+
+  it('save a pin for a switch moved, clear one reset to the default, and leave the rest alone', () => {
+    const initial = { dataSharing: false, writeAccess: true }
+    expect(sharingAfterSave(initial, initial, [], undefined)).toEqual({})
+    expect(
+      sharingAfterSave(initial, { dataSharing: true, writeAccess: true }, [], undefined),
+    ).toEqual({ dataSharing: true })
+    // "Use account default" put it back to the default (on): the pin goes.
+    const reset = sharingAfterSave(
+      initial,
+      { dataSharing: true, writeAccess: true },
+      ['dataSharing'],
+      undefined,
+    )
+    expect(reset).toEqual({ dataSharing: undefined })
+    expect('dataSharing' in reset).toBe(true)
+    // Reset, then moved off the default again: a pin, as if never reset.
+    expect(
+      sharingAfterSave(
+        { dataSharing: true, writeAccess: true },
+        { dataSharing: false, writeAccess: true },
+        ['dataSharing'],
+        undefined,
+      ),
+    ).toEqual({ dataSharing: false })
   })
 })

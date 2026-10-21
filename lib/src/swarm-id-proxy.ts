@@ -43,6 +43,8 @@ import type {
   ActGetGranteesMessage,
   GetPostageBatchMessage,
   GetDrivesMessage,
+  GetPermissionsMessage,
+  PermissionName,
   RequestPermissionsMessage,
   Drive,
   Permissions,
@@ -188,6 +190,8 @@ import {
 } from "./schemas"
 import { appSessionDuration } from "./utils/constants"
 import { PERMISSIONS_POPUP_MAX_MS, untilPopupClosed } from "./utils/popup"
+import { effectivePermissions } from "./permissions"
+import type { ActKeyCandidate } from "./proxy/act"
 import { buildAuthUrl } from "./utils/url"
 import {
   createActForContent,
@@ -2474,6 +2478,9 @@ export class SwarmIdProxy {
       case "getDrives":
         await this.handleGetDrives(message, event)
         break
+      case "getPermissions":
+        this.handleGetPermissions(message, event)
+        break
 
       case "createFeedManifest":
         await this.handleCreateFeedManifest(message, event)
@@ -3524,6 +3531,7 @@ export class SwarmIdProxy {
    */
   private buildConnectionInfo(): ConnectionInfo {
     let identity: ConnectionInfo["identity"] = undefined
+    let permissions: ConnectionInfo["permissions"] = undefined
 
     if (this.authenticated && this.parentOrigin) {
       try {
@@ -3536,12 +3544,14 @@ export class SwarmIdProxy {
           const { account } = connection
           const { sharingPublicKey, postageSignerAddress } =
             this.identityKeysFor(account.derivationKey)
+          permissions = effectivePermissions(connection.app, account.settings)
           identity = {
             id: account.id.toHex(),
             name: account.name,
             address: account.id.toHex(),
             publicKey: account.publicKey,
-            sharingPublicKey,
+            // Not advertised while the app may not read with it (#885).
+            ...(permissions.dataSharing && { sharingPublicKey }),
             postageSignerAddress,
             avatar: generatedAvatar(account.id.toHex()),
           }
@@ -3589,6 +3599,7 @@ export class SwarmIdProxy {
       identity,
       appKey,
       partition: this.drive?.coordinator?.currentPartition,
+      permissions,
     }
   }
 
@@ -3636,6 +3647,7 @@ export class SwarmIdProxy {
       identity: info.identity,
       appKey: info.appKey,
       partition: info.partition,
+      permissions: info.permissions,
     })
   }
 
@@ -5565,15 +5577,41 @@ export class SwarmIdProxy {
     return derivationKey ? deriveSharingKey(derivationKey).secret : undefined
   }
 
+  /** What this session may do with the sharing key right now (#885). */
+  private sessionPermissions() {
+    const connection = this.findConnectionForParent()
+    return effectivePermissions(connection?.app, connection?.account.settings)
+  }
+
+  /** The rejection for a sharing-key use the user has not allowed (#885). */
+  private permissionDenied(permission: PermissionName): SwarmIdError {
+    return new SwarmIdError(
+      "permission-denied",
+      permission === "dataSharing"
+        ? "This app is not allowed to access data shared by other apps. Ask with requestPermissions({ dataSharing: true })."
+        : "This app is not allowed to share data with other apps. Ask with requestPermissions({ writeAccess: true }).",
+      { permission },
+    )
+  }
+
   /**
    * The keys this session may read or manage ACT data with: the origin-bound
    * app key, then the account-wide sharing key. The ACT module picks the one
-   * a share names.
+   * a share names. The sharing key is always offered, denied when the switch
+   * `permission` is off (#885): the ACT module then fails the call with
+   * `permission-denied` exactly when that key is the one the share names,
+   * which neither key alone could tell.
    */
-  private actKeys(): Uint8Array[] {
+  private actKeys(permission: PermissionName): ActKeyCandidate[] {
     const appKey = hexToUint8Array(this.appSecret!)
     const sharing = this.sharingSecret()
-    return sharing ? [appKey, sharing] : [appKey]
+    if (!sharing) return [appKey]
+    return this.sessionPermissions()[permission]
+      ? [appKey, sharing]
+      : [
+          appKey,
+          { privateKey: sharing, denied: this.permissionDenied(permission) },
+        ]
   }
 
   private async handleActUploadData(
@@ -5605,7 +5643,14 @@ export class SwarmIdProxy {
         enableProgress,
       )
 
-      // The app key publishes unless the dApp asked for the identity-level key
+      // The app key publishes unless the dApp asked for the identity-level
+      // key, which the user may have switched off for this app (#885)
+      if (
+        options?.publisher === "identity" &&
+        !this.sessionPermissions().writeAccess
+      ) {
+        throw this.permissionDenied("writeAccess")
+      }
       const publisherPrivateKey =
         options?.publisher === "identity"
           ? this.sharingSecret()
@@ -5722,7 +5767,7 @@ export class SwarmIdProxy {
         encryptedReference,
         historyReference,
         publisherPubKey,
-        this.actKeys(),
+        this.actKeys("dataSharing"),
         timestamp,
         requestOptions,
       )
@@ -5783,7 +5828,7 @@ export class SwarmIdProxy {
     try {
       this.ensureCanUpload(batchID)
 
-      const publisherPrivateKey = this.actKeys()
+      const publisherPrivateKey = this.actKeys("writeAccess")
 
       // Parse grantee public keys from compressed hex
       const newGranteePublicKeys = grantees.map((hex) =>
@@ -5835,7 +5880,7 @@ export class SwarmIdProxy {
     try {
       this.ensureCanUpload(batchID)
 
-      const publisherPrivateKey = this.actKeys()
+      const publisherPrivateKey = this.actKeys("writeAccess")
 
       // Parse grantee public keys from compressed hex
       const revokePublicKeys = revokeGrantees.map((hex) =>
@@ -5892,7 +5937,7 @@ export class SwarmIdProxy {
         )
       }
 
-      const publisherPrivateKey = this.actKeys()
+      const publisherPrivateKey = this.actKeys("dataSharing")
 
       // Get grantees from ACT
       const grantees = await getGranteesFromAct(
@@ -5943,6 +5988,17 @@ export class SwarmIdProxy {
       type: "getDrivesResponse",
       requestId: message.requestId,
       drives,
+    })
+  }
+
+  private handleGetPermissions(
+    message: GetPermissionsMessage,
+    event: MessageEvent,
+  ): void {
+    this.postMessage(event, {
+      type: "getPermissionsResponse",
+      requestId: message.requestId,
+      permissions: this.sessionPermissions(),
     })
   }
 

@@ -414,7 +414,7 @@ describe("mergeSnapshotWithRemote — apps / stamps", () => {
       ...makeConnectedApp("https://app.example"),
       appSecret: "33".repeat(32),
       drives: [new BatchId("cc".repeat(32))],
-      drivesAt: 9_000_000,
+      permissionsAt: 9_000_000,
     }
     const result = mergeSnapshotWithRemote(
       makeSnapshot({ connectedApps: [staleWithNewStamp] }),
@@ -432,7 +432,7 @@ describe("mergeSnapshotWithRemote — apps / stamps", () => {
     const chosen = {
       ...makeConnectedApp("https://app.example"),
       drives: [new BatchId("cc".repeat(32))],
-      drivesAt: 9_000_000,
+      permissionsAt: 9_000_000,
     }
     const stale = makeConnectedApp("https://app.example")
     const result = mergeSnapshotWithRemote(
