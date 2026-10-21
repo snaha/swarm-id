@@ -10,11 +10,7 @@
   import { Separator } from '$lib/components/ui/separator'
   import { Popover } from '$lib/components/ui/popover'
   import InfoButton from '$lib/components/ui/tooltip/info-button.svelte'
-  import {
-    DRIVE_REQUEST_PRESETS,
-    type DriveRequestPreset,
-    clientStore,
-  } from '$lib/stores/client.svelte'
+  import { clientStore } from '$lib/stores/client.svelte'
 
   let popoverOpen = $state(false)
 
@@ -162,21 +158,6 @@
           {/if}
         </Label>
       </div>
-
-      <!-- The drives asked for on the connect screen (#862) -->
-      <label class="block text-xs text-muted-foreground">
-        Request drives
-        <select
-          class="mt-1 w-full rounded-md border border-border bg-background px-2 py-1 text-xs text-foreground"
-          value={clientStore.driveRequestPreset}
-          onchange={(event) =>
-            (clientStore.driveRequestPreset = event.currentTarget.value as DriveRequestPreset)}
-        >
-          {#each Object.entries(DRIVE_REQUEST_PRESETS) as [key, preset] (key)}
-            <option value={key}>{preset.label}</option>
-          {/each}
-        </select>
-      </label>
     {/if}
   </div>
 </Popover>
