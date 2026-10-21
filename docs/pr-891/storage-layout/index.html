@@ -171,7 +171,8 @@ path of BIP-44, as <a href="../key-derivation/">Key Derivation</a> describes. Th
 schema (the per-field clocks, <code dir="auto">settings</code>, <code dir="auto">defaultPostageStampBatchID</code>, <code dir="auto">lastModified</code>) are left
 out of a fresh record; the UI sets them as the user edits. <code dir="auto">settings</code> holds the app session
 duration and the account-wide sharing switches (<code dir="auto">dataSharing</code>, <code dir="auto">writeAccess</code>, on when absent),
-which a connected app may pin for itself with the same two fields on its entry.</p>
+which a connected app may pin for itself with the same two fields on its entry, as it may its own
+<code dir="auto">sessionDuration</code>.</p>
 <p>Everything on the record except <code dir="auto">access</code> and <code dir="auto">encryptedSeed</code> is the synced projection, and a
 record with the same <code dir="auto">id</code> may already exist from an earlier import. Replace it only with the
 vault fields; replacing the collections discards stamps and connected apps the user added on
