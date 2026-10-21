@@ -4,7 +4,13 @@ import { BatchId, PrivateKey } from '@ethersphere/bee-js'
 import type { PostageStamp } from '@snaha/swarm-id/internal'
 import { describe, expect, it } from 'vitest'
 
-import { pickerRows, rowChoices, rowsComplete, rowsGrant } from '$lib/drive-request'
+import {
+  fillRequiredRows,
+  pickerRows,
+  rowChoices,
+  rowsComplete,
+  rowsGrant,
+} from '$lib/drive-request'
 
 const REGULAR_A = 'aa'.repeat(32)
 const REGULAR_B = 'bb'.repeat(32)
@@ -64,6 +70,39 @@ describe('pickerRows', () => {
     const required = pickerRows([{ kind: 'scratch' }], [drive(REGULAR_A)], REGULAR_A)
     expect(required[0].chosen).toBe('')
     expect(rowsComplete(required)).toBe(false)
+  })
+})
+
+// #879: a drive created in another tab arrives while the popup waits.
+describe('fillRequiredRows', () => {
+  it('fills a waiting required row with a drive that arrived, and nothing else', () => {
+    const rows = pickerRows(
+      [{ kind: 'regular' }, { kind: 'scratch' }],
+      [drive(REGULAR_A)],
+      REGULAR_A,
+    )
+    expect(rows.map((row) => row.chosen)).toEqual([REGULAR_A, ''])
+    // Nothing new of the kind: the same array back.
+    expect(fillRequiredRows(rows, [drive(REGULAR_A), drive(REGULAR_B)], REGULAR_A)).toBe(rows)
+    const filled = fillRequiredRows(rows, DRIVES, REGULAR_A)
+    expect(filled).not.toBe(rows)
+    expect(filled.map((row) => row.chosen)).toEqual([REGULAR_A, SCRATCH_C])
+    expect(rows[1].chosen).toBe('')
+  })
+
+  it('leaves optional rows and chosen rows alone, and never hands out a held drive', () => {
+    const rows = pickerRows(
+      [{ kind: 'regular', optional: true }, { kind: 'regular' }],
+      [drive(REGULAR_A)],
+      undefined,
+    )
+    expect(rows.map((row) => row.chosen)).toEqual(['', REGULAR_A])
+    expect(fillRequiredRows(rows, DRIVES, undefined)).toBe(rows)
+    const waiting = [{ ...rows[1], chosen: '' }, rows[1]]
+    expect(fillRequiredRows(waiting, DRIVES, REGULAR_A).map((row) => row.chosen)).toEqual([
+      REGULAR_B,
+      REGULAR_A,
+    ])
   })
 })
 
