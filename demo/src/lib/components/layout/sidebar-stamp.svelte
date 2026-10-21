@@ -80,6 +80,12 @@
         {/each}
       </select>
     </label>
+    <!-- One lane per drive: each drive's lease is its own (#882). -->
+    {#each clientStore.drives as drive (drive.batchID)}
+      <div class="text-xs text-muted-foreground pl-6">
+        Lane on {drive.batchID.slice(0, 8)}…: {drive.partition ?? 'Inactive'}
+      </div>
+    {/each}
   {/if}
 
   {#if clientStore.stamp}

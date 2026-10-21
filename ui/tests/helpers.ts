@@ -449,28 +449,40 @@ const INGEST_TIMEOUT_MS = 180_000
 const INGEST_POLL_MS = 5_000
 
 /**
- * Wait until the Bee node knows the account's default batch.
+ * Wait until the Bee node knows the account's default batch, or the batches named.
  *
  * A purchase settles on chain; the node only learns of it by watching, and
  * until it has, every stamped write is rejected with `invalid batch id` — the
  * partition-lock SOC included, so the failure surfaces as a lease that cannot
  * be acquired rather than as anything about the batch.
  */
-export async function waitForBatchIngestion(page: Page, beeUrl: string = BEE_API_URL) {
-  const wanted = await page.evaluate(() => {
-    const doc = JSON.parse(localStorage.getItem('swarm-id-accounts') ?? '{}') as {
-      data?: { defaultPostageStampBatchID?: string }[]
-    }
-    return doc.data?.[0]?.defaultPostageStampBatchID
-  })
-  expect(wanted, 'the account has no default batch — did the purchase settle?').toBeTruthy()
+export async function waitForBatchIngestion(
+  page: Page,
+  beeUrl: string = BEE_API_URL,
+  /** The batches to wait for; the account's default batch when omitted. */
+  batchIds?: string[],
+) {
+  const wanted =
+    batchIds ??
+    (await page.evaluate(() => {
+      const doc = JSON.parse(localStorage.getItem('swarm-id-accounts') ?? '{}') as {
+        data?: { defaultPostageStampBatchID?: string }[]
+      }
+      const id = doc.data?.[0]?.defaultPostageStampBatchID
+      return id ? [id] : []
+    }))
+  expect(
+    wanted.length,
+    'the account has no default batch — did the purchase settle?',
+  ).toBeGreaterThan(0)
 
   await expect
     .poll(
       async () => {
         const response = await fetch(`${beeUrl}/batches`)
         const { batches = [] } = (await response.json()) as { batches?: { batchID: string }[] }
-        return batches.some((batch) => batch.batchID.toLowerCase() === wanted!.toLowerCase())
+        const known = new Set(batches.map((batch) => batch.batchID.toLowerCase()))
+        return wanted.every((id) => known.has(id.toLowerCase()))
       },
       { timeout: INGEST_TIMEOUT_MS, intervals: [INGEST_POLL_MS] },
     )
