@@ -209,9 +209,12 @@ export class Device {
       await unlock.fill(PASSWORD)
       await popup.getByRole('button', { name: 'Confirm' }).click()
     }
-    // An `'all'` request (the two-drive suite) is one checkbox, off until ticked.
-    const fullAccess = popup.getByText('Grant this app full drive access')
-    if (await fullAccess.isVisible()) await popup.getByRole('checkbox').check()
+    // The done screen, once the unlock (if any) has gone through. An `'all'`
+    // request (the two-drive suite) puts one checkbox on it, off until ticked,
+    // and "Go to app" stays disabled until then.
+    await expect(done).toBeVisible()
+    const fullAccess = popup.getByRole('checkbox')
+    if ((await fullAccess.count()) > 0) await fullAccess.check()
     await goToApp(popup)
     await expect(page.getByRole('heading', { name: 'Identity' })).toBeVisible({ timeout: 15_000 })
   }
