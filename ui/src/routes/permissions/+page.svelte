@@ -3,86 +3,63 @@
   SPDX-License-Identifier: Apache-2.0
 -->
 <!--
-  "Permissions for <app>" (#711; SwarmID-MVP, section PERMISSIONS). One page,
-  two ways in:
-  - an app's request (`requestDrives()`), in a popup: only what it asked for,
-    every row empty, and saving with nothing chosen grants nothing. The new
-    drives are added to what the app already holds;
-  - the Apps tab's "Permissions": everything the app holds, where a drive
-    set to "None" is taken away and unticking "all" falls back to the
-    account default.
-  Beside the drives, the two sharing switches (#885): a request shows the
-  ones asked for, an edit both (write access once data sharing is on). Each
-  shows the app's pin or the account default; moving one pins it, and "Use
-  account default" unpins it.
+  "Permissions for <app>" (#711, #885; SwarmID-MVP, section PERMISSIONS): an
+  app's request, in a popup. Only what it asked for is shown — a drive row
+  per drive, empty; the sharing switches not already on, off — and saving
+  with nothing chosen grants nothing. The drives chosen are added to what
+  the app already holds; a switch turned on is pinned for this app.
+  Editing everything an app holds is the Apps tab's own page
+  (`home-app-detail`).
   A grant is a write to the account record, so nothing is unlocked here —
-  which is why the page refuses to render inside a frame, and grants on
-  request only to an app with a live connection. Editing is reachable by URL
-  for a disconnected app too, on purpose: it can only swap or drop what the
-  stored grant already holds, never widen it. The grant reaches the app's live
-  session as a storage event or an account-bus delta; a partitioned session
-  that opened this popup is handed it directly, and one whose popup the page
-  had to open instead waits for the bus delta to leave before closing.
+  which is why the page refuses to render inside a frame, and grants only to
+  an app with a live connection. The grant reaches the app's live session as
+  a storage event or an account-bus delta; a partitioned session that opened
+  this popup is handed it directly, and one whose popup the page had to open
+  instead waits for the bus delta to leave before closing.
 -->
 <script lang="ts">
   import { onMount } from 'svelte'
 
-  import { accountDeltaSnapshot } from '@snaha/swarm-id/internal'
-  import type { AppPermissions, PermissionName } from '@snaha/swarm-id/internal'
+  import { type AppPermissions, accountDeltaSnapshot } from '@snaha/swarm-id/internal'
 
   import { goto } from '$app/navigation'
   import { resolve } from '$app/paths'
 
   import AppHeader from '$lib/components/app-header.svelte'
   import AppIcon from '$lib/components/app-icon.svelte'
-  import DriveAddDialog from '$lib/components/drive-add-dialog.svelte'
+  import DrivePickerRows from '$lib/components/drive-picker-rows.svelte'
   import { Button } from '$lib/components/ui/button'
-  import { Select, type SelectOption } from '$lib/components/ui/select'
   import { Switch } from '$lib/components/ui/switch'
-  import { ADD_NEW_DRIVE, type PickerRow, kindOf, rowChoices, rowsGrant } from '$lib/drive-request'
-  import { driveDisplayName } from '$lib/drives'
+  import { type PickerRow, kindOf, rowsGrant } from '$lib/drive-request'
   import {
     type PermissionsPageRequest,
     SWITCH_COPY,
-    editRows,
-    grantAfterEdit,
     grantAfterRequest,
     grantableOnRequest,
     parsePermissionsHash,
-    pinnedDifferently,
     requestRows,
     sameGrant,
     sharingAfterSave,
-    sharingDefault,
     switchValues,
-    switchesToShow,
-    unknownDriveLabel,
+    switchesToAsk,
   } from '$lib/permissions-request'
   import routes from '$lib/routes'
   import { accountBusStore } from '$lib/stores/account-bus'
   import { accountsStore } from '$lib/stores/accounts.svelte'
   import { sessionStore } from '$lib/stores/session.svelte'
-  import { toastStore } from '$lib/stores/toast.svelte'
 
   const ICON_SIZE = 48
 
   let page = $state<PermissionsPageRequest | undefined>(undefined)
   let rows = $state<PickerRow[]>([])
   let allTicked = $state(false)
-  /** The sharing switches (#885): what they showed at load, and show now. */
-  let initialSharing: AppPermissions = { dataSharing: true, writeAccess: true }
+  /** The sharing switches: what they were at load, and show now. */
+  let initialSharing = $state<AppPermissions>({ dataSharing: true, writeAccess: true })
   let sharing = $state<AppPermissions>({ dataSharing: true, writeAccess: true })
-  // An array, not a Set: `$state` proxies arrays, so the helper line reacts.
-  let resets = $state<PermissionName[]>([])
-  let addingFor = $state<number | undefined>(undefined)
-  /** Re-mounts the selects after the dialog closes (see the connect done page). */
-  let selectEpoch = $state(0)
-  let batchesBeforeAdd = new Set<string>()
   let saving = $state(false)
   /** Rendered inside another site: a grant is one click, so refuse (clickjacking). */
   let framed = $state(false)
 
-  const requesting = $derived(page?.permissions !== undefined)
   const requested = $derived(page?.permissions?.drives)
   const account = $derived.by(() => {
     const id = page?.accountId ?? sessionStore.currentAccountId
@@ -101,14 +78,12 @@
   /** The clock `connected` reads: not reactive, so `save` sets it again. */
   let now = $state(Date.now())
   const connected = $derived(grantableOnRequest(app, now))
-  const showAllCheckbox = $derived(requesting ? requested === 'all' : app?.drives === 'all')
   // Write access is shown once data sharing is on, as designed.
   const switches = $derived(
-    switchesToShow(page?.permissions).filter(
+    switchesToAsk(page?.permissions, initialSharing).filter(
       (name) => name !== 'writeAccess' || sharing.dataSharing,
     ),
   )
-  const pinned = $derived(app ? pinnedDifferently(app, account?.settings) : [])
 
   /** Why the page cannot grant anything, if it cannot. */
   const refusal = $derived.by(() => {
@@ -116,12 +91,7 @@
     if (!page) return undefined
     if (!account) return 'This account is not on this device.'
     if (account.isSignedOut) return `Sign in to ${account.name} first.`
-    // A request grants to a live session only. Editing is for the Apps tab,
-    // which lists disconnected apps too, so a grant can be trimmed before the
-    // app reconnects.
-    if (!app || (requesting && !connected)) {
-      return `${appName} is not connected to ${account.name}.`
-    }
+    if (!app || !connected) return `${appName} is not connected to ${account.name}.`
     return undefined
   })
 
@@ -129,81 +99,28 @@
     framed = window.top !== window
     if (framed) return
     page = parsePermissionsHash(window.location.hash)
-    if (!page) {
+    if (!page || page.permissions === undefined) {
       goto(resolve(routes.ROOT))
       return
     }
-    if (requesting) {
-      rows = Array.isArray(requested) ? requestRows(requested) : []
-    } else if (app) {
-      rows = editRows(app.drives, drives, defaultBatchHex)
-      allTicked = app.drives === 'all'
-    }
+    rows = Array.isArray(requested) ? requestRows(requested) : []
     initialSharing = switchValues(app, account?.settings)
     sharing = { ...initialSharing }
   })
-
-  /** "Use account default": the switch follows the account again on save. */
-  function useDefault(name: PermissionName) {
-    sharing[name] = sharingDefault(account?.settings, name)
-    if (!resets.includes(name)) resets.push(name)
-  }
-
-  function optionsFor(index: number): SelectOption[] {
-    const choices = rowChoices(rows, index, drives).map((drive) => ({
-      value: drive.batchID.toHex(),
-      label:
-        driveDisplayName(drive) + (drive.batchID.toHex() === defaultBatchHex ? ' (default)' : ''),
-    }))
-    // A granted drive this device has no record of (edit mode): keep it
-    // selectable, so saving keeps it and "None" is the only way to drop it.
-    const chosen = rows[index].chosen
-    if (chosen !== '' && !choices.some((choice) => choice.value === chosen)) {
-      choices.unshift({ value: chosen, label: unknownDriveLabel(chosen) })
-    }
-    return [
-      ...(rows[index].optional
-        ? [{ value: '', label: requesting ? 'Please select drive' : 'None' }]
-        : []),
-      ...choices,
-      { value: ADD_NEW_DRIVE, label: 'Add new drive…' },
-    ]
-  }
-
-  function choose(index: number, value: string) {
-    if (value === ADD_NEW_DRIVE) {
-      batchesBeforeAdd = new Set(drives.map((drive) => drive.batchID.toHex()))
-      addingFor = index
-    } else {
-      rows[index].chosen = value
-    }
-  }
-
-  function closeAddDialog() {
-    addingFor = undefined
-    selectEpoch += 1
-  }
-
-  function onDriveAdded(message: string) {
-    toastStore.show(message)
-    const added = drives.find((drive) => !batchesBeforeAdd.has(drive.batchID.toHex()))
-    if (addingFor !== undefined && added) rows[addingFor].chosen = added.batchID.toHex()
-  }
 
   async function save() {
     // A popup can sit open past the connection's end.
     now = Date.now()
     if (!page || !account || !app || refusal || saving) return
     const current = app.drives
-    const grant = !requesting
-      ? grantAfterEdit(current, rows, allTicked, defaultBatchHex)
-      : requested === 'all'
+    const grant =
+      requested === 'all'
         ? allTicked
           ? 'all'
           : current
         : grantAfterRequest(current, defaultBatchHex, rowsGrant(rows))
     const grantChanged = !sameGrant(grant, current)
-    const sharingPatch = sharingAfterSave(initialSharing, sharing, resets, account.settings)
+    const sharingPatch = sharingAfterSave(initialSharing, sharing, [], account.settings)
     const changed = grantChanged || Object.keys(sharingPatch).length > 0
     if (changed) {
       account.setAppPermissions(page.appOrigin, {
@@ -212,11 +129,6 @@
       })
     }
 
-    if (!requesting) {
-      toastStore.show('Permissions saved')
-      goto(resolve(routes.ROOT))
-      return
-    }
     // A partitioned session cannot see this write: hand it the account as
     // the bus would. The collections are Svelte proxies, which structured
     // clone rejects, so the wire shape goes through JSON.
@@ -254,9 +166,9 @@
 
         {#if refusal}
           <p class="text-muted-foreground text-center text-sm">{refusal}</p>
-        {:else}
+        {:else if account}
           <div class="flex w-full flex-col gap-4">
-            {#if showAllCheckbox}
+            {#if requested === 'all'}
               <label class="flex w-full items-start gap-2 text-sm">
                 <input type="checkbox" bind:checked={allTicked} class="mt-0.5 size-4 shrink-0" />
                 <span class="flex flex-col gap-1">
@@ -268,20 +180,8 @@
                 </span>
               </label>
             {/if}
-            {#each rows as row, index (index)}
-              <div class="flex w-full flex-col gap-2">
-                <p class="text-sm">{row.kind === 'scratch' ? 'Scratch drive' : 'Drive'}</p>
-                {#key selectEpoch}
-                  <Select
-                    options={optionsFor(index)}
-                    value={row.chosen}
-                    onchange={(value) => choose(index, value)}
-                  />
-                {/key}
-                <p class="text-muted-foreground text-sm">{row.description}</p>
-              </div>
-            {/each}
-            {#if switches.length > 0 && (rows.length > 0 || showAllCheckbox)}
+            <DrivePickerRows {account} bind:rows emptyLabel="Please select drive" />
+            {#if switches.length > 0 && (rows.length > 0 || requested === 'all')}
               <div class="bg-border h-px w-full"></div>
             {/if}
             {#each switches as name (name)}
@@ -290,14 +190,6 @@
                 <div class="flex flex-col gap-1 text-sm">
                   <span class="font-medium">{SWITCH_COPY[name].label}</span>
                   <span class="text-muted-foreground">{SWITCH_COPY[name].description}</span>
-                  {#if !requesting && pinned.includes(name) && !resets.includes(name)}
-                    <span class="text-muted-foreground">
-                      Account default: {sharingDefault(account?.settings, name) ? 'on' : 'off'} ·
-                      <button type="button" class="underline" onclick={() => useDefault(name)}>
-                        Use account default
-                      </button>
-                    </span>
-                  {/if}
                 </div>
               </div>
             {/each}
@@ -308,14 +200,5 @@
         {/if}
       </div>
     </main>
-
-    {#if account && addingFor !== undefined}
-      <DriveAddDialog
-        {account}
-        kind={rows[addingFor].kind}
-        onClose={closeAddDialog}
-        onAdded={onDriveAdded}
-      />
-    {/if}
   </div>
 {/if}

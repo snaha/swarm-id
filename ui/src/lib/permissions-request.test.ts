@@ -14,6 +14,7 @@ import {
   requestRows,
   sharingAfterSave,
   switchValues,
+  switchesToAsk,
   switchesToShow,
   unknownDriveLabel,
 } from '$lib/permissions-request'
@@ -154,6 +155,17 @@ describe('the sharing switches', () => {
     expect(switchesToShow({ drives: [] })).toEqual([])
     expect(switchesToShow({ dataSharing: true })).toEqual(['dataSharing'])
     expect(switchesToShow({ writeAccess: true })).toEqual(['dataSharing', 'writeAccess'])
+  })
+
+  it('are asked for only while off, write access listed for the caller to reveal', () => {
+    const on = { dataSharing: true, writeAccess: true }
+    expect(switchesToAsk({ dataSharing: true, writeAccess: true }, on)).toEqual([])
+    expect(switchesToAsk({ writeAccess: true }, { dataSharing: true, writeAccess: false })).toEqual(
+      ['writeAccess'],
+    )
+    expect(
+      switchesToAsk({ writeAccess: true }, { dataSharing: false, writeAccess: false }),
+    ).toEqual(['dataSharing', 'writeAccess'])
   })
 
   it('tell a pin that differs from the account default from one that matches it', () => {

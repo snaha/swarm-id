@@ -153,7 +153,7 @@
         <!-- Keyed so per-account state (e.g. the unlocked seed) never survives a switch. -->
         {#key account.id}
           {#if tab === 'apps'}
-            <HomeApps {account} />
+            <HomeApps {account} {target} />
           {:else if tab === 'storage'}
             <HomeDrives {account} {target} />
           {:else}

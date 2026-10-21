@@ -7,7 +7,8 @@ import { PASSWORD, completeCreateFlow, goToApp, openConnectPopup, seedNoChain } 
 // The permissions page grants with no unlock (#711), so it refuses to render
 // inside another site's frame: a framed "Save permissions" is a clickjacking
 // target. Chain-free: the refusal comes before any account is looked up.
-const PERMISSIONS_URL = 'http://localhost:5500/permissions#origin=https%3A%2F%2Fapp.example'
+const PERMISSIONS_URL =
+  'http://localhost:5500/permissions#origin=https%3A%2F%2Fapp.example&permissions=%7B%7D'
 
 test('the permissions page refuses to render inside a frame', async ({ page }) => {
   await page.setContent(`<iframe src="${PERMISSIONS_URL}" width="600" height="600"></iframe>`)
@@ -88,13 +89,13 @@ test('the sharing switches gate the key, are asked for, and are pinned per app',
   await expect(page.getByText('Sharing Key', { exact: true })).toBeVisible()
 
   // Pinned apart from the account default: badged on the Apps tab, and the
-  // app's page offers the default back. Taking it leaves the app following.
+  // app's own page (Frame 154) offers the default back, applying at once.
+  // Taking it leaves the app following the account again.
   await page.goto('/')
   await page.getByRole('tab', { name: 'Apps' }).click()
   await expect(page.getByText('Custom permissions')).toBeVisible()
-  await page.getByRole('button', { name: 'App actions' }).click()
-  await page.getByRole('menuitem', { name: 'Permissions' }).click()
-  await expect(page.getByText(`Permissions for ${APP_NAME}`)).toBeVisible()
+  await page.getByRole('button', { name: APP_NAME }).click()
+  await expect(page).toHaveURL(/#apps\/http%3A%2F%2Flocalhost%3A3500$/)
   await expect(page.getByRole('switch', { name: 'Data sharing' })).toHaveAttribute(
     'aria-checked',
     'true',
@@ -106,7 +107,56 @@ test('the sharing switches gate the key, are asked for, and are pinned per app',
     'false',
   )
   await expect(page.getByText('Account default: off')).toHaveCount(0)
-  await page.getByRole('button', { name: 'Save permissions' }).click()
-  await expect(page.getByText('Permissions saved')).toBeVisible()
+  await page.getByRole('button', { name: 'Back to apps' }).click()
   await expect(page.getByText('Custom permissions')).toHaveCount(0)
+  await expect(page).toHaveURL(/#apps$/)
+
+  // Disconnect from the app's page: the row says so, and the page offers
+  // Revoke access alone.
+  await page.getByRole('button', { name: APP_NAME }).click()
+  await page.getByRole('button', { name: 'Disconnect' }).click()
+  await expect(page.getByRole('button', { name: 'Disconnect' })).toHaveCount(0)
+  await page.getByRole('button', { name: 'Back to apps' }).click()
+  await expect(page.getByText('Disconnected')).toBeVisible()
+})
+
+// A switch asked for at connect that is not already on is put on the connect
+// screen beside the drives; turned on there, it is pinned with the connection.
+test('a switch requested at connect is asked on the connect screen', async ({ page }) => {
+  test.setTimeout(120_000)
+  await seedNoChain(page)
+  await page.addInitScript(() => {
+    localStorage.setItem('swarm-id-demo-drive-request', 'sharing')
+  })
+  await page.goto('/?signin')
+  await expect(page.getByRole('link', { name: 'Create a new account' })).toBeVisible({
+    timeout: 15000,
+  })
+  await completeCreateFlow(page)
+  await page.getByRole('button', { name: 'Stay local for now' }).click()
+  await expect(page).toHaveURL(/\/$/)
+  await page.getByRole('tab', { name: 'Apps' }).click()
+  await page.getByRole('switch', { name: 'Data sharing' }).click()
+
+  await page.goto(DEMO_URL)
+  const popup = await openConnectPopup(page)
+  await popup.getByRole('button', { name: /0x[0-9a-fA-F]{4}/ }).click()
+  await popup.getByRole('textbox', { name: 'Account password' }).fill(PASSWORD)
+  await popup.getByRole('button', { name: 'Confirm' }).click()
+  await expect(popup.getByText(`Connect your Swarm ID to ${APP_NAME}`)).toBeVisible()
+  // Data sharing is off for the account, so it is asked; write access only
+  // once data sharing is turned on here.
+  const asked = popup.getByRole('switch', { name: 'Data sharing' })
+  await expect(asked).toHaveAttribute('aria-checked', 'false')
+  await expect(popup.getByRole('switch', { name: 'Write access' })).toHaveCount(0)
+  await asked.click()
+  await expect(popup.getByRole('switch', { name: 'Write access' })).toHaveCount(0)
+  await goToApp(popup)
+
+  // Granted with the connection: the app has its key, nothing left to ask.
+  const accountButton = page.getByRole('button', { name: /0x|[0-9a-f]{6}\.\.\./ }).first()
+  await expect(accountButton).toBeVisible({ timeout: 10000 })
+  await expect(page.getByRole('button', { name: 'Request data sharing' })).toHaveCount(0)
+  await page.goto(`${DEMO_URL}/account`)
+  await expect(page.getByText('Sharing Key', { exact: true })).toBeVisible()
 })

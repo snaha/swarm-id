@@ -54,11 +54,28 @@ export const DRIVE_REQUEST_PRESETS = {
   },
   all: { label: 'All drives', request: 'all' },
   none: { label: 'No drive', request: [] },
-} satisfies Record<string, { label: string; request: DriveRequest | undefined }>
+  sharing: {
+    label: 'Account default + data sharing & write access',
+    request: undefined,
+    sharing: { dataSharing: true, writeAccess: true },
+  },
+} satisfies Record<
+  string,
+  {
+    label: string
+    request: DriveRequest | undefined
+    sharing?: Pick<Permissions, 'dataSharing' | 'writeAccess'>
+  }
+>
 export type DriveRequestPreset = keyof typeof DRIVE_REQUEST_PRESETS
 
-function requestedPermissions(drives: DriveRequest | undefined): Permissions | undefined {
-  return drives === undefined ? undefined : { drives }
+function requestedPermissions(preset: DriveRequestPreset): Permissions | undefined {
+  const { request, sharing } = DRIVE_REQUEST_PRESETS[preset] as {
+    request: DriveRequest | undefined
+    sharing?: Pick<Permissions, 'dataSharing' | 'writeAccess'>
+  }
+  if (request === undefined && sharing === undefined) return undefined
+  return { ...(request !== undefined && { drives: request }), ...sharing }
 }
 
 function loadDriveRequestPreset(): DriveRequestPreset {
@@ -352,7 +369,7 @@ async function runInitialize(generation: number) {
       iframePath: PROXY_PATH,
       timeout: CLIENT_TIMEOUT,
       subsidisedGatewayUrl: currentSubsidisedGatewayUrl,
-      permissions: requestedPermissions(DRIVE_REQUEST_PRESETS[driveRequestPreset].request),
+      permissions: requestedPermissions(driveRequestPreset),
       onConnectionChange,
       metadata: {
         name: 'Swarm ID Demo',

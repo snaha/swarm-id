@@ -2244,8 +2244,9 @@ export interface ClientOptions {
   /**
    * What the app asks the user for on the connect screen (#862): `drives` is
    * `"all"`, or one row per drive. Without it the app writes to the account
-   * default. The sharing switches are not asked at connect — the app gets
-   * the account defaults and asks later with `requestPermissions()` (#885).
+   * default. `dataSharing` / `writeAccess` ask for the sharing switches
+   * (#885): the connect screen shows the ones not already on for the user
+   * to turn on; the app can ask again later with `requestPermissions()`.
    */
   permissions?: Permissions
   /** URL of a subsidised gateway for users without postage stamps. Gateway handles stamping server-side. */

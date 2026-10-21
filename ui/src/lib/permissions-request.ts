@@ -236,9 +236,9 @@ export function switchValues(
 }
 
 /**
- * Which switches the page shows: on a request, the ones asked for — data
- * sharing whenever write access is, since the latter implies it; on an
- * edit, both.
+ * Which switches a request names: the ones asked for, data sharing whenever
+ * write access is, since the latter implies it. Both for no request (an
+ * edit).
  */
 export function switchesToShow(requested: Permissions | undefined): PermissionName[] {
   if (requested === undefined) return [...PERMISSION_NAMES]
@@ -246,6 +246,19 @@ export function switchesToShow(requested: Permissions | undefined): PermissionNa
   if (requested.dataSharing || requested.writeAccess) names.push('dataSharing')
   if (requested.writeAccess) names.push('writeAccess')
   return names
+}
+
+/**
+ * The switches a request asks for that are not already on — the ones the
+ * connect screen and the permissions popup put the question for (#885).
+ * Write access is listed while data sharing is off: it is only SHOWN once
+ * data sharing is on, which the caller keeps live as the user flips it.
+ */
+export function switchesToAsk(
+  requested: Permissions | undefined,
+  current: AppPermissions,
+): PermissionName[] {
+  return switchesToShow(requested).filter((name) => !current[name])
 }
 
 /** The switches an app pins to something other than the account default. */

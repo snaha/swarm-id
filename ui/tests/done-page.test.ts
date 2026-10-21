@@ -138,8 +138,8 @@ test('connect flow shows the done screen variants and closes the popup', async (
   await seedLocalChain(page)
   await page.goto('/')
   await page.getByRole('tab', { name: 'Apps' }).click()
-  await page.getByRole('button', { name: 'App actions' }).click()
-  await page.getByRole('menuitem', { name: 'Remove' }).click()
+  await page.getByRole('button', { name: APP_NAME }).click()
+  await page.getByRole('button', { name: 'Revoke access' }).click()
 
   // A second drive, so the NEXT (first-again) connect must ask which drive
   // the app should use.
@@ -366,16 +366,14 @@ test('an app asks for a scratch drive later, and the Apps tab edits what it hold
     expect.stringMatching(/^[0-9a-f]{64}$/),
   ])
 
-  // The Apps tab opens the same page with everything the app holds: a row
-  // per granted drive. The scratch drive set to None is taken away.
+  // The app's own page under Apps shows everything the app holds: a row
+  // per granted drive, applied as changed. The scratch drive set to None is
+  // taken away.
   await page.getByRole('tab', { name: 'Apps' }).click()
-  await page.getByRole('button', { name: 'App actions' }).click()
-  await page.getByRole('menuitem', { name: 'Permissions' }).click()
-  await expect(page.getByText(`Permissions for ${APP_NAME}`)).toBeVisible()
+  await page.getByRole('button', { name: APP_NAME }).click()
   await expect(page.getByRole('combobox')).toHaveCount(2)
   await expect(page.getByText('Scratch drive', { exact: true })).toBeVisible()
   await page.getByRole('combobox').nth(1).selectOption('')
-  await page.getByRole('button', { name: 'Save permissions' }).click()
   await expect(page.getByText('Permissions saved')).toBeVisible()
   expect(await grantOf()).toEqual([(granted as string[])[0]])
 })

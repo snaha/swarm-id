@@ -238,8 +238,8 @@ test('the bus carries an app removal to a partitioned session', async ({ page })
   // and `connectedUntil` over an incoming entry — a peer's copy of a session
   // deadline is not its to set — and tombstones are the one exception.
   await idPage.getByRole('tab', { name: 'Apps' }).click()
-  await idPage.getByRole('button', { name: 'App actions' }).click()
-  await idPage.getByRole('menuitem', { name: 'Remove' }).click()
+  await idPage.getByRole('button', { name: 'Swarm ID Demo' }).click()
+  await idPage.getByRole('button', { name: 'Revoke access' }).click()
 
   await expect(page.getByRole('heading', { name: 'Not connected' })).toBeVisible({
     timeout: 15000,
@@ -292,8 +292,8 @@ test('a change on one device reaches another device’s stored account', async (
 
     // A revokes on device A...
     await page.getByRole('tab', { name: 'Apps' }).click()
-    await page.getByRole('button', { name: 'App actions' }).click()
-    await page.getByRole('menuitem', { name: 'Remove' }).click()
+    await page.getByRole('button', { name: 'Swarm ID Demo' }).click()
+    await page.getByRole('button', { name: 'Revoke access' }).click()
 
     // ...and B's DURABLE truth follows, which is what an unpartitioned proxy on
     // B reads. Asserted on storage rather than the DOM for exactly that reason.
