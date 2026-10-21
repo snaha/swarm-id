@@ -306,13 +306,22 @@ export function customised(
   )
 }
 
-/** The switches an app pins to something other than the account default. */
+/**
+ * The switches an app pins to something other than the account default.
+ * Write access counts only while data sharing is in effect: without it the
+ * pin changes nothing and has no row to be seen on, so it is not custom —
+ * it is kept, and shows again once data sharing is back on.
+ */
 export function pinnedDifferently(
   app: Pick<ConnectedApp, 'dataSharing' | 'writeAccess'>,
   settings: AccountSettings | undefined,
 ): PermissionName[] {
+  const { dataSharing } = switchValues(app, settings)
   return PERMISSION_NAMES.filter(
-    (name) => app[name] !== undefined && app[name] !== sharingDefault(settings, name),
+    (name) =>
+      (name !== 'writeAccess' || dataSharing) &&
+      app[name] !== undefined &&
+      app[name] !== sharingDefault(settings, name),
   )
 }
 

@@ -212,6 +212,19 @@ describe('the sharing switches', () => {
     ])
   })
 
+  // Asked for both at connect, write access declined, data sharing turned off
+  // again on the app's page: the write pin can neither act nor be seen, so the
+  // app is not custom — until data sharing is back on.
+  it('do not count a write access pin while data sharing is off', () => {
+    const app = { dataSharing: false, writeAccess: false }
+    expect(pinnedDifferently(app, { dataSharing: false })).toEqual([])
+    expect(customised(app, { dataSharing: false })).toBe(false)
+    expect(pinnedDifferently({ writeAccess: false }, { dataSharing: false })).toEqual([])
+    expect(
+      pinnedDifferently({ dataSharing: true, writeAccess: false }, { dataSharing: false }),
+    ).toEqual(['writeAccess'])
+  })
+
   it('save a pin for a switch moved, clear one reset to the default, and leave the rest alone', () => {
     const initial = { dataSharing: false, writeAccess: true }
     expect(sharingAfterSave(initial, initial, [], undefined)).toEqual({})
