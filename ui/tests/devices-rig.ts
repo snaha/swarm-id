@@ -253,8 +253,10 @@ export class Device {
    */
   async upload(page: Page = this.page, batchHex?: string): Promise<string> {
     // A named drive, else the primary: the sidebar's "Write to" select, shown
-    // once the app holds more than one drive.
-    if (batchHex) await page.getByRole('combobox', { name: 'Write to' }).selectOption(batchHex)
+    // once the app holds more than one drive. It keeps its last choice, so an
+    // unnamed upload sets it back rather than inheriting the previous target.
+    const target = page.getByRole('combobox', { name: 'Write to' })
+    if ((await target.count()) > 0) await target.selectOption(batchHex ?? '')
     const payload = `${this.label} ${Date.now()} ${Math.random()}`
     await page.getByPlaceholder('Enter data to upload...').fill(payload)
     // The upload has started once a write leaves for the node (from the proxy
