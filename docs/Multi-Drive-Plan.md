@@ -11,9 +11,10 @@ account's drives**, at connect time or at any time later, and can target any gra
 on a write. A **scratch drive** lets an app overwrite its own earlier data instead of
 filling the batch.
 
-A drive is a postage batch. Today an app session spends exactly one: its per-app override
-(`ConnectedApp.postageStampBatchID`) or else the account default
-(`resolveStampForApp`, `lib/src/utils/postage-stamp-association.ts`).
+A drive is a postage batch. Before this plan an app session spent exactly one: a per-app
+override or else the account default. Now each app holds a **grant**
+(`ConnectedApp.drives`: absent for the account default, `"all"`, or a list), and
+`resolveStampForApp` (`lib/src/utils/postage-stamp-association.ts`) picks its primary from it.
 
 Related issues: [#512](https://github.com/snaha/swarm-id/issues/512) (drive types and
 usage), [#711](https://github.com/snaha/swarm-id/issues/711) (permission flow from an
@@ -262,12 +263,30 @@ a teardown overtook, since nothing else would.
   partitioned session only its granted drives' signer keys (a live `"all"` grant learns of
   new drives that way); an integration test with one session writing two drives and a second
   device taking over each lane independently. Still open after step 4, tracked in #882: `lib/test/integration` calls the library's functions against the cluster and never builds a proxy session, so it belongs to the browser suites (`ui/tests`), next to the three-device scenarios.
+- Steps 5–6: unit tests for the connect picker's rows and the permissions page's request
+  and edit rules; Playwright for each entry point (`done-page.test.ts`).
+- **The Safari path, without Safari.** `chromium-partitioned` turns on Chromium's
+  third-party storage partitioning and browses the demo from a loopback literal, cross-site
+  against the identity origin, so the proxy iframe gets its own store as under ITP; every
+  test there first proves it did. It runs the connect-screen grant, `requestDrives()`
+  through the iframe's popup, and the fallback when that popup is blocked (`window.open`
+  made to fail in the proxy frame, as Safari blocks it) (`bus-propagation.test.ts`).
+  Playwright's WebKit was tried and does not partition the iframe here, so it would only
+  test the shared path.
 - Step 7: unit tests for the wrap (slot sequence, counter monotonicity across a publish); an
   integration test that fills a lane past its capacity and reads back the newest data; a
   live test that the overwrite evicts on a real network.
 
 ## Open questions
 
-None at the moment. To verify in steps 2–3: how the account bus delivers a newly created
-drive to a partitioned session today, so the delta can apply the same reachability rule as
-the `setSecret` handover.
+None. The one this section held — how a partitioned session learns of a drive created after
+its handover — is answered by two tests: a delta is narrowed back to the grant ("does not
+accumulate stamps it cannot spend from a delta"), and a live `"all"` grant lists a drive a
+delta adds.
+
+## Follow-ups
+
+- #882: the two-drive browser test.
+- #879: the connect screen picking up a drive created in another tab.
+- #884: proving a scratch drive's overwritten chunk is evicted on a real network.
+- #885: the data-sharing and write-access permissions.

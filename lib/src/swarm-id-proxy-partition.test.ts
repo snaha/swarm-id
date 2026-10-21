@@ -2951,6 +2951,57 @@ describe("SwarmIdProxy partitioned write enablement", () => {
       )
     })
 
+    // The plan's own claim (#862): a live "all" grant learns of a drive added
+    // after the handover from the delta alone — the handover could not carry
+    // a drive that did not exist yet.
+    it('lists a drive a delta adds to a live "all" grant', async () => {
+      const account = makeSyncedAccount()
+      const challenge = await startPartitionedConnect()
+      await sendSetSecret(challenge, {
+        account: serializeSyncedAccount({
+          ...account,
+          connectedApps: [
+            {
+              appUrl: PARENT_ORIGIN,
+              appName: "dApp",
+              lastConnectedAt: Date.now(),
+              drives: "all",
+              drivesAt: Date.now(),
+            },
+          ],
+        }),
+      })
+      await awaitBusJoin()
+      const added: PostageStamp = {
+        ...account.postageStamps[0],
+        batchID: new BatchId(OTHER_BATCH_ID_HEX),
+        signerKey: new PrivateKey("44".repeat(32)),
+        createdAt: Date.now(),
+      }
+      const busChannel = new BroadcastChannel(accountChannelName)
+      try {
+        busChannel.postMessage(
+          accountDelta({ postageStamps: [...account.postageStamps, added] }),
+        )
+        await vi.waitFor(async () => {
+          await dispatch(
+            { type: "getDrives", requestId: `g-${Date.now()}` },
+            PARENT_ORIGIN,
+            parentWindow,
+          )
+          const drives = messagesOfType("getDrivesResponse").at(-1)!.drives as {
+            batchID: string
+          }[]
+          expect(drives.map((drive) => drive.batchID)).toEqual([
+            BATCH_ID_HEX,
+            OTHER_BATCH_ID_HEX,
+          ])
+        })
+      } finally {
+        busChannel.close()
+      }
+    })
+
     it("disconnects a partitioned session when the delta revokes this app", async () => {
       const busChannel = await hydratedSession()
       try {

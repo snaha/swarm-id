@@ -98,6 +98,15 @@ export class SignalingTransport implements BusTransport {
     return this.peers.size
   }
 
+  /**
+   * Settles once every publish so far has been encrypted and handed to its
+   * socket or data channel — what a page about to close waits for (#711).
+   * Not a delivery receipt: nothing here says a peer has read it.
+   */
+  settled(): Promise<void> {
+    return Promise.allSettled([...this.pendingDeliveries]).then(() => undefined)
+  }
+
   publish(message: BusMessageInput): void {
     const delivery = this.deliver(message).catch((error) => {
       console.error("[SignalingTransport] Publish failed:", error)

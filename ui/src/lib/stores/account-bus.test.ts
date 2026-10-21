@@ -11,7 +11,7 @@ import type { SignedInAccount } from '@snaha/swarm-id/internal'
 import { deriveBusContext } from '@snaha/swarm-id/internal'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
-import { PUBLISH_DEBOUNCE_MS, accountBusStore } from './account-bus'
+import { CLOSE_PUBLISH_TIMEOUT_MS, PUBLISH_DEBOUNCE_MS, accountBusStore } from './account-bus'
 import { applyAccountDelta } from './account-delta'
 
 // The fold itself is `account-delta.test.ts`; here the question is only whether
@@ -33,6 +33,8 @@ const transports = vi.hoisted(
       close: ReturnType<typeof vi.fn>
       /** Peers in the room, as the real transport counts them. */
       peerCount: number
+      /** What `publishBeforeClose` awaits before the window goes. */
+      settled: ReturnType<typeof vi.fn>
       /** What the bus subscribed with — the seam a peer's message arrives on. */
       deliver?: (raw: unknown, from?: string) => void
       /** The seam the room's departures arrive on. */
@@ -57,6 +59,7 @@ vi.mock('@snaha/swarm-id/internal', async (importActual) => {
         local: false,
         peerCount: 0,
         publish: vi.fn(),
+        settled: vi.fn(async () => {}),
         subscribe: vi.fn((handler: (raw: unknown, from?: string) => void) => {
           transport.deliver = handler
           return () => {
@@ -198,6 +201,21 @@ describe('accountBusStore', () => {
     await settlePublish()
     expect(deltasPublished(transports[0])).toHaveLength(1)
   })
+
+  it(
+    'publishes anyway once the wait for a peer runs out',
+    async () => {
+      const account = makeAccount()
+      const started = Date.now()
+
+      await accountBusStore.publishBeforeClose(account)
+
+      expect(Date.now() - started).toBeGreaterThanOrEqual(CLOSE_PUBLISH_TIMEOUT_MS)
+      expect(deltasPublished(transports[0])).toHaveLength(1)
+      expect(transports[0].settled).toHaveBeenCalledOnce()
+    },
+    CLOSE_PUBLISH_TIMEOUT_MS * 2,
+  )
 
   it('closes at once with no signaling server configured', async () => {
     signalingUrlStub.value = undefined

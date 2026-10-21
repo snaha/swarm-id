@@ -29,6 +29,7 @@ import {
   addDrive,
   beeReachable,
   busRoomJoined,
+  buyDriveInDialog,
   chainReachable,
   completeCreateFlow,
   expectProxyPartitioned,
@@ -337,5 +338,151 @@ test('a partitioned session uploads with its own stamp and reads it back', async
   await page.getByRole('button', { name: 'Upload & read back' }).click()
   await expect(page.getByText('Uploaded and read back byte-identical.')).toBeVisible({
     timeout: DRIVE_SETTLE_TIMEOUT_MS,
+  })
+})
+
+// --- Multi-drive on the Safari path (#862) ---------------------------------
+//
+// Steps 5 and 6 each change what a partitioned session is handed, and on
+// Safari that is the ordinary session. These run the same flows as
+// `done-page.test.ts` under the partition, where the only ways a grant reaches
+// the iframe are the popup's `window.opener` hand-off and the account bus.
+
+/** The demo's "Write to" selector: listed only once the app holds two drives. */
+const writeTo = (page: Page) => page.getByLabel('Write to')
+
+/** Pick the demo's connect-time request (`ClientOptions.permissions`) on its origin. */
+async function requestOnConnect(page: Page, preset: string) {
+  await page.goto(`${demoOrigin}/`)
+  await page.evaluate((value) => localStorage.setItem('swarm-id-demo-drive-request', value), preset)
+}
+
+// #880: the picker runs before the handover, so a partitioned session is
+// handed what the user granted.
+test('a partitioned session is handed the drives granted on the connect screen', async ({
+  page,
+}) => {
+  test.skip(!chainUp, 'requires a local chain: two drives are bought')
+  test.setTimeout(CHAIN_TEST_TIMEOUT_MS * 2)
+  await seedLocalChain(page.context())
+  // One funding covers both drives: ~1.3 BZZ each out of 3 (`DRIVE_FUNDING`).
+  await createAccountWithDrive(page)
+  await addDrive(page)
+  await expect(page.getByText(/^Drive [0-9a-f]{4}$/)).toHaveCount(2, {
+    timeout: DRIVE_SETTLE_TIMEOUT_MS,
+  })
+
+  await requestOnConnect(page, 'all')
+  await page.goto(`${demoOrigin}/`)
+  await expectProxyPartitioned(page)
+  const popup = await openProxyConnectPopup(page)
+  await popup.getByRole('button', { name: /0x[0-9a-fA-F]{4}/ }).click()
+  await popup.getByRole('textbox', { name: 'Account password' }).fill(PASSWORD)
+  await popup.getByRole('button', { name: 'Confirm' }).click()
+  await popup.getByRole('checkbox').check()
+  await goToApp(popup)
+
+  // Primary, plus both drives.
+  await expect(writeTo(page).locator('option')).toHaveCount(3, { timeout: 15000 })
+})
+
+// #883: the iframe opens the permissions popup, so the popup hands the new
+// grant straight back through `window.opener` — the path Safari takes.
+test('requestDrives() hands a partitioned session the drive it was granted', async ({ page }) => {
+  test.skip(!chainUp, 'requires a local chain: a scratch drive is bought in the popup')
+  test.setTimeout(CHAIN_TEST_TIMEOUT_MS * 2)
+  await seedLocalChain(page.context())
+  // One funding covers both drives: ~1.3 BZZ each out of 3 (`DRIVE_FUNDING`).
+  await createAccountWithDrive(page)
+  await connectPartitioned(page, '/')
+  await expectProxyPartitioned(page)
+  await expect(writeTo(page)).toHaveCount(0)
+
+  const popupPromise = page.waitForEvent('popup')
+  await page.getByRole('button', { name: 'Request a scratch drive' }).click()
+  const popup = await popupPromise
+  await expect(popup.getByText('Scratch drive', { exact: true })).toBeVisible()
+  // Opened by the iframe: the hand-off goes through `window.opener`.
+  expect(new URL(popup.url()).hash).toContain('challenge=')
+  await popup.getByRole('combobox').selectOption({ label: 'Add new drive…' })
+  await buyDriveInDialog(popup.getByRole('dialog'))
+  await expect(popup.getByRole('combobox')).toHaveValue(/^[0-9a-f]{64}$/)
+  await popup
+    .getByRole('button', { name: 'Save permissions' })
+    .click()
+    .catch(() => undefined)
+  await expect.poll(() => popup.isClosed()).toBe(true)
+
+  // `requestDrives()` resolved with the new grant: no reload, no reconnect.
+  await expect(writeTo(page).locator('option', { hasText: 'scratch' })).toHaveCount(1, {
+    timeout: 15000,
+  })
+})
+
+test('requestDrives() saved with nothing chosen leaves a partitioned session as it was', async ({
+  page,
+}) => {
+  test.skip(!chainUp, 'requires a local chain: the account needs a drive')
+  test.setTimeout(CHAIN_TEST_TIMEOUT_MS)
+  await seedLocalChain(page.context())
+  await createAccountWithDrive(page)
+  await connectPartitioned(page, '/account')
+  await expectProxyPartitioned(page)
+
+  const popupPromise = page.waitForEvent('popup')
+  await page.getByRole('button', { name: 'Request a scratch drive' }).click()
+  const popup = await popupPromise
+  await popup
+    .getByRole('button', { name: 'Save permissions' })
+    .click()
+    .catch(() => undefined)
+  await expect.poll(() => popup.isClosed()).toBe(true)
+
+  await page.reload()
+  await expect(page.getByRole('heading', { name: 'Identity' })).toBeVisible({ timeout: 15000 })
+  await expect(writeTo(page)).toHaveCount(0)
+})
+
+// Safari blocks a popup the iframe opens after a message from the page, and
+// the client then opens it from the page instead. That popup's opener is the
+// dApp, so nothing can hand the iframe the grant but the account bus — which
+// is why the page waits for the delta to go out before it closes. Chromium
+// lets the iframe open it, so the block is made here: `window.open` fails in
+// the proxy frame alone, for the permissions page alone.
+test('requestDrives() reaches a partitioned session over the bus when its popup is blocked', async ({
+  page,
+}) => {
+  test.skip(!chainUp, 'requires a local chain: a scratch drive is bought in the popup')
+  test.setTimeout(CHAIN_TEST_TIMEOUT_MS * 2)
+  await seedLocalChain(page.context())
+  // Only the permissions popup: the connect popup this test needs first opens
+  // from the same frame.
+  await page.context().addInitScript((idOrigin) => {
+    if (location.origin !== idOrigin || !location.pathname.endsWith('/proxy')) return
+    const open = window.open.bind(window)
+    window.open = (url, ...rest) =>
+      String(url ?? '').includes('/permissions#') ? null : open(url, ...rest)
+  }, ID_ORIGIN)
+  // One funding covers both drives: ~1.3 BZZ each out of 3 (`DRIVE_FUNDING`).
+  await createAccountWithDrive(page)
+  await connectPartitioned(page, '/')
+
+  const popupPromise = page.waitForEvent('popup')
+  await page.getByRole('button', { name: 'Request a scratch drive' }).click()
+  const popup = await popupPromise
+  // Opened by the page: no challenge, and marked for the bus.
+  expect(new URL(popup.url()).hash).not.toContain('challenge=')
+  expect(new URL(popup.url()).hash).toContain('handover=bus')
+  await popup.getByRole('combobox').selectOption({ label: 'Add new drive…' })
+  await buyDriveInDialog(popup.getByRole('dialog'))
+  await expect(popup.getByRole('combobox')).toHaveValue(/^[0-9a-f]{64}$/)
+  await popup
+    .getByRole('button', { name: 'Save permissions' })
+    .click()
+    .catch(() => undefined)
+  await expect.poll(() => popup.isClosed(), { timeout: 15000 }).toBe(true)
+
+  await expect(writeTo(page).locator('option', { hasText: 'scratch' })).toHaveCount(1, {
+    timeout: 15000,
   })
 })

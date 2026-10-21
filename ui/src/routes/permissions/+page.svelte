@@ -170,7 +170,8 @@
           ? 'all'
           : current
         : grantAfterRequest(current, defaultBatchHex, rowsGrant(rows))
-    if (!sameGrant(grant, current)) account.setAppDrives(page.appOrigin, grant)
+    const changed = !sameGrant(grant, current)
+    if (changed) account.setAppDrives(page.appOrigin, grant)
 
     if (!requesting) {
       toastStore.show('Permissions saved')
@@ -188,9 +189,10 @@
         delta: { type: 'account-delta', snapshot: accountDeltaSnapshot(account.toSyncedRecord()) },
       }
       window.opener.postMessage(JSON.parse(JSON.stringify(message)), window.location.origin)
-    } else if (page.handOverViaBus) {
+    } else if (page.handOverViaBus && changed) {
       // Opened by the page while the session is partitioned: the bus is the
       // only way back, and closing now would take the delta with the window.
+      // Nothing changed, nothing to carry: the page closes at once.
       saving = true
       await accountBusStore.publishBeforeClose(account.toSyncedRecord())
     }
