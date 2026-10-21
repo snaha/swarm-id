@@ -324,6 +324,15 @@ export const DriveSchema = PostageBatchSchema.extend({
    * `"all"` grant, otherwise the first granted regular drive
    */
   primary: z.boolean(),
+  /**
+   * The write partition this session holds on the drive (#882): the lane its
+   * uploads land on, or `undefined` while it holds none — before its first
+   * write to this drive, and after an idle release or a disconnect. Each
+   * drive's lease is its own, so this moves per drive. Every lease change
+   * emits `connectionInfoChanged`, whether or not the primary's `partition`
+   * moved with it, so `onConnectionChange` is where to re-read the drives.
+   */
+  partition: z.number().int().min(0).optional(),
 })
 export type Drive = z.infer<typeof DriveSchema>
 

@@ -10,9 +10,10 @@ import { CHAIN_RPC_URL, chainReachable } from './helpers'
 import { stockWorkerFaucets, workerFaucetKey } from './worker-faucet'
 
 /**
- * What one run of the three-device suite funds the account's signer with.
- * The smallest drive at 30 days costs ~0.65 BZZ, and whatever is left over is
- * stranded on that signer for good — so not the everyday 3 BZZ.
+ * What one drive costs a run of the device suites: the smallest drive at 30
+ * days is ~0.65 BZZ, and whatever is left over is stranded on that signer for
+ * good — so not the everyday 3 BZZ. The three-device suite buys one, the
+ * two-drive suite two.
  */
 export const DEVICES_RUN_BZZ_PLUR = 10n ** 16n // 1 BZZ
 
@@ -20,17 +21,19 @@ export const DEVICES_RUN_BZZ_PLUR = 10n ** 16n // 1 BZZ
 const STOCKED_SLOTS = 3
 
 /** The first worker slot still holding what one run of this suite spends. */
-export async function stockedSlot(): Promise<number | undefined> {
+export async function stockedSlot(
+  bzzPlur: bigint = DEVICES_RUN_BZZ_PLUR,
+): Promise<number | undefined> {
   const client = new MultichainClient(gnosisMainnetSettings({ rpcUrls: [CHAIN_RPC_URL] }))
   for (let slot = 0; slot < STOCKED_SLOTS; slot++) {
     const address = new PrivateKey(workerFaucetKey(slot)).publicKey().address().toChecksum()
-    if ((await client.getBzzBalance(address as `0x${string}`)) >= DEVICES_RUN_BZZ_PLUR) return slot
+    if ((await client.getBzzBalance(address as `0x${string}`)) >= bzzPlur) return slot
   }
   return undefined
 }
 
 /**
- * The suite buys ONE drive per run. The everyday setup tops every slot back up
+ * A suite buys one or two drives per run. The everyday setup tops every slot back up
  * to its full float from the chain's faucet and fails outright once that
  * faucet runs low — after a dozen runs on one baked chain, which is exactly
  * the cadence of a suite meant to be run by hand. Any slot that still holds
@@ -40,7 +43,9 @@ export async function stockedSlot(): Promise<number | undefined> {
 export default async function globalSetup(config: FullConfig): Promise<void> {
   // One account per run: the seed survives worker restarts inside a run, not
   // across runs, or the roster grows by three devices every time.
-  rmSync(join(config.projects[0].outputDir, 'three-devices-seed.json'), { force: true })
+  for (const seed of ['three-devices-seed.json', 'two-drives-seed.json']) {
+    rmSync(join(config.projects[0].outputDir, seed), { force: true })
+  }
   if (!(await chainReachable())) return
   if ((await stockedSlot()) !== undefined) return
   await stockWorkerFaucets(config.workers, CHAIN_RPC_URL)

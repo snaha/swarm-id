@@ -810,6 +810,7 @@ describe("SwarmIdProxy partitioned write enablement", () => {
         flushStamperState(): Promise<void>
         getWorkerPool(count?: number): Promise<unknown>
         onLeaseAcquired(partition: number): void
+        onLeaseChange(): void
       }
     }
 
@@ -1184,6 +1185,61 @@ describe("SwarmIdProxy partitioned write enablement", () => {
           batchTTL: 3600,
         },
       ])
+    })
+
+    // #882: each drive's lane is its own, and the dApp hears about every move.
+    it("reports each drive's own lane, and announces a lane moving on a drive other than the primary", async () => {
+      nextStamper()
+      await connectWithTwoDrives()
+      nextStamper()
+      await internals().withModeAwareWriteLock(
+        undefined,
+        async () => undefined,
+        SECOND_BATCH_ID_HEX,
+      )
+      const first = coordinatorFor(BATCH_ID_HEX)!
+      const second = coordinatorFor(SECOND_BATCH_ID_HEX)!
+      first.currentPartition = 0
+      second.currentPartition = 1
+
+      const lanes = async () => {
+        const before = messagesOfType("getDrivesResponse").length
+        await dispatch(
+          { type: "getDrives", requestId: `lane-${before}` },
+          PARENT_ORIGIN,
+          parentWindow,
+        )
+        await vi.waitFor(() =>
+          expect(messagesOfType("getDrivesResponse")).toHaveLength(before + 1),
+        )
+        const { drives } = messagesOfType("getDrivesResponse").at(-1)! as {
+          drives: { batchID: string; partition?: number }[]
+        }
+        return drives.map(({ batchID, partition }) => ({ batchID, partition }))
+      }
+      expect(await lanes()).toEqual([
+        { batchID: BATCH_ID_HEX, partition: 0 },
+        { batchID: SECOND_BATCH_ID_HEX, partition: 1 },
+      ])
+
+      // The second drive's lease goes: nothing in the connection info moves
+      // with it, and the dApp is told all the same, so it re-reads the drives.
+      const announced = messagesOfType("connectionInfoChanged").length
+      second.currentPartition = undefined
+      second.deps.onLeaseChange()
+      expect(messagesOfType("connectionInfoChanged")).toHaveLength(
+        announced + 1,
+      )
+      expect(messagesOfType("connectionInfoChanged").at(-1)!.partition).toBe(0)
+      expect(await lanes()).toEqual([
+        { batchID: BATCH_ID_HEX, partition: 0 },
+        { batchID: SECOND_BATCH_ID_HEX, partition: undefined },
+      ])
+      // And nothing moved: nothing is sent.
+      second.deps.onLeaseChange()
+      expect(messagesOfType("connectionInfoChanged")).toHaveLength(
+        announced + 1,
+      )
     })
 
     it("tears down only the drive that leaves the grant", async () => {
