@@ -435,7 +435,7 @@ test('requestDrives() saved with nothing chosen leaves a partitioned session as 
     .catch(() => undefined)
   await expect.poll(() => popup.isClosed()).toBe(true)
 
-  await page.reload()
+  await page.goto(`${demoOrigin}/account`)
   await expect(page.getByRole('heading', { name: 'Identity' })).toBeVisible({ timeout: 15000 })
   await expect(writeTo(page)).toHaveCount(0)
 })
