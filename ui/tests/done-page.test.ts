@@ -286,6 +286,65 @@ test('a drive request renders a row per drive and grants what was picked', async
   expect(await grantOf()).toBe('all')
 })
 
+// #879: a required row waits on a drive, and the drive is created in another
+// tab of the identity UI rather than through the popup's own dialog.
+test('a drive created in another tab fills the row waiting for it', async ({ page }) => {
+  test.setTimeout(CHAIN_TEST_TIMEOUT_MS * 2)
+  await seedLocalChain(page.context())
+  await page.goto('/')
+  await page.getByRole('link', { name: 'Get started' }).first().click()
+  await completeCreateFlow(page)
+  await page.getByRole('button', { name: 'Stay local for now' }).click()
+  await expect(page).toHaveURL(/\/$/)
+  // Two purchases: the regular drive now, the scratch drive from the other tab.
+  await fundPostageSigner(page, { bzzPlur: 2n * DRIVE_FUNDING.bzzPlur })
+  await addDrive(page)
+  await expect(page.getByText(/^Drive [0-9a-f]{4}$/)).toBeVisible({
+    timeout: DRIVE_SETTLE_TIMEOUT_MS,
+  })
+
+  // The demo asks for a drive and a scratch drive it must have; the account
+  // has none, so the popup offers to create one and holds "Go to app".
+  await page.goto(DEMO_URL)
+  await page.evaluate(() => localStorage.setItem('swarm-id-demo-drive-request', 'regular-scratch'))
+  await page.reload()
+  const popup = await openConnectPopup(page)
+  await popup.getByRole('button', { name: /0x[0-9a-fA-F]{4}/ }).click()
+  await popup.getByRole('textbox', { name: 'Account password' }).fill(PASSWORD)
+  await popup.getByRole('button', { name: 'Confirm' }).click()
+  await expect(popup.getByRole('button', { name: 'Add scratch drive' })).toBeVisible()
+  await expect(popup.getByRole('button', { name: 'Go to app' })).toBeDisabled()
+
+  // Meanwhile the Storage tab, in a tab of its own, adds the scratch drive.
+  const storageTab = await page.context().newPage()
+  await storageTab.goto('/')
+  await addDrive(storageTab, { kind: 'scratch' })
+  await expect(storageTab.getByText(/^Drive [0-9a-f]{4}$/)).toHaveCount(2, {
+    timeout: DRIVE_SETTLE_TIMEOUT_MS,
+  })
+
+  // The waiting row took it, with nothing clicked in the popup.
+  await expect(popup.getByRole('combobox').nth(1)).toHaveValue(/^[0-9a-f]{64}$/)
+  await expect(popup.getByRole('button', { name: 'Go to app' })).toBeEnabled()
+  await goToApp(popup)
+  await expect(page.getByRole('button', { name: /0x|[0-9a-f]{6}\.\.\./ }).first()).toBeVisible({
+    timeout: 10000,
+  })
+  await storageTab.reload()
+  const grant = await storageTab.evaluate(() => {
+    const doc = JSON.parse(localStorage.getItem('swarm-id-accounts') ?? '{}') as {
+      data?: { connectedApps?: { appUrl: string; drives?: string[] | 'all' }[] }[]
+    }
+    return doc.data
+      ?.flatMap((account) => account.connectedApps ?? [])
+      .find((app) => app.appUrl === 'http://localhost:3500')?.drives
+  })
+  expect(grant).toEqual([
+    expect.stringMatching(/^[0-9a-f]{64}$/),
+    expect.stringMatching(/^[0-9a-f]{64}$/),
+  ])
+})
+
 // Step 6 (#711): an app asks for more drives after connecting, and the user
 // edits what an app holds from the Apps tab.
 test('an app asks for a scratch drive later, and the Apps tab edits what it holds', async ({

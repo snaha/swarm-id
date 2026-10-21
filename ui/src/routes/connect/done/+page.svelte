@@ -37,6 +37,7 @@
   import {
     ADD_NEW_DRIVE,
     type PickerRow,
+    fillRequiredRows,
     kindOf,
     pickerRows,
     rowChoices,
@@ -144,6 +145,14 @@
     if (Array.isArray(requested)) {
       rows = pickerRows(requested, drives, defaultBatchHex)
     }
+  })
+
+  // A drive created meanwhile in another tab of the identity UI — its Storage
+  // tab, another popup — reaches the account store over the storage event; a
+  // required row still waiting on one takes it (#879).
+  $effect(() => {
+    const filled = fillRequiredRows(rows, drives, defaultBatchHex)
+    if (filled !== rows) rows = filled
   })
 
   function grantFor(): DriveGrant | undefined {
