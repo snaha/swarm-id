@@ -16,6 +16,7 @@ import {
   type Permissions,
   PermissionsSchema,
   type PostageStamp,
+  appSessionDuration,
 } from '@snaha/swarm-id/internal'
 
 import { type PickerRow, kindOf } from '$lib/drive-request'
@@ -259,6 +260,21 @@ export function switchesToAsk(
   current: AppPermissions,
 ): PermissionName[] {
   return switchesToShow(requested).filter((name) => !current[name])
+}
+
+/**
+ * Whether the app holds anything of its own apart from the account defaults
+ * — a sharing switch pinned the other way, or its own session duration — the
+ * Apps tab's "Custom permissions" badge.
+ */
+export function customised(
+  app: Pick<ConnectedApp, 'dataSharing' | 'writeAccess' | 'sessionDuration'>,
+  settings: AccountSettings | undefined,
+): boolean {
+  return (
+    pinnedDifferently(app, settings).length > 0 ||
+    (app.sessionDuration !== undefined && app.sessionDuration !== appSessionDuration(settings))
+  )
 }
 
 /** The switches an app pins to something other than the account default. */

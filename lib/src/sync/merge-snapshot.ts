@@ -146,6 +146,7 @@ export function mergeConnectedApps(
             drives: loser.drives,
             dataSharing: loser.dataSharing,
             writeAccess: loser.writeAccess,
+            sessionDuration: loser.sessionDuration,
             permissionsAt: loser.permissionsAt,
           }
         : winner,

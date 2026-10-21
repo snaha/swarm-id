@@ -1043,7 +1043,8 @@ export class SwarmIdProxy {
       parentOrigin: this.parentOrigin,
       connectedUntil:
         connection?.connectedUntil ??
-        Date.now() + appSessionDuration(this.partitionAccount?.settings),
+        Date.now() +
+          appSessionDuration(this.partitionAccount?.settings, connection),
       data: {
         ...data,
         // The projection carries `BatchId`/`PrivateKey`/`EthAddress`; this is
@@ -1157,10 +1158,11 @@ export class SwarmIdProxy {
     connectedAt: number,
   ): Promise<void> {
     const now = Date.now()
+    const existing = account.connectedApps.find(
+      (app) => app.appUrl === this.parentOrigin,
+    )
     const connection: ConnectedApp = {
-      ...(account.connectedApps.find(
-        (app) => app.appUrl === this.parentOrigin,
-      ) ?? {
+      ...(existing ?? {
         appUrl: this.parentOrigin!,
         appName: this.appMetadata?.name ?? this.parentOrigin!,
         lastConnectedAt: connectedAt,
@@ -1176,7 +1178,7 @@ export class SwarmIdProxy {
       // while the line above is not: `savePartitionSession` reads it straight
       // back off this connection, and a restore is bounded by the deadline the
       // stored record already carries (`readPartitionSession`).
-      connectedUntil: now + appSessionDuration(account.settings),
+      connectedUntil: now + appSessionDuration(account.settings, existing),
     }
     this.partitionAccount = {
       ...account,

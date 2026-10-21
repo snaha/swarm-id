@@ -173,6 +173,7 @@ export function serializeConnectedApp(
         : app.drives?.map((batchId) => batchId.toString()),
     dataSharing: app.dataSharing,
     writeAccess: app.writeAccess,
+    sessionDuration: app.sessionDuration,
     permissionsAt: app.permissionsAt,
     revokedAt: app.revokedAt,
     disconnectedAt: app.disconnectedAt,

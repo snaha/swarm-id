@@ -48,6 +48,7 @@ function saveConnection(
   grant: ConnectGrant | undefined,
 ): void {
   const now = Date.now()
+  const existing = account.connectedApps.find((app) => app.appUrl === request.appOrigin)
   const connection: ConnectedApp = {
     appUrl: request.appOrigin,
     appName: request.appName,
@@ -55,7 +56,7 @@ function saveConnection(
     appDescription: request.appDescription,
     appSecret,
     lastConnectedAt: now,
-    connectedUntil: now + appSessionDuration(account.settings),
+    connectedUntil: now + appSessionDuration(account.settings, existing),
     ...(grant ? { ...grant, permissionsAt: now } : {}),
   }
   account.connectApp(connection)

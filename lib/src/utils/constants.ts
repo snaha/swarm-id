@@ -23,8 +23,8 @@ export const DAY = 24 * HOUR
 export const DEFAULT_SESSION_DURATION = 30 * DAY
 
 /**
- * How long a connection to a dApp lasts, in ms: the account's own setting, or
- * the default above.
+ * How long a connection to a dApp lasts, in ms: the app's own setting when
+ * the user gave it one, else the account's, else the default above.
  *
  * One rule with two callers on opposite sides of the handover — the popup
  * writes `connectedUntil` from it when it saves the connection
@@ -33,8 +33,13 @@ export const DEFAULT_SESSION_DURATION = 30 * DAY
  * `?? DEFAULT_SESSION_DURATION` is one copy that goes stale when the rule
  * gains a clamp or a floor (#590).
  */
-export function appSessionDuration(settings?: {
-  appSessionDuration?: number
-}): number {
-  return settings?.appSessionDuration ?? DEFAULT_SESSION_DURATION
+export function appSessionDuration(
+  settings?: { appSessionDuration?: number },
+  app?: { sessionDuration?: number },
+): number {
+  return (
+    app?.sessionDuration ??
+    settings?.appSessionDuration ??
+    DEFAULT_SESSION_DURATION
+  )
 }

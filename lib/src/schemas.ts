@@ -162,7 +162,11 @@ export const ConnectedAppSchemaV1 = z.object({
   // default becomes. `effectivePermissions` (`permissions.ts`) folds the two.
   dataSharing: z.boolean().optional(),
   writeAccess: z.boolean().optional(),
-  // The grant above — drives and the two switches — rides its own
+  // How long this app's connections last, in ms, when the user set it for
+  // this app rather than the account (`settings.appSessionDuration`).
+  // Applied at the next connect (`appSessionDuration`).
+  sessionDuration: z.number().optional(),
+  // The grant above — drives, the two switches, the duration — rides its own
   // last-writer-wins clock, because it is the one edit to an entry that says
   // nothing about whether the app is still connected. Ranking the whole entry
   // on a clock this bumped let a drive picked on a stale copy outrank a revoke

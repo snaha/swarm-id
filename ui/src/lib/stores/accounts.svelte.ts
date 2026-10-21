@@ -23,6 +23,11 @@ import { browser } from '$app/environment'
 import { drivesNeedingAttention, soonestDriveExpiry } from '$lib/drives'
 import { daysToMs } from '$lib/duration'
 
+/** What an app holds that the user edits on its page: all on `permissionsAt`. */
+export type AppPermissionsPatch = Partial<
+  Pick<ConnectedApp, 'drives' | 'dataSharing' | 'writeAccess' | 'sessionDuration'>
+>
+
 /**
  * The device-local tail of the account record, mirroring the lib's `Account`
  * union: the seed vault — which SURVIVES a sign-out so the user can sign back
@@ -397,14 +402,11 @@ export class Account {
   }
 
   /**
-   * Change part of what an app holds — its drives, or a sharing switch
-   * pinned (or unpinned with `undefined`, to follow the account default
-   * again, #885) — on the grant's own clock.
+   * Change part of what an app holds — its drives, a sharing switch or its
+   * session duration pinned (or unpinned with `undefined`, to follow the
+   * account default again, #885) — on the grant's own clock.
    */
-  setAppPermissions(
-    appUrl: string,
-    patch: Partial<Pick<ConnectedApp, 'drives' | 'dataSharing' | 'writeAccess'>>,
-  ) {
+  setAppPermissions(appUrl: string, patch: AppPermissionsPatch) {
     if (!this.connectedApps.some((app) => app.appUrl === appUrl)) {
       return
     }
@@ -620,7 +622,13 @@ function revoked(app: ConnectedApp, tombstone: boolean): ConnectedApp {
     // it had, and the picker's default choice writes nothing to clear them
     // (#862). On the grant's own clock so the reset wins the merge.
     ...(tombstone
-      ? { drives: undefined, dataSharing: undefined, writeAccess: undefined, permissionsAt: now }
+      ? {
+          drives: undefined,
+          dataSharing: undefined,
+          writeAccess: undefined,
+          sessionDuration: undefined,
+          permissionsAt: now,
+        }
       : {}),
     // Clear only the auth material; keep `lastConnectedAt` so the connect flow
     // can still order this account by when it was last used (a revoked app must

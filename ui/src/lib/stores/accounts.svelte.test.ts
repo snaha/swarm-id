@@ -422,10 +422,15 @@ describe('Account sharing switches', () => {
 
   it('forgets the pins with Remove, as it forgets the drives', () => {
     const account = accountWithApp()
-    account.setAppPermissions(APP_URL, { dataSharing: false, writeAccess: false })
+    account.setAppPermissions(APP_URL, {
+      dataSharing: false,
+      writeAccess: false,
+      sessionDuration: 7,
+    })
     account.removeApp(APP_URL)
     expect(account.connectedApps[0].dataSharing).toBeUndefined()
     expect(account.connectedApps[0].writeAccess).toBeUndefined()
+    expect(account.connectedApps[0].sessionDuration).toBeUndefined()
   })
 })
 

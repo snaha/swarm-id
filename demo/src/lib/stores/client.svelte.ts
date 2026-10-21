@@ -54,28 +54,41 @@ export const DRIVE_REQUEST_PRESETS = {
   },
   all: { label: 'All drives', request: 'all' },
   none: { label: 'No drive', request: [] },
-  sharing: {
-    label: 'Account default + data sharing & write access',
-    request: undefined,
-    sharing: { dataSharing: true, writeAccess: true },
-  },
-} satisfies Record<
-  string,
-  {
-    label: string
-    request: DriveRequest | undefined
-    sharing?: Pick<Permissions, 'dataSharing' | 'writeAccess'>
-  }
->
+} satisfies Record<string, { label: string; request: DriveRequest | undefined }>
 export type DriveRequestPreset = keyof typeof DRIVE_REQUEST_PRESETS
 
-function requestedPermissions(preset: DriveRequestPreset): Permissions | undefined {
-  const { request, sharing } = DRIVE_REQUEST_PRESETS[preset] as {
-    request: DriveRequest | undefined
-    sharing?: Pick<Permissions, 'dataSharing' | 'writeAccess'>
+/** The sharing switches asked for at connect (#885); the Permissions page sets them. */
+export interface SharingRequest {
+  dataSharing: boolean
+  writeAccess: boolean
+}
+const SHARING_REQUEST_STORAGE_KEY = 'swarm-id-demo-sharing-request'
+
+/** What the next connect asks for: the drives preset and the switches ticked. */
+function requestedPermissions(
+  preset: DriveRequestPreset,
+  sharing: SharingRequest,
+): Permissions | undefined {
+  const { request } = DRIVE_REQUEST_PRESETS[preset]
+  const permissions: Permissions = {
+    ...(request !== undefined && { drives: request }),
+    ...(sharing.dataSharing && { dataSharing: true }),
+    ...(sharing.writeAccess && { writeAccess: true }),
   }
-  if (request === undefined && sharing === undefined) return undefined
-  return { ...(request !== undefined && { drives: request }), ...sharing }
+  return Object.keys(permissions).length > 0 ? permissions : undefined
+}
+
+function loadSharingRequest(): SharingRequest {
+  try {
+    const stored = localStorage.getItem(SHARING_REQUEST_STORAGE_KEY)
+    if (stored !== null) {
+      const parsed = JSON.parse(stored) as Partial<SharingRequest>
+      return { dataSharing: parsed.dataSharing === true, writeAccess: parsed.writeAccess === true }
+    }
+  } catch {
+    // localStorage unavailable, or an unreadable value
+  }
+  return { dataSharing: false, writeAccess: false }
 }
 
 function loadDriveRequestPreset(): DriveRequestPreset {
@@ -156,8 +169,10 @@ function loadSubsidisedGatewayPreference(): boolean {
 
 let subsidisedGatewayEnabled = $state(loadSubsidisedGatewayPreference())
 let driveRequestPreset = $state<DriveRequestPreset>(loadDriveRequestPreset())
+let sharingRequest = $state<SharingRequest>(loadSharingRequest())
 // The preset the live client was built with, compared like the gateway above.
 let currentDriveRequestPreset: DriveRequestPreset | undefined = undefined
+let currentSharingRequest: string | undefined = undefined
 
 let currentIdentityId: string | undefined
 let currentIdentityName: string | undefined
@@ -361,6 +376,7 @@ async function runInitialize(generation: number) {
 
     currentSubsidisedGatewayUrl = subsidisedGatewayEnabled ? DEFAULT_BEE_NODE_URL : undefined
     currentDriveRequestPreset = driveRequestPreset
+    currentSharingRequest = JSON.stringify(sharingRequest)
 
     // Held locally as well: everything below runs across awaits, and `client`
     // can be cleared under us by a teardown in between.
@@ -369,7 +385,7 @@ async function runInitialize(generation: number) {
       iframePath: PROXY_PATH,
       timeout: CLIENT_TIMEOUT,
       subsidisedGatewayUrl: currentSubsidisedGatewayUrl,
-      permissions: requestedPermissions(driveRequestPreset),
+      permissions: requestedPermissions(driveRequestPreset, sharingRequest),
       onConnectionChange,
       metadata: {
         name: 'Swarm ID Demo',
@@ -469,7 +485,8 @@ async function runConnect(): Promise<void> {
   if (
     client &&
     (currentSubsidisedGatewayUrl !== subsidisedUrl ||
-      currentDriveRequestPreset !== driveRequestPreset)
+      currentDriveRequestPreset !== driveRequestPreset ||
+      currentSharingRequest !== JSON.stringify(sharingRequest))
   ) {
     logStore.log('Connect options changed, reinitializing client...')
     teardownClient()
@@ -526,22 +543,30 @@ export const clientStore = {
     return permissions
   },
   /**
-   * Ask for a sharing switch the user turned off (#885): opens the
-   * "Permissions for Swarm ID Demo" popup, or nothing when it is already on.
+   * Ask the user for more (#711, #885): opens the "Permissions for Swarm ID
+   * Demo" popup with what is asked, or nothing when every switch asked for is
+   * already on and no drive was. Resolves with what the app holds after.
    */
-  async requestSharing(permission: PermissionName): Promise<void> {
-    if (!client) return
+  async requestPermissions(request: Permissions): Promise<AppPermissions | undefined> {
+    if (!client) return undefined
     try {
-      const held = await client.requestPermissions({ [permission]: true })
+      const held = await client.requestPermissions(request)
+      drives = await client.getDrives()
       logStore.log(
-        `Permissions after the request: data sharing ${held.dataSharing ? 'on' : 'off'}, write access ${held.writeAccess ? 'on' : 'off'}`,
+        `Permissions after the request: data sharing ${held.dataSharing ? 'on' : 'off'}, write access ${held.writeAccess ? 'on' : 'off'}, drives ${drives.map((drive) => `${drive.batchID.slice(0, 8)} (${drive.kind})`).join(', ') || 'none'}`,
       )
+      return held
     } catch (error) {
       logStore.log(
         `Permission request failed: ${error instanceof Error ? error.message : String(error)}`,
         'warn',
       )
+      return undefined
     }
+  },
+  /** One switch, from the sidebar. */
+  async requestSharing(permission: PermissionName): Promise<void> {
+    await this.requestPermissions({ [permission]: true })
   },
   get drives() {
     return drives
@@ -606,6 +631,18 @@ export const clientStore = {
       localStorage.setItem(DRIVE_REQUEST_STORAGE_KEY, value)
     } catch {
       logStore.log('Could not persist the drive request choice', 'warn')
+    }
+  },
+
+  get sharingRequest() {
+    return sharingRequest
+  },
+  set sharingRequest(value: SharingRequest) {
+    sharingRequest = value
+    try {
+      localStorage.setItem(SHARING_REQUEST_STORAGE_KEY, JSON.stringify(value))
+    } catch {
+      logStore.log('Could not persist the sharing request choice', 'warn')
     }
   },
 

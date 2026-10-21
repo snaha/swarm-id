@@ -5,6 +5,7 @@ import type { PostageStamp } from '@snaha/swarm-id/internal'
 import { describe, expect, it } from 'vitest'
 
 import {
+  customised,
   editRows,
   grantAfterEdit,
   grantAfterRequest,
@@ -166,6 +167,13 @@ describe('the sharing switches', () => {
     expect(
       switchesToAsk({ writeAccess: true }, { dataSharing: false, writeAccess: false }),
     ).toEqual(['dataSharing', 'writeAccess'])
+  })
+
+  it('count a differing pin or an own session length as custom', () => {
+    expect(customised({}, undefined)).toBe(false)
+    expect(customised({ dataSharing: false }, undefined)).toBe(true)
+    expect(customised({ sessionDuration: 7 }, undefined)).toBe(true)
+    expect(customised({ sessionDuration: 7 }, { appSessionDuration: 7 })).toBe(false)
   })
 
   it('tell a pin that differs from the account default from one that matches it', () => {

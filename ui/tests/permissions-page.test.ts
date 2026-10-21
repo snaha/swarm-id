@@ -66,10 +66,13 @@ test('the sharing switches gate the key, are asked for, and are pinned per app',
   await expect(page.getByText('Sharing key withheld')).toBeVisible()
   await expect(page.getByText('Sharing Key', { exact: true })).toHaveCount(0)
 
-  // The app asks: the page shows that one switch, off; turning it on pins it.
-  await page.goto(DEMO_URL)
+  // The app asks, from the demo's Permissions page: the popup shows that one
+  // switch, off; turning it on pins it.
+  await page.goto(`${DEMO_URL}/permissions`)
+  await expect(page.getByText('Data sharing: off')).toBeVisible()
+  await page.getByRole('checkbox', { name: 'Data sharing', exact: true }).last().click()
   const popupPromise = page.waitForEvent('popup')
-  await requestButton.click()
+  await page.getByRole('button', { name: 'Request permissions' }).click()
   const permissions = await popupPromise
   await expect(permissions.getByText(`Permissions for ${APP_NAME}`)).toBeVisible()
   await expect(permissions.getByRole('combobox')).toHaveCount(0)
@@ -84,6 +87,8 @@ test('the sharing switches gate the key, are asked for, and are pinned per app',
   await expect.poll(() => permissions.isClosed()).toBe(true)
 
   // The live session sees it: the key is back, and nothing left to ask.
+  await expect(page.getByText('Data sharing: on')).toBeVisible({ timeout: 15000 })
+  await page.goto(DEMO_URL)
   await expect(requestButton).toHaveCount(0, { timeout: 15000 })
   await page.goto(`${DEMO_URL}/account`)
   await expect(page.getByText('Sharing Key', { exact: true })).toBeVisible()
@@ -111,6 +116,20 @@ test('the sharing switches gate the key, are asked for, and are pinned per app',
   await expect(page.getByText('Custom permissions')).toHaveCount(0)
   await expect(page).toHaveURL(/#apps$/)
 
+  // The app's own session length counts as custom too, until reset.
+  await page.getByRole('button', { name: APP_NAME }).click()
+  const duration = page.getByRole('combobox', { name: 'Keep app connected for' })
+  await expect(duration).toHaveValue('30')
+  await duration.selectOption('7')
+  await expect(page.getByText('Account default: 30 days')).toBeVisible()
+  await page.getByRole('button', { name: 'Back to apps' }).click()
+  await expect(page.getByText('Custom permissions')).toBeVisible()
+  await page.getByRole('button', { name: APP_NAME }).click()
+  await page.getByRole('button', { name: 'Use account default' }).click()
+  await expect(duration).toHaveValue('30')
+  await page.getByRole('button', { name: 'Back to apps' }).click()
+  await expect(page.getByText('Custom permissions')).toHaveCount(0)
+
   // Disconnect from the app's page: the row says so, and the page offers
   // Revoke access alone.
   await page.getByRole('button', { name: APP_NAME }).click()
@@ -126,7 +145,10 @@ test('a switch requested at connect is asked on the connect screen', async ({ pa
   test.setTimeout(120_000)
   await seedNoChain(page)
   await page.addInitScript(() => {
-    localStorage.setItem('swarm-id-demo-drive-request', 'sharing')
+    localStorage.setItem(
+      'swarm-id-demo-sharing-request',
+      JSON.stringify({ dataSharing: true, writeAccess: true }),
+    )
   })
   await page.goto('/?signin')
   await expect(page.getByRole('link', { name: 'Create a new account' })).toBeVisible({

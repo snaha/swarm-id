@@ -18,17 +18,11 @@
   import { Badge } from '$lib/components/ui/badge'
   import { Select } from '$lib/components/ui/select'
   import { Switch } from '$lib/components/ui/switch'
-  import { msToDays } from '$lib/duration'
-  import { pinnedDifferently, sharingDefault } from '$lib/permissions-request'
+  import { CONNECTION_DAYS_OPTIONS, msToDays } from '$lib/duration'
+  import { customised, sharingDefault } from '$lib/permissions-request'
   import type { Account } from '$lib/types'
 
   const DEFAULT_CONNECTION_DAYS = 30
-  const DURATION_OPTIONS = [
-    { value: '1', label: '1 day' },
-    { value: '7', label: '7 days' },
-    { value: '30', label: '30 days' },
-    { value: '90', label: '90 days' },
-  ]
 
   interface Props {
     account: Account
@@ -74,7 +68,7 @@
     <div class="flex w-full items-center justify-between gap-4">
       <p class="text-sm">Keep apps connected for</p>
       <Select
-        options={DURATION_OPTIONS}
+        options={CONNECTION_DAYS_OPTIONS}
         bind:value={connectionDays}
         class="w-70"
         onchange={(value) => account.setAppConnectionDays(Number(value))}
@@ -123,7 +117,7 @@
               <p class="truncate text-sm font-medium">{app.appName}</p>
               <p class="text-muted-foreground truncate text-sm">{app.appUrl}</p>
             </div>
-            {#if pinnedDifferently(app, account.settings).length > 0}
+            {#if customised(app, account.settings)}
               <Badge variant="outline">Custom permissions</Badge>
             {/if}
             {#if !isConnected(app.connectedUntil)}
