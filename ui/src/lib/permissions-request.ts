@@ -259,7 +259,36 @@ export function switchesToAsk(
   requested: Permissions | undefined,
   current: AppPermissions,
 ): PermissionName[] {
-  return switchesToShow(requested).filter((name) => !current[name])
+  const effective = askedValues(current)
+  return switchesToShow(requested).filter((name) => !effective[name])
+}
+
+/**
+ * What the asked switches show at first: the effective values, so write
+ * access reads off while data sharing is, whatever it would be underneath.
+ */
+export function askedValues(raw: AppPermissions): AppPermissions {
+  return { dataSharing: raw.dataSharing, writeAccess: raw.dataSharing && raw.writeAccess }
+}
+
+/**
+ * The pins an ask leaves: each switch asked and moved off its underlying
+ * value — and a write access asked and left off while data sharing was
+ * turned on, since the user declined it. A switch not asked, or left
+ * disabled (data sharing still off), was not decided, so it is not pinned.
+ */
+export function askedPatch(
+  raw: AppPermissions,
+  shown: AppPermissions,
+  asked: readonly PermissionName[],
+  settings: AccountSettings | undefined,
+): Partial<Pick<ConnectedApp, 'dataSharing' | 'writeAccess'>> {
+  const decided = {
+    dataSharing: asked.includes('dataSharing') ? shown.dataSharing : raw.dataSharing,
+    writeAccess:
+      asked.includes('writeAccess') && shown.dataSharing ? shown.writeAccess : raw.writeAccess,
+  }
+  return sharingAfterSave(raw, decided, [], settings)
 }
 
 /**

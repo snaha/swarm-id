@@ -166,19 +166,31 @@ test('a switch requested at connect is asked on the connect screen', async ({ pa
   await popup.getByRole('textbox', { name: 'Account password' }).fill(PASSWORD)
   await popup.getByRole('button', { name: 'Confirm' }).click()
   await expect(popup.getByText(`Connect your Swarm ID to ${APP_NAME}`)).toBeVisible()
-  // Data sharing is off for the account, so it is asked; write access only
-  // once data sharing is turned on here.
+  // Data sharing is off for the account, so both are asked; write access is
+  // there from the start but only enabled once data sharing is on.
   const asked = popup.getByRole('switch', { name: 'Data sharing' })
+  const write = popup.getByRole('switch', { name: 'Write access' })
   await expect(asked).toHaveAttribute('aria-checked', 'false')
-  await expect(popup.getByRole('switch', { name: 'Write access' })).toHaveCount(0)
+  await expect(write).toBeDisabled()
   await asked.click()
-  await expect(popup.getByRole('switch', { name: 'Write access' })).toHaveCount(0)
+  await expect(write).toBeEnabled()
+  await write.click()
+  await expect(write).toHaveAttribute('aria-checked', 'true')
+  // Turning data sharing off takes write access with it; on again, it is asked afresh.
+  await asked.click()
+  await expect(write).toBeDisabled()
+  await expect(write).toHaveAttribute('aria-checked', 'false')
+  await asked.click()
+  await write.click()
   await goToApp(popup)
 
   // Granted with the connection: the app has its key, nothing left to ask.
   const accountButton = page.getByRole('button', { name: /0x|[0-9a-f]{6}\.\.\./ }).first()
   await expect(accountButton).toBeVisible({ timeout: 10000 })
   await expect(page.getByRole('button', { name: 'Request data sharing' })).toHaveCount(0)
+  await page.goto(`${DEMO_URL}/permissions`)
+  await expect(page.getByText('Data sharing: on')).toBeVisible()
+  await expect(page.getByText('Write access: on')).toBeVisible()
   await page.goto(`${DEMO_URL}/account`)
   await expect(page.getByText('Sharing Key', { exact: true })).toBeVisible()
 })

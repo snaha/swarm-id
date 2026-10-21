@@ -20,7 +20,11 @@
 <script lang="ts">
   import { onMount } from 'svelte'
 
-  import { type AppPermissions, accountDeltaSnapshot } from '@snaha/swarm-id/internal'
+  import {
+    type AppPermissions,
+    type PermissionName,
+    accountDeltaSnapshot,
+  } from '@snaha/swarm-id/internal'
 
   import { goto } from '$app/navigation'
   import { resolve } from '$app/paths'
@@ -34,12 +38,13 @@
   import {
     type PermissionsPageRequest,
     SWITCH_COPY,
+    askedPatch,
+    askedValues,
     grantAfterRequest,
     grantableOnRequest,
     parsePermissionsHash,
     requestRows,
     sameGrant,
-    sharingAfterSave,
     switchValues,
     switchesToAsk,
   } from '$lib/permissions-request'
@@ -56,6 +61,12 @@
   /** The sharing switches: what they were at load, and show now. */
   let initialSharing = $state<AppPermissions>({ dataSharing: true, writeAccess: true })
   let sharing = $state<AppPermissions>({ dataSharing: true, writeAccess: true })
+
+  /** Flip a switch; write access cannot outlive data sharing. */
+  function flip(name: PermissionName) {
+    sharing[name] = !sharing[name]
+    if (name === 'dataSharing' && !sharing.dataSharing) sharing.writeAccess = false
+  }
   let saving = $state(false)
   /** Rendered inside another site: a grant is one click, so refuse (clickjacking). */
   let framed = $state(false)
@@ -78,12 +89,9 @@
   /** The clock `connected` reads: not reactive, so `save` sets it again. */
   let now = $state(Date.now())
   const connected = $derived(grantableOnRequest(app, now))
-  // Write access is shown once data sharing is on, as designed.
-  const switches = $derived(
-    switchesToAsk(page?.permissions, initialSharing).filter(
-      (name) => name !== 'writeAccess' || sharing.dataSharing,
-    ),
-  )
+  // Write access stays on screen while data sharing is off, disabled: both
+  // asked for means both shown, and one enables the other.
+  const switches = $derived(switchesToAsk(page?.permissions, initialSharing))
 
   /** Why the page cannot grant anything, if it cannot. */
   const refusal = $derived.by(() => {
@@ -105,7 +113,7 @@
     }
     rows = Array.isArray(requested) ? requestRows(requested) : []
     initialSharing = switchValues(app, account?.settings)
-    sharing = { ...initialSharing }
+    sharing = askedValues(initialSharing)
   })
 
   async function save() {
@@ -120,7 +128,7 @@
           : current
         : grantAfterRequest(current, defaultBatchHex, rowsGrant(rows))
     const grantChanged = !sameGrant(grant, current)
-    const sharingPatch = sharingAfterSave(initialSharing, sharing, [], account.settings)
+    const sharingPatch = askedPatch(initialSharing, sharing, switches, account.settings)
     const changed = grantChanged || Object.keys(sharingPatch).length > 0
     if (changed) {
       account.setAppPermissions(page.appOrigin, {
@@ -186,7 +194,12 @@
             {/if}
             {#each switches as name (name)}
               <div class="flex w-full items-start gap-3">
-                <Switch bind:checked={sharing[name]} aria-label={SWITCH_COPY[name].label} />
+                <Switch
+                  checked={sharing[name]}
+                  disabled={name === 'writeAccess' && !sharing.dataSharing}
+                  aria-label={SWITCH_COPY[name].label}
+                  onclick={() => flip(name)}
+                />
                 <div class="flex flex-col gap-1 text-sm">
                   <span class="font-medium">{SWITCH_COPY[name].label}</span>
                   <span class="text-muted-foreground">{SWITCH_COPY[name].description}</span>

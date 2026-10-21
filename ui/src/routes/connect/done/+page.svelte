@@ -26,7 +26,7 @@
 
   import { BatchId } from '@ethersphere/bee-js'
   import ArrowRight from '@lucide/svelte/icons/arrow-right'
-  import type { AppPermissions } from '@snaha/swarm-id/internal'
+  import type { AppPermissions, PermissionName } from '@snaha/swarm-id/internal'
 
   import { goto } from '$app/navigation'
   import { resolve } from '$app/paths'
@@ -50,7 +50,8 @@
   import { driveDisplayName } from '$lib/drives'
   import {
     SWITCH_COPY,
-    sharingAfterSave,
+    askedPatch,
+    askedValues,
     switchValues,
     switchesToAsk,
   } from '$lib/permissions-request'
@@ -87,11 +88,15 @@
   /** The sharing switches (#885): what they were at load, and show now. */
   let initialSharing = $state<AppPermissions>({ dataSharing: true, writeAccess: true })
   let sharing = $state<AppPermissions>({ dataSharing: true, writeAccess: true })
-  const switches = $derived(
-    switchesToAsk(request?.permissions, initialSharing).filter(
-      (name) => name !== 'writeAccess' || sharing.dataSharing,
-    ),
-  )
+
+  /** Flip a switch; write access cannot outlive data sharing. */
+  function flip(name: PermissionName) {
+    sharing[name] = !sharing[name]
+    if (name === 'dataSharing' && !sharing.dataSharing) sharing.writeAccess = false
+  }
+  // Write access stays on screen while data sharing is off, disabled: both
+  // asked for means both shown, and one enables the other.
+  const switches = $derived(switchesToAsk(request?.permissions, initialSharing))
   /** The legacy picker's explicit choice; the account default until touched. */
   let chosenBatchHex = $state<string | undefined>(undefined)
   const selectedBatchHex = $derived(chosenBatchHex ?? defaultBatchHex)
@@ -167,7 +172,7 @@
       account.connectedApps.find((app) => app.appUrl === request.appOrigin),
       account.settings,
     )
-    sharing = { ...initialSharing }
+    sharing = askedValues(initialSharing)
   })
 
   function driveGrantFor(): Pick<ConnectGrant, 'drives'> | undefined {
@@ -187,7 +192,7 @@
   function grantFor(): ConnectGrant | undefined {
     const grant = {
       ...driveGrantFor(),
-      ...sharingAfterSave(initialSharing, sharing, [], account?.settings),
+      ...askedPatch(initialSharing, sharing, switches, account?.settings),
     }
     return Object.keys(grant).length > 0 ? grant : undefined
   }
@@ -268,7 +273,12 @@
           {/if}
           {#each switches as name (name)}
             <div class="flex w-full items-start gap-3">
-              <Switch bind:checked={sharing[name]} aria-label={SWITCH_COPY[name].label} />
+              <Switch
+                checked={sharing[name]}
+                disabled={name === 'writeAccess' && !sharing.dataSharing}
+                aria-label={SWITCH_COPY[name].label}
+                onclick={() => flip(name)}
+              />
               <div class="flex flex-col gap-1 text-sm">
                 <span class="font-medium">{SWITCH_COPY[name].label}</span>
                 <span class="text-muted-foreground">{SWITCH_COPY[name].description}</span>

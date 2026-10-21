@@ -5,6 +5,8 @@ import type { PostageStamp } from '@snaha/swarm-id/internal'
 import { describe, expect, it } from 'vitest'
 
 import {
+  askedPatch,
+  askedValues,
   customised,
   editRows,
   grantAfterEdit,
@@ -158,15 +160,40 @@ describe('the sharing switches', () => {
     expect(switchesToShow({ writeAccess: true })).toEqual(['dataSharing', 'writeAccess'])
   })
 
-  it('are asked for only while off, write access listed for the caller to reveal', () => {
+  it('are asked for only while effectively off', () => {
     const on = { dataSharing: true, writeAccess: true }
     expect(switchesToAsk({ dataSharing: true, writeAccess: true }, on)).toEqual([])
     expect(switchesToAsk({ writeAccess: true }, { dataSharing: true, writeAccess: false })).toEqual(
       ['writeAccess'],
     )
+    // Write access underneath is on, but data sharing is off: both are asked.
+    expect(switchesToAsk({ writeAccess: true }, { dataSharing: false, writeAccess: true })).toEqual(
+      ['dataSharing', 'writeAccess'],
+    )
+    expect(askedValues({ dataSharing: false, writeAccess: true })).toEqual({
+      dataSharing: false,
+      writeAccess: false,
+    })
+  })
+
+  it('pin what an ask decided, and not a write access left disabled or never asked', () => {
+    const raw = { dataSharing: false, writeAccess: true }
+    const both = ['dataSharing', 'writeAccess'] as const
+    // Nothing touched: nothing pinned, write access was never enabled.
+    expect(askedPatch(raw, { dataSharing: false, writeAccess: false }, both, undefined)).toEqual({})
+    // Data sharing on, write access left off: declined, so pinned off.
+    expect(askedPatch(raw, { dataSharing: true, writeAccess: false }, both, undefined)).toEqual({
+      dataSharing: true,
+      writeAccess: false,
+    })
+    // Both on: write access follows the default it already matches.
+    expect(askedPatch(raw, { dataSharing: true, writeAccess: true }, both, undefined)).toEqual({
+      dataSharing: true,
+    })
+    // Only data sharing asked: write access, off on screen, is not its decision.
     expect(
-      switchesToAsk({ writeAccess: true }, { dataSharing: false, writeAccess: false }),
-    ).toEqual(['dataSharing', 'writeAccess'])
+      askedPatch(raw, { dataSharing: true, writeAccess: false }, ['dataSharing'], undefined),
+    ).toEqual({ dataSharing: true })
   })
 
   it('count a differing pin or an own session length as custom', () => {
