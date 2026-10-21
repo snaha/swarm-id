@@ -24,6 +24,7 @@ default mocked unit suite (`pnpm --filter @snaha/swarm-id test`) and the local-c
 | `second-upload-delay.test.ts`          | timings: held-lease re-validation throttle (when a 2nd upload pays a gateway read)                    |
 | `upload-cost-breakdown.test.ts`        | timings: held-lease upload phase breakdown (op vs publish)                                            |
 | `fold-latency.test.ts`                 | timings: 10 sequential `foldAccountFromSwarm` runs on a 2-device account (wall time + Bee read count) |
+| `scratch-eviction.test.ts`             | a scratch lane wraps on a real network: the overwritten chunk is gone from a node that never held it  |
 
 The deterministic, always-on guards for the same logic are the mocked tests in
 `lib/src/sync/*.test.ts` (run in CI). This suite is the live counterpart.
@@ -43,6 +44,11 @@ The deterministic, always-on guards for the same logic are the mocked tests in
    Two knobs the template does not list, both read by `env.ts` with defaults:
    `KEEPALIVE_EVERY_MS` (lease keep-alive cadence, default `10000`) and
    `ACQUIRE_RUNS` (how many times the acquire benchmarks repeat, default `1`).
+
+   `scratch-eviction.test.ts` also wants `READ_BEE_URL`, a second node or
+   gateway independent of `BEE_URL`: the uploader keeps its own copy of a chunk
+   it overwrote, so only another node can say whether the network still has
+   it. The batch must be mutable. Without `READ_BEE_URL` that scenario skips.
 
 2. Run:
 
