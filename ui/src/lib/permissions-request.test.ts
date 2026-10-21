@@ -222,7 +222,7 @@ describe('the sharing switches', () => {
     expect(pinnedDifferently({ writeAccess: false }, { dataSharing: false })).toEqual([])
     expect(
       pinnedDifferently({ dataSharing: true, writeAccess: false }, { dataSharing: false }),
-    ).toEqual(['writeAccess'])
+    ).toEqual(['dataSharing', 'writeAccess'])
   })
 
   it('save a pin for a switch moved, clear one reset to the default, and leave the rest alone', () => {
