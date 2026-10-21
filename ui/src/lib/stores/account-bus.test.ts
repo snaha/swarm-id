@@ -182,8 +182,11 @@ describe('accountBusStore', () => {
 
   // #711: a permissions popup closes right after saving. The debounce would
   // die with it, and the room keeps nothing for a peer not yet in it.
-  it('publishes before a page closes, once a peer is in the room', async () => {
+  it('publishes before a page closes, once a peer is in the room, and once', async () => {
     const account = makeAccount()
+    accountBusStore.join(account)
+    // A debounced publish already queued must not go out a second time.
+    accountBusStore.publish(account)
     const done = accountBusStore.publishBeforeClose(account)
     await settle()
     expect(deltasPublished(transports[0])).toHaveLength(0)
@@ -194,6 +197,16 @@ describe('accountBusStore', () => {
     expect(deltasPublished(transports[0])).toHaveLength(1)
     await settlePublish()
     expect(deltasPublished(transports[0])).toHaveLength(1)
+  })
+
+  it('closes at once with no signaling server configured', async () => {
+    signalingUrlStub.value = undefined
+    const started = Date.now()
+
+    await accountBusStore.publishBeforeClose(makeAccount())
+
+    expect(Date.now() - started).toBeLessThan(PUBLISH_DEBOUNCE_MS)
+    expect(transports).toHaveLength(0)
   })
 
   it('joins the account-derived room, not one named by the account id', async () => {

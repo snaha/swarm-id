@@ -8,6 +8,7 @@ import {
   editRows,
   grantAfterEdit,
   grantAfterRequest,
+  grantableOnRequest,
   parsePermissionsHash,
   requestRows,
   unknownDriveLabel,
@@ -57,6 +58,20 @@ describe('parsePermissionsHash', () => {
 })
 
 describe('a request', () => {
+  // The page grants on request to a live session only (#883 review): a
+  // disconnected entry stays in the record, and so does an expired one.
+  it('grants only to an app with a live connection', () => {
+    const NOW = 1_000
+    const live = { appUrl: 'https://app.example', appName: 'App', lastConnectedAt: 1 }
+    expect(grantableOnRequest({ ...live, connectedUntil: NOW + 1 }, NOW)).toBe(true)
+    expect(grantableOnRequest({ ...live, connectedUntil: NOW }, NOW)).toBe(false)
+    expect(grantableOnRequest({ ...live, connectedUntil: NOW + 1, disconnectedAt: 5 }, NOW)).toBe(
+      false,
+    )
+    expect(grantableOnRequest(live, NOW)).toBe(false)
+    expect(grantableOnRequest(undefined, NOW)).toBe(false)
+  })
+
   it('shows each asked drive, regular first, all of them empty and none required', () => {
     const rows = requestRows([{ kind: 'scratch' }, { kind: 'regular', description: 'Messages' }])
     expect(rows.map((row) => [row.kind, row.description, row.chosen, row.optional])).toEqual([

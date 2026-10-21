@@ -195,12 +195,21 @@ export const accountBusStore = {
    * Publish `account` from a page about to close (#711). The debounce would
    * die with the window, a page that just opened is still joining, and the
    * room has no mailbox — so wait for the join and for a peer to be in the
-   * room, publish at once, and give the send a moment to leave.
-   * ponytail: bounded by CLOSE_PUBLISH_TIMEOUT_MS; past it the delta is
-   * published anyway, reaching whoever is there, and a peer that joins later
-   * learns of the change from the next delta or the Swarm feed.
+   * room, publish at once, and give the send a moment to leave. With no bus
+   * configured there is nothing to wait for, and the page closes at once.
+   *
+   * ponytail: a heuristic with two known ceilings, both bounded by
+   * CLOSE_PUBLISH_TIMEOUT_MS. "A peer" is any peer, not provably the app's
+   * iframe — though the iframe joined the room when its session was
+   * hydrated, so it is normally the one already there — and the grace is a
+   * wait, not an acknowledgement. Past the bound the delta is published
+   * anyway, reaching whoever is there, and a peer that missed it learns of
+   * the change from the next delta or the Swarm feed. Proving delivery
+   * needs a receipt from the iframe: a new bus message kind, if this shows
+   * up on a real device.
    */
   async publishBeforeClose(account: SyncedAccount): Promise<void> {
+    if (!busSignalingUrl()) return
     accountBusStore.join(account)
     if (publishTimer !== undefined) {
       clearTimeout(publishTimer)

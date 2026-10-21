@@ -73,6 +73,24 @@ export function parsePermissionsHash(hash: string): PermissionsPageRequest | und
 }
 
 /**
+ * Whether a request may grant to `app` at `now`: only to a live connection.
+ * A plain Disconnect leaves the entry (no `revokedAt`) with `disconnectedAt`
+ * set and the session fields cleared; an expired one has `connectedUntil`
+ * in the past. Either would let any site open the page for a previously
+ * connected origin and have one click grant it drives for its next connect.
+ * Editing from the Apps tab is not gated on this: it lists disconnected
+ * apps too, so a grant can be trimmed before the app reconnects.
+ */
+export function grantableOnRequest(app: ConnectedApp | undefined, now: number): boolean {
+  return (
+    app !== undefined &&
+    app.disconnectedAt === undefined &&
+    app.connectedUntil !== undefined &&
+    app.connectedUntil > now
+  )
+}
+
+/**
  * A request's rows: one per drive asked for, regular first, every one
  * starting empty. Nothing is required — saving with nothing chosen means
  * the user granted nothing.

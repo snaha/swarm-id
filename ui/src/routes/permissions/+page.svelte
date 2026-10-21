@@ -13,7 +13,9 @@
     account default.
   A grant is a write to the account record, so nothing is unlocked here —
   which is why the page refuses to render inside a frame, and grants on
-  request only to an app with a live connection. It reaches the app's live
+  request only to an app with a live connection. Editing is reachable by URL
+  for a disconnected app too, on purpose: it can only swap or drop what the
+  stored grant already holds, never widen it. The grant reaches the app's live
   session as a storage event or an account-bus delta; a partitioned session
   that opened this popup is handed it directly, and one whose popup the page
   had to open instead waits for the bus delta to leave before closing.
@@ -38,6 +40,7 @@
     editRows,
     grantAfterEdit,
     grantAfterRequest,
+    grantableOnRequest,
     parsePermissionsHash,
     requestRows,
     sameGrant,
@@ -78,12 +81,9 @@
   // a connected origin and name it whatever it likes.
   const appName = $derived(app?.appName ?? page?.appName ?? page?.appOrigin ?? '')
   const appIcon = $derived(app?.appIcon ?? page?.appIcon ?? `${page?.appOrigin}/favicon.ico`)
-  const connected = $derived(
-    app !== undefined &&
-      app.disconnectedAt === undefined &&
-      app.connectedUntil !== undefined &&
-      app.connectedUntil > Date.now(),
-  )
+  /** The clock `connected` reads: not reactive, so `save` sets it again. */
+  let now = $state(Date.now())
+  const connected = $derived(grantableOnRequest(app, now))
   const showAllCheckbox = $derived(requesting ? requested === 'all' : app?.drives === 'all')
 
   /** Why the page cannot grant anything, if it cannot. */
@@ -159,6 +159,8 @@
   }
 
   async function save() {
+    // A popup can sit open past the connection's end.
+    now = Date.now()
     if (!page || !account || !app || refusal || saving) return
     const current = app.drives
     const grant = !requesting
