@@ -358,7 +358,7 @@ async function requestOnConnect(page: Page, preset: string) {
 }
 
 // #880: the picker runs before the handover, so a partitioned session is
-// handed what the user granted — not the account default it used to get first.
+// handed what the user granted.
 test('a partitioned session is handed the drives granted on the connect screen', async ({
   page,
 }) => {
@@ -427,6 +427,7 @@ test('requestDrives() saved with nothing chosen leaves a partitioned session as 
   await seedLocalChain(page.context())
   await createAccountWithDrive(page)
   await connectPartitioned(page, '/account')
+  await expectProxyPartitioned(page)
 
   const popupPromise = page.waitForEvent('popup')
   await page.getByRole('button', { name: 'Request a scratch drive' }).click()
