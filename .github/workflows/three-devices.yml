@@ -1,5 +1,5 @@
-# The three-device partition scenarios (`ui/tests/three-devices.test.ts`) in
-# real browsers against a real cluster. Minutes per run by design — the lease
+# The device scenarios (`ui/tests/three-devices.test.ts`, `ui/tests/two-drives.test.ts`)
+# in real browsers against a real cluster. Minutes per run by design — the lease
 # TTL, the idle yield and the beacon grace are each 30 s and the suite waits
 # them out — so it does not run on every change:
 #
@@ -28,6 +28,8 @@ on:
       - 'ui/src/lib/stores/accounts.svelte.ts'
       - 'ui/src/routes/proxy/**'
       - 'ui/tests/three-devices.test.ts'
+      - 'ui/tests/two-drives.test.ts'
+      - 'ui/tests/devices-rig.ts'
       - 'ui/tests/global-setup-devices.ts'
       - 'ui/tests/helpers.ts'
       - 'ui/tests/worker-faucet.ts'
@@ -140,7 +142,7 @@ jobs:
 
       # The identity UI, the demo and the signaling server are started by the
       # suite's own config (`webServer`), the way `pnpm dev` starts them.
-      - name: Run the three-device suite
+      - name: Run the device suites
         working-directory: ./ui
         run: pnpm test:devices
         env:
