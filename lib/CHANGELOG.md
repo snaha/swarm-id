@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.8.0](https://github.com/snaha/swarm-id/compare/v0.7.0...v0.8.0) (2026-10-21)
+
+
+### ⚠ BREAKING CHANGES
+
+* **lib:** let a write name its drive, and list the app's drives ([#877](https://github.com/snaha/swarm-id/issues/877))
+
+### Features
+
+* grant apps drives, and give each drive a kind ([#864](https://github.com/snaha/swarm-id/issues/864)) ([c6cc3ba](https://github.com/snaha/swarm-id/commit/c6cc3ba85aa7193fa2435944895f1843711961b6))
+* let an app ask for drives at connect, and pick them on the connect screen ([#880](https://github.com/snaha/swarm-id/issues/880)) ([0a8864e](https://github.com/snaha/swarm-id/commit/0a8864ea7fe9e0623d9a9f8581545ade0b337bf2))
+* let an app ask for more drives later, and edit what an app holds ([#883](https://github.com/snaha/swarm-id/issues/883)) ([a061707](https://github.com/snaha/swarm-id/commit/a06170759456332e254322590b3b276d78cb339a))
+* **lib:** give each granted drive its own write path in the proxy ([#869](https://github.com/snaha/swarm-id/issues/869)) ([4740ed3](https://github.com/snaha/swarm-id/commit/4740ed3461fc36799d700415da32804f49e93410))
+* **lib:** let a write name its drive, and list the app's drives ([#877](https://github.com/snaha/swarm-id/issues/877)) ([6eb7e76](https://github.com/snaha/swarm-id/commit/6eb7e76c447583cadf070b10531898677e9513dc))
+* scratch drives, whose full lanes wrap onto their oldest slot ([#881](https://github.com/snaha/swarm-id/issues/881)) ([dab3d45](https://github.com/snaha/swarm-id/commit/dab3d4556d8825c6f65d7d39a2c6d37c02b54baf))
+
 ## [0.7.0](https://github.com/snaha/swarm-id/compare/v0.6.0...v0.7.0) (2026-10-09)
 
 
