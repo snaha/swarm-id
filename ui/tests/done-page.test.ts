@@ -371,7 +371,8 @@ test('an app asks for a scratch drive later, and the Apps tab edits what it hold
   // taken away.
   await page.getByRole('tab', { name: 'Apps' }).click()
   await page.getByRole('button', { name: APP_NAME }).click()
-  await expect(page.getByRole('combobox')).toHaveCount(2)
+  // Two drive rows; the third combobox is "Keep app connected for".
+  await expect(page.getByRole('combobox')).toHaveCount(3)
   await expect(page.getByText('Scratch drive', { exact: true })).toBeVisible()
   await page.getByRole('combobox').nth(1).selectOption('')
   await expect(page.getByText('Permissions saved')).toBeVisible()
