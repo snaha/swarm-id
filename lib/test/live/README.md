@@ -24,7 +24,7 @@ default mocked unit suite (`pnpm --filter @snaha/swarm-id test`) and the local-c
 | `second-upload-delay.test.ts`          | timings: held-lease re-validation throttle (when a 2nd upload pays a gateway read)                    |
 | `upload-cost-breakdown.test.ts`        | timings: held-lease upload phase breakdown (op vs publish)                                            |
 | `fold-latency.test.ts`                 | timings: 10 sequential `foldAccountFromSwarm` runs on a 2-device account (wall time + Bee read count) |
-| `scratch-eviction.test.ts`             | a scratch lane wraps on a real network: the overwritten chunk is gone from a node that never held it   |
+| `scratch-eviction.test.ts`             | a scratch lane wraps on a real network: the overwritten chunk is gone from a node that never held it  |
 
 The deterministic, always-on guards for the same logic are the mocked tests in
 `lib/src/sync/*.test.ts` (run in CI). This suite is the live counterpart.
