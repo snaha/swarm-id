@@ -38,6 +38,17 @@ export interface BuildAuthUrlOptions {
   challenge?: string
   /** What the app asks for; the connect screen renders a row per drive (#862). */
   permissions?: Permissions
+  /**
+   * Opens the permissions page instead of connect (#711), for this account:
+   * the one the app's session is with.
+   */
+  permissionsFor?: string
+  /**
+   * The app's session is partitioned but this popup was not opened by its
+   * iframe, so nothing can hand it the grant except the account bus: the
+   * page waits for the delta to go out before it closes (#711).
+   */
+  handOverViaBus?: boolean
 }
 
 /**
@@ -90,5 +101,10 @@ export function buildAuthUrl(
     params.set("permissions", JSON.stringify(options.permissions))
   }
 
+  if (options?.permissionsFor !== undefined) {
+    params.set("account", options.permissionsFor)
+    if (options.handOverViaBus) params.set("handover", "bus")
+    return `${baseUrl}/permissions#${params.toString()}`
+  }
   return `${baseUrl}/connect#${params.toString()}`
 }

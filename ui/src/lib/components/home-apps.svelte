@@ -5,14 +5,19 @@
 
 <script lang="ts">
   import EllipsisVertical from '@lucide/svelte/icons/ellipsis-vertical'
+  import ShieldCheck from '@lucide/svelte/icons/shield-check'
   import Trash2 from '@lucide/svelte/icons/trash-2'
   import Unlink from '@lucide/svelte/icons/unlink'
+
+  import { goto } from '$app/navigation'
+  import { resolve } from '$app/paths'
 
   import AppIcon from '$lib/components/app-icon.svelte'
   import { Button } from '$lib/components/ui/button'
   import { DropdownMenu, DropdownMenuItem } from '$lib/components/ui/dropdown-menu'
   import { Select } from '$lib/components/ui/select'
   import { msToDays } from '$lib/duration'
+  import routes from '$lib/routes'
   import type { Account } from '$lib/types'
 
   const DEFAULT_CONNECTION_DAYS = 30
@@ -38,6 +43,12 @@
   )
   // Revoked tombstones stay in the record for sync; only show live entries.
   const activeApps = $derived(account.activeApps)
+
+  /** The app's "Permissions for <app>" page (#711), keyed by its origin. */
+  function openPermissions(appUrl: string) {
+    // eslint-disable-next-line svelte/no-navigation-without-resolve -- resolve() plus the origin as a hash
+    goto(`${resolve(routes.PERMISSIONS)}#origin=${encodeURIComponent(appUrl)}`)
+  }
 
   function isConnected(connectedUntil: number | undefined): boolean {
     return connectedUntil !== undefined && connectedUntil > Date.now()
@@ -89,6 +100,10 @@
               </Button>
             {/snippet}
 
+            <DropdownMenuItem onclick={() => openPermissions(app.appUrl)}>
+              <ShieldCheck class="size-4 shrink-0" />
+              <span class="flex-1 whitespace-nowrap">Permissions</span>
+            </DropdownMenuItem>
             {#if isConnected(app.connectedUntil)}
               <DropdownMenuItem onclick={() => disconnect(app.appUrl)}>
                 <Unlink class="size-4 shrink-0" />

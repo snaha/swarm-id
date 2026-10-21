@@ -31,6 +31,8 @@ const transports = vi.hoisted(
       options: { url: string; topic: string }
       publish: ReturnType<typeof vi.fn>
       close: ReturnType<typeof vi.fn>
+      /** Peers in the room, as the real transport counts them. */
+      peerCount: number
       /** What the bus subscribed with — the seam a peer's message arrives on. */
       deliver?: (raw: unknown, from?: string) => void
       /** The seam the room's departures arrive on. */
@@ -53,6 +55,7 @@ vi.mock('@snaha/swarm-id/internal', async (importActual) => {
       const transport = {
         options,
         local: false,
+        peerCount: 0,
         publish: vi.fn(),
         subscribe: vi.fn((handler: (raw: unknown, from?: string) => void) => {
           transport.deliver = handler
@@ -175,6 +178,35 @@ describe('accountBusStore', () => {
     transports.length = 0
     signalingUrlStub.value = SIGNALING_URL
     deriveGate.value = undefined
+  })
+
+  // #711: a permissions popup closes right after saving. The debounce would
+  // die with it, and the room keeps nothing for a peer not yet in it.
+  it('publishes before a page closes, once a peer is in the room, and once', async () => {
+    const account = makeAccount()
+    accountBusStore.join(account)
+    // A debounced publish already queued must not go out a second time.
+    accountBusStore.publish(account)
+    const done = accountBusStore.publishBeforeClose(account)
+    await settle()
+    expect(deltasPublished(transports[0])).toHaveLength(0)
+
+    transports[0].peerCount = 1
+    await done
+
+    expect(deltasPublished(transports[0])).toHaveLength(1)
+    await settlePublish()
+    expect(deltasPublished(transports[0])).toHaveLength(1)
+  })
+
+  it('closes at once with no signaling server configured', async () => {
+    signalingUrlStub.value = undefined
+    const started = Date.now()
+
+    await accountBusStore.publishBeforeClose(makeAccount())
+
+    expect(Date.now() - started).toBeLessThan(PUBLISH_DEBOUNCE_MS)
+    expect(transports).toHaveLength(0)
   })
 
   it('joins the account-derived room, not one named by the account id', async () => {

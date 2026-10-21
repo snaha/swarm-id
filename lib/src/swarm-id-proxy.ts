@@ -43,6 +43,7 @@ import type {
   ActGetGranteesMessage,
   GetPostageBatchMessage,
   GetDrivesMessage,
+  RequestPermissionsMessage,
   Drive,
   Permissions,
   CreateFeedManifestMessage,
@@ -186,6 +187,7 @@ import {
   type NetworkSettings,
 } from "./schemas"
 import { appSessionDuration } from "./utils/constants"
+import { PERMISSIONS_POPUP_MAX_MS, untilPopupClosed } from "./utils/popup"
 import { buildAuthUrl } from "./utils/url"
 import {
   createActForContent,
@@ -334,6 +336,12 @@ export class SwarmIdProxy {
   private primaryBatchId: string | undefined
   private storagePartitioned: boolean = false
   private pendingChallenge: string | undefined
+  /**
+   * The permissions popups this session opened (#711), by challenge: only
+   * their hand-off is folded, once, and only from that window. An entry
+   * goes when its popup closes.
+   */
+  private pendingGrants = new Map<string, Window>()
   /**
    * Hydrated account view for the storage-partitioning fallback: the synced
    * projection handed over by the connect popup (`AuthData.account`), held in
@@ -889,7 +897,25 @@ export class SwarmIdProxy {
    */
   private async handlePopupMessage(
     message: PopupToIframeMessage,
+    source: MessageEventSource | null,
   ): Promise<void> {
+    if (message.type === "grantUpdated") {
+      // Only the popup this session opened, from that window, for this
+      // session's app, and once: a stale or replayed challenge, another
+      // window or another origin is ignored, never folded.
+      const popup = this.pendingGrants.get(message.challenge)
+      if (
+        !popup ||
+        source !== popup ||
+        message.appOrigin !== this.parentOrigin
+      ) {
+        console.warn("[Proxy] grantUpdated from another popup — ignoring")
+        return
+      }
+      this.pendingGrants.delete(message.challenge)
+      this.applyAccountDelta(message.delta.snapshot)
+      return
+    }
     if (message.type === "setSecret") {
       // Challenge FIRST, so the origin check below can tell whose handover it
       // is refusing. Both are guards before anything is read out of the
@@ -2185,7 +2211,10 @@ export class SwarmIdProxy {
       }
 
       // Handle same-origin popup messages (storage partitioning postMessage fallback)
-      if (event.origin === window.location.origin && type === "setSecret") {
+      if (
+        event.origin === window.location.origin &&
+        (type === "setSecret" || type === "grantUpdated")
+      ) {
         const popupResult = PopupToIframeMessageSchema.safeParse(event.data)
         if (!popupResult.success) {
           // Say what actually happened. Falling through from here reaches the
@@ -2195,11 +2224,11 @@ export class SwarmIdProxy {
           // payload shape produced SOME session; now that the projection is
           // required, a refused handover is the ordinary way a version-skewed
           // identity deployment fails, and it must not read as an origin bug.
-          console.warn("[Proxy] Invalid setSecret payload:", popupResult.error)
-          this.endRefusedConnect()
+          console.warn(`[Proxy] Invalid ${type} payload:`, popupResult.error)
+          if (type === "setSecret") this.endRefusedConnect()
           return
         }
-        await this.handlePopupMessage(popupResult.data)
+        await this.handlePopupMessage(popupResult.data, event.source)
         return
       }
 
@@ -2452,6 +2481,10 @@ export class SwarmIdProxy {
 
       case "connect":
         this.handleConnect(message, event)
+        break
+
+      case "requestPermissions":
+        await this.handleRequestPermissions(message, event)
         break
 
       default:
@@ -3734,6 +3767,58 @@ export class SwarmIdProxy {
     })
 
     this.authButtonContainer.appendChild(button)
+  }
+
+  /**
+   * Open the permissions popup for this session's account (#711) and answer
+   * once it is closed. The popup writes the grant to shared storage, which
+   * reaches an unpartitioned session as a storage event; a partitioned one
+   * is handed it as `grantUpdated`, which is why the iframe opens it.
+   */
+  private async handleRequestPermissions(
+    message: RequestPermissionsMessage,
+    event: MessageEvent,
+  ): Promise<void> {
+    const connection = this.findConnectionForParent()
+    if (!this.authenticated || !connection || !this.parentOrigin) {
+      this.sendErrorToParent(
+        event,
+        message.requestId,
+        new SwarmIdError(
+          "not-authenticated",
+          "Connect to Swarm ID before asking for more permissions.",
+        ),
+        "Not authenticated",
+      )
+      return
+    }
+    const challenge = crypto.randomUUID()
+    const basePath = window.location.pathname.replace(/\/proxy$/, "")
+    const url = buildAuthUrl(
+      window.location.origin + basePath,
+      this.parentOrigin,
+      this.appMetadata,
+      {
+        challenge,
+        permissions: message.permissions,
+        permissionsFor: connection.account.id.toHex(),
+      },
+    )
+    const mode = message.popupMode ?? this.popupMode
+    const popup =
+      mode === "popup"
+        ? window.open(url, "_blank", "width=500,height=600")
+        : window.open(url, "_blank")
+    if (popup) {
+      this.pendingGrants.set(challenge, popup)
+      await untilPopupClosed(popup, PERMISSIONS_POPUP_MAX_MS)
+      this.pendingGrants.delete(challenge)
+    }
+    this.postMessage(event, {
+      type: "requestPermissionsResponse",
+      requestId: message.requestId,
+      opened: popup !== null,
+    })
   }
 
   private handleConnect(

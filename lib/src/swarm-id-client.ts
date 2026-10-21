@@ -82,6 +82,7 @@ import type {
   ButtonConfig,
   PostageBatch,
   Drive,
+  DriveRequest,
   Permissions,
   DriveTargetOptions,
 } from "./types"
@@ -95,6 +96,7 @@ import { EthAddress, Identifier, PrivateKey, Topic } from "@ethersphere/bee-js"
 import { generatedAvatar } from "./utils/avatar"
 import { uint8ArrayToHex } from "./utils/hex"
 import { collectionPath } from "./utils/collection"
+import { PERMISSIONS_POPUP_MAX_MS, untilPopupClosed } from "./utils/popup"
 import { buildAuthUrl } from "./utils/url"
 import { TimeoutError, withTimeout } from "./utils/promise"
 
@@ -102,6 +104,14 @@ const DEFAULT_TIMEOUT_MS = 30000
 /** The largest delay `setTimeout` honours; past it, it fires almost at once. */
 const MAX_TIMER_DELAY_MS = 2 ** 31 - 1
 const DEFAULT_INITIALIZATION_TIMEOUT_MS = 30000
+/**
+ * The round trip of a `requestPermissions` message: the proxy answers it
+ * once its popup closes, at the latest after `PERMISSIONS_POPUP_MAX_MS` — so
+ * this is longer by the default timeout, and the call never rejects with
+ * `timeout` while the proxy is still watching the popup.
+ */
+const PERMISSIONS_REQUEST_TIMEOUT_MS =
+  PERMISSIONS_POPUP_MAX_MS + DEFAULT_TIMEOUT_MS
 
 /**
  * {@link withTimeout} for one of `initialize()`'s waits: a missed deadline
@@ -1066,6 +1076,83 @@ export class SwarmIdClient {
         "Failed to open authentication popup",
       )
     }
+  }
+
+  /**
+   * Ask the user for more drives (#711). Opens the "Permissions for <app>"
+   * popup showing only what is asked; the user picks drives, may create one,
+   * or grants nothing. Resolves once the popup is closed with the drives the
+   * app now holds — the same as before when the user granted nothing or
+   * closed it. Call it from a user gesture, as `connect()`: a popup opened
+   * later is blocked.
+   *
+   * @example
+   * ```typescript
+   * const drives = await client.requestDrives([{ kind: 'scratch' }])
+   * const scratch = drives.find((drive) => drive.kind === 'scratch')
+   * ```
+   * @throws {SwarmIdError} `not-authenticated` when the app is not connected
+   * @throws {SwarmIdError} `popup-blocked` when the browser blocked the popup
+   */
+  async requestDrives(drives: DriveRequest): Promise<Drive[]> {
+    this.ensureReady()
+    await this.requestPermissions({ drives })
+    return this.getDrives()
+  }
+
+  /**
+   * The general form behind {@link requestDrives}: drives are the first
+   * permission, and the next ones join `permissions` rather than adding a
+   * method each. Opened the way `connect()` opens: from the parent while
+   * the iframe's store is shared, which keeps the click; otherwise by the
+   * iframe, so a partitioned session is handed the new grant directly.
+   */
+  private async requestPermissions(permissions: Permissions): Promise<void> {
+    const account = this.lastConnectionInfo?.identity?.id
+    if (!account) {
+      throw new SwarmIdError(
+        "not-authenticated",
+        "Connect to Swarm ID before asking for more permissions.",
+      )
+    }
+    if (this.storageShared !== true) {
+      const response = await this.sendRequest<{
+        type: "requestPermissionsResponse"
+        requestId: string
+        opened: boolean
+      }>({
+        type: "requestPermissions",
+        requestId: this.generateRequestId(),
+        permissions,
+        popupMode: this.popupMode,
+        requestOptions: { timeout: PERMISSIONS_REQUEST_TIMEOUT_MS },
+      })
+      if (response.opened) return
+    }
+    const basePath = this.iframePath.replace(/\/proxy$/, "")
+    const url = buildAuthUrl(
+      this.iframeOrigin + basePath,
+      window.location.origin,
+      this.metadata,
+      {
+        permissions,
+        permissionsFor: account,
+        // Opened here although the iframe could not see shared storage (its
+        // own popup was blocked): the bus is the only way back to it.
+        handOverViaBus: this.storageShared !== true,
+      },
+    )
+    const popup =
+      this.popupMode === "popup"
+        ? window.open(url, "_blank", "width=500,height=600")
+        : window.open(url, "_blank")
+    if (!popup) {
+      throw new SwarmIdError(
+        "popup-blocked",
+        "Failed to open the permissions popup",
+      )
+    }
+    await untilPopupClosed(popup, PERMISSIONS_POPUP_MAX_MS)
   }
 
   /**
