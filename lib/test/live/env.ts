@@ -85,6 +85,11 @@ const num = (name: string, fallback: number): number =>
 /** Parsed env + the timing knobs the scenarios honour. Gateway-sized defaults. */
 export const liveEnv = {
   beeUrl: str("BEE_URL") ?? DEFAULT_BEE_URL,
+  /** A second node or gateway, independent of `BEE_URL`, that reads only:
+   *  what the network serves once the uploader's own copy is out of the
+   *  picture (`scratch-eviction.test.ts`, #884). Optional; that suite skips
+   *  without it. */
+  readBeeUrl: str("READ_BEE_URL"),
   batchIdHex: str("BATCH_ID"),
   signerKeyHex: str("SIGNER_KEY"),
   depth: num("DEPTH", 21),
