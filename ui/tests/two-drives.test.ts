@@ -5,10 +5,11 @@
  *
  * An app granted every drive of the account (`'all'`) writes to two of them,
  * naming the drive on each write, and a second device of the same account
- * takes a lane on each. Each drive's lease is its own: a lane is taken on the
- * first write to that drive and not before, one device's lanes are released
- * together on its disconnect while the other's stay, and a drive leaving the
- * grant tears down its lane on every device and nothing else. The lanes are
+ * takes a lane on each. Each drive's lease is its own: the primary's comes
+ * with the session and any other drive's with the first write that names it,
+ * a write to one drive moves nothing on the other, one device's lanes are
+ * released together on its disconnect while the other's stay, and a drive
+ * leaving the grant tears down its lane on every device and nothing else. The lanes are
  * read off the demo's sidebar, one line per drive, from `getDrives()`'s
  * `partition`.
  *
@@ -117,78 +118,102 @@ test.describe('two devices on two drives', () => {
     }
   })
 
-  test('A takes a lane on each drive, on its first write to that drive', async () => {
-    await A.connect()
-    // Granted both, writing to neither yet: no lane on either.
-    expect(await A.lane(D1)).toBeUndefined()
-    expect(await A.lane(D2)).toBeUndefined()
+  /** The lane a device holds on a drive, once the sidebar shows one. */
+  async function laneHeld(device: Device, batchHex: string): Promise<number> {
+    await expect
+      .poll(() => device.lane(batchHex), {
+        message: `${device.label} holds no lane on ${batchHex.slice(0, 8)}`,
+        timeout: LEASE_REFRESH_MS,
+      })
+      .not.toBeUndefined()
+    return (await device.lane(batchHex))!
+  }
 
-    // An unnamed write goes to the primary, and takes a lane there only.
+  // Holders idle past IDLE_YIELD_MS let go once a rival is known, so every
+  // comparison below follows an upload closely rather than a gap.
+
+  test('A holds the primary from connect, and takes the second drive on its first write to it', async () => {
+    await A.connect()
+    // The primary's write path is built with the session, and its lane with
+    // it; the other drive's is built on the first write that names it.
+    const onD1 = await laneHeld(A, D1)
+    expect(await A.lane(D2), 'a lane on the second drive before any write to it').toBeUndefined()
+
+    // An unnamed write goes to the primary, and touches no other drive.
     await A.upload()
-    const onD1 = await A.lane(D1)
-    expect(onD1, 'A uploaded without holding a lane on the primary').toBeDefined()
-    expect(await A.lane(D2), 'a write to one drive took a lane on the other').toBeUndefined()
+    expect(await A.lane(D1)).toBe(onD1)
+    expect(await A.lane(D2), 'a write to the primary took a lane on the other').toBeUndefined()
 
     await A.upload(A.page, D2)
-    expect(await A.lane(D2), 'A uploaded to the second drive without a lane there').toBeDefined()
+    await laneHeld(A, D2)
     expect(await A.lane(D1), 'the second drive’s lane moved the first’s').toBe(onD1)
   })
 
   test("B takes its own lane on each drive, leaving A's where they are", async () => {
     await A.ensureConnected()
-    const aOnD1 = await A.lane(D1)
-    const aOnD2 = await A.lane(D2)
-
     await B.connect()
+    // A holds both, freshly: what B does next must not move either.
+    await A.upload()
+    await A.upload(A.page, D2)
+    const aOnD1 = await laneHeld(A, D1)
+    const aOnD2 = await laneHeld(A, D2)
+
     await B.upload()
-    const bOnD1 = await B.lane(D1)
-    expect(bOnD1, 'B uploaded without holding a lane on the primary').toBeDefined()
+    const bOnD1 = await laneHeld(B, D1)
     expect(bOnD1, 'B took the lane A holds on the first drive').not.toBe(aOnD1)
-    expect(await B.lane(D2), 'B’s first write took a lane on the second drive too').toBeUndefined()
+    expect(
+      await B.lane(D2),
+      'B’s write to the first drive took a lane on the second',
+    ).toBeUndefined()
     expect(await A.lane(D1), 'A lost its lane on the first drive to B').toBe(aOnD1)
     expect(await A.lane(D2), 'B’s write to the first drive moved A’s lane on the second').toBe(
       aOnD2,
     )
 
     await B.upload(B.page, D2)
-    expect(await B.lane(D2), 'B took the lane A holds on the second drive').not.toBe(aOnD2)
+    expect(await laneHeld(B, D2), 'B took the lane A holds on the second drive').not.toBe(aOnD2)
     expect(await A.lane(D2), 'A lost its lane on the second drive to B').toBe(aOnD2)
     await expectNoDualHoldOn(D1, all())
     await expectNoDualHoldOn(D2, all())
   })
 
-  test("A's disconnect releases both its lanes and leaves B's; A comes back on one drive only", async () => {
+  test("A's disconnect releases both its lanes and leaves B's", async () => {
     for (const device of all()) await device.ensureConnected()
-    const bOnD1 = await B.lane(D1)
-    const bOnD2 = await B.lane(D2)
-    expect(bOnD1 !== undefined && bOnD2 !== undefined, 'B does not hold both lanes').toBe(true)
+    // Every lane held, freshly.
+    await A.upload()
+    await A.upload(A.page, D2)
+    await B.upload()
+    await B.upload(B.page, D2)
+    const aOnD2 = await laneHeld(A, D2)
+    const bOnD1 = await laneHeld(B, D1)
+    const bOnD2 = await laneHeld(B, D2)
 
     await A.disconnect()
     expect(await B.lane(D1), 'A’s disconnect moved B’s lane on the first drive').toBe(bOnD1)
     expect(await B.lane(D2), 'A’s disconnect moved B’s lane on the second drive').toBe(bOnD2)
 
-    // Back, and writing to the second drive alone: a lane there, none on the
-    // first — the first drive's write path is built on its first write, as
-    // it was before.
+    // Back, and writing to the second drive: a lane of its own there again,
+    // beside B's — the one it released is free to take back.
     await A.connect()
     await A.upload(A.page, D2)
-    expect(await A.lane(D2), 'A uploaded to the second drive without a lane there').toBeDefined()
-    expect(await A.lane(D1), 'A came back holding a lane on a drive it never wrote').toBeUndefined()
+    const back = await laneHeld(A, D2)
+    expect(back, 'A came back onto the lane B holds').not.toBe(bOnD2)
+    expect(back).toBe(aOnD2)
+    await expectNoDualHoldOn(D1, all())
     await expectNoDualHoldOn(D2, all())
   })
 
   test('a drive leaving the grant tears down its lane on every device, and only that lane', async () => {
     for (const device of all()) await device.ensureConnected()
-    // Both hold both: A's lane on the first drive is what must survive.
+    // Both hold both, freshly: the lanes on the first drive are what must survive.
+    await A.upload(A.page, D2)
+    await B.upload(B.page, D2)
     await A.upload()
-    const aOnD1 = await A.lane(D1)
-    const bOnD1 = await B.lane(D1)
-    expect(
-      aOnD1 !== undefined && bOnD1 !== undefined,
-      'A and B do not both hold the first drive',
-    ).toBe(true)
-    expect(await A.lane(D2)).toBeDefined()
-    expect(await B.lane(D2)).toBeDefined()
+    await B.upload()
+    const aOnD1 = await laneHeld(A, D1)
+    const bOnD1 = await laneHeld(B, D1)
+    await laneHeld(A, D2)
+    await laneHeld(B, D2)
 
     // The user takes full drive access away in Swarm ID, on device A: the app
     // falls back to the account default, and the second drive leaves the grant.
@@ -204,16 +229,20 @@ test.describe('two devices on two drives', () => {
       await swarmId.close()
     }
 
-    // One drive left: the sidebar's per-drive lanes go with the select, and
-    // the primary's partition line says what each device still holds.
+    // One drive left on each device — device A's store by the storage event,
+    // device B's over the bus: the sidebar's per-drive lanes go with its
+    // select, and the primary's partition line says what each still holds.
     for (const device of all()) {
       await expect
-        .poll(async () => (await device.lanes()).size, { timeout: GRANT_PROPAGATION_MS })
+        .poll(async () => (await device.lanes()).size, {
+          message: `${device.label} still lists two drives`,
+          timeout: GRANT_PROPAGATION_MS,
+        })
         .toBe(0)
     }
     expect(await A.partition(), 'A lost its lane on the drive that stayed').toBe(aOnD1)
     expect(await B.partition(), 'B lost its lane on the drive that stayed').toBe(bOnD1)
-    // And the drive that stayed still writes, for both.
+    // And the drive that stayed still writes, for both, where they were.
     await A.upload()
     await B.upload()
     expect(await A.partition()).toBe(aOnD1)
