@@ -11,9 +11,12 @@
   - the Apps tab's "Permissions": everything the app holds, where a drive
     set to "None" is taken away and unticking "all" falls back to the
     account default.
-  A grant is a write to the account record, so nothing is unlocked here. It
-  reaches the app's live session as a storage event or an account-bus delta;
-  a partitioned session that opened this popup is handed it directly.
+  A grant is a write to the account record, so nothing is unlocked here —
+  which is why the page refuses to render inside a frame, and grants on
+  request only to an app with a live connection. It reaches the app's live
+  session as a storage event or an account-bus delta; a partitioned session
+  that opened this popup is handed it directly, and one whose popup the page
+  had to open instead waits for the bus delta to leave before closing.
 -->
 <script lang="ts">
   import { onMount } from 'svelte'
@@ -38,8 +41,10 @@
     parsePermissionsHash,
     requestRows,
     sameGrant,
+    unknownDriveLabel,
   } from '$lib/permissions-request'
   import routes from '$lib/routes'
+  import { accountBusStore } from '$lib/stores/account-bus'
   import { accountsStore } from '$lib/stores/accounts.svelte'
   import { sessionStore } from '$lib/stores/session.svelte'
   import { toastStore } from '$lib/stores/toast.svelte'
@@ -53,6 +58,9 @@
   /** Re-mounts the selects after the dialog closes (see the connect done page). */
   let selectEpoch = $state(0)
   let batchesBeforeAdd = new Set<string>()
+  let saving = $state(false)
+  /** Rendered inside another site: a grant is one click, so refuse (clickjacking). */
+  let framed = $state(false)
 
   const requesting = $derived(page?.permissions !== undefined)
   const requested = $derived(page?.permissions?.drives)
@@ -66,25 +74,41 @@
     account?.defaultPostageStampBatchID?.toHex() ??
       drives.find((drive) => kindOf(drive) === 'regular')?.batchID.toHex(),
   )
-  const appName = $derived(page?.appName ?? app?.appName ?? page?.appOrigin ?? '')
+  // The stored name and icon over the URL's: any site can open this page with
+  // a connected origin and name it whatever it likes.
+  const appName = $derived(app?.appName ?? page?.appName ?? page?.appOrigin ?? '')
+  const appIcon = $derived(app?.appIcon ?? page?.appIcon ?? `${page?.appOrigin}/favicon.ico`)
+  const connected = $derived(
+    app !== undefined &&
+      app.disconnectedAt === undefined &&
+      app.connectedUntil !== undefined &&
+      app.connectedUntil > Date.now(),
+  )
   const showAllCheckbox = $derived(requesting ? requested === 'all' : app?.drives === 'all')
 
   /** Why the page cannot grant anything, if it cannot. */
   const refusal = $derived.by(() => {
+    if (framed) return 'This page cannot be shown inside another site.'
     if (!page) return undefined
     if (!account) return 'This account is not on this device.'
     if (account.isSignedOut) return `Sign in to ${account.name} first.`
-    if (!app) return `${appName} is not connected to ${account.name}.`
+    // A request grants to a live session only. Editing is for the Apps tab,
+    // which lists disconnected apps too, so a grant can be trimmed before the
+    // app reconnects.
+    if (!app || (requesting && !connected)) {
+      return `${appName} is not connected to ${account.name}.`
+    }
     return undefined
   })
 
   onMount(() => {
+    framed = window.top !== window
+    if (framed) return
     page = parsePermissionsHash(window.location.hash)
     if (!page) {
       goto(resolve(routes.ROOT))
       return
     }
-    if (page.accountId && account) sessionStore.setCurrentAccount(account.id)
     if (requesting) {
       rows = Array.isArray(requested) ? requestRows(requested) : []
     } else if (app) {
@@ -99,6 +123,12 @@
       label:
         driveDisplayName(drive) + (drive.batchID.toHex() === defaultBatchHex ? ' (default)' : ''),
     }))
+    // A granted drive this device has no record of (edit mode): keep it
+    // selectable, so saving keeps it and "None" is the only way to drop it.
+    const chosen = rows[index].chosen
+    if (chosen !== '' && !choices.some((choice) => choice.value === chosen)) {
+      choices.unshift({ value: chosen, label: unknownDriveLabel(chosen) })
+    }
     return [
       ...(rows[index].optional
         ? [{ value: '', label: requesting ? 'Please select drive' : 'None' }]
@@ -128,8 +158,8 @@
     if (addingFor !== undefined && added) rows[addingFor].chosen = added.batchID.toHex()
   }
 
-  function save() {
-    if (!page || !account || !app || refusal) return
+  async function save() {
+    if (!page || !account || !app || refusal || saving) return
     const current = app.drives
     const grant = !requesting
       ? grantAfterEdit(current, rows, allTicked, defaultBatchHex)
@@ -156,22 +186,25 @@
         delta: { type: 'account-delta', snapshot: accountDeltaSnapshot(account.toSyncedRecord()) },
       }
       window.opener.postMessage(JSON.parse(JSON.stringify(message)), window.location.origin)
+    } else if (page.handOverViaBus) {
+      // Opened by the page while the session is partitioned: the bus is the
+      // only way back, and closing now would take the delta with the window.
+      saving = true
+      await accountBusStore.publishBeforeClose(account.toSyncedRecord())
     }
     window.close()
   }
 </script>
 
-{#if page}
+{#if framed}
+  <p class="text-muted-foreground p-8 text-center text-sm">{refusal}</p>
+{:else if page}
   <div class="flex min-h-svh flex-col">
     <AppHeader />
     <main class="flex w-full flex-1 flex-col items-center justify-center px-4 pb-24 sm:px-8">
       <div class="flex w-full max-w-96 flex-col items-center gap-8">
         <div class="flex w-full flex-col items-center gap-2 text-center">
-          <AppIcon
-            src={page.appIcon ?? app?.appIcon ?? `${page.appOrigin}/favicon.ico`}
-            name={appName}
-            size={ICON_SIZE}
-          />
+          <AppIcon src={appIcon} name={appName} size={ICON_SIZE} />
           <h1 class="text-lg leading-tight font-bold">Permissions for {appName}</h1>
           <p class="text-sm">{page.appOrigin}</p>
         </div>
@@ -205,7 +238,9 @@
                 <p class="text-muted-foreground text-sm">{row.description}</p>
               </div>
             {/each}
-            <Button class="w-full" onclick={save}>Save permissions</Button>
+            <Button class="w-full" onclick={save} disabled={saving}>
+              {saving ? 'Saving…' : 'Save permissions'}
+            </Button>
           </div>
         {/if}
       </div>

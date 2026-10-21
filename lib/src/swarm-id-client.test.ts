@@ -209,6 +209,9 @@ describe("SwarmIdClient connect()", () => {
       )
     })
 
+    /** Past the popup watch's Safari start delay and one poll. */
+    const POPUP_WATCH_MS = 3000
+
     // #711: the permissions popup opens the way connect's does, and the call
     // resolves with the drives the app holds once it closes — granted or not.
     it("opens the permissions page for the session's account and resolves with its drives", async () => {
@@ -227,16 +230,78 @@ describe("SwarmIdClient connect()", () => {
         vi.mocked(window.open).mockReturnValueOnce(popup as Window)
 
         const request = client.requestDrives([{ kind: "scratch" }])
-        await vi.advanceTimersByTimeAsync(1000)
+        await vi.advanceTimersByTimeAsync(POPUP_WATCH_MS)
         expect(getDrives).not.toHaveBeenCalled()
         popup.closed = true
-        await vi.advanceTimersByTimeAsync(1000)
+        await vi.advanceTimersByTimeAsync(POPUP_WATCH_MS)
 
         await expect(request).resolves.toBe(drives)
         const url = vi.mocked(window.open).mock.calls[0][0] as string
         expect(url).toContain("/permissions#")
-        expect(new URLSearchParams(url.split("#")[1]).get("account")).toBe(
-          "aa".repeat(20),
+        const params = new URLSearchParams(url.split("#")[1])
+        expect(params.get("account")).toBe("aa".repeat(20))
+        // Shared storage: the storage event carries the grant back.
+        expect(params.get("handover")).toBeNull()
+      } finally {
+        vi.useRealTimers()
+      }
+    })
+
+    // Partitioned or unproven storage: the iframe opens the popup, so the
+    // partitioned session can be handed the grant, and answers once it closes.
+    it("asks the proxy to open the permissions popup when the store is not shared", async () => {
+      vi.spyOn(internals(client), "ensureReady").mockImplementation(() => {})
+      setStorageShared(false)
+      internals(client).lastConnectionInfo = {
+        identity: { id: "aa".repeat(20) },
+      }
+      const sendRequestSpy = vi
+        .spyOn(internals(client), "sendRequest")
+        .mockResolvedValue({
+          type: "requestPermissionsResponse",
+          opened: true,
+        })
+      const drives = [{ batchID: "ab".repeat(32) }]
+      vi.spyOn(client, "getDrives").mockResolvedValue(drives as never)
+
+      await expect(client.requestDrives([{ kind: "scratch" }])).resolves.toBe(
+        drives,
+      )
+
+      expect(sendRequestSpy).toHaveBeenCalledWith(
+        expect.objectContaining({
+          type: "requestPermissions",
+          permissions: { drives: [{ kind: "scratch" }] },
+        }),
+      )
+      expect(window.open).not.toHaveBeenCalled()
+    })
+
+    // Safari's case: the iframe's own popup was blocked, so the page opens it
+    // and nothing can hand the iframe the grant but the account bus.
+    it("opens the fallback popup from the parent when the proxy's was blocked, marked for the bus", async () => {
+      vi.useFakeTimers()
+      try {
+        vi.spyOn(internals(client), "ensureReady").mockImplementation(() => {})
+        setStorageShared(false)
+        internals(client).lastConnectionInfo = {
+          identity: { id: "aa".repeat(20) },
+        }
+        vi.spyOn(internals(client), "sendRequest").mockResolvedValue({
+          type: "requestPermissionsResponse",
+          opened: false,
+        })
+        vi.spyOn(client, "getDrives").mockResolvedValue([])
+        vi.mocked(window.open).mockReturnValueOnce({ closed: true } as Window)
+
+        const request = client.requestDrives([{ kind: "scratch" }])
+        await vi.advanceTimersByTimeAsync(POPUP_WATCH_MS)
+        await request
+
+        const url = vi.mocked(window.open).mock.calls[0][0] as string
+        expect(url).toContain("/permissions#")
+        expect(new URLSearchParams(url.split("#")[1]).get("handover")).toBe(
+          "bus",
         )
       } finally {
         vi.useRealTimers()

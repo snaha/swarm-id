@@ -96,6 +96,7 @@ import { EthAddress, Identifier, PrivateKey, Topic } from "@ethersphere/bee-js"
 import { generatedAvatar } from "./utils/avatar"
 import { uint8ArrayToHex } from "./utils/hex"
 import { collectionPath } from "./utils/collection"
+import { PERMISSIONS_POPUP_MAX_MS, untilPopupClosed } from "./utils/popup"
 import { buildAuthUrl } from "./utils/url"
 import { TimeoutError, withTimeout } from "./utils/promise"
 
@@ -103,22 +104,14 @@ const DEFAULT_TIMEOUT_MS = 30000
 /** The largest delay `setTimeout` honours; past it, it fires almost at once. */
 const MAX_TIMER_DELAY_MS = 2 ** 31 - 1
 const DEFAULT_INITIALIZATION_TIMEOUT_MS = 30000
-/** How long a permissions popup may stay open: the user is choosing drives. */
-const PERMISSIONS_POPUP_TIMEOUT_MS = 10 * 60_000
-const POPUP_CLOSED_POLL_MS = 500
-
-/** Settles once `popup` is closed, or after `timeoutMs` whatever its state. */
-function untilClosed(popup: Window, timeoutMs: number): Promise<void> {
-  return new Promise((resolve) => {
-    const started = Date.now()
-    const poll = setInterval(() => {
-      if (popup.closed || Date.now() - started >= timeoutMs) {
-        clearInterval(poll)
-        resolve()
-      }
-    }, POPUP_CLOSED_POLL_MS)
-  })
-}
+/**
+ * The round trip of a `requestPermissions` message: the proxy answers it
+ * once its popup closes, at the latest after `PERMISSIONS_POPUP_MAX_MS` — so
+ * this is longer by the default timeout, and the call never rejects with
+ * `timeout` while the proxy is still watching the popup.
+ */
+const PERMISSIONS_REQUEST_TIMEOUT_MS =
+  PERMISSIONS_POPUP_MAX_MS + DEFAULT_TIMEOUT_MS
 
 /**
  * {@link withTimeout} for one of `initialize()`'s waits: a missed deadline
@@ -1086,16 +1079,6 @@ export class SwarmIdClient {
   }
 
   /**
-   * Open the auth popup from the dApp page.
-   *
-   * Carries no challenge: a popup opened here has the dApp page as its
-   * `window.opener`, so there is nothing for a handover to attach to, and the
-   * popup falls back to the storage write it does anyway.
-   *
-   * @returns whether the popup opened — a blocked one returns null, which the
-   *   caller must not report as a connect in progress.
-   */
-  /**
    * Ask the user for more drives (#711). Opens the "Permissions for <app>"
    * popup showing only what is asked; the user picks drives, may create one,
    * or grants nothing. Resolves once the popup is closed with the drives the
@@ -1142,7 +1125,7 @@ export class SwarmIdClient {
         requestId: this.generateRequestId(),
         permissions,
         popupMode: this.popupMode,
-        requestOptions: { timeout: PERMISSIONS_POPUP_TIMEOUT_MS },
+        requestOptions: { timeout: PERMISSIONS_REQUEST_TIMEOUT_MS },
       })
       if (response.opened) return
     }
@@ -1151,7 +1134,13 @@ export class SwarmIdClient {
       this.iframeOrigin + basePath,
       window.location.origin,
       this.metadata,
-      { permissions, permissionsFor: account },
+      {
+        permissions,
+        permissionsFor: account,
+        // Opened here although the iframe could not see shared storage (its
+        // own popup was blocked): the bus is the only way back to it.
+        handOverViaBus: this.storageShared !== true,
+      },
     )
     const popup =
       this.popupMode === "popup"
@@ -1163,9 +1152,19 @@ export class SwarmIdClient {
         "Failed to open the permissions popup",
       )
     }
-    await untilClosed(popup, PERMISSIONS_POPUP_TIMEOUT_MS)
+    await untilPopupClosed(popup, PERMISSIONS_POPUP_MAX_MS)
   }
 
+  /**
+   * Open the auth popup from the dApp page.
+   *
+   * Carries no challenge: a popup opened here has the dApp page as its
+   * `window.opener`, so there is nothing for a handover to attach to, and the
+   * popup falls back to the storage write it does anyway.
+   *
+   * @returns whether the popup opened — a blocked one returns null, which the
+   *   caller must not report as a connect in progress.
+   */
   private openAuthWindow(options: ConnectOptions): boolean {
     const basePath = this.iframePath.replace(/\/proxy$/, "")
     const authUrl = buildAuthUrl(

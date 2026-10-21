@@ -524,6 +524,8 @@ Asks the user for more drives while the app is connected — a viewer who starts
 
 **Returns:** `Promise<Drive[]>` — the drives the app holds once the popup is closed, as [`getDrives()`](#getdrives) reports them. When the user granted nothing, or closed the popup, that is what the app held before.
 
+The popup grants only to an app with a live connection. An app that was tracking the account default (connected with no drive request) holds an explicit list afterwards, with that default as its first drive: it keeps its primary, and no longer follows a later change of the account default.
+
 **Throws:**
 
 - `not-authenticated` if the app is not connected

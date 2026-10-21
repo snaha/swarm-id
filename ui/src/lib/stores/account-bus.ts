@@ -20,6 +20,7 @@
  * change made on ANOTHER DEVICE reaches this device's unpartitioned contexts
  * at all — they read storage, and no storage event crosses a device boundary.
  */
+import { withTimeout } from '@snaha/swarm-id'
 import {
   AccountBus,
   PRESENCE_INTERVAL_MS,
@@ -28,6 +29,7 @@ import {
   accountDeltaSnapshot,
   deriveBusContext,
   getOrCreateDeviceId,
+  sleep,
 } from '@snaha/swarm-id/internal'
 import type { SyncedAccount } from '@snaha/swarm-id/internal'
 
@@ -41,7 +43,18 @@ import { applyAccountDelta } from '$lib/stores/account-delta'
  */
 export const PUBLISH_DEBOUNCE_MS = 300
 
+/** How long a closing page waits for a room to reach (see `publishBeforeClose`). */
+const CLOSE_PUBLISH_TIMEOUT_MS = 5000
+const PEER_POLL_MS = 100
+/**
+ * After the publish, before the window goes: the delta is encrypted and
+ * sent asynchronously, and a closing window takes its socket with it.
+ */
+const CLOSE_SEND_GRACE_MS = 500
+
 let bus: AccountBus | undefined
+/** The room's transport, read for its peer count by `publishBeforeClose`. */
+let transport: SignalingTransport | undefined
 /** Who else is live in the room, from their `presence` beats — the same
  *  tracker the proxy keeps, so the dev device list can say "online" without
  *  any Swarm read. Rebuilt per room; never persisted. */
@@ -77,6 +90,7 @@ function closeBus(): void {
   unsubscribePeerLeft = undefined
   bus?.close()
   bus = undefined
+  transport = undefined
   joinedKey = undefined
   attaching = undefined
 }
@@ -90,7 +104,7 @@ async function attach(account: SyncedAccount, forGeneration: number): Promise<vo
   const context = await deriveBusContext(account.derivationKey)
   if (forGeneration !== generation) return
 
-  const transport = new SignalingTransport({
+  transport = new SignalingTransport({
     url,
     topic: context.topic,
     encryptionKey: context.encryptionKey,
@@ -175,6 +189,33 @@ export const accountBusStore = {
    */
   liveDeviceIds(): string[] {
     return presence.liveDeviceIds(Date.now())
+  },
+
+  /**
+   * Publish `account` from a page about to close (#711). The debounce would
+   * die with the window, a page that just opened is still joining, and the
+   * room has no mailbox — so wait for the join and for a peer to be in the
+   * room, publish at once, and give the send a moment to leave.
+   * ponytail: bounded by CLOSE_PUBLISH_TIMEOUT_MS; past it the delta is
+   * published anyway, reaching whoever is there, and a peer that joins later
+   * learns of the change from the next delta or the Swarm feed.
+   */
+  async publishBeforeClose(account: SyncedAccount): Promise<void> {
+    accountBusStore.join(account)
+    if (publishTimer !== undefined) {
+      clearTimeout(publishTimer)
+      publishTimer = undefined
+    }
+    pending = undefined
+    const deadline = Date.now() + CLOSE_PUBLISH_TIMEOUT_MS
+    await withTimeout(attaching ?? Promise.resolve(), CLOSE_PUBLISH_TIMEOUT_MS, 'bus join').catch(
+      () => undefined,
+    )
+    while ((transport?.peerCount ?? 0) === 0 && Date.now() < deadline) {
+      await sleep(PEER_POLL_MS)
+    }
+    publishNow(account)
+    await sleep(CLOSE_SEND_GRACE_MS)
   },
 
   /** Leave the room (sign-out, account cleared, page teardown). */

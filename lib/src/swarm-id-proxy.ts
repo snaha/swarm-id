@@ -187,6 +187,7 @@ import {
   type NetworkSettings,
 } from "./schemas"
 import { appSessionDuration } from "./utils/constants"
+import { PERMISSIONS_POPUP_MAX_MS, untilPopupClosed } from "./utils/popup"
 import { buildAuthUrl } from "./utils/url"
 import {
   createActForContent,
@@ -316,30 +317,6 @@ function deltaFoldView(snapshot: AccountStateSnapshot): DeviceStateSnapshot {
  * - Augment requests with authentication
  * - Return responses to parent dApp
  */
-const PERMISSIONS_POPUP_POLL_MS = 500
-/**
- * Safari reports a just-opened tab as closed for a moment, so the watch
- * starts late (as the connect popup's does).
- */
-const PERMISSIONS_POPUP_WATCH_DELAY_MS = 2000
-/** Past this the request answers anyway: the user is choosing drives. */
-const PERMISSIONS_POPUP_MAX_MS = 10 * 60_000
-
-/** Settles once `popup` is closed, or after the cap whatever its state. */
-function untilPopupClosed(popup: Window): Promise<void> {
-  return new Promise((resolve) => {
-    const started = Date.now()
-    setTimeout(() => {
-      const poll = setInterval(() => {
-        if (popup.closed || Date.now() - started >= PERMISSIONS_POPUP_MAX_MS) {
-          clearInterval(poll)
-          resolve()
-        }
-      }, PERMISSIONS_POPUP_POLL_MS)
-    }, PERMISSIONS_POPUP_WATCH_DELAY_MS)
-  })
-}
-
 export class SwarmIdProxy {
   private parentOrigin: string | undefined
   private parentIdentified: boolean = false
@@ -359,8 +336,12 @@ export class SwarmIdProxy {
   private primaryBatchId: string | undefined
   private storagePartitioned: boolean = false
   private pendingChallenge: string | undefined
-  /** The permissions popup's challenge (#711): only its hand-off is folded. */
-  private pendingGrantChallenge: string | undefined
+  /**
+   * The permissions popups this session opened (#711), by challenge: only
+   * their hand-off is folded, once, and only from that window. An entry
+   * goes when its popup closes.
+   */
+  private pendingGrants = new Map<string, Window>()
   /**
    * Hydrated account view for the storage-partitioning fallback: the synced
    * projection handed over by the connect popup (`AuthData.account`), held in
@@ -916,19 +897,22 @@ export class SwarmIdProxy {
    */
   private async handlePopupMessage(
     message: PopupToIframeMessage,
+    source: MessageEventSource | null,
   ): Promise<void> {
     if (message.type === "grantUpdated") {
-      // Only the popup this session opened, for this session's app: a stale
-      // challenge or another origin is ignored, never folded.
+      // Only the popup this session opened, from that window, for this
+      // session's app, and once: a stale or replayed challenge, another
+      // window or another origin is ignored, never folded.
+      const popup = this.pendingGrants.get(message.challenge)
       if (
-        !this.pendingGrantChallenge ||
-        message.challenge !== this.pendingGrantChallenge ||
+        !popup ||
+        source !== popup ||
         message.appOrigin !== this.parentOrigin
       ) {
         console.warn("[Proxy] grantUpdated from another popup — ignoring")
         return
       }
-      this.pendingGrantChallenge = undefined
+      this.pendingGrants.delete(message.challenge)
       this.applyAccountDelta(message.delta.snapshot)
       return
     }
@@ -2244,7 +2228,7 @@ export class SwarmIdProxy {
           if (type === "setSecret") this.endRefusedConnect()
           return
         }
-        await this.handlePopupMessage(popupResult.data)
+        await this.handlePopupMessage(popupResult.data, event.source)
         return
       }
 
@@ -3826,8 +3810,9 @@ export class SwarmIdProxy {
         ? window.open(url, "_blank", "width=500,height=600")
         : window.open(url, "_blank")
     if (popup) {
-      this.pendingGrantChallenge = challenge
-      await untilPopupClosed(popup)
+      this.pendingGrants.set(challenge, popup)
+      await untilPopupClosed(popup, PERMISSIONS_POPUP_MAX_MS)
+      this.pendingGrants.delete(challenge)
     }
     this.postMessage(event, {
       type: "requestPermissionsResponse",

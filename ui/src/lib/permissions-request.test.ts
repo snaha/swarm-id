@@ -10,6 +10,7 @@ import {
   grantAfterRequest,
   parsePermissionsHash,
   requestRows,
+  unknownDriveLabel,
 } from '$lib/permissions-request'
 
 const A = 'aa'.repeat(32)
@@ -49,6 +50,8 @@ describe('parsePermissionsHash', () => {
     })
     expect(parsePermissionsHash('#origin=x&permissions=%7Bbroken')?.permissions).toEqual({})
     expect(parsePermissionsHash('#origin=x')?.permissions).toBeUndefined()
+    expect(parsePermissionsHash('#origin=x&handover=bus')?.handOverViaBus).toBe(true)
+    expect(parsePermissionsHash('#origin=x')?.handOverViaBus).toBe(false)
     expect(parsePermissionsHash('#account=x')).toBeUndefined()
   })
 })
@@ -82,6 +85,18 @@ describe('an edit', () => {
       ['regular', A],
       ['scratch', S],
     ])
+  })
+
+  // A drive granted on another device may not have synced here yet: it is
+  // still a row, so a save keeps it unless the user sets it to None.
+  it('keeps a granted drive this device does not know, as a row of its own', () => {
+    const rows = editRows([new BatchId(A), new BatchId(B)], [drive(A)], A)
+    expect(rows.map((row) => [row.kind, row.chosen])).toEqual([
+      ['regular', A],
+      ['regular', B],
+    ])
+    expect(hex(grantAfterEdit([new BatchId(A), new BatchId(B)], rows, false, A))).toEqual([A, B])
+    expect(unknownDriveLabel(B)).toBe('Drive bbbb (not on this device yet)')
   })
 
   it('takes away a drive set to None, and keeps tracking the default unless another was picked', () => {

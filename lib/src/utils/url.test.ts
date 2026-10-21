@@ -95,6 +95,31 @@ describe("buildAuthUrl", () => {
     })
   })
 
+  // #711: a request for more opens the permissions page for the session's
+  // account; a parent-opened popup for a partitioned session is marked so.
+  it("opens the permissions page for an account, marked for the bus when the page opened it", () => {
+    const url = buildAuthUrl(
+      "https://swarm-id.example.com",
+      "https://myapp.example.com",
+      undefined,
+      { permissions: { drives: [{ kind: "scratch" }] }, permissionsFor: "ab" },
+    )
+    expect(url).toContain("https://swarm-id.example.com/permissions#")
+    const params = new URLSearchParams(url.split("#")[1])
+    expect(params.get("account")).toBe("ab")
+    expect(params.get("handover")).toBeNull()
+
+    const viaBus = buildAuthUrl(
+      "https://swarm-id.example.com",
+      "https://myapp.example.com",
+      undefined,
+      { permissions: {}, permissionsFor: "ab", handOverViaBus: true },
+    )
+    expect(new URLSearchParams(viaBus.split("#")[1]).get("handover")).toBe(
+      "bus",
+    )
+  })
+
   it("should include challenge when provided", () => {
     const url = buildAuthUrl(
       "https://swarm-id.example.com",

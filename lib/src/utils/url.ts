@@ -43,6 +43,12 @@ export interface BuildAuthUrlOptions {
    * the one the app's session is with.
    */
   permissionsFor?: string
+  /**
+   * The app's session is partitioned but this popup was not opened by its
+   * iframe, so nothing can hand it the grant except the account bus: the
+   * page waits for the delta to go out before it closes (#711).
+   */
+  handOverViaBus?: boolean
 }
 
 /**
@@ -97,6 +103,7 @@ export function buildAuthUrl(
 
   if (options?.permissionsFor !== undefined) {
     params.set("account", options.permissionsFor)
+    if (options.handOverViaBus) params.set("handover", "bus")
     return `${baseUrl}/permissions#${params.toString()}`
   }
   return `${baseUrl}/connect#${params.toString()}`

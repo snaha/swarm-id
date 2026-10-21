@@ -4,6 +4,7 @@ import { type Page, expect, test } from '@playwright/test'
 
 import {
   CHAIN_TEST_TIMEOUT_MS,
+  DRIVE_FUNDING,
   DRIVE_SETTLE_TIMEOUT_MS,
   PASSWORD,
   addDrive,
@@ -290,16 +291,22 @@ test('a drive request renders a row per drive and grants what was picked', async
 test('an app asks for a scratch drive later, and the Apps tab edits what it holds', async ({
   page,
 }) => {
-  test.setTimeout(CHAIN_TEST_TIMEOUT_MS * 2)
+  test.setTimeout(CHAIN_TEST_TIMEOUT_MS * 3)
   await seedLocalChain(page)
   await page.goto('/')
   await page.getByRole('link', { name: 'Get started' }).first().click()
   await completeCreateFlow(page)
   await page.getByRole('button', { name: 'Stay local for now' }).click()
   await expect(page).toHaveURL(/\/$/)
-  await fundPostageSigner(page)
+  // Two drives: a regular one the app tracks as the default, and a scratch
+  // one for it to ask for — two purchases out of this slot's 3 BZZ float.
+  await fundPostageSigner(page, { bzzPlur: 2n * DRIVE_FUNDING.bzzPlur })
   await addDrive(page)
   await expect(page.getByText(/^Drive [0-9a-f]{4}$/)).toBeVisible({
+    timeout: DRIVE_SETTLE_TIMEOUT_MS,
+  })
+  await addDrive(page, { kind: 'scratch' })
+  await expect(page.getByText(/^Drive [0-9a-f]{4}$/)).toHaveCount(2, {
     timeout: DRIVE_SETTLE_TIMEOUT_MS,
   })
 
@@ -325,29 +332,50 @@ test('an app asks for a scratch drive later, and the Apps tab edits what it hold
 
   // The app asks for a scratch drive. The page shows only that, empty, and
   // saving with nothing chosen grants nothing — no unlock on the way.
-  const popupPromise = page.waitForEvent('popup')
-  await page.getByRole('button', { name: 'Request a scratch drive' }).click()
-  popup = await popupPromise
-  await expect(popup.getByText(`Permissions for ${APP_NAME}`)).toBeVisible()
-  await expect(popup.getByText('Scratch drive', { exact: true })).toBeVisible()
-  await expect(popup.getByRole('combobox')).toHaveValue('')
-  await popup
-    .getByRole('button', { name: 'Save permissions' })
-    .click()
-    .catch(() => undefined)
-  await expect.poll(() => popup.isClosed()).toBe(true)
-
+  const request = async () => {
+    const popupPromise = page.waitForEvent('popup')
+    await page.getByRole('button', { name: 'Request a scratch drive' }).click()
+    const popup = await popupPromise
+    await expect(popup.getByText(`Permissions for ${APP_NAME}`)).toBeVisible()
+    await expect(popup.getByText('Scratch drive', { exact: true })).toBeVisible()
+    await expect(popup.getByRole('combobox')).toHaveValue('')
+    return popup
+  }
+  const save = async (popup: Page) => {
+    await popup
+      .getByRole('button', { name: 'Save permissions' })
+      .click()
+      .catch(() => undefined)
+    await expect.poll(() => popup.isClosed()).toBe(true)
+  }
+  await save(await request())
   await page.goto('/')
   expect(await grantOf()).toBeUndefined()
 
-  // The Apps tab opens the same page with everything the app holds: one Drive
-  // row on the account default, which saving leaves tracking the default.
+  // Asked again, the user picks the scratch drive: it is added to the grant,
+  // behind the default the app was tracking, which becomes explicit.
+  await page.goto(DEMO_URL)
+  popup = await request()
+  await popup.getByRole('combobox').selectOption({ index: 1 })
+  await expect(popup.getByRole('combobox')).toHaveValue(/^[0-9a-f]{64}$/)
+  await save(popup)
+  await page.goto('/')
+  const granted = await grantOf()
+  expect(granted).toEqual([
+    expect.stringMatching(/^[0-9a-f]{64}$/),
+    expect.stringMatching(/^[0-9a-f]{64}$/),
+  ])
+
+  // The Apps tab opens the same page with everything the app holds: a row
+  // per granted drive. The scratch drive set to None is taken away.
   await page.getByRole('tab', { name: 'Apps' }).click()
   await page.getByRole('button', { name: 'App actions' }).click()
   await page.getByRole('menuitem', { name: 'Permissions' }).click()
   await expect(page.getByText(`Permissions for ${APP_NAME}`)).toBeVisible()
-  await expect(page.getByRole('combobox')).toHaveValue(/^[0-9a-f]{64}$/)
+  await expect(page.getByRole('combobox')).toHaveCount(2)
+  await expect(page.getByText('Scratch drive', { exact: true })).toBeVisible()
+  await page.getByRole('combobox').nth(1).selectOption('')
   await page.getByRole('button', { name: 'Save permissions' }).click()
   await expect(page.getByText('Permissions saved')).toBeVisible()
-  expect(await grantOf()).toBeUndefined()
+  expect(await grantOf()).toEqual([(granted as string[])[0]])
 })

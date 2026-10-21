@@ -272,12 +272,17 @@ export function seedNoChain(page: Page) {
  */
 export async function addDrive(
   page: Page,
-  { settle = true, method = 'built-in' }: { settle?: boolean; method?: 'built-in' | 'widget' } = {},
+  {
+    settle = true,
+    method = 'built-in',
+    kind = 'regular',
+  }: { settle?: boolean; method?: 'built-in' | 'widget'; kind?: 'regular' | 'scratch' } = {},
 ) {
   await page.getByRole('tab', { name: 'Storage' }).click()
   await page.getByRole('button', { name: 'Add drive' }).click()
   const dialog = page.getByRole('dialog')
   // The form's selects in order: Drive type, Storage, Size up to, lifespan unit.
+  await dialog.getByRole('combobox').first().selectOption(kind)
   // The smallest size on offer — index 1, past the "Please select" placeholder.
   await dialog.getByRole('combobox').nth(2).selectOption({ index: 1 })
   // ...and an explicit lifespan, rather than the dialog's default of a YEAR. A

@@ -2876,36 +2876,76 @@ describe("SwarmIdProxy partitioned write enablement", () => {
         ])
       })
 
+      /** A hand-off from `source` (the popup by default) revoking this app. */
+      const handOff = (
+        challenge: string,
+        overrides: { appOrigin?: string; source?: unknown } = {},
+      ) =>
+        dispatch(
+          {
+            type: "grantUpdated",
+            appOrigin: overrides.appOrigin ?? PARENT_ORIGIN,
+            challenge,
+            delta: accountDelta({ connectedApps: [revoked(PARENT_ORIGIN)] }),
+          },
+          ID_ORIGIN,
+          overrides.source ?? popup,
+        )
+      /** The hand-off was folded: the delta revokes the app, which disconnects. */
+      const folded = () => messagesOfType("disconnectResponse")
+      const pendingGrants = () =>
+        (proxy as unknown as { pendingGrants: Map<string, Window> })
+          .pendingGrants
+      let popup: { closed: boolean }
+
+      beforeEach(() => {
+        popup = { closed: false }
+      })
+
       it(
-        "folds the popup's hand-off, and only with its challenge",
+        "folds the popup's hand-off once: from that window, with its challenge, for this app",
         async () => {
           const busChannel = await hydratedSession()
           busChannel.close()
-          const url = await requestPermissions({ closed: true } as Window)
+          const request = requestPermissions(popup as unknown as Window)
+          await vi.waitFor(() => expect(window.open).toHaveBeenCalled())
+          const url = vi.mocked(window.open).mock.calls.at(-1)![0] as string
           const challenge = new URLSearchParams(url.split("#")[1]).get(
             "challenge",
           )!
-          const handOff = (withChallenge: string) =>
-            dispatch(
-              {
-                type: "grantUpdated",
-                appOrigin: PARENT_ORIGIN,
-                challenge: withChallenge,
-                delta: accountDelta({
-                  connectedApps: [revoked(PARENT_ORIGIN)],
-                }),
-              },
-              ID_ORIGIN,
-            )
 
           await handOff("not-this-popup")
+          await handOff(challenge, { appOrigin: "https://other.example.com" })
+          await handOff(challenge, { source: {} })
           await flushBus()
-          expect(messagesOfType("disconnectResponse")).toHaveLength(0)
+          expect(folded()).toHaveLength(0)
+          expect(pendingGrants().has(challenge)).toBe(true)
 
           await handOff(challenge)
-          await vi.waitFor(() =>
-            expect(messagesOfType("disconnectResponse")).toHaveLength(1),
-          )
+          await vi.waitFor(() => expect(folded()).toHaveLength(1))
+          // One shot: the same challenge folds nothing twice.
+          expect(pendingGrants().has(challenge)).toBe(false)
+
+          popup.closed = true
+          await request
+        },
+        POPUP_WATCH_MS * 2,
+      )
+
+      it(
+        "forgets the challenge once the popup is closed",
+        async () => {
+          const busChannel = await hydratedSession()
+          busChannel.close()
+          popup.closed = true
+          const url = await requestPermissions(popup as unknown as Window)
+          const challenge = new URLSearchParams(url.split("#")[1]).get(
+            "challenge",
+          )!
+
+          await handOff(challenge)
+          await flushBus()
+          expect(folded()).toHaveLength(0)
         },
         POPUP_WATCH_MS * 2,
       )

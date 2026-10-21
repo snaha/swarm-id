@@ -19,6 +19,7 @@ import { type PickerRow, kindOf } from '$lib/drive-request'
 
 /** The helper line under the app's primary drive when it is edited. */
 const PRIMARY_DESCRIPTION = 'Where this app will store data'
+const UNKNOWN_DRIVE_HEX_CHARS = 4
 const KIND_DESCRIPTION = {
   regular: 'Used to store permanent data',
   scratch: 'Used to store streaming data',
@@ -36,6 +37,11 @@ export interface PermissionsPageRequest {
   accountId?: string
   /** The partitioned iframe's challenge, when it opened the popup. */
   challenge?: string
+  /**
+   * The app's session is partitioned and this popup was opened by the page,
+   * not the iframe: only the account bus can carry the grant back.
+   */
+  handOverViaBus: boolean
 }
 
 /** Parse the page's URL hash; `undefined` without an origin. */
@@ -62,6 +68,7 @@ export function parsePermissionsHash(hash: string): PermissionsPageRequest | und
     permissions,
     accountId: params.get('account') ?? undefined,
     challenge: params.get('challenge') ?? undefined,
+    handOverViaBus: params.get('handover') === 'bus',
   }
 }
 
@@ -102,10 +109,17 @@ export function grantAfterRequest(
   return [...new Set([...held, ...chosen])].map(toBatchId)
 }
 
+/** The row label of a granted drive this device has no record of yet. */
+export function unknownDriveLabel(batchHex: string): string {
+  return `Drive ${batchHex.slice(0, UNKNOWN_DRIVE_HEX_CHARS)} (not on this device yet)`
+}
+
 /**
  * The rows the Apps tab edits: a grant that tracks the account default is
  * one Drive row on it; a list is a row per granted drive, each of which may
- * be set to "None" to take the drive away from the app.
+ * be set to "None" to take the drive away from the app. A granted drive this
+ * device does not know (not yet synced from the device that bought it) is a
+ * row too, so saving keeps it rather than dropping it unseen.
  */
 export function editRows(
   current: Grant,
@@ -123,11 +137,10 @@ export function editRows(
       },
     ]
   }
-  return current.flatMap((batch) => {
+  return current.map((batch) => {
     const drive = drives.find((candidate) => candidate.batchID.equals(batch))
-    if (!drive) return []
-    const kind = kindOf(drive)
-    return [{ kind, description: KIND_DESCRIPTION[kind], optional: true, chosen: batch.toHex() }]
+    const kind = drive ? kindOf(drive) : 'regular'
+    return { kind, description: KIND_DESCRIPTION[kind], optional: true, chosen: batch.toHex() }
   })
 }
 
