@@ -13,6 +13,7 @@ import {
   fundPostageSigner,
   goToApp,
   openConnectPopup,
+  requestFromDemo,
   seedLocalChain,
 } from './helpers'
 
@@ -333,9 +334,7 @@ test('an app asks for a scratch drive later, and the Apps tab edits what it hold
   // The app asks for a scratch drive. The page shows only that, empty, and
   // saving with nothing chosen grants nothing — no unlock on the way.
   const request = async () => {
-    const popupPromise = page.waitForEvent('popup')
-    await page.getByRole('button', { name: 'Request a scratch drive' }).click()
-    const popup = await popupPromise
+    const popup = await requestFromDemo(page, DEMO_URL, ['A scratch drive'])
     await expect(popup.getByText(`Permissions for ${APP_NAME}`)).toBeVisible()
     await expect(popup.getByText('Scratch drive', { exact: true })).toBeVisible()
     await expect(popup.getByRole('combobox')).toHaveValue('')

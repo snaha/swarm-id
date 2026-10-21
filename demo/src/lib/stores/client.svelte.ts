@@ -3,7 +3,6 @@
 
 import {
   type AppPermissions,
-  type PermissionName,
   SwarmIdClient,
   formatTTL,
   DEFAULT_BEE_NODE_URL,
@@ -564,10 +563,6 @@ export const clientStore = {
       return undefined
     }
   },
-  /** One switch, from the sidebar. */
-  async requestSharing(permission: PermissionName): Promise<void> {
-    await this.requestPermissions({ [permission]: true })
-  },
   get drives() {
     return drives
   },
@@ -576,25 +571,6 @@ export const clientStore = {
   },
   set targetBatchID(value: string | undefined) {
     targetBatchID = value
-  },
-  /**
-   * Ask for a scratch drive on top of what the app holds (#711): opens the
-   * "Permissions for Swarm ID Demo" popup, and comes back with the drives
-   * the app holds once it closes — the same ones when nothing was granted.
-   */
-  async requestScratchDrive(): Promise<void> {
-    if (!client) return
-    try {
-      drives = await client.requestDrives([{ kind: 'scratch' }])
-      logStore.log(
-        `Drives after the request: ${drives.map((drive) => `${drive.batchID.slice(0, 8)} (${drive.kind})`).join(', ') || 'none'}`,
-      )
-    } catch (error) {
-      logStore.log(
-        `Drive request failed: ${error instanceof Error ? error.message : String(error)}`,
-        'warn',
-      )
-    }
   },
   /** Spread into any write's options: the drive the user picked, or none. */
   get uploadTarget(): { batchID?: string } {

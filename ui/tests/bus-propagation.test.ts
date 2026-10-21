@@ -38,6 +38,7 @@ import {
   openConnectPopup,
   openProxyConnectPopup,
   partitionedDemoOrigin,
+  requestFromDemo,
   seedLocalChain,
   waitForBatchIngestion,
 } from './helpers'
@@ -398,9 +399,7 @@ test('requestDrives() hands a partitioned session the drive it was granted', asy
   await expectProxyPartitioned(page)
   await expect(writeTo(page)).toHaveCount(0)
 
-  const popupPromise = page.waitForEvent('popup')
-  await page.getByRole('button', { name: 'Request a scratch drive' }).click()
-  const popup = await popupPromise
+  const popup = await requestFromDemo(page, demoOrigin!, ['A scratch drive'])
   await expect(popup.getByText('Scratch drive', { exact: true })).toBeVisible()
   // Opened by the iframe: the hand-off goes through `window.opener`.
   expect(new URL(popup.url()).hash).toContain('challenge=')
@@ -429,9 +428,7 @@ test('requestDrives() saved with nothing chosen leaves a partitioned session as 
   await connectPartitioned(page, '/account')
   await expectProxyPartitioned(page)
 
-  const popupPromise = page.waitForEvent('popup')
-  await page.getByRole('button', { name: 'Request a scratch drive' }).click()
-  const popup = await popupPromise
+  const popup = await requestFromDemo(page, demoOrigin!, ['A scratch drive'])
   await popup
     .getByRole('button', { name: 'Save permissions' })
     .click()
@@ -467,9 +464,7 @@ test('requestDrives() reaches a partitioned session over the bus when its popup 
   await createAccountWithDrive(page)
   await connectPartitioned(page, '/')
 
-  const popupPromise = page.waitForEvent('popup')
-  await page.getByRole('button', { name: 'Request a scratch drive' }).click()
-  const popup = await popupPromise
+  const popup = await requestFromDemo(page, demoOrigin!, ['A scratch drive'])
   // Opened by the page: no challenge, and marked for the bus.
   expect(new URL(popup.url()).hash).not.toContain('challenge=')
   expect(new URL(popup.url()).hash).toContain('handover=bus')
@@ -485,4 +480,103 @@ test('requestDrives() reaches a partitioned session over the bus when its popup 
   await expect(writeTo(page).locator('option', { hasText: 'scratch' })).toHaveCount(1, {
     timeout: 15000,
   })
+})
+
+// #885 on the Safari path: the sharing switches reach a partitioned session
+// the three ways a drive does — handed over by the popup the iframe opened,
+// pinned with the connect handover, and over the bus when the popup is blocked.
+// Chain-free: no drive is involved.
+
+/** An account whose data sharing is off account-wide, made on the identity origin. */
+async function createAccountSharingOff(page: Page) {
+  await page.goto(`${ID_ORIGIN}/`)
+  await page.getByRole('link', { name: 'Get started' }).first().click()
+  await completeCreateFlow(page)
+  await page.getByRole('button', { name: 'Stay local for now' }).click()
+  await page.getByRole('tab', { name: 'Apps' }).click()
+  const dataSharing = page.getByRole('switch', { name: 'Data sharing' })
+  await dataSharing.click()
+  await expect(dataSharing).toHaveAttribute('aria-checked', 'false')
+}
+
+const dataSharingShown = (page: Page, state: 'on' | 'off') =>
+  page.getByText(`Data sharing: ${state}`)
+
+test('requestPermissions() hands a partitioned session the switch turned on in its popup', async ({
+  page,
+}) => {
+  await createAccountSharingOff(page)
+  await connectPartitioned(page, '/permissions')
+  await expectProxyPartitioned(page)
+  await expect(dataSharingShown(page, 'off')).toBeVisible({ timeout: 15000 })
+  await expect(page.getByText('Sharing key: withheld (data sharing is off)')).toBeVisible()
+
+  const popup = await requestFromDemo(page, demoOrigin!, ['Data sharing'])
+  // Opened by the iframe: the hand-off goes through `window.opener`.
+  expect(new URL(popup.url()).hash).toContain('challenge=')
+  await popup.getByRole('switch', { name: 'Data sharing' }).click()
+  await popup
+    .getByRole('button', { name: 'Save permissions' })
+    .click()
+    .catch(() => undefined)
+  await expect.poll(() => popup.isClosed()).toBe(true)
+
+  // No reload, no reconnect: the session was handed the pin, and the key with it.
+  await expect(dataSharingShown(page, 'on')).toBeVisible({ timeout: 15000 })
+  await expect(page.getByText('Sharing key: available')).toBeVisible()
+})
+
+test('the connect screen asks a partitioned session’s switches, pinned with the handover', async ({
+  page,
+}) => {
+  await createAccountSharingOff(page)
+  await page.goto(`${demoOrigin}/`)
+  await page.evaluate(() =>
+    localStorage.setItem(
+      'swarm-id-demo-sharing-request',
+      JSON.stringify({ dataSharing: true, writeAccess: true }),
+    ),
+  )
+  await page.goto(`${demoOrigin}/permissions`)
+  await expectProxyPartitioned(page)
+
+  const popup = await openProxyConnectPopup(page)
+  await popup.getByRole('button', { name: /0x[0-9a-fA-F]{4}/ }).click()
+  await popup.getByRole('textbox', { name: 'Account password' }).fill(PASSWORD)
+  await popup.getByRole('button', { name: 'Confirm' }).click()
+  const write = popup.getByRole('switch', { name: 'Write access' })
+  await expect(write).toBeDisabled()
+  await popup.getByRole('switch', { name: 'Data sharing' }).click()
+  await write.click()
+  await goToApp(popup)
+
+  await expect(dataSharingShown(page, 'on')).toBeVisible({ timeout: 15000 })
+  await expect(page.getByText('Write access: on')).toBeVisible()
+})
+
+test('a switch reaches a partitioned session over the bus when its popup is blocked', async ({
+  page,
+}) => {
+  // Only the permissions popup: the connect popup opens from the same frame.
+  await page.context().addInitScript((idOrigin) => {
+    if (location.origin !== idOrigin || !location.pathname.endsWith('/proxy')) return
+    const open = window.open.bind(window)
+    window.open = (url, ...rest) =>
+      String(url ?? '').includes('/permissions#') ? null : open(url, ...rest)
+  }, ID_ORIGIN)
+  await createAccountSharingOff(page)
+  await connectPartitioned(page, '/permissions')
+
+  const popup = await requestFromDemo(page, demoOrigin!, ['Data sharing'])
+  // Opened by the page: no challenge, and marked for the bus.
+  expect(new URL(popup.url()).hash).not.toContain('challenge=')
+  expect(new URL(popup.url()).hash).toContain('handover=bus')
+  await popup.getByRole('switch', { name: 'Data sharing' }).click()
+  await popup
+    .getByRole('button', { name: 'Save permissions' })
+    .click()
+    .catch(() => undefined)
+  await expect.poll(() => popup.isClosed(), { timeout: 15000 }).toBe(true)
+
+  await expect(dataSharingShown(page, 'on')).toBeVisible({ timeout: 15000 })
 })

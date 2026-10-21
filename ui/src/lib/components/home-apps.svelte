@@ -105,17 +105,20 @@
     {#if activeApps.length === 0}
       <p class="text-muted-foreground py-8 text-center text-sm">No connected apps yet.</p>
     {:else}
+      <!-- Frame 31's Item: 10px vertical padding and gaps, a 40px rounded-sm
+           icon, 16px name line over a 20px URL line, badges, and a 32px icon
+           slot with a 16px chevron; a separator between rows and after the last. -->
       <div class="flex w-full flex-col">
         {#each activeApps as app (app.appUrl)}
           <button
             type="button"
-            class="border-border hover:bg-muted/50 flex w-full cursor-pointer items-center gap-3 border-b py-2.5 text-left"
+            class="border-border flex w-full cursor-pointer items-center gap-2.5 border-b py-2.5 text-left"
             onclick={() => open(app.appUrl)}
           >
-            <AppIcon src={app.appIcon} name={app.appName} size={40} />
-            <div class="flex min-w-0 flex-1 flex-col">
-              <p class="truncate text-sm font-medium">{app.appName}</p>
-              <p class="text-muted-foreground truncate text-sm">{app.appUrl}</p>
+            <AppIcon src={app.appIcon} name={app.appName} size={40} class="rounded-sm" />
+            <div class="flex min-w-0 flex-1 flex-col gap-1">
+              <p class="truncate text-sm leading-4 font-medium">{app.appName}</p>
+              <p class="text-muted-foreground truncate text-sm leading-5">{app.appUrl}</p>
             </div>
             {#if customised(app, account.settings)}
               <Badge variant="outline">Custom permissions</Badge>
@@ -123,7 +126,9 @@
             {#if !isConnected(app.connectedUntil)}
               <Badge>Disconnected</Badge>
             {/if}
-            <ChevronRight class="text-muted-foreground size-4 shrink-0" />
+            <span class="flex size-8 shrink-0 items-center justify-center">
+              <ChevronRight class="size-4" />
+            </span>
           </button>
         {/each}
       </div>

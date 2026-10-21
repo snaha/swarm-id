@@ -489,3 +489,24 @@ export async function beeReachable(beeUrl: string = BEE_API_URL): Promise<boolea
     return false
   }
 }
+
+/**
+ * Ask for more from the demo's Permissions page (`requestPermissions()`):
+ * tick `picks` under "Ask now" — "Data sharing", "Write access", "All drives",
+ * "A regular drive", "A scratch drive" — and return the popup it opens.
+ */
+export async function requestFromDemo(page: Page, origin: string, picks: string[]) {
+  await page.goto(`${origin}/permissions`)
+  // The session is restored on load; the request button waits for it.
+  await expect(page.getByText('Not connected.')).toHaveCount(0, { timeout: 15000 })
+  for (const pick of picks) {
+    // "Data sharing" / "Write access" exist under "Ask at connect" too: the
+    // last one is "Ask now"'s.
+    await page.getByRole('checkbox', { name: pick, exact: true }).last().click()
+  }
+  const popupPromise = page.waitForEvent('popup')
+  await page.getByRole('button', { name: 'Request permissions' }).click()
+  const popup = await popupPromise
+  await popup.waitForLoadState()
+  return popup
+}

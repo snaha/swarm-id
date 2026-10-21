@@ -5,7 +5,6 @@
 
 <script lang="ts">
   import { Badge } from '$lib/components/ui/badge'
-  import { Button } from '$lib/components/ui/button'
   import { clientStore } from '$lib/stores/client.svelte'
 
   let expanded = $state(false)
@@ -50,38 +49,6 @@
       >
     {/if}
   </button>
-
-  {#if clientStore.authenticated}
-    <div class="pl-6">
-      <Button
-        variant="outline"
-        size="sm"
-        class="w-full text-xs"
-        onclick={() => clientStore.requestScratchDrive()}
-      >
-        Request a scratch drive
-      </Button>
-      {#if clientStore.permissions && !clientStore.permissions.dataSharing}
-        <Button
-          variant="outline"
-          size="sm"
-          class="mt-2 w-full text-xs"
-          onclick={() => clientStore.requestSharing('dataSharing')}
-        >
-          Request data sharing
-        </Button>
-      {:else if clientStore.permissions && !clientStore.permissions.writeAccess}
-        <Button
-          variant="outline"
-          size="sm"
-          class="mt-2 w-full text-xs"
-          onclick={() => clientStore.requestSharing('writeAccess')}
-        >
-          Request write access
-        </Button>
-      {/if}
-    </div>
-  {/if}
 
   {#if clientStore.drives.length > 1}
     <label class="block pl-6 text-xs text-muted-foreground">

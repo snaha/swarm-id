@@ -28,6 +28,7 @@
   /** What a later request asks for, ticked here. */
   let askDataSharing = $state(false)
   let askWriteAccess = $state(false)
+  let askAll = $state(false)
   let askRegular = $state(false)
   let askScratch = $state(false)
   let lastResult = $state<string | undefined>(undefined)
@@ -38,7 +39,7 @@
       ...(askScratch ? [{ kind: 'scratch' as DriveKind }] : []),
     ]
     const permissions: Permissions = {
-      ...(drives.length > 0 && { drives }),
+      ...(askAll ? { drives: 'all' } : drives.length > 0 && { drives }),
       ...(askDataSharing && { dataSharing: true }),
       ...(askWriteAccess && { writeAccess: true }),
     }
@@ -163,11 +164,15 @@
         <Label for="ask-write-access" class="cursor-pointer text-sm">Write access</Label>
       </div>
       <div class="flex items-center gap-2">
-        <Checkbox id="ask-regular" bind:checked={askRegular} />
+        <Checkbox id="ask-all" bind:checked={askAll} />
+        <Label for="ask-all" class="cursor-pointer text-sm">All drives</Label>
+      </div>
+      <div class="flex items-center gap-2">
+        <Checkbox id="ask-regular" bind:checked={askRegular} disabled={askAll} />
         <Label for="ask-regular" class="cursor-pointer text-sm">A regular drive</Label>
       </div>
       <div class="flex items-center gap-2">
-        <Checkbox id="ask-scratch" bind:checked={askScratch} />
+        <Checkbox id="ask-scratch" bind:checked={askScratch} disabled={askAll} />
         <Label for="ask-scratch" class="cursor-pointer text-sm">A scratch drive</Label>
       </div>
       <AsyncButton

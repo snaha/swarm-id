@@ -60,8 +60,8 @@ test('the sharing switches gate the key, are asked for, and are pinned per app',
   await popup.getByRole('textbox', { name: 'Account password' }).fill(PASSWORD)
   await popup.getByRole('button', { name: 'Confirm' }).click()
   await goToApp(popup)
-  const requestButton = page.getByRole('button', { name: 'Request data sharing' })
-  await expect(requestButton).toBeVisible({ timeout: 15000 })
+  const accountButton = page.getByRole('button', { name: /0x|[0-9a-f]{6}\.\.\./ }).first()
+  await expect(accountButton).toBeVisible({ timeout: 10000 })
   await page.goto(`${DEMO_URL}/account`)
   await expect(page.getByText('Sharing key withheld')).toBeVisible()
   await expect(page.getByText('Sharing Key', { exact: true })).toHaveCount(0)
@@ -86,10 +86,8 @@ test('the sharing switches gate the key, are asked for, and are pinned per app',
     .catch(() => undefined)
   await expect.poll(() => permissions.isClosed()).toBe(true)
 
-  // The live session sees it: the key is back, and nothing left to ask.
+  // The live session sees it: the key is back.
   await expect(page.getByText('Data sharing: on')).toBeVisible({ timeout: 15000 })
-  await page.goto(DEMO_URL)
-  await expect(requestButton).toHaveCount(0, { timeout: 15000 })
   await page.goto(`${DEMO_URL}/account`)
   await expect(page.getByText('Sharing Key', { exact: true })).toBeVisible()
 
@@ -187,7 +185,6 @@ test('a switch requested at connect is asked on the connect screen', async ({ pa
   // Granted with the connection: the app has its key, nothing left to ask.
   const accountButton = page.getByRole('button', { name: /0x|[0-9a-f]{6}\.\.\./ }).first()
   await expect(accountButton).toBeVisible({ timeout: 10000 })
-  await expect(page.getByRole('button', { name: 'Request data sharing' })).toHaveCount(0)
   await page.goto(`${DEMO_URL}/permissions`)
   await expect(page.getByText('Data sharing: on')).toBeVisible()
   await expect(page.getByText('Write access: on')).toBeVisible()
