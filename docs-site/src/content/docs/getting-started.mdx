@@ -119,17 +119,48 @@ chunk so the user's own drive is spent through the public gateway. See
 
 ## Options
 
-| Option                 | Type       | Required | Description                                                                           |
-| ---------------------- | ---------- | -------- | ------------------------------------------------------------------------------------- |
-| `iframeOrigin`         | `string`   | Yes      | Origin of the Swarm ID iframe, for example `https://swarm-id.snaha.net`               |
-| `metadata`             | `object`   | No       | What the connect popup shows about your app                                           |
-| `metadata.name`        | `string`   | No       | Your app's name                                                                       |
-| `metadata.description` | `string`   | No       | A line about your app                                                                 |
-| `metadata.icon`        | `string`   | No       | Your app's icon as a data URL, SVG or PNG, under 4 KB                                 |
-| `onConnectionChange`   | `function` | No       | Called when the app-visible connection state changes (identity, stamp, account, auth) |
+| Option                 | Type       | Required | Description                                                                            |
+| ---------------------- | ---------- | -------- | -------------------------------------------------------------------------------------- |
+| `iframeOrigin`         | `string`   | Yes      | Origin of the Swarm ID iframe, for example `https://swarm-id.snaha.net`                |
+| `metadata`             | `object`   | No       | What the connect popup shows about your app                                            |
+| `metadata.name`        | `string`   | No       | Your app's name                                                                        |
+| `metadata.description` | `string`   | No       | A line about your app                                                                  |
+| `metadata.icon`        | `string`   | No       | Your app's icon as a data URL, SVG or PNG, under 4 KB                                  |
+| `onConnectionChange`   | `function` | No       | Called when the app-visible connection state changes (identity, stamp, account, auth)  |
+| `permissions`          | `object`   | No       | What the connect screen asks the user for: drives, and the sharing switches. See below |
 
 The full list, including the subsidised gateway and the iframe button's look, is on the
 [API Reference](../api/).
+
+## Drives and permissions
+
+Without `permissions` the app writes to the user's **default drive** and may read and publish with
+the account's sharing key: the account's defaults, which the user can change. An app that needs
+more says so, and the connect screen asks for it:
+
+```typescript
+const client = new SwarmIdClient({
+  // …
+  permissions: {
+    // One row per drive on the connect screen: a regular drive, and a scratch
+    // drive the user may leave empty.
+    drives: [{ kind: 'regular' }, { kind: 'scratch', optional: true }],
+    // Asked only when the user has it off.
+    dataSharing: true,
+  },
+})
+
+// What the user granted, now and whenever they change it in Swarm ID
+const drives = await client.getDrives()
+const { dataSharing, writeAccess } = await client.getPermissions()
+
+// Ask for more later, from a click
+const scratch = await client.requestDrives([{ kind: 'scratch' }])
+```
+
+A write names a drive with `batchID`, or goes to the app's primary drive. A call that needs a
+sharing switch the user turned off rejects with `permission-denied`. All of it, including what the
+user sees in Swarm ID, is on [Drives & Permissions](../drives-and-permissions/).
 
 ## Data
 
@@ -211,5 +242,6 @@ there, restores it with the recovery phrase, or rebuilds the account from Swarm 
 ## Next
 
 - [Architecture](../architecture/): how the popup, the iframe and your page fit together
+- [Drives & Permissions](../drives-and-permissions/): what an app asks for and what the user grants
 - [Key Derivation](../key-derivation/): every key the account uses and where it comes from
 - [API Reference](../api/): every method and option
