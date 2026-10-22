@@ -8,6 +8,7 @@
  */
 
 import { derivePostageSignerKeySync } from "./utils/key-derivation"
+import type { ActKeyCandidates } from "./proxy/act"
 import {
   describe,
   it,
@@ -164,6 +165,45 @@ vi.mock("./bus/bus-context", async (importActual) => {
         throw new Error("bus context derivation failed")
       }
       return actual.deriveBusContext(derivationKey)
+    }),
+  }
+})
+/**
+ * The grantee handlers, run against an ACT the identity published: the
+ * sharing key (the second candidate) is the one the share names, so a denied
+ * candidate fails the call with its own error, as the real module does
+ * (`proxy/act/index.test.ts`, "fails with a denied candidate's error").
+ */
+vi.mock("./proxy/act", async (importActual) => {
+  const actual = await importActual<typeof import("./proxy/act")>()
+  const publishedByIdentity = (keys: ActKeyCandidates) => {
+    const sharing = (Array.isArray(keys) ? keys : [keys])[1]
+    if (sharing && !(sharing instanceof Uint8Array)) throw sharing.denied
+  }
+  return {
+    ...actual,
+    addGranteesToAct: vi.fn(async (_t, _b, _h, keys: ActKeyCandidates) => {
+      publishedByIdentity(keys)
+      return {
+        historyReference: "h",
+        granteeListReference: "g",
+        actReference: "a",
+      }
+    }),
+    revokeGranteesFromAct: vi.fn(
+      async (_t, _b, _h, _e, keys: ActKeyCandidates) => {
+        publishedByIdentity(keys)
+        return {
+          encryptedReference: "e",
+          historyReference: "h",
+          granteeListReference: "g",
+          actReference: "a",
+        }
+      },
+    ),
+    getGranteesFromAct: vi.fn(async (_b, _h, keys: ActKeyCandidates) => {
+      publishedByIdentity(keys)
+      return []
     }),
   }
 })
@@ -1105,6 +1145,95 @@ describe("SwarmIdProxy partitioned write enablement", () => {
         )
         return messagesOfType("getPermissionsResponse").at(-1)!.permissions
       }
+
+      // Which switch gates which handler, against an ACT the identity
+      // published (the mocked `./proxy/act`): managing grantees needs write
+      // access, listing them only data sharing.
+      it("refuse to add or revoke grantees without write access, and still list them", async () => {
+        await connectWith({ writeAccess: false })
+        // The write lock is a fake; this one runs the operation handed to it.
+        await vi.waitFor(() =>
+          expect(coordinatorFor(BATCH_ID_HEX)).toBeDefined(),
+        )
+        coordinatorFor(BATCH_ID_HEX)!.withWrite.mockImplementation(
+          async (operation: (target: unknown) => Promise<unknown>) =>
+            operation({}),
+        )
+        const history = "ab".repeat(32)
+        const grantee = new PrivateKey("cd".repeat(32))
+          .publicKey()
+          .toCompressedHex()
+
+        await dispatch(
+          {
+            type: "actAddGrantees",
+            requestId: "add",
+            historyReference: history,
+            grantees: [grantee],
+          },
+          PARENT_ORIGIN,
+          parentWindow,
+        )
+        await dispatch(
+          {
+            type: "actRevokeGrantees",
+            requestId: "revoke",
+            historyReference: history,
+            encryptedReference: "ef".repeat(32),
+            revokeGrantees: [grantee],
+          },
+          PARENT_ORIGIN,
+          parentWindow,
+        )
+        await dispatch(
+          {
+            type: "actGetGrantees",
+            requestId: "list",
+            historyReference: history,
+          },
+          PARENT_ORIGIN,
+          parentWindow,
+        )
+
+        await vi.waitFor(() => {
+          for (const requestId of ["add", "revoke"]) {
+            expect(messagesOfType("error")).toContainEqual(
+              expect.objectContaining({
+                requestId,
+                code: "permission-denied",
+                permission: "writeAccess",
+              }),
+            )
+          }
+          expect(messagesOfType("actGetGranteesResponse")).toContainEqual(
+            expect.objectContaining({ requestId: "list", grantees: [] }),
+          )
+        })
+      })
+
+      it("refuse to list grantees without data sharing", async () => {
+        await connectWith({ dataSharing: false })
+
+        await dispatch(
+          {
+            type: "actGetGrantees",
+            requestId: "list",
+            historyReference: "ab".repeat(32),
+          },
+          PARENT_ORIGIN,
+          parentWindow,
+        )
+
+        await vi.waitFor(() =>
+          expect(messagesOfType("error")).toContainEqual(
+            expect.objectContaining({
+              requestId: "list",
+              code: "permission-denied",
+              permission: "dataSharing",
+            }),
+          ),
+        )
+      })
 
       it("are on by default, and the snapshot carries the sharing key", async () => {
         await connectWith({})

@@ -16,8 +16,9 @@ export default defineConfig({
   // root-absolute: Astro does not rewrite a `/architecture` href for the base,
   // so one would 404 everywhere but local dev.
   base: '/',
-  // The old page's address; relative, so it survives the deployment base.
-  redirects: { '/scratch-drives/': './drives-and-permissions/' },
+  // The old page's address; relative, so it survives the deployment base —
+  // and up one, since the redirect page is served at `…/scratch-drives/`.
+  redirects: { '/scratch-drives/': '../drives-and-permissions/' },
   integrations: [
     starlight({
       title: 'Swarm ID',

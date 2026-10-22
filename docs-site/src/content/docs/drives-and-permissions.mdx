@@ -208,6 +208,7 @@ sharing key is the one the share names: the error means "ask the user", never "n
 try {
   const data = await client.actDownloadData(encryptedRef, historyRef, publisherKey)
 } catch (error) {
+  if (!(error instanceof SwarmIdError)) throw error
   if (error.code === 'permission-denied' && error.permission === 'dataSharing') {
     await client.requestPermissions({ dataSharing: true })
   }

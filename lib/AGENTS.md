@@ -10,7 +10,7 @@ Two package entries, one build: `@snaha/swarm-id` (`src/index.ts`) is the dApp A
 All cross-origin communication via `postMessage` with Zod validation.
 
 The full unions live in `types.ts` (`ParentToIframeMessageSchema`, `IframeToParentMessageSchema`,
-`PopupToIframeMessageSchema`) — 41 and 46 members, one `…Response` per request. The ones worth
+`PopupToIframeMessageSchema`) — 42 and 47 members, one `…Response` per request. The ones worth
 knowing by name:
 
 - **Parent → Iframe**: `parentIdentify`, `checkAuth`, `connect`, `requestPermissions` (#711), `getPermissions` (#885),

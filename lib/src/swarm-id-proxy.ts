@@ -5997,6 +5997,20 @@ export class SwarmIdProxy {
     message: GetPermissionsMessage,
     event: MessageEvent,
   ): void {
+    // Without a session the fold would answer on/on, for a key the app does
+    // not hold; `connectionInfo.permissions` is absent then, and so is this.
+    if (!this.authenticated || !this.appSecret) {
+      this.sendErrorToParent(
+        event,
+        message.requestId,
+        new SwarmIdError(
+          "not-authenticated",
+          "Not authenticated. Please login first.",
+        ),
+        "Get permissions failed",
+      )
+      return
+    }
     this.postMessage(event, {
       type: "getPermissionsResponse",
       requestId: message.requestId,
