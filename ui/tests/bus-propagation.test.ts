@@ -103,6 +103,13 @@ async function connectPartitioned(page: Page, path: string) {
   await popup.getByRole('textbox', { name: 'Account password' }).fill(PASSWORD)
   await popup.getByRole('button', { name: 'Confirm' }).click()
   await goToApp(popup)
+  // The popup closes as soon as it has posted the handover; the proxy keeps
+  // the session for a reload only after hydrating it, which with a drive
+  // means a round trip to Bee. A test that navigates before the demo shows
+  // the account leaves the next page load with no session to restore.
+  await expect(page.getByRole('button', { name: /0x|[0-9a-f]{6}\.\.\./ }).first()).toBeVisible({
+    timeout: 15000,
+  })
 }
 
 /** The same, but creating the account inside the popup — so it has no drive. */
