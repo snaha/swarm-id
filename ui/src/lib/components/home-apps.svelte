@@ -9,6 +9,7 @@
 -->
 <script lang="ts">
   import ChevronRight from '@lucide/svelte/icons/chevron-right'
+  import { appSessionDuration, sharingDefault } from '@snaha/swarm-id/internal'
 
   import { replaceState } from '$app/navigation'
   import { page } from '$app/state'
@@ -19,10 +20,8 @@
   import { Select } from '$lib/components/ui/select'
   import { Switch } from '$lib/components/ui/switch'
   import { CONNECTION_DAYS_OPTIONS, msToDays } from '$lib/duration'
-  import { customised, sharingDefault } from '$lib/permissions-request'
+  import { customised } from '$lib/permissions-request'
   import type { Account } from '$lib/types'
-
-  const DEFAULT_CONNECTION_DAYS = 30
 
   interface Props {
     account: Account
@@ -32,13 +31,7 @@
 
   let { account, target = [] }: Props = $props()
 
-  let connectionDays = $derived(
-    String(
-      account.settings?.appSessionDuration !== undefined
-        ? msToDays(account.settings.appSessionDuration)
-        : DEFAULT_CONNECTION_DAYS,
-    ),
-  )
+  let connectionDays = $derived(String(msToDays(appSessionDuration(account.settings))))
   // Revoked tombstones stay in the record for sync; only show live entries.
   const activeApps = $derived(account.activeApps)
   // The account-wide sharing switches (#885), on unless turned off here;
@@ -47,8 +40,17 @@
   const writeAccess = $derived(sharingDefault(account.settings, 'writeAccess'))
 
   /** The open app's origin: from the hash, then the row clicked or "Back". */
-  let openUrl = $derived(target[0] ? decodeURIComponent(target[0]) : undefined)
+  let openUrl = $derived(target[0] ? decodeOrigin(target[0]) : undefined)
   const openApp = $derived(activeApps.find((app) => app.appUrl === openUrl))
+
+  /** Anyone can write the hash: a malformed escape shows the list, not an error. */
+  function decodeOrigin(encoded: string): string | undefined {
+    try {
+      return decodeURIComponent(encoded)
+    } catch {
+      return undefined
+    }
+  }
 
   function open(appUrl: string | undefined) {
     openUrl = appUrl

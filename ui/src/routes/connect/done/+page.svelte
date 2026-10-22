@@ -26,7 +26,11 @@
 
   import { BatchId } from '@ethersphere/bee-js'
   import ArrowRight from '@lucide/svelte/icons/arrow-right'
-  import type { AppPermissions, PermissionName } from '@snaha/swarm-id/internal'
+  import {
+    type AppPermissions,
+    type PermissionName,
+    effectivePermissions,
+  } from '@snaha/swarm-id/internal'
 
   import { goto } from '$app/navigation'
   import { resolve } from '$app/paths'
@@ -48,13 +52,7 @@
     rowsGrant,
   } from '$lib/drive-request'
   import { driveDisplayName } from '$lib/drives'
-  import {
-    SWITCH_COPY,
-    askedPatch,
-    askedValues,
-    switchValues,
-    switchesToAsk,
-  } from '$lib/permissions-request'
+  import { SWITCH_COPY, askedPatch, switchesToAsk } from '$lib/permissions-request'
   import routes from '$lib/routes'
   import { accountsStore } from '$lib/stores/accounts.svelte'
   import { connectStore } from '$lib/stores/connect.svelte'
@@ -85,7 +83,7 @@
 
   let rows = $state<PickerRow[]>([])
   let grantAll = $state(false)
-  /** The sharing switches (#885): what they were at load, and show now. */
+  /** The sharing switches (#885): what was in effect at load, and what they show now. */
   let initialSharing = $state<AppPermissions>({ dataSharing: true, writeAccess: true })
   let sharing = $state<AppPermissions>({ dataSharing: true, writeAccess: true })
 
@@ -168,11 +166,11 @@
       rows = pickerRows(requested, drives, defaultBatchHex)
     }
     // A reconnect starts from what the app already holds.
-    initialSharing = switchValues(
+    initialSharing = effectivePermissions(
       account.connectedApps.find((app) => app.appUrl === request.appOrigin),
       account.settings,
     )
-    sharing = askedValues(initialSharing)
+    sharing = { ...initialSharing }
   })
 
   function driveGrantFor(): Pick<ConnectGrant, 'drives'> | undefined {
@@ -192,7 +190,7 @@
   function grantFor(): ConnectGrant | undefined {
     const grant = {
       ...driveGrantFor(),
-      ...askedPatch(initialSharing, sharing, switches, account?.settings),
+      ...askedPatch(initialSharing, sharing, switches),
     }
     return Object.keys(grant).length > 0 ? grant : undefined
   }

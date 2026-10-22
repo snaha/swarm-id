@@ -24,6 +24,7 @@
     type AppPermissions,
     type PermissionName,
     accountDeltaSnapshot,
+    effectivePermissions,
   } from '@snaha/swarm-id/internal'
 
   import { goto } from '$app/navigation'
@@ -39,13 +40,11 @@
     type PermissionsPageRequest,
     SWITCH_COPY,
     askedPatch,
-    askedValues,
     grantAfterRequest,
     grantableOnRequest,
     parsePermissionsHash,
     requestRows,
     sameGrant,
-    switchValues,
     switchesToAsk,
   } from '$lib/permissions-request'
   import routes from '$lib/routes'
@@ -58,7 +57,7 @@
   let page = $state<PermissionsPageRequest | undefined>(undefined)
   let rows = $state<PickerRow[]>([])
   let allTicked = $state(false)
-  /** The sharing switches: what they were at load, and show now. */
+  /** The sharing switches: what was in effect at load, and what they show now. */
   let initialSharing = $state<AppPermissions>({ dataSharing: true, writeAccess: true })
   let sharing = $state<AppPermissions>({ dataSharing: true, writeAccess: true })
 
@@ -112,8 +111,8 @@
       return
     }
     rows = Array.isArray(requested) ? requestRows(requested) : []
-    initialSharing = switchValues(app, account?.settings)
-    sharing = askedValues(initialSharing)
+    initialSharing = effectivePermissions(app, account?.settings)
+    sharing = { ...initialSharing }
   })
 
   async function save() {
@@ -128,7 +127,7 @@
           : current
         : grantAfterRequest(current, defaultBatchHex, rowsGrant(rows))
     const grantChanged = !sameGrant(grant, current)
-    const sharingPatch = askedPatch(initialSharing, sharing, switches, account.settings)
+    const sharingPatch = askedPatch(initialSharing, sharing, switches)
     const changed = grantChanged || Object.keys(sharingPatch).length > 0
     if (changed) {
       account.setAppPermissions(page.appOrigin, {

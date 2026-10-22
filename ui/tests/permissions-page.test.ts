@@ -18,6 +18,18 @@ test('the permissions page refuses to render inside a frame', async ({ page }) =
   await expect(framed.getByRole('button', { name: 'Save permissions' })).toHaveCount(0)
 })
 
+// The Apps tab's app page grants on the spot too (#885), and is deep-linkable
+// as `/#apps/<origin>`, so the home route refuses the same way.
+test('the home page refuses to render inside a frame', async ({ page }) => {
+  await page.setContent(
+    '<iframe src="http://localhost:5500/#apps" width="600" height="600"></iframe>',
+  )
+
+  const framed = page.frameLocator('iframe')
+  await expect(framed.getByText('This page cannot be shown inside another site.')).toBeVisible()
+  await expect(framed.getByRole('tab', { name: 'Apps' })).toHaveCount(0)
+})
+
 test('the permissions page renders at top level', async ({ page }) => {
   await page.goto(PERMISSIONS_URL)
 
@@ -86,8 +98,10 @@ test('the sharing switches gate the key, are asked for, and are pinned per app',
     .catch(() => undefined)
   await expect.poll(() => permissions.isClosed()).toBe(true)
 
-  // The live session sees it: the key is back.
+  // The live session sees it: the key is back. Write access was not asked,
+  // so it is not granted along, whatever the account default says.
   await expect(page.getByText('Data sharing: on')).toBeVisible({ timeout: 15000 })
+  await expect(page.getByText('Write access: off')).toBeVisible()
   await page.goto(`${DEMO_URL}/account`)
   await expect(page.getByText('Sharing Key', { exact: true })).toBeVisible()
 
@@ -104,12 +118,20 @@ test('the sharing switches gate the key, are asked for, and are pinned per app',
     'true',
   )
   await expect(page.getByText('Account default: off')).toBeVisible()
-  await page.getByRole('button', { name: 'Use account default' }).click()
+  // Write access was pinned off along with it: the app holds what the popup
+  // showed, not the account default underneath.
+  await expect(page.getByRole('switch', { name: 'Write access' })).toHaveAttribute(
+    'aria-checked',
+    'false',
+  )
+  await expect(page.getByText('Account default: on')).toBeVisible()
+  await page.getByRole('button', { name: 'Use account default' }).first().click()
   await expect(page.getByRole('switch', { name: 'Data sharing' })).toHaveAttribute(
     'aria-checked',
     'false',
   )
   await expect(page.getByText('Account default: off')).toHaveCount(0)
+  await expect(page.getByText('Account default: on')).toHaveCount(0)
   await page.getByRole('button', { name: 'Back to apps' }).click()
   await expect(page.getByText('Custom permissions')).toHaveCount(0)
   await expect(page).toHaveURL(/#apps$/)

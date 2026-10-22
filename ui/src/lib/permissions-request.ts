@@ -16,7 +16,7 @@ import {
   type Permissions,
   PermissionsSchema,
   type PostageStamp,
-  appSessionDuration,
+  effectivePermissions,
 } from '@snaha/swarm-id/internal'
 
 import { type PickerRow, kindOf } from '$lib/drive-request'
@@ -213,137 +213,75 @@ export const SWITCH_COPY: Record<PermissionName, { label: string; description: s
   },
 }
 
-/** The account-wide default of a switch: what an unpinned app gets. */
-export function sharingDefault(
-  settings: AccountSettings | undefined,
-  name: PermissionName,
-): boolean {
-  return settings?.[name] ?? true
-}
-
 /**
- * What each switch shows: the app's pin, else the account default. Each on
- * its own — write access is only SHOWN once data sharing is on, which is how
- * the implication is kept, so its own value need not follow.
- */
-export function switchValues(
-  app: Pick<ConnectedApp, 'dataSharing' | 'writeAccess'> | undefined,
-  settings: AccountSettings | undefined,
-): AppPermissions {
-  return {
-    dataSharing: app?.dataSharing ?? sharingDefault(settings, 'dataSharing'),
-    writeAccess: app?.writeAccess ?? sharingDefault(settings, 'writeAccess'),
-  }
-}
-
-/**
- * Which switches a request names: the ones asked for, data sharing whenever
- * write access is, since the latter implies it. Both for no request (an
- * edit).
- */
-export function switchesToShow(requested: Permissions | undefined): PermissionName[] {
-  if (requested === undefined) return [...PERMISSION_NAMES]
-  const names: PermissionName[] = []
-  if (requested.dataSharing || requested.writeAccess) names.push('dataSharing')
-  if (requested.writeAccess) names.push('writeAccess')
-  return names
-}
-
-/**
- * The switches a request asks for that are not already on — the ones the
- * connect screen and the permissions popup put the question for (#885).
- * Write access is listed while data sharing is off: it is only SHOWN once
- * data sharing is on, which the caller keeps live as the user flips it.
+ * The switches a request asks for that are not in effect (`current`, from
+ * `effectivePermissions`) — the ones the connect screen and the permissions
+ * popup put the question for (#885). Data sharing is asked whenever write
+ * access is, since the latter implies it; write access is listed while data
+ * sharing is off, shown disabled until the user turns data sharing on.
  */
 export function switchesToAsk(
   requested: Permissions | undefined,
   current: AppPermissions,
 ): PermissionName[] {
-  const effective = askedValues(current)
-  return switchesToShow(requested).filter((name) => !effective[name])
+  const names: PermissionName[] = []
+  if (requested?.dataSharing || requested?.writeAccess) names.push('dataSharing')
+  if (requested?.writeAccess) names.push('writeAccess')
+  return names.filter((name) => !current[name])
 }
 
 /**
- * What the asked switches show at first: the effective values, so write
- * access reads off while data sharing is, whatever it would be underneath.
- */
-export function askedValues(raw: AppPermissions): AppPermissions {
-  return { dataSharing: raw.dataSharing, writeAccess: raw.dataSharing && raw.writeAccess }
-}
-
-/**
- * The pins an ask leaves: each switch asked and moved off its underlying
- * value — and a write access asked and left off while data sharing was
- * turned on, since the user declined it. A switch not asked, or left
- * disabled (data sharing still off), was not decided, so it is not pinned.
+ * The pins an ask leaves, `initial` being what was in effect when the screen
+ * opened and `shown` what it shows at save: data sharing when asked and
+ * moved; write access when asked, enabled and moved — and, whenever data
+ * sharing was just turned on, to what the screen showed: off unless it was
+ * asked and turned on. The screen showed write access off, or not at all,
+ * and what sits underneath (the account default, an old pin) is not what the
+ * user agreed to.
  */
 export function askedPatch(
-  raw: AppPermissions,
+  initial: AppPermissions,
   shown: AppPermissions,
   asked: readonly PermissionName[],
-  settings: AccountSettings | undefined,
 ): Partial<Pick<ConnectedApp, 'dataSharing' | 'writeAccess'>> {
-  const decided = {
-    dataSharing: asked.includes('dataSharing') ? shown.dataSharing : raw.dataSharing,
-    writeAccess:
-      asked.includes('writeAccess') && shown.dataSharing ? shown.writeAccess : raw.writeAccess,
+  const patch: Partial<Pick<ConnectedApp, 'dataSharing' | 'writeAccess'>> = {}
+  if (asked.includes('dataSharing') && shown.dataSharing !== initial.dataSharing) {
+    patch.dataSharing = shown.dataSharing
   }
-  return sharingAfterSave(raw, decided, [], settings)
+  const writeAsked = asked.includes('writeAccess') && shown.dataSharing
+  const writeAccess = writeAsked && shown.writeAccess
+  const dataSharingTurnedOn = shown.dataSharing && !initial.dataSharing
+  if (dataSharingTurnedOn || (writeAsked && writeAccess !== initial.writeAccess)) {
+    patch.writeAccess = writeAccess
+  }
+  return patch
 }
 
 /**
  * Whether the app holds anything of its own apart from the account defaults
- * — a sharing switch pinned the other way, or its own session duration — the
- * Apps tab's "Custom permissions" badge.
+ * — a pinned switch or its own session length — the Apps tab's "Custom
+ * permissions" badge. A pin equal to the default counts: the app no longer
+ * follows the account, so turning a switch off account-wide leaves it be.
  */
 export function customised(
   app: Pick<ConnectedApp, 'dataSharing' | 'writeAccess' | 'sessionDuration'>,
   settings: AccountSettings | undefined,
 ): boolean {
-  return (
-    pinnedDifferently(app, settings).length > 0 ||
-    (app.sessionDuration !== undefined && app.sessionDuration !== appSessionDuration(settings))
-  )
+  return pinned(app, settings).length > 0 || app.sessionDuration !== undefined
 }
 
 /**
- * The switches an app pins to something other than the account default.
- * Write access counts only while data sharing is in effect: without it the
- * pin changes nothing and has no row to be seen on, so it is not custom —
- * it is kept, and shows again once data sharing is back on.
+ * The switches an app pins. Write access counts only while data sharing is
+ * in effect: without it the pin changes nothing and has no row to be seen
+ * on, so it is not custom — it is kept, and shows again once data sharing is
+ * back on.
  */
-export function pinnedDifferently(
+export function pinned(
   app: Pick<ConnectedApp, 'dataSharing' | 'writeAccess'>,
   settings: AccountSettings | undefined,
 ): PermissionName[] {
-  const { dataSharing } = switchValues(app, settings)
+  const { dataSharing } = effectivePermissions(app, settings)
   return PERMISSION_NAMES.filter(
-    (name) =>
-      (name !== 'writeAccess' || dataSharing) &&
-      app[name] !== undefined &&
-      app[name] !== sharingDefault(settings, name),
+    (name) => app[name] !== undefined && (name !== 'writeAccess' || dataSharing),
   )
-}
-
-/**
- * The sharing patch a save writes: a pin for each switch moved off what it
- * showed, a cleared pin (`undefined`) for one put back to the account default
- * after "Use account default", nothing for the rest — an untouched switch
- * keeps following, or stays pinned, as it was.
- */
-export function sharingAfterSave(
-  initial: AppPermissions,
-  values: AppPermissions,
-  resets: readonly PermissionName[],
-  settings: AccountSettings | undefined,
-): Partial<Pick<ConnectedApp, 'dataSharing' | 'writeAccess'>> {
-  const patch: Partial<Pick<ConnectedApp, 'dataSharing' | 'writeAccess'>> = {}
-  for (const name of PERMISSION_NAMES) {
-    if (resets.includes(name) && values[name] === sharingDefault(settings, name)) {
-      patch[name] = undefined
-    } else if (values[name] !== initial[name]) {
-      patch[name] = values[name]
-    }
-  }
-  return patch
 }

@@ -6,8 +6,10 @@
   One app of the Apps tab (SwarmID-MVP, APPS, Frame 154): what it holds, each
   control applying as it is changed — a drive row (a drive set to "None" is
   taken away, unticking "all" falls back to the account default), the sharing
-  switches (moving one pins it for this app; "Use account default" unpins
-  it, #885) — and the two ways out, Disconnect and Revoke access.
+  switches (moving one pins it for this app, even to the value the account
+  default has; "Use account default" unpins it, #885) — and the two ways out,
+  Disconnect and Revoke access. Every control grants on the spot, so the home
+  route refuses to render framed (`routes/+page.svelte`).
   "Keep app connected for" is the app's own session length, applied at its
   next connect (a running session keeps the deadline it was given), and
   counts as custom like a pinned switch. Not here yet: the design's per-app
@@ -21,6 +23,8 @@
     type ConnectedApp,
     type PermissionName,
     appSessionDuration,
+    effectivePermissions,
+    sharingDefault,
   } from '@snaha/swarm-id/internal'
 
   import DrivePickerRows from '$lib/components/drive-picker-rows.svelte'
@@ -34,10 +38,8 @@
     SWITCH_COPY,
     editRows,
     grantAfterEdit,
-    pinnedDifferently,
+    pinned,
     sameGrant,
-    sharingDefault,
-    switchValues,
   } from '$lib/permissions-request'
   import { toastStore } from '$lib/stores/toast.svelte'
   import type { Account } from '$lib/types'
@@ -56,16 +58,15 @@
       drives.find((drive) => kindOf(drive) === 'regular')?.batchID.toHex(),
   )
   const connected = $derived(app.connectedUntil !== undefined && app.connectedUntil > Date.now())
-  const sharing = $derived(switchValues(app, account.settings))
-  const pinned = $derived(pinnedDifferently(app, account.settings))
+  const sharing = $derived(effectivePermissions(app, account.settings))
+  const pinnedSwitches = $derived(pinned(app, account.settings))
   const switches = $derived(
     PERMISSION_NAMES.filter((name) => name !== 'writeAccess' || sharing.dataSharing),
   )
   const defaultDays = $derived(msToDays(appSessionDuration(account.settings)))
   const connectionDays = $derived(msToDays(appSessionDuration(account.settings, app)))
-  const customDuration = $derived(
-    app.sessionDuration !== undefined && connectionDays !== defaultDays,
-  )
+  // A pin equal to the default is a pin, as with the switches.
+  const customDuration = $derived(app.sessionDuration !== undefined)
 
   // Re-derived from the grant after each save; the picker edits the rows in place.
   let rows: PickerRow[] = $derived(editRows(app.drives, drives, defaultBatchHex))
@@ -151,7 +152,7 @@
         <div class="flex flex-col gap-1 text-sm">
           <span class="font-medium">{SWITCH_COPY[name].label}</span>
           <span class="text-muted-foreground">{SWITCH_COPY[name].description}</span>
-          {#if pinned.includes(name)}
+          {#if pinnedSwitches.includes(name)}
             <span class="text-muted-foreground">
               Account default: {sharingDefault(account.settings, name) ? 'on' : 'off'} ·
               <button type="button" class="underline" onclick={() => useDefault(name)}>
