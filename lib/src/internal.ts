@@ -91,6 +91,7 @@ export {
 export type { SyncAccountFunction, SyncResult } from "./sync"
 
 export { PartitionLease } from "./sync/partition-lease"
+export { mergeAccountSettings } from "./sync/merge-snapshot"
 
 export type { PartitionLeaseStateSnapshot } from "./sync/partition-lease"
 
@@ -111,7 +112,13 @@ export {
 
 export type { AccountStateSnapshot } from "./utils/account-state-snapshot"
 
-export { effectivePermissions } from "./permissions"
+export {
+  GRANT_CLOCKS,
+  SETTINGS_CLOCKS,
+  effectivePermissions,
+  sharingDefault,
+  stampClocks,
+} from "./permissions"
 
 export {
   BUCKET_DEPTH,

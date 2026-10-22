@@ -4,6 +4,7 @@
 import { describe, it, expect } from "vitest"
 import { BatchId, PrivateKey } from "@ethersphere/bee-js"
 import {
+  mergeAccountSettings,
   mergeSnapshotWithRemote,
   snapshotContainsContribution,
 } from "./merge-snapshot"
@@ -445,6 +446,54 @@ describe("mergeSnapshotWithRemote — apps / stamps", () => {
     ])
   })
 
+  // Each grant field rides its own clock (#885): a drive picked on a stale
+  // copy carries that copy's switches, and must not revert a pin made elsewhere.
+  it("a switch pinned on one copy survives a newer drive choice made on a stale one", () => {
+    const pinned = {
+      ...makeConnectedApp("https://app.example"),
+      dataSharing: false,
+      dataSharingAt: 8_000_000,
+      writeAccess: false,
+      writeAccessAt: 8_000_000,
+      sessionDuration: 7,
+      sessionDurationAt: 8_000_000,
+    }
+    const staleWithNewDrive = {
+      ...makeConnectedApp("https://app.example"),
+      drives: [new BatchId("cc".repeat(32))],
+      permissionsAt: 9_000_000,
+    }
+    const result = mergeSnapshotWithRemote(
+      makeSnapshot({ connectedApps: [staleWithNewDrive] }),
+      makeSnapshot({ connectedApps: [pinned] }),
+    )
+    expect(result.connectedApps[0]).toMatchObject({
+      dataSharing: false,
+      writeAccess: false,
+      sessionDuration: 7,
+      permissionsAt: 9_000_000,
+    })
+    const { drives } = result.connectedApps[0]
+    expect(drives !== "all" && drives?.map((b) => b.toHex())).toEqual([
+      "cc".repeat(32),
+    ])
+  })
+
+  it("a newer switch pin propagates between two live copies", () => {
+    const pinned = {
+      ...makeConnectedApp("https://app.example"),
+      writeAccess: false,
+      writeAccessAt: 9_000_000,
+    }
+    const result = mergeSnapshotWithRemote(
+      makeSnapshot({
+        connectedApps: [makeConnectedApp("https://app.example")],
+      }),
+      makeSnapshot({ connectedApps: [pinned] }),
+    )
+    expect(result.connectedApps[0].writeAccess).toBe(false)
+  })
+
   // A removal is not permanent: connecting again clears both markers and sets a
   // fresh `lastConnectedAt`, which is what has to outrank the tombstone.
   it("a genuine reconnect beats an older removal", () => {
@@ -543,5 +592,36 @@ describe("snapshotContainsContribution", () => {
     const mine = makeSnapshot({ postageStamps: [makeStamp("aa".repeat(32))] })
     const latest = makeSnapshot({ postageStamps: [makeStamp("bb".repeat(32))] })
     expect(snapshotContainsContribution(mine, latest)).toBe(false)
+  })
+})
+
+// The account-wide switches ride their own clocks inside `settings` (#885):
+// a "Keep apps connected for" change made on a stale copy outranks the whole
+// object on `settingsAt`, and must not take a data sharing "off" with it.
+describe("mergeAccountSettings", () => {
+  it("keeps a switch turned off under a newer unrelated edit made on a stale copy", () => {
+    const merged = mergeAccountSettings(
+      { value: { dataSharing: false, dataSharingAt: 5 }, at: 5 },
+      { value: { appSessionDuration: 1 }, at: 9 },
+    )
+    expect(merged).toEqual({
+      value: { appSessionDuration: 1, dataSharing: false, dataSharingAt: 5 },
+      at: 9,
+    })
+  })
+
+  it("takes the newer settings whole when nothing is clocked apart", () => {
+    expect(
+      mergeAccountSettings(
+        { value: { appSessionDuration: 1 }, at: 5 },
+        { value: { appSessionDuration: 2 }, at: 9 },
+      ),
+    ).toEqual({ value: { appSessionDuration: 2 }, at: 9 })
+    expect(
+      mergeAccountSettings(
+        { value: undefined, at: 0 },
+        { value: undefined, at: 0 },
+      ),
+    ).toEqual({ value: undefined, at: 0 })
   })
 })

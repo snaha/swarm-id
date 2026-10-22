@@ -15,10 +15,12 @@
  */
 import {
   type ConnectedApp,
+  GRANT_CLOCKS,
   type SyncedAccount,
   appSessionDuration,
   deriveSecret,
   serializeSyncedAccount,
+  stampClocks,
   stampsReachableByApp,
 } from '@snaha/swarm-id/internal'
 
@@ -39,7 +41,7 @@ export type ConnectGrant = Partial<Pick<ConnectedApp, 'drives' | 'dataSharing' |
 /**
  * Write the connected-app entry into the account record (this is what fires the
  * storage event the proxy iframe authenticates from). The grant goes in with
- * it, on its own clock, so the handover below already sees it.
+ * it, each field on its own clock, so the handover below already sees it.
  */
 function saveConnection(
   account: Account,
@@ -57,7 +59,7 @@ function saveConnection(
     appSecret,
     lastConnectedAt: now,
     connectedUntil: now + appSessionDuration(account.settings, existing),
-    ...(grant ? { ...grant, permissionsAt: now } : {}),
+    ...(grant ? stampClocks(grant, GRANT_CLOCKS, now) : {}),
   }
   account.connectApp(connection)
 }

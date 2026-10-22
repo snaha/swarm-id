@@ -123,14 +123,19 @@ export const DeviceSchemaV1 = z.object({
 // ============================================================================
 
 /**
- * Per-account settings, one `settingsAt` clock for the lot. The two sharing
+ * Per-account settings, on the account's `settingsAt` clock. The two sharing
  * switches (#885) are the account-wide defaults every app follows unless it
- * is pinned otherwise (`ConnectedAppSchemaV1`); absent means on.
+ * is pinned otherwise (`ConnectedAppSchemaV1`); absent means on. Each rides
+ * its own clock on top (`SETTINGS_CLOCKS`, `permissions.ts`): `settingsAt`
+ * ranks the object whole, so a session-length change made on a stale copy
+ * would otherwise carry that copy's switches with it and undo an "off".
  */
 export const AccountSettingsSchemaV1 = z.object({
   appSessionDuration: z.number().optional(),
   dataSharing: z.boolean().optional(),
+  dataSharingAt: z.number().optional(),
   writeAccess: z.boolean().optional(),
+  writeAccessAt: z.number().optional(),
 })
 
 // ============================================================================
@@ -161,17 +166,22 @@ export const ConnectedAppSchemaV1 = z.object({
   // → the account's `settings` decide; present → pinned, whatever the account
   // default becomes. `effectivePermissions` (`permissions.ts`) folds the two.
   dataSharing: z.boolean().optional(),
+  dataSharingAt: z.number().optional(),
   writeAccess: z.boolean().optional(),
+  writeAccessAt: z.number().optional(),
   // How long this app's connections last, in ms, when the user set it for
   // this app rather than the account (`settings.appSessionDuration`).
   // Applied at the next connect (`appSessionDuration`).
   sessionDuration: z.number().optional(),
-  // The grant above — drives, the two switches, the duration — rides its own
-  // last-writer-wins clock, because it is the one edit to an entry that says
-  // nothing about whether the app is still connected. Ranking the whole entry
-  // on a clock this bumped let a drive picked on a stale copy outrank a revoke
-  // made elsewhere and take the tombstone with it (#681). Membership merges on
-  // the markers below instead.
+  sessionDurationAt: z.number().optional(),
+  // The grant — drives, the two switches, the duration — rides last-writer-
+  // wins clocks of its own, one per field (`GRANT_CLOCKS`, `permissions.ts`),
+  // because a grant edit says nothing about whether the app is still
+  // connected. Ranking the whole entry on a clock this bumped let a drive
+  // picked on a stale copy outrank a revoke made elsewhere and take the
+  // tombstone with it (#681); one clock for the whole grant let it revert a
+  // switch pinned elsewhere the same way (#885). Membership merges on the
+  // markers below instead.
   permissionsAt: z.number().optional(),
   // Tombstone marker. A revoked app is kept in the snapshot (so the removal
   // propagates to other devices) but hidden from the UI and invalid for auth.
