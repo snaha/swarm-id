@@ -62,6 +62,7 @@ function makeView(overrides: Partial<DeviceStateView> = {}): DeviceStateView {
     accountName: { value: "acct", at: 1 },
     defaultPostageStampBatchID: { value: undefined, at: 1 },
     settings: { value: undefined, at: 1 },
+    deleted: { value: false, at: 1 },
     accountPublicKey: TEST_ACCOUNT_PUBLIC_KEY,
     accountCreatedAt: 1_000_000,
     partitionCount: 2,
@@ -112,6 +113,17 @@ describe("device-state serialization", () => {
       at: 3,
     })
   })
+
+  it("round-trips the deletion marker", () => {
+    const view = makeView({ deleted: { value: true, at: 12 } })
+    const bytes = new TextEncoder().encode(
+      JSON.stringify(serializeDeviceState(ACCOUNT_ID, "dev-1", view)),
+    )
+    expect(deserializeDeviceState(bytes).deleted).toEqual({
+      value: true,
+      at: 12,
+    })
+  })
 })
 
 describe("accountStateToDeviceView — never-edited scalar clocks", () => {
@@ -147,9 +159,19 @@ describe("accountStateToDeviceView — never-edited scalar clocks", () => {
     expect(view.accountName.at).toBe(CREATED_AT)
     expect(view.defaultPostageStampBatchID.at).toBe(CREATED_AT)
     expect(view.settings.at).toBe(CREATED_AT)
+    // An account nobody deleted is not deleted, as of its creation.
+    expect(view.deleted).toEqual({ value: false, at: CREATED_AT })
     // Regression guard: must NOT pick up the fresh publish-time `lastModified`,
     // which would let an unchanged default name clobber a peer's real rename.
     expect(view.accountName.at).not.toBe(1_700_000_999_000)
+  })
+
+  it("carries a deletion with its own clock", () => {
+    const deletedAt = CREATED_AT + 7_000
+    const view = accountStateToDeviceView(
+      newAccountSnapshot({ deleted: true, deletedAt }),
+    )
+    expect(view.deleted).toEqual({ value: true, at: deletedAt })
   })
 
   it("preserves an explicit edit clock (a real rename outranks a peer's createdAt)", () => {
@@ -306,6 +328,35 @@ describe("foldAccount — per-field scalar LWW", () => {
       dataSharingAt: 10,
     })
     expect(folded.settingsAt).toBe(20)
+  })
+
+  it("a deletion wins over a peer's older view of the account", () => {
+    const deleting = makeView({ deleted: { value: true, at: 20 } })
+    const stale = makeView({
+      accountName: { value: "renamed-before", at: 10 },
+      deleted: { value: false, at: 1 },
+    })
+    const folded = foldAccount(
+      [deleting, stale] as unknown as DeviceStateSnapshot[],
+      [],
+    )
+    expect(folded.deleted).toBe(true)
+    expect(folded.deletedAt).toBe(20)
+    // Its own field: the rename on the other view still lands.
+    expect(folded.accountName).toBe("renamed-before")
+  })
+
+  it("a newer restore resurrects a deleted account", () => {
+    const deleted = makeView({ deleted: { value: true, at: 20 } })
+    const restored = makeView({ deleted: { value: false, at: 30 } })
+    for (const views of [
+      [deleted, restored],
+      [restored, deleted],
+    ]) {
+      const folded = foldAccount(views as unknown as DeviceStateSnapshot[], [])
+      expect(folded.deleted).toBe(false)
+      expect(folded.deletedAt).toBe(30)
+    }
   })
 
   // The bus fold (`deltaFoldView` in `swarm-id-proxy.ts`) reuses `foldAccount`

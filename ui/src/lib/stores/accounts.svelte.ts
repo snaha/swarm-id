@@ -76,7 +76,7 @@ type DeviceAuth =
  * the persisted collection and its mutations are never dropped.
  *
  * Scalar fields each carry a per-field last-writer-wins clock
- * (`accountNameAt` / `defaultStampAt` / `settingsAt`) so concurrent edits to
+ * (`accountNameAt` / `defaultStampAt` / `settingsAt` / `deletedAt`) so concurrent edits to
  * different scalars on different devices converge instead of clobbering. A
  * mutator that changes a scalar MUST stamp the matching clock; the fold folds
  * them by LWW (`applyRefreshed`).
@@ -111,6 +111,9 @@ export class Account {
   accountNameAt = $state<number | undefined>(undefined)
   defaultStampAt = $state<number | undefined>(undefined)
   settingsAt = $state<number | undefined>(undefined)
+  /** Deleted on some device: set by `markDeleted`, or folded from a peer. */
+  deleted = $state(false)
+  deletedAt = $state<number | undefined>(undefined)
   lastModified = $state<number | undefined>(undefined)
   partitionCount = $state<number | undefined>(undefined)
   // Persist-and-publish this account's change, bound to `this` in the ctor so
@@ -163,6 +166,8 @@ export class Account {
     this.accountNameAt = record.accountNameAt
     this.defaultStampAt = record.defaultStampAt
     this.settingsAt = record.settingsAt
+    this.deleted = record.deleted ?? false
+    this.deletedAt = record.deletedAt
     this.lastModified = record.lastModified
     this.partitionCount = record.partitionCount
   }
@@ -183,6 +188,8 @@ export class Account {
     this.accountNameAt = undefined
     this.defaultStampAt = undefined
     this.settingsAt = undefined
+    this.deleted = false
+    this.deletedAt = undefined
     this.lastModified = undefined
     this.partitionCount = undefined
   }
@@ -233,6 +240,8 @@ export class Account {
       accountNameAt: this.accountNameAt,
       defaultStampAt: this.defaultStampAt,
       settingsAt: this.settingsAt,
+      deleted: this.deleted,
+      deletedAt: this.deletedAt,
       lastModified: this.lastModified,
       partitionCount: this.partitionCount,
     }
@@ -347,6 +356,29 @@ export class Account {
       soonestDriveExpiry: soonestDriveExpiry(this.stamps),
     }
     this.#resetSyncedFields()
+    this.#commit({ skipSync: true })
+  }
+
+  /**
+   * The deleting device's teardown, in one commit: revoke every live app —
+   * the revoke is what cuts a partitioned dApp session off from the stamp
+   * signer keys, over the bus — and mark the account deleted, so a peer that
+   * folds it forgets the account.
+   *
+   * Drives and devices are deliberately left live. The account publishes
+   * through its default drive, and the fold skips a removed device's view, so
+   * tombstoning either would silence the very publish that carries this.
+   * `skipSync`, because that publish is the caller's to await: the record may
+   * only be removed once it has landed (`publishAccountDeletion`).
+   */
+  markDeleted() {
+    const now = Date.now()
+    this.connectedApps = this.connectedApps.map((app) =>
+      app.revokedAt === undefined ? revoked(app, true) : app,
+    )
+    this.deleted = true
+    this.deletedAt = now
+    this.lastModified = now
     this.#commit({ skipSync: true })
   }
 
@@ -575,6 +607,11 @@ export class Account {
    * came from Swarm). Collections replace wholesale (already merged upstream).
    * Scalars are folded by per-field LWW: a remote value wins only if its clock
    * is newer than ours, so a stale device can't clobber a local edit.
+   *
+   * @returns true when this fold is what deleted the account — a peer's
+   *   deletion won over a live local record. The caller then forgets the
+   *   account (`forgetAccountDeletedElsewhere`). An account already deleted
+   *   here is not news: that is the deleting device mid-publish.
    */
   applyRefreshed(fields: {
     devices?: Device[]
@@ -586,7 +623,10 @@ export class Account {
     defaultStampAt?: number
     settings?: AccountSettings | undefined
     settingsAt?: number
-  }) {
+    deleted?: boolean
+    deletedAt?: number
+  }): boolean {
+    const wasDeleted = this.deleted
     if (fields.devices) this.devices = fields.devices
     if (fields.connectedApps) this.connectedApps = fields.connectedApps
     if (fields.postageStamps) this.postageStamps = fields.postageStamps
@@ -614,7 +654,16 @@ export class Account {
       this.settings = merged.value
       this.settingsAt = merged.at
     }
+    if (
+      fields.deleted !== undefined &&
+      fields.deletedAt !== undefined &&
+      fields.deletedAt > (this.deletedAt ?? this.createdAt)
+    ) {
+      this.deleted = fields.deleted
+      this.deletedAt = fields.deletedAt
+    }
     this.#commit({ skipSync: true })
+    return this.deleted && !wasDeleted
   }
 }
 

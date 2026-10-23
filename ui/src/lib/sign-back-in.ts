@@ -23,6 +23,7 @@ import {
   foldedToSyncedAccount,
 } from '@snaha/swarm-id/internal'
 
+import { reclaimed } from '$lib/account-deleted'
 import { strip0x } from '$lib/crypto/hex'
 import { walletFromEntropy } from '$lib/crypto/mnemonic'
 import { noteAccountFolded } from '$lib/dev/account-refresh'
@@ -74,8 +75,9 @@ export async function signBackIn(
       allowEmpty: opts?.allowEmpty === true,
     }))
 
+  // Claimed back whichever way it was restored: see `reclaimed`.
   const live = accountsStore.add({
-    ...restored,
+    ...reclaimed(restored),
     access: vault.access,
     encryptedSeed: vault.encryptedSeed,
   })

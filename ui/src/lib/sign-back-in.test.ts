@@ -197,4 +197,49 @@ describe('signBackIn', () => {
     await expect(signBackIn(live, wallet.entropy)).rejects.toThrow(/Swarm network/)
     expect(live.isSignedOut).toBe(true)
   })
+
+  // A restore folding a deleted account brings it back: the user unlocked it,
+  // and the drives they kept at deletion come with it.
+  it('claims back an account the network fold says was deleted', async () => {
+    const live = await signedOutWithCorruptSnapshot()
+    const deletedAt = Date.now() - 1_000
+    const record = await signedInRecord()
+    vi.mocked(foldAccountFromSwarm).mockResolvedValue({
+      account: {
+        devices: record.devices,
+        connectedApps: [],
+        postageStamps: record.postageStamps,
+        accountName: record.name,
+        defaultPostageStampBatchID: record.defaultPostageStampBatchID,
+        settings: undefined,
+        accountNameAt: record.createdAt,
+        defaultStampAt: record.createdAt,
+        settingsAt: record.createdAt,
+        deleted: true,
+        deletedAt,
+        createdAt: record.createdAt,
+        publicKey: record.publicKey,
+        partitionCount: 2,
+      },
+      devices: record.devices,
+    })
+
+    await signBackIn(live, wallet.entropy)
+
+    expect(live.deleted).toBe(false)
+    expect(live.deletedAt).toBeGreaterThan(deletedAt)
+    expect(live.postageStamps).toHaveLength(1)
+  })
+
+  // The local snapshot cannot see a deletion made elsewhere while this device
+  // was signed out, so the claim is made on every sign-back-in.
+  it('claims the account back on a sign-back-in from the snapshot too', async () => {
+    const live = await signedOutAccount()
+    const before = Date.now()
+
+    await signBackIn(live, wallet.entropy)
+
+    expect(live.deleted).toBe(false)
+    expect(live.deletedAt).toBeGreaterThanOrEqual(before)
+  })
 })

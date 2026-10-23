@@ -183,7 +183,7 @@ export interface ResizePlan {
  * chunk, so it survives any delay up to that many × 2^Δ blocks — twice the
  * confirmation window at the smallest resize, more at every other.
  */
-const FLOOR_MARGIN_BLOCKS = 36n
+export const FLOOR_MARGIN_BLOCKS = 36n
 
 /**
  * Plan a resize to `newDepth` from the batch's LIVE remaining per-chunk

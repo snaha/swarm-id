@@ -113,6 +113,8 @@ export function serializeSyncedAccount(
     accountNameAt: data.accountNameAt,
     defaultStampAt: data.defaultStampAt,
     settingsAt: data.settingsAt,
+    deleted: data.deleted,
+    deletedAt: data.deletedAt,
     lastModified: data.lastModified,
     partitionCount: data.partitionCount,
   }

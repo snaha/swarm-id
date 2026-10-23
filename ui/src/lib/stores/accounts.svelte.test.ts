@@ -525,3 +525,112 @@ describe('Account.setAccess', () => {
     expect(account.toRecord()).toMatchObject({ signedOutAt: expect.any(Number) })
   })
 })
+
+describe('Account.markDeleted', () => {
+  const APP_URL = 'https://app.example.com'
+  const OTHER_APP_URL = 'https://other.example.com'
+  const REVOKED_AT = 1700000000500
+
+  function accountWithApps(commit: (account: Account, options?: { skipSync?: boolean }) => void) {
+    return new Account(
+      {
+        ...signedInRecord(),
+        connectedApps: [
+          { appUrl: APP_URL, appName: 'App', lastConnectedAt: 1, appSecret: '44'.repeat(32) },
+          // Already removed: its tombstone keeps its own clock.
+          { appUrl: OTHER_APP_URL, appName: 'Other', lastConnectedAt: 1, revokedAt: REVOKED_AT },
+        ],
+      },
+      commit,
+    )
+  }
+
+  // One commit, and not a published one: the deletion is published by the
+  // caller, awaited, so the record is removed only once peers can hear it.
+  it('revokes every live app and marks the account deleted, in one unpublished commit', () => {
+    const commit = vi.fn()
+    const account = accountWithApps(commit)
+
+    account.markDeleted()
+
+    expect(commit).toHaveBeenCalledTimes(1)
+    expect(commit).toHaveBeenCalledWith(account, { skipSync: true })
+    expect(account.deleted).toBe(true)
+    expect(account.deletedAt).toEqual(expect.any(Number))
+    const [live, removed] = account.connectedApps
+    expect(live.revokedAt).toEqual(expect.any(Number))
+    expect(live.appSecret).toBeUndefined()
+    expect(removed.revokedAt).toBe(REVOKED_AT)
+    expect(account.toSyncedRecord().deleted).toBe(true)
+  })
+
+  // Drives stay: the account publishes through its default drive, and the
+  // fold skips a removed device's view.
+  it('leaves drives and devices alone', () => {
+    const account = new Account(
+      {
+        ...signedInRecord(),
+        devices: [{ deviceId: 'd', name: 'd', createdAt: 1, lastSignedInAt: 1 }],
+        postageStamps: [
+          {
+            batchID: new BatchId('c'.repeat(64)),
+            signerKey: new PrivateKey('b'.repeat(64)),
+            depth: 20,
+            amount: 1n,
+            bucketDepth: 16,
+            blockNumber: 1,
+            immutableFlag: false,
+            utilization: 0,
+            usable: true,
+            exists: true,
+            createdAt: 1,
+          },
+        ],
+      },
+      noCommit,
+    )
+
+    account.markDeleted()
+
+    expect(account.stamps).toHaveLength(1)
+    expect(account.devices[0].removedAt).toBeUndefined()
+  })
+})
+
+describe('Account.applyRefreshed deletion verdict', () => {
+  const CREATED_AT = 1700000000000
+
+  it('reports a peer deletion that wins', () => {
+    const account = new Account(signedInRecord(), noCommit)
+    expect(account.applyRefreshed({ deleted: true, deletedAt: CREATED_AT + 1 })).toBe(true)
+    expect(account.deleted).toBe(true)
+  })
+
+  it('ignores a deletion older than the local verdict', () => {
+    const account = new Account(
+      { ...signedInRecord(), deleted: false, deletedAt: CREATED_AT + 10 },
+      noCommit,
+    )
+    expect(account.applyRefreshed({ deleted: true, deletedAt: CREATED_AT + 5 })).toBe(false)
+    expect(account.deleted).toBe(false)
+  })
+
+  // The deleting device folds peers while it publishes; its own deletion is
+  // not news, and a stale peer's live copy must not undo it.
+  it('neither reports nor undoes a deletion this device made', () => {
+    const account = new Account(signedInRecord(), noCommit)
+    account.markDeleted()
+    expect(account.applyRefreshed({ deleted: false, deletedAt: CREATED_AT })).toBe(false)
+    expect(account.applyRefreshed({ deleted: true, deletedAt: Date.now() + 1 })).toBe(false)
+    expect(account.deleted).toBe(true)
+  })
+
+  it('takes a newer restore from a peer', () => {
+    const account = new Account(
+      { ...signedInRecord(), deleted: true, deletedAt: CREATED_AT + 5 },
+      noCommit,
+    )
+    expect(account.applyRefreshed({ deleted: false, deletedAt: CREATED_AT + 10 })).toBe(false)
+    expect(account.deleted).toBe(false)
+  })
+})

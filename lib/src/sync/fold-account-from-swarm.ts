@@ -57,6 +57,8 @@ export function foldedToSyncedAccount(opts: {
     accountNameAt: account.accountNameAt,
     defaultStampAt: account.defaultStampAt,
     settingsAt: account.settingsAt,
+    deleted: account.deleted,
+    deletedAt: account.deletedAt,
     lastModified: opts.lastModified ?? Date.now(),
     devices: [...account.devices],
     connectedApps: [...account.connectedApps],

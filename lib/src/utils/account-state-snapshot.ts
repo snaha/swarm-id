@@ -46,11 +46,11 @@ const ACCOUNT_STATE_SNAPSHOT_VERSION = 1
  *
  * Every never-edited scalar clock falls back to the account's STABLE
  * `createdAt`, NEVER a fresh `Date.now()`: re-stamping an unchanged name /
- * default-stamp / settings on every publish would let a device that never
- * touched the field clobber a peer's genuine concurrent edit under per-field
- * LWW (docs/Account-State.md, "Convergence rules"). `createdAt` is identical
- * across devices and predates every edit,
- * so any real change still wins.
+ * default-stamp / settings / deletion marker on every publish would let a
+ * device that never touched the field clobber a peer's genuine concurrent edit
+ * under per-field LWW (docs/Account-State.md, "Convergence rules"). `createdAt`
+ * is identical across devices and predates every edit, so any real change
+ * still wins.
  *
  * `defaultPostageStampBatchID` may be absent: an account with no drives is a
  * supported state, and only the feed write (which needs a stamp to pay for
@@ -73,6 +73,8 @@ export function accountToStateSnapshot(
       accountNameAt: account.accountNameAt ?? account.createdAt,
       defaultStampAt: account.defaultStampAt ?? account.createdAt,
       settingsAt: account.settingsAt ?? account.createdAt,
+      deleted: account.deleted ?? false,
+      deletedAt: account.deletedAt ?? account.createdAt,
       createdAt: account.createdAt,
       lastModified: timestamp,
       devices: account.devices,
@@ -109,6 +111,8 @@ export function serializeAccountStateSnapshot(input: {
       accountNameAt: input.metadata.accountNameAt,
       defaultStampAt: input.metadata.defaultStampAt,
       settingsAt: input.metadata.settingsAt,
+      deleted: input.metadata.deleted,
+      deletedAt: input.metadata.deletedAt,
       createdAt: input.metadata.createdAt,
       lastModified: input.metadata.lastModified,
       devices: input.metadata.devices,

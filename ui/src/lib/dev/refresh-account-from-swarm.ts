@@ -25,6 +25,7 @@ import {
   mergePostageStamps,
 } from '@snaha/swarm-id/internal'
 
+import { forgetAccountDeletedElsewhere } from '$lib/account-deleted'
 import { accountsStore } from '$lib/stores/accounts.svelte'
 import { networkSettingsStore } from '$lib/stores/network-settings.svelte'
 
@@ -91,8 +92,9 @@ export async function refreshAccountFromSwarm(accountId: string): Promise<Refres
 
     // Apply WITHOUT re-publishing (the data came from Swarm). Scalars carry
     // their per-field clocks so `applyRefreshed` folds them by LWW against the
-    // local value.
-    account.applyRefreshed({
+    // local value — the deletion marker among them, and a winning one means
+    // another device deleted this account.
+    const deletedByPeer = account.applyRefreshed({
       devices: mergedDevices,
       connectedApps: mergedApps,
       postageStamps: mergedStamps,
@@ -102,7 +104,12 @@ export async function refreshAccountFromSwarm(accountId: string): Promise<Refres
       defaultStampAt: state.defaultStampAt,
       settings: state.settings,
       settingsAt: state.settingsAt,
+      deleted: state.deleted,
+      deletedAt: state.deletedAt,
     })
+    if (deletedByPeer) {
+      forgetAccountDeletedElsewhere(account)
+    }
 
     return { ok: true, refreshedAt: Date.now() }
   } catch (err) {
