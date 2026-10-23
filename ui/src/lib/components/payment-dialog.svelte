@@ -169,6 +169,8 @@
    * "you cannot pay".
    */
   let balances = $state<Record<string, bigint>>({})
+  /** A Check again read in flight; the button waits for it. */
+  let checkingBalances = $state(false)
   /**
    * Set once an attempt has been made. From then on the Gnosis side is
    * re-priced before every source-side quote: a failed attempt may still have
@@ -420,7 +422,8 @@
    * Read what the wallet holds of every token on the selected chain, one slot
    * per token. Fire-and-forget from the events that move what it holds: the
    * switch (at connect, and on a chain change), a new account, the wallet's
-   * own chain change, and a failed attempt that may still have spent.
+   * own chain change, and a failed attempt that may still have spent. And on
+   * Check again beside a shortfall: a top-up made elsewhere moves none of those.
    *
    * Through the chain's own endpoint, never the wallet's: the same chain state
    * either way, and one path instead of two.
@@ -474,6 +477,15 @@
         }
       }),
     )
+  }
+
+  async function checkBalancesAgain() {
+    checkingBalances = true
+    try {
+      await readBalances()
+    } finally {
+      checkingBalances = false
+    }
   }
 
   /**
@@ -892,7 +904,18 @@
       {/if}
 
       {#if fundsShortfall}
-        <p class="text-destructive w-full text-sm">{fundsShortfall}</p>
+        <div class="flex w-full flex-col gap-1">
+          <p class="text-destructive text-sm">{fundsShortfall}</p>
+          <Button
+            variant="link"
+            size="xs"
+            class="self-end"
+            disabled={checkingBalances}
+            onclick={() => void checkBalancesAgain()}
+          >
+            Check again
+          </Button>
+        </div>
       {/if}
 
       {#if errorMessage}
