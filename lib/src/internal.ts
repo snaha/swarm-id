@@ -91,6 +91,7 @@ export {
 export type { SyncAccountFunction, SyncResult } from "./sync"
 
 export { PartitionLease } from "./sync/partition-lease"
+export { mergeAccountSettings } from "./sync/merge-snapshot"
 
 export type { PartitionLeaseStateSnapshot } from "./sync/partition-lease"
 
@@ -100,6 +101,9 @@ export {
   type DriveRequest,
   type DriveRequirement,
   type Permissions,
+  type AppPermissions,
+  type PermissionName,
+  type AccountSettings,
   STORAGE_CHALLENGE_KEY,
   STORAGE_KEY_ACCOUNTS,
   STORAGE_KEY_NETWORK_SETTINGS,
@@ -107,6 +111,14 @@ export {
 } from "./types"
 
 export type { AccountStateSnapshot } from "./utils/account-state-snapshot"
+
+export {
+  GRANT_CLOCKS,
+  SETTINGS_CLOCKS,
+  effectivePermissions,
+  sharingDefault,
+  stampClocks,
+} from "./permissions"
 
 export {
   BUCKET_DEPTH,

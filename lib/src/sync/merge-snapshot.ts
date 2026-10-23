@@ -33,11 +33,13 @@
 
 import type { AccountStateSnapshot } from "../utils/account-state-snapshot"
 import type {
+  AccountSettings,
   Device,
   ConnectedApp,
   PostageStamp,
   AccountMetadata,
 } from "../schemas"
+import { GRANT_CLOCKS, SETTINGS_CLOCKS, overlayNewer } from "../permissions"
 
 export function mergeSnapshotWithRemote(
   local: AccountStateSnapshot,
@@ -117,15 +119,16 @@ export function mergeConnectedApps(
   //   bumped by every write ranked the entry instead, so a drive picked on a
   //   stale copy outranked a revoke and restored the credential it had cleared
   //   (#681).
-  // - The drive grant overlays on its own `drivesAt`. It moves
-  //   no membership field, so without a clock of its own it ties with every
-  //   stale copy of the entry and loses — the same correction #663 made for a
-  //   device's name.
+  // - The grant overlays field by field, each on its own clock
+  //   (`GRANT_CLOCKS`). It moves no membership field, so without a clock of
+  //   its own it ties with every stale copy of the entry and loses — the same
+  //   correction #663 made for a device's name. Per field, so a drive picked
+  //   on a stale copy does not carry that copy's switches over a pin made
+  //   elsewhere.
   //
   // Distinct apps still both survive (union).
   const recency = (a: ConnectedApp) =>
     Math.max(a.revokedAt ?? 0, a.disconnectedAt ?? 0, a.lastConnectedAt ?? 0)
-  const drivesRecency = (a: ConnectedApp) => a.drivesAt ?? 0
   const merged = new Map<string, ConnectedApp>()
   // Process remote first, then local, so a tie favours local (most recent
   // observation here); a strictly-newer entry on either side wins.
@@ -137,14 +140,28 @@ export function mergeConnectedApps(
     }
     const winner = recency(a) >= recency(existing) ? a : existing
     const loser = winner === a ? existing : a
-    merged.set(
-      keyOf(a),
-      drivesRecency(loser) > drivesRecency(winner)
-        ? { ...winner, drives: loser.drives, drivesAt: loser.drivesAt }
-        : winner,
-    )
+    merged.set(keyOf(a), overlayNewer(winner, loser, GRANT_CLOCKS))
   }
   return Array.from(merged.values())
+}
+
+/**
+ * The account settings, last writer wins on `at` for the object and, on top,
+ * per switch on its own clock (`SETTINGS_CLOCKS`): a session-length change
+ * made on a stale copy must not take a data sharing "off" with it (#885). A
+ * tie favours `local`.
+ */
+export function mergeAccountSettings(
+  local: { value?: AccountSettings; at: number },
+  remote: { value?: AccountSettings; at: number },
+): { value: AccountSettings | undefined; at: number } {
+  const [winner, loser] =
+    remote.at > local.at ? [remote, local] : [local, remote]
+  if (!winner.value && !loser.value) return { value: undefined, at: winner.at }
+  return {
+    value: overlayNewer(winner.value ?? {}, loser.value ?? {}, SETTINGS_CLOCKS),
+    at: winner.at,
+  }
 }
 
 export function mergePostageStamps(

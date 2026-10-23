@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import {
+  type AppPermissions,
   SwarmIdClient,
   formatTTL,
   DEFAULT_BEE_NODE_URL,
@@ -55,8 +56,38 @@ export const DRIVE_REQUEST_PRESETS = {
 } satisfies Record<string, { label: string; request: DriveRequest | undefined }>
 export type DriveRequestPreset = keyof typeof DRIVE_REQUEST_PRESETS
 
-function requestedPermissions(drives: DriveRequest | undefined): Permissions | undefined {
-  return drives === undefined ? undefined : { drives }
+/** The sharing switches asked for at connect (#885); the Permissions page sets them. */
+export interface SharingRequest {
+  dataSharing: boolean
+  writeAccess: boolean
+}
+const SHARING_REQUEST_STORAGE_KEY = 'swarm-id-demo-sharing-request'
+
+/** What the next connect asks for: the drives preset and the switches ticked. */
+function requestedPermissions(
+  preset: DriveRequestPreset,
+  sharing: SharingRequest,
+): Permissions | undefined {
+  const { request } = DRIVE_REQUEST_PRESETS[preset]
+  const permissions: Permissions = {
+    ...(request !== undefined && { drives: request }),
+    ...(sharing.dataSharing && { dataSharing: true }),
+    ...(sharing.writeAccess && { writeAccess: true }),
+  }
+  return Object.keys(permissions).length > 0 ? permissions : undefined
+}
+
+function loadSharingRequest(): SharingRequest {
+  try {
+    const stored = localStorage.getItem(SHARING_REQUEST_STORAGE_KEY)
+    if (stored !== null) {
+      const parsed = JSON.parse(stored) as Partial<SharingRequest>
+      return { dataSharing: parsed.dataSharing === true, writeAccess: parsed.writeAccess === true }
+    }
+  } catch {
+    // localStorage unavailable, or an unreadable value
+  }
+  return { dataSharing: false, writeAccess: false }
 }
 
 function loadDriveRequestPreset(): DriveRequestPreset {
@@ -116,6 +147,8 @@ let stamp = $state<StampInfo | undefined>(undefined)
 // Every drive the app was granted, and the one its writes name — `undefined`
 // leaves each write to the primary.
 let drives = $state<Drive[]>([])
+// The sharing switches (#885), off the snapshot: the user flips them in Swarm ID.
+let permissions = $state<AppPermissions | undefined>(undefined)
 let targetBatchID = $state<string | undefined>(undefined)
 let partition = $state<number | undefined>(undefined)
 let deferred = $state(false)
@@ -135,8 +168,10 @@ function loadSubsidisedGatewayPreference(): boolean {
 
 let subsidisedGatewayEnabled = $state(loadSubsidisedGatewayPreference())
 let driveRequestPreset = $state<DriveRequestPreset>(loadDriveRequestPreset())
+let sharingRequest = $state<SharingRequest>(loadSharingRequest())
 // The preset the live client was built with, compared like the gateway above.
 let currentDriveRequestPreset: DriveRequestPreset | undefined = undefined
+let currentSharingRequest: string | undefined = undefined
 
 let currentIdentityId: string | undefined
 let currentIdentityName: string | undefined
@@ -268,6 +303,7 @@ async function onConnectionChange(info: ConnectionInfo) {
     : undefined
   logStore.log(`Connection info: canUpload=${info.canUpload}, identity=${loggableIdentity}`)
   partition = info.partition
+  permissions = info.permissions
 
   if (isAuthenticated && !info.canUpload) {
     // Say which of the three it is rather than guessing from `storagePartitioned`:
@@ -339,6 +375,7 @@ async function runInitialize(generation: number) {
 
     currentSubsidisedGatewayUrl = subsidisedGatewayEnabled ? DEFAULT_BEE_NODE_URL : undefined
     currentDriveRequestPreset = driveRequestPreset
+    currentSharingRequest = JSON.stringify(sharingRequest)
 
     // Held locally as well: everything below runs across awaits, and `client`
     // can be cleared under us by a teardown in between.
@@ -347,7 +384,7 @@ async function runInitialize(generation: number) {
       iframePath: PROXY_PATH,
       timeout: CLIENT_TIMEOUT,
       subsidisedGatewayUrl: currentSubsidisedGatewayUrl,
-      permissions: requestedPermissions(DRIVE_REQUEST_PRESETS[driveRequestPreset].request),
+      permissions: requestedPermissions(driveRequestPreset, sharingRequest),
       onConnectionChange,
       metadata: {
         name: 'Swarm ID Demo',
@@ -447,7 +484,8 @@ async function runConnect(): Promise<void> {
   if (
     client &&
     (currentSubsidisedGatewayUrl !== subsidisedUrl ||
-      currentDriveRequestPreset !== driveRequestPreset)
+      currentDriveRequestPreset !== driveRequestPreset ||
+      currentSharingRequest !== JSON.stringify(sharingRequest))
   ) {
     logStore.log('Connect options changed, reinitializing client...')
     teardownClient()
@@ -500,6 +538,31 @@ export const clientStore = {
   get stamp() {
     return stamp
   },
+  get permissions() {
+    return permissions
+  },
+  /**
+   * Ask the user for more (#711, #885): opens the "Permissions for Swarm ID
+   * Demo" popup with what is asked, or nothing when every switch asked for is
+   * already on and no drive was. Resolves with what the app holds after.
+   */
+  async requestPermissions(request: Permissions): Promise<AppPermissions | undefined> {
+    if (!client) return undefined
+    try {
+      const held = await client.requestPermissions(request)
+      drives = await client.getDrives()
+      logStore.log(
+        `Permissions after the request: data sharing ${held.dataSharing ? 'on' : 'off'}, write access ${held.writeAccess ? 'on' : 'off'}, drives ${drives.map((drive) => `${drive.batchID.slice(0, 8)} (${drive.kind})`).join(', ') || 'none'}`,
+      )
+      return held
+    } catch (error) {
+      logStore.log(
+        `Permission request failed: ${error instanceof Error ? error.message : String(error)}`,
+        'warn',
+      )
+      return undefined
+    }
+  },
   get drives() {
     return drives
   },
@@ -508,25 +571,6 @@ export const clientStore = {
   },
   set targetBatchID(value: string | undefined) {
     targetBatchID = value
-  },
-  /**
-   * Ask for a scratch drive on top of what the app holds (#711): opens the
-   * "Permissions for Swarm ID Demo" popup, and comes back with the drives
-   * the app holds once it closes — the same ones when nothing was granted.
-   */
-  async requestScratchDrive(): Promise<void> {
-    if (!client) return
-    try {
-      drives = await client.requestDrives([{ kind: 'scratch' }])
-      logStore.log(
-        `Drives after the request: ${drives.map((drive) => `${drive.batchID.slice(0, 8)} (${drive.kind})`).join(', ') || 'none'}`,
-      )
-    } catch (error) {
-      logStore.log(
-        `Drive request failed: ${error instanceof Error ? error.message : String(error)}`,
-        'warn',
-      )
-    }
   },
   /** Spread into any write's options: the drive the user picked, or none. */
   get uploadTarget(): { batchID?: string } {
@@ -563,6 +607,18 @@ export const clientStore = {
       localStorage.setItem(DRIVE_REQUEST_STORAGE_KEY, value)
     } catch {
       logStore.log('Could not persist the drive request choice', 'warn')
+    }
+  },
+
+  get sharingRequest() {
+    return sharingRequest
+  },
+  set sharingRequest(value: SharingRequest) {
+    sharingRequest = value
+    try {
+      localStorage.setItem(SHARING_REQUEST_STORAGE_KEY, JSON.stringify(value))
+    } catch {
+      logStore.log('Could not persist the sharing request choice', 'warn')
     }
   },
 

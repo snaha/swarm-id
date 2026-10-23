@@ -4,6 +4,8 @@
 -->
 
 <script lang="ts">
+  import { onMount } from 'svelte'
+
   import ChevronLeft from '@lucide/svelte/icons/chevron-left'
 
   import { replaceState } from '$app/navigation'
@@ -111,11 +113,25 @@
   }
 
   const attentionCount = $derived(account ? drivesNeedingAttention(account) : 0)
+
+  // Rendered inside another site: an app's page (`#apps/<origin>`) grants on
+  // the spot, one click per switch, so refuse — a same-site page could frame
+  // its own origin's page and clickjack a switch on (#885). The same refusal
+  // the permissions popup gives (#883); `/proxy` is its own route and stays
+  // framable.
+  let framed = $state(false)
+  onMount(() => {
+    framed = window.top !== window
+  })
 </script>
 
 <svelte:window onhashchange={() => readHash(location.hash)} />
 
-{#if account}
+{#if framed}
+  <p class="text-muted-foreground p-8 text-center text-sm">
+    This page cannot be shown inside another site.
+  </p>
+{:else if account}
   <div class="flex min-h-svh flex-col">
     <header class="flex w-full items-center gap-2 p-8">
       <SwarmWordmark height={30} />
@@ -153,7 +169,7 @@
         <!-- Keyed so per-account state (e.g. the unlocked seed) never survives a switch. -->
         {#key account.id}
           {#if tab === 'apps'}
-            <HomeApps {account} />
+            <HomeApps {account} {target} />
           {:else if tab === 'storage'}
             <HomeDrives {account} {target} />
           {:else}

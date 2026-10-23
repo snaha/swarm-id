@@ -171,6 +171,12 @@ export function serializeConnectedApp(
       app.drives === "all"
         ? "all"
         : app.drives?.map((batchId) => batchId.toString()),
+    dataSharing: app.dataSharing,
+    dataSharingAt: app.dataSharingAt,
+    writeAccess: app.writeAccess,
+    writeAccessAt: app.writeAccessAt,
+    sessionDuration: app.sessionDuration,
+    sessionDurationAt: app.sessionDurationAt,
     drivesAt: app.drivesAt,
     revokedAt: app.revokedAt,
     disconnectedAt: app.disconnectedAt,

@@ -26,6 +26,10 @@ type ProxyInternals = {
     message: { type: string; requestId: string; label: string },
     event: MessageEvent,
   ) => Promise<void>
+  handleGetPermissions: (
+    message: { type: string; requestId: string },
+    event: MessageEvent,
+  ) => void
   authenticated: boolean
   appSecret: string
   /** The primary drive's write path (read-only: a getter over `drives`). */
@@ -282,6 +286,21 @@ describe("SwarmIdProxy deriveAppSecret (#520)", () => {
     expect(lastMessage()).toMatchObject({
       type: "error",
       requestId: "r1",
+      code: "not-authenticated",
+    })
+  })
+
+  // `effectivePermissions(undefined, undefined)` is on/on: without a session
+  // that would tell an app it may read and write with a key it does not hold
+  // (#885).
+  it("errors on getPermissions when not authenticated instead of answering on/on", () => {
+    internals(proxy).handleGetPermissions(
+      { type: "getPermissions", requestId: "r2" },
+      { source, origin: PARENT_ORIGIN } as unknown as MessageEvent,
+    )
+    expect(lastMessage()).toMatchObject({
+      type: "error",
+      requestId: "r2",
       code: "not-authenticated",
     })
   })

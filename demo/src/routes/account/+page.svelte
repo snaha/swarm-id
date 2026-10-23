@@ -147,7 +147,12 @@
           </div>
         {/if}
 
-        {#if clientStore.identity.sharingPublicKey}
+        {#if !clientStore.identity.sharingPublicKey}
+          <p class="text-xs text-muted-foreground">
+            Sharing key withheld: data sharing is off for this app. Turn it on in Swarm ID (Apps),
+            or ask for it from the Permissions page.
+          </p>
+        {:else}
           <div>
             <div class="text-xs font-medium text-muted-foreground uppercase tracking-wider mb-1">
               Sharing Key

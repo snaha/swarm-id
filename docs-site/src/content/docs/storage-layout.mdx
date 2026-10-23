@@ -80,7 +80,10 @@ The schema is `LocalAccountSchemaV1`, the signed-in arm: the portable projection
 `id`, `publicKey` and the master key all come from the recovery phrase on the first Ethereum
 path of BIP-44, as [Key Derivation](../key-derivation/) describes. The optional fields of the
 schema (the per-field clocks, `settings`, `defaultPostageStampBatchID`, `lastModified`) are left
-out of a fresh record; the UI sets them as the user edits.
+out of a fresh record; the UI sets them as the user edits. `settings` holds the app session
+duration and the account-wide sharing switches (`dataSharing`, `writeAccess`, on when absent),
+which a connected app may pin for itself with the same two fields on its entry, as it may its own
+`sessionDuration`.
 
 Everything on the record except `access` and `encryptedSeed` is the synced projection, and a
 record with the same `id` may already exist from an earlier import. Replace it only with the

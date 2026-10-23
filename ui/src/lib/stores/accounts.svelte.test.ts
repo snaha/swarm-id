@@ -320,7 +320,7 @@ describe('Account.signOut storage-warning remnant', () => {
   })
 })
 
-describe('Account.setAppDrives', () => {
+describe('Account.setAppPermissions — drives', () => {
   const APP_URL = 'https://app.example.com'
   const BATCH_HEX = 'c'.repeat(64)
 
@@ -339,7 +339,7 @@ describe('Account.setAppDrives', () => {
   // made on another device (#681).
   it('grants the app drives and stamps the grant clock', () => {
     const account = accountWithApp()
-    account.setAppDrives(APP_URL, [new BatchId(BATCH_HEX)])
+    account.setAppPermissions(APP_URL, { drives: [new BatchId(BATCH_HEX)] })
     const app = account.connectedApps[0]
     expect(app.drives !== 'all' && app.drives?.map((b) => b.toHex())).toEqual([BATCH_HEX])
     expect(app.drivesAt).toEqual(expect.any(Number))
@@ -347,14 +347,14 @@ describe('Account.setAppDrives', () => {
 
   it('clears the grant back to the account default', () => {
     const account = accountWithApp()
-    account.setAppDrives(APP_URL, [new BatchId(BATCH_HEX)])
-    account.setAppDrives(APP_URL, undefined)
+    account.setAppPermissions(APP_URL, { drives: [new BatchId(BATCH_HEX)] })
+    account.setAppPermissions(APP_URL, { drives: undefined })
     expect(account.connectedApps[0].drives).toBeUndefined()
   })
 
   it('is a no-op for an unknown app', () => {
     const account = accountWithApp()
-    account.setAppDrives('https://other.example.com', [new BatchId(BATCH_HEX)])
+    account.setAppPermissions('https://other.example.com', { drives: [new BatchId(BATCH_HEX)] })
     expect(account.connectedApps[0].drives).toBeUndefined()
     expect(account.connectedApps).toHaveLength(1)
   })
@@ -364,7 +364,7 @@ describe('Account.setAppDrives', () => {
   // clock, or the app comes back still granted the drives it had.
   it('is forgotten by Remove, with a fresh grant clock', () => {
     const account = accountWithApp()
-    account.setAppDrives(APP_URL, [new BatchId(BATCH_HEX)])
+    account.setAppPermissions(APP_URL, { drives: [new BatchId(BATCH_HEX)] })
     const grantedAt = account.connectedApps[0].drivesAt ?? 0
     vi.useFakeTimers({ toFake: ['Date'] })
     try {
@@ -381,7 +381,7 @@ describe('Account.setAppDrives', () => {
 
   it('survives a plain Disconnect', () => {
     const account = accountWithApp()
-    account.setAppDrives(APP_URL, [new BatchId(BATCH_HEX)])
+    account.setAppPermissions(APP_URL, { drives: [new BatchId(BATCH_HEX)] })
     account.disconnectApp(APP_URL)
     expect(account.connectedApps[0].drives).toHaveLength(1)
   })
@@ -389,6 +389,81 @@ describe('Account.setAppDrives', () => {
 
 // The account syncs to its default drive, and a scratch drive overwrites its
 // oldest data, so the default is always a regular drive (#862).
+// #885: the sharing switches, pinned per app on the grant's clock, or set
+// account-wide on the settings clock.
+describe('Account sharing switches', () => {
+  const APP_URL = 'https://app.example.com'
+
+  function accountWithApp(): Account {
+    return new Account(
+      {
+        ...signedInRecord(),
+        connectedApps: [{ appUrl: APP_URL, appName: 'Test App', lastConnectedAt: 1 }],
+      },
+      noCommit,
+    )
+  }
+
+  // Each switch on its own clock, not the drives': a drive picked on a stale
+  // copy elsewhere must not carry that copy's switches over this pin.
+  it("pins and unpins an app, stamping the switch's own clock", () => {
+    const account = accountWithApp()
+    account.setAppPermissions(APP_URL, { dataSharing: false })
+    expect(account.connectedApps[0].dataSharing).toBe(false)
+    expect(account.connectedApps[0].dataSharingAt).toEqual(expect.any(Number))
+    expect(account.connectedApps[0].drivesAt).toBeUndefined()
+    account.setAppPermissions(APP_URL, { dataSharing: undefined })
+    expect(account.connectedApps[0].dataSharing).toBeUndefined()
+  })
+
+  it("sets the account-wide default on the switch's own clock alone", () => {
+    const account = accountWithApp()
+    account.setSharingDefault('writeAccess', false)
+    expect(account.settings).toEqual({ writeAccess: false, writeAccessAt: expect.any(Number) })
+    expect(account.settingsAt).toBeUndefined()
+  })
+
+  // The other direction: a switch flipped on a stale copy, after device B
+  // changed "Keep apps connected for", must not carry the old length over B's.
+  it('a switch flipped on a stale copy does not revert a newer session length', () => {
+    const now = vi.spyOn(Date, 'now').mockReturnValue(1_000)
+    const account = accountWithApp()
+    account.setAppConnectionDays(30)
+    now.mockReturnValue(3_000)
+    account.setSharingDefault('dataSharing', false)
+    account.applyRefreshed({ settings: { appSessionDuration: 5 }, settingsAt: 2_000 })
+    now.mockRestore()
+    expect(account.settings).toMatchObject({ appSessionDuration: 5, dataSharing: false })
+  })
+
+  // Device B, on a stale copy, changes "Keep apps connected for" after this
+  // device turned data sharing off: its settings outrank ours whole, and
+  // must not take the "off" with them.
+  it('folds a remote settings copy per switch, not whole', () => {
+    const account = accountWithApp()
+    account.setSharingDefault('dataSharing', false)
+    const dataSharingAt = account.settings?.dataSharingAt
+    account.applyRefreshed({
+      settings: { appSessionDuration: 5 },
+      settingsAt: (dataSharingAt ?? 0) + 1,
+    })
+    expect(account.settings).toEqual({ appSessionDuration: 5, dataSharing: false, dataSharingAt })
+  })
+
+  it('forgets the pins with Remove, as it forgets the drives', () => {
+    const account = accountWithApp()
+    account.setAppPermissions(APP_URL, {
+      dataSharing: false,
+      writeAccess: false,
+      sessionDuration: 7,
+    })
+    account.removeApp(APP_URL)
+    expect(account.connectedApps[0].dataSharing).toBeUndefined()
+    expect(account.connectedApps[0].writeAccess).toBeUndefined()
+    expect(account.connectedApps[0].sessionDuration).toBeUndefined()
+  })
+})
+
 describe('Account default drive', () => {
   const REGULAR_HEX = 'c'.repeat(64)
   const SCRATCH_HEX = 'e'.repeat(64)

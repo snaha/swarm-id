@@ -29,6 +29,8 @@ import {
 } from "@ethersphere/bee-js"
 import { z } from "zod"
 import {
+  AccountSettingsSchemaV1,
+  type AccountSettings,
   ConnectedAppSchemaV1,
   PostageStampSchemaV1,
   type AccountStateSnapshot,
@@ -44,7 +46,11 @@ import { hexToUint8Array } from "../utils/hex"
 import { AsyncEpochFinder, BasicEpochUpdater } from "../proxy/feeds/epochs"
 import { uploadData, type UploadTarget } from "../proxy/upload"
 import { downloadDataWithChunkAPI } from "../proxy/download-data"
-import { mergeConnectedApps, mergePostageStamps } from "./merge-snapshot"
+import {
+  mergeAccountSettings,
+  mergeConnectedApps,
+  mergePostageStamps,
+} from "./merge-snapshot"
 import { ensureInRoster } from "./device-roster"
 import type { SyncResult } from "./types"
 
@@ -52,9 +58,7 @@ export const DEVICE_STATE_TOPIC_PREFIX = "swarm-id-devstate-v1"
 
 const DEVICE_STATE_VERSION = 1
 
-/** Account settings carried in a device view (mirrors `account.settings`). */
-const SettingsSchema = z.object({ appSessionDuration: z.number().optional() })
-export type AccountSettings = z.infer<typeof SettingsSchema>
+export type { AccountSettings } from "../schemas"
 
 const ClockedSchema = <T extends z.ZodTypeAny>(value: T) =>
   z.object({ value, at: z.number() })
@@ -72,7 +76,9 @@ export const DeviceStateSnapshotSchemaV1 = z.object({
   postageStamps: z.array(PostageStampSchemaV1),
   accountName: ClockedSchema(z.string()),
   defaultPostageStampBatchID: ClockedSchema(z.string().length(64).optional()),
-  settings: ClockedSchema(SettingsSchema.optional()),
+  // The account's own schema, not a mirror, so every settings field (the
+  // sharing switches and their clocks included) reaches the feed.
+  settings: ClockedSchema(AccountSettingsSchemaV1.optional()),
   // Account-level immutables — carried on the robust per-device feed (not the
   // roster), so the fold reconstructs them without a shared doc. Identical
   // across devices.
@@ -312,14 +318,18 @@ export function foldAccount(
   let postageStamps: PostageStamp[] = []
   let accountName = { value: "", at: 0 }
   let defaultBatch: { value?: string; at: number } = { at: 0 }
-  let settings: { value?: AccountSettings; at: number } = { at: 0 }
+  let settings: { value: AccountSettings | undefined; at: number } = {
+    value: undefined,
+    at: 0,
+  }
 
   for (const v of views) {
     connectedApps = mergeConnectedApps(connectedApps, v.connectedApps)
     postageStamps = mergePostageStamps(postageStamps, v.postageStamps)
     accountName = pickLatest(accountName, v.accountName)
     defaultBatch = pickLatest(defaultBatch, v.defaultPostageStampBatchID)
-    settings = pickLatest(settings, v.settings)
+    // The switches inside ride their own clocks (#885).
+    settings = mergeAccountSettings(settings, v.settings)
   }
 
   // Account immutables from any view that defines them — NOT just views[0],

@@ -95,6 +95,8 @@ describe("device-state serialization", () => {
       postageStamps: [makeStamp("cc".repeat(32), { deletedAt: 7 })],
       accountName: { value: "my account", at: 9 },
       defaultPostageStampBatchID: { value: "cc".repeat(32), at: 9 },
+      // The sharing switches and their clocks (#885) ride the feed too.
+      settings: { value: { dataSharing: false, dataSharingAt: 3 }, at: 3 },
     })
     const bytes = new TextEncoder().encode(
       JSON.stringify(serializeDeviceState(ACCOUNT_ID, "dev-1", view)),
@@ -105,6 +107,10 @@ describe("device-state serialization", () => {
     expect(back.postageStamps[0].deletedAt).toBe(7)
     expect(back.connectedApps[0].revokedAt).toBe(5)
     expect(back.accountName).toEqual({ value: "my account", at: 9 })
+    expect(back.settings).toEqual({
+      value: { dataSharing: false, dataSharingAt: 3 },
+      at: 3,
+    })
   })
 })
 
@@ -279,6 +285,27 @@ describe("foldAccount — per-field scalar LWW", () => {
     expect(folded.accountNameAt).toBe(10)
     expect(folded.defaultStampAt).toBe(10)
     expect(folded.settingsAt).toBe(1)
+  })
+
+  // The switches inside `settings` ride their own clocks (#885): a stale
+  // copy's newer session-length edit does not undo a data sharing "off".
+  it("folds the sharing switches per field, not with the settings object", () => {
+    const viewA = makeView({
+      settings: { value: { dataSharing: false, dataSharingAt: 10 }, at: 10 },
+    })
+    const viewB = makeView({
+      settings: { value: { appSessionDuration: 5 }, at: 20 },
+    })
+    const folded = foldAccount(
+      [viewA, viewB] as unknown as DeviceStateSnapshot[],
+      [],
+    )
+    expect(folded.settings).toEqual({
+      appSessionDuration: 5,
+      dataSharing: false,
+      dataSharingAt: 10,
+    })
+    expect(folded.settingsAt).toBe(20)
   })
 
   // The bus fold (`deltaFoldView` in `swarm-id-proxy.ts`) reuses `foldAccount`
