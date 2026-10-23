@@ -28,7 +28,7 @@
  */
 import { withTimeout } from '@snaha/swarm-id'
 import type { SwapInput } from '@swarm-id/multichain'
-import type { Chain } from 'viem'
+import { type Chain, formatUnits } from 'viem'
 import { arbitrum, base, gnosis, mainnet, optimism, polygon } from 'viem/chains'
 
 /** Native-token sentinel for "the chain's own currency". */
@@ -134,6 +134,18 @@ export function displayAmount(value: string | number): string {
 }
 
 /**
+ * A wallet's balance, from base units, at the digits a price shows. Rounded
+ * down rather than to nearest: a balance shown rounded up would claim money the
+ * wallet lacks, and could read as the very price it falls short of. Unlike a
+ * price, zero is a figure: "0", not blank.
+ */
+export function displayBalance(value: bigint, decimals: number): string {
+  const dropped = value.toString().length - AMOUNT_PRECISION_DIGITS
+  const unit = dropped > 0 ? 10n ** BigInt(dropped) : 1n
+  return formatUnits((value / unit) * unit, decimals)
+}
+
+/**
  * A dollar figure as the screens show it: cents normally, significant digits
  * below a cent. The one USD formatter in the app — the pay screen's total and
  * the drive dialogs' cost estimate both come through here, so the two cannot
@@ -201,6 +213,11 @@ export interface PaymentQuote {
    * fails at the far end of a payment that already succeeded.
    */
   delivers: Delivery
+  /**
+   * What the wallet pays out of each asset, by token address, in base units —
+   * empty when the rail cannot say. Source-chain gas is not included.
+   */
+  charges: { currency: string; amount: bigint }[]
 }
 
 export interface ExecutePaymentOptions {

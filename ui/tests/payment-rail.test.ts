@@ -42,6 +42,7 @@ const PAYMENT_TIMEOUT_MS = 180_000
 
 /** Anvil's first prefunded account — the "wallet" the injected provider is. */
 const WALLET_ADDRESS = '0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266'
+const PRIVATE_KEY_BYTES = 32
 
 /** `local-solver-protocol.ts` — deposits are addressed here. */
 const LOCAL_SOLVER_ADDRESS = '0xa0ee7a142d267c1f36714e4a8f75612f20a79720'
@@ -85,8 +86,13 @@ test.skip(!chainUp || !sourceUp, 'requires both chains and the solver (pnpm dev:
  * It starts on Ethereum mainnet deliberately: the payment screen selects the
  * source chain, so `pay()` has to negotiate a network switch first, and that
  * is a state the designs draw and the code has a branch for.
+ *
+ * `address` is the account it reports; only anvil's unlocked accounts can pay.
  */
-async function injectPayingWallet(page: Page, { misroutedGnosis = false } = {}) {
+async function injectPayingWallet(
+  page: Page,
+  { misroutedGnosis = false, address = WALLET_ADDRESS } = {},
+) {
   await page.addInitScript(
     ([sourceRpc, gnosisRpc, address, sourceChainId, gnosisChainId, misrouted]) => {
       const sourceHex = `0x${Number(sourceChainId).toString(16)}`
@@ -201,7 +207,7 @@ async function injectPayingWallet(page: Page, { misroutedGnosis = false } = {}) 
     [
       SOURCE_RPC_URL,
       CHAIN_RPC_URL,
-      WALLET_ADDRESS,
+      address,
       SOURCE_CHAIN_ID,
       GNOSIS_CHAIN_ID,
       misroutedGnosis,
@@ -321,8 +327,11 @@ async function mintUsdcTo(address: string, units: bigint): Promise<void> {
 }
 
 /** Open the payment screens for a new drive and connect the injected wallet. */
-async function openPaymentAndConnect(page: Page, { misroutedGnosis = false } = {}) {
-  await injectPayingWallet(page, { misroutedGnosis })
+async function openPaymentAndConnect(
+  page: Page,
+  { misroutedGnosis = false, address = WALLET_ADDRESS } = {},
+) {
+  await injectPayingWallet(page, { misroutedGnosis, address })
   await seedPaidEnvironment(page)
 
   await page.goto('/')
@@ -449,6 +458,37 @@ test('paying in a token takes an approve first, and the solver pulls it', async 
   // The pull was real: the solver collected the token before it filled.
   expect(await sourceUsdc(LOCAL_SOLVER_ADDRESS)).toBeGreaterThan(pulledBefore)
   await expectDriveOwnedBySigner(page)
+})
+
+test('a wallet short of the price is told so, and Check again lets it pay once funded', async ({
+  page,
+}) => {
+  test.setTimeout(PAYMENT_TIMEOUT_MS)
+  // A fresh account, not anvil's #0: that one gathers mock USDC across runs on
+  // a long-lived chain, and this needs a wallet that starts with none. It can
+  // never sign, so Pay is only ever checked, not clicked.
+  const address = new PrivateKey(crypto.getRandomValues(new Uint8Array(PRIVATE_KEY_BYTES)))
+    .publicKey()
+    .address()
+    .toChecksum()
+  await openPaymentAndConnect(page, { address })
+
+  const dialog = page.getByRole('dialog')
+  await dialog.getByRole('combobox').first().selectOption(String(SOURCE_CHAIN_ID))
+  await dialog.getByRole('combobox').nth(1).selectOption(SOURCE_USDC_ADDRESS)
+
+  const shortfall = dialog.getByText('not enough for this payment')
+  const pay = page.getByRole('button', { name: 'Pay with your wallet' })
+  await expect(shortfall).toBeVisible({ timeout: PAYMENT_TIMEOUT_MS })
+  await expect(pay).toBeDisabled()
+
+  // Funded somewhere else: nothing the dialog listens to moves, so only asking
+  // again shows it.
+  await mintUsdcTo(address, 100_000_000n)
+  await dialog.getByRole('button', { name: 'Check again' }).click()
+
+  await expect(shortfall).toBeHidden({ timeout: PAYMENT_TIMEOUT_MS })
+  await expect(pay).toBeEnabled()
 })
 
 test('changing wallet disconnects it and brings the picker back', async ({ page }) => {

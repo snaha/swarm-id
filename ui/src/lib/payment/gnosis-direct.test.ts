@@ -108,6 +108,13 @@ describe('quoteDirectPayment', () => {
       (await quoteDirectPayment(request(parseUnits('0.0000434659', 18)))).amountFormatted,
     ).toBe('0.00004347')
   })
+
+  it('charges the wallet the whole payment in xDAI', async () => {
+    const xdaiWei = parseUnits('0.06', 18)
+    expect((await quoteDirectPayment(request(xdaiWei))).charges).toEqual([
+      { currency: NATIVE_CURRENCY, amount: xdaiWei },
+    ])
+  })
 })
 
 /**
@@ -547,6 +554,34 @@ describe('paying in something other than xDAI', () => {
     })
     expect((quote.handle as { amount: bigint }).amount).toBe(42n)
     expect(getTokenBalance).not.toHaveBeenCalled()
+  })
+
+  describe('charges', () => {
+    const GAS_LEG = parseUnits('0.005', 18)
+
+    function quoteInUsdc(gasXdaiWei: bigint) {
+      chainIdentity.mockResolvedValue(identity('mainnet'))
+      quoteTokenInForBzzOut.mockResolvedValue(9_030_000n)
+      return quoteDirectPayment({
+        ...request(parseUnits('9.04', 18), USDC),
+        bzzPlur: 206n * 10n ** 16n,
+        gasXdaiWei,
+      })
+    }
+
+    it('charges the token leg in the token and the gas leg in xDAI', async () => {
+      expect((await quoteInUsdc(GAS_LEG)).charges).toEqual([
+        { currency: USDC, amount: BUFFERED_USDC },
+        { currency: NATIVE_CURRENCY, amount: GAS_LEG },
+      ])
+    })
+
+    it('charges only the gas when an earlier transfer covers the token leg', async () => {
+      getTokenBalance.mockResolvedValue(BUFFERED_USDC)
+      expect((await quoteInUsdc(GAS_LEG)).charges).toEqual([
+        { currency: NATIVE_CURRENCY, amount: GAS_LEG },
+      ])
+    })
   })
 
   /** Paying in xDAI stays one prompt — the gas rides along in the same send. */
