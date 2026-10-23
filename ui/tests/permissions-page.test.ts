@@ -125,6 +125,24 @@ test('the sharing switches gate the key, are asked for, and are pinned per app',
     'false',
   )
   await expect(page.getByText('Account default: on')).toBeVisible()
+  // Back to the defaults, write access first: it follows the account's "on".
+  await page.getByRole('button', { name: 'Use account default' }).last().click()
+  await expect(page.getByRole('switch', { name: 'Write access' })).toHaveAttribute(
+    'aria-checked',
+    'true',
+  )
+  await page.getByRole('button', { name: 'Use account default' }).click()
+  await expect(page.getByRole('switch', { name: 'Data sharing' })).toHaveAttribute(
+    'aria-checked',
+    'false',
+  )
+  // Turning data sharing on here grants it alone, as the popup does: write
+  // access was hidden, so it is pinned off, not left to that default.
+  await page.getByRole('switch', { name: 'Data sharing' }).click()
+  await expect(page.getByRole('switch', { name: 'Write access' })).toHaveAttribute(
+    'aria-checked',
+    'false',
+  )
   await page.getByRole('button', { name: 'Use account default' }).first().click()
   await expect(page.getByRole('switch', { name: 'Data sharing' })).toHaveAttribute(
     'aria-checked',

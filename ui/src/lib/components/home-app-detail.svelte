@@ -36,6 +36,7 @@
   import {
     PERMISSION_NAMES,
     SWITCH_COPY,
+    askedPatch,
     editRows,
     grantAfterEdit,
     pinned,
@@ -84,8 +85,11 @@
     toastStore.show('Permissions saved')
   }
 
+  // The popup's rule: write access is hidden while data sharing is off, so
+  // turning data sharing on pins it off rather than granting it unseen.
   function flip(name: PermissionName) {
-    account.setAppPermissions(app.appUrl, { [name]: !sharing[name] })
+    const shown = { ...sharing, [name]: !sharing[name] }
+    account.setAppPermissions(app.appUrl, askedPatch(sharing, shown, [name]))
   }
 
   function useDefault(name: PermissionName) {
