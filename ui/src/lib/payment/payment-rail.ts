@@ -317,17 +317,6 @@ export async function walletGenesisHash(provider: EthereumProvider): Promise<str
   return typeof hash === 'string' ? hash : undefined
 }
 
-/** The chain a payment opens on: the wallet's own when offered, else `selected`. */
-export function startingChainId(
-  walletChain: number | undefined,
-  chains: Chain[],
-  selected: number,
-): number {
-  return walletChain !== undefined && chains.some((chain) => chain.id === walletChain)
-    ? walletChain
-    : selected
-}
-
 /**
  * Ask the wallet to switch to `chainId`, adding the chain when the wallet does
  * not know it. Rejects if the user declines — the caller shows the design's

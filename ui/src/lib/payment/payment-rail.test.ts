@@ -1,14 +1,13 @@
 // Copyright 2026 The Swarm Authors. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 import { defineChain } from 'viem'
-import { base, gnosis, mainnet } from 'viem/chains'
+import { gnosis } from 'viem/chains'
 import { describe, expect, it, vi } from 'vitest'
 
 import {
   displayAmount,
   displayUsd,
   isUnrecognizedChainError,
-  startingChainId,
   switchWalletChain,
 } from '$lib/payment/payment-rail'
 
@@ -326,19 +325,5 @@ describe('switchWalletChain — two networks, one chain id', () => {
     const { provider, calls } = walletOn({ genesis: OTHER_GENESIS })
     await switchWalletChain(provider, gnosis.id, [gnosis])
     expect(calls).toEqual(['wallet_switchEthereumChain'])
-  })
-})
-
-describe('startingChainId', () => {
-  it('opens on the wallet’s own chain when the payment can come from it', () => {
-    expect(startingChainId(base.id, [gnosis, mainnet, base], gnosis.id)).toBe(base.id)
-  })
-
-  it('keeps the selection when the wallet’s chain is not one on offer', () => {
-    expect(startingChainId(mainnet.id, [gnosis, base], base.id)).toBe(base.id)
-  })
-
-  it('keeps the selection when the wallet would not say', () => {
-    expect(startingChainId(undefined, [gnosis, mainnet], gnosis.id)).toBe(gnosis.id)
   })
 })

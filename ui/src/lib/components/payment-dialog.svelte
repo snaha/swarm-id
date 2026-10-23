@@ -44,7 +44,6 @@
     type PaymentQuote,
     type PaymentRail,
     displayAmount,
-    startingChainId,
   } from '$lib/payment/payment-rail'
   import { subscribeProviderEvent } from '$lib/payment/provider-events'
   import { createWalletChainRecord } from '$lib/payment/wallet-chain-record'
@@ -354,23 +353,12 @@
       // A wallet that has just arrived has been put on nothing.
       walletChain.forget()
 
-      // A wallet already on a chain the payment can come from stays there.
-      // Otherwise adding a network is what makes the wallet show a balance for
-      // it at all, so it is offered here rather than at Pay. A refusal is not
-      // fatal — they may mean to pay from somewhere else, and `pay()` asks
-      // again for whichever chain they land on.
-      const current = wallet.chains[0] ? Number(wallet.chains[0].id) : undefined
-      const starting = startingChainId(current, rail.chains, Number(chainId))
-      if (String(starting) !== chainId) {
-        chainId = String(starting)
-        tokenAddress = rail.tokens(starting)[0].address
-      }
-      if (current === starting) {
-        walletChain.note(starting)
-      } else {
-        screen = 'switching'
-        await attempt.guard(ensureWalletChain().catch(() => undefined))
-      }
+      // Adding a network is what makes the wallet show a balance for it at all,
+      // so it is offered here rather than at Pay. A refusal is not fatal — they
+      // may mean to pay from somewhere else, and `pay()` asks again for
+      // whichever chain they land on.
+      screen = 'switching'
+      await attempt.guard(ensureWalletChain().catch(() => undefined))
 
       screen = 'configure'
       // After the guard, like everything else here: a connect cancelled at the
@@ -427,9 +415,9 @@
 
   /**
    * Read what the wallet holds of every token on the selected chain, one slot
-   * per token. Fire-and-forget from the events that move what it holds:
-   * connecting, a chain change, a new account, the wallet's own chain change,
-   * and a failed attempt that may still have spent.
+   * per token. Fire-and-forget from the events that move what it holds: the
+   * switch (at connect, and on a chain change), a new account, the wallet's
+   * own chain change, and a failed attempt that may still have spent.
    *
    * Through the chain's own endpoint, never the wallet's: the same chain state
    * either way, and one path instead of two.
