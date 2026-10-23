@@ -95,8 +95,7 @@ describe("device-state serialization", () => {
       postageStamps: [makeStamp("cc".repeat(32), { deletedAt: 7 })],
       accountName: { value: "my account", at: 9 },
       defaultPostageStampBatchID: { value: "cc".repeat(32), at: 9 },
-      // The sharing switches and their clocks (#885) ride the feed too: a
-      // one-field mirror of the settings schema here silently dropped them.
+      // The sharing switches and their clocks (#885) ride the feed too.
       settings: { value: { dataSharing: false, dataSharingAt: 3 }, at: 3 },
     })
     const bytes = new TextEncoder().encode(

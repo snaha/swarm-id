@@ -76,8 +76,8 @@ export const DeviceStateSnapshotSchemaV1 = z.object({
   postageStamps: z.array(PostageStampSchemaV1),
   accountName: ClockedSchema(z.string()),
   defaultPostageStampBatchID: ClockedSchema(z.string().length(64).optional()),
-  // The account's own schema, not a mirror: a mirror that lagged it dropped
-  // the sharing switches from every feed payload (#885).
+  // The account's own schema, not a mirror, so every settings field (the
+  // sharing switches and their clocks included) reaches the feed.
   settings: ClockedSchema(AccountSettingsSchemaV1.optional()),
   // Account-level immutables — carried on the robust per-device feed (not the
   // roster), so the fold reconstructs them without a shared doc. Identical

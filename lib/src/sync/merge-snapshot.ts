@@ -122,9 +122,9 @@ export function mergeConnectedApps(
   // - The grant overlays field by field, each on its own clock
   //   (`GRANT_CLOCKS`). It moves no membership field, so without a clock of
   //   its own it ties with every stale copy of the entry and loses — the same
-  //   correction #663 made for a device's name. One clock for the whole grant
-  //   let a drive picked on a stale copy carry that copy's switches along and
-  //   revert a pin made elsewhere (#885).
+  //   correction #663 made for a device's name. Per field, so a drive picked
+  //   on a stale copy does not carry that copy's switches over a pin made
+  //   elsewhere.
   //
   // Distinct apps still both survive (union).
   const recency = (a: ConnectedApp) =>

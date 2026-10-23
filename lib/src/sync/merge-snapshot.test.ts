@@ -626,13 +626,19 @@ describe("snapshotContainsContribution", () => {
 // a "Keep apps connected for" change made on a stale copy outranks the whole
 // object on `settingsAt`, and must not take a data sharing "off" with it.
 describe("mergeAccountSettings", () => {
-  it("keeps a switch turned off under a newer unrelated edit made on a stale copy", () => {
+  it("keeps each switch turned off under a newer unrelated edit made on a stale copy", () => {
+    const off = {
+      dataSharing: false,
+      dataSharingAt: 5,
+      writeAccess: false,
+      writeAccessAt: 5,
+    }
     const merged = mergeAccountSettings(
-      { value: { dataSharing: false, dataSharingAt: 5 }, at: 5 },
+      { value: off, at: 5 },
       { value: { appSessionDuration: 1 }, at: 9 },
     )
     expect(merged).toEqual({
-      value: { appSessionDuration: 1, dataSharing: false, dataSharingAt: 5 },
+      value: { appSessionDuration: 1, ...off },
       at: 9,
     })
   })
