@@ -6,8 +6,13 @@ import { BatchId, EthAddress, PrivateKey } from "@ethersphere/bee-js"
 import {
   createAccountsStorageManager,
   serializeAccount,
+  serializeSyncedAccount,
 } from "./storage-managers"
-import { LocalAccountSchemaV1, isSignedOutAccount } from "../schemas"
+import {
+  LocalAccountSchemaV1,
+  SyncedAccountSchemaV1,
+  isSignedOutAccount,
+} from "../schemas"
 import { STORAGE_KEY_ACCOUNTS } from "../types"
 import {
   TEST_BATCH_ID_HEX,
@@ -17,6 +22,27 @@ import {
   createSignedOutAccount,
   createPostageStamp,
 } from "../test-fixtures"
+
+describe("deletion marker", () => {
+  it("round-trips through local storage and the synced projection", () => {
+    const account = createAccount({ deleted: true, deletedAt: 4_321 })
+
+    const stored = LocalAccountSchemaV1.parse(
+      JSON.parse(JSON.stringify(serializeAccount(account))),
+    )
+    if (isSignedOutAccount(stored))
+      throw new Error("expected a signed-in account")
+    expect(stored.deleted).toBe(true)
+    expect(stored.deletedAt).toBe(4_321)
+
+    // What the connect popup hands a partitioned proxy, and a backup holds.
+    const synced = SyncedAccountSchemaV1.parse(
+      JSON.parse(JSON.stringify(serializeSyncedAccount(account))),
+    )
+    expect(synced.deleted).toBe(true)
+    expect(synced.deletedAt).toBe(4_321)
+  })
+})
 
 describe("serializeAccount — device-local seed vault", () => {
   it("round-trips a seed-vault account through serialize + Zod parse", () => {

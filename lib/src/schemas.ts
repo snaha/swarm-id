@@ -313,6 +313,11 @@ export const SyncedAccountSchemaV1 = z.object({
   accountNameAt: z.number().optional(),
   defaultStampAt: z.number().optional(),
   settingsAt: z.number().optional(),
+  // The account was deleted, clocked like the scalars above: a peer that folds
+  // a winning `true` forgets the account, and a later restore writes `false`
+  // on a newer clock to bring it back. Absent → never deleted.
+  deleted: z.boolean().optional(),
+  deletedAt: z.number().optional(),
   // Last-writer-wins clock for cross-device metadata merge (set on any change).
   lastModified: z.number().optional(),
   /**
@@ -408,6 +413,9 @@ export const AccountMetadataSchemaV1 = z.object({
   accountNameAt: z.number().optional(),
   defaultStampAt: z.number().optional(),
   settingsAt: z.number().optional(),
+  // The deletion marker and its clock (see `SyncedAccountSchemaV1`).
+  deleted: z.boolean().optional(),
+  deletedAt: z.number().optional(),
   createdAt: z.number(),
   lastModified: z.number(),
   devices: z.array(DeviceSchemaV1).default([]),

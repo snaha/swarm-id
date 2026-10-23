@@ -6,13 +6,11 @@
 <script lang="ts">
   import ChevronsUpDown from '@lucide/svelte/icons/chevrons-up-down'
   import Copy from '@lucide/svelte/icons/copy'
-  import Eye from '@lucide/svelte/icons/eye'
 
+  import SecretRow from '$lib/components/secret-row.svelte'
   import { Button } from '$lib/components/ui/button'
   import { toastStore } from '$lib/stores/toast.svelte'
   import { copyToClipboard, truncateAddress } from '$lib/utils'
-
-  const MASKED_KEY = '•'.repeat(66)
 
   interface KeyRow {
     label: string
@@ -122,34 +120,13 @@
       {#if publicKey}
         {@render keyRow(publicKey)}
       {/if}
-      <div class="bg-muted flex flex-col gap-1 rounded-md p-4">
-        {@render keyBlock(privateKey.label, privateKey.description)}
-        <div class="flex items-center gap-2">
-          {#if displayed}
-            <p class="min-w-0 flex-1 text-sm break-all">{displayed}</p>
-            <Button
-              variant="ghost"
-              size="icon"
-              class="size-7 shrink-0"
-              aria-label="Copy {privateKey.label.toLowerCase()}"
-              onclick={() => displayed && copyText(displayed, privateKey.label)}
-            >
-              <Copy />
-            </Button>
-          {:else}
-            <p class="min-w-0 flex-1 text-sm break-all select-none">{MASKED_KEY}</p>
-            <Button
-              variant="ghost"
-              size="icon"
-              class="size-7 shrink-0"
-              aria-label="Reveal {privateKey.label.toLowerCase()}"
-              onclick={reveal}
-            >
-              <Eye />
-            </Button>
-          {/if}
-        </div>
-      </div>
+      <SecretRow
+        label={privateKey.label}
+        description={privateKey.description}
+        value={displayed}
+        copyValue={displayed}
+        onreveal={reveal}
+      />
     </div>
   {/if}
 </div>

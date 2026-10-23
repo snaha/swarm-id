@@ -23,9 +23,12 @@ import { strip0x } from '$lib/crypto/hex'
 import { remainingLifespanSeconds } from '$lib/drives'
 import { type OwnerFunds, postageChain } from '$lib/payment/chain'
 import { fetchExistingBatchFromChain } from '$lib/payment/contract'
+import { type DilutionSkipReason, planDeleteDilution } from '$lib/payment/delete-dilution'
 import {
   BUCKET_DEPTH,
   CreatePendingError,
+  GAS_BUDGET_XDAI_WEI,
+  GAS_PER_TRANSACTION_XDAI_WEI,
   bundledCreate,
   bundledExtend,
   bundledResize,
@@ -35,6 +38,7 @@ import {
   increaseDepthOnChain,
   preflightExtend,
   preflightResize,
+  readDilutionState,
   reconcileStampFromChain,
   topUpOnChain,
 } from '$lib/payment/postage-onchain'
@@ -99,7 +103,8 @@ export interface RunOptions {
 
 /**
  * Bring the owner address up to the funds an operation needs, via the caller's
- * funding seam. No-op when residual balances already cover it.
+ * funding seam. No-op when residual balances already cover it. Gas is the
+ * fixed budget unless the operation passes more.
  */
 async function ensureFunded(
   destination: string,
@@ -107,15 +112,16 @@ async function ensureFunded(
   requestFunding: RequestFunding,
   onStep: ((step: OperationStep) => void) | undefined,
   client?: MultichainClient,
+  xdaiNeeded: bigint = GAS_BUDGET_XDAI_WEI,
 ): Promise<void> {
   const chain = client ?? (await postageChain())
-  const shortfall: OwnerFunds = await fundingShortfall(destination, bzzNeeded, chain)
+  const shortfall: OwnerFunds = await fundingShortfall(destination, bzzNeeded, chain, xdaiNeeded)
   if (shortfall.bzz === 0n && shortfall.xdai === 0n) {
     return
   }
   onStep?.('funding')
   await requestFunding({ destination, bzz: shortfall.bzz, xdai: shortfall.xdai })
-  const remainingShortfall = await fundingShortfall(destination, bzzNeeded, chain)
+  const remainingShortfall = await fundingShortfall(destination, bzzNeeded, chain, xdaiNeeded)
   if (remainingShortfall.bzz > 0n || remainingShortfall.xdai > 0n) {
     throw new Error('The payment did not deliver enough funds. You can retry to finish it.')
   }
@@ -451,6 +457,159 @@ export async function runResize(options: ResizeOptions): Promise<void> {
   if (!reconciled) {
     account.updateStamp(drive.batchID, plan.afterDilute)
   }
+}
+
+/** Progress through a deletion's dilutions, for the pending screen. */
+export type DilutionProgress =
+  | { step: 'checking' | 'funding' }
+  | { step: 'diluting'; drive: PostageStamp; index: number; total: number }
+
+/** What became of one drive. `unsent`: it was planned, but never funded. */
+export type DriveDilution =
+  | { drive: PostageStamp; outcome: 'diluted'; targetDepth: number }
+  | { drive: PostageStamp; outcome: 'skipped'; reason: DilutionSkipReason }
+  | { drive: PostageStamp; outcome: 'unsent' }
+  | { drive: PostageStamp; outcome: 'failed'; error: unknown }
+
+/**
+ * How the dilutions went as a whole:
+ * - `complete`: every drive planned for dilution was diluted;
+ * - `unfunded`: the gas was not obtained (declined, or not delivered), so no
+ *   transaction was sent — `error` is why;
+ * - `failed`: at least one transaction failed. The others were still sent, and
+ *   a retry plans the diluted ones as `expires-soon`.
+ */
+export type DeleteDilutionResult =
+  | { status: 'complete' | 'failed'; drives: DriveDilution[] }
+  | { status: 'unfunded'; drives: DriveDilution[]; error: unknown }
+
+export interface DeleteDilutionOptions {
+  account: Account
+  /**
+   * The account's postage signer, derived by the caller before anything is
+   * torn down: it is the owner `increaseDepth` requires, and the key the user
+   * is handed when the drives cannot be diluted.
+   */
+  signerKey: PrivateKey
+  /** Batch ids (hex) of the drives the user chose to keep. */
+  keep: ReadonlySet<string>
+  requestFunding: RequestFunding
+  beforeSpend?: BeforeSpend
+  onProgress?: (progress: DilutionProgress) => void
+}
+
+/**
+ * Dilute an account's drives before it is deleted, so each one it owns
+ * lapses within a day or two instead of running out its lifespan
+ * (`planDeleteDilution` says how far, and which are left alone).
+ *
+ * Every drive is planned from chain truth first, and gas for ALL the planned
+ * transactions is checked and funded once: a payment screen per drive would be
+ * N interruptions for one decision. A dilution moves no BZZ, so the need is gas
+ * alone.
+ *
+ * A funding failure is a result, not an error — no transaction was sent, and
+ * the caller decides whether the deletion goes ahead without diluting. A failed
+ * transaction does not stop the others; it is reported per drive. Like the
+ * other runners, everything after `beforeSpend` is a spend whose record must
+ * land, so callers keep this call outside their attempt guard.
+ *
+ * @throws when the chain cannot be read or the contract is paused, with nothing
+ *   sent; and whatever `beforeSpend` throws.
+ */
+export async function runDeleteDilution(
+  options: DeleteDilutionOptions,
+): Promise<DeleteDilutionResult> {
+  const { account, signerKey, keep, requestFunding, beforeSpend, onProgress } = options
+  const client = await postageChain()
+  onProgress?.({ step: 'checking' })
+
+  const constraints = await client.getPostageWriteConstraints()
+  if (constraints.paused) {
+    throw new Error("Swarm's payment contract is temporarily paused. Try again later.")
+  }
+  const signerAddress = signerKey.publicKey().address().toChecksum()
+  const planned = await Promise.all(
+    account.stamps.map(async (drive) => {
+      const kept = keep.has(drive.batchID.toHex())
+      // A kept drive is never touched, so it is not read either.
+      const chain = kept ? undefined : await readDilutionState(drive, client)
+      return {
+        drive,
+        chain,
+        plan: planDeleteDilution({
+          chain,
+          signerAddress,
+          minimumBalancePerChunk: constraints.minimumInitialBalancePerChunk,
+          lastPrice: constraints.lastPrice,
+          keep: kept,
+        }),
+      }
+    }),
+  )
+
+  const drives: DriveDilution[] = []
+  const toDilute: { drive: PostageStamp; targetDepth: number; remaining: bigint; from: number }[] =
+    []
+  for (const { drive, chain, plan } of planned) {
+    if ('skip' in plan) {
+      drives.push({ drive, outcome: 'skipped', reason: plan.skip })
+    } else if (chain) {
+      toDilute.push({
+        drive,
+        targetDepth: plan.targetDepth,
+        remaining: chain.remaining,
+        from: chain.depth,
+      })
+    }
+  }
+  if (toDilute.length === 0) {
+    return { status: 'complete', drives }
+  }
+
+  const perTransaction = BigInt(toDilute.length) * GAS_PER_TRANSACTION_XDAI_WEI
+  const xdaiNeeded = perTransaction > GAS_BUDGET_XDAI_WEI ? perTransaction : GAS_BUDGET_XDAI_WEI
+  try {
+    await ensureFunded(
+      signerAddress,
+      0n,
+      requestFunding,
+      () => onProgress?.({ step: 'funding' }),
+      client,
+      xdaiNeeded,
+    )
+  } catch (error) {
+    for (const { drive } of toDilute) {
+      drives.push({ drive, outcome: 'unsent' })
+    }
+    return { status: 'unfunded', drives, error }
+  }
+  await beforeSpend?.()
+
+  let failed = false
+  for (const [index, { drive, targetDepth, remaining, from }] of toDilute.entries()) {
+    onProgress?.({ step: 'diluting', drive, index, total: toDilute.length })
+    try {
+      await increaseDepthOnChain(signerKey, drive, targetDepth, client)
+    } catch (error) {
+      failed = true
+      drives.push({ drive, outcome: 'failed', error })
+      continue
+    }
+    if (!(await reconcileStampFromChain(account, drive, client))) {
+      // The increase is confirmed; the re-read is what failed. Record what the
+      // plan predicted so the record a failed publish leaves behind is not the
+      // pre-dilution one.
+      const left = remaining >> BigInt(targetDepth - from)
+      account.updateStamp(drive.batchID, {
+        depth: targetDepth,
+        amount: left,
+        batchTTL: ttlSecondsFor(left, constraints.lastPrice),
+      })
+    }
+    drives.push({ drive, outcome: 'diluted', targetDepth })
+  }
+  return { status: failed ? 'failed' : 'complete', drives }
 }
 
 /**

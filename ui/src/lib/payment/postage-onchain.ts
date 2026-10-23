@@ -24,6 +24,7 @@ import {
 
 import { prefix0x } from '$lib/crypto/hex'
 import { type OwnerFunds, ownerFunds, postageChain } from '$lib/payment/chain'
+import type { DilutionChainState } from '$lib/payment/delete-dilution'
 import { ttlSecondsFor } from '$lib/payment/purchase'
 import type { Account } from '$lib/types'
 
@@ -37,6 +38,10 @@ const TOP_UP_READ_INTERVAL_MS = 2_000
 /** xDAI budget covering approve + topUp + increaseDepth with ample headroom
  * (each op costs well under 0.001 xDAI at current Gnosis gas prices). */
 export const GAS_BUDGET_XDAI_WEI = 5_000_000_000_000_000n // 0.005 xDAI
+
+/** xDAI set aside per transaction when one operation sends many (account
+ * deletion dilutes every drive): the same headroom as the budget above. */
+export const GAS_PER_TRANSACTION_XDAI_WEI = 1_000_000_000_000_000n // 0.001 xDAI
 
 /** Bee's fixed bucket depth; a batch's depth must exceed it. */
 export const BUCKET_DEPTH = 16
@@ -61,18 +66,20 @@ function batchIdHex(stamp: Pick<PostageStamp, 'batchID'>): `0x${string}` {
 
 /**
  * What the owner address is missing for an operation needing `bzzPlur` of BZZ
- * (plus the fixed gas budget). Zeros when the residual balances already cover
+ * plus `xdaiWei` of gas (the fixed budget unless the operation sends more
+ * transactions than it covers). Zeros when the residual balances already cover
  * it — funds parked by an earlier interrupted attempt are consumed first.
  */
 export async function fundingShortfall(
   address: string,
   bzzPlur: bigint,
   client?: MultichainClient,
+  xdaiWei: bigint = GAS_BUDGET_XDAI_WEI,
 ): Promise<OwnerFunds> {
   const chain = client ?? (await postageChain())
   const funds = await ownerFunds(address, chain)
   return {
-    xdai: funds.xdai >= GAS_BUDGET_XDAI_WEI ? 0n : GAS_BUDGET_XDAI_WEI - funds.xdai,
+    xdai: funds.xdai >= xdaiWei ? 0n : xdaiWei - funds.xdai,
     bzz: funds.bzz >= bzzPlur ? 0n : bzzPlur - funds.bzz,
   }
 }
@@ -384,6 +391,29 @@ export async function preflightResize(
     throw new Error('This drive is immutable and cannot be resized.')
   }
   return { ...preflight, alreadyResized: preflight.batch.depth >= newDepth }
+}
+
+/**
+ * The batch as account deletion plans it, without refusing anything: a batch
+ * that is gone, expired, owned elsewhere or immutable is a reason to leave it
+ * be (`planDeleteDilution`), not an error. Undefined when the chain has no such
+ * batch; a failed read throws.
+ */
+export async function readDilutionState(
+  stamp: Pick<PostageStamp, 'batchID'>,
+  client?: MultichainClient,
+): Promise<DilutionChainState | undefined> {
+  const chain = client ?? (await postageChain())
+  const batch = await chain.getPostageBatch(batchIdHex(stamp))
+  if (!batch) {
+    return undefined
+  }
+  return {
+    depth: batch.depth,
+    remaining: await chain.getRemainingBalance(batchIdHex(stamp)),
+    owner: batch.owner,
+    immutable: batch.immutableFlag,
+  }
 }
 
 /**

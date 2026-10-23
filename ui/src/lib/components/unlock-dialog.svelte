@@ -12,6 +12,8 @@
 <script lang="ts">
   import { type Snippet, untrack } from 'svelte'
 
+  import Eye from '@lucide/svelte/icons/eye'
+  import EyeOff from '@lucide/svelte/icons/eye-off'
   import LoaderCircle from '@lucide/svelte/icons/loader-circle'
 
   import { createAttemptTracker } from '$lib/attempt'
@@ -25,10 +27,20 @@
     account: Account
     title: string
     description?: string
+    /** Above the body — e.g. the account the ceremony is about. */
+    header?: Snippet
     /** Richer body than a plain string — rendered in place of `description`. */
     children?: Snippet
+    /** Below the password field, above the confirm button. */
+    footer?: Snippet
+    /** Labels the password field; without it the placeholder alone names it. */
+    passwordLabel?: string
+    /** The caller's own precondition for confirming (e.g. a typed name). */
+    canConfirm?: boolean
     /** Overrides the access-method-derived confirm label. */
     confirmLabel?: string
+    /** Overrides the heading of the passkey / wallet waiting state. */
+    pendingTitle?: string
     /** Destructive confirm styling for delete-style ceremonies. */
     destructive?: boolean
     onunlocked: (entropy: Uint8Array) => void | Promise<void>
@@ -39,8 +51,13 @@
     account,
     title,
     description,
+    header,
     children,
+    footer,
+    passwordLabel,
+    canConfirm = true,
     confirmLabel,
+    pendingTitle,
     destructive = false,
     onunlocked,
     onclose,
@@ -57,14 +74,17 @@
   const initialSignedOutAt = untrack(() => account.signedOutAt)
 
   let password = $state('')
+  let passwordShown = $state(false)
   let busy = $state(false)
   let pendingCeremony = $state(false)
   let error = $state<string | undefined>(undefined)
   /** Cancel/retry supersedes the in-flight ceremony — it must not complete. */
   const attempts = createAttemptTracker()
 
+  const confirmable = $derived(canConfirm && (access.type !== 'password' || password.length > 0))
+
   async function confirm() {
-    if (busy) {
+    if (busy || !confirmable) {
       return
     }
     const attempt = attempts.begin()
@@ -117,7 +137,8 @@
     <div class="flex flex-col items-center gap-2 py-4 text-center">
       <LoaderCircle class="size-5 animate-spin" />
       <p class="text-sm font-bold">
-        {access.type === 'eth-wallet' ? 'Confirm with wallet' : 'Confirm with passkey'}
+        {pendingTitle ??
+          (access.type === 'eth-wallet' ? 'Confirm with wallet' : 'Confirm with passkey')}
       </p>
       <p class="text-sm">
         {access.type === 'eth-wallet'
@@ -129,6 +150,8 @@
   </Dialog>
 {:else}
   <Dialog onclose={close} {title}>
+    {@render header?.()}
+
     {#if children}
       {@render children()}
     {:else if description}
@@ -136,15 +159,38 @@
     {/if}
 
     {#if access.type === 'password'}
-      <Input
-        type="password"
-        bind:value={password}
-        placeholder="Account password"
-        autocomplete="current-password"
-        data-autofocus
-        onkeydown={(event: KeyboardEvent) => event.key === 'Enter' && confirm()}
-      />
+      <div class="flex w-full flex-col gap-2">
+        {#if passwordLabel}
+          <label for="unlock-password" class="text-sm font-medium">{passwordLabel}</label>
+        {/if}
+        <div class="flex w-full items-center gap-2">
+          <Input
+            id="unlock-password"
+            type={passwordShown ? 'text' : 'password'}
+            bind:value={password}
+            placeholder="Account password"
+            autocomplete="current-password"
+            data-autofocus
+            onkeydown={(event: KeyboardEvent) => event.key === 'Enter' && confirm()}
+          />
+          <Button
+            variant="ghost"
+            size="icon"
+            class="size-6 shrink-0 rounded-md [&_svg]:size-3.5"
+            aria-label={passwordShown ? 'Hide password' : 'Show password'}
+            onclick={() => (passwordShown = !passwordShown)}
+          >
+            {#if passwordShown}
+              <EyeOff />
+            {:else}
+              <Eye />
+            {/if}
+          </Button>
+        </div>
+      </div>
     {/if}
+
+    {@render footer?.()}
 
     {#if error}
       <p class="text-destructive text-xs">{error}</p>
@@ -153,7 +199,7 @@
     <Button
       variant={destructive ? 'destructive' : 'default'}
       class="w-full"
-      disabled={busy || (access.type === 'password' && password.length === 0)}
+      disabled={busy || !confirmable}
       onclick={confirm}
     >
       {#if busy}
