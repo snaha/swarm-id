@@ -342,7 +342,7 @@ describe('Account.setAppPermissions — drives', () => {
     account.setAppPermissions(APP_URL, { drives: [new BatchId(BATCH_HEX)] })
     const app = account.connectedApps[0]
     expect(app.drives !== 'all' && app.drives?.map((b) => b.toHex())).toEqual([BATCH_HEX])
-    expect(app.permissionsAt).toEqual(expect.any(Number))
+    expect(app.drivesAt).toEqual(expect.any(Number))
   })
 
   it('clears the grant back to the account default', () => {
@@ -365,7 +365,7 @@ describe('Account.setAppPermissions — drives', () => {
   it('is forgotten by Remove, with a fresh grant clock', () => {
     const account = accountWithApp()
     account.setAppPermissions(APP_URL, { drives: [new BatchId(BATCH_HEX)] })
-    const grantedAt = account.connectedApps[0].permissionsAt ?? 0
+    const grantedAt = account.connectedApps[0].drivesAt ?? 0
     vi.useFakeTimers({ toFake: ['Date'] })
     try {
       vi.setSystemTime(grantedAt + 1)
@@ -375,7 +375,7 @@ describe('Account.setAppPermissions — drives', () => {
     }
     const app = account.connectedApps[0]
     expect(app.drives).toBeUndefined()
-    expect(app.permissionsAt).toBeGreaterThan(grantedAt)
+    expect(app.drivesAt).toBeGreaterThan(grantedAt)
     expect(app.revokedAt).toEqual(expect.any(Number))
   })
 
@@ -411,7 +411,7 @@ describe('Account sharing switches', () => {
     account.setAppPermissions(APP_URL, { dataSharing: false })
     expect(account.connectedApps[0].dataSharing).toBe(false)
     expect(account.connectedApps[0].dataSharingAt).toEqual(expect.any(Number))
-    expect(account.connectedApps[0].permissionsAt).toBeUndefined()
+    expect(account.connectedApps[0].drivesAt).toBeUndefined()
     account.setAppPermissions(APP_URL, { dataSharing: undefined })
     expect(account.connectedApps[0].dataSharing).toBeUndefined()
   })

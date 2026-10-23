@@ -61,7 +61,7 @@ describe("per-field clocks", () => {
       dataSharing: false,
       dataSharingAt: 7,
       drives: undefined,
-      permissionsAt: 7,
+      drivesAt: 7,
     })
     expect(stampClocks({ appSessionDuration: 5 }, SETTINGS_CLOCKS, 7)).toEqual({
       appSessionDuration: 5,

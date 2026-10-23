@@ -46,7 +46,7 @@ export type FieldClocks = Readonly<Record<string, string>>
 
 /** What an app holds: the drives (#862), the two switches and its session length (#885). */
 export const GRANT_CLOCKS: FieldClocks = {
-  drives: "permissionsAt",
+  drives: "drivesAt",
   dataSharing: "dataSharingAt",
   writeAccess: "writeAccessAt",
   sessionDuration: "sessionDurationAt",

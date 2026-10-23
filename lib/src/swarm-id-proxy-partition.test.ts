@@ -954,7 +954,7 @@ describe("SwarmIdProxy partitioned write enablement", () => {
         connectedApps: account.connectedApps.map((app) => ({
           ...app,
           drives: [new BatchId(SECOND_BATCH_ID_HEX)],
-          permissionsAt: Date.now(),
+          drivesAt: Date.now(),
         })),
       }))
 
@@ -1454,7 +1454,7 @@ describe("SwarmIdProxy partitioned write enablement", () => {
         connectedApps: account.connectedApps.map((app) => ({
           ...app,
           drives: [new BatchId(BATCH_ID_HEX)],
-          permissionsAt: Date.now(),
+          drivesAt: Date.now(),
         })),
       }))
 
@@ -1623,7 +1623,7 @@ describe("SwarmIdProxy partitioned write enablement", () => {
           connectedApps: account.connectedApps.map((app) => ({
             ...app,
             drives: [new BatchId(BATCH_ID_HEX)],
-            permissionsAt: Date.now(),
+            drivesAt: Date.now(),
           })),
         }))
         await vi.waitFor(() => expect(second.teardown).toHaveBeenCalled())
@@ -1697,7 +1697,7 @@ describe("SwarmIdProxy partitioned write enablement", () => {
           connectedApps: account.connectedApps.map((app) => ({
             ...app,
             drives: [new BatchId(BATCH_ID_HEX)],
-            permissionsAt: Date.now(),
+            drivesAt: Date.now(),
           })),
         }))
         await vi.waitFor(() =>
@@ -3217,7 +3217,7 @@ describe("SwarmIdProxy partitioned write enablement", () => {
               appName: "dApp",
               lastConnectedAt: Date.now(),
               drives: "all",
-              permissionsAt: Date.now(),
+              drivesAt: Date.now(),
             },
           ],
         }),
@@ -3613,7 +3613,7 @@ describe("SwarmIdProxy partitioned write enablement", () => {
                 appName: "dApp",
                 lastConnectedAt: Date.now(),
                 drives: [stamp.batchID, new BatchId(OTHER_BATCH_ID_HEX)],
-                permissionsAt: Date.now() + 1,
+                drivesAt: Date.now() + 1,
               },
             ],
             postageStamps: [
@@ -4038,7 +4038,7 @@ describe("SwarmIdProxy partitioned write enablement", () => {
                 lastConnectedAt: Date.now(),
                 // Strictly newer than the hydrated entry, so the fold cannot
                 // tie on a same-millisecond clock and keep the local grant.
-                permissionsAt: Date.now() + 1,
+                drivesAt: Date.now() + 1,
                 drives: [new BatchId(OTHER_BATCH_ID_HEX)],
               },
             ],

@@ -177,7 +177,7 @@ export function serializeConnectedApp(
     writeAccessAt: app.writeAccessAt,
     sessionDuration: app.sessionDuration,
     sessionDurationAt: app.sessionDurationAt,
-    permissionsAt: app.permissionsAt,
+    drivesAt: app.drivesAt,
     revokedAt: app.revokedAt,
     disconnectedAt: app.disconnectedAt,
   }

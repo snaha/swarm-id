@@ -151,6 +151,6 @@ describe('commitConnect', () => {
   it("stamps the clock of each switch granted, not the drives'", () => {
     const connection = connect({})
     expect(connection).toMatchObject({ dataSharing: true, dataSharingAt: NOW })
-    expect(connection.permissionsAt).toBeUndefined()
+    expect(connection.drivesAt).toBeUndefined()
   })
 })

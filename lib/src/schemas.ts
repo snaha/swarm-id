@@ -174,15 +174,13 @@ export const ConnectedAppSchemaV1 = z.object({
   // Applied at the next connect (`appSessionDuration`).
   sessionDuration: z.number().optional(),
   sessionDurationAt: z.number().optional(),
-  // The grant — drives, the two switches, the duration — rides last-writer-
-  // wins clocks of its own, one per field (`GRANT_CLOCKS`, `permissions.ts`),
-  // because a grant edit says nothing about whether the app is still
-  // connected. Ranking the whole entry on a clock this bumped let a drive
-  // picked on a stale copy outrank a revoke made elsewhere and take the
-  // tombstone with it (#681); one clock for the whole grant let it revert a
-  // switch pinned elsewhere the same way (#885). Membership merges on the
-  // markers below instead.
-  permissionsAt: z.number().optional(),
+  // The grant — drives (on `drivesAt`), the two switches, the duration —
+  // rides last-writer-wins clocks of its own, one per field (`GRANT_CLOCKS`,
+  // `permissions.ts`), because a grant edit says nothing about whether the app
+  // is still connected. Ranking the whole entry on a clock this bumped let a
+  // drive picked on a stale copy outrank a revoke made elsewhere and take the
+  // tombstone with it (#681). Membership merges on the markers below instead.
+  drivesAt: z.number().optional(),
   // Tombstone marker. A revoked app is kept in the snapshot (so the removal
   // propagates to other devices) but hidden from the UI and invalid for auth.
   revokedAt: z.number().optional(),

@@ -9,6 +9,7 @@ import {
   snapshotContainsContribution,
 } from "./merge-snapshot"
 import type { AccountStateSnapshot } from "../utils/account-state-snapshot"
+import { ConnectedAppSchemaV1 } from "../schemas"
 import type { Device, ConnectedApp, PostageStamp } from "../schemas"
 
 const SELF_DEVICE_ID = "device-self-111"
@@ -415,7 +416,7 @@ describe("mergeSnapshotWithRemote — apps / stamps", () => {
       ...makeConnectedApp("https://app.example"),
       appSecret: "33".repeat(32),
       drives: [new BatchId("cc".repeat(32))],
-      permissionsAt: 9_000_000,
+      drivesAt: 9_000_000,
     }
     const result = mergeSnapshotWithRemote(
       makeSnapshot({ connectedApps: [staleWithNewStamp] }),
@@ -433,7 +434,7 @@ describe("mergeSnapshotWithRemote — apps / stamps", () => {
     const chosen = {
       ...makeConnectedApp("https://app.example"),
       drives: [new BatchId("cc".repeat(32))],
-      permissionsAt: 9_000_000,
+      drivesAt: 9_000_000,
     }
     const stale = makeConnectedApp("https://app.example")
     const result = mergeSnapshotWithRemote(
@@ -461,7 +462,7 @@ describe("mergeSnapshotWithRemote — apps / stamps", () => {
     const staleWithNewDrive = {
       ...makeConnectedApp("https://app.example"),
       drives: [new BatchId("cc".repeat(32))],
-      permissionsAt: 9_000_000,
+      drivesAt: 9_000_000,
     }
     const result = mergeSnapshotWithRemote(
       makeSnapshot({ connectedApps: [staleWithNewDrive] }),
@@ -471,8 +472,34 @@ describe("mergeSnapshotWithRemote — apps / stamps", () => {
       dataSharing: false,
       writeAccess: false,
       sessionDuration: 7,
-      permissionsAt: 9_000_000,
+      drivesAt: 9_000_000,
     })
+    const { drives } = result.connectedApps[0]
+    expect(drives !== "all" && drives?.map((b) => b.toHex())).toEqual([
+      "cc".repeat(32),
+    ])
+  })
+
+  // The drives clock is `drivesAt`, as main stores it: a record written by a
+  // main-era client must keep its clock through the schema, or a stale copy
+  // with newer membership recency wins the drives and reverts a narrowing.
+  it("a main-shaped drive grant keeps its clock through the schema", () => {
+    const narrowed = ConnectedAppSchemaV1.parse({
+      appUrl: "https://app.example",
+      appName: "https://app.example",
+      lastConnectedAt: 100,
+      drives: ["cc".repeat(32)],
+      drivesAt: 200,
+    })
+    const stale = {
+      ...makeConnectedApp("https://app.example"),
+      lastConnectedAt: 300,
+      drives: "all" as const,
+    }
+    const result = mergeSnapshotWithRemote(
+      makeSnapshot({ connectedApps: [stale] }),
+      makeSnapshot({ connectedApps: [narrowed] }),
+    )
     const { drives } = result.connectedApps[0]
     expect(drives !== "all" && drives?.map((b) => b.toHex())).toEqual([
       "cc".repeat(32),

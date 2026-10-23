@@ -70,7 +70,7 @@ describe("restoreLocalSessionFields — a peer's Disconnect", () => {
     const regranted = onWire({
       ...local,
       drives: "all",
-      permissionsAt: LATER,
+      drivesAt: LATER,
     })
 
     const [app] = fold([local], [regranted])
