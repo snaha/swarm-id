@@ -3,7 +3,10 @@
 
 import { describe, it, expect } from "vitest"
 import { BatchId, PrivateKey } from "@ethersphere/bee-js"
-import { serializeAccountStateSnapshot } from "./account-state-snapshot"
+import {
+  accountToStateSnapshot,
+  serializeAccountStateSnapshot,
+} from "./account-state-snapshot"
 import { AccountStateSnapshotSchemaV1 } from "../schemas"
 import type { SignedInAccount } from "../schemas"
 import {
@@ -541,5 +544,24 @@ describe("AccountStateSnapshotSchemaV1", () => {
   it("should be exported and usable for direct validation", () => {
     expect(AccountStateSnapshotSchemaV1).toBeDefined()
     expect(typeof AccountStateSnapshotSchemaV1.safeParse).toBe("function")
+  })
+})
+
+describe("deletion marker", () => {
+  it("falls back to not deleted, as of the account's creation", () => {
+    const account = createAccount()
+    const snapshot = accountToStateSnapshot(account, account.id.toHex(), 5)
+    expect(snapshot.metadata.deleted).toBe(false)
+    expect(snapshot.metadata.deletedAt).toBe(account.createdAt)
+  })
+
+  it("survives the wire form the bus and the feeds carry", () => {
+    const account = createAccount({ deleted: true, deletedAt: 1_234 })
+    const snapshot = accountToStateSnapshot(account, account.id.toHex(), 5)
+    const parsed = AccountStateSnapshotSchemaV1.parse(
+      JSON.parse(JSON.stringify(serializeAccountStateSnapshot(snapshot))),
+    )
+    expect(parsed.metadata.deleted).toBe(true)
+    expect(parsed.metadata.deletedAt).toBe(1_234)
   })
 })

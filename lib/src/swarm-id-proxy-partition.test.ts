@@ -269,7 +269,10 @@ import {
   serializeAccount,
   serializeSyncedAccount,
 } from "./utils/storage-managers"
-import { serializeAccountStateSnapshot } from "./utils/account-state-snapshot"
+import {
+  accountToStateSnapshot,
+  serializeAccountStateSnapshot,
+} from "./utils/account-state-snapshot"
 import {
   IframeToParentMessageSchema,
   STORAGE_CHALLENGE_KEY,
@@ -3071,6 +3074,8 @@ describe("SwarmIdProxy partitioned write enablement", () => {
       postageStamps?: PostageStamp[]
       defaultPostageStampBatchID?: string
       defaultStampAt?: number
+      deleted?: boolean
+      deletedAt?: number
       lastModified?: number
     }): Record<string, unknown> {
       const account = makeSyncedAccount()
@@ -3083,6 +3088,8 @@ describe("SwarmIdProxy partitioned write enablement", () => {
             defaultPostageStampBatchID:
               overrides?.defaultPostageStampBatchID ?? BATCH_ID_HEX,
             defaultStampAt: overrides?.defaultStampAt,
+            deleted: overrides?.deleted,
+            deletedAt: overrides?.deletedAt,
             publicKey: account.publicKey,
             settings: undefined,
             createdAt: account.createdAt,
@@ -3384,6 +3391,39 @@ describe("SwarmIdProxy partitioned write enablement", () => {
         await vi.waitFor(() =>
           expect(messagesOfType("disconnectResponse")).toHaveLength(1),
         )
+      } finally {
+        busChannel.close()
+      }
+    })
+
+    // The marker a deleting device publishes must survive this session's fold,
+    // its stored copy and its own next publish: the session that drops it
+    // would republish the account as live and undo the deletion for every
+    // peer folding after it.
+    it("carries a peer's deletion marker through its fold and its publish", async () => {
+      const busChannel = await hydratedSession()
+      const internals = proxy as unknown as {
+        partitionAccount: SignedInAccount | undefined
+      }
+      const deletedAt = Date.now()
+      try {
+        busChannel.postMessage(accountDelta({ deleted: true, deletedAt }))
+        await vi.waitFor(() =>
+          expect(internals.partitionAccount?.deleted).toBe(true),
+        )
+        expect(internals.partitionAccount?.deletedAt).toBe(deletedAt)
+        const stored = JSON.parse(
+          localStorageFake.getItem(partitionSessionStorageKey(PARENT_ORIGIN)) ??
+            "{}",
+        ) as { data?: { account?: { deleted?: boolean } } }
+        expect(stored.data?.account?.deleted).toBe(true)
+        const published = accountToStateSnapshot(
+          internals.partitionAccount!,
+          internals.partitionAccount!.id.toHex(),
+          Date.now(),
+        )
+        expect(published.metadata.deleted).toBe(true)
+        expect(published.metadata.deletedAt).toBe(deletedAt)
       } finally {
         busChannel.close()
       }

@@ -209,6 +209,7 @@ export function makeView(over: Partial<DeviceStateView> = {}): DeviceStateView {
     accountName: { value: "live-test", at: 1 },
     defaultPostageStampBatchID: { value: undefined, at: 1 },
     settings: { value: undefined, at: 1 },
+    deleted: { value: false, at: 1 },
     accountPublicKey: TEST_ACCOUNT_PUBLIC_KEY,
     accountCreatedAt: 1_000,
     partitionCount: 2,
