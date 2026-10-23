@@ -26,28 +26,23 @@ function message(charges: { currency: string; amount: bigint }[], figures: Recor
 }
 
 describe('shortfallMessage', () => {
-  it('says what the wallet holds and what the payment needs', () => {
+  it('says what the wallet holds, and leaves the price to the headline', () => {
     expect(message([{ currency: NATIVE_CURRENCY, amount: PRICE }], { [NATIVE_CURRENCY]: 0n })).toBe(
-      'Your wallet has 0 xDAI on Gnosis Chain, and this payment needs 0.5237 xDAI. Choose another chain or token, or add funds to this one.',
+      'Your wallet has 0 xDAI on Gnosis Chain, not enough for this payment. Choose another chain or token, or add funds to this one.',
     )
   })
 
   it('formats amounts in the token’s own decimals', () => {
     expect(
       message([{ currency: USDC.address, amount: 10_836_000n }], { [USDC.address]: 2_500_000n }),
-    ).toMatch(/has 2\.5 USDC on Gnosis Chain, and this payment needs 10\.84 USDC/)
+    ).toMatch(/has 2\.5 USDC on Gnosis Chain, not enough/)
   })
 
-  it('never shows a near miss as the same figure twice', () => {
+  it('never shows a near miss as the price itself', () => {
+    // 10.835 to nearest would read 10.84 — the 10.836 price in the headline.
     expect(
       message([{ currency: USDC.address, amount: 10_836_000n }], { [USDC.address]: 10_835_000n }),
-    ).toMatch(/has 10\.83 USDC on Gnosis Chain, and this payment needs 10\.84 USDC/)
-  })
-
-  it('rounds what is needed up, so adding the figure shown is enough', () => {
-    expect(
-      message([{ currency: USDC.address, amount: 10_834_900n }], { [USDC.address]: 0n }),
-    ).toMatch(/needs 10\.84 USDC/)
+    ).toMatch(/has 10\.83 USDC on Gnosis Chain, not enough/)
   })
 
   it('lets through a wallet holding exactly what is charged', () => {
@@ -74,7 +69,7 @@ describe('shortfallMessage', () => {
         ],
         { [USDC.address]: 50_000_000n, [NATIVE_CURRENCY]: parseUnits('0.001', XDAI.decimals) },
       ),
-    ).toMatch(/has 0\.001 xDAI on Gnosis Chain, and this payment needs 0\.005 xDAI/)
+    ).toMatch(/has 0\.001 xDAI on Gnosis Chain, not enough/)
   })
 })
 
