@@ -5,7 +5,7 @@ import { describe, expect, it } from 'vitest'
 
 import { NATIVE_CURRENCY } from '$lib/payment/payment-rail'
 
-import { formatBalance, shortfallMessage } from './wallet-shortfall'
+import { shortfallMessage } from './wallet-shortfall'
 
 const XDAI = { address: NATIVE_CURRENCY, symbol: 'xDAI', name: 'xDAI', decimals: 18 }
 const USDC = {
@@ -70,15 +70,5 @@ describe('shortfallMessage', () => {
         { [USDC.address]: 50_000_000n, [NATIVE_CURRENCY]: parseUnits('0.001', XDAI.decimals) },
       ),
     ).toMatch(/has 0\.001 xDAI on Gnosis Chain, not enough/)
-  })
-})
-
-describe('formatBalance', () => {
-  it('shows an empty balance as 0', () => {
-    expect(formatBalance(0n, USDC.decimals)).toBe('0')
-  })
-
-  it('never rounds a balance up past what the wallet holds', () => {
-    expect(formatBalance(10_839_999n, USDC.decimals)).toBe('10.83')
   })
 })

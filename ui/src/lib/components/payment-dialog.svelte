@@ -44,10 +44,11 @@
     type PaymentQuote,
     type PaymentRail,
     displayAmount,
+    displayBalance,
   } from '$lib/payment/payment-rail'
   import { subscribeProviderEvent } from '$lib/payment/provider-events'
   import { createWalletChainRecord } from '$lib/payment/wallet-chain-record'
-  import { formatBalance, shortfallMessage } from '$lib/payment/wallet-shortfall'
+  import { shortfallMessage } from '$lib/payment/wallet-shortfall'
 
   /**
    * The payment screens: choose a method, then — for the built-in engine —
@@ -197,20 +198,22 @@
       label: chain.name,
     })),
   )
+  const selectedChain = $derived(rail.chains.find((chain) => String(chain.id) === chainId))
+  const selectedTokens = $derived(rail.tokens(Number(chainId)))
   const tokenOptions = $derived(
-    rail.tokens(Number(chainId)).map((token) => {
+    selectedTokens.map((token) => {
       const held = balances[balanceKey(chainId, token.address)]
       return {
         value: token.address,
         label:
           held === undefined
             ? `${token.symbol} (${token.name})`
-            : `${token.symbol} (${token.name}) — ${formatBalance(held, token.decimals)}`,
+            : `${token.symbol} (${token.name}) — ${displayBalance(held, token.decimals)}`,
       }
     }),
   )
   const tokenSymbol = $derived(
-    rail.tokens(Number(chainId)).find((token) => token.address === tokenAddress)?.symbol ?? '',
+    selectedTokens.find((token) => token.address === tokenAddress)?.symbol ?? '',
   )
   const shortAddress = $derived(
     walletAddress ? `${walletAddress.slice(0, 6)}…${walletAddress.slice(-4)}` : '',
@@ -256,9 +259,9 @@
     paymentQuote
       ? shortfallMessage(
           paymentQuote.charges,
-          rail.tokens(Number(chainId)),
+          selectedTokens,
           (currency) => balances[balanceKey(chainId, currency)],
-          rail.chains.find((chain) => String(chain.id) === chainId)?.name ?? '',
+          selectedChain?.name ?? '',
         )
       : '',
   )
@@ -433,7 +436,7 @@
    */
   async function readBalances() {
     const address = walletAddress
-    const chain = rail.chains.find((candidate) => String(candidate.id) === chainId)
+    const chain = selectedChain
     if (!address || !chain) {
       return
     }
@@ -828,7 +831,7 @@
           options={chainOptions}
           bind:value={chainId}
           onchange={() => {
-            tokenAddress = rail.tokens(Number(chainId))[0]?.address ?? ''
+            tokenAddress = selectedTokens[0]?.address ?? ''
             void followChain()
             void refreshQuote()
           }}

@@ -28,7 +28,7 @@
  */
 import { withTimeout } from '@snaha/swarm-id'
 import type { SwapInput } from '@swarm-id/multichain'
-import type { Chain } from 'viem'
+import { type Chain, formatUnits } from 'viem'
 import { arbitrum, base, gnosis, mainnet, optimism, polygon } from 'viem/chains'
 
 /** Native-token sentinel for "the chain's own currency". */
@@ -86,7 +86,7 @@ export interface QuoteRequest {
 }
 
 /** Significant digits in a displayed price. */
-export const AMOUNT_PRECISION_DIGITS = 4
+const AMOUNT_PRECISION_DIGITS = 4
 const USD_DECIMALS = 2
 /** The dollar figure below which cents are all zeros. */
 const CENT = 0.01
@@ -131,6 +131,18 @@ export function displayAmount(value: string | number): string {
     return ''
   }
   return significantDigits(amount, AMOUNT_PRECISION_DIGITS)
+}
+
+/**
+ * A wallet's balance, from base units, at the digits a price shows. Rounded
+ * down rather than to nearest: a balance shown rounded up would claim money the
+ * wallet lacks, and could read as the very price it falls short of. Unlike a
+ * price, zero is a figure: "0", not blank.
+ */
+export function displayBalance(value: bigint, decimals: number): string {
+  const dropped = value.toString().length - AMOUNT_PRECISION_DIGITS
+  const unit = dropped > 0 ? 10n ** BigInt(dropped) : 1n
+  return formatUnits((value / unit) * unit, decimals)
 }
 
 /**
