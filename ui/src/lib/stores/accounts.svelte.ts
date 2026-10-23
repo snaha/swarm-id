@@ -360,11 +360,17 @@ export class Account {
     this.#setSettings({ [permission]: on })
   }
 
-  /** On the settings clock, and each switch on its own too (`SETTINGS_CLOCKS`). */
+  /**
+   * Each switch on its own clock (`SETTINGS_CLOCKS`), the rest on `settingsAt`.
+   * A switch-only patch leaves `settingsAt` alone: bumping it would carry this
+   * copy's `appSessionDuration` over a newer one made elsewhere.
+   */
   #setSettings(patch: AccountSettings) {
     const now = Date.now()
     this.settings = { ...this.settings, ...stampClocks(patch, SETTINGS_CLOCKS, now) }
-    this.settingsAt = now
+    if (Object.keys(patch).some((field) => !(field in SETTINGS_CLOCKS))) {
+      this.settingsAt = now
+    }
     this.lastModified = now
     this.#commit()
   }

@@ -416,11 +416,24 @@ describe('Account sharing switches', () => {
     expect(account.connectedApps[0].dataSharing).toBeUndefined()
   })
 
-  it("sets the account-wide default on the settings clock and the switch's own", () => {
+  it("sets the account-wide default on the switch's own clock alone", () => {
     const account = accountWithApp()
     account.setSharingDefault('writeAccess', false)
     expect(account.settings).toEqual({ writeAccess: false, writeAccessAt: expect.any(Number) })
-    expect(account.settingsAt).toEqual(expect.any(Number))
+    expect(account.settingsAt).toBeUndefined()
+  })
+
+  // The other direction: a switch flipped on a stale copy, after device B
+  // changed "Keep apps connected for", must not carry the old length over B's.
+  it('a switch flipped on a stale copy does not revert a newer session length', () => {
+    const now = vi.spyOn(Date, 'now').mockReturnValue(1_000)
+    const account = accountWithApp()
+    account.setAppConnectionDays(30)
+    now.mockReturnValue(3_000)
+    account.setSharingDefault('dataSharing', false)
+    account.applyRefreshed({ settings: { appSessionDuration: 5 }, settingsAt: 2_000 })
+    now.mockRestore()
+    expect(account.settings).toMatchObject({ appSessionDuration: 5, dataSharing: false })
   })
 
   // Device B, on a stale copy, changes "Keep apps connected for" after this
@@ -432,7 +445,7 @@ describe('Account sharing switches', () => {
     const dataSharingAt = account.settings?.dataSharingAt
     account.applyRefreshed({
       settings: { appSessionDuration: 5 },
-      settingsAt: (account.settingsAt ?? 0) + 1,
+      settingsAt: (dataSharingAt ?? 0) + 1,
     })
     expect(account.settings).toEqual({ appSessionDuration: 5, dataSharing: false, dataSharingAt })
   })
