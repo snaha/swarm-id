@@ -2,11 +2,14 @@
 // SPDX-License-Identifier: Apache-2.0
 import { RedundancyLevel, Utils } from '@ethersphere/bee-js'
 import {
+  type ConnectedApp,
   MIN_USABLE_BATCH_DEPTH,
   PARTITION_COUNT,
   type PostageStamp,
+  type SyncedAccount,
   isScratchDrive,
   remainingLifespanSeconds,
+  stampsReachableByApp,
 } from '@snaha/swarm-id/internal'
 
 /**
@@ -366,4 +369,19 @@ export function describeDrive(drive: PostageStamp, now = Date.now()): DriveDispl
     expiryDate: hasLifespan ? formatYmd(now + ttl * MS_PER_SECOND) : undefined,
     purchasedOn: formatYmd(drive.createdAt),
   }
+}
+
+/**
+ * The names of the connected apps that can write to `drive`: the ones whose
+ * grant names it, or follows the account default while it is the default.
+ * Removed apps are left out — they reach nothing any more.
+ */
+export function appsUsingDrive(
+  drive: PostageStamp,
+  apps: ConnectedApp[],
+  account: Pick<SyncedAccount, 'defaultPostageStampBatchID'>,
+): string[] {
+  return apps
+    .filter((app) => !app.revokedAt && stampsReachableByApp(app, account, [drive]).length > 0)
+    .map((app) => app.appName)
 }

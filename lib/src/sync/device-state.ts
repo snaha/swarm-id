@@ -73,6 +73,7 @@ export const DeviceStateSnapshotSchemaV1 = z.object({
   accountName: ClockedSchema(z.string()),
   defaultPostageStampBatchID: ClockedSchema(z.string().length(64).optional()),
   settings: ClockedSchema(SettingsSchema.optional()),
+  deleted: ClockedSchema(z.boolean()),
   // Account-level immutables — carried on the robust per-device feed (not the
   // roster), so the fold reconstructs them without a shared doc. Identical
   // across devices.
@@ -90,6 +91,7 @@ export interface DeviceStateView {
   accountName: { value: string; at: number }
   defaultPostageStampBatchID: { value: string | undefined; at: number }
   settings: { value: AccountSettings | undefined; at: number }
+  deleted: { value: boolean; at: number }
   accountPublicKey: string
   accountCreatedAt: number
   partitionCount: number
@@ -108,6 +110,9 @@ export interface FoldedAccount {
   accountNameAt: number
   defaultStampAt: number
   settingsAt: number
+  /** Whether the account was deleted, and the clock of that verdict. */
+  deleted: boolean
+  deletedAt: number
   createdAt: number
   publicKey: string
   partitionCount: number
@@ -140,6 +145,7 @@ export function accountStateToDeviceView(
       at: m.defaultStampAt ?? stableAt,
     },
     settings: { value: m.settings, at: m.settingsAt ?? stableAt },
+    deleted: { value: m.deleted ?? false, at: m.deletedAt ?? stableAt },
     accountPublicKey: m.publicKey,
     accountCreatedAt: m.createdAt,
     partitionCount: m.partitionCount ?? 1,
@@ -167,6 +173,7 @@ export function serializeDeviceState(
     accountName: view.accountName,
     defaultPostageStampBatchID: view.defaultPostageStampBatchID,
     settings: view.settings,
+    deleted: view.deleted,
     accountPublicKey: view.accountPublicKey,
     accountCreatedAt: view.accountCreatedAt,
     partitionCount: view.partitionCount,
@@ -313,6 +320,7 @@ export function foldAccount(
   let accountName = { value: "", at: 0 }
   let defaultBatch: { value?: string; at: number } = { at: 0 }
   let settings: { value?: AccountSettings; at: number } = { at: 0 }
+  let deleted = { value: false, at: 0 }
 
   for (const v of views) {
     connectedApps = mergeConnectedApps(connectedApps, v.connectedApps)
@@ -320,6 +328,7 @@ export function foldAccount(
     accountName = pickLatest(accountName, v.accountName)
     defaultBatch = pickLatest(defaultBatch, v.defaultPostageStampBatchID)
     settings = pickLatest(settings, v.settings)
+    deleted = pickLatest(deleted, v.deleted)
   }
 
   // Account immutables from any view that defines them — NOT just views[0],
@@ -353,6 +362,8 @@ export function foldAccount(
     accountNameAt: accountName.at,
     defaultStampAt: defaultBatch.at,
     settingsAt: settings.at,
+    deleted: deleted.value,
+    deletedAt: deleted.at,
     createdAt: Number.isFinite(createdAt) ? createdAt : Date.now(),
     publicKey,
     // No per-field clock needed: partitionCount is a fixed constant

@@ -12,6 +12,7 @@
   import AccountList from '$lib/components/account-list.svelte'
   import AccountStartChoice from '$lib/components/account-start-choice.svelte'
   import AccountSwitcher from '$lib/components/account-switcher.svelte'
+  import DeleteAccountDialog from '$lib/components/delete-account-dialog.svelte'
   import HomeAccount from '$lib/components/home-account.svelte'
   import HomeApps from '$lib/components/home-apps.svelte'
   import HomeDrives from '$lib/components/home-drives.svelte'
@@ -65,6 +66,8 @@
    * with the reason the row showed — recomputing it here could come back
    * empty and leave the dialog with nothing to say. */
   let checkingDrive = $state<{ account: Account; attention: DriveAttention } | undefined>(undefined)
+  /** Account being deleted. Held here, not by its tab, so the outcome outlives the account. */
+  let deleting = $state<Account | undefined>(undefined)
 
   const accounts = $derived(accountsStore.accounts)
   // The active session's account, if any: with one the page IS the app
@@ -157,7 +160,7 @@
           {:else if tab === 'storage'}
             <HomeDrives {account} {target} />
           {:else}
-            <HomeAccount {account} {target} />
+            <HomeAccount {account} {target} ondelete={() => (deleting = account)} />
           {/if}
         {/key}
       </div>
@@ -231,4 +234,8 @@
     }}
     onclose={() => (checkingDrive = undefined)}
   />
+{/if}
+
+{#if deleting}
+  <DeleteAccountDialog account={deleting} onClose={() => (deleting = undefined)} />
 {/if}

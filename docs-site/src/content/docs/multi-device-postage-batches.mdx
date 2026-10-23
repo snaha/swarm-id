@@ -517,6 +517,7 @@ device's full current view (`DeviceStateSnapshotSchemaV1`):
   accountName: { value, at },                             // scalars carry their own clock
   defaultPostageStampBatchID: { value, at },
   settings: { value, at },
+  deleted: { value, at },                                 // the account was deleted
   accountPublicKey, accountCreatedAt, partitionCount }    // immutables, so a fold needs no shared doc
 ```
 
@@ -541,9 +542,10 @@ Last writer wins by that clock; tombstones are kept, and a later activity with a
 brings an entry back (a removed device signing in again, for example). Fields that are plain
 edits rather than statements of membership — a device's name, a stamp's name, an app's drive
 pointer — each ride their own clock and are laid over the winner, so a rename made on a
-stale copy cannot outrank a revoke made elsewhere. The three scalars converge per field on
+stale copy cannot outrank a revoke made elsewhere. The four scalars converge per field on
 their `at` clocks, so concurrent changes to different scalars on different devices both
-survive.
+survive. A winning `deleted: true` makes every other device forget the account; a restore
+writes `deleted: false` on a fresh clock and brings it back.
 
 ### Restore, refresh, and the bus
 
