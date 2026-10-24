@@ -29,6 +29,8 @@
   import type { Account } from '$lib/types'
 
   let missingRequest = $state(false)
+  /** Rendered inside another site: approving is a click, so refuse (clickjacking, #896). */
+  let framed = $state(false)
   /** Account being unlocked to approve the connection. */
   let unlocking = $state<Account | undefined>(undefined)
   /** Signed-out account being unlocked to see the drive needing attention,
@@ -65,6 +67,8 @@
   const otherAccounts = $derived(accounts.filter((account) => !previouslyUsed.includes(account)))
 
   onMount(() => {
+    framed = window.top !== window
+    if (framed) return
     missingRequest = !connectStore.initFromHash(window.location.hash)
   })
 
@@ -139,7 +143,11 @@
   <AppHeader />
 
   <main class="flex w-full flex-1 flex-col items-center justify-center px-8 pb-24">
-    {#if missingRequest}
+    {#if framed}
+      <p class="text-muted-foreground text-center text-sm">
+        This page cannot be shown inside another site.
+      </p>
+    {:else if missingRequest}
       <div class="flex w-full max-w-96 flex-col items-center gap-8">
         <div class="flex flex-col items-center gap-2">
           <CircleAlert class="text-destructive size-5" />
