@@ -157,7 +157,12 @@
     }
   }
 
+  /** Rendered inside another site: "Go to app" commits the grant, so refuse (clickjacking, #896). */
+  let framed = $state(false)
+
   onMount(() => {
+    framed = window.top !== window
+    if (framed) return
     if (!account || !request || !pending) {
       goto(resolve(routes.ROOT))
       return
@@ -205,7 +210,11 @@
   }
 </script>
 
-{#if account && request}
+{#if framed}
+  <p class="text-muted-foreground p-8 text-center text-sm">
+    This page cannot be shown inside another site.
+  </p>
+{:else if account && request}
   <div class="flex min-h-svh flex-col">
     <AppHeader />
     <main class="flex w-full flex-1 flex-col items-center justify-center px-8 pb-24">
