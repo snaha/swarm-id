@@ -147,4 +147,8 @@ test('expired drives are alerted on every tab until dismissed', async ({ page })
   // The drive list shows the badge instead of a size.
   await page.getByRole('tab', { name: 'Storage' }).click()
   await expect(page.getByText('Drive expired')).toHaveCount(2)
+
+  // The connect popup's account chooser flags the account too (Frame 148).
+  await page.goto('/connect#origin=https%3A%2F%2Fapp.example')
+  await expect(page.getByRole('button', { name: 'Drive expired' })).toBeVisible()
 })

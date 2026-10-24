@@ -388,8 +388,8 @@ const SignedOutAccountSchemaV1 = z.object({
   encryptedState: z.string(),
   // Storage-warning remnant, captured at sign-out (the stamps themselves are
   // only in the encrypted snapshot): whether any drive already needed
-  // attention, and the soonest estimated drive expiry (epoch ms) so the
-  // "expires soon" warning can keep developing while signed out.
+  // attention, and the soonest estimated drive expiry (epoch ms, past for an
+  // expired drive) so the chooser's warning can keep developing while signed out.
   storageWarning: z.boolean().optional(),
   soonestDriveExpiry: z.number().optional(),
   signedOutAt: z.number(),
