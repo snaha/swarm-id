@@ -188,7 +188,7 @@
 
             <div class="flex flex-1 items-center justify-end gap-3">
               {#if d.status === 'expired'}
-                <span class="text-muted-foreground text-sm whitespace-nowrap">Drive expired</span>
+                <Badge>Drive expired</Badge>
               {:else if d.status === 'expires-soon'}
                 <Badge variant="destructive">Expires soon</Badge>
               {:else if d.timeLeftLabel}

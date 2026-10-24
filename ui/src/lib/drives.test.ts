@@ -13,6 +13,7 @@ import {
   driveEffectiveBytes,
   driveNeedsAttention,
   drivesNeedingAttention,
+  expiredDriveAlerts,
   formatBytes,
   formatRemaining,
   remainingLifespanSeconds,
@@ -204,6 +205,43 @@ describe('drivesNeedingAttention', () => {
     expect(driveNeedsAttention(makeDrive({ batchTTL: 6 * DAY, utilization: 1 }), measuredAt)).toBe(
       true,
     )
+  })
+})
+
+describe('expiredDriveAlerts', () => {
+  const measuredAt = Date.UTC(2026, 8, 21)
+  const hex = (char: string) => char.repeat(64)
+  const live = makeDrive({ batchID: new BatchId(hex('1')), name: 'Live' })
+  const expired = makeDrive({ batchID: new BatchId(hex('2')), name: 'Drive 5', batchTTL: 0 })
+  const expiredDefault = makeDrive({ batchID: new BatchId(hex('3')), batchTTL: 0 })
+
+  it('alerts each expired drive, the default first and in its own words', () => {
+    const account = {
+      stamps: [live, expired, expiredDefault],
+      defaultPostageStampBatchID: expiredDefault.batchID,
+    }
+    expect(expiredDriveAlerts(account, new Set(), measuredAt)).toEqual([
+      {
+        batchHex: hex('3'),
+        message:
+          'Your default drive has expired. Account data may have been lost and your account is no longer synced across devices.',
+      },
+      {
+        batchHex: hex('2'),
+        message:
+          'Drive 5 has expired. Data from associated apps may have been lost and some apps may not work properly.',
+      },
+    ])
+  })
+
+  it('leaves out a dismissed drive', () => {
+    const account = { stamps: [expired, expiredDefault] }
+    const alerts = expiredDriveAlerts(account, new Set([hex('2')]), measuredAt)
+    expect(alerts.map((alert) => alert.batchHex)).toEqual([hex('3')])
+  })
+
+  it('is empty without an expired drive', () => {
+    expect(expiredDriveAlerts({ stamps: [live] }, new Set(), measuredAt)).toEqual([])
   })
 })
 

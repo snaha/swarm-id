@@ -233,6 +233,36 @@ export function drivesNeedingAttention(
   return account.stamps.filter((drive) => driveNeedsAttention(drive, now)).length
 }
 
+/** An expired drive's alert on the home page (Frame 157). */
+export interface ExpiredDriveAlert {
+  batchHex: string
+  message: string
+}
+
+/**
+ * One alert per expired drive the user has not dismissed, the default drive's
+ * first and in its own words: its loss stops the account's own sync (#363).
+ */
+export function expiredDriveAlerts(
+  account: { stamps: PostageStamp[]; defaultPostageStampBatchID?: { toHex(): string } },
+  dismissed: ReadonlySet<string>,
+  now = Date.now(),
+): ExpiredDriveAlert[] {
+  const defaultHex = account.defaultPostageStampBatchID?.toHex()
+  return account.stamps
+    .filter((drive) => describeDrive(drive, now).status === 'expired')
+    .map((drive) => ({ drive, batchHex: drive.batchID.toHex() }))
+    .filter(({ batchHex }) => !dismissed.has(batchHex))
+    .sort((a, b) => Number(b.batchHex === defaultHex) - Number(a.batchHex === defaultHex))
+    .map(({ drive, batchHex }) => ({
+      batchHex,
+      message:
+        batchHex === defaultHex
+          ? 'Your default drive has expired. Account data may have been lost and your account is no longer synced across devices.'
+          : `${driveDisplayName(drive)} has expired. Data from associated apps may have been lost and some apps may not work properly.`,
+    }))
+}
+
 /**
  * The soonest estimated expiry (epoch ms) among live, not-yet-expired drives
  * with a known TTL; `undefined` when none qualifies. Captured at sign-out so
