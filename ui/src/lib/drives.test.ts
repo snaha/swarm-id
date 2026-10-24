@@ -249,14 +249,18 @@ describe('soonestDriveExpiry / accountDriveAttention', () => {
   const measuredAt = Date.UTC(2026, 8, 21)
   const DAY_MS = DAY * 1000
 
-  it('picks the soonest expiry among live drives, skipping expired and unknown TTLs', () => {
+  it('picks the soonest expiry, skipping unknown TTLs', () => {
     const stamps = [
       makeDrive({ batchTTL: 90 * DAY }),
-      makeDrive({ batchTTL: 10 * DAY }), // soonest that still lives
-      makeDrive({ batchTTL: 0 }), // expired — skipped
+      makeDrive({ batchTTL: 10 * DAY }), // soonest
       makeDrive({ batchTTL: undefined }), // unknown — skipped
     ]
     expect(soonestDriveExpiry(stamps, measuredAt)).toBe(measuredAt + 10 * DAY_MS)
+  })
+
+  it('keeps an expired drive, as a past expiry, so a sign-out remembers it', () => {
+    const stamps = [makeDrive({ batchTTL: 10 * DAY }), makeDrive({ batchTTL: 0 })]
+    expect(soonestDriveExpiry(stamps, measuredAt)).toBeLessThanOrEqual(measuredAt)
   })
 
   it('is undefined without any qualifying drive', () => {
@@ -286,19 +290,35 @@ describe('soonestDriveExpiry / accountDriveAttention', () => {
     })
   })
 
-  it('stops warning once the captured expiry is past, as the signed-in path does', () => {
+  it('turns the signed-out warning to expired once the captured expiry is past', () => {
     const expiry = measuredAt + 30 * DAY_MS
     const account = { stamps: [], isSignedOut: true, soonestDriveExpiry: expiry }
-    expect(accountDriveAttention(account, expiry + DAY_MS)).toBeUndefined()
-    // A captured full flag still stands on its own once the expiry has run out.
+    expect(accountDriveAttention(account, expiry + DAY_MS)).toEqual({
+      reason: 'may-have-expired',
+      expiry,
+    })
+    // Expired outranks a captured full flag.
     expect(accountDriveAttention({ ...account, storageWarning: true }, expiry + DAY_MS)).toEqual({
-      reason: 'full',
+      reason: 'may-have-expired',
+      expiry,
     })
   })
 
   it('uses the live drive state for signed-in accounts', () => {
     const account = { stamps: [makeDrive({ utilization: 1 })], isSignedOut: false }
     expect(accountDriveAttention(account, measuredAt)).toEqual({ reason: 'full' })
+  })
+
+  it('reports an expired drive first, over an expiring or full one', () => {
+    const account = {
+      stamps: [
+        makeDrive({ utilization: 1 }),
+        makeDrive({ batchTTL: 3 * DAY }),
+        makeDrive({ batchTTL: 0 }),
+      ],
+      isSignedOut: false,
+    }
+    expect(accountDriveAttention(account, measuredAt)).toEqual({ reason: 'expired' })
   })
 
   it('reports the soonest EXPIRING drive, not a full one that outlives it', () => {
@@ -323,6 +343,8 @@ describe('soonestDriveExpiry / accountDriveAttention', () => {
     expect(driveAttentionLabel(expiring)).toBe('Drive expiring')
     expect(driveAttentionLabel({ ...expiring, reason: 'may-expire' })).toBe('Drive expiring')
     expect(driveAttentionLabel({ reason: 'full' })).toBe('Drive full')
+    expect(driveAttentionLabel({ reason: 'expired' })).toBe('Drive expired')
+    expect(driveAttentionLabel({ ...expiring, reason: 'may-have-expired' })).toBe('Drive expired')
     expect(driveAttentionDescription(expiring, 'home')).toBe(
       'A drive expires on 2026-10-02. Sign in to extend its lifespan.',
     )
@@ -332,6 +354,12 @@ describe('soonestDriveExpiry / accountDriveAttention', () => {
     )
     expect(driveAttentionDescription({ reason: 'full' }, 'home')).toBe(
       'A drive is full. Sign in to increase its size.',
+    )
+    expect(driveAttentionDescription({ reason: 'expired' }, 'home')).toBe(
+      'A drive has expired. Sign in to check it.',
+    )
+    expect(driveAttentionDescription({ ...expiring, reason: 'may-have-expired' }, 'home')).toBe(
+      'A drive may have expired around 2026-10-02. Sign in to check it.',
     )
     // Only the connect popup promises that the connection is not held up.
     expect(driveAttentionDescription({ reason: 'full' }, 'connect')).toBe(

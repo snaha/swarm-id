@@ -6,7 +6,7 @@
 <!--
   Bordered account rows for the chooser screens (connect popup, home chooser):
   avatar, name, truncated address, and a right-side slot. The slot shows the
-  drive-attention action when the account has a drive expiring or full (and
+  drive-attention action when the account has a drive expired, expiring or full (and
   `oncheckdrive` is wired) — taking PRIORITY over any `badge` text, so
   "Signed out" and the drive warning never show together. The label names the
   drive and its state: inside the connect popup, next to rows reading "Signed
