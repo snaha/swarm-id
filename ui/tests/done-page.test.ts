@@ -4,6 +4,7 @@ import { type Page, expect, test } from '@playwright/test'
 
 import {
   CHAIN_TEST_TIMEOUT_MS,
+  CONNECTED_TIMEOUT_MS,
   DRIVE_FUNDING,
   DRIVE_SETTLE_TIMEOUT_MS,
   PASSWORD,
@@ -25,6 +26,18 @@ test.skip(!chainUp, 'requires a local chain (pnpm dev:local)')
 
 const DEMO_URL = 'http://localhost:3500'
 const APP_NAME = 'Swarm ID Demo'
+
+/** The drives the demo's app entry holds, read from the identity UI's store. */
+function grantOf(page: Page) {
+  return page.evaluate((appUrl) => {
+    const doc = JSON.parse(localStorage.getItem('swarm-id-accounts') ?? '{}') as {
+      data?: { connectedApps?: { appUrl: string; drives?: string[] | 'all' }[] }[]
+    }
+    return doc.data
+      ?.flatMap((account) => account.connectedApps ?? [])
+      .find((app) => app.appUrl === appUrl)?.drives
+  }, DEMO_URL)
+}
 
 /** Asserts the shared done view's drive pitch (the no-drive branch). */
 async function expectDrivePitch(page: Page) {
@@ -98,7 +111,7 @@ test('connect flow shows the done screen variants and closes the popup', async (
 
   // The demo picked up the session — the sidebar shows the account.
   const accountButton = page.getByRole('button', { name: /0x|[0-9a-f]{6}\.\.\./ }).first()
-  await expect(accountButton).toBeVisible({ timeout: 10000 })
+  await expect(accountButton).toBeVisible({ timeout: CONNECTED_TIMEOUT_MS })
 
   // Give the account a drive. Funded out of band first, so the purchase finds
   // the owner address already stocked and no payment screen opens.
@@ -170,14 +183,7 @@ test('connect flow shows the done screen variants and closes the popup', async (
 
   await seedLocalChain(page)
   await page.goto('/')
-  const appDrive = await page.evaluate(() => {
-    const doc = JSON.parse(localStorage.getItem('swarm-id-accounts') ?? '{}') as {
-      data?: { connectedApps?: { appUrl: string; drives?: string[] | 'all' }[] }[]
-    }
-    return doc.data
-      ?.flatMap((account) => account.connectedApps ?? [])
-      .find((app) => app.appUrl === 'http://localhost:3500')?.drives
-  })
+  const appDrive = await grantOf(page)
   // Granted exactly the drive the user picked.
   expect(appDrive).toEqual([expect.stringMatching(/^[0-9a-f]{64}$/)])
 
@@ -235,16 +241,6 @@ test('a drive request renders a row per drive and grants what was picked', async
     timeout: DRIVE_SETTLE_TIMEOUT_MS,
   })
 
-  const grantOf = () =>
-    page.evaluate(() => {
-      const doc = JSON.parse(localStorage.getItem('swarm-id-accounts') ?? '{}') as {
-        data?: { connectedApps?: { appUrl: string; drives?: string[] | 'all' }[] }[]
-      }
-      return doc.data
-        ?.flatMap((account) => account.connectedApps ?? [])
-        .find((app) => app.appUrl === 'http://localhost:3500')?.drives
-    })
-
   // The demo asks for a drive and an optional scratch drive.
   await page.goto(DEMO_URL)
   await page.evaluate(() =>
@@ -264,9 +260,9 @@ test('a drive request renders a row per drive and grants what was picked', async
   await expect(popup.getByRole('button', { name: 'Go to app' })).toBeEnabled()
   await goToApp(popup)
   const accountButton = page.getByRole('button', { name: /0x|[0-9a-f]{6}\.\.\./ }).first()
-  await expect(accountButton).toBeVisible({ timeout: 10000 })
+  await expect(accountButton).toBeVisible({ timeout: CONNECTED_TIMEOUT_MS })
   await page.goto('/')
-  expect(await grantOf()).toEqual([expect.stringMatching(/^[0-9a-f]{64}$/)])
+  expect(await grantOf(page)).toEqual([expect.stringMatching(/^[0-9a-f]{64}$/)])
 
   // "All drives" is one checkbox, and the only way on is through it.
   await page.goto(DEMO_URL)
@@ -282,9 +278,9 @@ test('a drive request renders a row per drive and grants what was picked', async
   await expect(popup.getByRole('button', { name: 'Go to app' })).toBeDisabled()
   await popup.getByRole('checkbox').check()
   await goToApp(popup)
-  await expect(accountButton).toBeVisible({ timeout: 10000 })
+  await expect(accountButton).toBeVisible({ timeout: CONNECTED_TIMEOUT_MS })
   await page.goto('/')
-  expect(await grantOf()).toBe('all')
+  expect(await grantOf(page)).toBe('all')
 })
 
 // #879: a required row waits on a drive, and the drive is created in another
@@ -329,17 +325,10 @@ test('a drive created in another tab fills the row waiting for it', async ({ pag
   await expect(popup.getByRole('button', { name: 'Go to app' })).toBeEnabled()
   await goToApp(popup)
   await expect(page.getByRole('button', { name: /0x|[0-9a-f]{6}\.\.\./ }).first()).toBeVisible({
-    timeout: 10000,
+    timeout: CONNECTED_TIMEOUT_MS,
   })
   await storageTab.reload()
-  const grant = await storageTab.evaluate(() => {
-    const doc = JSON.parse(localStorage.getItem('swarm-id-accounts') ?? '{}') as {
-      data?: { connectedApps?: { appUrl: string; drives?: string[] | 'all' }[] }[]
-    }
-    return doc.data
-      ?.flatMap((account) => account.connectedApps ?? [])
-      .find((app) => app.appUrl === 'http://localhost:3500')?.drives
-  })
+  const grant = await grantOf(storageTab)
   expect(grant).toEqual([
     expect.stringMatching(/^[0-9a-f]{64}$/),
     expect.stringMatching(/^[0-9a-f]{64}$/),
@@ -370,16 +359,6 @@ test('an app asks for a scratch drive later, and the Apps tab edits what it hold
     timeout: DRIVE_SETTLE_TIMEOUT_MS,
   })
 
-  const grantOf = () =>
-    page.evaluate(() => {
-      const doc = JSON.parse(localStorage.getItem('swarm-id-accounts') ?? '{}') as {
-        data?: { connectedApps?: { appUrl: string; drives?: string[] | 'all' }[] }[]
-      }
-      return doc.data
-        ?.flatMap((account) => account.connectedApps ?? [])
-        .find((app) => app.appUrl === 'http://localhost:3500')?.drives
-    })
-
   // Connect with no request: the app tracks the account default.
   await page.goto(DEMO_URL)
   let popup = await openConnectPopup(page)
@@ -388,7 +367,7 @@ test('an app asks for a scratch drive later, and the Apps tab edits what it hold
   await popup.getByRole('button', { name: 'Confirm' }).click()
   await goToApp(popup)
   const accountButton = page.getByRole('button', { name: /0x|[0-9a-f]{6}\.\.\./ }).first()
-  await expect(accountButton).toBeVisible({ timeout: 10000 })
+  await expect(accountButton).toBeVisible({ timeout: CONNECTED_TIMEOUT_MS })
 
   // The app asks for a scratch drive. The page shows only that, empty, and
   // saving with nothing chosen grants nothing — no unlock on the way.
@@ -408,7 +387,7 @@ test('an app asks for a scratch drive later, and the Apps tab edits what it hold
   }
   await save(await request())
   await page.goto('/')
-  expect(await grantOf()).toBeUndefined()
+  expect(await grantOf(page)).toBeUndefined()
 
   // Asked again, the user picks the scratch drive: it is added to the grant,
   // behind the default the app was tracking, which becomes explicit.
@@ -418,7 +397,7 @@ test('an app asks for a scratch drive later, and the Apps tab edits what it hold
   await expect(popup.getByRole('combobox')).toHaveValue(/^[0-9a-f]{64}$/)
   await save(popup)
   await page.goto('/')
-  const granted = await grantOf()
+  const granted = await grantOf(page)
   expect(granted).toEqual([
     expect.stringMatching(/^[0-9a-f]{64}$/),
     expect.stringMatching(/^[0-9a-f]{64}$/),
@@ -434,5 +413,5 @@ test('an app asks for a scratch drive later, and the Apps tab edits what it hold
   await expect(page.getByText('Scratch drive', { exact: true })).toBeVisible()
   await page.getByRole('combobox').nth(1).selectOption('')
   await expect(page.getByText('Permissions saved')).toBeVisible()
-  expect(await grantOf()).toEqual([(granted as string[])[0]])
+  expect(await grantOf(page)).toEqual([(granted as string[])[0]])
 })
