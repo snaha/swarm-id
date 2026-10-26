@@ -226,8 +226,9 @@ test.describe('two devices on two drives', () => {
       await swarmId.goto(`${ID_ORIGIN}/`)
       await swarmId.getByRole('tab', { name: 'Apps' }).click()
       await swarmId.getByRole('button', { name: 'Swarm ID Demo' }).click()
-      // The app's page grants on the spot: unticking saves it.
-      await swarmId.getByRole('checkbox', { name: /full drive access/ }).uncheck()
+      // The app's page grants on the spot: unticking saves it, and swaps the
+      // box for the drive rows, so `uncheck()` would wait on a box that is gone.
+      await swarmId.getByRole('checkbox', { name: /full drive access/ }).click()
       await expect(swarmId.getByText('Permissions saved')).toBeVisible()
     } finally {
       await swarmId.close()
