@@ -273,6 +273,7 @@ import { serializeAccountStateSnapshot } from "./utils/account-state-snapshot"
 import {
   IframeToParentMessageSchema,
   STORAGE_CHALLENGE_KEY,
+  IDENTITY_SITE_STORAGE_KEY,
   STORAGE_KEY_ACCOUNTS,
   STORAGE_KEY_NETWORK_SETTINGS,
   leaseCacheStorageKey,
@@ -620,6 +621,33 @@ describe("SwarmIdProxy partitioned write enablement", () => {
       { type: "switchIdentitySite", site: "https://other.example/id" },
     ])
     expect(localStorageFake.getItem(STORAGE_CHALLENGE_KEY)).toBeNull()
+  })
+
+  // The choice made on this site's popup is this site's to report (#849):
+  // in `proxyReady`, and gone again on the app's say-so.
+  it("reports the remembered identity site on proxyReady and clears it on request", async () => {
+    localStorageFake.setItem(
+      IDENTITY_SITE_STORAGE_KEY,
+      "https://other.example/id",
+    )
+    await dispatch(
+      { type: "parentIdentify", requestId: "r1", metadata: { name: "dApp" } },
+      PARENT_ORIGIN,
+      parentWindow,
+    )
+    expect(messagesOfType("proxyReady")[0]).toMatchObject({
+      identitySite: "https://other.example/id",
+    })
+
+    await dispatch(
+      { type: "clearIdentitySite", requestId: "r2" },
+      PARENT_ORIGIN,
+      parentWindow,
+    )
+    expect(localStorageFake.getItem(IDENTITY_SITE_STORAGE_KEY)).toBeNull()
+    expect(messagesOfType("clearIdentitySiteResponse")).toEqual([
+      { type: "clearIdentitySiteResponse", requestId: "r2" },
+    ])
   })
 
   it("does not evict another batch's lease-cache entry", async () => {

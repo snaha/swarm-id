@@ -16,6 +16,7 @@
 import {
   type ConnectedApp,
   GRANT_CLOCKS,
+  IDENTITY_SITE_STORAGE_KEY,
   type SyncedAccount,
   appSessionDuration,
   deriveSecret,
@@ -135,9 +136,16 @@ function sendSecretToOpener(account: Account, request: ConnectRequest, appSecret
  * (#849), then close: the app's client re-embeds its proxy from there and the
  * user connects on that site. The opener is the proxy iframe (our origin) when
  * it opened us, which is exactly when the URL carried a challenge; else it is
- * the app page.
+ * the app page. Also remembered here, in this site's first-party store: the
+ * next app's proxy reads it when the store is shared, and the next connect
+ * popup offers it when not, so the site is typed once per device.
  */
 export function chooseIdentitySite(request: ConnectRequest, site: string): void {
+  try {
+    localStorage.setItem(IDENTITY_SITE_STORAGE_KEY, site)
+  } catch {
+    // Storage unavailable: the choice holds for this app only.
+  }
   const message = {
     type: 'identitySiteChosen',
     appOrigin: request.appOrigin,

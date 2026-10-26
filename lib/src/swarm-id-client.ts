@@ -90,6 +90,7 @@ import type {
 import {
   IframeToParentMessageSchema,
   IdentitySiteChosenMessageSchema,
+  IDENTITY_SITE_STORAGE_KEY,
   ParentToIframeMessageSchema,
   AppMetadataSchema,
   PermissionsSchema,
@@ -103,12 +104,6 @@ import { buildAuthUrl, isHttpUrl, normalizeUrl } from "./utils/url"
 import { TimeoutError, withTimeout } from "./utils/promise"
 
 const DEFAULT_TIMEOUT_MS = 30000
-/**
- * Where the app origin's storage remembers the identity site the user chose
- * on the connect screen (#849), as a base URL; absent means the app's own
- * `iframeOrigin`.
- */
-const IDENTITY_SITE_STORAGE_KEY = "swarm-id-identity-site"
 const DEFAULT_IFRAME_PATH = "/proxy"
 
 function rememberedIdentitySite(): string | undefined {
@@ -187,6 +182,12 @@ export class SwarmIdClient {
   private readonly defaultIframePath: string
   /** The connect popup `openAuthWindow` opened, while one is open: the only window besides the iframe this client listens to. */
   private authPopup: Window | null = null
+  /** What the proxy's own store prefers, as reported on `proxyReady` (#849). */
+  private preferredSite: string | undefined
+  /** Set across the re-initialize of an explicit reset, so the default site's remembered preference is not followed straight back. */
+  private ignorePreferredSite = false
+  /** At most one hop per client: two sites preferring each other must not re-embed forever. */
+  private preferenceFollowed = false
   private timeout: number
   private initializationTimeout: number
   private onConnectionChange?: (info: ConnectionInfo) => void
@@ -473,6 +474,22 @@ export class SwarmIdClient {
     // Wait for iframe to be ready
     await this.readyPromise
 
+    // The device prefers another site (#849): go there now, so the user's
+    // first click already opens that site's popup. Only the proxy's own store
+    // can say so, which is why this waits for `proxyReady`.
+    const preferred = this.preferredSite
+    this.preferredSite = undefined
+    if (
+      preferred !== undefined &&
+      normalizeUrl(preferred) !== this.iframeOrigin &&
+      !this.ignorePreferredSite &&
+      !this.preferenceFollowed
+    ) {
+      this.preferenceFollowed = true
+      await this.useIdentitySite(preferred)
+      return
+    }
+
     // Wait for the initial ConnectionInfo snapshot (sent right after proxyReady)
     // so `client.connectionInfo` is populated by the time `initialize()` resolves.
     await this.firstConnectionInfoPromise
@@ -562,6 +579,7 @@ export class SwarmIdClient {
         // Which transport `connect()` can use, known before the first click
         // (#613). Undefined against a proxy older than that field.
         this.storageShared = message.storageShared
+        this.preferredSite = message.identitySite
         if (this.readyResolve) {
           this.readyResolve()
         }
@@ -1326,7 +1344,23 @@ export class SwarmIdClient {
     this.applyIdentitySite(base)
     this.teardown()
     this.setupMessageListener()
-    await this.initialize()
+    // A reset must not be undone by the default site remembering the choice:
+    // the preference is skipped for this one initialize, then cleared where
+    // the default's proxy can reach it (its first-party store when shared;
+    // a partitioned store holds nothing to clear, and the popup offers the
+    // remembered site with a way to decline it).
+    this.ignorePreferredSite = base === undefined
+    try {
+      await this.initialize()
+    } finally {
+      this.ignorePreferredSite = false
+    }
+    if (base === undefined) {
+      await this.sendRequest({
+        type: "clearIdentitySite",
+        requestId: this.generateRequestId(),
+      })
+    }
   }
 
   /**

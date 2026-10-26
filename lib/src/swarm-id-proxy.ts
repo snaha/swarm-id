@@ -63,6 +63,7 @@ import {
   ParentIdentifyMessageSchema,
   PopupToIframeMessageSchema,
   STORAGE_CHALLENGE_KEY,
+  IDENTITY_SITE_STORAGE_KEY,
   STORAGE_KEY_NETWORK_SETTINGS,
   partitionSessionStorageKey,
   PartitionSessionSchemaV1,
@@ -2351,6 +2352,7 @@ export class SwarmIdProxy {
       // client needs it before its first `connect()` — an await between the
       // user's click and `window.open` is what loses the gesture.
       storageShared: isStorageShared(),
+      identitySite: this.preferredIdentitySite(),
     })
 
     // Send the initial ConnectionInfo snapshot. The client awaits this before
@@ -2512,6 +2514,18 @@ export class SwarmIdProxy {
 
       case "connect":
         this.handleConnect(message, event)
+        break
+
+      case "clearIdentitySite":
+        try {
+          localStorage.removeItem(IDENTITY_SITE_STORAGE_KEY)
+        } catch {
+          // Storage unavailable: nothing was remembered here either.
+        }
+        this.postMessage(event, {
+          type: "clearIdentitySiteResponse",
+          requestId: message.requestId,
+        })
         break
 
       case "requestPermissions":
@@ -3872,6 +3886,19 @@ export class SwarmIdProxy {
       requestId: message.requestId,
       opened: popup !== null,
     })
+  }
+
+  /**
+   * The identity site the user chose on this site's connect popup (#849), when
+   * this iframe can see the first-party store it was written to. A partitioned
+   * store never holds it, so the answer is simply absent there.
+   */
+  private preferredIdentitySite(): string | undefined {
+    try {
+      return localStorage.getItem(IDENTITY_SITE_STORAGE_KEY) ?? undefined
+    } catch {
+      return undefined
+    }
   }
 
   private handleConnect(

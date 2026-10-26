@@ -8,7 +8,7 @@
 
   import ChevronLeft from '@lucide/svelte/icons/chevron-left'
   import CircleAlert from '@lucide/svelte/icons/circle-alert'
-  import { isHttpUrl } from '@snaha/swarm-id/internal'
+  import { IDENTITY_SITE_STORAGE_KEY, isHttpUrl } from '@snaha/swarm-id/internal'
 
   import { goto } from '$app/navigation'
   import { resolve } from '$app/paths'
@@ -43,6 +43,8 @@
   let choosingSite = $state(false)
   let siteUrl = $state('')
   const siteUrlValid = $derived(isHttpUrl(siteUrl.trim()))
+  /** The site chosen on an earlier connect on this device, offered instead of the form. */
+  let rememberedSite = $state<string | undefined>(undefined)
 
   const request = $derived(connectStore.request)
   const appIcon = $derived(
@@ -72,6 +74,12 @@
 
   onMount(() => {
     missingRequest = !connectStore.initFromHash(window.location.hash)
+    try {
+      const stored = localStorage.getItem(IDENTITY_SITE_STORAGE_KEY)
+      rememberedSite = stored !== null && isHttpUrl(stored) ? stored : undefined
+    } catch {
+      rememberedSite = undefined
+    }
   })
 
   async function select(account: Account) {
@@ -129,6 +137,16 @@
     }
   }
 
+  /** Decline the remembered site, here and for the next app. */
+  function forgetSite() {
+    try {
+      localStorage.removeItem(IDENTITY_SITE_STORAGE_KEY)
+    } catch {
+      // Storage unavailable: there was nothing remembered to forget.
+    }
+    rememberedSite = undefined
+  }
+
   /**
    * Drive warning on a row: open that account's Storage tab in a NEW
    * window — navigating this popup away would lose the connect request
@@ -182,6 +200,31 @@
             <p class="text-sm">{request.appOrigin}</p>
           </div>
         </div>
+
+        <!-- A site chosen on this device before (#849): one click to send
+             the app there, or decline and sign in here. -->
+        {#if rememberedSite !== undefined}
+          <div class="flex w-full flex-col gap-2 rounded-lg border p-4">
+            <p class="text-sm font-bold">Your account is on another site</p>
+            <p class="font-mono text-xs break-all">{rememberedSite}</p>
+            <p class="text-xs">
+              This window closes and {request.appName} switches to that site. Then press Connect in
+              {request.appName} again: it opens your site, where you sign in.
+            </p>
+            <div class="flex gap-2">
+              <Button
+                size="sm"
+                class="flex-1"
+                onclick={() => request && chooseIdentitySite(request, rememberedSite ?? '')}
+              >
+                Switch to that site
+              </Button>
+              <Button size="sm" variant="outline" class="flex-1" onclick={forgetSite}>
+                Stay here
+              </Button>
+            </div>
+          </div>
+        {/if}
 
         {#if accounts.length > 0 && !addingAccount}
           <div class="flex w-full flex-col gap-4">

@@ -1913,6 +1913,59 @@ describe("SwarmIdClient initialize() sequencing", () => {
 
     client.destroy()
   })
+
+  // The device prefers another site, and the proxy's store can say so (#849):
+  // the client goes there before `initialize()` resolves, so the user's first
+  // click already opens that site's popup.
+  it("follows the identity site proxyReady names, once", async () => {
+    const storage = { setItem: vi.fn(), removeItem: vi.fn(), getItem: vi.fn() }
+    vi.stubGlobal("localStorage", storage)
+    const createElement = vi.mocked(document.createElement)
+    const initializing = client.initialize()
+    initializing.catch(() => {})
+    await flush()
+    env.iframeElement.onload?.()
+    await flush()
+    env.dispatch({ data: { type: "proxyInitialized" } })
+    await flush()
+    env.dispatch({
+      data: {
+        type: "proxyReady",
+        authenticated: false,
+        parentOrigin: "https://localhost",
+        identitySite: "https://other.example/id",
+      },
+    })
+    await flush()
+
+    expect(client.identitySite).toBe("https://other.example/id")
+    expect(storage.setItem).toHaveBeenCalledWith(
+      "swarm-id-identity-site",
+      "https://other.example/id",
+    )
+    expect(createElement).toHaveBeenCalledTimes(2)
+    expect(env.iframeElement.src).toBe("https://other.example/id/proxy")
+
+    // The second site preferring the first back must not bounce forever.
+    env.iframeElement.onload?.()
+    await flush()
+    env.dispatch({ data: { type: "proxyInitialized" } })
+    await flush()
+    env.dispatch({
+      origin: "https://other.example",
+      data: {
+        type: "proxyReady",
+        authenticated: false,
+        parentOrigin: "https://localhost",
+        identitySite: IFRAME_ORIGIN,
+      },
+    })
+    await flush()
+    expect(createElement).toHaveBeenCalledTimes(2)
+    expect(client.identitySite).toBe("https://other.example/id")
+
+    client.destroy()
+  })
 })
 
 // A server render (Next.js App Router, SvelteKit with SSR) reaches the

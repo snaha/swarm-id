@@ -50,6 +50,15 @@ export type {
 export const STORAGE_KEY_ACCOUNTS = "swarm-id-accounts"
 export const STORAGE_KEY_NETWORK_SETTINGS = "swarm-id-network-settings"
 export const STORAGE_CHALLENGE_KEY = "swarm-storage-challenge"
+/**
+ * Where the identity site the user chose is remembered, as a base URL (#849).
+ * Under the same name in two stores: the app origin's, written by the client,
+ * so the app embeds that site from then on; and the default identity site's
+ * first-party store, written by its connect popup, so every app on the device
+ * learns it — directly through the proxy iframe where the store is shared,
+ * or from the popup's "your account is on…" offer where it is partitioned.
+ */
+export const IDENTITY_SITE_STORAGE_KEY = "swarm-id-identity-site"
 export const STORAGE_KEY_LEASE_CACHE_PREFIX = "swarm-id-lease-v2"
 
 /**
@@ -1401,6 +1410,12 @@ export const RequestPermissionsMessageSchema = z.object({
   requestOptions: RequestOptionsSchema,
 })
 
+/** Forget the device-wide identity-site choice held by this proxy's store (#849). */
+export const ClearIdentitySiteMessageSchema = z.object({
+  type: z.literal("clearIdentitySite"),
+  requestId: z.string(),
+})
+
 export const ConnectMessageSchema = z.object({
   type: z.literal("connect"),
   requestId: z.string(),
@@ -1409,6 +1424,7 @@ export const ConnectMessageSchema = z.object({
 
 export const ParentToIframeMessageSchema = z.discriminatedUnion("type", [
   ParentIdentifyMessageSchema,
+  ClearIdentitySiteMessageSchema,
   CheckAuthMessageSchema,
   DisconnectMessageSchema,
   UploadDataMessageSchema,
@@ -1534,6 +1550,13 @@ export const ProxyReadyMessageSchema = z.object({
   type: z.literal("proxyReady"),
   authenticated: z.boolean(),
   parentOrigin: z.string(),
+  /**
+   * The identity site this device prefers, as the proxy's store remembers it
+   * (#849): present when the user chose one on a connect popup of this site
+   * and the iframe can see that first-party store. The client switches to it
+   * before `initialize()` resolves.
+   */
+  identitySite: z.string().optional(),
   /**
    * Whether the iframe can read the trusted domain's first-party store, which
    * decides which transport `connect()` can use (#613). Optional so an older
@@ -1735,6 +1758,11 @@ export const ConnectionInfoChangedMessageSchema = z.object({
 export const SwitchIdentitySiteMessageSchema = z.object({
   type: z.literal("switchIdentitySite"),
   site: z.string().url(),
+})
+
+export const ClearIdentitySiteResponseMessageSchema = z.object({
+  type: z.literal("clearIdentitySiteResponse"),
+  requestId: z.string(),
 })
 
 export const ConnectResponseMessageSchema = z.object({
@@ -1998,6 +2026,7 @@ export const IframeToParentMessageSchema = z.discriminatedUnion("type", [
   ConnectionInfoChangedMessageSchema,
   ConnectResponseMessageSchema,
   SwitchIdentitySiteMessageSchema,
+  ClearIdentitySiteResponseMessageSchema,
   IsConnectedResponseMessageSchema,
   GetNodeInfoResponseMessageSchema,
   GsocMineResponseMessageSchema,

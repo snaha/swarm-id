@@ -105,6 +105,7 @@ export {
   type PermissionName,
   type AccountSettings,
   STORAGE_CHALLENGE_KEY,
+  IDENTITY_SITE_STORAGE_KEY,
   STORAGE_KEY_ACCOUNTS,
   STORAGE_KEY_NETWORK_SETTINGS,
   leaseCacheStorageKey,
