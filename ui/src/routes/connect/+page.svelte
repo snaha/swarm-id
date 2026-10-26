@@ -240,10 +240,10 @@
               aria-invalid={siteUrl.length > 0 && !siteUrlValid}
             />
             <p class="text-xs">
-              The app will use that site instead of this one. You will connect there, with a second
-              click.
+              This window closes and {request.appName} switches to that site. Then press Connect in
+              {request.appName} again: it opens your site, where you sign in.
             </p>
-            <Button type="submit" size="sm" disabled={!siteUrlValid}>Continue there</Button>
+            <Button type="submit" size="sm" disabled={!siteUrlValid}>Switch to this site</Button>
           </form>
         {:else}
           <Button variant="link" size="sm" onclick={() => (choosingSite = true)}>
