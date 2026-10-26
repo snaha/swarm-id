@@ -67,8 +67,6 @@
     if (name === 'dataSharing' && !sharing.dataSharing) sharing.writeAccess = false
   }
   let saving = $state(false)
-  /** Rendered inside another site: a grant is one click, so refuse (clickjacking). */
-  let framed = $state(false)
 
   const requested = $derived(page?.permissions?.drives)
   const account = $derived.by(() => {
@@ -94,7 +92,6 @@
 
   /** Why the page cannot grant anything, if it cannot. */
   const refusal = $derived.by(() => {
-    if (framed) return 'This page cannot be shown inside another site.'
     if (!page) return undefined
     if (!account) return 'This account is not on this device.'
     if (account.isSignedOut) return `Sign in to ${account.name} first.`
@@ -103,8 +100,6 @@
   })
 
   onMount(() => {
-    framed = window.top !== window
-    if (framed) return
     page = parsePermissionsHash(window.location.hash)
     if (!page || page.permissions === undefined) {
       goto(resolve(routes.ROOT))
@@ -158,9 +153,7 @@
   }
 </script>
 
-{#if framed}
-  <p class="text-muted-foreground p-8 text-center text-sm">{refusal}</p>
-{:else if page}
+{#if page}
   <div class="flex min-h-svh flex-col">
     <AppHeader />
     <main class="flex w-full flex-1 flex-col items-center justify-center px-4 pb-24 sm:px-8">
