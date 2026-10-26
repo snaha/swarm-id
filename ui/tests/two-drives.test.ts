@@ -225,10 +225,10 @@ test.describe('two devices on two drives', () => {
     try {
       await swarmId.goto(`${ID_ORIGIN}/`)
       await swarmId.getByRole('tab', { name: 'Apps' }).click()
-      await swarmId.getByRole('button', { name: 'App actions' }).click()
-      await swarmId.getByRole('menuitem', { name: 'Permissions' }).click()
-      await swarmId.getByRole('checkbox').uncheck()
-      await swarmId.getByRole('button', { name: 'Save permissions' }).click()
+      await swarmId.getByRole('button', { name: 'Swarm ID Demo' }).click()
+      // The app's page grants on the spot: unticking saves it.
+      await swarmId.getByRole('checkbox', { name: /full drive access/ }).uncheck()
+      await expect(swarmId.getByText('Permissions saved')).toBeVisible()
     } finally {
       await swarmId.close()
     }
