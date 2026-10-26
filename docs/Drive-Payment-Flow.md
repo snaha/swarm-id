@@ -504,7 +504,8 @@ per-chunk balance per step and refuses a result below `minimumInitialBalancePerC
 storage). So deletion **dilutes** each drive as far as it will go, and the drive lapses within a day
 or two instead of running out its lifespan. Dilution does not erase anything — data already stored
 stays retrievable until the batch expires, and nobody can be stopped from having downloaded it — it
-only stops paying for it.
+only stops paying for it. Diluting the default drive also shortens how long the deletion itself
+stays readable to devices that are offline (docs/Account-State.md, "Offline devices").
 
 The plan (`planDeleteDilution`, `ui/src/lib/payment/delete-dilution.ts`) takes k whole steps, the
 largest with `remaining >> k` still at or above the floor, so the balance lands in

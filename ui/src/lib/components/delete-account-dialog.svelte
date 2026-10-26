@@ -234,6 +234,16 @@
         ? 'This will permanently delete your account and all associated drives. Data stored by connected apps may be lost.'
         : 'This will permanently delete your account.'}
     </p>
+    {#if synced}
+      <!-- Peers that are offline now only learn of the deletion from the feed,
+           and the feed lives on the default drive (docs/Account-State.md,
+           "Offline devices"). -->
+      <p class="text-muted-foreground text-sm">
+        Your other devices learn of the deletion through your default drive. One that stays offline
+        until that drive expires will keep the account. Unless you keep the drive's data, that is
+        within about two days.
+      </p>
+    {/if}
 
     <div class="flex w-full flex-col gap-2">
       <label for="delete-account-name" class="text-sm">
