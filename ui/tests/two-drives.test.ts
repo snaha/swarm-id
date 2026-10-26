@@ -28,6 +28,7 @@ import { dirname, join } from 'node:path'
 
 import {
   Device,
+  LANE_PREFIX_LENGTH,
   LEASE_REFRESH_MS,
   type Seed,
   TTL_LAPSE_MS,
@@ -37,11 +38,11 @@ import {
   rigUp,
   sleep,
 } from './devices-rig'
+import { TWO_DRIVES_SEED_FILE } from './global-setup-devices'
 import { ID_ORIGIN } from './helpers'
 
 /** Where a run keeps its account, so a worker restarted after a failure
  *  reuses the drives instead of buying two more. */
-const SEED_FILE = 'two-drives-seed.json'
 /** A grant change reaches the other device over the account bus: one
  *  round trip, with the poll fallback as margin. */
 const GRANT_PROPAGATION_MS = LEASE_REFRESH_MS * 3
@@ -57,7 +58,7 @@ async function expectNoDualHoldOn(
   const taken = [...held.values()].filter((lane): lane is number => lane !== undefined)
   expect(
     new Set(taken).size,
-    `dual hold on ${batchHex.slice(0, 8)}: ${JSON.stringify([...held])}`,
+    `dual hold on ${batchHex.slice(0, LANE_PREFIX_LENGTH)}: ${JSON.stringify([...held])}`,
   ).toBe(taken.length)
   return held
 }
@@ -77,7 +78,7 @@ test.describe('two devices on two drives', () => {
 
   test.beforeAll(async ({ browser }) => {
     test.setTimeout(TTL_LAPSE_MS * 2 + UPLOAD_TIMEOUT_MS * 3)
-    const seedPath = join(test.info().project.outputDir, SEED_FILE)
+    const seedPath = join(test.info().project.outputDir, TWO_DRIVES_SEED_FILE)
     let seed: Seed
     if (existsSync(seedPath)) {
       seed = JSON.parse(readFileSync(seedPath, 'utf8')) as Seed
@@ -122,7 +123,7 @@ test.describe('two devices on two drives', () => {
   async function laneHeld(device: Device, batchHex: string): Promise<number> {
     await expect
       .poll(() => device.lane(batchHex), {
-        message: `${device.label} holds no lane on ${batchHex.slice(0, 8)}`,
+        message: `${device.label} holds no lane on ${batchHex.slice(0, LANE_PREFIX_LENGTH)}`,
         timeout: LEASE_REFRESH_MS,
       })
       .not.toBeUndefined()
@@ -177,7 +178,10 @@ test.describe('two devices on two drives', () => {
     await expectNoDualHoldOn(D2, all())
   })
 
-  test("A's disconnect releases both its lanes and leaves B's", async () => {
+  // Not proven here: that the disconnect RELEASES A's lanes. A reclaims its own
+  // lock either way, so that takes a third device waiting on the slot, as in
+  // three-devices' disconnect scenario.
+  test("A's disconnect leaves B's lanes, and A comes back on its own", async () => {
     for (const device of all()) await device.ensureConnected()
     // Every lane held, freshly.
     await A.upload()
@@ -193,7 +197,7 @@ test.describe('two devices on two drives', () => {
     expect(await B.lane(D2), 'A’s disconnect moved B’s lane on the second drive').toBe(bOnD2)
 
     // Back, and writing to the second drive: a lane of its own there again,
-    // beside B's — the one it released is free to take back.
+    // beside B's.
     await A.connect()
     await A.upload(A.page, D2)
     const back = await laneHeld(A, D2)

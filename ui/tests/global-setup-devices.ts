@@ -40,10 +40,15 @@ export async function stockedSlot(
  * one run's worth is good enough here; the full stocking is only attempted
  * when none does.
  */
+/** Where a suite keeps its run's account (in the project's output dir), so a worker
+ *  restarted after a failure reuses the drives instead of buying more. */
+export const THREE_DEVICES_SEED_FILE = 'three-devices-seed.json'
+export const TWO_DRIVES_SEED_FILE = 'two-drives-seed.json'
+
 export default async function globalSetup(config: FullConfig): Promise<void> {
   // One account per run: the seed survives worker restarts inside a run, not
   // across runs, or the roster grows by three devices every time.
-  for (const seed of ['three-devices-seed.json', 'two-drives-seed.json']) {
+  for (const seed of [THREE_DEVICES_SEED_FILE, TWO_DRIVES_SEED_FILE]) {
     rmSync(join(config.projects[0].outputDir, seed), { force: true })
   }
   if (!(await chainReachable())) return

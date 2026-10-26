@@ -39,7 +39,6 @@ import {
   IDLE_WAIT_MS,
   LEASE_REFRESH_MS,
   PEER_YIELD_MIN_IDLE_MS,
-  SEED_FILE,
   type Seed,
   TTL_LAPSE_MS,
   UNANSWERED_WAIT,
@@ -50,6 +49,7 @@ import {
   skipScenario,
   sleep,
 } from './devices-rig'
+import { THREE_DEVICES_SEED_FILE } from './global-setup-devices'
 
 // Not `serial`: a scenario that fails must not hide the ones after it — the
 // point of the run is a verdict per scenario. Each one re-establishes what it
@@ -70,7 +70,7 @@ test.describe('three devices on two partitions', () => {
     // Playwright replaces the worker after a failed test and runs this hook
     // again; the drive bought the first time is reused rather than bought
     // again, which is what keeps a run with failures from draining the faucet.
-    const seedPath = join(test.info().project.outputDir, SEED_FILE)
+    const seedPath = join(test.info().project.outputDir, THREE_DEVICES_SEED_FILE)
     if (existsSync(seedPath)) {
       const seed = JSON.parse(readFileSync(seedPath, 'utf8')) as Seed
       // The previous worker's contexts are gone but their locks and beacons

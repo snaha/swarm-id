@@ -1452,6 +1452,9 @@ describe("SwarmIdProxy partitioned write enablement", () => {
       const second = coordinatorFor(SECOND_BATCH_ID_HEX)!
       first.currentPartition = 0
       second.currentPartition = 1
+      // Announce this baseline, so the emit below can only come from the
+      // second drive's lane: the primary's partition no longer moves.
+      second.deps.onLeaseChange()
 
       const lanes = async () => {
         const before = messagesOfType("getDrivesResponse").length

@@ -66,9 +66,6 @@ export const PUBLISHED_LINE = 'Published device state'
 export const YIELDED_LINE = 'Released idle partition'
 /** Device-state publishes inside one idle window that say a holder was never idle (#707). */
 export const BUSY_PUBLISHES = 3
-/** Where a run keeps its account (in the project's output dir), so a worker restarted
- *  after a failure reuses the drive instead of buying another. */
-export const SEED_FILE = 'three-devices-seed.json'
 
 export const PARTITION_LINE = /^Partition: /
 /** The sidebar's per-drive lane line: `Lane on <8 hex>…: <n|Inactive>`. */
@@ -140,11 +137,14 @@ export class Device {
     const context = await browser.newContext()
     await seedLocalChain(context)
     if (driveRequest) {
-      await context.addInitScript((preset: string) => {
-        if (location.origin === 'http://localhost:3500') {
-          localStorage.setItem('swarm-id-demo-drive-request', preset)
-        }
-      }, driveRequest)
+      await context.addInitScript(
+        ({ preset, origin }) => {
+          if (location.origin === origin) {
+            localStorage.setItem('swarm-id-demo-drive-request', preset)
+          }
+        },
+        { preset: driveRequest, origin: DEMO_ORIGIN },
+      )
     }
     if (seed) {
       // Once only: the script runs on every page load in the context, and the
