@@ -170,7 +170,8 @@ is gone after the user’s next change to any account. Validate before writing.<
 path of BIP-44, as <a href="../key-derivation/">Key Derivation</a> describes. The optional fields of the
 schema (the per-field clocks, <code dir="auto">settings</code>, <code dir="auto">defaultPostageStampBatchID</code>, <code dir="auto">deleted</code>, <code dir="auto">lastModified</code>)
 are left out of a fresh record; the UI sets them as the user edits. <code dir="auto">deleted</code> is set only by
-deleting the account, and a record carrying <code dir="auto">deleted: true</code> is one the UI is about to remove.</p>
+deleting the account, and a record carrying <code dir="auto">deleted: true</code> is mid-deletion: the UI removes it
+once the deletion is published, or takes the marker back if it never is.</p>
 <p>Everything on the record except <code dir="auto">access</code> and <code dir="auto">encryptedSeed</code> is the synced projection, and a
 record with the same <code dir="auto">id</code> may already exist from an earlier import. Replace it only with the
 vault fields; replacing the collections discards stamps and connected apps the user added on
