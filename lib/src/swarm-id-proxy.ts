@@ -2630,15 +2630,19 @@ export class SwarmIdProxy {
    * moved default stamp) is adopted from the bus at the next live overlap, as
    * it was before #635.
    *
-   * Ended means what it means everywhere else: the entry is gone, `revokedAt`
-   * (Remove), or a `disconnectedAt` newer than the connection this session came
-   * from (Disconnect). Both buttons state the end on the entry — the bus strips
+   * Ended means what it means everywhere else: a `revokedAt` (Remove) or a
+   * `disconnectedAt` (Disconnect) newer than the connection this session came
+   * from. Both buttons state the end on the entry — the bus strips
    * `appSecret`/`connectedUntil`, so the entry is the only place it can be
    * said — and testing only the Remove marker let a Disconnect made while the
    * tab was closed come back still connected and still able to upload, for the
    * rest of the session's 30 days (#667). The comparison is `connectedAt`, the
-   * same guard `restoreLocalSessionFields` uses live: a disconnect older than
-   * our connection was answered by that connection.
+   * same guard `restoreLocalSessionFields` uses live: an end older than our
+   * connection was answered by that connection. A missing entry is not an
+   * end either: entries are tombstoned, never deleted, so the published state
+   * simply never saw this connection — which an expired drive guarantees,
+   * since the identity site then cannot publish it — and ending the session
+   * on that logged the user out on every reload.
    *
    * Background, and deliberately fail-open: a gateway that cannot be reached is
    * not evidence of a revoke, and refusing the session for it would make every
@@ -2670,11 +2674,19 @@ export class SwarmIdProxy {
       // A missing `connectedAt` is not evidence that we connected after the
       // disconnect, so it reads as 0 and the disconnect stands. That is not the
       // offline case the fail-open below protects: the answer arrived.
+      //
+      // An entry is only ever tombstoned, never deleted, so a missing one
+      // means the published state never heard of this connection — with an
+      // expired drive the identity site cannot publish the connect at all —
+      // and it has nothing to say. A removal is compared on its clock like a
+      // disconnect: a reconnect clears the tombstone, so one older than our
+      // connection was answered by that connection, and only the published
+      // state lagging behind would still show it.
+      if (app === undefined) return
+      const since = connectedAt ?? 0
       const ended =
-        app === undefined ||
-        app.revokedAt !== undefined ||
-        (app.disconnectedAt !== undefined &&
-          app.disconnectedAt > (connectedAt ?? 0))
+        (app.revokedAt !== undefined && app.revokedAt > since) ||
+        (app.disconnectedAt !== undefined && app.disconnectedAt > since)
       if (!ended) return
       console.info(
         "[Proxy] The restored session was ended while this page was closed",

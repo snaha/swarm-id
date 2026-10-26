@@ -3017,7 +3017,8 @@ describe("SwarmIdProxy partitioned write enablement", () => {
     // a restored session checks the account's own Swarm state in the
     // background and tears itself down on a tombstone.
     it("ends a restored session the account has since revoked", async () => {
-      await connectPartitioned()
+      const connectedAt = Date.now()
+      await connectPartitionedAt(connectedAt)
       const revoked = makeSyncedAccount()
       foldedFromSwarm.value = {
         account: {
@@ -3026,8 +3027,8 @@ describe("SwarmIdProxy partitioned write enablement", () => {
             {
               appUrl: PARENT_ORIGIN,
               appName: "dApp",
-              lastConnectedAt: Date.now(),
-              revokedAt: Date.now(),
+              lastConnectedAt: connectedAt,
+              revokedAt: connectedAt + 1,
             },
           ],
         },
@@ -3115,6 +3116,67 @@ describe("SwarmIdProxy partitioned write enablement", () => {
       const infos = messagesOfType("connectionInfoChanged")
       expect(infos[infos.length - 1]?.canUpload).toBe(true)
       expect(storedSession()).toBeTruthy()
+      foldedFromSwarm.value = undefined
+    })
+
+    /** The restore's background check ran and declined: the session is still up. */
+    async function expectCheckKeptSession(): Promise<void> {
+      await vi.waitFor(() =>
+        expect(vi.mocked(foldAccountFromSwarm)).toHaveBeenCalled(),
+      )
+      await vi.mocked(foldAccountFromSwarm).mock.results.at(-1)?.value
+      await Promise.resolve()
+      await Promise.resolve()
+      const infos = messagesOfType("connectionInfoChanged")
+      expect(infos[infos.length - 1]?.canUpload).toBe(true)
+      expect(storedSession()).toBeTruthy()
+    }
+
+    // The published state can predate this session: with an expired drive
+    // the identity site cannot publish the connect, so the last snapshot on
+    // Swarm never saw it. An entry is only ever tombstoned, never deleted, so
+    // a missing one means exactly that — the state has nothing to say about
+    // a connection it never heard of — and must not read as a removal.
+    it("keeps a restored session the published state has no entry for", async () => {
+      await connectPartitionedAt(Date.now())
+      foldedFromSwarm.value = {
+        account: { ...makeSyncedAccount(), connectedApps: [] },
+        devices: [],
+      }
+      vi.mocked(foldAccountFromSwarm).mockClear()
+
+      await reload()
+
+      await expectCheckKeptSession()
+      foldedFromSwarm.value = undefined
+    })
+
+    // Same for a removal the published state still shows from before this
+    // session: the reconnect answered it (`connectApp` clears the tombstone),
+    // and only a removal newer than our connection can end it — the clock the
+    // Disconnect check below already compares.
+    it("keeps a restored session it reconnected after the removal", async () => {
+      const connectedAt = Date.now()
+      await connectPartitionedAt(connectedAt)
+      foldedFromSwarm.value = {
+        account: {
+          ...makeSyncedAccount(),
+          connectedApps: [
+            {
+              appUrl: PARENT_ORIGIN,
+              appName: "dApp",
+              lastConnectedAt: connectedAt - 1000,
+              revokedAt: connectedAt - 1000,
+            },
+          ],
+        },
+        devices: [],
+      }
+      vi.mocked(foldAccountFromSwarm).mockClear()
+
+      await reload()
+
+      await expectCheckKeptSession()
       foldedFromSwarm.value = undefined
     })
 
