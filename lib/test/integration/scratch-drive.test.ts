@@ -9,7 +9,8 @@
  * newest write is the one served.
  *
  * Whether the overwritten chunk is actually evicted cannot be seen here: the
- * uploading node keeps its own copy. `test/live` is where that is checked.
+ * uploading node keeps its own copy. `test/live/scratch-eviction.test.ts`
+ * reads it back from a node that never held it (#884).
  */
 import { describe, it, expect, inject } from "vitest"
 import {
@@ -18,7 +19,7 @@ import {
   Identifier,
   PrivateKey,
 } from "@ethersphere/bee-js"
-import { Binary } from "cafe-utility"
+import { mineIdentifierInBucket } from "../soc-bucket"
 import { uploadSOC } from "../../src/proxy/upload"
 import { downloadSOC } from "../../src/proxy/download-data"
 import type { UtilizationStoreDB } from "../../src/storage/utilization-store"
@@ -31,8 +32,6 @@ import { QUEEN_KEY, TEST_STAMP_DEPTH, createQueenBee } from "./cluster"
 
 const ID_BYTES = 32
 const SOC_PAYLOAD_SIZE = 32
-const BUCKET_BYTE_MASK = 0xff
-const BITS_PER_BYTE = 8
 /** One more write than the lane holds is enough to wrap it. */
 const WRAP_TEST_TIMEOUT_MS = 120_000
 
@@ -40,22 +39,6 @@ const emptyCache = {
   getAllChunks: async () => [],
   putChunk: async () => undefined,
 } as unknown as UtilizationStoreDB
-
-/** An identifier whose SOC address (keccak(id ‖ owner)) falls in `bucket`. */
-function mineIdentifierInBucket(owner: EthAddress, bucket: number): Identifier {
-  const ownerBytes = owner.toUint8Array()
-  const preimage = new Uint8Array(ID_BYTES + ownerBytes.length)
-  preimage.set(ownerBytes, ID_BYTES)
-  const high = bucket >> BITS_PER_BYTE
-  const low = bucket & BUCKET_BYTE_MASK
-  for (;;) {
-    crypto.getRandomValues(preimage.subarray(0, ID_BYTES))
-    const address = Binary.keccak256(preimage)
-    if (address[0] === high && address[1] === low) {
-      return new Identifier(preimage.slice(0, ID_BYTES))
-    }
-  }
-}
 
 describe("scratch drive (live Bee)", () => {
   it(
