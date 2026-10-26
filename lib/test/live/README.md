@@ -48,7 +48,7 @@ The deterministic, always-on guards for the same logic are the mocked tests in
    `scratch-eviction.test.ts` also wants `READ_BEE_URL`, a second node or
    gateway independent of `BEE_URL`: the uploader keeps its own copy of a chunk
    it overwrote, so only another node can say whether the network still has
-   it. The batch must be mutable. Without `READ_BEE_URL` that scenario skips.
+   it. Without `READ_BEE_URL` that scenario skips.
 
 2. Run:
 

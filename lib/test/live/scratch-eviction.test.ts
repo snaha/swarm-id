@@ -15,8 +15,9 @@
  * first one and expect it missing, with the newest still served as the control
  * that the reader does see this batch's writes at all.
  *
- * Opt-in, like the rest of this suite; skips without `READ_BEE_URL`. The batch
- * must be mutable: an immutable one refuses the re-used index outright.
+ * Opt-in, like the rest of this suite; skips without `READ_BEE_URL`. Any batch
+ * will do: Bee takes the re-used index on an immutable batch too, and storers
+ * replace a same-index chunk with a newer one regardless of batch type.
  */
 import { describe, it, expect } from "vitest"
 import {
@@ -32,6 +33,7 @@ import {
   UtilizationAwareStamper,
   partitionCapacity,
 } from "../../src/utils/batch-utilization"
+import { isNotFoundError } from "../../src/utils/bee-error"
 import { mineIdentifierInBucket } from "../soc-bucket"
 import { createContext, delay, liveEnv, makeInMemoryCache } from "./env"
 
@@ -45,16 +47,28 @@ const EVICTION_TEST_TIMEOUT_MS = 600_000
 const EVICTION_POLL_TRIES = 12
 const EVICTION_POLL_DELAY_MS = 10_000
 
-/** Resolves to the payload, or `undefined` when the node has no such chunk. */
-async function readPayload(
+/** Bypasses the reader's cache: once a read has cached the chunk, the reader
+ *  would keep serving its own copy and hide an eviction that lands later. */
+const UNCACHED = { headers: { "swarm-cache": "false" } }
+
+type ReadResult =
+  | { served: Uint8Array }
+  | { missing: true }
+  | { inconclusive: unknown }
+
+/** Only a 404 says the node has no such chunk; a 500 or a dropped connection
+ *  says nothing about eviction either way. */
+async function readChunk(
   bee: Bee,
   owner: EthAddress,
   identifier: Identifier,
-): Promise<Uint8Array | undefined> {
+): Promise<ReadResult> {
   try {
-    return (await downloadSOC(bee, owner, identifier)).payload
-  } catch {
-    return undefined
+    return {
+      served: (await downloadSOC(bee, owner, identifier, UNCACHED)).payload,
+    }
+  } catch (error) {
+    return isNotFoundError(error) ? { missing: true } : { inconclusive: error }
   }
 }
 
@@ -106,25 +120,32 @@ describe.skipIf(!liveEnv.configured || !liveEnv.readBeeUrl)(
         const newest = written[written.length - 1]
 
         // The control: the reader sees this batch's writes at all.
-        let served: Uint8Array | undefined
-        for (let i = 0; i < EVICTION_POLL_TRIES && !served; i++) {
-          served = await readPayload(reader, owner, newest.identifier)
-          if (!served) await delay(EVICTION_POLL_DELAY_MS)
-        }
-        expect(served, "the reader never served the newest chunk").toEqual(
-          newest.data,
-        )
-
-        // The claim: the chunk the wrap overwrote is no longer served.
-        let stillServed: Uint8Array | undefined = oldest.data
-        for (let i = 0; i < EVICTION_POLL_TRIES && stillServed; i++) {
-          stillServed = await readPayload(reader, owner, oldest.identifier)
-          if (stillServed) await delay(EVICTION_POLL_DELAY_MS)
+        let control: ReadResult = { missing: true }
+        for (
+          let i = 0;
+          i < EVICTION_POLL_TRIES && !("served" in control);
+          i++
+        ) {
+          if (i > 0) await delay(EVICTION_POLL_DELAY_MS)
+          control = await readChunk(reader, owner, newest.identifier)
         }
         expect(
-          stillServed,
-          `the reader still serves the overwritten chunk after ${EVICTION_POLL_TRIES} reads`,
-        ).toBeUndefined()
+          "served" in control && control.served,
+          "the reader never served the newest chunk",
+        ).toEqual(newest.data)
+
+        // The claim: the chunk the wrap overwrote is no longer served.
+        let claim: ReadResult = { served: oldest.data }
+        for (let i = 0; i < EVICTION_POLL_TRIES && !("missing" in claim); i++) {
+          if (i > 0) await delay(EVICTION_POLL_DELAY_MS)
+          claim = await readChunk(reader, owner, oldest.identifier)
+        }
+        expect(
+          "missing" in claim,
+          "inconclusive" in claim
+            ? `inconclusive: the reader's last read failed without a 404 (${String(claim.inconclusive)})`
+            : `the reader still serves the overwritten chunk after ${EVICTION_POLL_TRIES} reads`,
+        ).toBe(true)
       },
       EVICTION_TEST_TIMEOUT_MS,
     )
