@@ -67,6 +67,18 @@ export interface FundingNeed {
 export type RequestFunding = (need: FundingNeed) => Promise<void>
 
 /**
+ * The user backed out of paying: what a `RequestFunding` rejects with when the
+ * choice was deliberate. Typed so the dialogs can return to their form instead
+ * of presenting a deliberate choice as a failure.
+ */
+export class PaymentCancelledError extends Error {
+  constructor() {
+    super('Payment cancelled.')
+    this.name = 'PaymentCancelledError'
+  }
+}
+
+/**
  * The last moment before money moves: run after the owner address is funded and
  * before the first spending transaction. Throwing here aborts the operation with
  * nothing spent.
@@ -474,14 +486,15 @@ export type DriveDilution =
 /**
  * How the dilutions went as a whole:
  * - `complete`: every drive planned for dilution was diluted;
- * - `unfunded`: the gas was not obtained (declined, or not delivered), so no
- *   transaction was sent — `error` is why;
+ * - `unfunded`: the user declined to pay for the gas, so no transaction was
+ *   sent;
  * - `failed`: at least one transaction failed. The others were still sent, and
  *   a retry plans the diluted ones as `expires-soon`.
  */
-export type DeleteDilutionResult =
-  | { status: 'complete' | 'failed'; drives: DriveDilution[] }
-  | { status: 'unfunded'; drives: DriveDilution[]; error: unknown }
+export interface DeleteDilutionResult {
+  status: 'complete' | 'unfunded' | 'failed'
+  drives: DriveDilution[]
+}
 
 export interface DeleteDilutionOptions {
   account: Account
@@ -508,14 +521,16 @@ export interface DeleteDilutionOptions {
  * N interruptions for one decision. A dilution moves no BZZ, so the need is gas
  * alone.
  *
- * A funding failure is a result, not an error — no transaction was sent, and
- * the caller decides whether the deletion goes ahead without diluting. A failed
- * transaction does not stop the others; it is reported per drive. Like the
- * other runners, everything after `beforeSpend` is a spend whose record must
- * land, so callers keep this call outside their attempt guard.
+ * A declined payment is a result, not an error — no transaction was sent, and
+ * the caller decides whether the deletion goes ahead without diluting. Only the
+ * user's own decline counts: a payment that failed, may still be in flight, or
+ * delivered short throws like any other failure, so a retry can finish it. A
+ * failed transaction does not stop the others; it is reported per drive. Like
+ * the other runners, everything after `beforeSpend` is a spend whose record
+ * must land, so callers keep this call outside their attempt guard.
  *
- * @throws when the chain cannot be read or the contract is paused, with nothing
- *   sent; and whatever `beforeSpend` throws.
+ * @throws when the chain cannot be read, the contract is paused or the funding
+ *   failed, with nothing sent; and whatever `beforeSpend` throws.
  */
 export async function runDeleteDilution(
   options: DeleteDilutionOptions,
@@ -579,10 +594,13 @@ export async function runDeleteDilution(
       xdaiNeeded,
     )
   } catch (error) {
+    if (!(error instanceof PaymentCancelledError)) {
+      throw error
+    }
     for (const { drive } of toDilute) {
       drives.push({ drive, outcome: 'unsent' })
     }
-    return { status: 'unfunded', drives, error }
+    return { status: 'unfunded', drives }
   }
   await beforeSpend?.()
 

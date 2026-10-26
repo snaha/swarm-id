@@ -8,6 +8,8 @@
  *
  * See docs/Drive-Payment-Flow.md, "Delete account".
  */
+import type { SyncResult } from '@snaha/swarm-id/internal'
+
 import { prefix0x } from '$lib/crypto/hex'
 import { syncStore } from '$lib/dev/sync.svelte'
 import {
@@ -47,7 +49,7 @@ export interface DeleteAccountOptions {
  * Delete `account` from every device. Throws, leaving the account in place,
  * when a dilution transaction failed or the deletion could not be published;
  * running it again is safe — diluted drives plan as `expires-soon`, and the
- * publish is a plain re-send.
+ * account is marked and published afresh.
  */
 export async function deleteAccount(options: DeleteAccountOptions): Promise<DeletionResult> {
   const { account, keep, requestFunding, checkpoint, onProgress } = options
@@ -84,28 +86,38 @@ export async function deleteAccount(options: DeleteAccountOptions): Promise<Dele
  *
  * The publish is awaited, not left to the debounced sync hook, because the
  * record is what publishes it: removed first, a failed publish would leave
- * every peer holding a live account this device can no longer delete. On
- * failure the marked record stays and this throws; calling again re-sends.
- * A local account has nothing on Swarm and no drive to publish through, so it
- * is simply removed.
+ * every peer holding a live account this device can no longer delete. The feed
+ * goes first and the bus only once it has landed, since live peers forget the
+ * account on the bus delta. On failure the marker is taken back
+ * (`cancelDeletion`), the account stays, and this throws; calling again marks
+ * and publishes afresh. A local account has nothing on Swarm and no drive to
+ * publish through, so it is simply removed.
  */
 export async function tearDownAccount(account: Account): Promise<void> {
   if (!account.isLocal) {
-    if (!account.deleted) {
-      account.markDeleted()
+    account.markDeleted()
+    let published: SyncResult | undefined
+    try {
+      published = await syncStore.syncAccount(account.id.toHex())
+    } finally {
+      if (!published || published.status === 'error') {
+        account.cancelDeletion()
+      }
     }
-    // The bus reaches live sessions now — a partitioned dApp iframe hears of
-    // the revoke no other way — and the feed reaches devices that are closed.
-    const [published] = await Promise.all([
-      syncStore.syncAccount(account.id.toHex()),
-      accountBusStore.publishBeforeClose(account.toSyncedRecord()),
-    ])
     if (!published) {
       throw new Error('The deletion could not be published to your other devices.')
     }
     if (published.status === 'error') {
       throw new Error(`The deletion could not be published: ${published.error}`)
     }
+    if (!account.deleted) {
+      // Taken back mid-publish — another tab loading (`load` in the accounts
+      // store) — so what went out is unknown. A retry marks and sends afresh.
+      throw new Error('The deletion was interrupted.')
+    }
+    // The feed reaches devices that are closed; the bus reaches live sessions
+    // now — a partitioned dApp iframe hears of the revoke no other way.
+    await accountBusStore.publishBeforeClose(account.toSyncedRecord())
   }
   accountsStore.remove(account.id)
   if (sessionStore.currentAccountId === account.id.toHex()) {

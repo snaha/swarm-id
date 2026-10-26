@@ -97,9 +97,15 @@
     onClose()
   }
 
-  // The dialog can unmount without close() — abandon a payment request nobody
-  // is left to answer. One already with the wallet is not abandoned by this.
-  onDestroy(() => funding.cancel())
+  // The dialog can unmount without close() — the same as closing it: abandon a
+  // payment request nobody is left to answer, and supersede the attempt first,
+  // or that abandoned payment reads as a decline and the teardown runs with
+  // nobody left to hand the signer key to. One already with the wallet is not
+  // abandoned by this.
+  onDestroy(() => {
+    attempts.supersede()
+    funding.cancel()
+  })
 
   function unlocked(entropy: Uint8Array) {
     // Deletion needs proof of control, not the seed itself.

@@ -67,7 +67,10 @@ export function planDeleteDilution(input: DilutionInput): DilutionPlan {
   if (chain.immutable) {
     return { skip: 'immutable' }
   }
-  const floor = input.minimumBalancePerChunk + input.lastPrice * FLOOR_MARGIN_BLOCKS
+  const margined = input.minimumBalancePerChunk + input.lastPrice * FLOOR_MARGIN_BLOCKS
+  // At least one PLUR: a zero floor (a chain with no price yet) is met by every
+  // balance, and the halving would never stop.
+  const floor = margined > 0n ? margined : 1n
   let steps = 0
   while (chain.remaining >> BigInt(steps + 1) >= floor) {
     steps++

@@ -29,9 +29,13 @@
   import { failureDetail } from '$lib/failure-detail'
   import { currentChainPrice } from '$lib/payment/chain-price'
   import { createCostEstimate } from '$lib/payment/cost-estimate.svelte'
-  import { type OperationStep, reconciledChainDepth, runExtend } from '$lib/payment/drive-operation'
   import {
+    type OperationStep,
     PaymentCancelledError,
+    reconciledChainDepth,
+    runExtend,
+  } from '$lib/payment/drive-operation'
+  import {
     UseCardError,
     createFundingRequester,
     describeStep,

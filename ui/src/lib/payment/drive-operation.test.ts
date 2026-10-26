@@ -14,6 +14,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { Account } from '$lib/stores/accounts.svelte'
 
 import {
+  PaymentCancelledError,
   SizeIncreasePendingError,
   reconciledChainDepth,
   runDeleteDilution,
@@ -545,7 +546,7 @@ describe('runDeleteDilution', () => {
   const DRIVE_DEPTH = 20
   /** 50 floors' worth: five halvings fit before the floor. */
   const DILUTED_DEPTH = DRIVE_DEPTH + 5
-  const declined = new Error('Payment cancelled.')
+  const declined = new PaymentCancelledError()
 
   function batchHex(index: number): string {
     return index.toString(16).padStart(64, '0')
@@ -682,7 +683,7 @@ describe('runDeleteDilution', () => {
       beforeSpend,
     })
 
-    expect(result).toMatchObject({ status: 'unfunded', error: declined })
+    expect(result.status).toBe('unfunded')
     expect(result.drives.map((drive) => drive.outcome)).toEqual(['unsent', 'unsent'])
     expect(requestFunding).toHaveBeenCalledWith({
       destination: SIGNER_ADDRESS,
@@ -693,18 +694,37 @@ describe('runDeleteDilution', () => {
     expect(onchain.increaseDepthOnChain).not.toHaveBeenCalled()
   })
 
-  it('sends nothing when the payment did not deliver enough', async () => {
+  // Only the user's decline lets the deletion go ahead undiluted; anything
+  // else must fail, so the account is kept for a retry.
+  it('throws, sending nothing, when the payment did not deliver enough', async () => {
     const account = makeAccount(drives(1))
     onchain.fundingShortfall.mockResolvedValue({ bzz: 0n, xdai: 1n })
 
-    const result = await runDeleteDilution({
-      account,
-      signerKey: SIGNER_KEY,
-      keep: new Set(),
-      requestFunding,
-    })
+    await expect(
+      runDeleteDilution({ account, signerKey: SIGNER_KEY, keep: new Set(), requestFunding }),
+    ).rejects.toThrow('did not deliver enough')
+    expect(onchain.increaseDepthOnChain).not.toHaveBeenCalled()
+  })
 
-    expect(result.status).toBe('unfunded')
+  it('throws, sending nothing, when the balance cannot be read', async () => {
+    const account = makeAccount(drives(1))
+    onchain.fundingShortfall.mockRejectedValueOnce(new Error('RPC unreachable'))
+
+    await expect(
+      runDeleteDilution({ account, signerKey: SIGNER_KEY, keep: new Set(), requestFunding }),
+    ).rejects.toThrow('RPC unreachable')
+    expect(requestFunding).not.toHaveBeenCalled()
+    expect(onchain.increaseDepthOnChain).not.toHaveBeenCalled()
+  })
+
+  it('throws, sending nothing, when the payment failed rather than being declined', async () => {
+    const account = makeAccount(drives(1))
+    onchain.fundingShortfall.mockResolvedValue({ bzz: 0n, xdai: GAS_BUDGET_XDAI_WEI })
+    requestFunding.mockRejectedValueOnce(new Error('Payment could not be confirmed.'))
+
+    await expect(
+      runDeleteDilution({ account, signerKey: SIGNER_KEY, keep: new Set(), requestFunding }),
+    ).rejects.toThrow('could not be confirmed')
     expect(onchain.increaseDepthOnChain).not.toHaveBeenCalled()
   })
 

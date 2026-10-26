@@ -122,30 +122,81 @@ describe('tearDownAccount', () => {
     expect(sessionStore.currentAccountId).toBeUndefined()
   })
 
+  // Live peers forget the account the moment the bus delta lands, so it may
+  // only go out once the feed write has: otherwise a failed publish leaves
+  // them without an account this device still has.
+  it('tells live peers only after the deletion is on Swarm', async () => {
+    const account = accountsStore.add(record(true))
+    let busBeforeSwarm = false
+    sync.syncAccount.mockImplementation(async () => {
+      // As the feed write settles, not as it starts: a bus publish sent
+      // alongside it has been called by then.
+      await Promise.resolve()
+      busBeforeSwarm = bus.publishBeforeClose.mock.calls.length > 0
+      return PUBLISHED
+    })
+
+    await tearDownAccount(account)
+
+    expect(busBeforeSwarm).toBe(false)
+    expect(bus.publishBeforeClose).toHaveBeenCalledTimes(1)
+  })
+
   it.each([
     ['no publish could be made', undefined],
     ['the publish failed', { status: 'error', error: 'Bee unreachable' }],
-  ])('keeps the account when %s', async (_label, outcome) => {
+  ])('keeps the account, unmarked, when %s', async (_label, outcome) => {
     const account = accountsStore.add(record(true))
     sync.syncAccount.mockResolvedValue(outcome)
 
     await expect(tearDownAccount(account)).rejects.toThrow()
 
-    // Kept, still marked: a retry re-runs only the publish.
-    expect(accountsStore.get(ID_HEX)?.deleted).toBe(true)
+    // Kept and live again: a marker left behind would go out with the next
+    // routine sync and delete the account everywhere else, unannounced. The
+    // reversal is clocked after the marker, so it also outvotes one that
+    // reached Swarm before the failure.
+    const kept = accountsStore.get(ID_HEX)
+    expect(kept?.deleted).toBe(false)
+    expect(kept?.deletedAt).toEqual(expect.any(Number))
+    expect(bus.publishBeforeClose).not.toHaveBeenCalled()
   })
 
-  it('finishes on a retry, without re-marking the account', async () => {
+  it('keeps the account, unmarked, when the publish threw', async () => {
+    const account = accountsStore.add(record(true))
+    sync.syncAccount.mockRejectedValue(new Error('lock lost'))
+
+    await expect(tearDownAccount(account)).rejects.toThrow('lock lost')
+
+    expect(accountsStore.get(ID_HEX)?.deleted).toBe(false)
+    expect(bus.publishBeforeClose).not.toHaveBeenCalled()
+  })
+
+  it('keeps the account when its marker was taken back mid-publish', async () => {
+    const account = accountsStore.add(record(true))
+    sync.syncAccount.mockImplementation(() => {
+      account.cancelDeletion()
+      return Promise.resolve(PUBLISHED)
+    })
+
+    await expect(tearDownAccount(account)).rejects.toThrow('interrupted')
+
+    expect(accountsStore.get(ID_HEX)?.deleted).toBe(false)
+    expect(bus.publishBeforeClose).not.toHaveBeenCalled()
+  })
+
+  it('marks the account afresh on a retry, and finishes', async () => {
     const account = accountsStore.add(record(true))
     sync.syncAccount.mockResolvedValueOnce(undefined)
     await expect(tearDownAccount(account)).rejects.toThrow()
-    const deletedAt = account.deletedAt
 
-    sync.syncAccount.mockResolvedValueOnce(PUBLISHED)
+    let deletedAtPublish: boolean | undefined
+    sync.syncAccount.mockImplementationOnce(() => {
+      deletedAtPublish = accountsStore.get(ID_HEX)?.deleted
+      return Promise.resolve(PUBLISHED)
+    })
     await tearDownAccount(account)
 
-    expect(sync.syncAccount).toHaveBeenCalledTimes(2)
-    expect(account.deletedAt).toBe(deletedAt)
+    expect(deletedAtPublish).toBe(true)
     expect(accountsStore.get(ID_HEX)).toBeUndefined()
   })
 
@@ -191,11 +242,7 @@ describe('deleteAccount', () => {
   it('deletes anyway when the gas was not paid, handing over the signer key', async () => {
     const account = accountsStore.add(record(true))
     const { signerKey } = await derivePostageSigner(account.derivationKey)
-    dilution.runDeleteDilution.mockResolvedValue({
-      status: 'unfunded',
-      drives: [],
-      error: new Error('Payment cancelled.'),
-    })
+    dilution.runDeleteDilution.mockResolvedValue({ status: 'unfunded', drives: [] })
 
     const result = await deleteAccount({ account, keep: new Set(), requestFunding, checkpoint })
 
