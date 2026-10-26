@@ -45,6 +45,7 @@
   import {
     ADD_NEW_DRIVE,
     type PickerRow,
+    fillRequiredRows,
     kindOf,
     pickerRows,
     rowChoices,
@@ -171,6 +172,17 @@
       account.settings,
     )
     sharing = { ...initialSharing }
+  })
+
+  // A drive created meanwhile in another tab of the identity UI — its Storage
+  // tab, another popup — reaches the account store over the storage event; a
+  // required row still waiting on one takes it (#879). Not while the Add drive
+  // dialog is open: its drive belongs to the row it was opened for, and
+  // `onDriveAdded` runs before the dialog closes and this runs again.
+  $effect(() => {
+    if (addingFor !== undefined) return
+    const filled = fillRequiredRows(rows, drives, defaultBatchHex)
+    if (filled !== rows) rows = filled
   })
 
   function driveGrantFor(): Pick<ConnectGrant, 'drives'> | undefined {

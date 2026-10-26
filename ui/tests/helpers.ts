@@ -19,6 +19,9 @@ export const PASSWORD = 'testpassword123'
  * slowest one measured takes under 30s, so this is margin, not a budget. */
 export const DRIVE_SETTLE_TIMEOUT_MS = 75_000
 
+/** The demo shows its account button once the popup's grant reaches it. */
+export const CONNECTED_TIMEOUT_MS = 10_000
+
 /**
  * What a whole journey that buys a drive is allowed. Applied per test, and
  * only to the tests that reach the chain — a suite-wide budget hands the same
