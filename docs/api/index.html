@@ -660,6 +660,11 @@
 <td><code dir="auto">boolean</code></td>
 <td>The drive a write goes to when it names none: the account default for an <code dir="auto">'all'</code> grant, otherwise the first granted regular drive. A scratch drive is never primary</td>
 </tr>
+<tr>
+<td><code dir="auto">partition</code></td>
+<td><code dir="auto">number | undefined</code></td>
+<td>The write partition this session holds on the drive, as <code dir="auto">connectionInfo.partition</code> reports it for the primary: <code dir="auto">undefined</code> while it holds none: until the drive’s write path is built (at connect for the primary, on the first write that names it for any other), and after an idle release or a disconnect. Every lease change fires <code dir="auto">onConnectionChange</code>, so re-read the drives there</td>
+</tr>
 </tbody>
 </table>
 <p><strong>Returns:</strong> <code dir="auto">Promise&lt;Drive[]&gt;</code> — empty when the app was granted no drive</p>
