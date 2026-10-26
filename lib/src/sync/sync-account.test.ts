@@ -521,6 +521,70 @@ describe("createSyncAccount", () => {
     expect(uploadCallCount).toBe(0)
   })
 
+  // Two publishes of one account contend for the same partition lease, and the
+  // loser fails (`PartitionLeaseLostError`) — the debounced sync hook firing
+  // while an account deletion awaits its own publish did exactly that.
+  it("runs one sync of an account at a time, the later after the earlier", async () => {
+    const stores = createMockStores()
+    let active = 0
+    let maxActive = 0
+    const releases: (() => void)[] = []
+    coordinatorController.withWrite = async (op) => {
+      active++
+      maxActive = Math.max(maxActive, active)
+      await new Promise<void>((resolve) => releases.push(resolve))
+      try {
+        return await op({ mode: "stamper" })
+      } finally {
+        active--
+      }
+    }
+    const syncAccount = createSyncAccount({
+      bee: createMockBee(),
+      ...stores,
+      utilizationStore: {} as UtilizationStoreDB,
+      utilizationUploader: {
+        scheduleUpload: vi.fn().mockResolvedValue(undefined),
+      } as unknown as DebouncedUtilizationUploader,
+    })
+
+    const first = syncAccount(TEST_ETH_ADDRESS_HEX)
+    const second = syncAccount(TEST_ETH_ADDRESS_HEX)
+    await vi.waitFor(() => expect(releases).toHaveLength(1))
+    releases[0]()
+    await vi.waitFor(() => expect(releases).toHaveLength(2))
+    releases[1]()
+
+    expect((await first)?.status).toBe("success")
+    expect((await second)?.status).toBe("success")
+    expect(maxActive).toBe(1)
+  })
+
+  it("still runs a later sync when the earlier one failed", async () => {
+    const stores = createMockStores()
+    let calls = 0
+    coordinatorController.withWrite = (op) => {
+      calls++
+      return calls === 1
+        ? Promise.reject(new Error("SOC upload failed"))
+        : op({ mode: "stamper" })
+    }
+    const syncAccount = createSyncAccount({
+      bee: createMockBee(),
+      ...stores,
+      utilizationStore: {} as UtilizationStoreDB,
+      utilizationUploader: {
+        scheduleUpload: vi.fn().mockResolvedValue(undefined),
+      } as unknown as DebouncedUtilizationUploader,
+    })
+
+    const first = syncAccount(TEST_ETH_ADDRESS_HEX)
+    const second = syncAccount(TEST_ETH_ADDRESS_HEX)
+
+    expect((await first)?.status).toBe("error")
+    expect((await second)?.status).toBe("success")
+  })
+
   // (Removed: the shared-feed verifyWon re-merge/republish + success-unverified
   // tests — Phase 3a writes each device's own feed, so there is no shared-feed
   // collision to verify against. Per-device convergence is covered by
