@@ -128,7 +128,7 @@
     aria-label={title}
     tabindex="-1"
     class={cn(
-      'bg-popover flex w-96 max-w-[calc(100vw-4rem)] flex-col gap-4 rounded-lg border p-4 shadow-lg outline-none',
+      'bg-popover flex max-h-[calc(100dvh-4rem)] w-96 max-w-[calc(100vw-4rem)] flex-col gap-4 overflow-y-auto rounded-lg border p-4 shadow-lg outline-none',
       className,
     )}
   >
