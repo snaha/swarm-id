@@ -369,7 +369,7 @@ export class Account {
    * through its default drive, and the fold skips a removed device's view, so
    * tombstoning either would silence the very publish that carries this.
    * `skipSync`, because that publish is the caller's to await: the record may
-   * only be removed once it has landed (`publishAccountDeletion`).
+   * only be removed once it has landed (`tearDownAccount`).
    */
   markDeleted() {
     const now = Date.now()
@@ -377,6 +377,24 @@ export class Account {
       app.revokedAt === undefined ? revoked(app, true) : app,
     )
     this.deleted = true
+    this.deletedAt = now
+    this.lastModified = now
+    this.#commit({ skipSync: true })
+  }
+
+  /**
+   * Take back a `markDeleted` whose publish never landed: the account stays,
+   * and a marker left on it would go out with the next routine sync and delete
+   * it everywhere else unannounced. On a fresh clock, so it also outvotes a
+   * marker that reached Swarm before the failure. The revokes stand — the user
+   * was deleting, and an app can reconnect. `skipSync`, like the marking: a
+   * retry is the likely next step, and a sync started here would contend with
+   * its publish.
+   */
+  cancelDeletion() {
+    // Strictly after the marker, even within the millisecond it was set.
+    const now = Math.max(Date.now(), (this.deletedAt ?? 0) + 1)
+    this.deleted = false
     this.deletedAt = now
     this.lastModified = now
     this.#commit({ skipSync: true })
@@ -759,7 +777,16 @@ function hydrate(record: AccountRecord): Account {
 
 function load(): Account[] {
   if (!browser) return []
-  return storageManager.load().map(hydrate)
+  return storageManager.load().map((record) => {
+    const account = hydrate(record)
+    // A marker still on a stored record is a teardown the page closed on
+    // before it was confirmed (`tearDownAccount`): take it back rather than
+    // let the next routine sync publish it. A tab still mid-teardown of the
+    // same account has its marker taken back too; it notices before removing
+    // anything and fails over to its Retry.
+    if (account.deleted) account.cancelDeletion()
+    return account
+  })
 }
 
 accounts = load()

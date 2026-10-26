@@ -127,4 +127,17 @@ describe('planDeleteDilution', () => {
       ),
     ).toEqual({ skip: 'immutable' })
   })
+
+  // A chain with no price yet (a fresh local contract) has a zero floor, which
+  // every balance meets: the plan stops at the last whole PLUR instead of
+  // halving forever.
+  it('terminates on a zero floor, leaving at least one PLUR', () => {
+    const remaining = 50n * MINIMUM
+    const plan = planDeleteDilution(input({ minimumBalancePerChunk: 0n, lastPrice: 0n }, remaining))
+
+    expect('targetDepth' in plan).toBe(true)
+    if ('targetDepth' in plan) {
+      expect(postDilution(remaining, plan.targetDepth)).toBe(1n)
+    }
+  })
 })

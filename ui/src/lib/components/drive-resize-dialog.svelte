@@ -28,16 +28,13 @@
   import { createCostEstimate } from '$lib/payment/cost-estimate.svelte'
   import {
     type OperationStep,
+    PaymentCancelledError,
     SizeIncreasePendingError,
     previewResize,
     reconciledChainDepth,
     runResize,
   } from '$lib/payment/drive-operation'
-  import {
-    PaymentCancelledError,
-    createFundingRequester,
-    describeStep,
-  } from '$lib/payment/funding-request.svelte'
+  import { createFundingRequester, describeStep } from '$lib/payment/funding-request.svelte'
   import type { ResizePlan } from '$lib/payment/purchase'
   import type { Account } from '$lib/types'
 

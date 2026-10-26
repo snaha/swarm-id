@@ -597,6 +597,42 @@ describe('Account.markDeleted', () => {
   })
 })
 
+describe('Account.cancelDeletion', () => {
+  // The marker comes off on a clock after the marking, so it outvotes one that
+  // reached Swarm; the revokes stay; and nothing is published, so a retry's
+  // own publish is not contended.
+  it('takes the marker back on a newer clock, keeping the revokes, unpublished', () => {
+    const commit = vi.fn()
+    const account = new Account(
+      {
+        ...signedInRecord(),
+        connectedApps: [
+          {
+            appUrl: 'https://app.example.com',
+            appName: 'App',
+            lastConnectedAt: 1,
+            appSecret: '44'.repeat(32),
+          },
+        ],
+      },
+      commit,
+    )
+    account.markDeleted()
+    const markedAt = account.deletedAt ?? 0
+    vi.useFakeTimers({ toFake: ['Date'] })
+    try {
+      vi.setSystemTime(markedAt + 1)
+      account.cancelDeletion()
+    } finally {
+      vi.useRealTimers()
+    }
+    expect(account.deleted).toBe(false)
+    expect(account.deletedAt).toBeGreaterThan(markedAt)
+    expect(account.connectedApps[0].revokedAt).toEqual(expect.any(Number))
+    expect(commit).toHaveBeenLastCalledWith(account, { skipSync: true })
+  })
+})
+
 describe('Account.applyRefreshed deletion verdict', () => {
   const CREATED_AT = 1700000000000
 

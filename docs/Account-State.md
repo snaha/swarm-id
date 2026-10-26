@@ -176,11 +176,13 @@ published like any other change. It is deliberately not a tombstone on the accou
 
 - **The deleting device** (`Account.markDeleted`, `ui/src/lib/delete-account.ts`) revokes every live
   connected app and sets `deleted` in one `skipSync` commit, then **awaits** its own feed publish
-  (`syncStore.syncAccount`) and an account-bus delta, and only then removes the record. Drives and
-  devices stay live: the publish goes through the default drive, and the fold skips a removed
-  device's view, so tombstoning either would silence the publish that carries the deletion. A
-  publish that fails (or is skipped: no default drive, every partition held) keeps the marked
-  record for a retry, which re-sends.
+  (`syncStore.syncAccount`), then an account-bus delta, and only then removes the record. The bus
+  goes second because live peers forget the account the moment its delta lands. Drives and devices
+  stay live: the publish goes through the default drive, and the fold skips a removed device's
+  view, so tombstoning either would silence the publish that carries the deletion. A publish that
+  fails (or is skipped: no default drive, every partition held) takes the marker back on a newer
+  clock (`Account.cancelDeletion`) and keeps the account; the revokes stand. A marker still on a
+  stored record at load is a teardown the page closed on, and is taken back the same way.
 - **A peer** that folds a winning `true` — from the bus (`applyAccountDelta`) or a Swarm refresh —
   removes the account locally, leaves the session if it was current, and says "This account was
   deleted on another device". `applyRefreshed` reports only the transition from live to deleted,

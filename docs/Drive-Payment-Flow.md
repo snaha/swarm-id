@@ -527,9 +527,10 @@ What the dialog does with the outcome:
 | Outcome                                         | Result                                                                          |
 | ----------------------------------------------- | ------------------------------------------------------------------------------- |
 | every planned drive diluted (or none to dilute) | the account is deleted — **Account deleted**                                    |
-| gas declined or not delivered, nothing sent     | the account is deleted anyway — **Some data couldn't be deleted**, with the key |
+| gas declined, nothing sent                      | the account is deleted anyway — **Some data couldn't be deleted**, with the key |
+| the gas payment failed or delivered short       | nothing is torn down — **Deletion failed**, Retry                               |
 | a transaction failed                            | nothing is torn down — **Deletion failed**, Retry                               |
-| the deletion could not be published             | the account stays, marked — **Deletion failed**, Retry                          |
+| the deletion could not be published             | the account stays, unmarked — **Deletion failed**, Retry                        |
 
 **The partial handover.** When the drives could not be diluted, the user asked for the account to
 go and it goes; but the drives still hold balance, and their only owner is the postage signer,
@@ -538,7 +539,7 @@ screen as **Private key** — "used to manage postage batches directly" — so t
 diluted, topped up or left to run out from any wallet.
 
 **Retry is idempotent.** A drive a first attempt diluted sits in [floor, 2·floor), so planning it
-again yields `expires-soon` and sends nothing; the publish is a plain re-send of the marked record
+again yields `expires-soon` and sends nothing; the account is marked and published afresh
 (docs/Account-State.md, "Account deletion"). A local account — no drives, nothing synced — skips
 both and is simply removed.
 
