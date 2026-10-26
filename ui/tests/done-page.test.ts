@@ -9,6 +9,7 @@ import {
   DRIVE_SETTLE_TIMEOUT_MS,
   PASSWORD,
   addDrive,
+  buyDriveInDialog,
   chainReachable,
   completeCreateFlow,
   fundPostageSigner,
@@ -333,6 +334,40 @@ test('a drive created in another tab fills the row waiting for it', async ({ pag
     expect.stringMatching(/^[0-9a-f]{64}$/),
     expect.stringMatching(/^[0-9a-f]{64}$/),
   ])
+})
+
+// The Add drive dialog's drive belongs to the row it was opened for: the
+// refill that picks up another tab's drive must not hand it to a different
+// row first, granting one batch twice (#893).
+test("a drive added from a row's dialog fills that row only", async ({ page }) => {
+  test.setTimeout(CHAIN_TEST_TIMEOUT_MS * 2)
+  await seedLocalChain(page.context())
+  await page.goto('/')
+  await page.getByRole('link', { name: 'Get started' }).first().click()
+  await completeCreateFlow(page)
+  await page.getByRole('button', { name: 'Stay local for now' }).click()
+  await expect(page).toHaveURL(/\/$/)
+  await fundPostageSigner(page)
+
+  // The demo asks for two drives of one kind; the account has none.
+  await page.goto(DEMO_URL)
+  await page.evaluate(() => localStorage.setItem('swarm-id-demo-drive-request', 'two-regular'))
+  await page.reload()
+  const popup = await openConnectPopup(page)
+  await popup.getByRole('button', { name: /0x[0-9a-fA-F]{4}/ }).click()
+  await popup.getByRole('textbox', { name: 'Account password' }).fill(PASSWORD)
+  await popup.getByRole('button', { name: 'Confirm' }).click()
+  const addButtons = popup.getByRole('button', { name: 'Add drive', exact: true })
+  await expect(addButtons).toHaveCount(2)
+
+  // Buy from the second row.
+  await addButtons.nth(1).click()
+  await buyDriveInDialog(popup.getByRole('dialog'))
+
+  // The second row holds it; the first still waits on a drive of its own.
+  await expect(addButtons).toHaveCount(1)
+  await expect(popup.getByRole('combobox')).toHaveCount(1)
+  await expect(popup.getByRole('button', { name: 'Go to app' })).toBeDisabled()
 })
 
 // Step 6 (#711): an app asks for more drives after connecting, and the user
