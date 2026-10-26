@@ -295,7 +295,28 @@ export function createSyncAccount(
     { attempt: number; timer: ReturnType<typeof setTimeout> }
   >()
 
-  return async function syncAccount(
+  // One sync per account at a time: two publishes of one account contend for
+  // the same partition lease, and the loser fails (`PartitionLeaseLostError`).
+  // A call made while one runs waits for it, then publishes the account as it
+  // is by then — so a caller awaiting its own publish (an account deletion)
+  // never races the debounced sync hook.
+  const inFlight = new Map<string, Promise<unknown>>()
+
+  function syncAccount(
+    accountId: string,
+  ): Promise<SyncResult | undefined> {
+    const run = (inFlight.get(accountId) ?? Promise.resolve())
+      .catch(() => undefined)
+      .then(() => syncAccountNow(accountId))
+    inFlight.set(accountId, run)
+    const forget = () => {
+      if (inFlight.get(accountId) === run) inFlight.delete(accountId)
+    }
+    run.then(forget, forget)
+    return run
+  }
+
+  async function syncAccountNow(
     accountId: string,
   ): Promise<SyncResult | undefined> {
     const startTime = performance.now()
@@ -462,4 +483,6 @@ export function createSyncAccount(
       }
     }
   }
+
+  return syncAccount
 }
