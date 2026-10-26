@@ -84,7 +84,8 @@ are left out of a fresh record; the UI sets them as the user edits. `settings` h
 duration and the account-wide sharing switches (`dataSharing`, `writeAccess`, on when absent),
 which a connected app may pin for itself with the same two fields on its entry, as it may its own
 `sessionDuration`. `deleted` is set only by deleting the account, and a record carrying
-`deleted: true` is one the UI is about to remove.
+`deleted: true` is mid-deletion: the UI removes it once the deletion is published, or takes the
+marker back if it never is.
 
 Everything on the record except `access` and `encryptedSeed` is the synced projection, and a
 record with the same `id` may already exist from an earlier import. Replace it only with the

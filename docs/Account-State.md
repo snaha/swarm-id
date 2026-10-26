@@ -193,6 +193,15 @@ published like any other change. It is deliberately not a tombstone on the accou
   sign-back-in from the local snapshot cannot see a deletion made while it was signed out. The
   drives the user kept at deletion come back with it.
 
+**Offline devices.** A device that is not open when the account is deleted misses the bus delta and
+can only learn of the deletion from the feed, which is stamped with the default drive. Once that
+drive expires its chunks are evicted and the feed can no longer be read, so a device that comes back
+after that keeps the account: nothing it can read says it was deleted. The window is the default
+drive's remaining lifespan — about one to two days when deletion dilutes it, its natural lifespan
+when the user keeps its data (or it cannot be diluted: owned elsewhere, immutable). The delete
+dialog says so. Such a device cannot delete the account itself either, because its publish needs a
+live default drive.
+
 The revokes are what cut a partitioned dApp session off from the stamp signer keys; the marker is
 what makes the account disappear. The proxy carries the marker through its fold, its stored
 session and its own publishes like the other scalars, so it never republishes the account as live.
