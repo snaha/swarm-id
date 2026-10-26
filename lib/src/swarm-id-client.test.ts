@@ -522,6 +522,7 @@ describe("SwarmIdClient connectionInfo", () => {
       uploadMode: snapshot.uploadMode,
       identity: snapshot.identity,
       appKey: snapshot.appKey,
+      identitySite: "https://swarm-id.example.com",
     })
 
     // `connectionInfo` getter calls ensureReady — mark client as ready for the read
@@ -532,6 +533,7 @@ describe("SwarmIdClient connectionInfo", () => {
       uploadMode: snapshot.uploadMode,
       identity: snapshot.identity,
       appKey: snapshot.appKey,
+      identitySite: "https://swarm-id.example.com",
     })
   })
 
@@ -1310,6 +1312,48 @@ describe("SwarmIdClient window message filtering", () => {
       expect.anything(),
       expect.anything(),
     )
+  })
+
+  // The user named another identity site on the connect screen (#849): the
+  // proxy relays it, and the client re-embeds from there and remembers it.
+  it("re-embeds the proxy from the site a switchIdentitySite names", () => {
+    vi.spyOn(console, "error").mockImplementation(() => {})
+    const storage = { setItem: vi.fn(), removeItem: vi.fn(), getItem: vi.fn() }
+    vi.stubGlobal("localStorage", storage)
+    const createElement = vi.mocked(document.createElement)
+    createElement.mockClear()
+
+    listener({
+      origin: "https://swarm-id.example.com",
+      source: contentWindow,
+      data: { type: "switchIdentitySite", site: "https://other.example/id" },
+    })
+
+    expect(storage.setItem).toHaveBeenCalledWith(
+      "swarm-id-identity-site",
+      "https://other.example/id",
+    )
+    expect(client.identitySite).toBe("https://other.example/id")
+    // A fresh iframe, at the chosen site's own `/proxy`.
+    expect(createElement).toHaveBeenCalledWith("iframe")
+    expect(createElement.mock.results[0]?.value.src).toBe(
+      "https://other.example/id/proxy",
+    )
+    client.destroy()
+  })
+
+  it("refuses a switchIdentitySite that is not an http(s) URL", () => {
+    const storage = { setItem: vi.fn(), removeItem: vi.fn(), getItem: vi.fn() }
+    vi.stubGlobal("localStorage", storage)
+
+    listener({
+      origin: "https://swarm-id.example.com",
+      source: contentWindow,
+      data: { type: "switchIdentitySite", site: "javascript:alert(1)" },
+    })
+
+    expect(storage.setItem).not.toHaveBeenCalled()
+    expect(client.identitySite).toBe("https://swarm-id.example.com")
   })
 
   describe("upload progress", () => {

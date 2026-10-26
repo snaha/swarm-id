@@ -26,6 +26,12 @@ export interface ConnectRequest {
    */
   partitionChallenge?: string
   /**
+   * The challenge as the URL carried it, whether or not it matched: present
+   * exactly when the proxy iframe opened this popup, so a message to
+   * `window.opener` reaches the iframe rather than the app page (#849).
+   */
+  challenge?: string
+  /**
    * What the app asked for (#862): `drives` is `"all"`, or a row per drive
    * for the done page's picker. Absent when the app asked for nothing, which
    * keeps the account default.
@@ -132,6 +138,7 @@ export const connectStore = {
       appDescription: params.get('appDescription') ?? undefined,
       appIcon: params.get('appIcon') ?? undefined,
       partitionChallenge,
+      challenge: challenge ?? undefined,
       permissions: parsePermissions(params.get('permissions')),
     }
     return true

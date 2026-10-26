@@ -8,6 +8,7 @@
 
   import ChevronLeft from '@lucide/svelte/icons/chevron-left'
   import CircleAlert from '@lucide/svelte/icons/circle-alert'
+  import { isHttpUrl } from '@snaha/swarm-id/internal'
 
   import { goto } from '$app/navigation'
   import { resolve } from '$app/paths'
@@ -19,8 +20,9 @@
   import UserAddFill from '$lib/components/icons/user-add-fill.svelte'
   import SignBackInDialog from '$lib/components/sign-back-in-dialog.svelte'
   import { Button } from '$lib/components/ui/button'
+  import { Input } from '$lib/components/ui/input'
   import UnlockDialog from '$lib/components/unlock-dialog.svelte'
-  import { deriveAppSecret, reusableAppSecret } from '$lib/connect-handshake'
+  import { chooseIdentitySite, deriveAppSecret, reusableAppSecret } from '$lib/connect-handshake'
   import { type DriveAttention, driveAttentionDescription } from '$lib/drives'
   import routes from '$lib/routes'
   import { accountsStore } from '$lib/stores/accounts.svelte'
@@ -37,6 +39,10 @@
   let checkingDrive = $state<{ account: Account; attention: DriveAttention } | undefined>(undefined)
   /** Shows the create/import choice while other accounts exist on the device. */
   let addingAccount = $state(false)
+  /** The "use another identity site" form (#849): open, and what is typed in it. */
+  let choosingSite = $state(false)
+  let siteUrl = $state('')
+  const siteUrlValid = $derived(isHttpUrl(siteUrl.trim()))
 
   const request = $derived(connectStore.request)
   const appIcon = $derived(
@@ -115,6 +121,12 @@
 
   function startAdding() {
     addingAccount = true
+  }
+
+  function submitSite() {
+    if (request && siteUrlValid) {
+      chooseIdentitySite(request, siteUrl.trim().replace(/\/+$/, ''))
+    }
   }
 
   /**
@@ -205,6 +217,38 @@
           </div>
         {:else}
           <AccountStartChoice />
+        {/if}
+
+        <!-- The site this popup runs on is the app's default; a user whose
+             account lives on another copy of Swarm ID names it here and
+             connects there instead (#849). -->
+        {#if choosingSite}
+          <form
+            class="flex w-full flex-col gap-2"
+            onsubmit={(event) => {
+              event.preventDefault()
+              submitSite()
+            }}
+          >
+            <label for="identity-site" class="text-sm font-bold">Your identity site</label>
+            <Input
+              id="identity-site"
+              type="url"
+              bind:value={siteUrl}
+              placeholder="https://"
+              class="font-mono"
+              aria-invalid={siteUrl.length > 0 && !siteUrlValid}
+            />
+            <p class="text-xs">
+              The app will use that site instead of this one. You will connect there, with a second
+              click.
+            </p>
+            <Button type="submit" size="sm" disabled={!siteUrlValid}>Continue there</Button>
+          </form>
+        {:else}
+          <Button variant="link" size="sm" onclick={() => (choosingSite = true)}>
+            My account is on another identity site
+          </Button>
         {/if}
       </div>
     {/if}

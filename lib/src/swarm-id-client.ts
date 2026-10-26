@@ -89,6 +89,7 @@ import type {
 } from "./types"
 import {
   IframeToParentMessageSchema,
+  IdentitySiteChosenMessageSchema,
   ParentToIframeMessageSchema,
   AppMetadataSchema,
   PermissionsSchema,
@@ -98,10 +99,25 @@ import { generatedAvatar } from "./utils/avatar"
 import { uint8ArrayToHex } from "./utils/hex"
 import { collectionPath } from "./utils/collection"
 import { PERMISSIONS_POPUP_MAX_MS, untilPopupClosed } from "./utils/popup"
-import { buildAuthUrl } from "./utils/url"
+import { buildAuthUrl, isHttpUrl, normalizeUrl } from "./utils/url"
 import { TimeoutError, withTimeout } from "./utils/promise"
 
 const DEFAULT_TIMEOUT_MS = 30000
+/**
+ * Where the app origin's storage remembers the identity site the user chose
+ * on the connect screen (#849), as a base URL; absent means the app's own
+ * `iframeOrigin`.
+ */
+const IDENTITY_SITE_STORAGE_KEY = "swarm-id-identity-site"
+const DEFAULT_IFRAME_PATH = "/proxy"
+
+function rememberedIdentitySite(): string | undefined {
+  try {
+    return localStorage.getItem(IDENTITY_SITE_STORAGE_KEY) ?? undefined
+  } catch {
+    return undefined
+  }
+}
 /** The largest delay `setTimeout` honours; past it, it fires almost at once. */
 const MAX_TIMER_DELAY_MS = 2 ** 31 - 1
 const DEFAULT_INITIALIZATION_TIMEOUT_MS = 30000
@@ -166,6 +182,11 @@ export class SwarmIdClient {
   private iframe: HTMLIFrameElement | undefined
   private iframeOrigin: string
   private iframePath: string
+  /** What the app configured; what `iframeOrigin` falls back to without a chosen site. */
+  private readonly defaultIframeOrigin: string
+  private readonly defaultIframePath: string
+  /** The connect popup `openAuthWindow` opened, while one is open: the only window besides the iframe this client listens to. */
+  private authPopup: Window | null = null
   private timeout: number
   private initializationTimeout: number
   private onConnectionChange?: (info: ConnectionInfo) => void
@@ -250,8 +271,11 @@ export class SwarmIdClient {
         "@snaha/swarm-id runs in the browser only: construct SwarmIdClient in code that runs there (an effect, onMount, or behind `typeof window !== 'undefined'`), not in a server render",
       )
     }
-    this.iframeOrigin = options.iframeOrigin
-    this.iframePath = options.iframePath || "/proxy"
+    this.defaultIframeOrigin = options.iframeOrigin
+    this.defaultIframePath = options.iframePath || DEFAULT_IFRAME_PATH
+    this.iframeOrigin = this.defaultIframeOrigin
+    this.iframePath = this.defaultIframePath
+    this.applyIdentitySite(rememberedIdentitySite())
     this.timeout = options.timeout ?? DEFAULT_TIMEOUT_MS
     this.initializationTimeout =
       options.initializationTimeout ?? DEFAULT_INITIALIZATION_TIMEOUT_MS
@@ -467,6 +491,22 @@ export class SwarmIdClient {
       // This is also what keeps a sibling or parent frame on the identity
       // origin from spoofing a push event like `connectionInfoChanged` or
       // `authSuccess`.
+      // The one message the connect popup sends the app page directly: it was
+      // opened from here, so its opener is this page, not the iframe (#849).
+      if (
+        this.authPopup !== null &&
+        event.source === this.authPopup &&
+        event.origin === new URL(this.iframeOrigin).origin &&
+        event.data?.type === "identitySiteChosen"
+      ) {
+        const chosen = IdentitySiteChosenMessageSchema.safeParse(event.data)
+        if (chosen.success) {
+          void this.useIdentitySite(chosen.data.site).catch((error) =>
+            console.error("[SwarmIdClient] Switching identity site:", error),
+          )
+        }
+        return
+      }
       if (!this.iframe || event.source !== this.iframe.contentWindow) {
         return
       }
@@ -565,6 +605,7 @@ export class SwarmIdClient {
           appKey: message.appKey,
           partition: message.partition,
           permissions: message.permissions,
+          identitySite: this.iframeOrigin,
         }
         this.lastConnectionInfo = info
         if (this.firstConnectionInfoResolve) {
@@ -576,6 +617,13 @@ export class SwarmIdClient {
         }
         break
       }
+
+      case "switchIdentitySite":
+        // The popup the iframe opened said the user wants another site (#849).
+        void this.useIdentitySite(message.site).catch((error) =>
+          console.error("[SwarmIdClient] Switching identity site:", error),
+        )
+        break
 
       case "initError":
         // Initialization error from proxy (e.g., origin validation failed)
@@ -1236,7 +1284,59 @@ export class SwarmIdClient {
       effectivePopupMode === "popup"
         ? window.open(authUrl, "_blank", "width=500,height=600")
         : window.open(authUrl, "_blank")
+    this.authPopup = popup
     return Boolean(popup)
+  }
+
+  /**
+   * Base URL of the identity site this client runs against (#849): the
+   * configured `iframeOrigin`, or the one the user chose on the connect screen,
+   * remembered in this origin's storage.
+   */
+  get identitySite(): string {
+    return this.iframeOrigin
+  }
+
+  /**
+   * Run against another identity site (#849), or `undefined` for the app's
+   * own again: remembers the choice for this app origin, tears the proxy
+   * iframe down and embeds one from the chosen site. The user then connects
+   * there — through the new iframe's own button, since no click is left to
+   * open a popup with.
+   *
+   * @throws {SwarmIdError} `invalid-request` when `site` is not an http(s) URL
+   */
+  async useIdentitySite(site: string | undefined): Promise<void> {
+    const base = site === undefined ? undefined : normalizeUrl(site)
+    if (base !== undefined && !isHttpUrl(base)) {
+      throw new SwarmIdError(
+        "invalid-request",
+        `Identity site is not an http(s) URL: ${site}`,
+      )
+    }
+    try {
+      if (base === undefined) {
+        localStorage.removeItem(IDENTITY_SITE_STORAGE_KEY)
+      } else {
+        localStorage.setItem(IDENTITY_SITE_STORAGE_KEY, base)
+      }
+    } catch {
+      // Storage unavailable: the choice holds for this page load only.
+    }
+    this.applyIdentitySite(base)
+    this.teardown()
+    this.setupMessageListener()
+    await this.initialize()
+  }
+
+  /**
+   * A chosen site is a base URL that carries its own path, so the proxy is at
+   * `/proxy` under it; the configured `iframePath` belongs to the default only.
+   */
+  private applyIdentitySite(base: string | undefined): void {
+    this.iframeOrigin = base ?? this.defaultIframeOrigin
+    this.iframePath =
+      base === undefined ? this.defaultIframePath : DEFAULT_IFRAME_PATH
   }
 
   /**
@@ -3691,6 +3791,11 @@ export class SwarmIdClient {
    * ```
    */
   destroy(): void {
+    this.teardown()
+  }
+
+  /** `destroy()`, minus the promise never to come back: `useIdentitySite` re-initializes after it. */
+  private teardown(): void {
     const destroyed = () =>
       new SwarmIdError("invalid-state", "Client destroyed")
 
@@ -3708,9 +3813,11 @@ export class SwarmIdClient {
       this.messageListener = undefined
     }
 
-    // Remove iframe
-    if (this.iframe && this.iframe.parentNode) {
-      this.iframe.parentNode.removeChild(this.iframe)
+    // Remove iframe. Dropped even when it was never attached: `initialize()`
+    // reads a held iframe as "already initialized", so keeping one here would
+    // refuse the re-initialize `useIdentitySite` runs next.
+    if (this.iframe) {
+      this.iframe.parentNode?.removeChild(this.iframe)
       this.iframe = undefined
     }
 

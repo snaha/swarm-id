@@ -131,6 +131,25 @@ function sendSecretToOpener(account: Account, request: ConnectRequest, appSecret
 }
 
 /**
+ * Tell whoever opened this popup that the user wants another identity site
+ * (#849), then close: the app's client re-embeds its proxy from there and the
+ * user connects on that site. The opener is the proxy iframe (our origin) when
+ * it opened us, which is exactly when the URL carried a challenge; else it is
+ * the app page.
+ */
+export function chooseIdentitySite(request: ConnectRequest, site: string): void {
+  const message = {
+    type: 'identitySiteChosen',
+    appOrigin: request.appOrigin,
+    challenge: request.challenge,
+    site,
+  }
+  const targetOrigin = request.challenge === undefined ? request.appOrigin : window.location.origin
+  window.opener?.postMessage(message, targetOrigin)
+  window.close()
+}
+
+/**
  * The app secret for this account and app, derived at unlock. Only this
  * crosses to the done page: the seed entropy itself stays with the ceremony
  * that produced it.

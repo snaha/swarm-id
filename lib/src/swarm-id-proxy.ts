@@ -922,6 +922,24 @@ export class SwarmIdProxy {
       this.applyAccountDelta(message.delta.snapshot)
       return
     }
+    if (message.type === "identitySiteChosen") {
+      // The user wants another identity site (#849). Only this attempt's own
+      // popup may say so, and only for this app; then this iframe's part is
+      // over — the app's client tears it down and embeds the chosen site's.
+      if (
+        !this.pendingChallenge ||
+        message.challenge !== this.pendingChallenge ||
+        message.appOrigin !== this.parentOrigin
+      ) {
+        console.warn("[Proxy] identitySiteChosen from another popup — ignoring")
+        return
+      }
+      this.pendingChallenge = undefined
+      localStorage.removeItem(STORAGE_CHALLENGE_KEY)
+      this.endRefusedConnect()
+      this.sendToParent({ type: "switchIdentitySite", site: message.site })
+      return
+    }
     if (message.type === "setSecret") {
       // Challenge FIRST, so the origin check below can tell whose handover it
       // is refusing. Both are guards before anything is read out of the
@@ -2221,7 +2239,9 @@ export class SwarmIdProxy {
       // Handle same-origin popup messages (storage partitioning postMessage fallback)
       if (
         event.origin === window.location.origin &&
-        (type === "setSecret" || type === "grantUpdated")
+        (type === "setSecret" ||
+          type === "grantUpdated" ||
+          type === "identitySiteChosen")
       ) {
         const popupResult = PopupToIframeMessageSchema.safeParse(event.data)
         if (!popupResult.success) {

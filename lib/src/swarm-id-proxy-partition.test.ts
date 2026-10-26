@@ -591,6 +591,37 @@ describe("SwarmIdProxy partitioned write enablement", () => {
   // slot and overwrite each other. Safe — `hydrate` refuses a snapshot whose
   // `batchId` differs, so the loser cold-acquires — but a hint that stops
   // hinting exactly when there are two writers to hint for is no hint.
+  // The popup says the user's account is on another identity site (#849):
+  // this iframe's part is to tell the app, which re-embeds from there.
+  it("relays the popup's identitySiteChosen to the parent, for this attempt only", async () => {
+    const challenge = await startPartitionedConnect()
+
+    await dispatch(
+      {
+        type: "identitySiteChosen",
+        appOrigin: PARENT_ORIGIN,
+        challenge: "not-this-attempt",
+        site: "https://other.example/id",
+      },
+      ID_ORIGIN,
+    )
+    expect(messagesOfType("switchIdentitySite")).toEqual([])
+
+    await dispatch(
+      {
+        type: "identitySiteChosen",
+        appOrigin: PARENT_ORIGIN,
+        challenge,
+        site: "https://other.example/id",
+      },
+      ID_ORIGIN,
+    )
+    expect(messagesOfType("switchIdentitySite")).toEqual([
+      { type: "switchIdentitySite", site: "https://other.example/id" },
+    ])
+    expect(localStorageFake.getItem(STORAGE_CHALLENGE_KEY)).toBeNull()
+  })
+
   it("does not evict another batch's lease-cache entry", async () => {
     const accountId = "aa".repeat(20)
     const otherBatch = "dd".repeat(32)

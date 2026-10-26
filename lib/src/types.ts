@@ -925,6 +925,13 @@ export const ConnectionInfoSchema = z.object({
    * absent without a session.
    */
   permissions: AppPermissionsSchema.optional(),
+  /**
+   * Base URL of the identity site this session runs against (#849): the app's
+   * `iframeOrigin` unless the user chose another one on the connect screen.
+   * Filled in by the client, not the proxy, which cannot know what it is
+   * embedded as.
+   */
+  identitySite: z.string().optional(),
 })
 
 export type ConnectionInfo = z.infer<typeof ConnectionInfoSchema>
@@ -1724,6 +1731,12 @@ export const ConnectionInfoChangedMessageSchema = z.object({
   permissions: AppPermissionsSchema.optional(),
 })
 
+/** The proxy relaying the popup's `identitySiteChosen` to the app (#849). */
+export const SwitchIdentitySiteMessageSchema = z.object({
+  type: z.literal("switchIdentitySite"),
+  site: z.string().url(),
+})
+
 export const ConnectResponseMessageSchema = z.object({
   type: z.literal("connectResponse"),
   requestId: z.string(),
@@ -1984,6 +1997,7 @@ export const IframeToParentMessageSchema = z.discriminatedUnion("type", [
   ErrorMessageSchema,
   ConnectionInfoChangedMessageSchema,
   ConnectResponseMessageSchema,
+  SwitchIdentitySiteMessageSchema,
   IsConnectedResponseMessageSchema,
   GetNodeInfoResponseMessageSchema,
   GsocMineResponseMessageSchema,
@@ -2222,9 +2236,24 @@ export const SetSecretMessageSchema = z.object({
   data: AuthDataSchema,
 })
 
+/**
+ * The connect popup saying the user wants another identity site (#849):
+ * `site` is the base URL they typed. The iframe forwards it to the app as
+ * `switchIdentitySite`; the app's client then re-embeds the proxy from there.
+ * `challenge` is absent when the popup was opened by the app page rather than
+ * the iframe — the message then goes to the page directly.
+ */
+export const IdentitySiteChosenMessageSchema = z.object({
+  type: z.literal("identitySiteChosen"),
+  appOrigin: z.string(),
+  challenge: z.string().optional(),
+  site: z.string().url(),
+})
+
 export const PopupToIframeMessageSchema = z.discriminatedUnion("type", [
   SetSecretMessageSchema,
   GrantUpdatedMessageSchema,
+  IdentitySiteChosenMessageSchema,
 ])
 
 export type SetSecretMessage = z.infer<typeof SetSecretMessageSchema>

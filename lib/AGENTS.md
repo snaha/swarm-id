@@ -18,8 +18,10 @@ knowing by name:
 - **Iframe → Parent**: `proxyReady`, `initError`, `authStatusResponse`, `authSuccess`,
   `connectResponse`, `connectionInfoChanged` (what `initialize()` awaits), `uploadDataResponse`,
   `error`
-- **Popup → Iframe**: `setSecret` — the partitioned handover, below — and `grantUpdated`, the
-  permissions popup handing a partitioned session its new grant as an account delta (#711)
+- **Popup → Iframe**: `setSecret` — the partitioned handover, below — `grantUpdated`, the
+  permissions popup handing a partitioned session its new grant as an account delta (#711), and
+  `identitySiteChosen`, the connect popup naming the site the user wants instead; the proxy relays
+  it to the app as `switchIdentitySite` and the client re-embeds the proxy from there (#849)
 
 Two authentication paths, decided by the storage probe (`utils/storage-probe.ts`):
 
