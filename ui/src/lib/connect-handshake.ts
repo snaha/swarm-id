@@ -145,11 +145,14 @@ function sendSecretToOpener(account: Account, request: ConnectRequest, appSecret
 /**
  * Tell whoever opened this popup that the user wants another identity site
  * (#849), then close: the app's client re-embeds its proxy from there and the
- * user connects on that site. The opener is the proxy iframe (our origin) when
- * it opened us, which is exactly when the URL carried a challenge; else it is
- * the app page. Also remembered here, in this site's first-party store: the
- * next app's proxy reads it when the store is shared, and the next connect
- * popup offers it when not, so the site is typed once per device.
+ * user connects on that site. With a challenge the proxy is listening for it,
+ * and it is either our opener or, when the app page had to open us because
+ * the browser refused the iframe a popup (#751), among the opener's frames —
+ * the same two deliveries as the session handover. Without one the app page
+ * opened us on shared storage and takes the choice itself. Also remembered
+ * here, in this site's first-party store: the next app's proxy reads it when
+ * the store is shared, and the next connect popup offers it when not, so the
+ * site is typed once per device.
  */
 export function chooseIdentitySite(request: ConnectRequest, site: string): void {
   try {
@@ -163,8 +166,17 @@ export function chooseIdentitySite(request: ConnectRequest, site: string): void 
     challenge: request.challenge,
     site,
   }
-  const targetOrigin = request.challenge === undefined ? request.appOrigin : window.location.origin
-  window.opener?.postMessage(message, targetOrigin)
+  const opener: Window | null = window.opener
+  if (opener) {
+    if (request.challenge === undefined) {
+      opener.postMessage(message, request.appOrigin)
+    } else {
+      opener.postMessage(message, window.location.origin)
+      for (let i = 0; i < opener.length; i++) {
+        opener[i].postMessage(message, window.location.origin)
+      }
+    }
+  }
   window.close()
 }
 

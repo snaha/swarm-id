@@ -12,7 +12,7 @@ import { BatchId, EthAddress, PrivateKey } from '@ethersphere/bee-js'
 import { AuthDataSchema, type ConnectedApp, type SyncedAccount } from '@snaha/swarm-id/internal'
 import { describe, expect, it, vi } from 'vitest'
 
-import { commitConnect, partitionHandoverAccount } from '$lib/connect-handshake'
+import { chooseIdentitySite, commitConnect, partitionHandoverAccount } from '$lib/connect-handshake'
 import type { Account } from '$lib/types'
 
 const APP_ORIGIN = 'https://dapp.example.com'
@@ -159,6 +159,45 @@ describe('commitConnect handover', () => {
     ]
     expect(openerPost).toHaveBeenCalledWith(...expected)
     for (const post of framePosts) expect(post).toHaveBeenCalledWith(...expected)
+  })
+})
+
+// Where the site choice goes (#849) follows who can act on it: the proxy, by
+// challenge, is the opener or one of the opener's frames (#751); without a
+// challenge the app page opened the popup and takes the choice itself.
+describe('chooseIdentitySite', () => {
+  const stub = () => {
+    const opener = { postMessage: vi.fn(), length: 1, 0: { postMessage: vi.fn() } }
+    vi.stubGlobal('window', {
+      location: { origin: 'https://id.example.com' },
+      opener,
+      close: vi.fn(),
+    })
+    return opener
+  }
+  const request = { appOrigin: APP_ORIGIN, appName: 'dApp' }
+  const chosen = expect.objectContaining({ type: 'identitySiteChosen', site: 'https://b.example' })
+
+  it('with a challenge, posts to the opener and its frames on our own origin', () => {
+    const opener = stub()
+    try {
+      chooseIdentitySite({ ...request, challenge: 'attempt-7' }, 'https://b.example')
+    } finally {
+      vi.unstubAllGlobals()
+    }
+    expect(opener.postMessage).toHaveBeenCalledWith(chosen, 'https://id.example.com')
+    expect(opener[0].postMessage).toHaveBeenCalledWith(chosen, 'https://id.example.com')
+  })
+
+  it('without a challenge, posts to the opener on the app origin', () => {
+    const opener = stub()
+    try {
+      chooseIdentitySite(request, 'https://b.example')
+    } finally {
+      vi.unstubAllGlobals()
+    }
+    expect(opener.postMessage).toHaveBeenCalledWith(chosen, APP_ORIGIN)
+    expect(opener[0].postMessage).not.toHaveBeenCalled()
   })
 })
 
