@@ -4,16 +4,22 @@ import { BatchId, EthAddress } from '@ethersphere/bee-js'
 import {
   type AccessMethod,
   type Account as AccountRecord,
+  type AccountSettings,
   type ConnectedApp,
   type Device,
+  GRANT_CLOCKS,
   type LocalVault,
+  type PermissionName,
   type PostageStamp,
   PostageStampSchemaV1,
+  SETTINGS_CLOCKS,
   type SyncedAccount,
   createAccountsStorageManager,
   isScratchDrive,
   isSignedOutAccount,
+  mergeAccountSettings,
   serializePostageStamp,
+  stampClocks,
 } from '@snaha/swarm-id/internal'
 
 import { browser } from '$app/environment'
@@ -21,7 +27,10 @@ import { browser } from '$app/environment'
 import { drivesNeedingAttention, soonestDriveExpiry } from '$lib/drives'
 import { daysToMs } from '$lib/duration'
 
-type AccountSettings = { appSessionDuration?: number }
+/** What an app holds that the user edits on its page, each field on its own clock (`GRANT_CLOCKS`). */
+export type AppPermissionsPatch = Partial<
+  Pick<ConnectedApp, 'drives' | 'dataSharing' | 'writeAccess' | 'sessionDuration'>
+>
 
 /**
  * The device-local tail of the account record, mirroring the lib's `Account`
@@ -343,9 +352,25 @@ export class Account {
 
   /** How long app connections stay valid, set in days (stored as ms). */
   setAppConnectionDays(days: number) {
+    this.#setSettings({ appSessionDuration: daysToMs(days) })
+  }
+
+  /** The account-wide default of a sharing switch, every unpinned app follows (#885). */
+  setSharingDefault(permission: PermissionName, on: boolean) {
+    this.#setSettings({ [permission]: on })
+  }
+
+  /**
+   * Each switch on its own clock (`SETTINGS_CLOCKS`), the rest on `settingsAt`.
+   * A switch-only patch leaves `settingsAt` alone: bumping it would carry this
+   * copy's `appSessionDuration` over a newer one made elsewhere.
+   */
+  #setSettings(patch: AccountSettings) {
     const now = Date.now()
-    this.settings = { ...this.settings, appSessionDuration: daysToMs(days) }
-    this.settingsAt = now
+    this.settings = { ...this.settings, ...stampClocks(patch, SETTINGS_CLOCKS, now) }
+    if (Object.keys(patch).some((field) => !(field in SETTINGS_CLOCKS))) {
+      this.settingsAt = now
+    }
     this.lastModified = now
     this.#commit()
   }
@@ -377,19 +402,21 @@ export class Account {
   }
 
   /**
-   * Set the drives an app may write to — or back to the account default with
-   * `undefined` (#862). The grant carries through the cross-device merge on
-   * its OWN clock: it says nothing about whether the app is still connected,
-   * and a clock that ranked the whole entry let this edit outrank a revoke
-   * made on another device (#681). No-op when the app has no entry.
+   * Change part of what an app holds — its drives (#862), a sharing switch or
+   * its session duration pinned (or unpinned with `undefined`, to follow the
+   * account default again, #885) — each field on its own clock. The grant
+   * carries through the cross-device merge on those, not the entry's: it
+   * says nothing about whether the app is still connected, and a clock that
+   * ranked the whole entry let a drive edit outrank a revoke made on another
+   * device (#681). No-op when the app has no entry.
    */
-  setAppDrives(appUrl: string, drives: ConnectedApp['drives']) {
+  setAppPermissions(appUrl: string, patch: AppPermissionsPatch) {
     if (!this.connectedApps.some((app) => app.appUrl === appUrl)) {
       return
     }
     const now = Date.now()
     this.connectedApps = this.connectedApps.map((app) =>
-      app.appUrl === appUrl ? { ...app, drives, drivesAt: now } : app,
+      app.appUrl === appUrl ? { ...app, ...stampClocks(patch, GRANT_CLOCKS, now) } : app,
     )
     this.lastModified = now
     this.#commit()
@@ -578,12 +605,14 @@ export class Account {
       this.defaultPostageStampBatchID = fields.defaultPostageStampBatchID
       this.defaultStampAt = fields.defaultStampAt
     }
-    if (
-      fields.settingsAt !== undefined &&
-      fields.settingsAt > (this.settingsAt ?? this.createdAt)
-    ) {
-      this.settings = fields.settings
-      this.settingsAt = fields.settingsAt
+    if (fields.settingsAt !== undefined) {
+      // Whole on `settingsAt`, each switch on its own clock (#885).
+      const merged = mergeAccountSettings(
+        { value: this.settings, at: this.settingsAt ?? this.createdAt },
+        { value: fields.settings, at: fields.settingsAt },
+      )
+      this.settings = merged.value
+      this.settingsAt = merged.at
     }
     this.#commit({ skipSync: true })
   }
@@ -598,7 +627,18 @@ function revoked(app: ConnectedApp, tombstone: boolean): ConnectedApp {
     // routing: without this a removed app reconnects still granted the drives
     // it had, and the picker's default choice writes nothing to clear them
     // (#862). On the grant's own clock so the reset wins the merge.
-    ...(tombstone ? { drives: undefined, drivesAt: now } : {}),
+    ...(tombstone
+      ? stampClocks(
+          {
+            drives: undefined,
+            dataSharing: undefined,
+            writeAccess: undefined,
+            sessionDuration: undefined,
+          },
+          GRANT_CLOCKS,
+          now,
+        )
+      : {}),
     // Clear only the auth material; keep `lastConnectedAt` so the connect flow
     // can still order this account by when it was last used (a revoked app must
     // not read as "never used").

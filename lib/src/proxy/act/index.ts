@@ -33,11 +33,23 @@ type ActUploadOptions = UploadOptions & { beeCompatible?: boolean }
  * the origin-bound app key and the account-wide sharing key (#519) — and does
  * not know which one a share was made out to, so every reader/publisher entry
  * point takes candidates and uses the one the ACT names.
+ *
+ * A candidate may be **denied** (#885): it is still tried, and when it is the
+ * one the ACT names the call fails with that error instead of succeeding. So
+ * a share made out to a key the user has switched off reads as a permission
+ * problem, not as "not a grantee".
  */
-export type ActKeyCandidates = Uint8Array | Uint8Array[]
+export type ActKeyCandidate =
+  | Uint8Array
+  | { privateKey: Uint8Array; denied: Error }
+export type ActKeyCandidates = ActKeyCandidate | ActKeyCandidate[]
 
-function candidateKeys(keys: ActKeyCandidates): Uint8Array[] {
-  return Array.isArray(keys) ? keys : [keys]
+function candidateKeys(
+  keys: ActKeyCandidates,
+): { privateKey: Uint8Array; denied?: Error }[] {
+  return (Array.isArray(keys) ? keys : [keys]).map((key) =>
+    key instanceof Uint8Array ? { privateKey: key } : key,
+  )
 }
 
 /**
@@ -52,11 +64,12 @@ function findPublisherKey(
   derived: ReturnType<typeof deriveKeys>
   entry: ActEntry
 } {
-  for (const privateKey of candidateKeys(keys)) {
+  for (const { privateKey, denied } of candidateKeys(keys)) {
     const pub = publicKeyFromPrivate(privateKey)
     const derived = deriveKeys(privateKey, pub.x, pub.y)
     const entry = findEntryByLookupKey(entries, derived.lookupKey)
     if (entry) {
+      if (denied) throw denied
       return { privateKey, derived, entry }
     }
   }
@@ -351,12 +364,15 @@ export async function decryptActReference(
   // Each candidate key, first as a grantee (ECDH with the publisher), then as
   // the publisher itself (ECDH with its own key) — all local, the manifest is
   // already here.
-  for (const readerPrivateKey of candidateKeys(readerPrivateKeys)) {
+  for (const { privateKey: readerPrivateKey, denied } of candidateKeys(
+    readerPrivateKeys,
+  )) {
     const readerPubKey = publicKeyFromPrivate(readerPrivateKey)
     for (const peer of [publisherPubKey, readerPubKey]) {
       const keys = deriveKeys(readerPrivateKey, peer.x, peer.y)
       const entry = findEntryByLookupKey(entries, keys.lookupKey)
       if (!entry) continue
+      if (denied) throw denied
       const accessKey = counterModeDecrypt(
         entry.encryptedAccessKey,
         keys.accessKeyDecryptionKey,

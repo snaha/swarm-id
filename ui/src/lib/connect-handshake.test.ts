@@ -9,10 +9,11 @@
  * (#578).
  */
 import { BatchId, EthAddress, PrivateKey } from '@ethersphere/bee-js'
-import { AuthDataSchema, type SyncedAccount } from '@snaha/swarm-id/internal'
-import { describe, expect, it } from 'vitest'
+import { AuthDataSchema, type ConnectedApp, type SyncedAccount } from '@snaha/swarm-id/internal'
+import { describe, expect, it, vi } from 'vitest'
 
-import { partitionHandoverAccount } from '$lib/connect-handshake'
+import { commitConnect, partitionHandoverAccount } from '$lib/connect-handshake'
+import type { Account } from '$lib/types'
 
 const APP_ORIGIN = 'https://dapp.example.com'
 const DEFAULT_BATCH = 'cc'.repeat(32)
@@ -115,5 +116,41 @@ describe('partitionHandoverAccount', () => {
     )
 
     expect(AuthDataSchema.safeParse(wire).success).toBe(true)
+  })
+})
+
+// The connection's deadline: the app's own session length (#885) over the
+// account's; and the grant made on the connect screen, each field on its
+// own clock.
+describe('commitConnect', () => {
+  const NOW = 1_000_000
+  const connect = (existing: Partial<ConnectedApp>) => {
+    const saved: ConnectedApp[] = []
+    const account = {
+      settings: { appSessionDuration: 500 },
+      connectedApps: [{ appUrl: APP_ORIGIN, appName: 'dApp', lastConnectedAt: 1, ...existing }],
+      connectApp: (app: ConnectedApp) => saved.push(app),
+    } as unknown as Account
+    vi.useFakeTimers({ toFake: ['Date'] })
+    try {
+      vi.setSystemTime(NOW)
+      commitConnect(account, { appOrigin: APP_ORIGIN, appName: 'dApp' }, '33'.repeat(32), {
+        dataSharing: true,
+      })
+    } finally {
+      vi.useRealTimers()
+    }
+    return saved[0]
+  }
+
+  it("lasts the app's own session length when it has one, else the account's", () => {
+    expect(connect({ sessionDuration: 7 }).connectedUntil).toBe(NOW + 7)
+    expect(connect({}).connectedUntil).toBe(NOW + 500)
+  })
+
+  it("stamps the clock of each switch granted, not the drives'", () => {
+    const connection = connect({})
+    expect(connection).toMatchObject({ dataSharing: true, dataSharingAt: NOW })
+    expect(connection.drivesAt).toBeUndefined()
   })
 })

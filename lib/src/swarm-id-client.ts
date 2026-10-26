@@ -84,6 +84,7 @@ import type {
   Drive,
   DriveRequest,
   Permissions,
+  AppPermissions,
   DriveTargetOptions,
 } from "./types"
 import {
@@ -563,6 +564,7 @@ export class SwarmIdClient {
           identity: message.identity,
           appKey: message.appKey,
           partition: message.partition,
+          permissions: message.permissions,
         }
         this.lastConnectionInfo = info
         if (this.firstConnectionInfoResolve) {
@@ -1096,18 +1098,73 @@ export class SwarmIdClient {
    */
   async requestDrives(drives: DriveRequest): Promise<Drive[]> {
     this.ensureReady()
-    await this.requestPermissions({ drives })
+    await this.openPermissions({ drives })
     return this.getDrives()
   }
 
   /**
-   * The general form behind {@link requestDrives}: drives are the first
-   * permission, and the next ones join `permissions` rather than adding a
-   * method each. Opened the way `connect()` opens: from the parent while
-   * the iframe's store is shared, which keeps the click; otherwise by the
-   * iframe, so a partitioned session is handed the new grant directly.
+   * What this app may do with the account-wide sharing key (#885): read what
+   * was shared with it (`dataSharing`), and publish or manage shares as the
+   * identity (`writeAccess`). Both are on unless the user switched them off,
+   * for every app or for this one. A call that needs one that is off rejects
+   * with `permission-denied`; check here first to ask the user before that
+   * happens. The same two booleans ride `connectionInfo.permissions`.
+   *
+   * @example
+   * ```typescript
+   * if (!(await client.getPermissions()).dataSharing) {
+   *   await client.requestPermissions({ dataSharing: true })
+   * }
+   * ```
    */
-  private async requestPermissions(permissions: Permissions): Promise<void> {
+  async getPermissions(): Promise<AppPermissions> {
+    this.ensureReady()
+    const response = await this.sendRequest<{
+      type: "getPermissionsResponse"
+      requestId: string
+      permissions: AppPermissions
+    }>({
+      type: "getPermissions",
+      requestId: this.generateRequestId(),
+    })
+    return response.permissions
+  }
+
+  /**
+   * Ask the user for more (#711, #885): drives, and the two sharing switches.
+   * Opens the "Permissions for <app>" popup showing only what is asked —
+   * each drive row empty, each switch off — and resolves once it is closed
+   * with what the app holds, granted or not; a closed popup grants nothing.
+   * When every switch asked for is already on and no drives were asked for,
+   * nothing is opened. Call it from a user gesture, as `connect()`.
+   *
+   * {@link requestDrives} is the drives-only form.
+   *
+   * @example
+   * ```typescript
+   * const { dataSharing } = await client.requestPermissions({ dataSharing: true })
+   * if (!dataSharing) return showSharedInboxUnavailable()
+   * ```
+   * @throws {SwarmIdError} `not-authenticated` when the app is not connected
+   * @throws {SwarmIdError} `popup-blocked` when the browser blocked the popup
+   */
+  async requestPermissions(permissions: Permissions): Promise<AppPermissions> {
+    this.ensureReady()
+    const held = this.lastConnectionInfo?.permissions
+    const satisfied =
+      permissions.drives === undefined &&
+      (!permissions.dataSharing || held?.dataSharing === true) &&
+      (!permissions.writeAccess || held?.writeAccess === true)
+    if (!satisfied) await this.openPermissions(permissions)
+    return this.getPermissions()
+  }
+
+  /**
+   * Opened the way `connect()` opens: from the parent while the iframe's
+   * store is shared, which keeps the click; otherwise by the iframe, so a
+   * partitioned session is handed the new grant directly.
+   */
+  private async openPermissions(permissions: Permissions): Promise<void> {
     const account = this.lastConnectionInfo?.identity?.id
     if (!account) {
       throw new SwarmIdError(

@@ -1,0 +1,25 @@
+/* Copyright 2026 The Swarm Authors. All rights reserved. */
+/* SPDX-License-Identifier: Apache-2.0 */
+
+/* Screenshot figures, shared by the Introduction and Drives & Permissions pages. */
+.intro-shots {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 1.5rem;
+}
+.intro-shots figure {
+  margin: 0;
+}
+.intro-wide {
+  margin-top: 1rem;
+}
+.intro-wide img,
+.intro-shots img {
+  border: 1px solid var(--sl-color-hairline);
+  border-radius: 0.5rem;
+}
+.intro-shots figcaption {
+  font-size: var(--sl-text-sm);
+  color: var(--sl-color-gray-2);
+  margin-top: 0.5rem;
+}

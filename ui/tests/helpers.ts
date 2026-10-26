@@ -489,3 +489,27 @@ export async function beeReachable(beeUrl: string = BEE_API_URL): Promise<boolea
     return false
   }
 }
+
+/**
+ * Ask for more from the demo's Permissions page (`requestPermissions()`):
+ * tick `picks` under "Ask now" — "Data sharing", "Write access", "All drives",
+ * "A regular drive", "A scratch drive" — and return the popup it opens.
+ */
+export async function requestFromDemo(page: Page, origin: string, picks: string[]) {
+  await page.goto(`${origin}/permissions`)
+  // The session is restored on load, and the request button is disabled
+  // until then: wait for the page to show what the app holds.
+  await expect(page.getByText(/^Data sharing: (on|off)$/)).toBeVisible({ timeout: 15000 })
+  for (const pick of picks) {
+    // "Data sharing" / "Write access" exist under "Ask at connect" too: the
+    // last one is "Ask now"'s.
+    await page.getByRole('checkbox', { name: pick, exact: true }).last().click()
+  }
+  // Under a blocked iframe popup the page opens it only after the proxy has
+  // answered, which is a round trip past the action timeout on a slow runner.
+  const popupPromise = page.waitForEvent('popup', { timeout: 15000 })
+  await page.getByRole('button', { name: 'Request permissions' }).click()
+  const popup = await popupPromise
+  await popup.waitForLoadState()
+  return popup
+}

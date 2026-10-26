@@ -11,9 +11,17 @@
     class?: string
     disabled?: boolean
     'aria-label'?: string
+    /** Given, the click is the caller's: `checked` then follows its state, not the click. */
+    onclick?: () => void
   }
 
-  let { checked = $bindable(), class: className, disabled = false, ...restProps }: Props = $props()
+  let {
+    checked = $bindable(),
+    class: className,
+    disabled = false,
+    onclick,
+    ...restProps
+  }: Props = $props()
 </script>
 
 <button
@@ -22,7 +30,7 @@
   aria-checked={checked}
   data-slot="switch"
   {disabled}
-  onclick={() => (checked = !checked)}
+  onclick={() => (onclick ? onclick() : (checked = !checked))}
   class={cn(
     'focus-visible:ring-ring/50 inline-flex h-5 w-9 shrink-0 cursor-pointer items-center rounded-full border border-transparent transition-colors outline-none focus-visible:ring-3 disabled:cursor-not-allowed disabled:opacity-50',
     checked ? 'bg-primary' : 'bg-input',

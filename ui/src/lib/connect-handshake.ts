@@ -15,10 +15,12 @@
  */
 import {
   type ConnectedApp,
+  GRANT_CLOCKS,
   type SyncedAccount,
   appSessionDuration,
   deriveSecret,
   serializeSyncedAccount,
+  stampClocks,
   stampsReachableByApp,
 } from '@snaha/swarm-id/internal'
 
@@ -29,26 +31,26 @@ import { networkSettingsStore } from '$lib/stores/network-settings.svelte'
 import type { Account } from '$lib/types'
 
 /**
- * The drives the user granted on the connect screen (#862). Absent, the
- * entry's grant is left as it was: nothing for a first connect, the earlier
- * choice for a reconnect.
+ * What the user granted on the connect screen: the drives (#862), and the
+ * sharing switches turned on there, pinned for this app (#885). A field
+ * left out is left as it was on the entry: nothing for a first connect, the
+ * earlier choice for a reconnect.
  */
-export interface DriveGrant {
-  drives: ConnectedApp['drives']
-}
+export type ConnectGrant = Partial<Pick<ConnectedApp, 'drives' | 'dataSharing' | 'writeAccess'>>
 
 /**
  * Write the connected-app entry into the account record (this is what fires the
  * storage event the proxy iframe authenticates from). The grant goes in with
- * it, on its own clock, so the handover below already sees it.
+ * it, each field on its own clock, so the handover below already sees it.
  */
 function saveConnection(
   account: Account,
   request: ConnectRequest,
   appSecret: string,
-  grant: DriveGrant | undefined,
+  grant: ConnectGrant | undefined,
 ): void {
   const now = Date.now()
+  const existing = account.connectedApps.find((app) => app.appUrl === request.appOrigin)
   const connection: ConnectedApp = {
     appUrl: request.appOrigin,
     appName: request.appName,
@@ -56,8 +58,8 @@ function saveConnection(
     appDescription: request.appDescription,
     appSecret,
     lastConnectedAt: now,
-    connectedUntil: now + appSessionDuration(account.settings),
-    ...(grant ? { drives: grant.drives, drivesAt: now } : {}),
+    connectedUntil: now + appSessionDuration(account.settings, existing),
+    ...(grant ? stampClocks(grant, GRANT_CLOCKS, now) : {}),
   }
   account.connectApp(connection)
 }
@@ -161,7 +163,7 @@ export function commitConnect(
   account: Account,
   request: ConnectRequest,
   appSecret: string,
-  grant?: DriveGrant,
+  grant?: ConnectGrant,
 ): void {
   saveConnection(account, request, appSecret, grant)
   sendSecretToOpener(account, request, appSecret)

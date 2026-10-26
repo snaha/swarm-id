@@ -308,6 +308,50 @@ describe("SwarmIdClient connect()", () => {
       }
     })
 
+    // #885: a switch already on is not asked for again; a drive always is.
+    it("skips the popup when every switch asked for is already on", async () => {
+      vi.spyOn(internals(client), "ensureReady").mockImplementation(() => {})
+      setStorageShared(true)
+      internals(client).lastConnectionInfo = {
+        identity: { id: "aa".repeat(20) },
+        permissions: { dataSharing: true, writeAccess: false },
+      }
+      const held = { dataSharing: true, writeAccess: false }
+      vi.spyOn(client, "getPermissions").mockResolvedValue(held)
+
+      await expect(
+        client.requestPermissions({ dataSharing: true }),
+      ).resolves.toBe(held)
+      expect(window.open).not.toHaveBeenCalled()
+    })
+
+    it("opens the popup for a switch that is off", async () => {
+      vi.useFakeTimers()
+      try {
+        vi.spyOn(internals(client), "ensureReady").mockImplementation(() => {})
+        setStorageShared(true)
+        internals(client).lastConnectionInfo = {
+          identity: { id: "aa".repeat(20) },
+          permissions: { dataSharing: true, writeAccess: false },
+        }
+        const held = { dataSharing: true, writeAccess: true }
+        vi.spyOn(client, "getPermissions").mockResolvedValue(held)
+        vi.mocked(window.open).mockReturnValueOnce({ closed: true } as Window)
+
+        const request = client.requestPermissions({ writeAccess: true })
+        await vi.advanceTimersByTimeAsync(POPUP_WATCH_MS)
+        await expect(request).resolves.toBe(held)
+
+        const url = vi.mocked(window.open).mock.calls[0][0] as string
+        const params = new URLSearchParams(url.split("#")[1])
+        expect(JSON.parse(params.get("permissions")!)).toEqual({
+          writeAccess: true,
+        })
+      } finally {
+        vi.useRealTimers()
+      }
+    })
+
     it("refuses a permissions request without a session", async () => {
       vi.spyOn(internals(client), "ensureReady").mockImplementation(() => {})
       setStorageShared(true)

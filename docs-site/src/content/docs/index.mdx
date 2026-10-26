@@ -68,13 +68,14 @@ something with one chosen reader, which is roughly what any app on Swarm does.
 ## One account, every app, every device
 
 Swarm ID is also where people manage that account. The identity site lists the apps they have
-connected, lets them disconnect one, and holds their **drives**: prepaid storage on Swarm that any
-connected app can write to.
+connected, lets them disconnect one and decide what each may do, and holds their **drives**:
+prepaid storage on Swarm that a connected app writes to once it is granted one. See
+[Drives & Permissions](./drives-and-permissions/).
 
 <div class="intro-wide">
   <Image
     src={identityApps}
-    alt="The Swarm ID site showing a connected app, the demo, with a Connected badge and a setting for how long apps stay connected"
+    alt="The Apps tab of the Swarm ID site: how long apps stay connected, the data sharing and write access switches, and the demo app listed with a Custom permissions badge"
   />
 </div>
 
@@ -141,12 +142,3 @@ recovery phrase, so it is the same identity on any host; what a user sets up aga
     href="./own-bee-node/"
   />
 </CardGrid>
-
-<style>{`
-  .intro-shots { display: grid; grid-template-columns: 1fr; gap: 1.5rem; }
-  .intro-shots figure { margin: 0; }
-  .intro-wide { margin-top: 1rem; }
-  .intro-wide img,
-  .intro-shots img { border: 1px solid var(--sl-color-hairline); border-radius: 0.5rem; }
-  .intro-shots figcaption { font-size: var(--sl-text-sm); color: var(--sl-color-gray-2); margin-top: 0.5rem; }
-`}</style>

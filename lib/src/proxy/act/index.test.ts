@@ -905,6 +905,70 @@ describe("identity-level keys: a reader or publisher holding several keys", () =
     ).resolves.toEqual([newGrantee.compressedPublicKey])
   })
 
+  // #885: the user may switch the sharing key off for an app. It is still
+  // tried, so a share made out to it fails with the denial — a permission
+  // problem — rather than with "not a grantee", which the app key alone would
+  // say. A share made out to the app key is untouched.
+  it("fails with a denied candidate's error exactly when the ACT names it", async () => {
+    const { publisher, appKey, sharingKey, target } = setup(140)
+    const denied = new Error("sharing switched off")
+    const candidates = [
+      appKey.privateKey,
+      { privateKey: sharingKey.privateKey, denied },
+    ]
+    const toSharing = await createActForContent(
+      target,
+      randomBytes(32),
+      publisher.privateKey,
+      [sharingKey.publicKey],
+    )
+    const contentRef = randomBytes(32)
+    const toApp = await createActForContent(
+      target,
+      contentRef,
+      publisher.privateKey,
+      [appKey.publicKey],
+    )
+
+    await expect(
+      decryptActReference(
+        mockBee,
+        toSharing.encryptedReference,
+        toSharing.historyReference,
+        toSharing.publisherPubKey,
+        candidates,
+      ),
+    ).rejects.toBe(denied)
+    await expect(
+      decryptActReference(
+        mockBee,
+        toApp.encryptedReference,
+        toApp.historyReference,
+        toApp.publisherPubKey,
+        candidates,
+      ),
+    ).resolves.toBe(toHex(contentRef))
+
+    const bySharing = await createActForContent(
+      target,
+      randomBytes(32),
+      sharingKey.privateKey,
+      [publisher.publicKey],
+    )
+    await expect(
+      getGranteesFromAct(mockBee, bySharing.historyReference, candidates),
+    ).rejects.toBe(denied)
+    await expect(
+      addGranteesToAct(
+        target,
+        mockBee,
+        bySharing.historyReference,
+        candidates,
+        [appKey.publicKey],
+      ),
+    ).rejects.toBe(denied)
+  })
+
   it("refuses to manage an ACT none of the candidates published", async () => {
     const { publisher, appKey, sharingKey, target } = setup(130)
     const created = await createActForContent(

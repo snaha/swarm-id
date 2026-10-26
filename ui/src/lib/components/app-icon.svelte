@@ -6,21 +6,27 @@
 <script lang="ts">
   import Globe from '@lucide/svelte/icons/globe'
 
+  import { cn } from '$lib/utils'
+
   interface Props {
     /** Favicon / logo URL for the connecting app. */
     src?: string
     /** App name, used as the image alt text. */
     name: string
     size?: number
+    class?: string
   }
 
-  let { src, name, size = 48 }: Props = $props()
+  let { src, name, size = 48, class: className }: Props = $props()
 
   let failed = $state(false)
 </script>
 
 <div
-  class="bg-muted flex shrink-0 items-center justify-center overflow-hidden rounded-lg"
+  class={cn(
+    'bg-muted flex shrink-0 items-center justify-center overflow-hidden rounded-lg',
+    className,
+  )}
   style="width: {size}px; height: {size}px;"
 >
   {#if src && !failed}

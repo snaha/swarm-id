@@ -90,6 +90,22 @@ describe("connectionInfoEqual", () => {
     ).toBe(false)
   })
 
+  // A data sharing flip moves `sharingPublicKey` too; a write access flip
+  // moves nothing else, so this comparison alone reports it (#885).
+  it("returns false when a sharing switch flips", () => {
+    const on = {
+      ...BASE,
+      permissions: { dataSharing: true, writeAccess: true },
+    }
+    expect(
+      connectionInfoEqual(on, {
+        ...on,
+        permissions: { dataSharing: true, writeAccess: false },
+      }),
+    ).toBe(false)
+    expect(connectionInfoEqual(on, { ...on })).toBe(true)
+  })
+
   it("returns false when one side has identity and the other doesn't", () => {
     expect(
       connectionInfoEqual(

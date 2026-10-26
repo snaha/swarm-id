@@ -2,121 +2,138 @@
   Copyright 2026 The Swarm Authors. All rights reserved.
   SPDX-License-Identifier: Apache-2.0
 -->
-
+<!--
+  The Apps tab (SwarmID-MVP, APPS, Frame 31): the account-wide settings, then
+  one row per connected app opening its own page (Frame 154, `home-app-detail`),
+  deep-linkable as `#apps/<origin>`.
+-->
 <script lang="ts">
-  import EllipsisVertical from '@lucide/svelte/icons/ellipsis-vertical'
-  import ShieldCheck from '@lucide/svelte/icons/shield-check'
-  import Trash2 from '@lucide/svelte/icons/trash-2'
-  import Unlink from '@lucide/svelte/icons/unlink'
+  import ChevronRight from '@lucide/svelte/icons/chevron-right'
+  import { appSessionDuration, sharingDefault } from '@snaha/swarm-id/internal'
 
-  import { goto } from '$app/navigation'
-  import { resolve } from '$app/paths'
+  import { replaceState } from '$app/navigation'
+  import { page } from '$app/state'
 
   import AppIcon from '$lib/components/app-icon.svelte'
-  import { Button } from '$lib/components/ui/button'
-  import { DropdownMenu, DropdownMenuItem } from '$lib/components/ui/dropdown-menu'
+  import HomeAppDetail from '$lib/components/home-app-detail.svelte'
+  import { Badge } from '$lib/components/ui/badge'
   import { Select } from '$lib/components/ui/select'
-  import { msToDays } from '$lib/duration'
-  import routes from '$lib/routes'
+  import { Switch } from '$lib/components/ui/switch'
+  import { CONNECTION_DAYS_OPTIONS, msToDays } from '$lib/duration'
+  import { customised } from '$lib/permissions-request'
   import type { Account } from '$lib/types'
-
-  const DEFAULT_CONNECTION_DAYS = 30
-  const DURATION_OPTIONS = [
-    { value: '1', label: '1 day' },
-    { value: '7', label: '7 days' },
-    { value: '30', label: '30 days' },
-    { value: '90', label: '90 days' },
-  ]
 
   interface Props {
     account: Account
+    /** From the URL hash (`#apps/<origin>`): the app to open. */
+    target?: string[]
   }
 
-  let { account }: Props = $props()
+  let { account, target = [] }: Props = $props()
 
-  let connectionDays = $derived(
-    String(
-      account.settings?.appSessionDuration !== undefined
-        ? msToDays(account.settings.appSessionDuration)
-        : DEFAULT_CONNECTION_DAYS,
-    ),
-  )
+  let connectionDays = $derived(String(msToDays(appSessionDuration(account.settings))))
   // Revoked tombstones stay in the record for sync; only show live entries.
   const activeApps = $derived(account.activeApps)
+  // The account-wide sharing switches (#885), on unless turned off here;
+  // write access is shown once data sharing is on, as on the app's own page.
+  const dataSharing = $derived(sharingDefault(account.settings, 'dataSharing'))
+  const writeAccess = $derived(sharingDefault(account.settings, 'writeAccess'))
 
-  /** The app's "Permissions for <app>" page (#711), keyed by its origin. */
-  function openPermissions(appUrl: string) {
-    // eslint-disable-next-line svelte/no-navigation-without-resolve -- resolve() plus the origin as a hash
-    goto(`${resolve(routes.PERMISSIONS)}#origin=${encodeURIComponent(appUrl)}`)
+  /** The open app's origin: from the hash, then the row clicked or "Back". */
+  let openUrl = $derived(target[0] ? decodeOrigin(target[0]) : undefined)
+  const openApp = $derived(activeApps.find((app) => app.appUrl === openUrl))
+
+  /** Anyone can write the hash: a malformed escape shows the list, not an error. */
+  function decodeOrigin(encoded: string): string | undefined {
+    try {
+      return decodeURIComponent(encoded)
+    } catch {
+      return undefined
+    }
+  }
+
+  function open(appUrl: string | undefined) {
+    openUrl = appUrl
+    // eslint-disable-next-line svelte/no-navigation-without-resolve -- hash only, same page
+    replaceState(appUrl ? `#apps/${encodeURIComponent(appUrl)}` : '#apps', page.state)
   }
 
   function isConnected(connectedUntil: number | undefined): boolean {
     return connectedUntil !== undefined && connectedUntil > Date.now()
   }
-
-  function disconnect(appUrl: string) {
-    // Drops the app secret the dApp's proxy iframe authenticates from.
-    account.disconnectApp(appUrl)
-  }
-
-  function remove(appUrl: string) {
-    account.removeApp(appUrl)
-  }
 </script>
 
-<div class="flex w-full flex-col gap-4">
-  <div class="flex w-full items-center justify-between gap-4">
-    <p class="text-sm">Keep apps connected for</p>
-    <Select
-      options={DURATION_OPTIONS}
-      bind:value={connectionDays}
-      class="w-70"
-      onchange={(value) => account.setAppConnectionDays(Number(value))}
-    />
-  </div>
-
-  <div class="bg-border h-px w-full"></div>
-
-  {#if activeApps.length === 0}
-    <p class="text-muted-foreground py-8 text-center text-sm">No connected apps yet.</p>
-  {:else}
-    <div class="flex w-full flex-col">
-      {#each activeApps as app (app.appUrl)}
-        <div class="border-border flex w-full items-center gap-3 border-b py-2.5">
-          <AppIcon src={app.appIcon} name={app.appName} size={40} />
-          <div class="flex min-w-0 flex-1 flex-col">
-            <p class="truncate text-sm font-medium">{app.appName}</p>
-            <p class="text-muted-foreground truncate text-sm">{app.appUrl}</p>
-          </div>
-          {#if isConnected(app.connectedUntil)}
-            <span class="bg-secondary text-secondary-foreground rounded-md px-2 py-0.5 text-xs">
-              Connected
-            </span>
-          {/if}
-          <DropdownMenu class="top-full right-0 mt-1 min-w-36 p-1">
-            {#snippet trigger(props)}
-              <Button variant="ghost" size="icon" aria-label="App actions" {...props}>
-                <EllipsisVertical />
-              </Button>
-            {/snippet}
-
-            <DropdownMenuItem onclick={() => openPermissions(app.appUrl)}>
-              <ShieldCheck class="size-4 shrink-0" />
-              <span class="flex-1 whitespace-nowrap">Permissions</span>
-            </DropdownMenuItem>
-            {#if isConnected(app.connectedUntil)}
-              <DropdownMenuItem onclick={() => disconnect(app.appUrl)}>
-                <Unlink class="size-4 shrink-0" />
-                <span class="flex-1 whitespace-nowrap">Disconnect</span>
-              </DropdownMenuItem>
-            {/if}
-            <DropdownMenuItem onclick={() => remove(app.appUrl)}>
-              <Trash2 class="size-4 shrink-0" />
-              <span class="flex-1 whitespace-nowrap">Remove</span>
-            </DropdownMenuItem>
-          </DropdownMenu>
-        </div>
-      {/each}
+{#if openApp}
+  <HomeAppDetail {account} app={openApp} onback={() => open(undefined)} />
+{:else}
+  <div class="flex w-full flex-col gap-4">
+    <div class="flex w-full items-center justify-between gap-4">
+      <p class="text-sm">Keep apps connected for</p>
+      <Select
+        options={CONNECTION_DAYS_OPTIONS}
+        bind:value={connectionDays}
+        class="w-70"
+        onchange={(value) => account.setAppConnectionDays(Number(value))}
+      />
     </div>
-  {/if}
-</div>
+
+    <div class="flex w-full items-start justify-between gap-4">
+      <div class="flex flex-col gap-1 text-sm">
+        <p>Data sharing</p>
+        <p class="text-muted-foreground">Allow apps to access data shared by other apps</p>
+      </div>
+      <Switch
+        checked={dataSharing}
+        aria-label="Data sharing"
+        onclick={() => account.setSharingDefault('dataSharing', !dataSharing)}
+      />
+    </div>
+    {#if dataSharing}
+      <div class="flex w-full items-start justify-between gap-4">
+        <div class="flex flex-col gap-1 text-sm">
+          <p>Write access</p>
+          <p class="text-muted-foreground">Allow apps to share data with other apps</p>
+        </div>
+        <Switch
+          checked={writeAccess}
+          aria-label="Write access"
+          onclick={() => account.setSharingDefault('writeAccess', !writeAccess)}
+        />
+      </div>
+    {/if}
+
+    <div class="bg-border h-px w-full"></div>
+
+    {#if activeApps.length === 0}
+      <p class="text-muted-foreground py-8 text-center text-sm">No connected apps yet.</p>
+    {:else}
+      <!-- Frame 31's Item: 10px vertical padding and gaps, a 40px rounded-sm
+           icon, 16px name line over a 20px URL line, badges, and a 32px icon
+           slot with a 16px chevron; a separator between rows and after the last. -->
+      <div class="flex w-full flex-col">
+        {#each activeApps as app (app.appUrl)}
+          <button
+            type="button"
+            class="border-border flex w-full cursor-pointer items-center gap-2.5 border-b py-2.5 text-left"
+            onclick={() => open(app.appUrl)}
+          >
+            <AppIcon src={app.appIcon} name={app.appName} size={40} class="rounded-sm" />
+            <div class="flex min-w-0 flex-1 flex-col gap-1">
+              <p class="truncate text-sm leading-4 font-medium">{app.appName}</p>
+              <p class="text-muted-foreground truncate text-sm leading-5">{app.appUrl}</p>
+            </div>
+            {#if customised(app, account.settings)}
+              <Badge variant="outline">Custom permissions</Badge>
+            {/if}
+            {#if !isConnected(app.connectedUntil)}
+              <Badge>Disconnected</Badge>
+            {/if}
+            <span class="flex size-8 shrink-0 items-center justify-center">
+              <ChevronRight class="size-4" />
+            </span>
+          </button>
+        {/each}
+      </div>
+    {/if}
+  </div>
+{/if}

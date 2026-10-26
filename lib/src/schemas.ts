@@ -119,6 +119,26 @@ export const DeviceSchemaV1 = z.object({
 })
 
 // ============================================================================
+// Account Settings Schema
+// ============================================================================
+
+/**
+ * Per-account settings, on the account's `settingsAt` clock. The two sharing
+ * switches (#885) are the account-wide defaults every app follows unless it
+ * is pinned otherwise (`ConnectedAppSchemaV1`); absent means on. Each rides
+ * its own clock on top (`SETTINGS_CLOCKS`, `permissions.ts`): `settingsAt`
+ * ranks the object whole, so a session-length change made on a stale copy
+ * would otherwise carry that copy's switches with it and undo an "off".
+ */
+export const AccountSettingsSchemaV1 = z.object({
+  appSessionDuration: z.number().optional(),
+  dataSharing: z.boolean().optional(),
+  dataSharingAt: z.number().optional(),
+  writeAccess: z.boolean().optional(),
+  writeAccessAt: z.number().optional(),
+})
+
+// ============================================================================
 // Connected App Schema
 // ============================================================================
 
@@ -141,10 +161,24 @@ export const ConnectedAppSchemaV1 = z.object({
   // `"all"` → every drive the account has, including ones added later. A
   // list → exactly those drives; an empty one opts the app out of drives.
   drives: z.union([z.literal("all"), z.array(StoredBatchId)]).optional(),
-  // The grant above rides its own last-writer-wins clock, because it is the
-  // one edit to an entry that says nothing about whether the app is still
-  // connected. Ranking the whole entry on a clock this bumped let a drive
-  // picked on a stale copy outrank a revoke made elsewhere and take the
+  // The app's own say on the account-wide sharing key (#885): reading with it
+  // (`dataSharing`) and publishing or managing with it (`writeAccess`). Absent
+  // → the account's `settings` decide; present → pinned, whatever the account
+  // default becomes. `effectivePermissions` (`permissions.ts`) folds the two.
+  dataSharing: z.boolean().optional(),
+  dataSharingAt: z.number().optional(),
+  writeAccess: z.boolean().optional(),
+  writeAccessAt: z.number().optional(),
+  // How long this app's connections last, in ms, when the user set it for
+  // this app rather than the account (`settings.appSessionDuration`).
+  // Applied at the next connect (`appSessionDuration`).
+  sessionDuration: z.number().optional(),
+  sessionDurationAt: z.number().optional(),
+  // The grant — drives (on `drivesAt`), the two switches, the duration —
+  // rides last-writer-wins clocks of its own, one per field (`GRANT_CLOCKS`,
+  // `permissions.ts`), because a grant edit says nothing about whether the app
+  // is still connected. Ranking the whole entry on a clock this bumped let a
+  // drive picked on a stale copy outrank a revoke made elsewhere and take the
   // tombstone with it (#681). Membership merges on the markers below instead.
   drivesAt: z.number().optional(),
   // Tombstone marker. A revoked app is kept in the snapshot (so the removal
@@ -300,11 +334,7 @@ export const SyncedAccountSchemaV1 = z.object({
   connectedApps: z.array(ConnectedAppSchemaV1).default([]),
   postageStamps: z.array(PostageStampSchemaV1).default([]),
   // Per-account settings (was identity.settings).
-  settings: z
-    .object({
-      appSessionDuration: z.number().optional(),
-    })
-    .optional(),
+  settings: AccountSettingsSchemaV1.optional(),
   // Per-field LWW clocks for the scalar account fields, so a concurrent change to
   // a *different* scalar on another device is not dropped wholesale, and a peer's
   // change propagates on refresh. Absent → fall back to the account's `createdAt`,
@@ -399,11 +429,7 @@ export const AccountMetadataSchemaV1 = z.object({
   // App-facing public key (compressed secp256k1 hex). Mirrors account.publicKey.
   publicKey: CompressedPublicKeySchema,
   // Per-account settings (was identity.settings).
-  settings: z
-    .object({
-      appSessionDuration: z.number().optional(),
-    })
-    .optional(),
+  settings: AccountSettingsSchemaV1.optional(),
   // Per-field LWW clocks for the scalar fields (see `SyncedAccountSchemaV1`).
   accountNameAt: z.number().optional(),
   defaultStampAt: z.number().optional(),
@@ -452,6 +478,7 @@ export type SignedOutAccount = z.infer<typeof SignedOutAccountSchemaV1>
 /** The local (on-device) account record: `SignedInAccount | SignedOutAccount`. */
 export type Account = z.infer<typeof LocalAccountSchemaV1>
 export type ConnectedApp = z.infer<typeof ConnectedAppSchemaV1>
+export type AccountSettings = z.infer<typeof AccountSettingsSchemaV1>
 export type PostageStamp = z.infer<typeof PostageStampSchemaV1>
 export type AccountMetadata = z.infer<typeof AccountMetadataSchemaV1>
 export type AccountStateSnapshot = z.infer<typeof AccountStateSnapshotSchemaV1>

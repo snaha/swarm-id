@@ -18,12 +18,19 @@
     connect (persisted only when it deviates from the default, so the app
     keeps tracking the default otherwise), or the drive pitch when there is
     none.
+  Under the drives, the sharing switches the app asked for that are not
+  already on (#885), each off; one turned on is pinned for this app.
 -->
 <script lang="ts">
   import { onMount } from 'svelte'
 
   import { BatchId } from '@ethersphere/bee-js'
   import ArrowRight from '@lucide/svelte/icons/arrow-right'
+  import {
+    type AppPermissions,
+    type PermissionName,
+    effectivePermissions,
+  } from '@snaha/swarm-id/internal'
 
   import { goto } from '$app/navigation'
   import { resolve } from '$app/paths'
@@ -33,7 +40,8 @@
   import DriveAddDialog from '$lib/components/drive-add-dialog.svelte'
   import { Button } from '$lib/components/ui/button'
   import { Select, type SelectOption } from '$lib/components/ui/select'
-  import { type DriveGrant, commitConnect } from '$lib/connect-handshake'
+  import { Switch } from '$lib/components/ui/switch'
+  import { type ConnectGrant, commitConnect } from '$lib/connect-handshake'
   import {
     ADD_NEW_DRIVE,
     type PickerRow,
@@ -44,6 +52,7 @@
     rowsGrant,
   } from '$lib/drive-request'
   import { driveDisplayName } from '$lib/drives'
+  import { SWITCH_COPY, askedPatch, switchesToAsk } from '$lib/permissions-request'
   import routes from '$lib/routes'
   import { accountsStore } from '$lib/stores/accounts.svelte'
   import { connectStore } from '$lib/stores/connect.svelte'
@@ -74,6 +83,18 @@
 
   let rows = $state<PickerRow[]>([])
   let grantAll = $state(false)
+  /** The sharing switches (#885): what was in effect at load, and what they show now. */
+  let initialSharing = $state<AppPermissions>({ dataSharing: true, writeAccess: true })
+  let sharing = $state<AppPermissions>({ dataSharing: true, writeAccess: true })
+
+  /** Flip a switch; write access cannot outlive data sharing. */
+  function flip(name: PermissionName) {
+    sharing[name] = !sharing[name]
+    if (name === 'dataSharing' && !sharing.dataSharing) sharing.writeAccess = false
+  }
+  // Write access stays on screen while data sharing is off, disabled: both
+  // asked for means both shown, and one enables the other.
+  const switches = $derived(switchesToAsk(request?.permissions, initialSharing))
   /** The legacy picker's explicit choice; the account default until touched. */
   let chosenBatchHex = $state<string | undefined>(undefined)
   const selectedBatchHex = $derived(chosenBatchHex ?? defaultBatchHex)
@@ -144,9 +165,15 @@
     if (Array.isArray(requested)) {
       rows = pickerRows(requested, drives, defaultBatchHex)
     }
+    // A reconnect starts from what the app already holds.
+    initialSharing = effectivePermissions(
+      account.connectedApps.find((app) => app.appUrl === request.appOrigin),
+      account.settings,
+    )
+    sharing = { ...initialSharing }
   })
 
-  function grantFor(): DriveGrant | undefined {
+  function driveGrantFor(): Pick<ConnectGrant, 'drives'> | undefined {
     if (requested === 'all') {
       return { drives: 'all' }
     }
@@ -157,6 +184,15 @@
       return { drives: [new BatchId(selectedBatchHex)] }
     }
     return undefined
+  }
+
+  /** The drives, and a pin for each switch turned on here; nothing for none. */
+  function grantFor(): ConnectGrant | undefined {
+    const grant = {
+      ...driveGrantFor(),
+      ...askedPatch(initialSharing, sharing, switches),
+    }
+    return Object.keys(grant).length > 0 ? grant : undefined
   }
 
   function goToApp() {
@@ -233,6 +269,20 @@
               <p class="text-muted-foreground text-sm">Where this app will store data</p>
             </div>
           {/if}
+          {#each switches as name (name)}
+            <div class="flex w-full items-start gap-3">
+              <Switch
+                checked={sharing[name]}
+                disabled={name === 'writeAccess' && !sharing.dataSharing}
+                aria-label={SWITCH_COPY[name].label}
+                onclick={() => flip(name)}
+              />
+              <div class="flex flex-col gap-1 text-sm">
+                <span class="font-medium">{SWITCH_COPY[name].label}</span>
+                <span class="text-muted-foreground">{SWITCH_COPY[name].description}</span>
+              </div>
+            </div>
+          {/each}
           <Button class="w-full" onclick={goToApp} disabled={!canGo}>
             Go to app
             <ArrowRight />

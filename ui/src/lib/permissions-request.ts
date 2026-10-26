@@ -3,16 +3,20 @@
 /**
  * The "Permissions for <app>" page as data (#711): what a request or the
  * Apps tab opens it with, the rows it shows, and the grant a save writes.
- * Drives are the only permission so far; the page reads `permissions` whole
- * so the next ones join it without a new route.
+ * Drives, and the two sharing switches (#885): the page reads `permissions`
+ * whole, so one route carries them all.
  */
 import { BatchId } from '@ethersphere/bee-js'
 import {
+  type AccountSettings,
+  type AppPermissions,
   type ConnectedApp,
   type DriveRequirement,
+  type PermissionName,
   type Permissions,
   PermissionsSchema,
   type PostageStamp,
+  effectivePermissions,
 } from '@snaha/swarm-id/internal'
 
 import { type PickerRow, kindOf } from '$lib/drive-request'
@@ -189,4 +193,95 @@ export function sameGrant(a: Grant, b: Grant): boolean {
 
 function toBatchId(hex: string): BatchId {
   return new BatchId(hex)
+}
+
+// ----------------------------------------------------------------------------
+// The sharing switches (#885)
+// ----------------------------------------------------------------------------
+
+export const PERMISSION_NAMES: readonly PermissionName[] = ['dataSharing', 'writeAccess']
+
+/** The two switches as the designs word them (SwarmID-MVP, PERMISSIONS). */
+export const SWITCH_COPY: Record<PermissionName, { label: string; description: string }> = {
+  dataSharing: {
+    label: 'Data sharing',
+    description: 'Allow this app to access data shared by other apps',
+  },
+  writeAccess: {
+    label: 'Write access',
+    description: 'Allow this app to share data with other apps',
+  },
+}
+
+/**
+ * The switches a request asks for that are not in effect (`current`, from
+ * `effectivePermissions`) — the ones the connect screen and the permissions
+ * popup put the question for (#885). Data sharing is asked whenever write
+ * access is, since the latter implies it; write access is listed while data
+ * sharing is off, shown disabled until the user turns data sharing on.
+ */
+export function switchesToAsk(
+  requested: Permissions | undefined,
+  current: AppPermissions,
+): PermissionName[] {
+  const names: PermissionName[] = []
+  if (requested?.dataSharing || requested?.writeAccess) names.push('dataSharing')
+  if (requested?.writeAccess) names.push('writeAccess')
+  return names.filter((name) => !current[name])
+}
+
+/**
+ * The pins an ask leaves, `initial` being what was in effect when the screen
+ * opened and `shown` what it shows at save: data sharing when asked and
+ * moved; write access when asked, enabled and moved — and, whenever data
+ * sharing was just turned on, to what the screen showed: off unless it was
+ * asked and turned on. The screen showed write access off, or not at all,
+ * and what sits underneath (the account default, an old pin) is not what the
+ * user agreed to.
+ */
+export function askedPatch(
+  initial: AppPermissions,
+  shown: AppPermissions,
+  asked: readonly PermissionName[],
+): Partial<Pick<ConnectedApp, 'dataSharing' | 'writeAccess'>> {
+  const patch: Partial<Pick<ConnectedApp, 'dataSharing' | 'writeAccess'>> = {}
+  if (asked.includes('dataSharing') && shown.dataSharing !== initial.dataSharing) {
+    patch.dataSharing = shown.dataSharing
+  }
+  const writeAsked = asked.includes('writeAccess') && shown.dataSharing
+  const writeAccess = writeAsked && shown.writeAccess
+  const dataSharingTurnedOn = shown.dataSharing && !initial.dataSharing
+  if (dataSharingTurnedOn || (writeAsked && writeAccess !== initial.writeAccess)) {
+    patch.writeAccess = writeAccess
+  }
+  return patch
+}
+
+/**
+ * Whether the app holds anything of its own apart from the account defaults
+ * — a pinned switch or its own session length — the Apps tab's "Custom
+ * permissions" badge. A pin equal to the default counts: the app no longer
+ * follows the account, so turning a switch off account-wide leaves it be.
+ */
+export function customised(
+  app: Pick<ConnectedApp, 'dataSharing' | 'writeAccess' | 'sessionDuration'>,
+  settings: AccountSettings | undefined,
+): boolean {
+  return pinned(app, settings).length > 0 || app.sessionDuration !== undefined
+}
+
+/**
+ * The switches an app pins. Write access counts only while data sharing is
+ * in effect: without it the pin changes nothing and has no row to be seen
+ * on, so it is not custom — it is kept, and shows again once data sharing is
+ * back on.
+ */
+export function pinned(
+  app: Pick<ConnectedApp, 'dataSharing' | 'writeAccess'>,
+  settings: AccountSettings | undefined,
+): PermissionName[] {
+  const { dataSharing } = effectivePermissions(app, settings)
+  return PERMISSION_NAMES.filter(
+    (name) => app[name] !== undefined && (name !== 'writeAccess' || dataSharing),
+  )
 }

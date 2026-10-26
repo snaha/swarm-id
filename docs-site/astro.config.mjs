@@ -16,6 +16,9 @@ export default defineConfig({
   // root-absolute: Astro does not rewrite a `/architecture` href for the base,
   // so one would 404 everywhere but local dev.
   base: '/',
+  // The old page's address; relative, so it survives the deployment base —
+  // and up one, since the redirect page is served at `…/scratch-drives/`.
+  redirects: { '/scratch-drives/': '../drives-and-permissions/' },
   integrations: [
     starlight({
       title: 'Swarm ID',
@@ -37,7 +40,7 @@ export default defineConfig({
             { label: 'Key Derivation', slug: 'key-derivation' },
             { label: 'Storage Layout', slug: 'storage-layout' },
             { label: 'Subsidised Gateway', slug: 'subsidised-gateway' },
-            { label: 'Scratch Drives', slug: 'scratch-drives' },
+            { label: 'Drives & Permissions', slug: 'drives-and-permissions' },
             { label: 'The Public Gateway', slug: 'public-gateway' },
             { label: 'Self-Hosting the Identity Site', slug: 'self-hosting' },
             { label: 'Using Your Own Bee Node', slug: 'own-bee-node' },
@@ -60,7 +63,7 @@ export default defineConfig({
           items: [{ autogenerate: { directory: 'api' } }],
         },
       ],
-      customCss: [],
+      customCss: ['./src/styles/screenshots.css'],
     }),
   ],
 })

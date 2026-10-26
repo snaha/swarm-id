@@ -8,6 +8,7 @@
  */
 
 import { derivePostageSignerKeySync } from "./utils/key-derivation"
+import type { ActKeyCandidates } from "./proxy/act"
 import {
   describe,
   it,
@@ -164,6 +165,45 @@ vi.mock("./bus/bus-context", async (importActual) => {
         throw new Error("bus context derivation failed")
       }
       return actual.deriveBusContext(derivationKey)
+    }),
+  }
+})
+/**
+ * The grantee handlers, run against an ACT the identity published: the
+ * sharing key (the second candidate) is the one the share names, so a denied
+ * candidate fails the call with its own error, as the real module does
+ * (`proxy/act/index.test.ts`, "fails with a denied candidate's error").
+ */
+vi.mock("./proxy/act", async (importActual) => {
+  const actual = await importActual<typeof import("./proxy/act")>()
+  const publishedByIdentity = (keys: ActKeyCandidates) => {
+    const sharing = (Array.isArray(keys) ? keys : [keys])[1]
+    if (sharing && !(sharing instanceof Uint8Array)) throw sharing.denied
+  }
+  return {
+    ...actual,
+    addGranteesToAct: vi.fn(async (_t, _b, _h, keys: ActKeyCandidates) => {
+      publishedByIdentity(keys)
+      return {
+        historyReference: "h",
+        granteeListReference: "g",
+        actReference: "a",
+      }
+    }),
+    revokeGranteesFromAct: vi.fn(
+      async (_t, _b, _h, _e, keys: ActKeyCandidates) => {
+        publishedByIdentity(keys)
+        return {
+          encryptedReference: "e",
+          historyReference: "h",
+          granteeListReference: "g",
+          actReference: "a",
+        }
+      },
+    ),
+    getGranteesFromAct: vi.fn(async (_b, _h, keys: ActKeyCandidates) => {
+      publishedByIdentity(keys)
+      return []
     }),
   }
 })
@@ -1062,6 +1102,217 @@ describe("SwarmIdProxy partitioned write enablement", () => {
         ),
       ).rejects.toMatchObject({ code: "drive-not-granted" })
       expect(coordinatorFor(UNGRANTED_BATCH_ID_HEX)).toBeUndefined()
+    })
+
+    // #885: the sharing switches. Enforced where the sharing key is used,
+    // reported on the snapshot, and the key itself withheld while the app may
+    // not read with it.
+    describe("the sharing switches", () => {
+      const connectWith = async (
+        app: Partial<ConnectedApp>,
+        settings?: SyncedAccount["settings"],
+      ) => {
+        nextStamper()
+        seedConnectedAccount({
+          account: { settings },
+          connectedApps: [
+            {
+              appUrl: PARENT_ORIGIN,
+              appName: "dApp",
+              appSecret: "44".repeat(32),
+              lastConnectedAt: Date.now(),
+              connectedUntil: Date.now() + 60_000,
+              ...app,
+            },
+          ],
+        })
+        await dispatch(
+          {
+            type: "parentIdentify",
+            requestId: "r1",
+            metadata: { name: "dApp" },
+          },
+          PARENT_ORIGIN,
+          parentWindow,
+        )
+      }
+      const lastInfo = () => messagesOfType("connectionInfoChanged").at(-1)!
+      const getPermissions = async () => {
+        await dispatch(
+          { type: "getPermissions", requestId: "gp" },
+          PARENT_ORIGIN,
+          parentWindow,
+        )
+        return messagesOfType("getPermissionsResponse").at(-1)!.permissions
+      }
+
+      // Which switch gates which handler, against an ACT the identity
+      // published (the mocked `./proxy/act`): managing grantees needs write
+      // access, listing them only data sharing.
+      it("refuse to add or revoke grantees without write access, and still list them", async () => {
+        await connectWith({ writeAccess: false })
+        // The write lock is a fake; this one runs the operation handed to it.
+        await vi.waitFor(() =>
+          expect(coordinatorFor(BATCH_ID_HEX)).toBeDefined(),
+        )
+        coordinatorFor(BATCH_ID_HEX)!.withWrite.mockImplementation(
+          async (operation: (target: unknown) => Promise<unknown>) =>
+            operation({}),
+        )
+        const history = "ab".repeat(32)
+        const grantee = new PrivateKey("cd".repeat(32))
+          .publicKey()
+          .toCompressedHex()
+
+        await dispatch(
+          {
+            type: "actAddGrantees",
+            requestId: "add",
+            historyReference: history,
+            grantees: [grantee],
+          },
+          PARENT_ORIGIN,
+          parentWindow,
+        )
+        await dispatch(
+          {
+            type: "actRevokeGrantees",
+            requestId: "revoke",
+            historyReference: history,
+            encryptedReference: "ef".repeat(32),
+            revokeGrantees: [grantee],
+          },
+          PARENT_ORIGIN,
+          parentWindow,
+        )
+        await dispatch(
+          {
+            type: "actGetGrantees",
+            requestId: "list",
+            historyReference: history,
+          },
+          PARENT_ORIGIN,
+          parentWindow,
+        )
+
+        await vi.waitFor(() => {
+          for (const requestId of ["add", "revoke"]) {
+            expect(messagesOfType("error")).toContainEqual(
+              expect.objectContaining({
+                requestId,
+                code: "permission-denied",
+                permission: "writeAccess",
+              }),
+            )
+          }
+          expect(messagesOfType("actGetGranteesResponse")).toContainEqual(
+            expect.objectContaining({ requestId: "list", grantees: [] }),
+          )
+        })
+      })
+
+      it("refuse to list grantees without data sharing", async () => {
+        await connectWith({ dataSharing: false })
+
+        await dispatch(
+          {
+            type: "actGetGrantees",
+            requestId: "list",
+            historyReference: "ab".repeat(32),
+          },
+          PARENT_ORIGIN,
+          parentWindow,
+        )
+
+        await vi.waitFor(() =>
+          expect(messagesOfType("error")).toContainEqual(
+            expect.objectContaining({
+              requestId: "list",
+              code: "permission-denied",
+              permission: "dataSharing",
+            }),
+          ),
+        )
+      })
+
+      it("are on by default, and the snapshot carries the sharing key", async () => {
+        await connectWith({})
+
+        await expect(getPermissions()).resolves.toEqual({
+          dataSharing: true,
+          writeAccess: true,
+        })
+        expect(lastInfo().permissions).toEqual({
+          dataSharing: true,
+          writeAccess: true,
+        })
+        expect(lastInfo().identity.sharingPublicKey).toMatch(/^0[23]/)
+      })
+
+      it("follow the account defaults, and a pinned app value wins", async () => {
+        await connectWith({ writeAccess: true }, { writeAccess: false })
+        await expect(getPermissions()).resolves.toEqual({
+          dataSharing: true,
+          writeAccess: true,
+        })
+      })
+
+      it("withhold the sharing key while data sharing is off", async () => {
+        await connectWith({}, { dataSharing: false })
+
+        expect(lastInfo().permissions).toEqual({
+          dataSharing: false,
+          writeAccess: false,
+        })
+        expect(lastInfo().identity.sharingPublicKey).toBeUndefined()
+      })
+
+      it("refuse to publish as the identity without write access", async () => {
+        await connectWith({ writeAccess: false })
+
+        await dispatch(
+          {
+            type: "actUploadData",
+            requestId: "a1",
+            data: new Uint8Array([1]),
+            grantees: [],
+            options: { publisher: "identity" },
+          },
+          PARENT_ORIGIN,
+          parentWindow,
+        )
+
+        await vi.waitFor(() =>
+          expect(messagesOfType("error")).toContainEqual(
+            expect.objectContaining({
+              requestId: "a1",
+              code: "permission-denied",
+              permission: "writeAccess",
+            }),
+          ),
+        )
+      })
+
+      it("take effect when the user flips a switch, as a storage event", async () => {
+        await connectWith({})
+
+        updateAccount((account) => ({
+          ...account,
+          settings: { dataSharing: false },
+          settingsAt: Date.now(),
+        }))
+
+        await vi.waitFor(() =>
+          expect(lastInfo().permissions).toEqual({
+            dataSharing: false,
+            writeAccess: false,
+          }),
+        )
+        await expect(getPermissions()).resolves.toEqual({
+          dataSharing: false,
+          writeAccess: false,
+        })
+      })
     })
 
     it("answers a write naming an ungranted drive with drive-not-granted", async () => {
