@@ -337,7 +337,7 @@ export class Account {
    */
   signOut(encryptedState: string) {
     // Capture the storage-warning remnant BEFORE the stamps are stripped: the
-    // chooser must keep warning about full/expiring drives while the stamps
+    // chooser must keep warning about expired, expiring and full drives while the stamps
     // themselves are only in the encrypted snapshot.
     this.#deviceAuth = {
       vault: this.#deviceAuth.vault,

@@ -5,6 +5,7 @@
 
 <script lang="ts">
   import ChevronLeft from '@lucide/svelte/icons/chevron-left'
+  import X from '@lucide/svelte/icons/x'
 
   import { replaceState } from '$app/navigation'
   import { page } from '$app/state'
@@ -16,6 +17,7 @@
   import HomeApps from '$lib/components/home-apps.svelte'
   import HomeDrives from '$lib/components/home-drives.svelte'
   import AlertFill from '$lib/components/icons/alert-fill.svelte'
+  import InfoFill from '$lib/components/icons/info-fill.svelte'
   import UserAddFill from '$lib/components/icons/user-add-fill.svelte'
   import ProductPage from '$lib/components/product-page.svelte'
   import SettingsMenu from '$lib/components/settings-menu.svelte'
@@ -25,8 +27,10 @@
   import { Tabs } from '$lib/components/ui/tabs'
   import {
     type DriveAttention,
+    attentionKey,
     driveAttentionDescription,
     drivesNeedingAttention,
+    expiredDriveAlerts,
   } from '$lib/drives'
   import { accountsStore } from '$lib/stores/accounts.svelte'
   import { sessionStore } from '$lib/stores/session.svelte'
@@ -111,6 +115,47 @@
   }
 
   const attentionCount = $derived(account ? drivesNeedingAttention(account) : 0)
+  const currentAttentionKey = $derived(account ? attentionKey(account) : '')
+
+  // ponytail: dismissals live in this device's localStorage, so another device
+  // shows the alert again; a synced `expiryNoticedAt` on the drive record if
+  // that matters (#892).
+  const DISMISSED_ALERTS_KEY = 'swarm-id-dismissed-drive-alerts'
+  interface DismissedAlerts {
+    /** Batch IDs (hex) of expired drives whose alert was closed. */
+    expired: string[]
+    /** The {@link attentionKey} when its warning was closed: it shows again once that changes. */
+    attentionKey?: string
+  }
+  let dismissedAlerts = $state<DismissedAlerts>({ expired: [] })
+  const dismissedKey = $derived(
+    account ? `${DISMISSED_ALERTS_KEY}:${account.id.toHex()}` : undefined,
+  )
+  $effect(() => {
+    dismissedAlerts = { expired: [] }
+    if (!dismissedKey) return
+    try {
+      const stored = JSON.parse(localStorage.getItem(dismissedKey) ?? '{}')
+      if (Array.isArray(stored.expired)) dismissedAlerts = stored
+    } catch {
+      // Unreadable: show every alert again.
+    }
+  })
+  function dismiss(next: DismissedAlerts) {
+    dismissedAlerts = next
+    try {
+      if (dismissedKey) localStorage.setItem(dismissedKey, JSON.stringify(next))
+    } catch {
+      // Storage blocked: the dismissal holds for this visit only.
+    }
+  }
+
+  const expiredAlerts = $derived(
+    account ? expiredDriveAlerts(account, new Set(dismissedAlerts.expired)) : [],
+  )
+  const showAttention = $derived(
+    attentionCount > 0 && currentAttentionKey !== dismissedAlerts.attentionKey,
+  )
 </script>
 
 <svelte:window onhashchange={() => readHash(location.hash)} />
@@ -127,24 +172,59 @@
 
     <main class="flex w-full flex-1 flex-col items-center px-8 pb-8">
       <div class="flex w-full max-w-144 flex-col items-center gap-8">
-        {#if attentionCount > 0}
-          <!-- Storage warning (frame 254-15824): visible on every tab while a
-               drive is about to expire or full; the link jumps to Storage. -->
-          <div class="bg-card flex w-full items-start gap-2 rounded-lg border px-2.5 py-2">
-            <span class="text-destructive pt-0.5">
-              <AlertFill class="size-4" />
-            </span>
-            <p class="text-destructive text-sm">
-              {attentionCount === 1 ? '1 drive needs' : `${attentionCount} drives need`} attention.
-              <button
-                type="button"
-                class="cursor-pointer underline underline-offset-2"
-                onclick={() => selectTab('storage')}
-              >
-                Check your storage
-              </button>
-              to avoid losing data.
-            </p>
+        {#if expiredAlerts.length > 0 || showAttention}
+          <!-- Drive alerts (Frame 157): one per expired drive, the default
+               first, then the storage warning (frame 254-15824) while a drive
+               is about to expire or full; the link jumps to Storage. -->
+          <div class="flex w-full flex-col gap-2">
+            {#each expiredAlerts as alert (alert.batchHex)}
+              <div class="bg-card flex w-full items-start gap-2 rounded-lg border px-2.5 py-2">
+                <span class="pt-0.5">
+                  <InfoFill class="size-4" />
+                </span>
+                <p class="flex-1 text-sm">{alert.message}</p>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  class="-my-1 size-7"
+                  aria-label="Dismiss"
+                  onclick={() =>
+                    dismiss({
+                      ...dismissedAlerts,
+                      expired: [...dismissedAlerts.expired, alert.batchHex],
+                    })}
+                >
+                  <X />
+                </Button>
+              </div>
+            {/each}
+            {#if showAttention}
+              <div class="bg-card flex w-full items-start gap-2 rounded-lg border px-2.5 py-2">
+                <span class="text-destructive pt-0.5">
+                  <AlertFill class="size-4" />
+                </span>
+                <p class="text-destructive flex-1 text-sm">
+                  {attentionCount === 1 ? '1 drive needs' : `${attentionCount} drives need`} attention.
+                  <button
+                    type="button"
+                    class="cursor-pointer underline underline-offset-2"
+                    onclick={() => selectTab('storage')}
+                  >
+                    Check your storage
+                  </button>
+                  to avoid losing data.
+                </p>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  class="-my-1 size-7"
+                  aria-label="Dismiss"
+                  onclick={() => dismiss({ ...dismissedAlerts, attentionKey: currentAttentionKey })}
+                >
+                  <X />
+                </Button>
+              </div>
+            {/if}
           </div>
         {/if}
 

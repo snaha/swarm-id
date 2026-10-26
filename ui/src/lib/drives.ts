@@ -234,15 +234,60 @@ export function drivesNeedingAttention(
 }
 
 /**
- * The soonest estimated expiry (epoch ms) among live, not-yet-expired drives
- * with a known TTL; `undefined` when none qualifies. Captured at sign-out so
- * the "expires soon" warning can keep developing while the stamps themselves
- * are locked away in the encrypted snapshot.
+ * What the "need attention" warning is about: each drive it counts, with the
+ * amount and depth that an extension or a resize changes. A dismissal holds
+ * while this stays the same, so a different drive, or the same one once it has
+ * been extended, brings the warning back.
+ */
+export function attentionKey(account: { stamps: PostageStamp[] }, now = Date.now()): string {
+  return account.stamps
+    .filter((drive) => driveNeedsAttention(drive, now))
+    .map((drive) => `${drive.batchID.toHex()}:${drive.amount}:${drive.depth}`)
+    .sort()
+    .join(',')
+}
+
+/** An expired drive's alert on the home page (Frame 157). */
+export interface ExpiredDriveAlert {
+  batchHex: string
+  message: string
+}
+
+/**
+ * One alert per expired drive the user has not dismissed, the default drive's
+ * first and in its own words: its loss stops the account's own sync (#363).
+ */
+export function expiredDriveAlerts(
+  account: { stamps: PostageStamp[]; defaultPostageStampBatchID?: { toHex(): string } },
+  dismissed: ReadonlySet<string>,
+  now = Date.now(),
+): ExpiredDriveAlert[] {
+  const defaultHex = account.defaultPostageStampBatchID?.toHex()
+  return account.stamps
+    .filter((drive) => describeDrive(drive, now).status === 'expired')
+    .map((drive) => ({ drive, batchHex: drive.batchID.toHex() }))
+    .filter(({ batchHex }) => !dismissed.has(batchHex))
+    .sort((a, b) => Number(b.batchHex === defaultHex) - Number(a.batchHex === defaultHex))
+    .map(({ drive, batchHex }) => ({
+      batchHex,
+      message:
+        batchHex === defaultHex
+          ? 'Your default drive has expired. Account data may have been lost and your account is no longer synced across devices.'
+          : `${driveDisplayName(drive)} has expired. Data from associated apps may have been lost and some apps may not work properly.`,
+    }))
+}
+
+/**
+ * The soonest estimated expiry (epoch ms) among drives with a known TTL —
+ * in the past for one already expired; `undefined` when none qualifies.
+ * Captured at sign-out so the chooser's warning can keep developing, through
+ * "expiring" to "expired", while the stamps themselves are locked away in the
+ * encrypted snapshot.
  */
 export function soonestDriveExpiry(stamps: PostageStamp[], now = Date.now()): number | undefined {
   const expiries = stamps
     .map((drive) => remainingLifespanSeconds(drive, now))
-    .filter((ttl): ttl is number => ttl !== undefined && ttl > 0)
+    .filter((ttl): ttl is number => ttl !== undefined)
     .map((ttl) => now + ttl * MS_PER_SECOND)
   return expiries.length > 0 ? Math.min(...expiries) : undefined
 }
@@ -255,11 +300,15 @@ export function soonestDriveExpiry(stamps: PostageStamp[], now = Date.now()): nu
  *
  * `expiring` is measured from the account's live drives, so its date is a
  * fact; `may-expire` comes from the estimate captured at sign-out, which
- * another device may have moved since, so its copy hedges. Either way the
- * date is still ahead — an expired drive is not "attention" (see
- * {@link driveNeedsAttention}), on both paths.
+ * another device may have moved since, so its copy hedges; both dates are
+ * ahead. `expired` and `may-have-expired` are the same two paths once the
+ * date has passed, so the latter's `expiry` is in the past. The chooser flags
+ * an expired drive, though the home page's attention count leaves it out (see
+ * {@link driveNeedsAttention}).
  */
 export type DriveAttention =
+  | { reason: 'expired' }
+  | { reason: 'may-have-expired'; expiry: number }
   | { reason: 'expiring'; expiry: number }
   | { reason: 'may-expire'; expiry: number }
   | { reason: 'full' }
@@ -271,17 +320,14 @@ export type DriveAttentionContext = 'connect' | 'home'
 
 /**
  * Why the account should carry the drive warning in a chooser row, or
- * `undefined` when it should not. Signed in: the live drives decide — a
- * lifespan inside the expires-soon window wins over a full one, because it is
- * the case that carries a date. Signed out: the soonest expiry captured at
- * sign-out, which keeps developing while the stamps themselves are locked in
- * the encrypted snapshot, else the captured flag — which by then can only
- * mean a full drive, since an expiring one would have left an expiry.
- *
- * Once that captured expiry is behind `now` the warning stops, the way
- * {@link driveNeedsAttention} already drops an expired drive on the signed-in
- * path: the estimate has run out, and neither "expires on" nor the remedy
- * behind it is true of a drive that is gone.
+ * `undefined` when it should not. Signed in: the live drives decide — an
+ * expired drive first, then a lifespan inside the expires-soon window over a
+ * full one, because it is the case that carries a date. Signed out: the
+ * soonest expiry captured at sign-out, which keeps developing while the
+ * stamps themselves are locked in the encrypted snapshot — "may have expired"
+ * once it is behind `now`, hedged like "may expire", since another device may
+ * have extended the drive since — else the captured flag, which by then can
+ * only mean a full drive, since an expiring one would have left an expiry.
  */
 export function accountDriveAttention(
   account: {
@@ -294,6 +340,9 @@ export function accountDriveAttention(
 ): DriveAttention | undefined {
   if (account.isSignedOut) {
     const captured = account.soonestDriveExpiry
+    if (captured !== undefined && captured <= now) {
+      return { reason: 'may-have-expired', expiry: captured }
+    }
     if (
       captured !== undefined &&
       captured > now &&
@@ -302,6 +351,9 @@ export function accountDriveAttention(
       return { reason: 'may-expire', expiry: captured }
     }
     return account.storageWarning === true ? { reason: 'full' } : undefined
+  }
+  if (account.stamps.some((drive) => describeDrive(drive, now).status === 'expired')) {
+    return { reason: 'expired' }
   }
   const expiringSoon = account.stamps.filter(
     (drive) => describeDrive(drive, now).status === 'expires-soon',
@@ -322,7 +374,16 @@ export function accountDriveAttention(
  * to the dialog behind the button, and to the Storage tab it lands on.
  */
 export function driveAttentionLabel(attention: DriveAttention): string {
-  return attention.reason === 'full' ? 'Drive full' : 'Drive expiring'
+  switch (attention.reason) {
+    case 'expired':
+    case 'may-have-expired':
+      return 'Drive expired'
+    case 'expiring':
+    case 'may-expire':
+      return 'Drive expiring'
+    case 'full':
+      return 'Drive full'
+  }
 }
 
 /** The unlock prompt behind that action: what is wrong, which of the Storage
@@ -338,6 +399,10 @@ export function driveAttentionDescription(
 
 function describeAttention(attention: DriveAttention): string {
   switch (attention.reason) {
+    case 'expired':
+      return 'A drive has expired. Sign in to check it.'
+    case 'may-have-expired':
+      return `A drive may have expired around ${formatYmd(attention.expiry)}. Sign in to check it.`
     case 'expiring':
       return `A drive expires on ${formatYmd(attention.expiry)}. Sign in to extend its lifespan.`
     case 'may-expire':

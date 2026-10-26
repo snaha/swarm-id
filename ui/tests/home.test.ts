@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import { expect, test } from '@playwright/test'
 
-import { completeCreateFlow } from './helpers'
+import { completeCreateFlow, seedNoChain } from './helpers'
 
 // A fresh browser context has empty localStorage, so a first visit lands on the
 // product page. "Get started" (→ /?signin) opts into the account chooser.
@@ -93,4 +93,62 @@ test('the URL hash selects a tab and opens what it names', async ({ page }) => {
   await expect(page).toHaveURL(/\/#storage$/)
   await page.reload()
   await expect(page.getByRole('tab', { name: 'Storage' })).toHaveAttribute('aria-selected', 'true')
+})
+
+// Frame 157 (#892). Chain-free: the two expired drives are written straight
+// into the stored account, the default one among them.
+test('expired drives are alerted on every tab until dismissed', async ({ page }) => {
+  await seedNoChain(page)
+  await page.goto('/?signin')
+  await completeCreateFlow(page)
+  await page.getByRole('button', { name: 'Stay local for now' }).click()
+  await expect(page).toHaveURL(/\/$/)
+  await page.evaluate(() => {
+    const doc = JSON.parse(localStorage.getItem('swarm-id-accounts') ?? '{}') as {
+      data?: { postageStamps?: object[]; defaultPostageStampBatchID?: string }[]
+    }
+    const record = doc.data?.[0]
+    if (!record) throw new Error('no stored account')
+    const stamp = (hexChar: string, name: string) => ({
+      batchID: hexChar.repeat(64),
+      signerKey: 'b'.repeat(64),
+      name,
+      utilization: 0,
+      usable: true,
+      depth: 24,
+      amount: '100000000',
+      bucketDepth: 16,
+      blockNumber: 1,
+      immutableFlag: false,
+      exists: true,
+      batchTTL: 0,
+      createdAt: Date.now(),
+    })
+    record.postageStamps = [stamp('1', 'Drive 1'), stamp('5', 'Drive 5')]
+    record.defaultPostageStampBatchID = '1'.repeat(64)
+    localStorage.setItem('swarm-id-accounts', JSON.stringify(doc))
+  })
+  await page.reload()
+
+  const defaultAlert = page.getByText('Your default drive has expired.')
+  const otherAlert = page.getByText('Drive 5 has expired.')
+  await expect(defaultAlert).toBeVisible()
+  await expect(otherAlert).toBeVisible()
+  await page.getByRole('tab', { name: 'Account' }).click()
+  await expect(defaultAlert).toBeVisible()
+
+  // The second alert's close button: the default drive's comes first.
+  await page.getByRole('button', { name: 'Dismiss' }).nth(1).click()
+  await expect(otherAlert).toHaveCount(0)
+  await page.reload()
+  await expect(defaultAlert).toBeVisible()
+  await expect(otherAlert).toHaveCount(0)
+
+  // The drive list shows the badge instead of a size.
+  await page.getByRole('tab', { name: 'Storage' }).click()
+  await expect(page.getByText('Drive expired')).toHaveCount(2)
+
+  // The connect popup's account chooser flags the account too (Frame 148).
+  await page.goto('/connect#origin=https%3A%2F%2Fapp.example')
+  await expect(page.getByRole('button', { name: 'Drive expired' })).toBeVisible()
 })
