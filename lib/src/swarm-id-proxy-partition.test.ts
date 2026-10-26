@@ -3032,6 +3032,32 @@ describe("SwarmIdProxy partitioned write enablement", () => {
       foldedFromSwarm.value = undefined
     })
 
+    // The check fails open when the roster cannot be read, which is routine
+    // whenever the gateway cannot serve the account's feeds. Logging the error
+    // object printed its whole stack, which read as a crash (#911): one line,
+    // the message, and what was decided.
+    it("logs one line, not a stack, when it cannot read the roster", async () => {
+      await connectPartitionedAt(Date.now())
+      vi.mocked(foldAccountFromSwarm).mockRejectedValueOnce(
+        new Error(
+          "roster scan inconclusive: cannot confirm the roster is empty",
+        ),
+      )
+      const warn = vi.spyOn(console, "warn").mockImplementation(() => {})
+      try {
+        await reload()
+        await vi.waitFor(() =>
+          expect(warn).toHaveBeenCalledWith(
+            "[Proxy] Could not verify the restored session, keeping it:",
+            "roster scan inconclusive: cannot confirm the roster is empty",
+          ),
+        )
+        expect(storedSession()).toBeTruthy()
+      } finally {
+        warn.mockRestore()
+      }
+    })
+
     // A reload is not a connection, and `hydratePartitionAccount` used to
     // record it as one. #668 worked around that at the one call site that
     // needed the true instant; every other reader still got "just now" (#670).
