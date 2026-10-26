@@ -128,7 +128,18 @@ function sendSecretToOpener(account: Account, request: ConnectRequest, appSecret
   // The account collections and network settings are Svelte $state proxies,
   // which structured clone rejects (DataCloneError). The payload is already
   // the JSON wire shape, so a JSON round-trip strips the reactivity.
-  window.opener.postMessage(JSON.parse(JSON.stringify(message)), window.location.origin)
+  const wire = JSON.parse(JSON.stringify(message))
+  const opener: Window = window.opener
+  opener.postMessage(wire, window.location.origin)
+  // When the browser refused the iframe a popup of its own (Firefox, #751),
+  // the app page opened this one and is the opener; the iframe is then among
+  // its frames, which are reachable cross-origin by index. The target origin
+  // keeps the payload from every other frame, and the proxy takes it on the
+  // challenge alone, whichever window delivered it.
+  // ponytail: direct children only; a proxy nested two frames deep would need a walk.
+  for (let i = 0; i < opener.length; i++) {
+    opener[i].postMessage(wire, window.location.origin)
+  }
 }
 
 /**

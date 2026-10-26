@@ -1124,6 +1124,7 @@ export class SwarmIdClient {
       type: "connectResponse"
       requestId: string
       success: boolean
+      challenge?: string
     }>({
       type: "connect",
       requestId,
@@ -1133,12 +1134,12 @@ export class SwarmIdClient {
       return
     }
 
-    // The proxy's popup was blocked — the click happened out here, and no
-    // activation crosses a postMessage. Opening from the parent is what this
-    // browser did before the storage mode decided anything: on a session that
-    // turns out to be shared it just works, and on a partitioned one it fails
-    // no worse than not having asked.
-    if (!this.openAuthWindow(options)) {
+    // The proxy's popup was blocked — Firefox never lets an iframe open one on
+    // the parent's click (#751). The click happened out here, and the round
+    // trip was short enough that the activation is still good, so open from
+    // the parent with the proxy's challenge: the popup hands the session to
+    // the iframe among this page's frames, which works in both storage modes.
+    if (!this.openAuthWindow(options, response.challenge)) {
       throw new SwarmIdError(
         "popup-blocked",
         "Failed to open authentication popup",
@@ -1281,20 +1282,22 @@ export class SwarmIdClient {
   /**
    * Open the auth popup from the dApp page.
    *
-   * Carries no challenge: a popup opened here has the dApp page as its
-   * `window.opener`, so there is nothing for a handover to attach to, and the
-   * popup falls back to the storage write it does anyway.
+   * Without a challenge the popup's handover has nothing to attach to, and it
+   * relies on the storage write it does anyway — right when the store is
+   * shared. With the proxy's challenge, the popup also posts the session to
+   * this page's frames, which is how a partitioned iframe gets it when the
+   * browser would not let the iframe open the popup itself (#751).
    *
    * @returns whether the popup opened — a blocked one returns null, which the
    *   caller must not report as a connect in progress.
    */
-  private openAuthWindow(options: ConnectOptions): boolean {
+  private openAuthWindow(options: ConnectOptions, challenge?: string): boolean {
     const basePath = this.iframePath.replace(/\/proxy$/, "")
     const authUrl = buildAuthUrl(
       this.iframeOrigin + basePath,
       window.location.origin,
       this.metadata,
-      { permissions: this.permissions },
+      { permissions: this.permissions, challenge },
     )
 
     const effectivePopupMode = options.popupMode ?? this.popupMode

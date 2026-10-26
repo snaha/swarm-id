@@ -439,6 +439,28 @@ describe("SwarmIdClient connect()", () => {
       )
     })
 
+    // Firefox blocks the delegated popup every time (#751). The fallback then
+    // carries the proxy's challenge, so the popup can hand the session to the
+    // iframe among this page's frames instead of writing to a store the
+    // partitioned iframe never reads.
+    it("puts the proxy's challenge on the fallback popup", async () => {
+      vi.spyOn(internals(client), "ensureReady").mockImplementation(() => {})
+      setStorageShared(false)
+      vi.spyOn(internals(client), "sendRequest").mockResolvedValue({
+        type: "connectResponse",
+        requestId: "test",
+        success: false,
+        challenge: "attempt-7",
+      })
+
+      await client.connect()
+
+      expect(window.open).toHaveBeenCalledWith(
+        expect.stringContaining("challenge=attempt-7"),
+        "_blank",
+      )
+    })
+
     it("throws when the fallback popup is blocked too", async () => {
       vi.spyOn(internals(client), "ensureReady").mockImplementation(() => {})
       setStorageShared(false)

@@ -1769,6 +1769,13 @@ export const ConnectResponseMessageSchema = z.object({
   type: z.literal("connectResponse"),
   requestId: z.string(),
   success: z.boolean(),
+  /**
+   * The attempt's challenge, when the proxy's own popup was blocked (#751):
+   * the parent opens the popup instead and carries it, so the popup can still
+   * tell a partitioned store from a shared one and hand the session to this
+   * iframe among the parent's frames.
+   */
+  challenge: z.string().optional(),
 })
 
 export const IsConnectedResponseMessageSchema = z.object({

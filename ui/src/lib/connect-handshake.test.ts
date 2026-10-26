@@ -119,6 +119,49 @@ describe('partitionHandoverAccount', () => {
   })
 })
 
+// The popup may have been opened by the app page rather than the iframe —
+// Firefox refuses the iframe a popup on the parent's click (#751). The
+// handover then goes to the opener AND to each of its frames: only the one on
+// this origin receives it, and only the challenge lets the proxy take it.
+describe('commitConnect handover', () => {
+  it('posts the session to the opener and to every frame of the opener', () => {
+    const openerPost = vi.fn()
+    const framePosts = [vi.fn(), vi.fn()]
+    vi.stubGlobal('window', {
+      addEventListener: () => {},
+      location: { origin: 'https://id.example.com' },
+      opener: {
+        postMessage: openerPost,
+        length: 2,
+        0: { postMessage: framePosts[0] },
+        1: { postMessage: framePosts[1] },
+      },
+    })
+    const account = {
+      ...makeAccount(),
+      settings: undefined,
+      connectApp: vi.fn(),
+      toSyncedRecord: () => makeAccount(),
+    } as unknown as Account
+    try {
+      commitConnect(
+        account,
+        { appOrigin: APP_ORIGIN, appName: 'dApp', partitionChallenge: 'attempt-7' },
+        '33'.repeat(32),
+      )
+    } finally {
+      vi.unstubAllGlobals()
+    }
+
+    const expected = [
+      expect.objectContaining({ type: 'setSecret', challenge: 'attempt-7' }),
+      'https://id.example.com',
+    ]
+    expect(openerPost).toHaveBeenCalledWith(...expected)
+    for (const post of framePosts) expect(post).toHaveBeenCalledWith(...expected)
+  })
+})
+
 // The connection's deadline: the app's own session length (#885) over the
 // account's; and the grant made on the connect screen, each field on its
 // own clock.

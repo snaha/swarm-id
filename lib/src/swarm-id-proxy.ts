@@ -3916,6 +3916,11 @@ export class SwarmIdProxy {
       type: "connectResponse",
       requestId: message.requestId,
       success,
+      // Blocked — Firefox refuses an iframe a popup on the parent's click
+      // (#751). The parent opens it instead, with this attempt's challenge,
+      // and `handlePopupMessage` accepts the handover on that challenge
+      // whichever window delivers it.
+      challenge: success ? undefined : this.pendingChallenge,
     })
   }
 

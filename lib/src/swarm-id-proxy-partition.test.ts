@@ -586,6 +586,33 @@ describe("SwarmIdProxy partitioned write enablement", () => {
     })
   }
 
+  // Firefox never lets the iframe open the popup on the parent's click (#751).
+  // The answer then carries the challenge, so the parent can open the popup
+  // itself — and the handover that popup sends on that challenge is taken,
+  // although this iframe opened nothing.
+  it("hands the parent its challenge when the popup is blocked, and accepts the handover on it", async () => {
+    vi.mocked(window.open).mockReturnValueOnce(null)
+    await dispatch(
+      { type: "parentIdentify", requestId: "r1", metadata: { name: "dApp" } },
+      PARENT_ORIGIN,
+      parentWindow,
+    )
+    await dispatch(
+      { type: "connect", requestId: "r2" },
+      PARENT_ORIGIN,
+      parentWindow,
+    )
+    const challenge = localStorageFake.getItem(STORAGE_CHALLENGE_KEY)
+    expect(messagesOfType("connectResponse")).toEqual([
+      { type: "connectResponse", requestId: "r2", success: false, challenge },
+    ])
+
+    await sendSetSecret(challenge!, {
+      account: serializeSyncedAccount(makeSyncedAccount()),
+    })
+    expect(messagesOfType("authSuccess")).toHaveLength(1)
+  })
+
   // The lease cache is a HINT at which lane this device holds, and a lane is
   // one partition of one batch. Keyed per account alone, the two coordinators
   // an account has whenever a dApp carries a per-app stamp override share one
