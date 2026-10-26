@@ -3,9 +3,10 @@
 import { defineConfig, devices } from '@playwright/test'
 
 /**
- * The three-device partition scenarios (`tests/three-devices.test.ts`): three
- * browser contexts of one account sharing two write partitions, driven through
- * the demo the way a person drives it. Minutes per run by construction — the
+ * The device scenarios: three browser contexts of one account sharing two
+ * write partitions (`tests/three-devices.test.ts`), and two of them writing
+ * two drives (`tests/two-drives.test.ts`, #882), driven through the demo the
+ * way a person drives it. Minutes per run by construction — the
  * lease TTL, the idle yield and the beacon grace are each 30 s and the suite
  * waits them out — so it is not part of `pnpm test:e2e`. It runs on its own
  * workflow (`.github/workflows/three-devices.yml`): on a PR that touches the
@@ -16,7 +17,7 @@ import { defineConfig, devices } from '@playwright/test'
  *   pnpm test:devices                   # chromium
  *   DEVICE_BROWSERS=chromium,firefox,webkit pnpm test:devices
  *
- * One worker: every test in the file shares the same three devices.
+ * One worker: every test in a file shares the same devices.
  */
 const BROWSERS = (process.env.DEVICE_BROWSERS ?? 'chromium').split(',')
 
@@ -25,7 +26,7 @@ const TEST_TIMEOUT_MS = 6 * 60 * 1000
 
 export default defineConfig({
   testDir: './tests',
-  testMatch: '**/three-devices.test.ts',
+  testMatch: ['**/three-devices.test.ts', '**/two-drives.test.ts'],
   fullyParallel: false,
   workers: 1,
   globalSetup: './tests/global-setup-devices.ts',

@@ -336,6 +336,8 @@ export class SwarmIdProxy {
    * delegates all writes to these coordinators via `withModeAwareWriteLock`.
    */
   private drives = new Map<string, DriveWritePath>()
+  /** The lanes `connectionInfoChanged` last went out with (see `heldLanes`). */
+  private lastHeldLanes = ""
   /** The primary drive's batch: where a write that names no drive goes. */
   private primaryBatchId: string | undefined
   private storagePartitioned: boolean = false
@@ -3625,20 +3627,37 @@ export class SwarmIdProxy {
     return undefined
   }
 
+  /** Every lane this session holds, as one comparable string. */
+  private heldLanes(): string {
+    return [...this.drives.values()]
+      .map((drive) => `${drive.batchId}:${drive.coordinator?.currentPartition}`)
+      .sort()
+      .join(",")
+  }
+
   /**
    * Recompute ConnectionInfo and send `connectionInfoChanged` to the parent
-   * if it actually differs from the last value we sent. Used both on auth
-   * transitions and on storage events that affect derived fields.
+   * if it actually differs from the last value we sent, or a lane moved.
+   * Used both on auth transitions and on storage events that affect derived
+   * fields.
    */
   private emitConnectionInfoIfChanged(): void {
     if (!this.parentOrigin) {
       return
     }
     const info = this.buildConnectionInfo()
-    if (connectionInfoEqual(this.lastConnectionInfo, info)) {
+    const lanes = this.heldLanes()
+    // A lease moving on a drive other than the primary changes nothing in
+    // the info itself; it is still sent, so the dApp re-reads `getDrives()`
+    // for the drive's `partition` (#882).
+    if (
+      connectionInfoEqual(this.lastConnectionInfo, info) &&
+      lanes === this.lastHeldLanes
+    ) {
       return
     }
     this.lastConnectionInfo = info
+    this.lastHeldLanes = lanes
     this.sendToParent({
       type: "connectionInfoChanged",
       canUpload: info.canUpload,
@@ -5983,6 +6002,8 @@ export class SwarmIdProxy {
           ...(await this.describeStamp(stamp)),
           kind: stamp.kind ?? "regular",
           primary: stamp.batchID.toHex() === primary?.batchID.toHex(),
+          partition: this.drives.get(stamp.batchID.toHex())?.coordinator
+            ?.currentPartition,
         }),
       ),
     )
