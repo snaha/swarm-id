@@ -51,6 +51,10 @@ export const DRIVE_REQUEST_PRESETS = {
       { kind: 'scratch' },
     ],
   },
+  'two-regular': {
+    label: 'Two drives',
+    request: [{ kind: 'regular' }, { kind: 'regular' }],
+  },
   all: { label: 'All drives', request: 'all' },
   none: { label: 'No drive', request: [] },
 } satisfies Record<string, { label: string; request: DriveRequest | undefined }>

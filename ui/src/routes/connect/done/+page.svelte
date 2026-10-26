@@ -180,7 +180,6 @@
   // dialog is open: its drive belongs to the row it was opened for, and
   // `onDriveAdded` runs before the dialog closes and this runs again.
   $effect(() => {
-    if (addingFor !== undefined) return
     const filled = fillRequiredRows(rows, drives, defaultBatchHex)
     if (filled !== rows) rows = filled
   })
