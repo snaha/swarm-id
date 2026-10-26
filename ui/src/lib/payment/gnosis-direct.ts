@@ -180,11 +180,6 @@ function isDirectHandle(handle: unknown): handle is DirectHandle {
   )
 }
 
-/** The legs that send anything: a covered leg costs the wallet nothing. */
-function sentLegs(legs: PaymentQuote['charges']): PaymentQuote['charges'] {
-  return legs.filter((leg) => leg.amount > 0n)
-}
-
 /**
  * Price a direct payment: the user pays exactly what must arrive, because
  * nothing takes a cut in between. Gas is the wallet's own business and it
@@ -280,10 +275,11 @@ export async function quoteDirectPayment(request: QuoteRequest): Promise<Payment
     // stranded exactly as the retry that credited it was meant to prevent.
     delivers: { input: accepted.input, amount },
     // What the wallet sends: the transfer net of any residual, and the gas leg.
-    charges: sentLegs([
+    // A covered leg costs the wallet nothing.
+    charges: [
       { currency: accepted.token.address, amount: transfer },
       { currency: NATIVE_CURRENCY, amount: gasXdaiWei },
-    ]),
+    ].filter((leg) => leg.amount > 0n),
   }
 }
 

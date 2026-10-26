@@ -1,7 +1,7 @@
 // Copyright 2026 The Swarm Authors. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 /** Whether the connected wallet is known to be short of what a payment charges. */
-import { type PaymentQuote, type PaymentToken, displayBalance } from '$lib/payment/payment-rail'
+import { type Charge, type PaymentToken, displayBalance } from '$lib/payment/payment-rail'
 
 /**
  * The first charge the wallet is known not to cover, as one sentence, or ''.
@@ -10,7 +10,7 @@ import { type PaymentQuote, type PaymentToken, displayBalance } from '$lib/payme
  * one whose balance is not read yet, never blocks.
  */
 export function shortfallMessage(
-  charges: PaymentQuote['charges'],
+  charges: Charge[],
   tokens: PaymentToken[],
   held: (currency: string) => bigint | undefined,
   chainName: string,

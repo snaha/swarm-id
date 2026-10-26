@@ -214,10 +214,16 @@ export interface PaymentQuote {
    */
   delivers: Delivery
   /**
-   * What the wallet pays out of each asset, by token address, in base units —
-   * empty when the rail cannot say. Source-chain gas is not included.
+   * What the wallet pays out of each asset — empty when the rail cannot say.
+   * Source-chain gas is not included.
    */
-  charges: { currency: string; amount: bigint }[]
+  charges: Charge[]
+}
+
+/** What a payment takes out of one asset, by token address, in base units. */
+export interface Charge {
+  currency: string
+  amount: bigint
 }
 
 export interface ExecutePaymentOptions {

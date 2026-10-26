@@ -3,7 +3,7 @@
 import { parseUnits } from 'viem'
 import { describe, expect, it } from 'vitest'
 
-import { NATIVE_CURRENCY } from '$lib/payment/payment-rail'
+import { type Charge, NATIVE_CURRENCY } from '$lib/payment/payment-rail'
 
 import { shortfallMessage } from './wallet-shortfall'
 
@@ -21,7 +21,7 @@ function holding(figures: Record<string, bigint>) {
   return (currency: string): bigint | undefined => figures[currency]
 }
 
-function message(charges: { currency: string; amount: bigint }[], figures: Record<string, bigint>) {
+function message(charges: Charge[], figures: Record<string, bigint>) {
   return shortfallMessage(charges, TOKENS, holding(figures), 'Gnosis Chain')
 }
 
