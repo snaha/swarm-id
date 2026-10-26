@@ -3043,23 +3043,17 @@ describe("SwarmIdProxy partitioned write enablement", () => {
           "roster scan inconclusive: cannot confirm the roster is empty",
         ),
       )
-      const error = vi.spyOn(console, "error").mockImplementation(() => {})
       const warn = vi.spyOn(console, "warn").mockImplementation(() => {})
       try {
         await reload()
         await vi.waitFor(() =>
-          expect(error).toHaveBeenCalledWith(
+          expect(warn).toHaveBeenCalledWith(
             "[Proxy] Could not verify the restored session, keeping it:",
             "roster scan inconclusive: cannot confirm the roster is empty",
           ),
         )
-        expect(warn).not.toHaveBeenCalledWith(
-          expect.stringContaining("Could not verify"),
-          expect.anything(),
-        )
         expect(storedSession()).toBeTruthy()
       } finally {
-        error.mockRestore()
         warn.mockRestore()
       }
     })

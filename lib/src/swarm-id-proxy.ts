@@ -2651,7 +2651,7 @@ export class SwarmIdProxy {
       // Fail open, as above — an unreachable gateway says nothing. The message
       // alone: the error object prints its whole stack, which reads as a crash
       // for what is a routine read failure (#911).
-      console.error(
+      console.warn(
         "[Proxy] Could not verify the restored session, keeping it:",
         error instanceof Error ? error.message : String(error),
       )
