@@ -9,6 +9,8 @@
   import { isSignedOutAccount, markFirstPartyStorage } from '@snaha/swarm-id/internal'
   import type { SyncedAccount } from '@snaha/swarm-id/internal'
 
+  import { page } from '$app/state'
+
   import Toast from '$lib/components/toast.svelte'
   // ponytail: the sync engine lives under `$lib/dev` but operates on real account
   // data — #389 can relocate it out of `$lib/dev`; not worth the churn here.
@@ -23,6 +25,15 @@
   import '../app.css'
 
   let { children } = $props()
+
+  /** The one route that must render framed: the dApp's hidden iframe. */
+  const PROXY_ROUTE = '/proxy'
+  // Every other page grants something on a click — a connection, a drive, a
+  // switch (#883, #885, #896) — and nothing sets `frame-ancestors`, so a
+  // same-site page could frame one and clickjack it. Refused here, once, so
+  // the next grant surface need not remember to; and decided before the page
+  // mounts, so a framed page never parses its request or redirects.
+  const framed = $derived(page.route.id !== PROXY_ROUTE && window.top !== window)
 
   /** The stored record for an account, once it is signed in — a signed-out one
    *  carries no `derivationKey`, and the bus topic is derived from it. */
@@ -81,6 +92,12 @@
   })
 </script>
 
-{@render children()}
+{#if framed}
+  <p class="text-muted-foreground p-8 text-center text-sm">
+    This page cannot be shown inside another site.
+  </p>
+{:else}
+  {@render children()}
+{/if}
 
 <Toast message={toastStore.message} />

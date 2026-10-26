@@ -8,8 +8,8 @@
   taken away, unticking "all" falls back to the account default), the sharing
   switches (moving one pins it for this app, even to the value the account
   default has; "Use account default" unpins it, #885) — and the two ways out,
-  Disconnect and Revoke access. Every control grants on the spot, so the home
-  route refuses to render framed (`routes/+page.svelte`).
+  Disconnect and Revoke access. Every control grants on the spot; like every
+  route but `/proxy`, it refuses to render framed (`routes/+layout.svelte`).
   "Keep app connected for" is the app's own session length, applied at its
   next connect (a running session keeps the deadline it was given), and
   counts as custom like a pinned switch. Not here yet: the design's per-app
