@@ -1,5 +1,24 @@
 # Changelog
 
+## [0.8.0](https://github.com/snaha/swarm-id/compare/v0.7.0...v0.8.0) (2026-10-26)
+
+
+### ⚠ BREAKING CHANGES
+
+* **lib:** let a write name its drive, and list the app's drives ([#877](https://github.com/snaha/swarm-id/issues/877))
+
+### Features
+
+* data sharing and write access switches, account-wide and per app ([#891](https://github.com/snaha/swarm-id/issues/891)) ([cec2fe2](https://github.com/snaha/swarm-id/commit/cec2fe2fb1d67a8f6ea5683fdbeecc1d71955a1a))
+* grant apps drives, and give each drive a kind ([#864](https://github.com/snaha/swarm-id/issues/864)) ([c6cc3ba](https://github.com/snaha/swarm-id/commit/c6cc3ba85aa7193fa2435944895f1843711961b6))
+* let an app ask for drives at connect, and pick them on the connect screen ([#880](https://github.com/snaha/swarm-id/issues/880)) ([0a8864e](https://github.com/snaha/swarm-id/commit/0a8864ea7fe9e0623d9a9f8581545ade0b337bf2))
+* let an app ask for more drives later, and edit what an app holds ([#883](https://github.com/snaha/swarm-id/issues/883)) ([a061707](https://github.com/snaha/swarm-id/commit/a06170759456332e254322590b3b276d78cb339a))
+* **lib:** give each granted drive its own write path in the proxy ([#869](https://github.com/snaha/swarm-id/issues/869)) ([4740ed3](https://github.com/snaha/swarm-id/commit/4740ed3461fc36799d700415da32804f49e93410))
+* **lib:** let a write name its drive, and list the app's drives ([#877](https://github.com/snaha/swarm-id/issues/877)) ([6eb7e76](https://github.com/snaha/swarm-id/commit/6eb7e76c447583cadf070b10531898677e9513dc))
+* **lib:** report each drive's lane, and test two devices writing two drives ([#895](https://github.com/snaha/swarm-id/issues/895)) ([94d8038](https://github.com/snaha/swarm-id/commit/94d80386559a844ead6329221dce613f7071e6fe))
+* scratch drives, whose full lanes wrap onto their oldest slot ([#881](https://github.com/snaha/swarm-id/issues/881)) ([dab3d45](https://github.com/snaha/swarm-id/commit/dab3d4556d8825c6f65d7d39a2c6d37c02b54baf))
+* **ui:** alert each expired drive on the home page ([#901](https://github.com/snaha/swarm-id/issues/901)) ([0096b82](https://github.com/snaha/swarm-id/commit/0096b822e3ce9ccb8dc2077a4207a9c7567ecd28))
+
 ## [0.7.0](https://github.com/snaha/swarm-id/compare/v0.6.0...v0.7.0) (2026-10-09)
 
 
