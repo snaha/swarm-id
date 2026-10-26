@@ -29,7 +29,7 @@
     /** Badge text for a row (e.g. "Signed out"). */
     badge?: (account: Account) => string | undefined
     onselect: (account: Account) => void
-    /** Enables the row action for a drive that is expiring or full. */
+    /** Enables the row action for a drive that has expired, is expiring or is full. */
     oncheckdrive?: (account: Account, attention: DriveAttention) => void
   }
 

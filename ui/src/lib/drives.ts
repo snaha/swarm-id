@@ -233,6 +233,20 @@ export function drivesNeedingAttention(
   return account.stamps.filter((drive) => driveNeedsAttention(drive, now)).length
 }
 
+/**
+ * What the "need attention" warning is about: each drive it counts, with the
+ * amount and depth that an extension or a resize changes. A dismissal holds
+ * while this stays the same, so a different drive, or the same one once it has
+ * been extended, brings the warning back.
+ */
+export function attentionKey(account: { stamps: PostageStamp[] }, now = Date.now()): string {
+  return account.stamps
+    .filter((drive) => driveNeedsAttention(drive, now))
+    .map((drive) => `${drive.batchID.toHex()}:${drive.amount}:${drive.depth}`)
+    .sort()
+    .join(',')
+}
+
 /** An expired drive's alert on the home page (Frame 157). */
 export interface ExpiredDriveAlert {
   batchHex: string
@@ -286,9 +300,11 @@ export function soonestDriveExpiry(stamps: PostageStamp[], now = Date.now()): nu
  *
  * `expiring` is measured from the account's live drives, so its date is a
  * fact; `may-expire` comes from the estimate captured at sign-out, which
- * another device may have moved since, so its copy hedges. Either way the
- * date is still ahead — an expired drive is not "attention" (see
- * {@link driveNeedsAttention}), on both paths.
+ * another device may have moved since, so its copy hedges; both dates are
+ * ahead. `expired` and `may-have-expired` are the same two paths once the
+ * date has passed, so the latter's `expiry` is in the past. The chooser flags
+ * an expired drive, though the home page's attention count leaves it out (see
+ * {@link driveNeedsAttention}).
  */
 export type DriveAttention =
   | { reason: 'expired' }

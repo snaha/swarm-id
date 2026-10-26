@@ -7,6 +7,7 @@ import { describe, expect, it } from 'vitest'
 import {
   DRIVE_SIZE_BREAKPOINTS,
   accountDriveAttention,
+  attentionKey,
   describeDrive,
   driveAttentionDescription,
   driveAttentionLabel,
@@ -242,6 +243,31 @@ describe('expiredDriveAlerts', () => {
 
   it('is empty without an expired drive', () => {
     expect(expiredDriveAlerts({ stamps: [live] }, new Set(), measuredAt)).toEqual([])
+  })
+})
+
+describe('attentionKey', () => {
+  const measuredAt = Date.UTC(2026, 8, 21)
+  const expiring = (char: string, amount = 100000000n) =>
+    makeDrive({ batchID: new BatchId(char.repeat(64)), batchTTL: 6 * DAY, amount })
+
+  it('changes when a different drive needs attention, at the same count', () => {
+    expect(attentionKey({ stamps: [expiring('1')] }, measuredAt)).not.toBe(
+      attentionKey({ stamps: [expiring('2')] }, measuredAt),
+    )
+  })
+
+  it('changes when the same drive was extended', () => {
+    expect(attentionKey({ stamps: [expiring('1')] }, measuredAt)).not.toBe(
+      attentionKey({ stamps: [expiring('1', 200000000n)] }, measuredAt),
+    )
+  })
+
+  it('holds while the same drives need attention, in any order', () => {
+    const live = makeDrive({ batchID: new BatchId('3'.repeat(64)) })
+    expect(attentionKey({ stamps: [expiring('1'), live, expiring('2')] }, measuredAt)).toBe(
+      attentionKey({ stamps: [expiring('2'), expiring('1')] }, measuredAt),
+    )
   })
 })
 

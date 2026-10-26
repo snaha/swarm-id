@@ -27,6 +27,7 @@
   import { Tabs } from '$lib/components/ui/tabs'
   import {
     type DriveAttention,
+    attentionKey,
     driveAttentionDescription,
     drivesNeedingAttention,
     expiredDriveAlerts,
@@ -114,6 +115,7 @@
   }
 
   const attentionCount = $derived(account ? drivesNeedingAttention(account) : 0)
+  const currentAttentionKey = $derived(account ? attentionKey(account) : '')
 
   // ponytail: dismissals live in this device's localStorage, so another device
   // shows the alert again; a synced `expiryNoticedAt` on the drive record if
@@ -122,8 +124,8 @@
   interface DismissedAlerts {
     /** Batch IDs (hex) of expired drives whose alert was closed. */
     expired: string[]
-    /** The "need attention" count when its warning was closed: it shows again once that changes. */
-    attentionCount?: number
+    /** The {@link attentionKey} when its warning was closed: it shows again once that changes. */
+    attentionKey?: string
   }
   let dismissedAlerts = $state<DismissedAlerts>({ expired: [] })
   const dismissedKey = $derived(
@@ -152,7 +154,7 @@
     account ? expiredDriveAlerts(account, new Set(dismissedAlerts.expired)) : [],
   )
   const showAttention = $derived(
-    attentionCount > 0 && attentionCount !== dismissedAlerts.attentionCount,
+    attentionCount > 0 && currentAttentionKey !== dismissedAlerts.attentionKey,
   )
 </script>
 
@@ -217,7 +219,7 @@
                   size="icon"
                   class="-my-1 size-7"
                   aria-label="Dismiss"
-                  onclick={() => dismiss({ ...dismissedAlerts, attentionCount })}
+                  onclick={() => dismiss({ ...dismissedAlerts, attentionKey: currentAttentionKey })}
                 >
                   <X />
                 </Button>
