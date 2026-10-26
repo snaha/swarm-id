@@ -214,6 +214,7 @@ export async function quoteDirectPayment(request: QuoteRequest): Promise<Payment
       // xDAI is a dollar stablecoin, so the USD figure is the amount itself.
       amountUsd: displayUsd(amount),
       delivers: { input: 'xdai', amount: request.xdaiWei - request.gasXdaiWei },
+      charges: [{ currency: NATIVE_CURRENCY, amount: request.xdaiWei }],
     }
   }
 
@@ -273,6 +274,12 @@ export async function quoteDirectPayment(request: QuoteRequest): Promise<Payment
     // there. Sizing the swap from the transfer alone would leave the residual
     // stranded exactly as the retry that credited it was meant to prevent.
     delivers: { input: accepted.input, amount },
+    // What the wallet sends: the transfer net of any residual, and the gas leg.
+    // A covered leg costs the wallet nothing.
+    charges: [
+      { currency: accepted.token.address, amount: transfer },
+      { currency: NATIVE_CURRENCY, amount: gasXdaiWei },
+    ].filter((leg) => leg.amount > 0n),
   }
 }
 

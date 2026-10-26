@@ -44,9 +44,11 @@
     type PaymentQuote,
     type PaymentRail,
     displayAmount,
+    displayBalance,
   } from '$lib/payment/payment-rail'
   import { subscribeProviderEvent } from '$lib/payment/provider-events'
   import { createWalletChainRecord } from '$lib/payment/wallet-chain-record'
+  import { shortfallMessage } from '$lib/payment/wallet-shortfall'
 
   /**
    * The payment screens: choose a method, then — for the built-in engine —
@@ -167,6 +169,8 @@
    * "you cannot pay".
    */
   let balances = $state<Record<string, bigint>>({})
+  /** A Check again read in flight; the button waits for it. */
+  let checkingBalances = $state(false)
   /**
    * Set once an attempt has been made. From then on the Gnosis side is
    * re-priced before every source-side quote: a failed attempt may still have
@@ -196,20 +200,22 @@
       label: chain.name,
     })),
   )
+  const selectedChain = $derived(rail.chains.find((chain) => String(chain.id) === chainId))
+  const selectedTokens = $derived(rail.tokens(Number(chainId)))
   const tokenOptions = $derived(
-    rail.tokens(Number(chainId)).map((token) => {
+    selectedTokens.map((token) => {
       const held = balances[balanceKey(chainId, token.address)]
       return {
         value: token.address,
         label:
           held === undefined
             ? `${token.symbol} (${token.name})`
-            : `${token.symbol} (${token.name}) — ${formatAmount(held, token.decimals)}`,
+            : `${token.symbol} (${token.name}) — ${displayBalance(held, token.decimals)}`,
       }
     }),
   )
   const tokenSymbol = $derived(
-    rail.tokens(Number(chainId)).find((token) => token.address === tokenAddress)?.symbol ?? '',
+    selectedTokens.find((token) => token.address === tokenAddress)?.symbol ?? '',
   )
   const shortAddress = $derived(
     walletAddress ? `${walletAddress.slice(0, 6)}…${walletAddress.slice(-4)}` : '',
@@ -249,6 +255,18 @@
     const paid = `${paymentQuote.amountFormatted} ${tokenSymbol}`
     return separateGasLeg ? `${paid} + ${gasLegAmount} gas` : paid
   })
+
+  /** Why Pay is held, or '' — said before the wallet refuses at signing. */
+  const fundsShortfall = $derived(
+    paymentQuote
+      ? shortfallMessage(
+          paymentQuote.charges,
+          selectedTokens,
+          (currency) => balances[balanceKey(chainId, currency)],
+          selectedChain?.name ?? '',
+        )
+      : '',
+  )
 
   /**
    * What one leg of the funding costs in the token the user is paying with —
@@ -404,7 +422,8 @@
    * Read what the wallet holds of every token on the selected chain, one slot
    * per token. Fire-and-forget from the events that move what it holds: the
    * switch (at connect, and on a chain change), a new account, the wallet's
-   * own chain change, and a failed attempt that may still have spent.
+   * own chain change, and a failed attempt that may still have spent. And on
+   * Check again beside a shortfall: a top-up made elsewhere moves none of those.
    *
    * Through the chain's own endpoint, never the wallet's: the same chain state
    * either way, and one path instead of two.
@@ -420,7 +439,7 @@
    */
   async function readBalances() {
     const address = walletAddress
-    const chain = rail.chains.find((candidate) => String(candidate.id) === chainId)
+    const chain = selectedChain
     if (!address || !chain) {
       return
     }
@@ -454,10 +473,19 @@
             balances[balanceKey(chain.id, token.address)] = BigInt(result)
           }
         } catch {
-          // The label stays absent; the quote is what gates Pay.
+          // No figure: no label, and no hold on Pay.
         }
       }),
     )
+  }
+
+  async function checkBalancesAgain() {
+    checkingBalances = true
+    try {
+      await readBalances()
+    } finally {
+      checkingBalances = false
+    }
   }
 
   /**
@@ -815,7 +843,7 @@
           options={chainOptions}
           bind:value={chainId}
           onchange={() => {
-            tokenAddress = rail.tokens(Number(chainId))[0]?.address ?? ''
+            tokenAddress = selectedTokens[0]?.address ?? ''
             void followChain()
             void refreshQuote()
           }}
@@ -875,11 +903,30 @@
         </p>
       {/if}
 
+      {#if fundsShortfall}
+        <div class="flex w-full flex-col gap-1">
+          <p class="text-destructive text-sm">{fundsShortfall}</p>
+          <Button
+            variant="link"
+            size="xs"
+            class="self-end"
+            disabled={checkingBalances}
+            onclick={() => void checkBalancesAgain()}
+          >
+            Check again
+          </Button>
+        </div>
+      {/if}
+
       {#if errorMessage}
         <p class="text-destructive w-full text-sm">{errorMessage}</p>
       {/if}
 
-      <Button class="w-full" disabled={!paymentQuote || quoting} onclick={pay}>
+      <Button
+        class="w-full"
+        disabled={!paymentQuote || quoting || fundsShortfall !== ''}
+        onclick={pay}
+      >
         Pay with your wallet
       </Button>
     {/if}

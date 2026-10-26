@@ -6,6 +6,7 @@ import { describe, expect, it, vi } from 'vitest'
 
 import {
   displayAmount,
+  displayBalance,
   displayUsd,
   isUnrecognizedChainError,
   switchWalletChain,
@@ -57,6 +58,19 @@ describe('displayAmount', () => {
     expect(displayAmount(123456789)).toBe('123500000')
     expect(displayAmount(0.0000000025)).toBe('0.0000000025')
     expect(displayAmount('0.000000000000000001')).toBe('0.000000000000000001')
+  })
+})
+
+/** A wallet's balance: a figure from base units, and never more than it holds. */
+describe('displayBalance', () => {
+  const USDC_DECIMALS = 6
+
+  it('shows an empty balance as 0', () => {
+    expect(displayBalance(0n, USDC_DECIMALS)).toBe('0')
+  })
+
+  it('never rounds a balance up past what the wallet holds', () => {
+    expect(displayBalance(10_839_999n, USDC_DECIMALS)).toBe('10.83')
   })
 })
 
