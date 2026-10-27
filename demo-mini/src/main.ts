@@ -25,10 +25,15 @@ function render(info: ConnectionInfo): void {
     ? `connected as ${info.identity.name} (${info.identity.address.slice(0, ADDRESS_PREFIX_LENGTH)}…)`
     : 'not connected'
   element('site').textContent = info.identitySite ?? iframeOrigin
+  element('failed').textContent = info.failedIdentitySite ?? '—'
+  // What `failedIdentitySite` is for: the app can say so before any connect.
+  const warning = element('failed-site')
+  warning.hidden = info.failedIdentitySite === undefined
+  warning.textContent = `Your identity site ${info.failedIdentitySite} is not working right now, so this app uses ${info.identitySite} instead. Connect to sign in there, or choose another identity site on the connect screen.`
   element('partitioned').textContent =
     info.storagePartitioned === undefined ? 'unknown' : String(info.storagePartitioned)
   log(
-    `connectionInfo: identity=${info.identity?.name ?? '-'} site=${info.identitySite} partitioned=${info.storagePartitioned} canUpload=${info.canUpload}`,
+    `connectionInfo: identity=${info.identity?.name ?? '-'} site=${info.identitySite} failed=${info.failedIdentitySite ?? '-'} partitioned=${info.storagePartitioned} canUpload=${info.canUpload}`,
   )
 }
 

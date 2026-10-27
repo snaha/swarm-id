@@ -1966,6 +1966,172 @@ describe("SwarmIdClient initialize() sequencing", () => {
 
     client.destroy()
   })
+
+  describe("a chosen identity site that does not come up", () => {
+    const CHOSEN = "https://other.example/id"
+    /** Past the deadline a chosen site gets, well inside the configured one. */
+    const CHOSEN_SITE_DEADLINE_MS = 10_000
+    let storage: {
+      setItem: Mock
+      removeItem: Mock
+      getItem: Mock
+    }
+
+    beforeEach(() => {
+      storage = { setItem: vi.fn(), removeItem: vi.fn(), getItem: vi.fn() }
+      vi.stubGlobal("localStorage", storage)
+    })
+
+    /** Bring the embedded proxy up the way the browser does. */
+    async function answerAs(origin: string, ready: Record<string, unknown>) {
+      env.iframeElement.onload?.()
+      await flush()
+      env.dispatch({ origin, data: { type: "proxyInitialized" } })
+      await flush()
+      env.dispatch({ origin, data: { type: "proxyReady", ...ready } })
+      await flush()
+    }
+
+    const CURRENT_PROXY = {
+      authenticated: false,
+      parentOrigin: "https://localhost",
+      connectChallenge: "armed",
+    }
+
+    /** The default names the chosen site; the chosen site runs a proxy too old to parse. */
+    async function failOnAnOldProxy(): Promise<{
+      initializing: Promise<void>
+    }> {
+      const initializing = client.initialize()
+      initializing.catch(() => {})
+      await flush()
+      await answerAs(IFRAME_ORIGIN, { ...CURRENT_PROXY, identitySite: CHOSEN })
+      expect(env.iframeElement.src).toBe(`${CHOSEN}/proxy`)
+      // What a proxy from before `connectChallenge` sends.
+      await answerAs("https://other.example", {
+        authenticated: false,
+        parentOrigin: "https://localhost",
+      })
+      // Wrapped: an async function returning the promise would wait on it.
+      return { initializing }
+    }
+
+    // #849: a site the user chose may run another version, or be down. The
+    // app keeps working on the site it configured, and says which one failed
+    // so it can tell the user; the choice itself is the user's to drop.
+    it("falls back to the configured site when the chosen site's proxy is too old to parse", async () => {
+      const { initializing } = await failOnAnOldProxy()
+
+      expect(env.iframeElement.src).toBe(`${IFRAME_ORIGIN}/proxy`)
+      expect(client.identitySite).toBe(IFRAME_ORIGIN)
+      // The default still names the chosen site; it is not followed again.
+      await answerAs(IFRAME_ORIGIN, { ...CURRENT_PROXY, identitySite: CHOSEN })
+      expect(env.iframeElement.src).toBe(`${IFRAME_ORIGIN}/proxy`)
+      env.dispatch({
+        data: {
+          type: "connectionInfoChanged",
+          canUpload: false,
+          uploadMode: "unavailable",
+        },
+      })
+      await initializing
+
+      expect(client.connectionInfo.identitySite).toBe(IFRAME_ORIGIN)
+      expect(client.connectionInfo.failedIdentitySite).toBe(CHOSEN)
+      expect(storage.removeItem).not.toHaveBeenCalled()
+      client.destroy()
+    })
+
+    it("falls back when the chosen site never answers, without waiting out the whole deadline", async () => {
+      vi.useFakeTimers()
+      try {
+        storage.getItem.mockReturnValue(CHOSEN)
+        client = new SwarmIdClient({
+          iframeOrigin: IFRAME_ORIGIN,
+          metadata: APP_METADATA,
+        })
+        const initializing = client.initialize()
+        initializing.catch(() => {})
+        await vi.advanceTimersByTimeAsync(0)
+        expect(env.iframeElement.src).toBe(`${CHOSEN}/proxy`)
+        env.iframeElement.onload?.()
+
+        await vi.advanceTimersByTimeAsync(CHOSEN_SITE_DEADLINE_MS)
+
+        expect(env.iframeElement.src).toBe(`${IFRAME_ORIGIN}/proxy`)
+        client.destroy()
+      } finally {
+        vi.useRealTimers()
+      }
+    })
+
+    // An unreachable site's iframe may never fire `load` at all (Firefox,
+    // connection refused): the wait for it is bound by the same deadline.
+    it("falls back when the chosen site's iframe never loads", async () => {
+      vi.useFakeTimers()
+      try {
+        storage.getItem.mockReturnValue(CHOSEN)
+        client = new SwarmIdClient({
+          iframeOrigin: IFRAME_ORIGIN,
+          metadata: APP_METADATA,
+        })
+        client.initialize().catch(() => {})
+        await vi.advanceTimersByTimeAsync(0)
+        expect(env.iframeElement.src).toBe(`${CHOSEN}/proxy`)
+
+        await vi.advanceTimersByTimeAsync(CHOSEN_SITE_DEADLINE_MS)
+
+        expect(env.iframeElement.src).toBe(`${IFRAME_ORIGIN}/proxy`)
+        client.destroy()
+      } finally {
+        vi.useRealTimers()
+      }
+    })
+
+    // The connect screen warns about it; both popups carry it — the one this
+    // page opens and the one the proxy's own button opens.
+    it("tells the configured site's proxy and connect popup which site failed", async () => {
+      await failOnAnOldProxy()
+      await answerAs(IFRAME_ORIGIN, CURRENT_PROXY)
+
+      const identify = env.iframeContentWindow.postMessage.mock.calls
+        .map(([message]) => message)
+        .filter((message) => message.type === "parentIdentify")
+        .at(-1)
+      expect(identify.failedIdentitySite).toBe(CHOSEN)
+
+      internals(client).ready = true
+      await client.connect().catch(() => {})
+      const url = vi.mocked(window.open).mock.calls[0][0] as string
+      expect(new URLSearchParams(url.split("#")[1]).get("failedSite")).toBe(
+        CHOSEN,
+      )
+      client.destroy()
+    })
+
+    // Connecting on the configured site after the warning is the user's
+    // answer: the failed site is not tried again on the next load.
+    it("forgets the failed site once the user connects on the configured site", async () => {
+      await failOnAnOldProxy()
+      storage.getItem.mockReturnValue(CHOSEN)
+
+      env.dispatch({
+        data: { type: "authSuccess", origin: "https://localhost" },
+      })
+      env.dispatch({
+        data: {
+          type: "connectionInfoChanged",
+          canUpload: false,
+          uploadMode: "unavailable",
+        },
+      })
+
+      expect(storage.removeItem).toHaveBeenCalledWith("swarm-id-identity-site")
+      internals(client).ready = true
+      expect(client.connectionInfo.failedIdentitySite).toBeUndefined()
+      client.destroy()
+    })
+  })
 })
 
 // A server render (Next.js App Router, SvelteKit with SSR) reaches the

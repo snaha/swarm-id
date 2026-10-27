@@ -651,6 +651,28 @@ describe("SwarmIdProxy partitioned write enablement", () => {
     expect(localStorageFake.getItem(storageChallengeKey(next!))).not.toBeNull()
   })
 
+  // The app fell back to this site because the one the user chose did not
+  // come up (#849): the popup this proxy's own button opens warns about it,
+  // as the one the app page opens does.
+  it("puts the chosen site that failed on the popup its own button opens", async () => {
+    await dispatch(
+      {
+        type: "parentIdentify",
+        requestId: "r1",
+        metadata: { name: "dApp" },
+        failedIdentitySite: "https://other.example/id",
+      },
+      PARENT_ORIGIN,
+      parentWindow,
+    )
+    ;(proxy as unknown as { openAuthPopup(): boolean }).openAuthPopup()
+
+    const url = vi.mocked(window.open).mock.calls[0][0] as string
+    expect(new URLSearchParams(url.split("#")[1]).get("failedSite")).toBe(
+      "https://other.example/id",
+    )
+  })
+
   it("removes its armed challenge from the store when destroyed", async () => {
     const challenge = await startPartitionedConnect()
 

@@ -45,6 +45,8 @@
   const siteUrlValid = $derived(isHttpUrl(siteUrl.trim()))
   /** The site chosen on an earlier connect on this device, offered instead of the form. */
   let rememberedSite = $state<string | undefined>(undefined)
+  /** The user answered the warning about a chosen site that did not come up (#849). */
+  let failedSiteAnswered = $state(false)
 
   const request = $derived(connectStore.request)
   const appIcon = $derived(
@@ -137,6 +139,14 @@
     }
   }
 
+  /** Stay on this site after the warning: stop sending apps to the failed one. */
+  function useThisSite() {
+    if (rememberedSite === request?.failedSite) {
+      forgetSite()
+    }
+    failedSiteAnswered = true
+  }
+
   /** Decline the remembered site, here and for the next app. */
   function forgetSite() {
     try {
@@ -201,9 +211,41 @@
           </div>
         </div>
 
+        <!-- The site the user chose did not come up — offline, or a version
+             the app cannot talk to — so the app fell back to this one (#849):
+             stay here, or name another site. -->
+        {#if request.failedSite !== undefined && !failedSiteAnswered}
+          <div class="flex w-full flex-col gap-2 rounded-lg border p-4" role="alert">
+            <p class="flex items-center gap-1.5 text-sm font-bold">
+              <CircleAlert class="text-destructive size-4 shrink-0" />
+              Your identity site is not working right now
+            </p>
+            <p class="font-mono text-xs break-all">{request.failedSite}</p>
+            <p class="text-xs">
+              {request.appName} could not reach it, or it runs a version {request.appName} cannot work
+              with. Sign in here on {window.location.host} instead, or choose another identity site.
+            </p>
+            <div class="flex gap-2">
+              <Button size="sm" class="flex-1" onclick={useThisSite}>Use this site</Button>
+              <Button
+                size="sm"
+                variant="outline"
+                class="flex-1"
+                onclick={() => {
+                  failedSiteAnswered = true
+                  choosingSite = true
+                }}
+              >
+                Choose another site
+              </Button>
+            </div>
+          </div>
+        {/if}
+
         <!-- A site chosen on this device before (#849): one click to send
-             the app there, or decline and sign in here. -->
-        {#if rememberedSite !== undefined}
+             the app there, or decline and sign in here. Not the one that
+             just failed: the warning above covers that. -->
+        {#if rememberedSite !== undefined && rememberedSite !== request.failedSite}
           <div class="flex w-full flex-col gap-2 rounded-lg border p-4">
             <p class="text-sm font-bold">Your account is on another site</p>
             <p class="font-mono text-xs break-all">{rememberedSite}</p>

@@ -117,6 +117,11 @@ function rememberedIdentitySite(): string | undefined {
 const MAX_TIMER_DELAY_MS = 2 ** 31 - 1
 const DEFAULT_INITIALIZATION_TIMEOUT_MS = 30000
 /**
+ * How long a chosen identity site gets to come up before the client falls back
+ * to the configured one (#849): a user waits this long, not the full deadline.
+ */
+const CHOSEN_SITE_INITIALIZATION_TIMEOUT_MS = 10000
+/**
  * The round trip of a `requestPermissions` message: the proxy answers it
  * once its popup closes, at the latest after `PERMISSIONS_POPUP_MAX_MS` — so
  * this is longer by the default timeout, and the call never rejects with
@@ -188,6 +193,8 @@ export class SwarmIdClient {
   private ignorePreferredSite = false
   /** At most one hop per client: two sites preferring each other must not re-embed forever. */
   private preferenceFollowed = false
+  /** The chosen site that did not come up, while this client runs on the configured one instead (#849). */
+  private failedSite: string | undefined
   private timeout: number
   private initializationTimeout: number
   private onConnectionChange?: (info: ConnectionInfo) => void
@@ -350,12 +357,58 @@ export class SwarmIdClient {
    * ```
    */
   async initialize(): Promise<void> {
+    const site = this.iframeOrigin
+    try {
+      await this.embedProxy()
+    } catch (error) {
+      // A site the user chose that does not come up — offline, or a version
+      // this client cannot talk to (#849): run on the configured site
+      // instead, rather than leave the app with nothing. Its remembered
+      // preference is not followed straight back, and the choice itself is
+      // left for the user to drop on the connect screen.
+      if (
+        site === this.defaultIframeOrigin ||
+        !(error instanceof SwarmIdError) ||
+        error.code !== "init-failed"
+      ) {
+        throw error
+      }
+      console.warn(
+        `[SwarmIdClient] Identity site ${site} did not come up, using ${this.defaultIframeOrigin}:`,
+        error.message,
+      )
+      this.failedSite = site
+      this.teardown()
+      this.setupMessageListener()
+      this.applyIdentitySite(undefined)
+      const ignoring = this.ignorePreferredSite
+      this.ignorePreferredSite = true
+      try {
+        await this.embedProxy()
+      } finally {
+        this.ignorePreferredSite = ignoring
+      }
+    }
+  }
+
+  private async embedProxy(): Promise<void> {
     if (this.iframe) {
       throw new SwarmIdError(
         "invalid-state",
         "SwarmIdClient already initialized",
       )
     }
+
+    // A chosen site gets less time than the app's own: past it `initialize()`
+    // falls back to the configured site, and nobody should wait the full
+    // deadline for that.
+    const deadline =
+      this.iframeOrigin === this.defaultIframeOrigin
+        ? this.initializationTimeout
+        : Math.min(
+            this.initializationTimeout,
+            CHOSEN_SITE_INITIALIZATION_TIMEOUT_MS,
+          )
 
     // Set up the first-snapshot wait now (not in the constructor) so the
     // timeout starts when initialization actually begins, not when the
@@ -374,8 +427,8 @@ export class SwarmIdClient {
         this.firstConnectionInfoResolve = resolve
         this.firstConnectionInfoReject = reject
       }),
-      this.initializationTimeout,
-      `Proxy initialization timeout - proxy did not send initial connectionInfoChanged within ${this.initializationTimeout}ms`,
+      deadline,
+      `Proxy initialization timeout - proxy did not send initial connectionInfoChanged within ${deadline}ms`,
     )
     // Attach a no-op handler so the rejection isn't surfaced as
     // "unhandled" if the timeout fires before we reach the awaiting line
@@ -393,8 +446,8 @@ export class SwarmIdClient {
         this.proxyInitializedResolve = resolve
         this.proxyInitializedReject = reject
       }),
-      this.initializationTimeout,
-      `Proxy initialization timeout - proxy did not signal readiness within ${this.initializationTimeout}ms`,
+      deadline,
+      `Proxy initialization timeout - proxy did not signal readiness within ${deadline}ms`,
     )
     this.proxyInitializedPromise.catch(() => {})
 
@@ -403,8 +456,8 @@ export class SwarmIdClient {
         this.readyResolve = resolve
         this.readyReject = reject
       }),
-      this.initializationTimeout,
-      `Proxy initialization timeout - proxy did not respond within ${this.initializationTimeout}ms`,
+      deadline,
+      `Proxy initialization timeout - proxy did not respond within ${deadline}ms`,
     )
     this.readyPromise.catch(() => {})
 
@@ -445,8 +498,9 @@ export class SwarmIdClient {
 
     // Wait for iframe to load. The `reject` is stashed for `destroy()` while
     // the load is pending: a removed iframe never fires `load`, and nothing
-    // else would settle this.
-    await new Promise<void>((resolve, reject) => {
+    // else would settle this. Under the deadline too: an unreachable site's
+    // iframe may never fire it either (Firefox, connection refused).
+    const loaded = new Promise<void>((resolve, reject) => {
       this.iframeLoadReject = reject
       this.iframe!.onload = () => resolve()
       this.iframe!.onerror = () =>
@@ -461,6 +515,11 @@ export class SwarmIdClient {
         document.body.appendChild(this.iframe!)
       }
     })
+    await initDeadline(
+      loaded,
+      deadline,
+      `Proxy initialization timeout - the iframe did not load within ${deadline}ms`,
+    )
     this.iframeLoadReject = undefined
 
     // Wait for proxy to signal it's ready
@@ -475,6 +534,7 @@ export class SwarmIdClient {
       buttonConfig: this.buttonConfig,
       subsidisedGatewayUrl: this.subsidisedGatewayUrl,
       permissions: this.permissions,
+      failedIdentitySite: this.failedSite,
     })
 
     // Wait for iframe to be ready
@@ -566,6 +626,16 @@ export class SwarmIdClient {
           event.data,
           error,
         )
+        // Our own proxy's handshake we cannot read: a version this client
+        // cannot talk to. Fail now rather than at the deadline.
+        if (event.data?.type === "proxyReady") {
+          this.readyReject?.(
+            new SwarmIdError(
+              "init-failed",
+              "The identity site runs a version this client cannot talk to",
+            ),
+          )
+        }
         return
       }
 
@@ -617,6 +687,16 @@ export class SwarmIdClient {
         if (this.iframe) {
           this.iframe.style.display = "block"
         }
+        // Connected on the configured site after the warning (#849): that is
+        // the user's answer, so the failed site is not tried again.
+        if (this.failedSite !== undefined) {
+          this.failedSite = undefined
+          try {
+            localStorage.removeItem(IDENTITY_SITE_STORAGE_KEY)
+          } catch {
+            // Storage unavailable: nothing was remembered.
+          }
+        }
         break
 
       case "connectionInfoChanged": {
@@ -631,6 +711,7 @@ export class SwarmIdClient {
           partition: message.partition,
           permissions: message.permissions,
           identitySite: this.iframeOrigin,
+          failedIdentitySite: this.failedSite,
         }
         this.lastConnectionInfo = info
         if (this.firstConnectionInfoResolve) {
@@ -1280,7 +1361,7 @@ export class SwarmIdClient {
       this.iframeOrigin + basePath,
       window.location.origin,
       this.metadata,
-      { permissions: this.permissions, challenge },
+      { permissions: this.permissions, challenge, failedSite: this.failedSite },
     )
 
     const effectivePopupMode = options.popupMode ?? this.popupMode
@@ -1318,6 +1399,8 @@ export class SwarmIdClient {
         `Identity site is not an http(s) URL: ${site}`,
       )
     }
+    // A new choice: whether it comes up is for this initialize to find out.
+    this.failedSite = undefined
     try {
       if (base === undefined) {
         localStorage.removeItem(IDENTITY_SITE_STORAGE_KEY)

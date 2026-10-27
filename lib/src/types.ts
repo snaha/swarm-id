@@ -948,6 +948,13 @@ export const ConnectionInfoSchema = z.object({
    * embedded as.
    */
   identitySite: z.string().optional(),
+  /**
+   * The identity site the user chose that did not come up — offline, or
+   * running a version this client cannot talk to (#849). The session runs
+   * against the app's own `iframeOrigin` instead, and its connect screen says
+   * so; an app may tell the user too. Gone once the user connects there.
+   */
+  failedIdentitySite: z.string().optional(),
 })
 
 export type ConnectionInfo = z.infer<typeof ConnectionInfoSchema>
@@ -1032,6 +1039,8 @@ export const ParentIdentifyMessageSchema = z.object({
   buttonConfig: ButtonConfigSchema,
   subsidisedGatewayUrl: z.string().url().optional(),
   permissions: PermissionsSchema.optional(),
+  /** The chosen identity site that did not come up, for the connect popup to warn about (#849). */
+  failedIdentitySite: z.string().url().optional(),
 })
 
 export const CheckAuthMessageSchema = z.object({

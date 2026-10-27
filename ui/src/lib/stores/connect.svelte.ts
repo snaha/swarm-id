@@ -1,6 +1,11 @@
 // Copyright 2026 The Swarm Authors. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
-import { type Permissions, PermissionsSchema, storageChallengeKey } from '@snaha/swarm-id/internal'
+import {
+  type Permissions,
+  PermissionsSchema,
+  isHttpUrl,
+  storageChallengeKey,
+} from '@snaha/swarm-id/internal'
 
 import type { Account } from '$lib/types'
 
@@ -23,10 +28,15 @@ export interface ConnectRequest {
   partitionChallenge?: string
   /**
    * The challenge as the URL carried it, whether or not it matched: present
-   * exactly when the proxy iframe opened this popup, so a message to
-   * `window.opener` reaches the iframe rather than the app page (#849).
+   * exactly when the proxy iframe's store was not proven shared, so a message
+   * for it goes to the opener's frames, where the iframe is (#751, #849).
    */
   challenge?: string
+  /**
+   * The identity site the user chose that did not come up, so the app runs on
+   * this one instead (#849): the connect screen warns about it.
+   */
+  failedSite?: string
   /**
    * What the app asked for (#862): `drives` is `"all"`, or a row per drive
    * for the done page's picker. Absent when the app asked for nothing, which
@@ -79,6 +89,11 @@ function parsePermissions(raw: string | null): Permissions | undefined {
   } catch {
     return undefined
   }
+}
+
+/** A site URL from the hash, if it is one: the URL is the app's to write. */
+function parseSite(raw: string | null): string | undefined {
+  return raw !== null && isHttpUrl(raw) ? raw : undefined
 }
 
 export const connectStore = {
@@ -136,6 +151,7 @@ export const connectStore = {
       partitionChallenge,
       challenge: challenge ?? undefined,
       permissions: parsePermissions(params.get('permissions')),
+      failedSite: parseSite(params.get('failedSite')),
     }
     return true
   },

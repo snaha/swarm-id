@@ -217,4 +217,23 @@ export function commitConnect(
 ): void {
   saveConnection(account, request, appSecret, grant)
   sendSecretToOpener(account, request, appSecret)
+  forgetFailedSite(request)
+}
+
+/**
+ * Connecting here after the connect screen warned that the chosen site did
+ * not come up (#849) is the user's answer: this site stops sending apps back
+ * there. Only that site — another one remembered since is a newer choice.
+ */
+function forgetFailedSite(request: ConnectRequest): void {
+  if (request.failedSite === undefined) {
+    return
+  }
+  try {
+    if (localStorage.getItem(IDENTITY_SITE_STORAGE_KEY) === request.failedSite) {
+      localStorage.removeItem(IDENTITY_SITE_STORAGE_KEY)
+    }
+  } catch {
+    // Storage unavailable: nothing was remembered.
+  }
 }

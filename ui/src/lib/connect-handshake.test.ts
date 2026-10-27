@@ -230,6 +230,36 @@ describe('commitConnect', () => {
     expect(connect({}).connectedUntil).toBe(NOW + 500)
   })
 
+  // Connecting here after the warning that the chosen site did not come up
+  // (#849) is the user's answer: this site stops sending apps back there. A
+  // different site remembered since is someone else's choice, and stays.
+  it('forgets the remembered site that failed, and only that one', () => {
+    const KEY = 'swarm-id-identity-site'
+    const FAILED = 'https://other.example/id'
+    const store = new Map<string, string>()
+    vi.stubGlobal('localStorage', {
+      getItem: (key: string) => store.get(key) ?? null,
+      removeItem: (key: string) => store.delete(key),
+    })
+    const account = {
+      settings: { appSessionDuration: 500 },
+      connectedApps: [],
+      connectApp: () => {},
+    } as unknown as Account
+    const request = { appOrigin: APP_ORIGIN, appName: 'dApp', failedSite: FAILED }
+    try {
+      store.set(KEY, FAILED)
+      commitConnect(account, request, '33'.repeat(32))
+      expect(store.has(KEY)).toBe(false)
+
+      store.set(KEY, 'https://b.example')
+      commitConnect(account, request, '33'.repeat(32))
+      expect(store.get(KEY)).toBe('https://b.example')
+    } finally {
+      vi.unstubAllGlobals()
+    }
+  })
+
   it("stamps the clock of each switch granted, not the drives'", () => {
     const connection = connect({})
     expect(connection).toMatchObject({ dataSharing: true, dataSharingAt: NOW })

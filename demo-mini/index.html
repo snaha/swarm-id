@@ -44,6 +44,12 @@
         font-family: ui-monospace, monospace;
         font-size: 13px;
       }
+      #failed-site {
+        border: 1px solid #c62828;
+        border-radius: 6px;
+        padding: 0.5rem 0.8rem;
+        color: #c62828;
+      }
       #log li {
         border-top: 1px solid #ddd;
         padding: 0.2rem 0;
@@ -56,6 +62,8 @@
       A second app origin with nothing but connect. Point it at an identity site with
       <code>?idDomain=…</code>; the default is <code>http://localhost:5500</code>.
     </p>
+
+    <p id="failed-site" role="alert" hidden></p>
 
     <h2>Library API</h2>
     <p><code>client.connect()</code> from this page's own button.</p>
@@ -75,6 +83,8 @@
       <dd id="status">initializing…</dd>
       <dt>Identity site</dt>
       <dd id="site">—</dd>
+      <dt>Failed identity site</dt>
+      <dd id="failed">—</dd>
       <dt>Storage partitioned</dt>
       <dd id="partitioned">—</dd>
     </dl>

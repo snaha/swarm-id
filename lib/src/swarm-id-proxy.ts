@@ -408,6 +408,8 @@ export class SwarmIdProxy {
   private appMetadata: AppMetadata | undefined
   /** What the dApp asks for, carried to the connect popup (#862). */
   private permissionsRequest: Permissions | undefined
+  /** The chosen identity site the app could not reach, for the connect popup to warn about (#849). */
+  private failedIdentitySite: string | undefined
   /**
    * The last Bee client built, with the URL it was asked for. Keyed on that
    * input URL, not on the client's own `url`, which bee-js keeps without the
@@ -2328,6 +2330,7 @@ export class SwarmIdProxy {
       this.appMetadata = parentMetadata
     }
     this.permissionsRequest = message.permissions
+    this.failedIdentitySite = message.failedIdentitySite
 
     // Store button config from parent
     if (parentButtonConfig) {
@@ -3985,7 +3988,11 @@ export class SwarmIdProxy {
       window.location.origin + basePath,
       this.parentOrigin,
       this.appMetadata,
-      { challenge, permissions: this.permissionsRequest },
+      {
+        challenge,
+        permissions: this.permissionsRequest,
+        failedSite: this.failedIdentitySite,
+      },
     )
 
     let popup: Window | null = null
