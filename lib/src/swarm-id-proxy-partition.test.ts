@@ -272,7 +272,7 @@ import {
 import { serializeAccountStateSnapshot } from "./utils/account-state-snapshot"
 import {
   IframeToParentMessageSchema,
-  STORAGE_CHALLENGE_KEY,
+  storageChallengeKey,
   IDENTITY_SITE_STORAGE_KEY,
   STORAGE_KEY_ACCOUNTS,
   STORAGE_KEY_NETWORK_SETTINGS,
@@ -521,7 +521,21 @@ describe("SwarmIdProxy partitioned write enablement", () => {
     return synced
   }
 
-  /** Run identify → connect → return the partition challenge the popup echoes. */
+  /** The connect challenge the proxy last armed and handed the parent. */
+  function armedChallenge(): string | undefined {
+    const armed = parentWindow.postMessage.mock.calls
+      .map(([message]) => message)
+      .filter(
+        (message) =>
+          message?.type === "proxyReady" || message?.type === "challengeArmed",
+      )
+      .at(-1)
+    return armed?.type === "proxyReady"
+      ? armed.connectChallenge
+      : armed?.challenge
+  }
+
+  /** Run identify → return the partition challenge the popup echoes. */
   async function startPartitionedConnect(
     appOrigin: string = PARENT_ORIGIN,
   ): Promise<string> {
@@ -530,12 +544,7 @@ describe("SwarmIdProxy partitioned write enablement", () => {
       appOrigin,
       parentWindow,
     )
-    await dispatch(
-      { type: "connect", requestId: "r2" },
-      appOrigin,
-      parentWindow,
-    )
-    const challenge = localStorageFake.getItem(STORAGE_CHALLENGE_KEY)
+    const challenge = armedChallenge()
     expect(challenge).toBeTruthy()
     return challenge!
   }
@@ -586,31 +595,68 @@ describe("SwarmIdProxy partitioned write enablement", () => {
     })
   }
 
-  // Firefox never lets the iframe open the popup on the parent's click (#751).
-  // The answer then carries the challenge, so the parent can open the popup
-  // itself — and the handover that popup sends on that challenge is taken,
-  // although this iframe opened nothing.
-  it("hands the parent its challenge when the popup is blocked, and accepts the handover on it", async () => {
-    vi.mocked(window.open).mockReturnValueOnce(null)
+  // The parent opens the connect popup in the user's click — Firefox refuses
+  // the iframe one (#751) — with a challenge armed ahead of it. Armed means
+  // already in this frame's store when the parent learns it, so the popup's
+  // partition check can never run ahead of the write.
+  it("arms the connect challenge in its store before telling the parent it is ready", async () => {
     await dispatch(
       { type: "parentIdentify", requestId: "r1", metadata: { name: "dApp" } },
       PARENT_ORIGIN,
       parentWindow,
     )
-    await dispatch(
-      { type: "connect", requestId: "r2" },
-      PARENT_ORIGIN,
-      parentWindow,
-    )
-    const challenge = localStorageFake.getItem(STORAGE_CHALLENGE_KEY)
-    expect(messagesOfType("connectResponse")).toEqual([
-      { type: "connectResponse", requestId: "r2", success: false, challenge },
-    ])
 
-    await sendSetSecret(challenge!, {
+    const [ready] = messagesOfType("proxyReady")
+    expect(ready.connectChallenge).toBeTruthy()
+    expect(
+      localStorageFake.getItem(storageChallengeKey(ready.connectChallenge)),
+    ).not.toBeNull()
+    expect(window.open).not.toHaveBeenCalled()
+  })
+
+  // Same-site dApps share this store, each with its own proxy armed ahead of
+  // any click: one key per challenge, or the last proxy loaded would
+  // overwrite the others' and their popups would misread the store.
+  it("keeps each proxy's challenge under its own key in a shared store", async () => {
+    const first = await startPartitionedConnect()
+    const firstProxy = proxy
+    mountProxy()
+    try {
+      const second = await startPartitionedConnect()
+
+      expect(second).not.toBe(first)
+      expect(
+        localStorageFake.getItem(storageChallengeKey(first)),
+      ).not.toBeNull()
+      expect(
+        localStorageFake.getItem(storageChallengeKey(second)),
+      ).not.toBeNull()
+    } finally {
+      firstProxy.destroy()
+    }
+  })
+
+  it("takes the handover on the armed challenge, then arms the next one", async () => {
+    const challenge = await startPartitionedConnect()
+
+    await sendSetSecret(challenge, {
       account: serializeSyncedAccount(makeSyncedAccount()),
     })
+
     expect(messagesOfType("authSuccess")).toHaveLength(1)
+    const next = armedChallenge()
+    expect(next).toBeTruthy()
+    expect(next).not.toBe(challenge)
+    expect(localStorageFake.getItem(storageChallengeKey(challenge))).toBeNull()
+    expect(localStorageFake.getItem(storageChallengeKey(next!))).not.toBeNull()
+  })
+
+  it("removes its armed challenge from the store when destroyed", async () => {
+    const challenge = await startPartitionedConnect()
+
+    proxy.destroy()
+
+    expect(localStorageFake.getItem(storageChallengeKey(challenge))).toBeNull()
   })
 
   // The lease cache is a HINT at which lane this device holds, and a lane is
@@ -647,7 +693,7 @@ describe("SwarmIdProxy partitioned write enablement", () => {
     expect(messagesOfType("switchIdentitySite")).toEqual([
       { type: "switchIdentitySite", site: "https://other.example/id" },
     ])
-    expect(localStorageFake.getItem(STORAGE_CHALLENGE_KEY)).toBeNull()
+    expect(localStorageFake.getItem(storageChallengeKey(challenge))).toBeNull()
   })
 
   // The choice made on this site's popup is this site's to report (#849):

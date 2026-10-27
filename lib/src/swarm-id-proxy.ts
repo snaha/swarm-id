@@ -62,7 +62,7 @@ import {
   ParentToIframeMessageSchema,
   ParentIdentifyMessageSchema,
   PopupToIframeMessageSchema,
-  STORAGE_CHALLENGE_KEY,
+  storageChallengeKey,
   IDENTITY_SITE_STORAGE_KEY,
   STORAGE_KEY_NETWORK_SETTINGS,
   partitionSessionStorageKey,
@@ -507,6 +507,11 @@ export class SwarmIdProxy {
     }
     this.setupMessageListener()
     this.setupStorageListeners()
+    // The armed challenge's key lives in a store other proxies share; it
+    // leaves with this page, and a page back from the bfcache arms anew.
+    // ponytail: a crashed tab leaks its one small key.
+    window.addEventListener("pagehide", this.onPageHide)
+    window.addEventListener("pageshow", this.onPageShow)
 
     // Multi-tab coordination rides the account bus (docs/Account-Bus.md).
     this.bus = new AccountBus([])
@@ -935,8 +940,7 @@ export class SwarmIdProxy {
         console.warn("[Proxy] identitySiteChosen from another popup — ignoring")
         return
       }
-      this.pendingChallenge = undefined
-      localStorage.removeItem(STORAGE_CHALLENGE_KEY)
+      this.rearmChallenge()
       this.endRefusedConnect()
       this.sendToParent({ type: "switchIdentitySite", site: message.site })
       return
@@ -973,9 +977,8 @@ export class SwarmIdProxy {
         return
       }
 
-      // Clean up challenge
-      this.pendingChallenge = undefined
-      localStorage.removeItem(STORAGE_CHALLENGE_KEY)
+      // This attempt is over: the next one gets its own challenge.
+      this.rearmChallenge()
 
       // Authenticate in storage-partitioned mode (no stamps available via postMessage)
       this.appSecret = message.data.secret
@@ -1392,6 +1395,9 @@ export class SwarmIdProxy {
    * Call this method when the proxy iframe is being unloaded.
    */
   destroy(): void {
+    window.removeEventListener("pagehide", this.onPageHide)
+    window.removeEventListener("pageshow", this.onPageShow)
+    this.dropArmedChallenge()
     for (const unsubscribe of this.unsubscribeStorageListeners) {
       unsubscribe()
     }
@@ -2353,6 +2359,7 @@ export class SwarmIdProxy {
       // user's click and `window.open` is what loses the gesture.
       storageShared: isStorageShared(),
       identitySite: this.preferredIdentitySite(),
+      connectChallenge: this.armChallenge(),
     })
 
     // Send the initial ConnectionInfo snapshot. The client awaits this before
@@ -2510,10 +2517,6 @@ export class SwarmIdProxy {
 
       case "createFeedManifest":
         await this.handleCreateFeedManifest(message, event)
-        break
-
-      case "connect":
-        this.handleConnect(message, event)
         break
 
       case "clearIdentitySite":
@@ -3391,7 +3394,8 @@ export class SwarmIdProxy {
     this.detachBusTransports()
     // Retire any join still deriving its key, or it would re-attach behind us.
     this.busJoinGeneration += 1
-    this.pendingChallenge = undefined
+    // A popup from before the disconnect must not sign this session back in.
+    this.rearmChallenge()
 
     this.emitConnectionInfoIfChanged()
 
@@ -3913,26 +3917,51 @@ export class SwarmIdProxy {
     }
   }
 
-  private handleConnect(
-    message: {
-      type: "connect"
-      requestId: string
-      popupMode?: "popup" | "window"
-    },
-    event: MessageEvent,
-  ): void {
-    const success = this.openAuthPopup({
-      popupMode: message.popupMode,
-    })
-    this.postMessage(event, {
-      type: "connectResponse",
-      requestId: message.requestId,
-      success,
-      // Blocked — Firefox refuses an iframe a popup on the parent's click
-      // (#751). The parent opens it instead, with this attempt's challenge,
-      // and `handlePopupMessage` accepts the handover on that challenge
-      // whichever window delivers it.
-      challenge: success ? undefined : this.pendingChallenge,
+  /**
+   * Arm the challenge the next connect popup carries, in this frame's store
+   * under its own key, and return it. Armed ahead of the click (#751): the
+   * app page opens the popup inside its user's click, which an iframe cannot
+   * do in Firefox and no page can after an await, and the popup's check that
+   * it can read the challenge back must not run ahead of the write.
+   */
+  private armChallenge(): string {
+    this.dropArmedChallenge()
+    const challenge = crypto.randomUUID()
+    this.pendingChallenge = challenge
+    try {
+      localStorage.setItem(storageChallengeKey(challenge), "1")
+    } catch {
+      // Storage blocked: the popup cannot read it back, takes this frame for
+      // partitioned and hands the session over by message, which still works.
+    }
+    return challenge
+  }
+
+  private readonly onPageHide = (): void => this.dropArmedChallenge()
+  private readonly onPageShow = (event: PageTransitionEvent): void => {
+    if (event.persisted) this.rearmChallenge()
+  }
+
+  /** Remove the armed challenge from the store, leaving none armed. */
+  private dropArmedChallenge(): void {
+    if (this.pendingChallenge) {
+      try {
+        localStorage.removeItem(storageChallengeKey(this.pendingChallenge))
+      } catch {
+        // Storage blocked: nothing was written.
+      }
+      this.pendingChallenge = undefined
+    }
+  }
+
+  /** Arm the next challenge once an attempt ends, and hand it to the app. */
+  private rearmChallenge(): void {
+    if (!this.parentOrigin) {
+      return
+    }
+    this.sendToParent({
+      type: "challengeArmed",
+      challenge: this.armChallenge(),
     })
   }
 
@@ -3940,17 +3969,15 @@ export class SwarmIdProxy {
    * Open the authentication popup window.
    * Returns true if popup was opened, false if parent origin is not set.
    */
-  private openAuthPopup(options?: { popupMode?: "popup" | "window" }): boolean {
+  private openAuthPopup(): boolean {
     if (!this.parentOrigin) {
       console.error("[Proxy] Cannot open auth window - parent origin not set")
       return false
     }
 
-    // Build authentication URL using shared utility
-    // challenge: used for storage partitioning detection — popup checks if it can read this from localStorage
-    const challenge = crypto.randomUUID()
-    this.pendingChallenge = challenge
-    localStorage.setItem(STORAGE_CHALLENGE_KEY, challenge)
+    // The challenge the app page would open with too (`armChallenge`): one
+    // attempt, whichever button the user clicked.
+    const challenge = this.pendingChallenge ?? this.armChallenge()
 
     // Get base path from current location (e.g., /id/pr-140/proxy -> /id/pr-140)
     const basePath = window.location.pathname.replace(/\/proxy$/, "")
@@ -3961,10 +3988,8 @@ export class SwarmIdProxy {
       { challenge, permissions: this.permissionsRequest },
     )
 
-    // Open as popup or full window based on popupMode (per-call override takes precedence)
-    const effectivePopupMode = options?.popupMode ?? this.popupMode
     let popup: Window | null = null
-    if (effectivePopupMode === "popup") {
+    if (this.popupMode === "popup") {
       popup = window.open(authUrl, "_blank", "width=500,height=600")
     } else {
       popup = window.open(authUrl, "_blank")

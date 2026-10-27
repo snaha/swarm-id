@@ -1,10 +1,6 @@
 // Copyright 2026 The Swarm Authors. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
-import {
-  type Permissions,
-  PermissionsSchema,
-  STORAGE_CHALLENGE_KEY,
-} from '@snaha/swarm-id/internal'
+import { type Permissions, PermissionsSchema, storageChallengeKey } from '@snaha/swarm-id/internal'
 
 import type { Account } from '$lib/types'
 
@@ -53,10 +49,10 @@ export interface PendingConnect {
 
 /**
  * Remembers (per popup tab) a challenge we already matched in localStorage.
- * The challenge key is consumed on first match, so without this marker a
- * reload or back-navigation re-running initFromHash would misread the missing
- * key as partitioned storage and hand the session over on a channel the dApp
- * is not listening on.
+ * The proxy drops the challenge's key once the attempt ends, so without this
+ * marker a reload or back-navigation re-running initFromHash would misread
+ * the missing key as partitioned storage and hand the session over on a
+ * channel the dApp is not listening on.
  */
 const CHALLENGE_MATCHED_KEY = 'swarm-id-challenge-matched'
 
@@ -117,15 +113,15 @@ export const connectStore = {
       return request !== undefined
     }
 
-    // Storage partitioning detection: the proxy iframe wrote this challenge
-    // to localStorage right before opening the popup. If we can't read it
-    // (and didn't already consume it earlier in this tab), our storage is
-    // partitioned from the iframe's.
+    // Storage partitioning detection: the proxy iframe armed this challenge
+    // in its localStorage before the popup was opened. If we can't read it
+    // (and didn't already match it earlier in this tab), our storage is
+    // partitioned from the iframe's. The key stays: the proxy owns it, and a
+    // second popup of the same attempt reads it too.
     let partitionChallenge: string | undefined = undefined
     const challenge = params.get('challenge')
     if (challenge) {
-      if (localStorage.getItem(STORAGE_CHALLENGE_KEY) === challenge) {
-        localStorage.removeItem(STORAGE_CHALLENGE_KEY)
+      if (localStorage.getItem(storageChallengeKey(challenge)) !== null) {
         sessionStorage.setItem(CHALLENGE_MATCHED_KEY, challenge)
       } else if (sessionStorage.getItem(CHALLENGE_MATCHED_KEY) !== challenge) {
         partitionChallenge = challenge

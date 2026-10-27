@@ -28,6 +28,7 @@ type ClientInternals = {
   ready: boolean
   iframe: unknown
   storageShared?: boolean
+  connectChallenge?: string
   lastConnectionInfo?: unknown
   /** The in-flight requests `sendRequest` is holding open. */
   pendingRequests: Map<string, unknown>
@@ -394,81 +395,38 @@ describe("SwarmIdClient connect()", () => {
   })
 
   describe("partitioned or unproven storage", () => {
+    // Firefox refuses an iframe a popup on the parent's click (#751), and a
+    // `window.open` after an await is allowed only while the click's
+    // activation lasts. So the popup opens here, in the click, with the
+    // challenge the proxy armed ahead of it: written to the proxy's store
+    // before it was handed over, so the popup's partition check cannot run
+    // ahead of the write. The popup hands the session to the iframe among
+    // this page's frames.
     it.each([false, undefined])(
-      "delegates to the proxy when storageShared is %s",
+      "opens the popup in the click with the proxy's armed challenge when storageShared is %s",
       async (storageShared) => {
         vi.spyOn(internals(client), "ensureReady").mockImplementation(() => {})
         setStorageShared(storageShared)
-        const sendRequestSpy = vi
-          .spyOn(internals(client), "sendRequest")
-          .mockResolvedValue({
-            type: "connectResponse",
-            requestId: "test",
-            success: true,
-          })
+        internals(client).connectChallenge = "attempt-7"
+        const sendRequestSpy = vi.spyOn(internals(client), "sendRequest")
 
-        await client.connect()
-
-        expect(sendRequestSpy).toHaveBeenCalledWith(
-          expect.objectContaining({ type: "connect" }),
+        const connecting = client.connect()
+        // Before anything is awaited: still inside the click.
+        expect(window.open).toHaveBeenCalledTimes(1)
+        expect(window.open).toHaveBeenCalledWith(
+          expect.stringContaining("challenge=attempt-7"),
+          "_blank",
         )
-        // The proxy opened it; opening a second one from here would be two
-        // popups for one click.
-        expect(window.open).not.toHaveBeenCalled()
+        await connecting
+
+        expect(sendRequestSpy).not.toHaveBeenCalled()
       },
     )
 
-    // A delegated popup can be blocked — the click was in the parent, and no
-    // activation crosses the postMessage. Falling back to the parent is what
-    // this branch had before the storage mode decided it, so it can never be
-    // worse than not asking at all.
-    it("falls back to opening from the parent when the proxy's popup is blocked", async () => {
+    it("throws when that popup is blocked", async () => {
       vi.spyOn(internals(client), "ensureReady").mockImplementation(() => {})
       setStorageShared(false)
-      vi.spyOn(internals(client), "sendRequest").mockResolvedValue({
-        type: "connectResponse",
-        requestId: "test",
-        success: false,
-      })
-
-      await client.connect()
-
-      expect(window.open).toHaveBeenCalledWith(
-        expect.stringContaining("https://swarm-id.example.com/connect#origin="),
-        "_blank",
-      )
-    })
-
-    // Firefox blocks the delegated popup every time (#751). The fallback then
-    // carries the proxy's challenge, so the popup can hand the session to the
-    // iframe among this page's frames instead of writing to a store the
-    // partitioned iframe never reads.
-    it("puts the proxy's challenge on the fallback popup", async () => {
-      vi.spyOn(internals(client), "ensureReady").mockImplementation(() => {})
-      setStorageShared(false)
-      vi.spyOn(internals(client), "sendRequest").mockResolvedValue({
-        type: "connectResponse",
-        requestId: "test",
-        success: false,
-        challenge: "attempt-7",
-      })
-
-      await client.connect()
-
-      expect(window.open).toHaveBeenCalledWith(
-        expect.stringContaining("challenge=attempt-7"),
-        "_blank",
-      )
-    })
-
-    it("throws when the fallback popup is blocked too", async () => {
-      vi.spyOn(internals(client), "ensureReady").mockImplementation(() => {})
-      setStorageShared(false)
-      vi.spyOn(internals(client), "sendRequest").mockResolvedValue({
-        type: "connectResponse",
-        requestId: "test",
-        success: false,
-      })
+      internals(client).connectChallenge = "attempt-7"
       vi.mocked(window.open).mockReturnValue(null)
 
       const error = await rejectionOf(client.connect())
@@ -624,6 +582,21 @@ describe("SwarmIdClient connectionInfo", () => {
     expect(onConnectionChange).toHaveBeenCalledWith(
       expect.objectContaining({ uploadUnavailableReason: "stamper-failed" }),
     )
+  })
+
+  // The challenge `connect()` opens the popup with: armed on `proxyReady`, and
+  // replaced whenever the proxy arms the next one after an attempt ends.
+  it("keeps the connect challenge the proxy armed, and the next one it arms", () => {
+    deliver({
+      type: "proxyReady",
+      authenticated: false,
+      parentOrigin: "https://localhost",
+      connectChallenge: "attempt-1",
+    })
+    expect(internals(client).connectChallenge).toBe("attempt-1")
+
+    deliver({ type: "challengeArmed", challenge: "attempt-2" })
+    expect(internals(client).connectChallenge).toBe("attempt-2")
   })
 
   it("throws from connectionInfo getter before initialize()", () => {
@@ -1188,6 +1161,7 @@ describe("SwarmIdClient window message filtering", () => {
     type: "proxyReady",
     authenticated: false,
     parentOrigin: "https://localhost",
+    connectChallenge: "armed",
   }
 
   beforeEach(() => {
@@ -1281,6 +1255,7 @@ describe("SwarmIdClient window message filtering", () => {
         type: "proxyReady",
         authenticated: false,
         parentOrigin: "https://localhost",
+        connectChallenge: "armed",
         storageShared: true,
       },
     })
@@ -1608,6 +1583,7 @@ describe("SwarmIdClient lifecycle errors", () => {
         type: "proxyReady",
         authenticated: false,
         parentOrigin: "https://localhost",
+        connectChallenge: "armed",
       }),
   ]
 
@@ -1955,6 +1931,7 @@ describe("SwarmIdClient initialize() sequencing", () => {
         type: "proxyReady",
         authenticated: false,
         parentOrigin: "https://localhost",
+        connectChallenge: "armed",
         identitySite: "https://other.example/id",
       },
     })
@@ -1979,6 +1956,7 @@ describe("SwarmIdClient initialize() sequencing", () => {
         type: "proxyReady",
         authenticated: false,
         parentOrigin: "https://localhost",
+        connectChallenge: "armed",
         identitySite: IFRAME_ORIGIN,
       },
     })

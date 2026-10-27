@@ -210,6 +210,12 @@ export class SwarmIdClient {
    * "not proven shared".
    */
   private storageShared: boolean | undefined
+  /**
+   * The challenge the next connect popup carries, armed by the proxy in its
+   * store before it was handed over: on `proxyReady`, then on
+   * `challengeArmed` each time an attempt ends.
+   */
+  private connectChallenge: string | undefined
   private readyPromise: Promise<void> | undefined
   private readyResolve?: () => void
   private readyReject?: (error: SwarmIdError) => void
@@ -580,6 +586,7 @@ export class SwarmIdClient {
         // (#613). Undefined against a proxy older than that field.
         this.storageShared = message.storageShared
         this.preferredSite = message.identitySite
+        this.connectChallenge = message.connectChallenge
         if (this.readyResolve) {
           this.readyResolve()
         }
@@ -635,6 +642,10 @@ export class SwarmIdClient {
         }
         break
       }
+
+      case "challengeArmed":
+        this.connectChallenge = message.challenge
+        break
 
       case "switchIdentitySite":
         // The popup the iframe opened said the user wants another site (#849).
@@ -1063,19 +1074,20 @@ export class SwarmIdClient {
    * with their Swarm ID, and the resulting authentication will be available
    * to the client when they return.
    *
-   * **Which window opens it** is decided by the iframe's STORAGE, not by the
-   * user agent (#613):
-   * - Shared storage: opened here, from the parent, so the click's activation is
-   *   still unspent. The popup writes the connection to the first-party store
+   * It is always opened here, synchronously, inside the user's click —
+   * Firefox refuses an iframe a popup on the parent's click (#751). **How the
+   * session gets back** is decided by the iframe's STORAGE, not by the user
+   * agent (#613):
+   * - Shared storage: the popup writes the connection to the first-party store
    *   the iframe reads, and a `storage` event carries it across.
-   * - Partitioned, or not proven shared: the proxy opens it, so the popup's
-   *   `window.opener` points back at the iframe and the session can be handed
-   *   over directly — the only channel into a partitioned frame. The session
-   *   is then kept in that partition's own store until it is disconnected or
-   *   its 30 days are up (#635), so a reload does not re-run this; a handover
-   *   that arrives without the account view is refused outright rather than
-   *   producing a session that cannot upload and cannot hear a revoke. A popup
-   *   blocked on this path falls back to opening from the parent.
+   * - Partitioned, or not proven shared: the popup carries the challenge the
+   *   proxy armed ahead of the click, and posts the session to the iframe
+   *   among this page's frames — the only channel into a partitioned frame.
+   *   The session is then kept in that partition's own store until it is
+   *   disconnected or its 30 days are up (#635), so a reload does not re-run
+   *   this; a handover that arrives without the account view is refused
+   *   outright rather than producing a session that cannot upload and cannot
+   *   hear a revoke.
    *
    * Safari private mode sessions are ephemeral (lost when the private window
    * closes). The whole partitioned path — handover, stamper, upload — is
@@ -1098,48 +1110,19 @@ export class SwarmIdClient {
   async connect(options: ConnectOptions = {}): Promise<void> {
     this.ensureReady()
 
-    // Storage shared: open it here, where the user's click still counts. The
-    // popup writes the connection to the first-party store the iframe reads,
-    // and a `storage` event carries it across.
-    if (this.storageShared === true) {
-      // Checked, not discarded: a blocked popup here opens nothing, and a
-      // `connect()` that resolved anyway would report a connect in progress
-      // that no window is running.
-      if (!this.openAuthWindow(options)) {
-        throw new SwarmIdError(
-          "popup-blocked",
-          "Failed to open authentication popup",
-        )
-      }
-      return
-    }
-
-    // Otherwise the iframe has to open it, so `window.opener` points back at
-    // the iframe and the popup can hand the session over directly — the only
-    // channel into a partitioned frame. `storageShared` is undefined against a
-    // proxy too old to report it, and that takes this path too: it works in
-    // both storage modes, where the one above works in only one.
-    const requestId = this.generateRequestId()
-    const response = await this.sendRequest<{
-      type: "connectResponse"
-      requestId: string
-      success: boolean
-      challenge?: string
-    }>({
-      type: "connect",
-      requestId,
-      popupMode: options.popupMode,
-    })
-    if (response.success) {
-      return
-    }
-
-    // The proxy's popup was blocked — Firefox never lets an iframe open one on
-    // the parent's click (#751). The click happened out here, and the round
-    // trip was short enough that the activation is still good, so open from
-    // the parent with the proxy's challenge: the popup hands the session to
-    // the iframe among this page's frames, which works in both storage modes.
-    if (!this.openAuthWindow(options, response.challenge)) {
+    // Opened here, inside the user's click: Firefox refuses an iframe a
+    // popup on the parent's click (#751), and no page may open one after an
+    // await. Storage shared: the popup writes the connection to the
+    // first-party store the iframe reads, and a `storage` event carries it
+    // across. Otherwise the popup carries the challenge the proxy armed ahead
+    // of the click, and hands the session to the iframe among this page's
+    // frames — which works in both storage modes.
+    const challenge =
+      this.storageShared === true ? undefined : this.connectChallenge
+    // Checked, not discarded: a blocked popup opens nothing, and a `connect()`
+    // that resolved anyway would report a connect in progress that no window
+    // is running.
+    if (!this.openAuthWindow(options, challenge)) {
       throw new SwarmIdError(
         "popup-blocked",
         "Failed to open authentication popup",

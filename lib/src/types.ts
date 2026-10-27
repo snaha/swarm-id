@@ -49,7 +49,14 @@ export type {
 // there are no longer separate identity/app/stamp collection keys.
 export const STORAGE_KEY_ACCOUNTS = "swarm-id-accounts"
 export const STORAGE_KEY_NETWORK_SETTINGS = "swarm-id-network-settings"
-export const STORAGE_CHALLENGE_KEY = "swarm-storage-challenge"
+/**
+ * Where a proxy leaves its armed connect challenge, for the popup to read back
+ * first-party: found means the two share a store. One key per challenge,
+ * because every same-site dApp's proxy arms one in that store ahead of any
+ * click, and a single key would leave only the last one loaded.
+ */
+export const storageChallengeKey = (challenge: string): string =>
+  `swarm-storage-challenge:${challenge}`
 /**
  * Where the identity site the user chose is remembered, as a base URL (#849).
  * Under the same name in two stores: the app origin's, written by the client,
@@ -1416,12 +1423,6 @@ export const ClearIdentitySiteMessageSchema = z.object({
   requestId: z.string(),
 })
 
-export const ConnectMessageSchema = z.object({
-  type: z.literal("connect"),
-  requestId: z.string(),
-  popupMode: z.enum(["popup", "window"]).optional(),
-})
-
 export const ParentToIframeMessageSchema = z.discriminatedUnion("type", [
   ParentIdentifyMessageSchema,
   ClearIdentitySiteMessageSchema,
@@ -1464,7 +1465,6 @@ export const ParentToIframeMessageSchema = z.discriminatedUnion("type", [
   GetPostageBatchMessageSchema,
   GetDrivesMessageSchema,
   GetPermissionsMessageSchema,
-  ConnectMessageSchema,
   RequestPermissionsMessageSchema,
 ])
 
@@ -1536,7 +1536,6 @@ export type GetPostageBatchMessage = z.infer<
 >
 export type GetDrivesMessage = z.infer<typeof GetDrivesMessageSchema>
 export type GetPermissionsMessage = z.infer<typeof GetPermissionsMessageSchema>
-export type ConnectMessage = z.infer<typeof ConnectMessageSchema>
 export type RequestPermissionsMessage = z.infer<
   typeof RequestPermissionsMessageSchema
 >
@@ -1559,11 +1558,18 @@ export const ProxyReadyMessageSchema = z.object({
   identitySite: z.string().optional(),
   /**
    * Whether the iframe can read the trusted domain's first-party store, which
-   * decides which transport `connect()` can use (#613). Optional so an older
-   * deployed proxy stays wire-compatible; absent reads as "not proven shared",
-   * and the client delegates, which works in both modes.
+   * decides which transport `connect()` can use (#613). Absent reads as "not
+   * proven shared", and the popup carries the challenge, which works in both
+   * modes.
    */
   storageShared: z.boolean().optional(),
+  /**
+   * The challenge `connect()` opens the popup with, already in this frame's
+   * store under `storageChallengeKey` (#751). Armed ahead of the click so the
+   * popup opens inside it, and so the popup's check that it can read the
+   * challenge back never runs ahead of the write.
+   */
+  connectChallenge: z.string(),
 })
 
 export const InitErrorMessageSchema = z.object({
@@ -1765,17 +1771,10 @@ export const ClearIdentitySiteResponseMessageSchema = z.object({
   requestId: z.string(),
 })
 
-export const ConnectResponseMessageSchema = z.object({
-  type: z.literal("connectResponse"),
-  requestId: z.string(),
-  success: z.boolean(),
-  /**
-   * The attempt's challenge, when the proxy's own popup was blocked (#751):
-   * the parent opens the popup instead and carries it, so the popup can still
-   * tell a partitioned store from a shared one and hand the session to this
-   * iframe among the parent's frames.
-   */
-  challenge: z.string().optional(),
+/** The connect challenge the proxy armed once the last attempt ended. */
+export const ChallengeArmedMessageSchema = z.object({
+  type: z.literal("challengeArmed"),
+  challenge: z.string(),
 })
 
 export const IsConnectedResponseMessageSchema = z.object({
@@ -2031,7 +2030,7 @@ export const IframeToParentMessageSchema = z.discriminatedUnion("type", [
   UploadProgressMessageSchema,
   ErrorMessageSchema,
   ConnectionInfoChangedMessageSchema,
-  ConnectResponseMessageSchema,
+  ChallengeArmedMessageSchema,
   SwitchIdentitySiteMessageSchema,
   ClearIdentitySiteResponseMessageSchema,
   IsConnectedResponseMessageSchema,
@@ -2106,9 +2105,7 @@ export type ErrorMessage = z.infer<typeof ErrorMessageSchema>
 export type ConnectionInfoChangedMessage = z.infer<
   typeof ConnectionInfoChangedMessageSchema
 >
-export type ConnectResponseMessage = z.infer<
-  typeof ConnectResponseMessageSchema
->
+export type ChallengeArmedMessage = z.infer<typeof ChallengeArmedMessageSchema>
 export type IsConnectedResponseMessage = z.infer<
   typeof IsConnectedResponseMessageSchema
 >
