@@ -10,6 +10,7 @@
     checked: boolean
     class?: string
     disabled?: boolean
+    id?: string
     'aria-label'?: string
     /** Given, the click is the caller's: `checked` then follows its state, not the click. */
     onclick?: () => void

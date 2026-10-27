@@ -56,6 +56,7 @@
   },
   "dependencies": {
     "@ethersphere/bee-js": "^13.0.0",
+    "@lat-murmeldjur/weeb_3": "0.0.354001",
     "@relayprotocol/relay-sdk": "^7.0.0",
     "@scure/bip39": "1.6.0",
     "@snaha/swarm-id": "workspace:*",

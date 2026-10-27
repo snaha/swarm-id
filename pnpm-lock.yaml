@@ -290,6 +290,9 @@ importers:
       '@ethersphere/bee-js':
         specifier: ^13.0.0
         version: 13.0.0
+      '@lat-murmeldjur/weeb_3':
+        specifier: 0.0.354001
+        version: 0.0.354001
       '@relayprotocol/relay-sdk':
         specifier: ^7.0.0
         version: 7.0.2(viem@2.55.13(typescript@5.8.3)(zod@3.25.76))
@@ -1384,6 +1387,9 @@ packages:
 
   '@jridgewell/trace-mapping@0.3.31':
     resolution: {integrity: sha512-zzNR+SdQSDJzc8joaeP8QQoCQr8NuYx2dIIytl1QeBEZHJ9uW6hebsrYgbz8hJwUQao3TWCMtmfV8Nu1twOLAw==}
+
+  '@lat-murmeldjur/weeb_3@0.0.354001':
+    resolution: {integrity: sha512-QatWRBzYfgMFmSMeCtY4polQ7NZzKXOk3SyJmq1suoI/6pDmJQl6LyMmJrBpd4Fx/Tko0qosHQGuKYhvHC17Gg==}
 
   '@lit-labs/ssr-dom-shim@1.6.0':
     resolution: {integrity: sha512-VHb0ALPMTlgKjM6yIxxoQNnpKyUKLD04VzeQdsiXkMqkvYlAHxq9glGLmgbb889/1GsohSOAjvQYoiBppXFqrQ==}
@@ -3938,6 +3944,9 @@ packages:
 
   hastscript@9.0.1:
     resolution: {integrity: sha512-g7df9rMFX/SPi34tyGCyUBREQoKkapwdY/T04Qn9TDWfHhAYt4/I0gMVirzK5wEzeUqIjEB+LXC/ypb7Aqno5w==}
+
+  hls.js@1.7.3:
+    resolution: {integrity: sha512-MsPlx6yVW4Qv4C7mEVou4/gk/5cN2dVxOTnrNjPSmyH2f0Ln+/UkG10Ax1PE6OvrmTVPKgQYozTtBaPOuCzq7A==}
 
   html-escaper@3.0.3:
     resolution: {integrity: sha512-RuMffC89BOWQoY0WKGpIhn5gX3iI54O6nRA0yC124NYVtzjmFWBIiFd8M0x+ZdX0P9R4lADg1mgP8C7PxGOWuQ==}
@@ -6779,6 +6788,10 @@ snapshots:
     dependencies:
       '@jridgewell/resolve-uri': 3.1.2
       '@jridgewell/sourcemap-codec': 1.5.5
+
+  '@lat-murmeldjur/weeb_3@0.0.354001':
+    dependencies:
+      hls.js: 1.7.3
 
   '@lit-labs/ssr-dom-shim@1.6.0': {}
 
@@ -10435,6 +10448,8 @@ snapshots:
       hast-util-parse-selector: 4.0.0
       property-information: 7.1.0
       space-separated-tokens: 2.0.2
+
+  hls.js@1.7.3: {}
 
   html-escaper@3.0.3: {}
 

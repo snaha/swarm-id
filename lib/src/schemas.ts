@@ -568,6 +568,8 @@ export const NetworkSettingsSchemaV1 = z.object({
   // as a broken endpoint. Same validator the settings dialog uses.
   beeNodeUrl: z.string().refine(isHttpUrl, "Must be an http(s) URL"),
   gnosisRpcUrl: z.string().refine(isHttpUrl, "Must be an http(s) URL"),
+  /** Experimental (#306): talk to Swarm through weeb-3 instead of `beeNodeUrl`. */
+  useWeeb3: z.boolean().optional(),
 })
 
 export type NetworkSettings = z.infer<typeof NetworkSettingsSchemaV1>
