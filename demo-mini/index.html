@@ -1,0 +1,86 @@
+<!doctype html>
+<!--
+  Copyright 2026 The Swarm Authors. All rights reserved.
+  SPDX-License-Identifier: Apache-2.0
+-->
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Swarm ID Mini</title>
+    <style>
+      body {
+        font:
+          15px/1.5 system-ui,
+          sans-serif;
+        max-width: 40rem;
+        margin: 2rem auto;
+        padding: 0 1rem;
+      }
+      dl {
+        display: grid;
+        grid-template-columns: max-content 1fr;
+        gap: 0.25rem 1rem;
+      }
+      dt {
+        color: #666;
+      }
+      dd {
+        margin: 0;
+        font-family: ui-monospace, monospace;
+        word-break: break-all;
+      }
+      button {
+        font: inherit;
+        padding: 0.4rem 0.8rem;
+      }
+      #swarm-id-button {
+        width: 300px;
+        height: 50px;
+      }
+      #log {
+        list-style: none;
+        padding: 0;
+        font-family: ui-monospace, monospace;
+        font-size: 13px;
+      }
+      #log li {
+        border-top: 1px solid #ddd;
+        padding: 0.2rem 0;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>Swarm ID Mini</h1>
+    <p>
+      A second app origin with nothing but connect. Point it at an identity site with
+      <code>?idDomain=…</code>; the default is <code>http://localhost:5500</code>.
+    </p>
+
+    <h2>Library API</h2>
+    <p><code>client.connect()</code> from this page's own button.</p>
+    <p>
+      <button id="connect">Connect</button>
+      <button id="disconnect">Disconnect</button>
+      <button id="reset-site">Use the app's default site</button>
+    </p>
+
+    <h2>Iframe button</h2>
+    <p>Rendered by the identity site inside its iframe; the click is the iframe's own.</p>
+    <div id="swarm-id-button"></div>
+
+    <h2>Status</h2>
+    <dl>
+      <dt>Session</dt>
+      <dd id="status">initializing…</dd>
+      <dt>Identity site</dt>
+      <dd id="site">—</dd>
+      <dt>Storage partitioned</dt>
+      <dd id="partitioned">—</dd>
+    </dl>
+
+    <h2>Log</h2>
+    <ul id="log"></ul>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
