@@ -12,7 +12,7 @@ import { BatchId, EthAddress, PrivateKey } from '@ethersphere/bee-js'
 import { AuthDataSchema, type ConnectedApp, type SyncedAccount } from '@snaha/swarm-id/internal'
 import { describe, expect, it, vi } from 'vitest'
 
-import { commitConnect, partitionHandoverAccount } from '$lib/connect-handshake'
+import { chooseIdentitySite, commitConnect, partitionHandoverAccount } from '$lib/connect-handshake'
 import type { Account } from '$lib/types'
 
 const APP_ORIGIN = 'https://dapp.example.com'
@@ -119,6 +119,88 @@ describe('partitionHandoverAccount', () => {
   })
 })
 
+// The popup may have been opened by the app page rather than the iframe —
+// Firefox refuses the iframe a popup on the parent's click (#751). The
+// handover then goes to the opener AND to each of its frames: only the one on
+// this origin receives it, and only the challenge lets the proxy take it.
+describe('commitConnect handover', () => {
+  it('posts the session to the opener and to every frame of the opener', () => {
+    const openerPost = vi.fn()
+    const framePosts = [vi.fn(), vi.fn()]
+    vi.stubGlobal('window', {
+      addEventListener: () => {},
+      location: { origin: 'https://id.example.com' },
+      opener: {
+        postMessage: openerPost,
+        length: 2,
+        0: { postMessage: framePosts[0] },
+        1: { postMessage: framePosts[1] },
+      },
+    })
+    const account = {
+      ...makeAccount(),
+      settings: undefined,
+      connectApp: vi.fn(),
+      toSyncedRecord: () => makeAccount(),
+    } as unknown as Account
+    try {
+      commitConnect(
+        account,
+        { appOrigin: APP_ORIGIN, appName: 'dApp', partitionChallenge: 'attempt-7' },
+        '33'.repeat(32),
+      )
+    } finally {
+      vi.unstubAllGlobals()
+    }
+
+    const expected = [
+      expect.objectContaining({ type: 'setSecret', challenge: 'attempt-7' }),
+      'https://id.example.com',
+    ]
+    expect(openerPost).toHaveBeenCalledWith(...expected)
+    for (const post of framePosts) expect(post).toHaveBeenCalledWith(...expected)
+  })
+})
+
+// Where the site choice goes (#849) follows who can act on it: the proxy, by
+// challenge, is the opener or one of the opener's frames (#751); without a
+// challenge the app page opened the popup and takes the choice itself.
+describe('chooseIdentitySite', () => {
+  const stub = () => {
+    const opener = { postMessage: vi.fn(), length: 1, 0: { postMessage: vi.fn() } }
+    vi.stubGlobal('window', {
+      location: { origin: 'https://id.example.com' },
+      opener,
+      close: vi.fn(),
+    })
+    return opener
+  }
+  const request = { appOrigin: APP_ORIGIN, appName: 'dApp' }
+  const chosen = expect.objectContaining({ type: 'identitySiteChosen', site: 'https://b.example' })
+
+  it('with a challenge, posts to the opener and its frames on our own origin', () => {
+    const opener = stub()
+    try {
+      chooseIdentitySite({ ...request, challenge: 'attempt-7' }, 'https://b.example')
+    } finally {
+      vi.unstubAllGlobals()
+    }
+    expect(opener.postMessage).toHaveBeenCalledWith(chosen, 'https://id.example.com')
+    expect(opener[0].postMessage).toHaveBeenCalledWith(chosen, 'https://id.example.com')
+  })
+
+  it('without a challenge, posts to the opener on the app origin', () => {
+    const opener = stub()
+    try {
+      chooseIdentitySite(request, 'https://b.example')
+    } finally {
+      vi.unstubAllGlobals()
+    }
+    expect(opener.postMessage).toHaveBeenCalledWith(chosen, APP_ORIGIN)
+    expect(opener[0].postMessage).not.toHaveBeenCalled()
+  })
+})
+
 // The connection's deadline: the app's own session length (#885) over the
 // account's; and the grant made on the connect screen, each field on its
 // own clock.
@@ -146,6 +228,36 @@ describe('commitConnect', () => {
   it("lasts the app's own session length when it has one, else the account's", () => {
     expect(connect({ sessionDuration: 7 }).connectedUntil).toBe(NOW + 7)
     expect(connect({}).connectedUntil).toBe(NOW + 500)
+  })
+
+  // Connecting here after the warning that the chosen site did not come up
+  // (#849) is the user's answer: this site stops sending apps back there. A
+  // different site remembered since is someone else's choice, and stays.
+  it('forgets the remembered site that failed, and only that one', () => {
+    const KEY = 'swarm-id-identity-site'
+    const FAILED = 'https://other.example/id'
+    const store = new Map<string, string>()
+    vi.stubGlobal('localStorage', {
+      getItem: (key: string) => store.get(key) ?? null,
+      removeItem: (key: string) => store.delete(key),
+    })
+    const account = {
+      settings: { appSessionDuration: 500 },
+      connectedApps: [],
+      connectApp: () => {},
+    } as unknown as Account
+    const request = { appOrigin: APP_ORIGIN, appName: 'dApp', failedSite: FAILED }
+    try {
+      store.set(KEY, FAILED)
+      commitConnect(account, request, '33'.repeat(32))
+      expect(store.has(KEY)).toBe(false)
+
+      store.set(KEY, 'https://b.example')
+      commitConnect(account, request, '33'.repeat(32))
+      expect(store.get(KEY)).toBe('https://b.example')
+    } finally {
+      vi.unstubAllGlobals()
+    }
   })
 
   it("stamps the clock of each switch granted, not the drives'", () => {

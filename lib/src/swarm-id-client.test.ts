@@ -28,6 +28,7 @@ type ClientInternals = {
   ready: boolean
   iframe: unknown
   storageShared?: boolean
+  connectChallenge?: string
   lastConnectionInfo?: unknown
   /** The in-flight requests `sendRequest` is holding open. */
   pendingRequests: Map<string, unknown>
@@ -394,59 +395,38 @@ describe("SwarmIdClient connect()", () => {
   })
 
   describe("partitioned or unproven storage", () => {
+    // Firefox refuses an iframe a popup on the parent's click (#751), and a
+    // `window.open` after an await is allowed only while the click's
+    // activation lasts. So the popup opens here, in the click, with the
+    // challenge the proxy armed ahead of it: written to the proxy's store
+    // before it was handed over, so the popup's partition check cannot run
+    // ahead of the write. The popup hands the session to the iframe among
+    // this page's frames.
     it.each([false, undefined])(
-      "delegates to the proxy when storageShared is %s",
+      "opens the popup in the click with the proxy's armed challenge when storageShared is %s",
       async (storageShared) => {
         vi.spyOn(internals(client), "ensureReady").mockImplementation(() => {})
         setStorageShared(storageShared)
-        const sendRequestSpy = vi
-          .spyOn(internals(client), "sendRequest")
-          .mockResolvedValue({
-            type: "connectResponse",
-            requestId: "test",
-            success: true,
-          })
+        internals(client).connectChallenge = "attempt-7"
+        const sendRequestSpy = vi.spyOn(internals(client), "sendRequest")
 
-        await client.connect()
-
-        expect(sendRequestSpy).toHaveBeenCalledWith(
-          expect.objectContaining({ type: "connect" }),
+        const connecting = client.connect()
+        // Before anything is awaited: still inside the click.
+        expect(window.open).toHaveBeenCalledTimes(1)
+        expect(window.open).toHaveBeenCalledWith(
+          expect.stringContaining("challenge=attempt-7"),
+          "_blank",
         )
-        // The proxy opened it; opening a second one from here would be two
-        // popups for one click.
-        expect(window.open).not.toHaveBeenCalled()
+        await connecting
+
+        expect(sendRequestSpy).not.toHaveBeenCalled()
       },
     )
 
-    // A delegated popup can be blocked — the click was in the parent, and no
-    // activation crosses the postMessage. Falling back to the parent is what
-    // this branch had before the storage mode decided it, so it can never be
-    // worse than not asking at all.
-    it("falls back to opening from the parent when the proxy's popup is blocked", async () => {
+    it("throws when that popup is blocked", async () => {
       vi.spyOn(internals(client), "ensureReady").mockImplementation(() => {})
       setStorageShared(false)
-      vi.spyOn(internals(client), "sendRequest").mockResolvedValue({
-        type: "connectResponse",
-        requestId: "test",
-        success: false,
-      })
-
-      await client.connect()
-
-      expect(window.open).toHaveBeenCalledWith(
-        expect.stringContaining("https://swarm-id.example.com/connect#origin="),
-        "_blank",
-      )
-    })
-
-    it("throws when the fallback popup is blocked too", async () => {
-      vi.spyOn(internals(client), "ensureReady").mockImplementation(() => {})
-      setStorageShared(false)
-      vi.spyOn(internals(client), "sendRequest").mockResolvedValue({
-        type: "connectResponse",
-        requestId: "test",
-        success: false,
-      })
+      internals(client).connectChallenge = "attempt-7"
       vi.mocked(window.open).mockReturnValue(null)
 
       const error = await rejectionOf(client.connect())
@@ -522,6 +502,7 @@ describe("SwarmIdClient connectionInfo", () => {
       uploadMode: snapshot.uploadMode,
       identity: snapshot.identity,
       appKey: snapshot.appKey,
+      identitySite: "https://swarm-id.example.com",
     })
 
     // `connectionInfo` getter calls ensureReady — mark client as ready for the read
@@ -532,6 +513,7 @@ describe("SwarmIdClient connectionInfo", () => {
       uploadMode: snapshot.uploadMode,
       identity: snapshot.identity,
       appKey: snapshot.appKey,
+      identitySite: "https://swarm-id.example.com",
     })
   })
 
@@ -600,6 +582,21 @@ describe("SwarmIdClient connectionInfo", () => {
     expect(onConnectionChange).toHaveBeenCalledWith(
       expect.objectContaining({ uploadUnavailableReason: "stamper-failed" }),
     )
+  })
+
+  // The challenge `connect()` opens the popup with: armed on `proxyReady`, and
+  // replaced whenever the proxy arms the next one after an attempt ends.
+  it("keeps the connect challenge the proxy armed, and the next one it arms", () => {
+    deliver({
+      type: "proxyReady",
+      authenticated: false,
+      parentOrigin: "https://localhost",
+      connectChallenge: "attempt-1",
+    })
+    expect(internals(client).connectChallenge).toBe("attempt-1")
+
+    deliver({ type: "challengeArmed", challenge: "attempt-2" })
+    expect(internals(client).connectChallenge).toBe("attempt-2")
   })
 
   it("throws from connectionInfo getter before initialize()", () => {
@@ -1164,6 +1161,7 @@ describe("SwarmIdClient window message filtering", () => {
     type: "proxyReady",
     authenticated: false,
     parentOrigin: "https://localhost",
+    connectChallenge: "armed",
   }
 
   beforeEach(() => {
@@ -1207,6 +1205,30 @@ describe("SwarmIdClient window message filtering", () => {
 
   // Every page carries message traffic of its own — devtools, HMR, wallet
   // extensions — and none of it was ever addressed to this client.
+  // The connect and permissions popups ask their opener who it is (#915):
+  // the answer's origin, which the browser vouches for, is what proves the
+  // app page opened them. Only a window on the identity origin is answered,
+  // on that origin.
+  it("answers the identity site's opener check, to that window", () => {
+    const popup = { postMessage: vi.fn() }
+    listener({
+      origin: "https://swarm-id.example.com",
+      source: popup,
+      data: { type: "openerCheck", nonce: "n-1" },
+    })
+    listener({
+      origin: "https://evil.example",
+      source: popup,
+      data: { type: "openerCheck", nonce: "n-2" },
+    })
+
+    expect(popup.postMessage).toHaveBeenCalledTimes(1)
+    expect(popup.postMessage).toHaveBeenCalledWith(
+      { type: "openerCheckResponse", nonce: "n-1" },
+      "https://swarm-id.example.com",
+    )
+  })
+
   it("drops a message from another window silently", () => {
     listener({
       origin: "http://localhost:5173",
@@ -1257,6 +1279,7 @@ describe("SwarmIdClient window message filtering", () => {
         type: "proxyReady",
         authenticated: false,
         parentOrigin: "https://localhost",
+        connectChallenge: "armed",
         storageShared: true,
       },
     })
@@ -1310,6 +1333,48 @@ describe("SwarmIdClient window message filtering", () => {
       expect.anything(),
       expect.anything(),
     )
+  })
+
+  // The user named another identity site on the connect screen (#849): the
+  // proxy relays it, and the client re-embeds from there and remembers it.
+  it("re-embeds the proxy from the site a switchIdentitySite names", () => {
+    vi.spyOn(console, "error").mockImplementation(() => {})
+    const storage = { setItem: vi.fn(), removeItem: vi.fn(), getItem: vi.fn() }
+    vi.stubGlobal("localStorage", storage)
+    const createElement = vi.mocked(document.createElement)
+    createElement.mockClear()
+
+    listener({
+      origin: "https://swarm-id.example.com",
+      source: contentWindow,
+      data: { type: "switchIdentitySite", site: "https://other.example/id" },
+    })
+
+    expect(storage.setItem).toHaveBeenCalledWith(
+      "swarm-id-identity-site",
+      "https://other.example/id",
+    )
+    expect(client.identitySite).toBe("https://other.example/id")
+    // A fresh iframe, at the chosen site's own `/proxy`.
+    expect(createElement).toHaveBeenCalledWith("iframe")
+    expect(createElement.mock.results[0]?.value.src).toBe(
+      "https://other.example/id/proxy",
+    )
+    client.destroy()
+  })
+
+  it("refuses a switchIdentitySite that is not an http(s) URL", () => {
+    const storage = { setItem: vi.fn(), removeItem: vi.fn(), getItem: vi.fn() }
+    vi.stubGlobal("localStorage", storage)
+
+    listener({
+      origin: "https://swarm-id.example.com",
+      source: contentWindow,
+      data: { type: "switchIdentitySite", site: "javascript:alert(1)" },
+    })
+
+    expect(storage.setItem).not.toHaveBeenCalled()
+    expect(client.identitySite).toBe("https://swarm-id.example.com")
   })
 
   describe("upload progress", () => {
@@ -1542,6 +1607,7 @@ describe("SwarmIdClient lifecycle errors", () => {
         type: "proxyReady",
         authenticated: false,
         parentOrigin: "https://localhost",
+        connectChallenge: "armed",
       }),
   ]
 
@@ -1868,6 +1934,227 @@ describe("SwarmIdClient initialize() sequencing", () => {
     )
 
     client.destroy()
+  })
+
+  // The device prefers another site, and the proxy's store can say so (#849):
+  // the client goes there before `initialize()` resolves, so the user's first
+  // click already opens that site's popup.
+  it("follows the identity site proxyReady names, once", async () => {
+    const storage = { setItem: vi.fn(), removeItem: vi.fn(), getItem: vi.fn() }
+    vi.stubGlobal("localStorage", storage)
+    const createElement = vi.mocked(document.createElement)
+    const initializing = client.initialize()
+    initializing.catch(() => {})
+    await flush()
+    env.iframeElement.onload?.()
+    await flush()
+    env.dispatch({ data: { type: "proxyInitialized" } })
+    await flush()
+    env.dispatch({
+      data: {
+        type: "proxyReady",
+        authenticated: false,
+        parentOrigin: "https://localhost",
+        connectChallenge: "armed",
+        identitySite: "https://other.example/id",
+      },
+    })
+    await flush()
+
+    expect(client.identitySite).toBe("https://other.example/id")
+    expect(storage.setItem).toHaveBeenCalledWith(
+      "swarm-id-identity-site",
+      "https://other.example/id",
+    )
+    expect(createElement).toHaveBeenCalledTimes(2)
+    expect(env.iframeElement.src).toBe("https://other.example/id/proxy")
+
+    // The second site preferring the first back must not bounce forever.
+    env.iframeElement.onload?.()
+    await flush()
+    env.dispatch({ data: { type: "proxyInitialized" } })
+    await flush()
+    env.dispatch({
+      origin: "https://other.example",
+      data: {
+        type: "proxyReady",
+        authenticated: false,
+        parentOrigin: "https://localhost",
+        connectChallenge: "armed",
+        identitySite: IFRAME_ORIGIN,
+      },
+    })
+    await flush()
+    expect(createElement).toHaveBeenCalledTimes(2)
+    expect(client.identitySite).toBe("https://other.example/id")
+
+    client.destroy()
+  })
+
+  describe("a chosen identity site that does not come up", () => {
+    const CHOSEN = "https://other.example/id"
+    /** Past the deadline a chosen site gets, well inside the configured one. */
+    const CHOSEN_SITE_DEADLINE_MS = 10_000
+    let storage: {
+      setItem: Mock
+      removeItem: Mock
+      getItem: Mock
+    }
+
+    beforeEach(() => {
+      storage = { setItem: vi.fn(), removeItem: vi.fn(), getItem: vi.fn() }
+      vi.stubGlobal("localStorage", storage)
+    })
+
+    /** Bring the embedded proxy up the way the browser does. */
+    async function answerAs(origin: string, ready: Record<string, unknown>) {
+      env.iframeElement.onload?.()
+      await flush()
+      env.dispatch({ origin, data: { type: "proxyInitialized" } })
+      await flush()
+      env.dispatch({ origin, data: { type: "proxyReady", ...ready } })
+      await flush()
+    }
+
+    const CURRENT_PROXY = {
+      authenticated: false,
+      parentOrigin: "https://localhost",
+      connectChallenge: "armed",
+    }
+
+    /** The default names the chosen site; the chosen site runs a proxy too old to parse. */
+    async function failOnAnOldProxy(): Promise<{
+      initializing: Promise<void>
+    }> {
+      const initializing = client.initialize()
+      initializing.catch(() => {})
+      await flush()
+      await answerAs(IFRAME_ORIGIN, { ...CURRENT_PROXY, identitySite: CHOSEN })
+      expect(env.iframeElement.src).toBe(`${CHOSEN}/proxy`)
+      // What a proxy from before `connectChallenge` sends.
+      await answerAs("https://other.example", {
+        authenticated: false,
+        parentOrigin: "https://localhost",
+      })
+      // Wrapped: an async function returning the promise would wait on it.
+      return { initializing }
+    }
+
+    // #849: a site the user chose may run another version, or be down. The
+    // app keeps working on the site it configured, and says which one failed
+    // so it can tell the user; the choice itself is the user's to drop.
+    it("falls back to the configured site when the chosen site's proxy is too old to parse", async () => {
+      const { initializing } = await failOnAnOldProxy()
+
+      expect(env.iframeElement.src).toBe(`${IFRAME_ORIGIN}/proxy`)
+      expect(client.identitySite).toBe(IFRAME_ORIGIN)
+      // The default still names the chosen site; it is not followed again.
+      await answerAs(IFRAME_ORIGIN, { ...CURRENT_PROXY, identitySite: CHOSEN })
+      expect(env.iframeElement.src).toBe(`${IFRAME_ORIGIN}/proxy`)
+      env.dispatch({
+        data: {
+          type: "connectionInfoChanged",
+          canUpload: false,
+          uploadMode: "unavailable",
+        },
+      })
+      await initializing
+
+      expect(client.connectionInfo.identitySite).toBe(IFRAME_ORIGIN)
+      expect(client.connectionInfo.failedIdentitySite).toBe(CHOSEN)
+      expect(storage.removeItem).not.toHaveBeenCalled()
+      client.destroy()
+    })
+
+    it("falls back when the chosen site never answers, without waiting out the whole deadline", async () => {
+      vi.useFakeTimers()
+      try {
+        storage.getItem.mockReturnValue(CHOSEN)
+        client = new SwarmIdClient({
+          iframeOrigin: IFRAME_ORIGIN,
+          metadata: APP_METADATA,
+        })
+        const initializing = client.initialize()
+        initializing.catch(() => {})
+        await vi.advanceTimersByTimeAsync(0)
+        expect(env.iframeElement.src).toBe(`${CHOSEN}/proxy`)
+        env.iframeElement.onload?.()
+
+        await vi.advanceTimersByTimeAsync(CHOSEN_SITE_DEADLINE_MS)
+
+        expect(env.iframeElement.src).toBe(`${IFRAME_ORIGIN}/proxy`)
+        client.destroy()
+      } finally {
+        vi.useRealTimers()
+      }
+    })
+
+    // An unreachable site's iframe may never fire `load` at all (Firefox,
+    // connection refused): the wait for it is bound by the same deadline.
+    it("falls back when the chosen site's iframe never loads", async () => {
+      vi.useFakeTimers()
+      try {
+        storage.getItem.mockReturnValue(CHOSEN)
+        client = new SwarmIdClient({
+          iframeOrigin: IFRAME_ORIGIN,
+          metadata: APP_METADATA,
+        })
+        client.initialize().catch(() => {})
+        await vi.advanceTimersByTimeAsync(0)
+        expect(env.iframeElement.src).toBe(`${CHOSEN}/proxy`)
+
+        await vi.advanceTimersByTimeAsync(CHOSEN_SITE_DEADLINE_MS)
+
+        expect(env.iframeElement.src).toBe(`${IFRAME_ORIGIN}/proxy`)
+        client.destroy()
+      } finally {
+        vi.useRealTimers()
+      }
+    })
+
+    // The connect screen warns about it; both popups carry it — the one this
+    // page opens and the one the proxy's own button opens.
+    it("tells the configured site's proxy and connect popup which site failed", async () => {
+      await failOnAnOldProxy()
+      await answerAs(IFRAME_ORIGIN, CURRENT_PROXY)
+
+      const identify = env.iframeContentWindow.postMessage.mock.calls
+        .map(([message]) => message)
+        .filter((message) => message.type === "parentIdentify")
+        .at(-1)
+      expect(identify.failedIdentitySite).toBe(CHOSEN)
+
+      internals(client).ready = true
+      await client.connect().catch(() => {})
+      const url = vi.mocked(window.open).mock.calls[0][0] as string
+      expect(new URLSearchParams(url.split("#")[1]).get("failedSite")).toBe(
+        CHOSEN,
+      )
+      client.destroy()
+    })
+
+    // Connecting on the configured site after the warning is the user's
+    // answer: the failed site is not tried again on the next load.
+    it("forgets the failed site once the user connects on the configured site", async () => {
+      await failOnAnOldProxy()
+      storage.getItem.mockReturnValue(CHOSEN)
+
+      env.dispatch({
+        data: { type: "authSuccess", origin: "https://localhost" },
+      })
+      env.dispatch({
+        data: {
+          type: "connectionInfoChanged",
+          canUpload: false,
+          uploadMode: "unavailable",
+        },
+      })
+
+      expect(storage.removeItem).toHaveBeenCalledWith("swarm-id-identity-site")
+      internals(client).ready = true
+      expect(client.connectionInfo.failedIdentitySite).toBeUndefined()
+      client.destroy()
+    })
   })
 })
 

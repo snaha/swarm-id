@@ -49,7 +49,23 @@ export type {
 // there are no longer separate identity/app/stamp collection keys.
 export const STORAGE_KEY_ACCOUNTS = "swarm-id-accounts"
 export const STORAGE_KEY_NETWORK_SETTINGS = "swarm-id-network-settings"
-export const STORAGE_CHALLENGE_KEY = "swarm-storage-challenge"
+/**
+ * Where a proxy leaves its armed connect challenge, for the popup to read back
+ * first-party: found means the two share a store. One key per challenge,
+ * because every same-site dApp's proxy arms one in that store ahead of any
+ * click, and a single key would leave only the last one loaded.
+ */
+export const storageChallengeKey = (challenge: string): string =>
+  `swarm-storage-challenge:${challenge}`
+/**
+ * Where the identity site the user chose is remembered, as a base URL (#849).
+ * Under the same name in two stores: the app origin's, written by the client,
+ * so the app embeds that site from then on; and the default identity site's
+ * first-party store, written by its connect popup, so every app on the device
+ * learns it — directly through the proxy iframe where the store is shared,
+ * or from the popup's "your account is on…" offer where it is partitioned.
+ */
+export const IDENTITY_SITE_STORAGE_KEY = "swarm-id-identity-site"
 export const STORAGE_KEY_LEASE_CACHE_PREFIX = "swarm-id-lease-v2"
 
 /**
@@ -925,6 +941,20 @@ export const ConnectionInfoSchema = z.object({
    * absent without a session.
    */
   permissions: AppPermissionsSchema.optional(),
+  /**
+   * Base URL of the identity site this session runs against (#849): the app's
+   * `iframeOrigin` unless the user chose another one on the connect screen.
+   * Filled in by the client, not the proxy, which cannot know what it is
+   * embedded as.
+   */
+  identitySite: z.string().optional(),
+  /**
+   * The identity site the user chose that did not come up — offline, or
+   * running a version this client cannot talk to (#849). The session runs
+   * against the app's own `iframeOrigin` instead, and its connect screen says
+   * so; an app may tell the user too. Gone once the user connects there.
+   */
+  failedIdentitySite: z.string().optional(),
 })
 
 export type ConnectionInfo = z.infer<typeof ConnectionInfoSchema>
@@ -1009,6 +1039,8 @@ export const ParentIdentifyMessageSchema = z.object({
   buttonConfig: ButtonConfigSchema,
   subsidisedGatewayUrl: z.string().url().optional(),
   permissions: PermissionsSchema.optional(),
+  /** The chosen identity site that did not come up, for the connect popup to warn about (#849). */
+  failedIdentitySite: z.string().url().optional(),
 })
 
 export const CheckAuthMessageSchema = z.object({
@@ -1394,14 +1426,15 @@ export const RequestPermissionsMessageSchema = z.object({
   requestOptions: RequestOptionsSchema,
 })
 
-export const ConnectMessageSchema = z.object({
-  type: z.literal("connect"),
+/** Forget the device-wide identity-site choice held by this proxy's store (#849). */
+export const ClearIdentitySiteMessageSchema = z.object({
+  type: z.literal("clearIdentitySite"),
   requestId: z.string(),
-  popupMode: z.enum(["popup", "window"]).optional(),
 })
 
 export const ParentToIframeMessageSchema = z.discriminatedUnion("type", [
   ParentIdentifyMessageSchema,
+  ClearIdentitySiteMessageSchema,
   CheckAuthMessageSchema,
   DisconnectMessageSchema,
   UploadDataMessageSchema,
@@ -1441,7 +1474,6 @@ export const ParentToIframeMessageSchema = z.discriminatedUnion("type", [
   GetPostageBatchMessageSchema,
   GetDrivesMessageSchema,
   GetPermissionsMessageSchema,
-  ConnectMessageSchema,
   RequestPermissionsMessageSchema,
 ])
 
@@ -1513,7 +1545,6 @@ export type GetPostageBatchMessage = z.infer<
 >
 export type GetDrivesMessage = z.infer<typeof GetDrivesMessageSchema>
 export type GetPermissionsMessage = z.infer<typeof GetPermissionsMessageSchema>
-export type ConnectMessage = z.infer<typeof ConnectMessageSchema>
 export type RequestPermissionsMessage = z.infer<
   typeof RequestPermissionsMessageSchema
 >
@@ -1528,12 +1559,26 @@ export const ProxyReadyMessageSchema = z.object({
   authenticated: z.boolean(),
   parentOrigin: z.string(),
   /**
+   * The identity site this device prefers, as the proxy's store remembers it
+   * (#849): present when the user chose one on a connect popup of this site
+   * and the iframe can see that first-party store. The client switches to it
+   * before `initialize()` resolves.
+   */
+  identitySite: z.string().optional(),
+  /**
    * Whether the iframe can read the trusted domain's first-party store, which
-   * decides which transport `connect()` can use (#613). Optional so an older
-   * deployed proxy stays wire-compatible; absent reads as "not proven shared",
-   * and the client delegates, which works in both modes.
+   * decides which transport `connect()` can use (#613). Absent reads as "not
+   * proven shared", and the popup carries the challenge, which works in both
+   * modes.
    */
   storageShared: z.boolean().optional(),
+  /**
+   * The challenge `connect()` opens the popup with, already in this frame's
+   * store under `storageChallengeKey` (#751). Armed ahead of the click so the
+   * popup opens inside it, and so the popup's check that it can read the
+   * challenge back never runs ahead of the write.
+   */
+  connectChallenge: z.string(),
 })
 
 export const InitErrorMessageSchema = z.object({
@@ -1724,10 +1769,21 @@ export const ConnectionInfoChangedMessageSchema = z.object({
   permissions: AppPermissionsSchema.optional(),
 })
 
-export const ConnectResponseMessageSchema = z.object({
-  type: z.literal("connectResponse"),
+/** The proxy relaying the popup's `identitySiteChosen` to the app (#849). */
+export const SwitchIdentitySiteMessageSchema = z.object({
+  type: z.literal("switchIdentitySite"),
+  site: z.string().url(),
+})
+
+export const ClearIdentitySiteResponseMessageSchema = z.object({
+  type: z.literal("clearIdentitySiteResponse"),
   requestId: z.string(),
-  success: z.boolean(),
+})
+
+/** The connect challenge the proxy armed once the last attempt ended. */
+export const ChallengeArmedMessageSchema = z.object({
+  type: z.literal("challengeArmed"),
+  challenge: z.string(),
 })
 
 export const IsConnectedResponseMessageSchema = z.object({
@@ -1983,7 +2039,9 @@ export const IframeToParentMessageSchema = z.discriminatedUnion("type", [
   UploadProgressMessageSchema,
   ErrorMessageSchema,
   ConnectionInfoChangedMessageSchema,
-  ConnectResponseMessageSchema,
+  ChallengeArmedMessageSchema,
+  SwitchIdentitySiteMessageSchema,
+  ClearIdentitySiteResponseMessageSchema,
   IsConnectedResponseMessageSchema,
   GetNodeInfoResponseMessageSchema,
   GsocMineResponseMessageSchema,
@@ -2056,9 +2114,7 @@ export type ErrorMessage = z.infer<typeof ErrorMessageSchema>
 export type ConnectionInfoChangedMessage = z.infer<
   typeof ConnectionInfoChangedMessageSchema
 >
-export type ConnectResponseMessage = z.infer<
-  typeof ConnectResponseMessageSchema
->
+export type ChallengeArmedMessage = z.infer<typeof ChallengeArmedMessageSchema>
 export type IsConnectedResponseMessage = z.infer<
   typeof IsConnectedResponseMessageSchema
 >
@@ -2222,9 +2278,46 @@ export const SetSecretMessageSchema = z.object({
   data: AuthDataSchema,
 })
 
+/**
+ * The connect popup saying the user wants another identity site (#849):
+ * `site` is the base URL they typed. The iframe forwards it to the app as
+ * `switchIdentitySite`; the app's client then re-embeds the proxy from there.
+ * `challenge` is absent when the popup was opened by the app page rather than
+ * the iframe — the message then goes to the page directly.
+ */
+export const IdentitySiteChosenMessageSchema = z.object({
+  type: z.literal("identitySiteChosen"),
+  appOrigin: z.string(),
+  challenge: z.string().optional(),
+  site: z.string().url(),
+})
+
+/**
+ * The connect or permissions popup asking its opener who it is (#915). The
+ * app origin on the popup's URL is whatever the opener wrote; the origin of
+ * the answer is what the browser vouches for.
+ */
+export const OpenerCheckMessageSchema = z.object({
+  type: z.literal("openerCheck"),
+  nonce: z.string(),
+})
+
+/**
+ * The answer: from the app page itself, whose origin is the proof, or from
+ * the proxy iframe — on the identity origin — vouching for the parent origin
+ * it verified when it was identified.
+ */
+export const OpenerCheckResponseMessageSchema = z.object({
+  type: z.literal("openerCheckResponse"),
+  nonce: z.string(),
+  parentOrigin: z.string().optional(),
+})
+
 export const PopupToIframeMessageSchema = z.discriminatedUnion("type", [
   SetSecretMessageSchema,
   GrantUpdatedMessageSchema,
+  IdentitySiteChosenMessageSchema,
+  OpenerCheckMessageSchema,
 ])
 
 export type SetSecretMessage = z.infer<typeof SetSecretMessageSchema>

@@ -49,6 +49,8 @@ export interface BuildAuthUrlOptions {
    * page waits for the delta to go out before it closes (#711).
    */
   handOverViaBus?: boolean
+  /** The chosen identity site that did not come up: the connect screen warns about it (#849). */
+  failedSite?: string
 }
 
 /**
@@ -99,6 +101,10 @@ export function buildAuthUrl(
 
   if (options?.permissions !== undefined) {
     params.set("permissions", JSON.stringify(options.permissions))
+  }
+
+  if (options?.failedSite !== undefined) {
+    params.set("failedSite", options.failedSite)
   }
 
   if (options?.permissionsFor !== undefined) {

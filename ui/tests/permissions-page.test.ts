@@ -54,11 +54,35 @@ test('the connect done page refuses to render inside a frame', async ({ page }) 
   expect(new URL(page.frames()[1].url()).pathname).toBe('/connect/done')
 })
 
-test('the permissions page renders at top level', async ({ page }) => {
+// Rendered, unlike framed; and opened by no app at all, so the opener check
+// (#915) refuses it before anything else is looked at.
+test('the permissions page renders at top level, and refuses a request no app opened', async ({
+  page,
+}) => {
   await page.goto(PERMISSIONS_URL)
 
   await expect(page.getByText('Permissions for https://app.example')).toBeVisible()
-  await expect(page.getByText('This account is not on this device.')).toBeVisible()
+  await expect(
+    page.getByText('This request could not be verified. Open this page from the app.'),
+  ).toBeVisible()
+})
+
+// The connect popup the same way: a page that names an app it is not gets
+// nothing to approve (#915).
+test('the connect page refuses a request its opener cannot vouch for', async ({
+  page,
+  context,
+}) => {
+  await page.goto('http://localhost:5500/')
+  const opened = context.waitForEvent('page')
+  // An opener on the identity origin that is not a proxy: it never answers.
+  await page.evaluate(() => window.open('/connect#origin=https%3A%2F%2Fapp.example'))
+  const popup = await opened
+
+  await expect(popup.getByText('This connection request could not be verified')).toBeVisible({
+    timeout: 10000,
+  })
+  await expect(popup.getByText('Connect to app.example')).toHaveCount(0)
 })
 
 // #885: the sharing switches. Account-wide on the Apps tab, pinned per app on

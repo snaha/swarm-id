@@ -272,7 +272,8 @@ import {
 import { serializeAccountStateSnapshot } from "./utils/account-state-snapshot"
 import {
   IframeToParentMessageSchema,
-  STORAGE_CHALLENGE_KEY,
+  storageChallengeKey,
+  IDENTITY_SITE_STORAGE_KEY,
   STORAGE_KEY_ACCOUNTS,
   STORAGE_KEY_NETWORK_SETTINGS,
   leaseCacheStorageKey,
@@ -520,7 +521,21 @@ describe("SwarmIdProxy partitioned write enablement", () => {
     return synced
   }
 
-  /** Run identify → connect → return the partition challenge the popup echoes. */
+  /** The connect challenge the proxy last armed and handed the parent. */
+  function armedChallenge(): string | undefined {
+    const armed = parentWindow.postMessage.mock.calls
+      .map(([message]) => message)
+      .filter(
+        (message) =>
+          message?.type === "proxyReady" || message?.type === "challengeArmed",
+      )
+      .at(-1)
+    return armed?.type === "proxyReady"
+      ? armed.connectChallenge
+      : armed?.challenge
+  }
+
+  /** Run identify → return the partition challenge the popup echoes. */
   async function startPartitionedConnect(
     appOrigin: string = PARENT_ORIGIN,
   ): Promise<string> {
@@ -529,12 +544,7 @@ describe("SwarmIdProxy partitioned write enablement", () => {
       appOrigin,
       parentWindow,
     )
-    await dispatch(
-      { type: "connect", requestId: "r2" },
-      appOrigin,
-      parentWindow,
-    )
-    const challenge = localStorageFake.getItem(STORAGE_CHALLENGE_KEY)
+    const challenge = armedChallenge()
     expect(challenge).toBeTruthy()
     return challenge!
   }
@@ -585,12 +595,219 @@ describe("SwarmIdProxy partitioned write enablement", () => {
     })
   }
 
+  // The parent opens the connect popup in the user's click — Firefox refuses
+  // the iframe one (#751) — with a challenge armed ahead of it. Armed means
+  // already in this frame's store when the parent learns it, so the popup's
+  // partition check can never run ahead of the write.
+  it("arms the connect challenge in its store before telling the parent it is ready", async () => {
+    await dispatch(
+      { type: "parentIdentify", requestId: "r1", metadata: { name: "dApp" } },
+      PARENT_ORIGIN,
+      parentWindow,
+    )
+
+    const [ready] = messagesOfType("proxyReady")
+    expect(ready.connectChallenge).toBeTruthy()
+    expect(
+      localStorageFake.getItem(storageChallengeKey(ready.connectChallenge)),
+    ).not.toBeNull()
+    expect(window.open).not.toHaveBeenCalled()
+  })
+
+  // Same-site dApps share this store, each with its own proxy armed ahead of
+  // any click: one key per challenge, or the last proxy loaded would
+  // overwrite the others' and their popups would misread the store.
+  it("keeps each proxy's challenge under its own key in a shared store", async () => {
+    const first = await startPartitionedConnect()
+    const firstProxy = proxy
+    mountProxy()
+    try {
+      const second = await startPartitionedConnect()
+
+      expect(second).not.toBe(first)
+      expect(
+        localStorageFake.getItem(storageChallengeKey(first)),
+      ).not.toBeNull()
+      expect(
+        localStorageFake.getItem(storageChallengeKey(second)),
+      ).not.toBeNull()
+    } finally {
+      firstProxy.destroy()
+    }
+  })
+
+  it("takes the handover on the armed challenge, then arms the next one", async () => {
+    const challenge = await startPartitionedConnect()
+
+    await sendSetSecret(challenge, {
+      account: serializeSyncedAccount(makeSyncedAccount()),
+    })
+
+    expect(messagesOfType("authSuccess")).toHaveLength(1)
+    const next = armedChallenge()
+    expect(next).toBeTruthy()
+    expect(next).not.toBe(challenge)
+    expect(localStorageFake.getItem(storageChallengeKey(challenge))).toBeNull()
+    expect(localStorageFake.getItem(storageChallengeKey(next!))).not.toBeNull()
+  })
+
+  // The app fell back to this site because the one the user chose did not
+  // come up (#849): the popup this proxy's own button opens warns about it,
+  // as the one the app page opens does.
+  it("puts the chosen site that failed on the popup its own button opens", async () => {
+    await dispatch(
+      {
+        type: "parentIdentify",
+        requestId: "r1",
+        metadata: { name: "dApp" },
+        failedIdentitySite: "https://other.example/id",
+      },
+      PARENT_ORIGIN,
+      parentWindow,
+    )
+    ;(proxy as unknown as { openAuthPopup(): boolean }).openAuthPopup()
+
+    const url = vi.mocked(window.open).mock.calls[0][0] as string
+    expect(new URLSearchParams(url.split("#")[1]).get("failedSite")).toBe(
+      "https://other.example/id",
+    )
+  })
+
+  // The app page learns the challenge on `proxyReady` (#751), so the
+  // challenge only says WHICH attempt a handover belongs to: what makes it a
+  // handover is coming from the identity origin, which only the connect popup
+  // can. A page that knows the challenge still cannot hand this frame a
+  // session of its own making.
+  it("refuses a handover the app page sends with the right challenge", async () => {
+    const challenge = await startPartitionedConnect()
+
+    await dispatch(
+      {
+        type: "setSecret",
+        appOrigin: PARENT_ORIGIN,
+        challenge,
+        data: {
+          secret: "33".repeat(32),
+          account: serializeSyncedAccount(makeSyncedAccount()),
+        },
+      },
+      PARENT_ORIGIN,
+      parentWindow,
+    )
+
+    expect(messagesOfType("authSuccess")).toHaveLength(0)
+  })
+
+  // One handover per challenge: once taken, a replay of it — a second popup
+  // of the same attempt, or anything that saw the URL — is not a session.
+  it("refuses a second handover on a challenge already taken", async () => {
+    const challenge = await startPartitionedConnect()
+    const account = serializeSyncedAccount(makeSyncedAccount())
+    await sendSetSecret(challenge, { account })
+    expect(messagesOfType("authSuccess")).toHaveLength(1)
+
+    await sendSetSecret(challenge, { account })
+
+    expect(messagesOfType("authSuccess")).toHaveLength(1)
+  })
+
+  // The popup this proxy's own button opens asks it who the app is (#915):
+  // the proxy vouches with the parent origin it verified, and only to a
+  // window on its own origin.
+  it("vouches for its parent's origin to a popup on its own origin", async () => {
+    await startPartitionedConnect()
+    const popup = { postMessage: vi.fn() }
+
+    await dispatch({ type: "openerCheck", nonce: "n-1" }, ID_ORIGIN, popup)
+    await dispatch(
+      { type: "openerCheck", nonce: "n-2" },
+      "https://evil.example",
+      popup,
+    )
+
+    expect(popup.postMessage).toHaveBeenCalledTimes(1)
+    expect(popup.postMessage).toHaveBeenCalledWith(
+      {
+        type: "openerCheckResponse",
+        nonce: "n-1",
+        parentOrigin: PARENT_ORIGIN,
+      },
+      ID_ORIGIN,
+    )
+  })
+
+  it("removes its armed challenge from the store when destroyed", async () => {
+    const challenge = await startPartitionedConnect()
+
+    proxy.destroy()
+
+    expect(localStorageFake.getItem(storageChallengeKey(challenge))).toBeNull()
+  })
+
   // The lease cache is a HINT at which lane this device holds, and a lane is
   // one partition of one batch. Keyed per account alone, the two coordinators
   // an account has whenever a dApp carries a per-app stamp override share one
   // slot and overwrite each other. Safe — `hydrate` refuses a snapshot whose
   // `batchId` differs, so the loser cold-acquires — but a hint that stops
   // hinting exactly when there are two writers to hint for is no hint.
+  // The popup says the user's account is on another identity site (#849):
+  // this iframe's part is to tell the app, which re-embeds from there.
+  it("relays the popup's identitySiteChosen to the parent, for this attempt only", async () => {
+    const challenge = await startPartitionedConnect()
+
+    await dispatch(
+      {
+        type: "identitySiteChosen",
+        appOrigin: PARENT_ORIGIN,
+        challenge: "not-this-attempt",
+        site: "https://other.example/id",
+      },
+      ID_ORIGIN,
+    )
+    expect(messagesOfType("switchIdentitySite")).toEqual([])
+
+    await dispatch(
+      {
+        type: "identitySiteChosen",
+        appOrigin: PARENT_ORIGIN,
+        challenge,
+        site: "https://other.example/id",
+      },
+      ID_ORIGIN,
+    )
+    expect(messagesOfType("switchIdentitySite")).toEqual([
+      { type: "switchIdentitySite", site: "https://other.example/id" },
+    ])
+    expect(localStorageFake.getItem(storageChallengeKey(challenge))).toBeNull()
+  })
+
+  // The choice made on this site's popup is this site's to report (#849):
+  // in `proxyReady`, and gone again on the app's say-so.
+  it("reports the remembered identity site on proxyReady and clears it on request", async () => {
+    localStorageFake.setItem(
+      IDENTITY_SITE_STORAGE_KEY,
+      "https://other.example/id",
+    )
+    await dispatch(
+      { type: "parentIdentify", requestId: "r1", metadata: { name: "dApp" } },
+      PARENT_ORIGIN,
+      parentWindow,
+    )
+    expect(messagesOfType("proxyReady")[0]).toMatchObject({
+      identitySite: "https://other.example/id",
+    })
+
+    await dispatch(
+      { type: "clearIdentitySite", requestId: "r2" },
+      PARENT_ORIGIN,
+      parentWindow,
+    )
+    expect(localStorageFake.getItem(IDENTITY_SITE_STORAGE_KEY)).toBeNull()
+    expect(messagesOfType("clearIdentitySiteResponse")).toEqual([
+      { type: "clearIdentitySiteResponse", requestId: "r2" },
+    ])
+  })
+
   it("does not evict another batch's lease-cache entry", async () => {
     const accountId = "aa".repeat(20)
     const otherBatch = "dd".repeat(32)
@@ -2931,7 +3148,8 @@ describe("SwarmIdProxy partitioned write enablement", () => {
     // a restored session checks the account's own Swarm state in the
     // background and tears itself down on a tombstone.
     it("ends a restored session the account has since revoked", async () => {
-      await connectPartitioned()
+      const connectedAt = Date.now()
+      await connectPartitionedAt(connectedAt)
       const revoked = makeSyncedAccount()
       foldedFromSwarm.value = {
         account: {
@@ -2940,8 +3158,8 @@ describe("SwarmIdProxy partitioned write enablement", () => {
             {
               appUrl: PARENT_ORIGIN,
               appName: "dApp",
-              lastConnectedAt: Date.now(),
-              revokedAt: Date.now(),
+              lastConnectedAt: connectedAt,
+              revokedAt: connectedAt + 1,
             },
           ],
         },
@@ -3029,6 +3247,67 @@ describe("SwarmIdProxy partitioned write enablement", () => {
       const infos = messagesOfType("connectionInfoChanged")
       expect(infos[infos.length - 1]?.canUpload).toBe(true)
       expect(storedSession()).toBeTruthy()
+      foldedFromSwarm.value = undefined
+    })
+
+    /** The restore's background check ran and declined: the session is still up. */
+    async function expectCheckKeptSession(): Promise<void> {
+      await vi.waitFor(() =>
+        expect(vi.mocked(foldAccountFromSwarm)).toHaveBeenCalled(),
+      )
+      await vi.mocked(foldAccountFromSwarm).mock.results.at(-1)?.value
+      await Promise.resolve()
+      await Promise.resolve()
+      const infos = messagesOfType("connectionInfoChanged")
+      expect(infos[infos.length - 1]?.canUpload).toBe(true)
+      expect(storedSession()).toBeTruthy()
+    }
+
+    // The published state can predate this session: with an expired drive
+    // the identity site cannot publish the connect, so the last snapshot on
+    // Swarm never saw it. An entry is only ever tombstoned, never deleted, so
+    // a missing one means exactly that — the state has nothing to say about
+    // a connection it never heard of — and must not read as a removal.
+    it("keeps a restored session the published state has no entry for", async () => {
+      await connectPartitionedAt(Date.now())
+      foldedFromSwarm.value = {
+        account: { ...makeSyncedAccount(), connectedApps: [] },
+        devices: [],
+      }
+      vi.mocked(foldAccountFromSwarm).mockClear()
+
+      await reload()
+
+      await expectCheckKeptSession()
+      foldedFromSwarm.value = undefined
+    })
+
+    // Same for a removal the published state still shows from before this
+    // session: the reconnect answered it (`connectApp` clears the tombstone),
+    // and only a removal newer than our connection can end it — the clock the
+    // Disconnect check below already compares.
+    it("keeps a restored session it reconnected after the removal", async () => {
+      const connectedAt = Date.now()
+      await connectPartitionedAt(connectedAt)
+      foldedFromSwarm.value = {
+        account: {
+          ...makeSyncedAccount(),
+          connectedApps: [
+            {
+              appUrl: PARENT_ORIGIN,
+              appName: "dApp",
+              lastConnectedAt: connectedAt - 1000,
+              revokedAt: connectedAt - 1000,
+            },
+          ],
+        },
+        devices: [],
+      }
+      vi.mocked(foldAccountFromSwarm).mockClear()
+
+      await reload()
+
+      await expectCheckKeptSession()
       foldedFromSwarm.value = undefined
     })
 

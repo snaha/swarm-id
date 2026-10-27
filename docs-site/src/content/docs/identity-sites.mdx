@@ -1,0 +1,192 @@
+---
+title: Using Your Own Identity Site
+description: How a user picks which copy of Swarm ID an app connects through, and how each flow works underneath
+---
+
+An app names one identity site when it creates its `SwarmIdClient` (`iframeOrigin`), usually
+`https://swarm-id.snaha.net`. That is the app's **default**, not a requirement. Swarm ID is a
+static site anyone can [host](../self-hosting/), and a user whose account lives on another copy
+(their own, their organisation's, a local one) can tell any app to use that site instead. The
+app does nothing to support this: the client handles the switch, remembers it, and falls back to
+the default when the chosen site is down.
+
+## For users
+
+### Choosing a site
+
+1. Press **Connect** in the app. The default identity site's connect window opens.
+2. Below the account list, choose **My account is on another identity site**, type the site's
+   address (for example `https://id.example.org`) and choose **Switch to this site**.
+3. The window closes and the app switches to that site. Press **Connect** again: this time the
+   window comes from your site, and you sign in there as usual.
+
+The choice is remembered twice:
+
+- **By the app**, in the app's own storage, so the app embeds your site on every later visit.
+- **By the default site**, in its own storage, so other apps on this device learn it too. Where
+  the browser lets the app's hidden Swarm ID frame see that storage (the app and the default
+  site are same-site), the next app switches before you click anything. Where it does not
+  (separate sites, Safari), the default site's connect window shows **Your account is on another
+  site** with your site's address: **Switch to that site** sends the app there, **Stay here**
+  forgets the choice and lets you sign in on the default site.
+
+You type the address once per device, not once per app.
+
+### When your site is not working
+
+If the chosen site is offline, or runs a version the app cannot talk to, the app does not stop
+working. It gives the chosen site up to 10 seconds (no time at all for an incompatible version)
+and then runs on its default site instead. The next connect window says **Your identity site is
+not working right now** and names your site:
+
+- **Use this site** signs you in on the default site, and stops sending apps to the failed one.
+- **Choose another site** opens the address field to name a different one.
+
+Signing in on the default site at that point counts as the answer: the failed site is forgotten
+by the app and by the default site, so you are not sent back to it next time. If you want it
+again once it is back, choose it again.
+
+## For app developers
+
+Nothing is required. The client reads and follows the user's choice by itself, and the
+`iframeOrigin` you configure stays the fallback. What the client exposes, if you want to show
+it:
+
+| API                                 | What it gives                                                                                                                   |
+| ----------------------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
+| `client.identitySite`               | The base URL the client is running against right now: your `iframeOrigin`, or the site the user chose                           |
+| `connectionInfo.identitySite`       | The same, as part of the connection state `onConnectionChange` reports                                                          |
+| `connectionInfo.failedIdentitySite` | The site the user chose that did not come up, while the client runs on your default instead; gone once the user connects        |
+| `client.useIdentitySite(site)`      | Switch to `site` (an http(s) URL) and remember it; resolves once the new site's frame is ready                                  |
+| `client.useIdentitySite(undefined)` | Back to your `iframeOrigin`, forgetting the choice in the app's storage, and in the default site's where its frame can reach it |
+
+A banner for a failed site is a few lines:
+
+```typescript
+const client = new SwarmIdClient({
+  iframeOrigin: 'https://swarm-id.snaha.net',
+  metadata: { name: 'My App' },
+  onConnectionChange: (info) => {
+    banner.hidden = info.failedIdentitySite === undefined
+    banner.textContent = `Your identity site ${info.failedIdentitySite} is not working; using ${info.identitySite}.`
+  },
+})
+```
+
+A chosen site's frame is loaded from `/proxy` under the site's base URL. The `iframePath` you
+configure applies to your default only.
+
+## How the flows work
+
+Three windows take part. The **app page** runs `SwarmIdClient`. The **proxy frame** is the
+hidden iframe the client embeds from the identity site (`/proxy`). It holds the session and
+does the signing. The **connect window** is the identity site's `/connect` page, opened as a
+popup when the user presses Connect.
+
+Whether the proxy frame and the connect window share storage decides how a session gets from
+one to the other. When the app and the identity site are same-site, they share it. When they
+are cross-site, or the browser partitions anyway (Safari, strict privacy settings), the proxy
+frame gets a store of its own. See [Architecture](../architecture/) for the general picture.
+The flows below are the ones the identity-site choice adds or changes.
+
+### Starting up
+
+1. `initialize()` looks in the app's storage for a remembered site
+   (`swarm-id-identity-site`). If there is one it embeds `/proxy` from there, otherwise from
+   `iframeOrigin`.
+2. The proxy frame answers with `proxyReady`. Besides whether its store is shared with the
+   identity site's top-level pages, it carries two things:
+   - **`connectChallenge`**: a fresh random value the proxy has already written to its own
+     store, under `swarm-storage-challenge:<challenge>`. The next connect window carries it.
+   - **`identitySite`**: the site the user chose on this identity site's connect window, if
+     the proxy can see that choice in its store. It can only when its store is shared.
+3. If `identitySite` names a site other than the current one, the client switches to it now,
+   before `initialize()` resolves, so the user's first click already opens their own site.
+   It follows at most one such hop, so two sites pointing at each other cannot loop.
+
+### Connecting
+
+1. The user clicks Connect. `connect()` opens the connect window **synchronously, inside the
+   click**. Browsers only allow a popup during the click's short-lived activation, and Firefox
+   never lets an iframe open one on a click that happened in the page around it. The URL
+   carries the app's origin and name, and the challenge whenever the store is not proven
+   shared.
+2. The connect window asks who opened it (`openerCheck`, with a random nonce) before it shows
+   anything. Any page can open `/connect` with any app's origin written in the URL. The origin
+   the browser stamps on the answer cannot be forged:
+   - the app page answers from the app's origin, so the claim holds;
+   - when the proxy frame's own button opened the window, the proxy answers from the
+     identity origin, vouching for the parent origin it verified when it was embedded.
+
+   Anything else (no answer within 5 seconds, a different origin, the proxy vouching for
+   another app) shows **This connection request could not be verified** and offers nothing to
+   approve. The permissions window runs the same check.
+
+3. The connect window looks for the challenge's key in its own storage. Found means it shares
+   a store with the proxy frame. Missing means the proxy frame is partitioned.
+4. The user picks an account and approves. The connect window then writes the connection to
+   its storage, and hands it over by message as well when the store is not shared.
+   - **Shared store**: a `storage` event carries the write to the proxy frame, which
+     authenticates from it.
+   - **Partitioned**: the connect window sends `setSecret` (the app secret and the account's
+     synced view) to its opener and to each of its opener's frames, every one addressed to
+     the **identity origin**. The browser delivers a message only to a window on the origin
+     it is addressed to, so the app page and any other frame on the page never receive it.
+     The proxy frame accepts it only if it comes from its own origin, carries the challenge it
+     armed, and names the app it is embedded in.
+5. The proxy reports `authSuccess` to the app page and arms a new challenge for the next
+   attempt (`challengeArmed`), so a challenge works once.
+
+The proxy also drops its armed key when the page is unloaded, and arms a new one when the page
+comes back from the browser's back/forward cache.
+
+### Choosing another site
+
+1. On the connect window the user types a site and chooses **Switch to this site**. The window
+   writes it to its own storage (`swarm-id-identity-site`), which is how other apps on the
+   device learn it, and sends `identitySiteChosen` with the site, the app's origin and the
+   challenge.
+2. The message goes where a session would:
+   - **With a challenge**: to the opener and the opener's frames, addressed to the identity
+     origin. The proxy frame checks the challenge and the app's origin, and relays it to the
+     app page as `switchIdentitySite`.
+   - **Without a challenge** (the store is shared and the app page opened the window): to the
+     app page directly, addressed to the app's origin. The client accepts it only from the
+     connect window it opened.
+3. The window closes. The client calls `useIdentitySite(site)`: it remembers the site in the
+   app's storage, removes the old proxy frame and embeds `/proxy` from the new site.
+4. The user presses Connect again, and the flow above runs against the new site.
+
+### Falling back to the default
+
+1. `initialize()` embeds the remembered site and gives it at most 10 seconds to load and say
+   `proxyReady`. A `proxyReady` the client cannot parse (an incompatible version) fails at
+   once.
+2. On failure the client removes that frame and embeds your `iframeOrigin`, without following
+   its remembered preference straight back. `connectionInfo.failedIdentitySite` names the
+   failed site.
+3. The client tells the default site's proxy which site failed (`parentIdentify`). Whichever
+   window then opens the connect window passes it on the URL (`failedSite`), and the connect
+   window shows the warning.
+4. When the user connects on the default site, the client removes the remembered site from
+   the app's storage, and the connect window removes it from the default site's storage if it
+   is still the same site. A newer choice is left alone.
+
+`initialize()` only fails outright when the default site itself does not come up.
+
+## What the user is trusting
+
+Choosing a site means trusting that site with the account: the seed lives there, and the app
+secret is derived there. The user makes that choice on a connect window of the identity site, not
+the app. An app can also call `useIdentitySite` itself, but that only changes which site its own
+pages embed; the user still signs in on that site, and the account must already be there.
+
+Two protections hold whichever site is used:
+
+- **Only the proxy frame receives the session.** Every handover is addressed to the identity
+  origin, so the app page never sees the app secret or the account view; it only learns that
+  the user connected.
+- **Only the app that opened the connect window can be connected.** A page that opens
+  `/connect` naming another app is refused (step 2 of [Connecting](#connecting)), and every
+  identity-site page except `/proxy` refuses to be framed, so it cannot be overlaid on
+  another site either.

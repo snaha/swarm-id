@@ -16,6 +16,7 @@
 import {
   type ConnectedApp,
   GRANT_CLOCKS,
+  IDENTITY_SITE_STORAGE_KEY,
   type SyncedAccount,
   appSessionDuration,
   deriveSecret,
@@ -127,7 +128,56 @@ function sendSecretToOpener(account: Account, request: ConnectRequest, appSecret
   // The account collections and network settings are Svelte $state proxies,
   // which structured clone rejects (DataCloneError). The payload is already
   // the JSON wire shape, so a JSON round-trip strips the reactivity.
-  window.opener.postMessage(JSON.parse(JSON.stringify(message)), window.location.origin)
+  const wire = JSON.parse(JSON.stringify(message))
+  const opener: Window = window.opener
+  opener.postMessage(wire, window.location.origin)
+  // When the browser refused the iframe a popup of its own (Firefox, #751),
+  // the app page opened this one and is the opener; the iframe is then among
+  // its frames, which are reachable cross-origin by index. The target origin
+  // keeps the payload from every other frame, and the proxy takes it on the
+  // challenge alone, whichever window delivered it.
+  // ponytail: direct children only; a proxy nested two frames deep would need a walk.
+  for (let i = 0; i < opener.length; i++) {
+    opener[i].postMessage(wire, window.location.origin)
+  }
+}
+
+/**
+ * Tell whoever opened this popup that the user wants another identity site
+ * (#849), then close: the app's client re-embeds its proxy from there and the
+ * user connects on that site. With a challenge the proxy is listening for it,
+ * and it is either our opener or, when the app page had to open us because
+ * the browser refused the iframe a popup (#751), among the opener's frames —
+ * the same two deliveries as the session handover. Without one the app page
+ * opened us on shared storage and takes the choice itself. Also remembered
+ * here, in this site's first-party store: the next app's proxy reads it when
+ * the store is shared, and the next connect popup offers it when not, so the
+ * site is typed once per device.
+ */
+export function chooseIdentitySite(request: ConnectRequest, site: string): void {
+  try {
+    localStorage.setItem(IDENTITY_SITE_STORAGE_KEY, site)
+  } catch {
+    // Storage unavailable: the choice holds for this app only.
+  }
+  const message = {
+    type: 'identitySiteChosen',
+    appOrigin: request.appOrigin,
+    challenge: request.challenge,
+    site,
+  }
+  const opener: Window | null = window.opener
+  if (opener) {
+    if (request.challenge === undefined) {
+      opener.postMessage(message, request.appOrigin)
+    } else {
+      opener.postMessage(message, window.location.origin)
+      for (let i = 0; i < opener.length; i++) {
+        opener[i].postMessage(message, window.location.origin)
+      }
+    }
+  }
+  window.close()
 }
 
 /**
@@ -167,4 +217,23 @@ export function commitConnect(
 ): void {
   saveConnection(account, request, appSecret, grant)
   sendSecretToOpener(account, request, appSecret)
+  forgetFailedSite(request)
+}
+
+/**
+ * Connecting here after the connect screen warned that the chosen site did
+ * not come up (#849) is the user's answer: this site stops sending apps back
+ * there. Only that site — another one remembered since is a newer choice.
+ */
+function forgetFailedSite(request: ConnectRequest): void {
+  if (request.failedSite === undefined) {
+    return
+  }
+  try {
+    if (localStorage.getItem(IDENTITY_SITE_STORAGE_KEY) === request.failedSite) {
+      localStorage.removeItem(IDENTITY_SITE_STORAGE_KEY)
+    }
+  } catch {
+    // Storage unavailable: nothing was remembered.
+  }
 }

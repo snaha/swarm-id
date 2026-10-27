@@ -36,6 +36,7 @@
   import { Button } from '$lib/components/ui/button'
   import { Switch } from '$lib/components/ui/switch'
   import { type PickerRow, kindOf, rowsGrant } from '$lib/drive-request'
+  import { verifyOpener } from '$lib/opener-check'
   import {
     type PermissionsPageRequest,
     SWITCH_COPY,
@@ -90,9 +91,18 @@
   // asked for means both shown, and one enables the other.
   const switches = $derived(switchesToAsk(page?.permissions, initialSharing))
 
+  /**
+   * Whether the request comes from the app it names (#915): undefined while
+   * the opener is asked; nothing is granted until it says so.
+   */
+  let openerVerified = $state<boolean | undefined>(undefined)
+
   /** Why the page cannot grant anything, if it cannot. */
   const refusal = $derived.by(() => {
     if (!page) return undefined
+    if (openerVerified === false) {
+      return 'This request could not be verified. Open this page from the app.'
+    }
     if (!account) return 'This account is not on this device.'
     if (account.isSignedOut) return `Sign in to ${account.name} first.`
     if (!app || !connected) return `${appName} is not connected to ${account.name}.`
@@ -106,6 +116,7 @@
       return
     }
     rows = Array.isArray(requested) ? requestRows(requested) : []
+    void verifyOpener(page.appOrigin).then((verified) => (openerVerified = verified))
     initialSharing = effectivePermissions(app, account?.settings)
     sharing = { ...initialSharing }
   })
@@ -113,7 +124,7 @@
   async function save() {
     // A popup can sit open past the connection's end.
     now = Date.now()
-    if (!page || !account || !app || refusal || saving) return
+    if (!page || !account || !app || refusal || saving || !openerVerified) return
     const current = app.drives
     const grant =
       requested === 'all'

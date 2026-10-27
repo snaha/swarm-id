@@ -97,6 +97,7 @@ export type { PartitionLeaseStateSnapshot } from "./sync/partition-lease"
 
 export {
   AuthDataSchema,
+  OpenerCheckResponseMessageSchema,
   PermissionsSchema,
   type DriveRequest,
   type DriveRequirement,
@@ -104,7 +105,8 @@ export {
   type AppPermissions,
   type PermissionName,
   type AccountSettings,
-  STORAGE_CHALLENGE_KEY,
+  storageChallengeKey,
+  IDENTITY_SITE_STORAGE_KEY,
   STORAGE_KEY_ACCOUNTS,
   STORAGE_KEY_NETWORK_SETTINGS,
   leaseCacheStorageKey,

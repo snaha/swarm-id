@@ -1,0 +1,24 @@
+{
+  "name": "@swarm-id/demo-mini",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "The smallest app that connects to Swarm ID: both connect buttons and a status line, nothing else",
+  "scripts": {
+    "dev": "vite dev --port 3600",
+    "build": "vite build",
+    "check:all": "prettier --check . && tsc --noEmit",
+    "format": "prettier --write .",
+    "clean": "rm -rf dist"
+  },
+  "devDependencies": {
+    "@snaha/swarm-id": "workspace:*",
+    "prettier": "3.7.3",
+    "typescript": "5.8.3",
+    "vite": "7.2.6"
+  },
+  "engines": {
+    "node": ">=22",
+    "pnpm": "11.x"
+  }
+}
