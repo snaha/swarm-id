@@ -673,6 +673,44 @@ describe("SwarmIdProxy partitioned write enablement", () => {
     )
   })
 
+  // The app page learns the challenge on `proxyReady` (#751), so the
+  // challenge only says WHICH attempt a handover belongs to: what makes it a
+  // handover is coming from the identity origin, which only the connect popup
+  // can. A page that knows the challenge still cannot hand this frame a
+  // session of its own making.
+  it("refuses a handover the app page sends with the right challenge", async () => {
+    const challenge = await startPartitionedConnect()
+
+    await dispatch(
+      {
+        type: "setSecret",
+        appOrigin: PARENT_ORIGIN,
+        challenge,
+        data: {
+          secret: "33".repeat(32),
+          account: serializeSyncedAccount(makeSyncedAccount()),
+        },
+      },
+      PARENT_ORIGIN,
+      parentWindow,
+    )
+
+    expect(messagesOfType("authSuccess")).toHaveLength(0)
+  })
+
+  // One handover per challenge: once taken, a replay of it — a second popup
+  // of the same attempt, or anything that saw the URL — is not a session.
+  it("refuses a second handover on a challenge already taken", async () => {
+    const challenge = await startPartitionedConnect()
+    const account = serializeSyncedAccount(makeSyncedAccount())
+    await sendSetSecret(challenge, { account })
+    expect(messagesOfType("authSuccess")).toHaveLength(1)
+
+    await sendSetSecret(challenge, { account })
+
+    expect(messagesOfType("authSuccess")).toHaveLength(1)
+  })
+
   it("removes its armed challenge from the store when destroyed", async () => {
     const challenge = await startPartitionedConnect()
 
