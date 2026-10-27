@@ -1205,6 +1205,30 @@ describe("SwarmIdClient window message filtering", () => {
 
   // Every page carries message traffic of its own — devtools, HMR, wallet
   // extensions — and none of it was ever addressed to this client.
+  // The connect and permissions popups ask their opener who it is (#915):
+  // the answer's origin, which the browser vouches for, is what proves the
+  // app page opened them. Only a window on the identity origin is answered,
+  // on that origin.
+  it("answers the identity site's opener check, to that window", () => {
+    const popup = { postMessage: vi.fn() }
+    listener({
+      origin: "https://swarm-id.example.com",
+      source: popup,
+      data: { type: "openerCheck", nonce: "n-1" },
+    })
+    listener({
+      origin: "https://evil.example",
+      source: popup,
+      data: { type: "openerCheck", nonce: "n-2" },
+    })
+
+    expect(popup.postMessage).toHaveBeenCalledTimes(1)
+    expect(popup.postMessage).toHaveBeenCalledWith(
+      { type: "openerCheckResponse", nonce: "n-1" },
+      "https://swarm-id.example.com",
+    )
+  })
+
   it("drops a message from another window silently", () => {
     listener({
       origin: "http://localhost:5173",

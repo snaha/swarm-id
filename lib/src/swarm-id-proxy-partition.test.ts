@@ -711,6 +711,31 @@ describe("SwarmIdProxy partitioned write enablement", () => {
     expect(messagesOfType("authSuccess")).toHaveLength(1)
   })
 
+  // The popup this proxy's own button opens asks it who the app is (#915):
+  // the proxy vouches with the parent origin it verified, and only to a
+  // window on its own origin.
+  it("vouches for its parent's origin to a popup on its own origin", async () => {
+    await startPartitionedConnect()
+    const popup = { postMessage: vi.fn() }
+
+    await dispatch({ type: "openerCheck", nonce: "n-1" }, ID_ORIGIN, popup)
+    await dispatch(
+      { type: "openerCheck", nonce: "n-2" },
+      "https://evil.example",
+      popup,
+    )
+
+    expect(popup.postMessage).toHaveBeenCalledTimes(1)
+    expect(popup.postMessage).toHaveBeenCalledWith(
+      {
+        type: "openerCheckResponse",
+        nonce: "n-1",
+        parentOrigin: PARENT_ORIGIN,
+      },
+      ID_ORIGIN,
+    )
+  })
+
   it("removes its armed challenge from the store when destroyed", async () => {
     const challenge = await startPartitionedConnect()
 

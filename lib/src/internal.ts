@@ -97,6 +97,7 @@ export type { PartitionLeaseStateSnapshot } from "./sync/partition-lease"
 
 export {
   AuthDataSchema,
+  OpenerCheckResponseMessageSchema,
   PermissionsSchema,
   type DriveRequest,
   type DriveRequirement,

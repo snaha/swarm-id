@@ -913,6 +913,20 @@ export class SwarmIdProxy {
     message: PopupToIframeMessage,
     source: MessageEventSource | null,
   ): Promise<void> {
+    if (message.type === "openerCheck") {
+      // The popup this proxy's own button opened asks who the app is (#915):
+      // vouch with the parent origin verified at `parentIdentify`, to that
+      // window and only on this origin.
+      ;(source as Window | null)?.postMessage(
+        {
+          type: "openerCheckResponse",
+          nonce: message.nonce,
+          parentOrigin: this.parentOrigin,
+        },
+        window.location.origin,
+      )
+      return
+    }
     if (message.type === "grantUpdated") {
       // Only the popup this session opened, from that window, for this
       // session's app, and once: a stale or replayed challenge, another
@@ -2250,7 +2264,8 @@ export class SwarmIdProxy {
         event.origin === window.location.origin &&
         (type === "setSecret" ||
           type === "grantUpdated" ||
-          type === "identitySiteChosen")
+          type === "identitySiteChosen" ||
+          type === "openerCheck")
       ) {
         const popupResult = PopupToIframeMessageSchema.safeParse(event.data)
         if (!popupResult.success) {

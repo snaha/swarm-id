@@ -24,6 +24,7 @@
   import UnlockDialog from '$lib/components/unlock-dialog.svelte'
   import { chooseIdentitySite, deriveAppSecret, reusableAppSecret } from '$lib/connect-handshake'
   import { type DriveAttention, driveAttentionDescription } from '$lib/drives'
+  import { verifyOpener } from '$lib/opener-check'
   import routes from '$lib/routes'
   import { accountsStore } from '$lib/stores/accounts.svelte'
   import { connectStore } from '$lib/stores/connect.svelte'
@@ -31,6 +32,11 @@
   import type { Account } from '$lib/types'
 
   let missingRequest = $state(false)
+  /**
+   * Whether the request comes from the app it names (#915): undefined while
+   * the opener is asked, and nothing is shown or granted until it says so.
+   */
+  let openerVerified = $state<boolean | undefined>(undefined)
   /** Account being unlocked to approve the connection. */
   let unlocking = $state<Account | undefined>(undefined)
   /** Signed-out account being unlocked to see the drive needing attention,
@@ -76,6 +82,10 @@
 
   onMount(() => {
     missingRequest = !connectStore.initFromHash(window.location.hash)
+    const appOrigin = connectStore.request?.appOrigin
+    if (appOrigin !== undefined) {
+      void verifyOpener(appOrigin).then((verified) => (openerVerified = verified))
+    }
     try {
       const stored = localStorage.getItem(IDENTITY_SITE_STORAGE_KEY)
       rememberedSite = stored !== null && isHttpUrl(stored) ? stored : undefined
@@ -189,7 +199,17 @@
           </div>
         </div>
       </div>
-    {:else if request}
+    {:else if openerVerified === false}
+      <div class="flex w-full max-w-96 flex-col items-center gap-8">
+        <div class="flex flex-col items-center gap-2">
+          <CircleAlert class="text-destructive size-5" />
+          <div class="flex flex-col items-center text-center">
+            <p class="text-sm font-bold">This connection request could not be verified</p>
+            <p class="text-sm">Open this page from the app you want to connect to Swarm ID.</p>
+          </div>
+        </div>
+      </div>
+    {:else if request && openerVerified}
       <div class="flex w-full max-w-96 flex-col items-center gap-8">
         {#if addingAccount && accounts.length > 0}
           <Button

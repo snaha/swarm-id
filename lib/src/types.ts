@@ -2292,10 +2292,32 @@ export const IdentitySiteChosenMessageSchema = z.object({
   site: z.string().url(),
 })
 
+/**
+ * The connect or permissions popup asking its opener who it is (#915). The
+ * app origin on the popup's URL is whatever the opener wrote; the origin of
+ * the answer is what the browser vouches for.
+ */
+export const OpenerCheckMessageSchema = z.object({
+  type: z.literal("openerCheck"),
+  nonce: z.string(),
+})
+
+/**
+ * The answer: from the app page itself, whose origin is the proof, or from
+ * the proxy iframe — on the identity origin — vouching for the parent origin
+ * it verified when it was identified.
+ */
+export const OpenerCheckResponseMessageSchema = z.object({
+  type: z.literal("openerCheckResponse"),
+  nonce: z.string(),
+  parentOrigin: z.string().optional(),
+})
+
 export const PopupToIframeMessageSchema = z.discriminatedUnion("type", [
   SetSecretMessageSchema,
   GrantUpdatedMessageSchema,
   IdentitySiteChosenMessageSchema,
+  OpenerCheckMessageSchema,
 ])
 
 export type SetSecretMessage = z.infer<typeof SetSecretMessageSchema>

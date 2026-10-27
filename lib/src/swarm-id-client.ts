@@ -90,6 +90,7 @@ import type {
 import {
   IframeToParentMessageSchema,
   IdentitySiteChosenMessageSchema,
+  OpenerCheckMessageSchema,
   IDENTITY_SITE_STORAGE_KEY,
   ParentToIframeMessageSchema,
   AppMetadataSchema,
@@ -586,6 +587,22 @@ export class SwarmIdClient {
         if (chosen.success) {
           void this.useIdentitySite(chosen.data.site).catch((error) =>
             console.error("[SwarmIdClient] Switching identity site:", error),
+          )
+        }
+        return
+      }
+      // A connect or permissions popup asking who opened it (#915): the
+      // origin of our answer, which the browser vouches for, is what proves
+      // this page did. Only the identity origin is answered.
+      if (
+        event.data?.type === "openerCheck" &&
+        event.origin === new URL(this.iframeOrigin).origin
+      ) {
+        const check = OpenerCheckMessageSchema.safeParse(event.data)
+        if (check.success && event.source) {
+          ;(event.source as Window).postMessage(
+            { type: "openerCheckResponse", nonce: check.data.nonce },
+            event.origin,
           )
         }
         return
