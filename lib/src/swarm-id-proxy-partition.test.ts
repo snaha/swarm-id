@@ -1521,6 +1521,34 @@ describe("SwarmIdProxy partitioned write enablement", () => {
       expect(first.teardown).not.toHaveBeenCalled()
     })
 
+    // #463: a dilute moves the stamp's depth, and with it the lane capacity
+    // the stamper was built with. The record change rebuilds the write path.
+    it("rebuilds a drive whose stamp was resized, at the new depth", async () => {
+      nextStamper()
+      await connectWithTwoDrives()
+      const before = coordinatorFor(BATCH_ID_HEX)!
+      const builtAt = vi
+        .mocked(UtilizationAwareStamper.create)
+        .mock.calls.at(-1)![2]
+
+      nextStamper()
+      updateAccount((account) => ({
+        ...account,
+        postageStamps: account.postageStamps.map((stamp) =>
+          stamp.batchID.toHex() === BATCH_ID_HEX
+            ? { ...stamp, depth: stamp.depth + 1 }
+            : stamp,
+        ),
+      }))
+
+      await vi.waitFor(() => expect(before.teardown).toHaveBeenCalled())
+      await vi.waitFor(() =>
+        expect(
+          vi.mocked(UtilizationAwareStamper.create).mock.calls.at(-1)![2],
+        ).toBe(builtAt + 1),
+      )
+    })
+
     it("routes a lease-request to the drive it names", async () => {
       nextStamper()
       await connectWithTwoDrives()

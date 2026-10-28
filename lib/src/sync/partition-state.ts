@@ -9,10 +9,12 @@
  * counter, so the two devices never race for the same `(bucket, slot)` pair
  * during an orderly hand-off.
  *
- * The counter is not a single blob: it is split into the same per-`chunkIndex`
- * chunks the utilisation store uses, each uploaded with a random key to the
- * partition's reserved slot (never a data slot), and a single "reference chunk"
- * lists their 64-byte encrypted references (address‖key).
+ * The counter is packed as SBU1 leaves (`counter-codec.ts`: a base and bit
+ * width chosen per publish, deltas packed to that width, outliers listed as
+ * exceptions), each leaf uploaded with a random key to the partition's reserved
+ * slot (never a data slot), and a single "reference chunk" carries the frame,
+ * the exceptions, and the leaves' 64-byte encrypted references (address‖key). The frame rides with the data, so a reader needs no batch
+ * depth and a dilute changes no published byte (#463).
  *
  * The address of the latest reference chunk is published as a **rotating
  * per-epoch state-pointer SOC** (`writeStatePointer`/`readStatePointer`): the
@@ -24,7 +26,7 @@
  * Mirrors the occupancy beacon (`partition-intent.ts`). See
  * docs/Postage-Batch-Partitioning.md (§8 cross-device handoff).
  *
- * Topic = keccak256("swarm-id-partition-state-v1" ‖ batchId ‖ uint32(partition))
+ * Topic = keccak256("swarm-id-partition-state-v2" ‖ batchId ‖ uint32(partition))
  * Owner = backup signer (`deriveSecret(swarmEncryptionKey, BACKUP_KEY_LABEL)`)
  */
 
@@ -51,11 +53,20 @@ import {
   LEASE_TTL_MS,
   NUM_BUCKETS,
   UtilizationAwareStamper,
-  extractChunk,
-  getChunkLayout,
-  mergeChunk,
   toBucket,
 } from "../utils/batch-utilization"
+import {
+  type CounterException,
+  type CounterFrame,
+  MAX_DELTA_WIDTH,
+  MAX_EXCEPTIONS,
+  chooseFrame,
+  decodeCounters,
+  encodeCounters,
+  frameFits,
+  leafByteLength,
+  leafCount,
+} from "./counter-codec"
 import { lockSocBucket } from "../utils/lock-soc"
 import {
   INTENT_EPOCH_MS,
@@ -69,28 +80,120 @@ import { SYNC_READ_TIMEOUT_MS } from "./timing-constants"
 const ENCRYPTED_REFERENCE_BYTES = 64
 
 /**
- * All-zero reference sentinel for a counter chunk that is entirely zero (never
- * written). It is NOT uploaded — the reference chunk just carries the sentinel
- * at that index, and the reader defaults a sentinel to a zero chunk. Keeps the
- * first publish sparse (only the touched chunks) instead of writing all
- * `numUtilizationChunks`, most of which are zero. Safe sentinel: a real ref is
- * `keccak256-address ‖ random-key`, never all-zero.
+ * All-zero reference sentinel for a leaf whose bytes are all zero (every
+ * bucket in it at the frame's base, none an exception). It is NOT uploaded —
+ * the reference chunk just carries the sentinel at that index, and the reader
+ * defaults a sentinel to a zero leaf. Keeps the first publish sparse (only the
+ * touched leaves) instead of writing every leaf, most of which are zero. Safe
+ * sentinel: a real ref is `keccak256-address ‖ random-key`, never all-zero.
  */
 const ZERO_CHUNK_REF = new Uint8Array(ENCRYPTED_REFERENCE_BYTES)
 
-/** Domain-separation tag for partition-state-feed topics. */
-const PARTITION_STATE_TOPIC_DOMAIN = "swarm-id-partition-state-v1"
+/**
+ * Domain-separation tag for partition-state-feed topics. v2 is the SBU1-packed
+ * counter (#463); v1 states, fixed uint16/uint32 chunks, are not read.
+ */
+const PARTITION_STATE_TOPIC_DOMAIN = "swarm-id-partition-state-v2"
+
+/**
+ * Reference-chunk header: width u8 ‖ base u32 ‖ exception count u16,
+ * big-endian; then the exceptions (bucket u32 ‖ count u32) and one 64-byte
+ * encrypted reference per leaf. `MAX_DELTA_WIDTH` keeps the whole of it within
+ * one chunk at `MAX_EXCEPTIONS`. No checksum: each reference binds its leaf's
+ * exact bytes (content address + key), and the SBU1 counter sum could not be
+ * stated here anyway — a retained leaf describes an earlier counter than the
+ * one being published (see the sum note in `writePartitionState`).
+ */
+const REFERENCE_HEADER_BYTES = 7
+const REFERENCE_WIDTH_OFFSET = 0
+const REFERENCE_BASE_OFFSET = 1
+const REFERENCE_EXCEPTIONS_OFFSET = 5
+const EXCEPTION_ENTRY_BYTES = 8
+
+interface ReferenceChunk {
+  frame: CounterFrame
+  exceptions: CounterException[]
+  /** One per leaf; `ZERO_CHUNK_REF` for a leaf that was never uploaded. */
+  references: Uint8Array[]
+}
+
+function encodeReferenceChunk(chunk: ReferenceChunk): Uint8Array {
+  const { frame, exceptions, references } = chunk
+  const out = new Uint8Array(
+    REFERENCE_HEADER_BYTES +
+      EXCEPTION_ENTRY_BYTES * exceptions.length +
+      ENCRYPTED_REFERENCE_BYTES * references.length,
+  )
+  const view = new DataView(out.buffer)
+  view.setUint8(REFERENCE_WIDTH_OFFSET, frame.width)
+  view.setUint32(REFERENCE_BASE_OFFSET, frame.base, false)
+  view.setUint16(REFERENCE_EXCEPTIONS_OFFSET, exceptions.length, false)
+  let at = REFERENCE_HEADER_BYTES
+  for (const { bucket, count } of exceptions) {
+    view.setUint32(at, bucket, false)
+    view.setUint32(at + UINT32_BYTES, count, false)
+    at += EXCEPTION_ENTRY_BYTES
+  }
+  for (const reference of references) {
+    out.set(reference, at)
+    at += ENCRYPTED_REFERENCE_BYTES
+  }
+  return out
+}
+
+/** Throws on a reference chunk the frame it names does not describe. */
+function parseReferenceChunk(bytes: Uint8Array): ReferenceChunk {
+  if (bytes.length < REFERENCE_HEADER_BYTES) {
+    throw new Error(`reference chunk has ${bytes.length} bytes, no header`)
+  }
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength)
+  const width = view.getUint8(REFERENCE_WIDTH_OFFSET)
+  if (width > MAX_DELTA_WIDTH) {
+    throw new Error(`reference chunk names width ${width}`)
+  }
+  const base = view.getUint32(REFERENCE_BASE_OFFSET, false)
+  const exceptionCount = view.getUint16(REFERENCE_EXCEPTIONS_OFFSET, false)
+  if (exceptionCount > MAX_EXCEPTIONS) {
+    throw new Error(`reference chunk names ${exceptionCount} exceptions`)
+  }
+  const leaves = leafCount(width)
+  const expectedLength =
+    REFERENCE_HEADER_BYTES +
+    EXCEPTION_ENTRY_BYTES * exceptionCount +
+    ENCRYPTED_REFERENCE_BYTES * leaves
+  if (bytes.length !== expectedLength) {
+    throw new Error(
+      `reference chunk has ${bytes.length} bytes, expected ${expectedLength} (width ${width}: ${leaves} leaves, ${exceptionCount} exceptions)`,
+    )
+  }
+  const exceptions: CounterException[] = []
+  let at = REFERENCE_HEADER_BYTES
+  for (let i = 0; i < exceptionCount; i++) {
+    exceptions.push({
+      bucket: view.getUint32(at, false),
+      count: view.getUint32(at + UINT32_BYTES, false),
+    })
+    at += EXCEPTION_ENTRY_BYTES
+  }
+  const references = Array.from({ length: leaves }, (_, i) =>
+    bytes.slice(
+      at + i * ENCRYPTED_REFERENCE_BYTES,
+      at + (i + 1) * ENCRYPTED_REFERENCE_BYTES,
+    ),
+  )
+  return { frame: { base, width }, exceptions, references }
+}
 
 /** Bytes to encode `partition` as big-endian uint32. */
 const UINT32_BYTES = 4
 
 /**
  * Schema for the *decoded* partition state: the per-bucket counter
- * reconstructed from the binary wire format (reference chunk → counter
- * chunks, see the module doc above for the byte layout). The wire format is
- * versioned by the feed topic domain (`PARTITION_STATE_TOPIC_DOMAIN`), not an
- * in-blob version byte — a future v2 publishes under a v2 topic and never
- * collides with v1 readers.
+ * reconstructed from the binary wire format (reference chunk → leaves, see
+ * the module doc above for the byte layout). The wire format is versioned by
+ * the feed topic domain (`PARTITION_STATE_TOPIC_DOMAIN`), not an in-blob
+ * version byte — a new version publishes under its own topic and never
+ * collides with older readers.
  *
  * `readPartitionState` validates the assembled counter against this schema
  * before returning it; a failure is reported as `readFailed` (fail-safe —
@@ -415,7 +518,6 @@ export async function readPartitionState(
     swarmEncryptionKey: Uint8Array
     batchId: BatchId
     partition: number
-    batchDepth: number
     /** Gone holder's `leasedUntil` (from the lock SOC) — locates the pointer of
      *  a partition that's been free for a while at its last-heartbeat bucket.
      *  A holder heartbeats the pointer up to its `leasedUntil`, so reading that
@@ -472,14 +574,16 @@ export async function readPartitionState(
    */
   stateBuckets?: number[]
   /**
-   * The N per-chunk refs (sentinels included) the resume state was assembled
-   * from — i.e. the reference chunk's contents. The caller seeds these as the
-   * lease's `publishedReferences` so its FIRST publish is incremental against
-   * the resumed state (only the changed chunk + reference chunk), not a full
-   * re-publish. Present on a full read and (best-effort) on a cache hit;
-   * undefined when no prior state exists.
+   * The per-leaf refs (sentinels included) the resume state was assembled
+   * from — i.e. the reference chunk's contents — and the frame they were
+   * encoded under. The caller seeds these as the lease's `publishedReferences`
+   * / `publishedFrame` so its FIRST publish is incremental against the resumed
+   * state (only the changed leaf + reference chunk), not a full re-publish.
+   * Present on a full read and (best-effort) on a cache hit; undefined when no
+   * prior state exists.
    */
   references?: Uint8Array[]
+  frame?: CounterFrame
 }> {
   const {
     bee,
@@ -487,7 +591,6 @@ export async function readPartitionState(
     swarmEncryptionKey,
     batchId,
     partition,
-    batchDepth,
     holderLeasedUntilMs,
     lockUnreadable,
     nowMs = Date.now(),
@@ -570,33 +673,34 @@ export async function readPartitionState(
   const refBytes = new Reference(referenceHex).toUint8Array()
 
   // Cache hit: the pointer still names the reference this device's local counter
-  // is already in sync with. Skip the COUNTER-chunk downloads — but still fetch
-  // the single reference chunk so we can return its per-chunk refs, letting the
-  // caller's FIRST publish be incremental against the resumed state rather than a
-  // full re-publish. Best-effort: on failure omit `references` (the first publish
+  // is already in sync with. Skip the leaf downloads — but still fetch the
+  // single reference chunk so we can return its per-leaf refs and frame, letting
+  // the caller's FIRST publish be incremental against the resumed state rather
+  // than a full re-publish. Best-effort: on failure omit them (the first publish
   // then falls back to the sparse-full path).
   if (knownReferenceHex !== undefined && referenceHex === knownReferenceHex) {
-    const { numUtilizationChunks } = getChunkLayout(batchDepth)
-    const references = await downloadReferenceChunkRefs(
-      bee,
-      refBytes,
-      numUtilizationChunks,
-    ).catch(() => undefined)
-    return { referenceHex, unchanged: true, references }
+    const referenceChunk = await downloadReferenceChunk(bee, refBytes).catch(
+      () => undefined,
+    )
+    return {
+      referenceHex,
+      unchanged: true,
+      references: referenceChunk?.references,
+      frame: referenceChunk?.frame,
+    }
   }
 
   const localCounter = new Uint32Array(NUM_BUCKETS)
-  // The reference chunk and every counter chunk overstamp this partition's
-  // reserved slot in their respective buckets — collect those buckets so the
-  // caller can protect them from utilisation saves (an overstamp there would
-  // evict the published resume point). The chunk address is the first 32
-  // bytes of each 64-byte encrypted reference.
+  // The reference chunk and every leaf overstamp this partition's reserved
+  // slot in their respective buckets — collect those buckets so the caller can
+  // protect them from utilisation saves (an overstamp there would evict the
+  // published resume point). The chunk address is the first 32 bytes of each
+  // 64-byte encrypted reference.
   const stateBuckets: number[] = [toBucket(refBytes.slice(0, 32))]
 
-  // The feed points to the reference chunk: a single chunk holding the
-  // 64-byte encrypted references (address‖key) of this partition's counter
-  // chunks. Each reference carries its own decryption key, so no key
-  // derivation is needed — downloadDataWithChunkAPI decrypts from the ref.
+  // The feed points to the reference chunk: the frame, the exceptions, and
+  // the 64-byte encrypted references (address‖key) of this partition's leaves. Each reference carries its own decryption key, so no
+  // key derivation is needed — downloadDataWithChunkAPI decrypts from the ref.
   //
   // Failure policy: the feed HAS an entry, so the partition has a real
   // resume point. If we cannot read it (transient network error, or a
@@ -605,22 +709,23 @@ export async function readPartitionState(
   // overstamp deterministically evicts the existing data chunk (Bee replaces
   // the older chunk at a colliding (bucket, slot) stamp index). Report
   // `readFailed` so the caller degrades to read-only and retries later.
-  // Collected here so it survives the try for the success return. The full set
-  // of per-chunk refs (sentinels included) lets the caller seed the lease's
-  // `publishedReferences` for an incremental first publish.
+  // Collected here so they survive the try for the success return. The full
+  // set of per-leaf refs (sentinels included) and the frame let the caller seed
+  // the lease's `publishedReferences` for an incremental first publish.
   let references: Uint8Array[] = []
+  let frame: CounterFrame | undefined
   try {
-    const { numUtilizationChunks } = getChunkLayout(batchDepth)
-    references = await downloadReferenceChunkRefs(
-      bee,
-      refBytes,
-      numUtilizationChunks,
+    const referenceChunk = await downloadReferenceChunk(bee, refBytes)
+    references = referenceChunk.references
+    frame = referenceChunk.frame
+    // Fire all leaf downloads in one round — every address is already in hand
+    // from the reference chunk, so serializing them would pay K× gateway
+    // latency on the cold takeover path for nothing (mirrors the parallelism
+    // the publish path uses). All-zero sentinel refs are leaves that were
+    // never written: they stay zero, no download (sparse publish).
+    const leaves = references.map(
+      (_, i) => new Uint8Array(leafByteLength(frame!.width, i)),
     )
-    // Fire all counter-chunk downloads in one round — every address is already
-    // in hand from the reference chunk, so serializing them would pay K×
-    // gateway latency on the cold takeover path for nothing (mirrors the
-    // parallelism the publish path uses). All-zero sentinel refs are chunks
-    // that were never written: leave them zero, no download (sparse publish).
     const chunkReads = await Promise.all(
       references.map((ref, i) =>
         bytesAllZero(ref)
@@ -632,9 +737,12 @@ export async function readPartitionState(
     )
     for (const read of chunkReads) {
       if (read === undefined) continue
-      mergeChunk(localCounter, read.i, read.data, batchDepth)
+      leaves[read.i] = read.data
       stateBuckets.push(toBucket(read.ref.slice(0, 32)))
     }
+    localCounter.set(
+      decodeCounters({ frame, exceptions: referenceChunk.exceptions, leaves }),
+    )
     PartitionStateSchemaV1.parse({ counters: localCounter })
   } catch (err) {
     console.warn(
@@ -657,55 +765,42 @@ export async function readPartitionState(
     unchanged: false,
     stateBuckets,
     references,
+    frame,
   }
 }
 
 /**
- * Download a partition's reference chunk and split it into its N per-chunk
- * encrypted refs (address‖key), sentinels included. Throws on a missing chunk
- * or a wrong-length reference chunk (callers map that to `readFailed` on the
- * full-read path, or to `undefined` references on the best-effort cache-hit path).
+ * Download and parse a partition's reference chunk. Throws on a missing chunk
+ * or one its own frame does not describe (callers map that to `readFailed` on
+ * the full-read path, or to `undefined` on the best-effort cache-hit path).
  */
-async function downloadReferenceChunkRefs(
+async function downloadReferenceChunk(
   bee: Bee,
   refBytes: Uint8Array,
-  numUtilizationChunks: number,
-): Promise<Uint8Array[]> {
-  const referenceChunk = await downloadDataWithChunkAPI(
-    bee,
-    new Reference(refBytes).toHex(),
-  )
-  const expectedLength = numUtilizationChunks * ENCRYPTED_REFERENCE_BYTES
-  if (referenceChunk.length !== expectedLength) {
-    throw new Error(
-      `reference chunk has ${referenceChunk.length} bytes, expected ${expectedLength} (${numUtilizationChunks} × ${ENCRYPTED_REFERENCE_BYTES})`,
-    )
-  }
-  return Array.from({ length: numUtilizationChunks }, (_, i) =>
-    referenceChunk.slice(
-      i * ENCRYPTED_REFERENCE_BYTES,
-      (i + 1) * ENCRYPTED_REFERENCE_BYTES,
-    ),
+): Promise<ReferenceChunk> {
+  return parseReferenceChunk(
+    await downloadDataWithChunkAPI(bee, new Reference(refBytes).toHex()),
   )
 }
 
 /**
  * Publish the current `localCounter` to the partition-state feed.
  *
- * The counter is split into the same per-`chunkIndex` chunks the utilisation
- * store uses; each is uploaded with a random encryption key to this partition's
- * reserved slot (so it never consumes a data slot), yielding a 64-byte
- * encrypted reference (address‖key). A single "reference chunk" lists those
- * references and is itself uploaded the same way; the feed points at it. A
- * taking-over device follows the feed → reference chunk → counter chunks,
- * decrypting each from the embedded key.
+ * The counter is packed into SBU1 leaves (`counter-codec.ts`); each is
+ * uploaded with a random encryption key to this partition's reserved slot (so
+ * it never consumes a data slot), yielding a 64-byte encrypted reference
+ * (address‖key). A single "reference chunk" carries the frame, the exceptions
+ * and those references, and is itself uploaded the same way;
+ * the feed points at it. A taking-over device follows the feed → reference
+ * chunk → leaves, decrypting each from the embedded key.
  *
- * INCREMENTAL: pass `previousReferences` (the refs the last publish returned)
- * and `previousCounter` (the counter it published) to re-upload ONLY the chunks
- * that changed, reusing the retained refs for the rest. A typical upload changes
- * the data SOC's bucket plus the previous publish's feed-SOC bucket, so the
- * publish is ~3-4 chunks instead of the whole counter. Omit them (release, or
- * the first publish of a session) for a full publish.
+ * INCREMENTAL: pass `previousReferences` (the refs the last publish returned),
+ * `previousCounter` (the counter it published) and `previousFrame` (the frame
+ * it packed with) to re-upload ONLY the leaves that changed, reusing the
+ * retained refs for the rest. The previous frame is kept while it still fits
+ * the counter, so leaf boundaries hold; a small upload then changes a leaf or
+ * two plus the reference chunk. Omit them (release, or the first publish of a
+ * session) for a full publish under the canonical frame.
  *
  * PARALLEL: every chunk address is content-derived, so all PUTs (counter chunks
  * + reference chunk + state-pointer SOC) are computed first and fired in a
@@ -716,15 +811,16 @@ export async function writePartitionState(opts: {
   bee: Bee
   stamper: Stamper
   batchId: BatchId
-  batchDepth: number
   partition: number
   localCounter: Uint32Array
   backupSigner: PrivateKey
   swarmEncryptionKey: Uint8Array
-  /** Refs from the previous publish; with `previousCounter`, enables incremental. */
+  /** Refs from the previous publish; with the other two, enables incremental. */
   previousReferences?: Uint8Array[]
-  /** The counter the previous publish wrote; diffed to find changed chunks. */
+  /** The counter the previous publish wrote; diffed to find changed leaves. */
   previousCounter?: Uint32Array
+  /** The frame the previous publish packed with; kept while it still fits. */
+  previousFrame?: CounterFrame
   /**
    * This device's id. When provided, the publish also avoids the buckets of
    * this device's current/previous-epoch intent beacons (the refresh tick
@@ -756,25 +852,48 @@ export async function writePartitionState(opts: {
   references: Uint8Array[]
   /** Snapshot of the counter this publish wrote (pass as `previousCounter` next). */
   publishedCounter: Uint32Array
+  /** The frame this publish packed with (pass as `previousFrame` next). */
+  frame: CounterFrame
 }> {
   const {
     bee,
     stamper,
     batchId,
-    batchDepth,
     partition,
     localCounter,
     backupSigner,
     swarmEncryptionKey,
     previousReferences,
     previousCounter,
+    previousFrame,
     deviceId,
     nowMs = Date.now(),
   } = opts
 
   PartitionStateSchemaV1.parse({ counters: localCounter })
 
-  const { numUtilizationChunks } = getChunkLayout(batchDepth)
+  // Incremental only when we have the previous publish's full ref set, the
+  // counter it published AND the frame it packed with — and that frame still
+  // fits (a counter only grows, so a base at or below the old minimum stays
+  // valid; only an outgrown width or too many exceptions reject it). Keeping
+  // the frame keeps every leaf's boundaries and bytes, so the per-leaf diff
+  // below finds only the leaves a data write touched. Otherwise pack under the
+  // canonical frame for this counter and publish in full.
+  const previous =
+    previousReferences !== undefined &&
+    previousCounter !== undefined &&
+    previousFrame !== undefined &&
+    previousReferences.length === leafCount(previousFrame.width) &&
+    frameFits(localCounter, previousFrame)
+      ? {
+          references: previousReferences,
+          counter: previousCounter,
+          frame: previousFrame,
+        }
+      : undefined
+  const frame = previous?.frame ?? chooseFrame(localCounter)
+  const encoded = encodeCounters(localCounter, frame)
+  const numLeaves = encoded.leaves.length
   const target: UploadTarget = { mode: "stamper", bee, stamper }
   const owner = backupSigner.publicKey().address()
   const reserve =
@@ -785,16 +904,7 @@ export async function writePartitionState(opts: {
   // caller and diffed on the next publish.
   const publishedCounter = localCounter.slice()
 
-  // Incremental only when we have a full previous ref set AND the counter it
-  // published; otherwise re-upload every chunk (refs/diff unknown). Re-upload a
-  // chunk iff its serialized bytes changed since the last publish — i.e. the
-  // chunk(s) covering the bucket(s) this session's data upload(s) touched.
-  // Reserved-slot writes (the prior publish's reference/pointer SOCs) never bump
-  // the counter, so the data write is the only inter-publish counter delta.
-  const incremental =
-    previousReferences !== undefined &&
-    previousReferences.length === numUtilizationChunks &&
-    previousCounter !== undefined
+  const incremental = previous !== undefined
 
   // KEYSTONE tripwire (fail loud, never silent slot reuse). The counter is a
   // monotonic per-bucket high-water, so any publish is always >= the one the last
@@ -822,35 +932,33 @@ export async function writePartitionState(opts: {
     }
   }
 
-  const allIndices = Array.from({ length: numUtilizationChunks }, (_, i) => i)
-  // Which chunks to (re)upload:
-  //  - incremental: those whose serialized bytes changed since the last publish
-  //    (the chunk[s] covering the data write's bucket[s]; reserved-slot writes
-  //    don't bump the counter, so the data write is the only delta).
-  //  - full (first publish of a session): only the NON-ZERO chunks; zero chunks
+  const allIndices = Array.from({ length: numLeaves }, (_, i) => i)
+  // Which leaves to (re)upload:
+  //  - incremental: those whose bytes changed since the last publish (the
+  //    leaf[s] covering the data write's bucket[s]; reserved-slot writes don't
+  //    bump the counter, so the data write is the only delta). The previous
+  //    counter is packed under the SAME frame, so the comparison is exact.
+  //  - full (first publish of a session): only the NON-ZERO leaves; zero leaves
   //    get the all-zero sentinel ref (not uploaded), so the first publish is
-  //    sparse instead of writing all `numUtilizationChunks` (mostly zero).
-  //    Counters are monotonic high-water — a chunk never returns to zero — so a
-  //    real-ref chunk stays real and only never-written chunks are sentinels.
-  const uploadIndices = incremental
+  //    sparse instead of writing every leaf (mostly zero). Deltas only grow
+  //    under a kept frame — a leaf never returns to zero — so a real-ref leaf
+  //    stays real and only never-written leaves are sentinels.
+  const previousLeaves = previous
+    ? encodeCounters(previous.counter, frame).leaves
+    : undefined
+  const uploadIndices = previousLeaves
     ? allIndices.filter(
-        (i) =>
-          !bytesEqual(
-            extractChunk(localCounter, i, batchDepth),
-            extractChunk(previousCounter, i, batchDepth),
-          ),
+        (i) => !bytesEqual(encoded.leaves[i], previousLeaves[i]),
       )
-    : allIndices.filter(
-        (i) => !bytesAllZero(extractChunk(localCounter, i, batchDepth)),
-      )
+    : allIndices.filter((i) => !bytesAllZero(encoded.leaves[i]))
   const uploadSet = new Set(uploadIndices)
 
   // Start from the retained refs (incremental) or all-zero sentinels (full).
   // Each sentinel is a fresh copy (not the shared `ZERO_CHUNK_REF` instance) so
   // the returned refs are mutually independent — an in-place byte write to one
   // zero slot can never bleed into another.
-  const references: Uint8Array[] = incremental
-    ? previousReferences.map((r) => r.slice())
+  const references: Uint8Array[] = previous
+    ? previous.references.map((r) => r.slice())
     : allIndices.map(() => ZERO_CHUNK_REF.slice())
 
   // Every reserved chunk overstamps the partition's single reserved slot, so
@@ -862,7 +970,7 @@ export async function writePartitionState(opts: {
     ...(reserve?.getCleanChunkBuckets() ?? []),
   ])
   if (incremental) {
-    for (let i = 0; i < numUtilizationChunks; i++) {
+    for (let i = 0; i < numLeaves; i++) {
       if (!uploadSet.has(i) && !bytesAllZero(references[i]))
         claimedBuckets.add(toBucket(references[i].slice(0, 32)))
     }
@@ -920,15 +1028,23 @@ export async function writePartitionState(opts: {
   // Precompute (CPU only) a distinct-bucket key/address for each chunk we will
   // upload, marking it reserved so its `stamp()` routes to the reserved slot.
   const prepared = uploadIndices.map((i) => {
-    const plaintext = extractChunk(localCounter, i, batchDepth)
-    const picked = pickReservedChunkKey(plaintext, claimedBuckets)
+    const picked = pickReservedChunkKey(encoded.leaves[i], claimedBuckets)
     references[i] = picked.reference
     reserve?.markReservedUtilizationChunk(picked.address, partition)
     return { data: picked.data }
   })
 
-  // The reference chunk lists every ref (N·64 bytes; ≤ 4096 even at N=64).
-  const referenceChunk = Binary.concatBytes(...references)
+  // The reference chunk: frame, exceptions, and every ref (sentinels
+  // included) — within one chunk by `MAX_DELTA_WIDTH`. It carries no counter
+  // sum: a retained ref may describe an earlier counter than `localCounter`
+  // (a seed counter ahead of its acked refs after an unacked write — the
+  // SAFETY INVARIANT in `PartitionLease.claimPartition`), and only Swarm
+  // holds those bytes, so no sum stated here could be the reader's.
+  const referenceChunk = encodeReferenceChunk({
+    frame,
+    exceptions: encoded.exceptions,
+    references,
+  })
   const refPicked = pickReservedChunkKey(referenceChunk, claimedBuckets)
   reserve?.markReservedUtilizationChunk(refPicked.address, partition)
 
@@ -998,7 +1114,7 @@ export async function writePartitionState(opts: {
   // sparse/incremental (~a few writes) or a full publish, and its gateway cost.
   console.debug(
     `[partition-state] publish p=${partition} incremental=${incremental} ` +
-      `counterChunks=${prepared.length}/${numUtilizationChunks} ` +
+      `leaves=${prepared.length}/${numLeaves} width=${frame.width} ` +
       `writes=${prepared.length + 2} durationMs=${Date.now() - publishStart}`,
   )
 
@@ -1016,6 +1132,7 @@ export async function writePartitionState(opts: {
     stateBuckets,
     references,
     publishedCounter,
+    frame,
   }
 }
 
