@@ -114,72 +114,29 @@ export const IDLE_YIELD_MS = 30 * 1000 // 30 seconds
 /** Size of each chunk in bytes */
 export const CHUNK_SIZE = 4096
 
-/**
- * Maximum batch depth at which a uint16 per-bucket counter is sufficient.
- *
- * At depth D the post-stamp counter caps at 2^(D-16). uint16 can hold
- * 0..65535; depth 31 → 32768 (fits), depth 32 → 65536 (overflows).
- * For depth > UINT16_COUNTER_MAX_DEPTH the serializer falls back to uint32.
- *
- * Issue: https://github.com/snaha/swarm-id/issues/243
- */
-export const UINT16_COUNTER_MAX_DEPTH = 31
-
-/** uint16 serialization size in bytes */
-const COUNTER_BYTES_UINT16 = 2
-
 /** uint32 serialization size in bytes */
 const COUNTER_BYTES_UINT32 = 4
 
-/** Largest value representable in an unsigned 16-bit integer */
-const UINT16_MAX = 0xffff
+/**
+ * The fixed layout counters are cached in: a uint32 per bucket, 1,024 buckets
+ * per CHUNK_SIZE-byte chunk, 64 chunks for the table — whatever the batch
+ * depth. The IndexedDB cache and the dev-only utilisation upload use it; the
+ * partition-state publish packs the counters separately
+ * (`sync/counter-codec.ts`). Neither depends on depth, so a dilute changes no
+ * cached byte (#463).
+ */
+export const BUCKETS_PER_CHUNK = CHUNK_SIZE / COUNTER_BYTES_UINT32
+export const NUM_UTILIZATION_CHUNKS = NUM_BUCKETS / BUCKETS_PER_CHUNK
 
 /**
- * Per-batch-depth chunk layout for the utilization state.
- *
- * The on-chunk counter representation switches between uint16 and uint32
- * based on whether the maximum slot index for the given batch depth fits
- * in 16 bits. Each utilization chunk is always CHUNK_SIZE bytes; the
- * number of buckets it covers — and thus the number of chunks needed —
- * doubles when counters shrink from 4 bytes to 2.
+ * Marks a cache row written in the fixed layout. Rows without it predate #463
+ * and were serialized at the batch's depth of the time: uint16 up to
+ * `LEGACY_UINT16_MAX_DEPTH` on a regular drive, uint32 above it and on a
+ * scratch drive. `UtilizationAwareStamper.create` converts them once.
  */
-export interface ChunkLayout {
-  /** Bytes per per-bucket counter on disk / on the wire */
-  counterByteSize: 2 | 4
-  /** Number of buckets packed into a single CHUNK_SIZE-byte chunk */
-  bucketsPerChunk: number
-  /** Total number of utilization chunks for one batch */
-  numUtilizationChunks: number
-}
-
-/**
- * The depth whose layout a drive's counters serialize at. A scratch drive's
- * counter wraps within its lane (#862), so the lane no longer bounds it and
- * uint16 would overflow: it always takes the uint32 layout. Every reader and
- * writer of the counters goes through this, so all devices agree — the kind
- * is fixed when the drive is created.
- */
-export function counterLayoutDepth(
-  batchDepth: number,
-  scratch: boolean,
-): number {
-  return scratch
-    ? Math.max(batchDepth, UINT16_COUNTER_MAX_DEPTH + 1)
-    : batchDepth
-}
-
-/**
- * Pick the on-disk chunk layout for a given batch depth.
- */
-export function getChunkLayout(batchDepth: number): ChunkLayout {
-  const counterByteSize =
-    batchDepth <= UINT16_COUNTER_MAX_DEPTH
-      ? COUNTER_BYTES_UINT16
-      : COUNTER_BYTES_UINT32
-  const bucketsPerChunk = CHUNK_SIZE / counterByteSize
-  const numUtilizationChunks = NUM_BUCKETS / bucketsPerChunk
-  return { counterByteSize, bucketsPerChunk, numUtilizationChunks }
-}
+export const CACHE_ROW_FORMAT = 1
+const LEGACY_UINT16_MAX_DEPTH = 31
+const LEGACY_COUNTER_BYTES_UINT16 = 2
 
 // ============================================================================
 // Types
@@ -189,7 +146,7 @@ export function getChunkLayout(batchDepth: number): ChunkLayout {
  * Metadata for a single utilization chunk
  */
 export interface ChunkMetadata {
-  /** Chunk index within the depth-dependent layout */
+  /** Chunk index within the fixed cache layout */
   index: number
 
   /**
@@ -215,15 +172,15 @@ export interface ChunkMetadata {
 /**
  * Utilization state for a postage batch
  *
- * Utilization data is stored as 32 chunks (uint16 codec, depth ≤ 31) or
- * 64 chunks (uint32 codec, depth ≥ 32) on Swarm, with IndexedDB caching
- * for performance.
+ * The counters are cached as `NUM_UTILIZATION_CHUNKS` uint32 chunks in
+ * IndexedDB; the partition-state publish packs them separately
+ * (`sync/counter-codec.ts`).
  */
 export interface BatchUtilizationState {
   /** Batch ID this state belongs to */
   batchId: BatchId
 
-  /** Batch depth — determines on-disk chunk layout (uint16 vs uint32) */
+  /** Batch depth — sets the lane capacity, never the layout */
   batchDepth: number
 
   /**
@@ -274,98 +231,95 @@ export function toBucket(chunkAddress: Uint8Array): number {
  * Calculate which utilization chunk a bucket belongs to.
  *
  * @param bucketIndex - Bucket index (0-65535)
- * @param batchDepth - Batch depth, drives the chunk layout
- * @returns Chunk index in the layout for this depth
+ * @returns Chunk index in the fixed cache layout
  */
-export function getChunkIndexForBucket(
-  bucketIndex: number,
-  batchDepth: number,
-): number {
+export function getChunkIndexForBucket(bucketIndex: number): number {
   if (bucketIndex < 0 || bucketIndex >= NUM_BUCKETS) {
     throw new Error(
       `Invalid bucket index: ${bucketIndex} (must be 0-${NUM_BUCKETS - 1})`,
     )
   }
-  const { bucketsPerChunk } = getChunkLayout(batchDepth)
-  return Math.floor(bucketIndex / bucketsPerChunk)
+  return Math.floor(bucketIndex / BUCKETS_PER_CHUNK)
+}
+
+function assertChunkIndex(chunkIndex: number): void {
+  if (chunkIndex < 0 || chunkIndex >= NUM_UTILIZATION_CHUNKS) {
+    throw new Error(
+      `Invalid chunk index: ${chunkIndex} (must be 0-${NUM_UTILIZATION_CHUNKS - 1})`,
+    )
+  }
 }
 
 /**
- * Extract a CHUNK_SIZE-byte chunk from the dataCounters array using the
- * codec implied by the batch depth.
+ * Extract a CHUNK_SIZE-byte chunk from the dataCounters array in the fixed
+ * cache layout.
  *
- * @param dataCounters - Full array of 65,536 counters (kept as Uint32Array
- *   in memory regardless of serialization size)
+ * @param dataCounters - Full array of 65,536 counters
  * @param chunkIndex - Index of chunk to extract
- * @param batchDepth - Batch depth, drives the chunk layout
  * @returns CHUNK_SIZE byte Uint8Array containing serialized counters
  */
 export function extractChunk(
   dataCounters: Uint32Array,
   chunkIndex: number,
-  batchDepth: number,
 ): Uint8Array {
-  const { counterByteSize, bucketsPerChunk, numUtilizationChunks } =
-    getChunkLayout(batchDepth)
-
-  if (chunkIndex < 0 || chunkIndex >= numUtilizationChunks) {
-    throw new Error(
-      `Invalid chunk index: ${chunkIndex} (must be 0-${numUtilizationChunks - 1})`,
-    )
-  }
-
-  const startBucket = chunkIndex * bucketsPerChunk
-  const endBucket = startBucket + bucketsPerChunk
-  const chunkCounters = dataCounters.slice(startBucket, endBucket)
-
-  return counterByteSize === COUNTER_BYTES_UINT16
-    ? serializeUint16Array(chunkCounters)
-    : serializeUint32Array(chunkCounters)
+  assertChunkIndex(chunkIndex)
+  const startBucket = chunkIndex * BUCKETS_PER_CHUNK
+  return serializeUint32Array(
+    dataCounters.slice(startBucket, startBucket + BUCKETS_PER_CHUNK),
+  )
 }
 
 /**
- * Merge a CHUNK_SIZE-byte chunk back into the dataCounters array using the
- * codec implied by the batch depth.
+ * Merge a CHUNK_SIZE-byte chunk back into the dataCounters array from the
+ * fixed cache layout.
  *
  * @param dataCounters - Full array of 65,536 counters (modified in place)
  * @param chunkIndex - Index of chunk to merge
  * @param chunkData - CHUNK_SIZE byte Uint8Array containing serialized counters
- * @param batchDepth - Batch depth, drives the chunk layout
  */
 export function mergeChunk(
   dataCounters: Uint32Array,
   chunkIndex: number,
   chunkData: Uint8Array,
-  batchDepth: number,
 ): void {
-  const { counterByteSize, bucketsPerChunk, numUtilizationChunks } =
-    getChunkLayout(batchDepth)
-
-  if (chunkIndex < 0 || chunkIndex >= numUtilizationChunks) {
-    throw new Error(
-      `Invalid chunk index: ${chunkIndex} (must be 0-${numUtilizationChunks - 1})`,
-    )
-  }
-
+  assertChunkIndex(chunkIndex)
   if (chunkData.length !== CHUNK_SIZE) {
     throw new Error(
       `Invalid chunk data length: ${chunkData.length} (expected ${CHUNK_SIZE})`,
     )
   }
+  dataCounters.set(
+    deserializeUint32Array(chunkData),
+    chunkIndex * BUCKETS_PER_CHUNK,
+  )
+}
 
-  const chunkCounters =
-    counterByteSize === COUNTER_BYTES_UINT16
-      ? deserializeUint16Array(chunkData)
-      : deserializeUint32Array(chunkData)
-
-  if (chunkCounters.length !== bucketsPerChunk) {
+/**
+ * Merge a row written before the fixed layout on a regular drive at depth ≤
+ * `LEGACY_UINT16_MAX_DEPTH`: little-endian uint16 counters, 2,048 per chunk.
+ */
+function mergeLegacyUint16Chunk(
+  dataCounters: Uint32Array,
+  chunkIndex: number,
+  chunkData: Uint8Array,
+): void {
+  const perChunk = CHUNK_SIZE / LEGACY_COUNTER_BYTES_UINT16
+  if (chunkData.length !== CHUNK_SIZE || chunkIndex * perChunk >= NUM_BUCKETS) {
     throw new Error(
-      `Invalid chunk counters length: ${chunkCounters.length} (expected ${bucketsPerChunk})`,
+      `Invalid legacy chunk ${chunkIndex} (${chunkData.length} bytes)`,
     )
   }
-
-  const startBucket = chunkIndex * bucketsPerChunk
-  dataCounters.set(chunkCounters, startBucket)
+  const view = new DataView(
+    chunkData.buffer,
+    chunkData.byteOffset,
+    chunkData.byteLength,
+  )
+  for (let i = 0; i < perChunk; i++) {
+    dataCounters[chunkIndex * perChunk + i] = view.getUint16(
+      i * LEGACY_COUNTER_BYTES_UINT16,
+      true,
+    )
+  }
 }
 
 // ============================================================================
@@ -376,21 +330,14 @@ export function mergeChunk(
  * Tracks which utilization chunks have been modified and need uploading
  */
 export class DirtyChunkTracker {
-  private dirtyChunks: Set<number>
-  private batchDepth: number
-
-  constructor(batchDepth: number) {
-    this.dirtyChunks = new Set()
-    this.batchDepth = batchDepth
-  }
+  private dirtyChunks: Set<number> = new Set()
 
   /**
    * Mark a bucket as dirty (marks its containing chunk)
    * @param bucketIndex - Bucket index (0-65535)
    */
   markDirty(bucketIndex: number): void {
-    const chunkIndex = getChunkIndexForBucket(bucketIndex, this.batchDepth)
-    this.dirtyChunks.add(chunkIndex)
+    this.dirtyChunks.add(getChunkIndexForBucket(bucketIndex))
   }
 
   /**
@@ -656,49 +603,6 @@ export function deserializeUint32Array(bytes: Uint8Array): Uint32Array {
   return arr
 }
 
-/**
- * Serialize a Uint32Array to bytes as little-endian uint16 values.
- *
- * Counters exceeding uint16 throw — callers must use the uint32 codec
- * (i.e. batchDepth >= UINT16_COUNTER_MAX_DEPTH + 1) for those depths.
- */
-export function serializeUint16Array(arr: Uint32Array): Uint8Array {
-  const buffer = new ArrayBuffer(arr.length * COUNTER_BYTES_UINT16)
-  const view = new DataView(buffer)
-
-  for (let i = 0; i < arr.length; i++) {
-    const v = arr[i]
-    if (v > UINT16_MAX) {
-      throw new Error(
-        `Counter at index ${i} (${v}) exceeds uint16 range; use uint32 codec`,
-      )
-    }
-    view.setUint16(i * COUNTER_BYTES_UINT16, v, true) // true = little-endian
-  }
-
-  return new Uint8Array(buffer)
-}
-
-/**
- * Deserialize little-endian uint16 bytes back into a Uint32Array (the
- * in-memory representation stays uint32 even when the on-disk codec is
- * narrower).
- */
-export function deserializeUint16Array(bytes: Uint8Array): Uint32Array {
-  if (bytes.length % COUNTER_BYTES_UINT16 !== 0) {
-    throw new Error("Byte array length must be a multiple of 2")
-  }
-
-  const arr = new Uint32Array(bytes.length / COUNTER_BYTES_UINT16)
-  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength)
-
-  for (let i = 0; i < arr.length; i++) {
-    arr[i] = view.getUint16(i * COUNTER_BYTES_UINT16, true) // true = little-endian
-  }
-
-  return arr
-}
-
 // ============================================================================
 // Utilization State Management
 // ============================================================================
@@ -709,7 +613,7 @@ export function deserializeUint16Array(bytes: Uint8Array): Uint32Array {
  * Seeds `dataCounters[bucket]` at `DATA_COUNTER_START` for every bucket so
  * the first stamping operations naturally skip the headroom slots.
  *
- * With 65,536 buckets and ~32–64 utilization chunks per save, the
+ * With 65,536 buckets and at most 64 utilization chunks per save, the
  * probability of any bucket getting 3+ utilisation chunks in one save is
  * < 10⁻⁷, so a headroom of 2 leaves ample margin.
  */
@@ -722,11 +626,9 @@ export function initializeBatchUtilization(
   // the reserved range; no headroom offset is baked into the counter itself.
   const dataCounters = new Uint32Array(NUM_BUCKETS)
 
-  const { numUtilizationChunks } = getChunkLayout(batchDepth)
-
   // Initialize metadata for all utilization chunks
   const chunks: ChunkMetadata[] = []
-  for (let i = 0; i < numUtilizationChunks; i++) {
+  for (let i = 0; i < NUM_UTILIZATION_CHUNKS; i++) {
     chunks.push({
       index: i,
       contentHash: "", // Will be set on first upload
@@ -836,7 +738,7 @@ export const MIN_USABLE_BATCH_DEPTH = ((): number => {
  * Load utilization state with cache hierarchy
  *
  * Load order:
- * 1. Try IndexedDB cache (all chunks for the depth's layout)
+ * 1. Try IndexedDB cache (all chunks of the fixed layout)
  * 2. If a bucket has no cached chunk, seed it with a zeroed default
  * 3. If nothing is cached, initialize new state
  *
@@ -856,21 +758,22 @@ export async function loadUtilizationState(
 ): Promise<BatchUtilizationState> {
   const { cache } = options
 
-  const { counterByteSize, bucketsPerChunk, numUtilizationChunks } =
-    getChunkLayout(batchDepth)
-
-  // Step 1: Try loading from IndexedDB cache
-  const cachedChunks = await cache.getAllChunks(batchId.toHex())
+  // Step 1: Try loading from IndexedDB cache. A row without the format marker
+  // predates the fixed layout; `UtilizationAwareStamper.create` converts those,
+  // this dev-only path just treats them as absent.
+  const cachedChunks = (await cache.getAllChunks(batchId.toHex())).filter(
+    (cached) => cached.format === CACHE_ROW_FORMAT,
+  )
 
   // Step 2: If we have all chunks in cache, reconstruct state
-  if (cachedChunks.length === numUtilizationChunks) {
+  if (cachedChunks.length === NUM_UTILIZATION_CHUNKS) {
     try {
       const dataCounters = new Uint32Array(NUM_BUCKETS)
       const chunks: ChunkMetadata[] = []
 
       // Reconstruct dataCounters from cached chunks
       for (const cached of cachedChunks) {
-        mergeChunk(dataCounters, cached.chunkIndex, cached.data, batchDepth)
+        mergeChunk(dataCounters, cached.chunkIndex, cached.data)
 
         chunks.push({
           index: cached.chunkIndex,
@@ -899,22 +802,15 @@ export async function loadUtilizationState(
   const dataCounters = new Uint32Array(NUM_BUCKETS)
   const chunks: ChunkMetadata[] = []
 
-  // Seed a default chunk's worth of counters once; reused via mergeChunk.
   // The per-partition counter is 0-based `j`, so a never-written bucket
-  // starts at 0.
-  const defaultCounters = new Uint32Array(bucketsPerChunk)
-  const defaultChunkData =
-    counterByteSize === COUNTER_BYTES_UINT16
-      ? serializeUint16Array(defaultCounters)
-      : serializeUint32Array(defaultCounters)
-
-  for (let i = 0; i < numUtilizationChunks; i++) {
+  // starts at 0 — `dataCounters` already is.
+  for (let i = 0; i < NUM_UTILIZATION_CHUNKS; i++) {
     // Check if we have this chunk in cache
     const cached = cachedChunks.find((c) => c.chunkIndex === i)
 
     if (cached) {
       // Use cached chunk
-      mergeChunk(dataCounters, i, cached.data, batchDepth)
+      mergeChunk(dataCounters, i, cached.data)
 
       chunks.push({
         index: i,
@@ -926,9 +822,7 @@ export async function loadUtilizationState(
       continue
     }
 
-    // No cached chunk for this bucket range — seed a zeroed default.
-    mergeChunk(dataCounters, i, defaultChunkData, batchDepth)
-
+    // No cached chunk for this bucket range — it stays zero.
     chunks.push({
       index: i,
       contentHash: "", // Will be set on first upload
@@ -998,11 +892,7 @@ export async function saveUtilizationState(
     const chunkMetadata = state.chunks[chunkIndex]
 
     // Extract chunk data from dataCounters
-    const chunkData = extractChunk(
-      state.dataCounters,
-      chunkIndex,
-      state.batchDepth,
-    )
+    const chunkData = extractChunk(state.dataCounters, chunkIndex)
 
     // Search for a derived key whose bucket isn't already claimed. Start
     // from the previously-chosen nonce so unchanged plaintexts reuse their
@@ -1053,6 +943,7 @@ export async function saveUtilizationState(
         data: chunkData,
         contentHash: cacReferenceHex,
         nonce: resolved.nonce,
+        format: CACHE_ROW_FORMAT,
         lastAccess: Date.now(),
       })
 
@@ -1106,7 +997,7 @@ export async function updateAfterWrite(
   const state = await loadUtilizationState(batchId, batchDepth, options)
 
   // Create tracker for dirty chunks
-  const tracker = new DirtyChunkTracker(batchDepth)
+  const tracker = new DirtyChunkTracker()
 
   // Assign buckets and slots to data chunks
   for (const chunk of dataChunks) {
@@ -1318,8 +1209,6 @@ export class UtilizationAwareStamper implements Stamper, SlotAssigner {
    * refusing. The counter keeps counting; only the slot is reduced.
    */
   readonly scratch: boolean
-  /** The depth the counters serialize at — {@link counterLayoutDepth}. */
-  readonly counterDepth: number
 
   /**
    * The next physical data slot per bucket, as core-sdk's `Stamper` means it.
@@ -1595,7 +1484,6 @@ export class UtilizationAwareStamper implements Stamper, SlotAssigner {
     this.depth = depth
     this.maxSlot = calculateMaxSlotsPerBucket(depth)
     this.scratch = scratch
-    this.counterDepth = counterLayoutDepth(depth, scratch)
     this.cache = cache
     this.encryptionKey = encryptionKey
     this.utilizationState = utilizationState
@@ -1624,24 +1512,48 @@ export class UtilizationAwareStamper implements Stamper, SlotAssigner {
     options: { scratch?: boolean } = {},
   ): Promise<UtilizationAwareStamper> {
     const scratch = options.scratch === true
-    const layoutDepth = counterLayoutDepth(depth, scratch)
     // Initialize utilization state (always, since owner is now required)
-    const utilizationState = initializeBatchUtilization(batchId, layoutDepth)
+    const utilizationState = initializeBatchUtilization(batchId, depth)
 
     // Try to load utilization state from cache
     try {
-      const cachedChunks = await cache.getAllChunks(batchId.toHex())
-      const { numUtilizationChunks } = getChunkLayout(layoutDepth)
-      // Merge cached chunks into state; ignore any that fall outside the
-      // current depth's layout (e.g. stale entries from a different depth)
+      const batchIdHex = batchId.toHex()
+      const cachedChunks = await cache.getAllChunks(batchIdHex)
+      // Rows without the format marker predate the fixed layout (#463) and
+      // were serialized at the batch's depth of the time. Read them under
+      // that rule and rewrite the batch in the fixed layout, once.
+      const legacy = cachedChunks.some(
+        (cached) => cached.format !== CACHE_ROW_FORMAT,
+      )
+      const legacyUint16 =
+        legacy && !scratch && depth <= LEGACY_UINT16_MAX_DEPTH
       for (const cached of cachedChunks) {
-        if (cached.chunkIndex >= numUtilizationChunks) continue
-        mergeChunk(
-          utilizationState.dataCounters,
-          cached.chunkIndex,
-          cached.data,
-          layoutDepth,
-        )
+        if (legacyUint16) {
+          mergeLegacyUint16Chunk(
+            utilizationState.dataCounters,
+            cached.chunkIndex,
+            cached.data,
+          )
+        } else if (cached.chunkIndex < NUM_UTILIZATION_CHUNKS) {
+          mergeChunk(
+            utilizationState.dataCounters,
+            cached.chunkIndex,
+            cached.data,
+          )
+        }
+      }
+      if (legacy) {
+        for (let i = 0; i < NUM_UTILIZATION_CHUNKS; i++) {
+          await cache.putChunk({
+            batchId: batchIdHex,
+            chunkIndex: i,
+            data: extractChunk(utilizationState.dataCounters, i),
+            contentHash: "",
+            nonce: 0,
+            format: CACHE_ROW_FORMAT,
+            lastAccess: Date.now(),
+          })
+        }
       }
     } catch (error) {
       console.warn(
@@ -1837,7 +1749,7 @@ export class UtilizationAwareStamper implements Stamper, SlotAssigner {
     // Mark utilization chunks as dirty for the affected buckets
     const dirtyChunkIndexes = new Set<number>()
     for (const bucket of this.dirtyBuckets) {
-      const chunkIndex = getChunkIndexForBucket(bucket, this.counterDepth)
+      const chunkIndex = getChunkIndexForBucket(bucket)
       dirtyChunkIndexes.add(chunkIndex)
       this.utilizationState.chunks[chunkIndex].dirty = true
     }
@@ -1872,7 +1784,6 @@ export class UtilizationAwareStamper implements Stamper, SlotAssigner {
         const chunkData = extractChunk(
           this.utilizationState.dataCounters,
           chunkIndex,
-          this.counterDepth,
         )
 
         const resolved = await chooseUtilizationChunkKey({
@@ -1891,6 +1802,7 @@ export class UtilizationAwareStamper implements Stamper, SlotAssigner {
           data: chunkData,
           contentHash,
           nonce: resolved.nonce,
+          format: CACHE_ROW_FORMAT,
           lastAccess: Date.now(),
         })
         this.utilizationState.chunks[chunkIndex].contentHash = contentHash

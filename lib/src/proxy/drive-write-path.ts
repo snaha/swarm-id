@@ -43,6 +43,11 @@ export class DriveWritePath {
      * own writes rather than letting Bee refuse the lease claim.
      */
     readonly lifetime: StampLifetimeFields,
+    /**
+     * The stamp's depth as the write path was built: the stamper's lane
+     * capacity comes from it, so a resize (dilute, #463) rebuilds the path.
+     */
+    readonly depth: number,
   ) {}
 
   /**

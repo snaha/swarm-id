@@ -12,7 +12,7 @@
  * The assertions are therefore on the stamper's own depth-derived state, not
  * on the depth passed to it: `maxSlot` (`2^(depth - bucketDepth)`, the
  * per-bucket slot budget the inner bee-js stamper enforces) and the
- * utilization state's `batchDepth` (which picks the on-disk chunk layout).
+ * utilization state's `batchDepth` (which sets the lane capacity).
  * A stale cached stamper fails on those.
  */
 import { BatchId, EthAddress, PrivateKey } from '@ethersphere/bee-js'

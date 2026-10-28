@@ -5,8 +5,8 @@
  * IndexedDB Cache for Batch Utilization Chunks
  *
  * Provides fast local caching of 4KB utilization chunks to avoid
- * repeated Swarm downloads. Each chunk is 4096 bytes containing either
- * 2048 uint16 or 1024 uint32 bucket counters, depending on batch depth.
+ * repeated Swarm downloads. Each chunk is 4096 bytes holding 1024 uint32
+ * bucket counters, whatever the batch depth.
  */
 
 // ============================================================================
@@ -20,7 +20,7 @@ export interface ChunkCacheEntry {
   /** Batch ID (hex string) */
   batchId: string
 
-  /** Chunk index within the depth-dependent layout */
+  /** Chunk index within the fixed cache layout */
   chunkIndex: number
 
   /** Serialized chunk data (4KB) */
@@ -42,6 +42,13 @@ export interface ChunkCacheEntry {
    * drops the stores rather than carrying rows forward (#662).
    */
   nonce: number
+
+  /**
+   * `CACHE_ROW_FORMAT` on every row the fixed layout writes. A row without it
+   * predates #463 and is still at its batch's depth-of-the-time layout; the
+   * stamper converts such a batch on load rather than the store dropping it.
+   */
+  format?: number
 
   /** Last access timestamp (for eviction) */
   lastAccess: number

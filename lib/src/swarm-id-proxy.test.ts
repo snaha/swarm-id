@@ -550,6 +550,7 @@ describe("SwarmIdProxy subsidised-mode selection", () => {
             state.postageBatchId,
             state.signerKey,
             state.stampLifetime ?? { createdAt: 0 },
+            STAMP_DEPTH,
           )
         : undefined
     if (drive && state.stamper) {

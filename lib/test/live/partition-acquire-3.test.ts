@@ -58,7 +58,6 @@ describe.skipIf(!liveEnv.configured)(
         deviceId: id,
         swarmEncryptionKey: hexToUint8Array(keys.encryptionKey),
         batchId: ctx.batchID,
-        batchDepth: ctx.depth,
         stamper: Stamper.fromBlank(ctx.signerKey, ctx.batchID, ctx.depth),
         // All three are known rivals → fresh claims run the intent round
         // (rotating addresses), the gateway-safe path for deconfliction.
