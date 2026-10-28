@@ -44,6 +44,7 @@ import {
   PartitionContendedError,
 } from "./batch-write-coordinator"
 import { accountStateToDeviceView, publishDeviceState } from "./device-state"
+import { rosterRetryDelayMs } from "./device-roster"
 import { getOrCreateDeviceId, detectDeviceName } from "../utils/device-id"
 import {
   activeDeviceIds,
@@ -288,11 +289,20 @@ export function createSyncAccount(
     }
   }
 
+  // Pending roster-append retries per account (#920), see the partial branch.
+  const rosterRetries = new Map<
+    string,
+    { attempt: number; timer: ReturnType<typeof setTimeout> }
+  >()
+
   return async function syncAccount(
     accountId: string,
   ): Promise<SyncResult | undefined> {
     const startTime = performance.now()
     const timestamp = () => new Date().toISOString()
+    // Any sync re-runs the append, so a pending retry would only duplicate it.
+    const pending = rosterRetries.get(accountId)
+    if (pending) clearTimeout(pending.timer)
 
     // Capture state snapshot (derives encryption key from derivation key).
     const snapshotResult = await getAccountStateSnapshot(accountId)
@@ -413,6 +423,22 @@ export function createSyncAccount(
           `[SyncCoordinator ${timestamp()}] Sync failed (+${(performance.now() - startTime).toFixed(2)}ms):`,
           result.error,
         )
+      }
+      if (result.status === "partial") {
+        // The roster append was skipped on an inconclusive scan (#920). Nothing
+        // else re-runs it until the user edits the account, so retry here with
+        // backoff; a mutation-triggered sync in between supersedes the timer.
+        const attempt = rosterRetries.get(accountId)?.attempt ?? 0
+        const delay = rosterRetryDelayMs(attempt)
+        console.warn(
+          `[SyncCoordinator ${timestamp()}] ${result.warning}; retrying in ${delay}ms`,
+        )
+        rosterRetries.set(accountId, {
+          attempt: attempt + 1,
+          timer: setTimeout(() => void syncAccount(accountId), delay),
+        })
+      } else {
+        rosterRetries.delete(accountId)
       }
       return result
     } catch (error) {
