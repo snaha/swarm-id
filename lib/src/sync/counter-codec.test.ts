@@ -76,6 +76,103 @@ describe("counter-codec — SBU1 golden vector", () => {
   })
 })
 
+/**
+ * SBU1 §12, the 14-chunk vector's root payload, verbatim from the spec. Its
+ * 13 leaf digests pin every byte of every leaf; the rest of the root is
+ * Nectar's own layout, parsed here only to reach them.
+ */
+const SPEC_LARGE_ROOT_HEX =
+  "5342553142424242424242424242424242424242424242424242424242424242424242421d100006000000000000000100000000007cb19900000064000e000d000200001234000013880000cbe500002000000000690000007d00000091000000880000007a000000760000006e00000079000000810000006c0000007d000000910000007a0000006b9c8de349a3c4b573d45db35c3585fcbe2e2c20d999ee2a5ead8c1600b5a5428a645b990e3f426220eda38496a262f6968b8a4d42f7becb602c51576f19112fe9fb1f9017218e72abf21947cb3290726dd5129c47e50562a22dfcaa64340dd76d5bb4cba42453e6cb20f8c1c0892bf2bf4873bd3b4850787f171952b662346708660c94f587fa4516af6eb9b083513f245d9bd9fc0559f48356021e51892201fb197b58a495d1305292904a61906b02e37e68101e3657b4e2ff9661d705a004c36ebbe152c039d8887c067cc8fa86636c62afc5f21cd8ca1afc4f546e77882de86c3e8248ce84ffd4c440f28c638007df05e9ea75a713a308e7ba48e6066903c88e6e5e60e48477ca6202b2333d5c06968f67baae3c03105bbb4a7a8491b04ce6f5c8fc3151cdfbc3136e8f0adac485df7ae4d866e1cce1cd1aa0d1cbbf33f19bf28b0420c19fcadaf197e1eaff36f8151ec107d59ad4e6d3a4cf1492a77828991d9c30151c90772df348891a627fa9a5046919dba774e2a388819e9e11aba2c68724aa66f7e98c8ec09b71685da6a49cf173a390ac1662a9e120712062d20fb8"
+
+describe("counter-codec — SBU1 §12 root vector", () => {
+  const SPEC_BATCH_ID = new Uint8Array(32).fill(0x42)
+  const SPEC_OWNER = new Uint8Array(20).fill(0x11)
+  const ROOT_HEADER_BYTES = 66
+  const DIGEST_BYTES = 32
+  const SLOT_BYTES = 4
+  const EXCEPTION_BYTES = 8
+
+  /**
+   * SBU1 §3: snapshot chunk `n` is the single-owner chunk with id
+   * `keccak256("swarm-batch-usage" ‖ batch_id ‖ u16_be(n))`, at address
+   * `keccak256(id ‖ owner)`; its bucket is the address's first 16 bits.
+   */
+  function snapshotChunkBucket(n: number): number {
+    const index = new Uint8Array(2)
+    new DataView(index.buffer).setUint16(0, n, false)
+    const id = Binary.keccak256(
+      Binary.concatBytes(
+        new TextEncoder().encode("swarm-batch-usage"),
+        SPEC_BATCH_ID,
+        index,
+      ),
+    )
+    const address = Binary.keccak256(Binary.concatBytes(id, SPEC_OWNER))
+    return (address[0] << 8) | address[1]
+  }
+
+  it("encodes every leaf to the digest the spec's root commits to", () => {
+    const root = Binary.hexToUint8Array(SPEC_LARGE_ROOT_HEX)
+    const view = new DataView(root.buffer, root.byteOffset, root.byteLength)
+    expect(new TextDecoder().decode(root.slice(0, 4))).toBe("SBU1")
+    expect(root.slice(4, 36)).toEqual(SPEC_BATCH_ID)
+    const width = view.getUint8(39)
+    const sum = view.getBigUint64(48, false)
+    const base = view.getUint32(56, false)
+    const allocated = view.getUint16(60, false)
+    const leafCountInRoot = view.getUint16(62, false)
+    const exceptionCount = view.getUint16(64, false)
+    expect({ allocated, leafCountInRoot, exceptionCount }).toEqual({
+      allocated: 14,
+      leafCountInRoot: 13,
+      exceptionCount: 2,
+    })
+
+    // The table the spec encoded: §12's counts, plus the slot each of the 14
+    // snapshot chunks took from its own bucket's watermark (§9: one per round,
+    // in chunk order), which advances that counter by one.
+    const counters = goldenCounters()
+    let at = ROOT_HEADER_BYTES
+    const exceptions = Array.from({ length: exceptionCount }, (_, i) => ({
+      bucket: view.getUint32(at + i * EXCEPTION_BYTES, false),
+      count: view.getUint32(at + i * EXCEPTION_BYTES + 4, false),
+    }))
+    at += exceptionCount * EXCEPTION_BYTES
+    let stamped = 0n
+    for (let n = 0; n < allocated; n++) {
+      const bucket = snapshotChunkBucket(n)
+      const slot = view.getUint32(at + n * SLOT_BYTES, false)
+      expect(slot, `chunk ${n} slot`).toBe(counters[bucket])
+      counters[bucket]++
+      stamped++
+    }
+    at += allocated * SLOT_BYTES
+    const digests = Array.from({ length: leafCountInRoot }, (_, i) =>
+      root.slice(at + i * DIGEST_BYTES, at + (i + 1) * DIGEST_BYTES),
+    )
+    expect(at + leafCountInRoot * DIGEST_BYTES).toBe(root.length)
+
+    // Our canonical frame and exceptions are the root's.
+    const frame = chooseFrame(counters)
+    expect(frame).toEqual({ base, width })
+    const encoded = encodeCounters(counters, frame)
+    expect(encoded.exceptions).toEqual(exceptions)
+    let total = 0n
+    for (const count of counters) total += BigInt(count)
+    expect(total).toBe(sum)
+    expect(stamped).toBe(14n)
+
+    // And every leaf hashes to the digest the root holds for it.
+    expect(encoded.leaves).toHaveLength(leafCountInRoot)
+    for (let i = 0; i < leafCountInRoot; i++) {
+      expect(
+        Binary.uint8ArrayToHex(Binary.keccak256(encoded.leaves[i])),
+        `leaf ${i} digest`,
+      ).toBe(Binary.uint8ArrayToHex(digests[i]))
+    }
+  })
+})
+
 describe("counter-codec — frames", () => {
   it("an empty table is width 0 with no leaves and no exceptions", () => {
     const counters = new Uint32Array(NUM_BUCKETS)
