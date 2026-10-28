@@ -6,22 +6,21 @@ import { BatchId } from "@ethersphere/bee-js"
 import { Binary } from "cafe-utility"
 import { makeEncryptedContentAddressedChunk } from "../chunk"
 import {
+  BUCKETS_PER_CHUNK,
+  CACHE_ROW_FORMAT,
   CHUNK_SIZE,
   DATA_COUNTER_START,
   NUM_BUCKETS,
+  NUM_UTILIZATION_CHUNKS,
   PARTITION_COUNT,
   PartitionLeaseLostError,
-  UINT16_COUNTER_MAX_DEPTH,
   UtilizationAwareStamper,
-  counterLayoutDepth,
   dataSlot,
   partitionCapacity,
   deriveUtilizationChunkKey,
-  deserializeUint16Array,
   deserializeUint32Array,
   extractChunk,
   getChunkIndexForBucket,
-  getChunkLayout,
   hasBucketCapacity,
   updateAfterWrite,
   calculateUtilization,
@@ -31,7 +30,6 @@ import {
   MIN_USABLE_BATCH_DEPTH,
   MIN_USABLE_PARTITION_CAPACITY,
   mergeChunk,
-  serializeUint16Array,
   serializeUint32Array,
 } from "./batch-utilization"
 import { EthAddress, PrivateKey } from "@ethersphere/bee-js"
@@ -60,156 +58,68 @@ function makeAddressInBucket(bucket: number, indexSeed: number): Uint8Array {
   return address
 }
 
-describe("getChunkLayout", () => {
-  it("uses uint16 codec for depth <= UINT16_COUNTER_MAX_DEPTH", () => {
-    const layout = getChunkLayout(24)
-    expect(layout.counterByteSize).toBe(2)
-    expect(layout.bucketsPerChunk).toBe(2048)
-    expect(layout.numUtilizationChunks).toBe(32)
-  })
-
-  it("uses uint16 codec at the boundary (depth = UINT16_COUNTER_MAX_DEPTH)", () => {
-    expect(UINT16_COUNTER_MAX_DEPTH).toBe(31)
-    const layout = getChunkLayout(UINT16_COUNTER_MAX_DEPTH)
-    expect(layout.counterByteSize).toBe(2)
-    expect(layout.numUtilizationChunks).toBe(32)
-  })
-
-  it("falls back to uint32 codec for depth > UINT16_COUNTER_MAX_DEPTH", () => {
-    const layout = getChunkLayout(32)
-    expect(layout.counterByteSize).toBe(4)
-    expect(layout.bucketsPerChunk).toBe(1024)
-    expect(layout.numUtilizationChunks).toBe(64)
-  })
-
-  it("returns a chunk size that covers all NUM_BUCKETS in both layouts", () => {
-    expect(getChunkLayout(24).bucketsPerChunk * 32).toBe(NUM_BUCKETS)
-    expect(getChunkLayout(32).bucketsPerChunk * 64).toBe(NUM_BUCKETS)
-    expect(getChunkLayout(24).bucketsPerChunk * 2).toBe(CHUNK_SIZE)
-    expect(getChunkLayout(32).bucketsPerChunk * 4).toBe(CHUNK_SIZE)
-  })
-})
-
-describe("serializeUint16Array / deserializeUint16Array", () => {
-  it("round-trips representative values", () => {
-    const source = new Uint32Array([0, 1, 255, 256, 32768, 65535])
-    const bytes = serializeUint16Array(source)
-    expect(bytes.byteLength).toBe(source.length * 2)
-    const decoded = deserializeUint16Array(bytes)
-    expect(Array.from(decoded)).toEqual(Array.from(source))
-  })
-
-  it("round-trips a full-bucket random fill", () => {
-    const source = new Uint32Array(2048)
-    for (let i = 0; i < source.length; i++) {
-      source[i] = Math.floor(Math.random() * 0x10000)
-    }
-    const bytes = serializeUint16Array(source)
-    expect(bytes.byteLength).toBe(CHUNK_SIZE)
-    const decoded = deserializeUint16Array(bytes)
-    expect(Array.from(decoded)).toEqual(Array.from(source))
-  })
-
-  it("rejects values that exceed uint16 range", () => {
-    const source = new Uint32Array([0, 0x10000])
-    expect(() => serializeUint16Array(source)).toThrow(/uint16 range/)
-  })
-
-  it("rejects odd-length byte input on deserialize", () => {
-    expect(() => deserializeUint16Array(new Uint8Array(3))).toThrow(
-      /multiple of 2/,
-    )
-  })
-})
-
-describe("extractChunk / mergeChunk", () => {
-  it("round-trips a full dataCounters at depth 24 (uint16 layout)", () => {
-    const depth = 24
-    const { numUtilizationChunks } = getChunkLayout(depth)
-    const source = new Uint32Array(NUM_BUCKETS)
-    for (let i = 0; i < source.length; i++) {
-      source[i] = i % 0xffff
-    }
-
-    const target = new Uint32Array(NUM_BUCKETS)
-    for (let i = 0; i < numUtilizationChunks; i++) {
-      const chunk = extractChunk(source, i, depth)
-      expect(chunk.byteLength).toBe(CHUNK_SIZE)
-      mergeChunk(target, i, chunk, depth)
-    }
-
-    expect(Array.from(target)).toEqual(Array.from(source))
-  })
-
-  it("round-trips a full dataCounters at depth 32 (uint32 layout)", () => {
-    const depth = 32
-    const { numUtilizationChunks } = getChunkLayout(depth)
+describe("extractChunk / mergeChunk (fixed uint32 cache layout)", () => {
+  it("round-trips a full dataCounters through every chunk", () => {
     const source = new Uint32Array(NUM_BUCKETS)
     for (let i = 0; i < source.length; i++) {
       source[i] = (i * 1664525 + 1013904223) >>> 0
     }
 
     const target = new Uint32Array(NUM_BUCKETS)
-    for (let i = 0; i < numUtilizationChunks; i++) {
-      const chunk = extractChunk(source, i, depth)
+    for (let i = 0; i < NUM_UTILIZATION_CHUNKS; i++) {
+      const chunk = extractChunk(source, i)
       expect(chunk.byteLength).toBe(CHUNK_SIZE)
-      mergeChunk(target, i, chunk, depth)
+      mergeChunk(target, i, chunk)
     }
 
     expect(Array.from(target)).toEqual(Array.from(source))
   })
 
+  it("covers all buckets with 64 chunks of 1,024, whatever the depth", () => {
+    expect(BUCKETS_PER_CHUNK).toBe(1024)
+    expect(NUM_UTILIZATION_CHUNKS).toBe(64)
+    expect(BUCKETS_PER_CHUNK * NUM_UTILIZATION_CHUNKS).toBe(NUM_BUCKETS)
+  })
+
   it("rejects an out-of-range chunk index", () => {
     const counters = new Uint32Array(NUM_BUCKETS)
-    expect(() => extractChunk(counters, 32, 24)).toThrow(/Invalid chunk index/)
-    expect(() => extractChunk(counters, 64, 32)).toThrow(/Invalid chunk index/)
+    expect(() => extractChunk(counters, 64)).toThrow(/Invalid chunk index/)
   })
 
   it("rejects a chunk whose byte length is not CHUNK_SIZE", () => {
     const counters = new Uint32Array(NUM_BUCKETS)
-    expect(() => mergeChunk(counters, 0, new Uint8Array(100), 24)).toThrow(
+    expect(() => mergeChunk(counters, 0, new Uint8Array(100))).toThrow(
       /Invalid chunk data length/,
     )
   })
 })
 
 describe("initializeBatchUtilization", () => {
-  it("seeds the per-partition counter at 0 and matches the layout's chunk count", () => {
-    const state = initializeBatchUtilization(TEST_BATCH_ID, 24)
-    expect(state.batchDepth).toBe(24)
-    expect(state.dataCounters.length).toBe(NUM_BUCKETS)
-    // Counter is the 0-based per-partition `j`; reserved headroom lives in the
-    // slot formula (`dataSlot`), not in the counter.
-    expect(state.dataCounters[0]).toBe(0)
-    expect(state.dataCounters[NUM_BUCKETS - 1]).toBe(0)
-    expect(state.chunks.length).toBe(32)
-  })
-
-  it("uses the 64-chunk layout at depth 32", () => {
-    const state = initializeBatchUtilization(TEST_BATCH_ID, 32)
-    expect(state.batchDepth).toBe(32)
-    expect(state.chunks.length).toBe(64)
+  it("seeds the per-partition counter at 0 with the fixed chunk count at any depth", () => {
+    for (const depth of [24, 32]) {
+      const state = initializeBatchUtilization(TEST_BATCH_ID, depth)
+      expect(state.batchDepth).toBe(depth)
+      expect(state.dataCounters.length).toBe(NUM_BUCKETS)
+      // Counter is the 0-based per-partition `j`; reserved headroom lives in
+      // the slot formula (`dataSlot`), not in the counter.
+      expect(state.dataCounters[0]).toBe(0)
+      expect(state.dataCounters[NUM_BUCKETS - 1]).toBe(0)
+      expect(state.chunks.length).toBe(NUM_UTILIZATION_CHUNKS)
+    }
   })
 })
 
-describe("getChunkIndexForBucket (depth-dependent layout)", () => {
-  it("maps buckets to chunks using the uint16 layout at depth 24", () => {
-    expect(getChunkIndexForBucket(0, 24)).toBe(0)
-    expect(getChunkIndexForBucket(2047, 24)).toBe(0)
-    expect(getChunkIndexForBucket(2048, 24)).toBe(1)
-    expect(getChunkIndexForBucket(NUM_BUCKETS - 1, 24)).toBe(31)
-  })
-
-  it("maps buckets to chunks using the uint32 layout at depth 32", () => {
-    expect(getChunkIndexForBucket(0, 32)).toBe(0)
-    expect(getChunkIndexForBucket(1023, 32)).toBe(0)
-    expect(getChunkIndexForBucket(1024, 32)).toBe(1)
-    expect(getChunkIndexForBucket(NUM_BUCKETS - 1, 32)).toBe(63)
+describe("getChunkIndexForBucket (fixed layout)", () => {
+  it("maps buckets to 1,024-bucket chunks", () => {
+    expect(getChunkIndexForBucket(0)).toBe(0)
+    expect(getChunkIndexForBucket(1023)).toBe(0)
+    expect(getChunkIndexForBucket(1024)).toBe(1)
+    expect(getChunkIndexForBucket(NUM_BUCKETS - 1)).toBe(63)
   })
 
   it("rejects an out-of-range bucket index", () => {
-    expect(() => getChunkIndexForBucket(-1, 24)).toThrow(/Invalid bucket index/)
-    expect(() => getChunkIndexForBucket(NUM_BUCKETS, 24)).toThrow(
+    expect(() => getChunkIndexForBucket(-1)).toThrow(/Invalid bucket index/)
+    expect(() => getChunkIndexForBucket(NUM_BUCKETS)).toThrow(
       /Invalid bucket index/,
     )
   })
@@ -525,26 +435,6 @@ describe("UtilizationAwareStamper partition awareness", () => {
     )
     expect(slots).toEqual([...lane, ...lane, lane[0]])
     expect(stamper.getLocalCounter()![BUCKET]).toBe(2 * cap + 1)
-  })
-
-  it("serializes a scratch drive's counters as uint32 at a uint16 depth", () => {
-    const DEPTH = 20
-    expect(
-      getChunkLayout(counterLayoutDepth(DEPTH, false)).counterByteSize,
-    ).toBe(2)
-    expect(
-      getChunkLayout(counterLayoutDepth(DEPTH, true)).counterByteSize,
-    ).toBe(4)
-
-    // Past uint16: a wrapped counter a uint16 layout would refuse.
-    const PAST_UINT16 = 70_000
-    const counters = new Uint32Array(NUM_BUCKETS)
-    counters[3] = PAST_UINT16
-    const layoutDepth = counterLayoutDepth(DEPTH, true)
-    const restored = new Uint32Array(NUM_BUCKETS)
-    mergeChunk(restored, 0, extractChunk(counters, 0, layoutDepth), layoutDepth)
-    expect(restored[3]).toBe(PAST_UINT16)
-    expect(() => extractChunk(counters, 0, DEPTH)).toThrow(/uint16/)
   })
 
   it("legacy mode (no partition bound) collapses to partition 0, K=1", async () => {
@@ -1410,6 +1300,144 @@ describe("UtilizationAwareStamper synced reference", () => {
     // Partition 1's set does not leak into partition 0's saves.
     expect(reloaded.getProtectedBuckets().has(22)).toBe(false)
     expect(await reloaded.getSyncedReference(0)).toBe("ref-zero")
+  })
+})
+
+describe("UtilizationAwareStamper cache rows (#463)", () => {
+  const SIGNER = new PrivateKey(
+    new Uint8Array(32).map((_, i) => (i + 11) & 0xff),
+  ).toHex()
+  const OWNER = new EthAddress("33".repeat(20))
+  const ENC_KEY = new Uint8Array(32).fill(0x24)
+  const BATCH_HEX = TEST_BATCH_ID.toHex()
+
+  function makeRecordingCache(seed: ChunkCacheEntry[] = []) {
+    const rows = new Map<number, ChunkCacheEntry>()
+    for (const row of seed) rows.set(row.chunkIndex, { ...row })
+    const cache = {
+      getAllChunks: async () =>
+        [...rows.values()].sort((a, b) => a.chunkIndex - b.chunkIndex),
+      putChunk: async (entry: ChunkCacheEntry) => {
+        rows.set(entry.chunkIndex, { ...entry })
+      },
+      getMetadata: async () => undefined,
+      putMetadata: async () => undefined,
+    } as unknown as UtilizationStoreDB
+    return { cache, rows }
+  }
+
+  async function create(
+    cache: UtilizationStoreDB,
+    depth: number,
+    scratch = false,
+  ): Promise<UtilizationAwareStamper> {
+    return UtilizationAwareStamper.create(
+      SIGNER,
+      TEST_BATCH_ID,
+      depth,
+      cache,
+      OWNER,
+      ENC_KEY,
+      undefined,
+      { scratch },
+    )
+  }
+
+  it("rows flushed at one depth load unchanged at another: a dilute changes no cached byte", async () => {
+    const { cache, rows } = makeRecordingCache()
+    const before = await create(cache, 24)
+    before.bindPartition({
+      partition: 0,
+      partitionCount: PARTITION_COUNT,
+      localCounter: new Uint32Array(NUM_BUCKETS),
+    })
+    const BUCKET = 0x4321
+    before.stamp(makeAddressInBucket(BUCKET, 1))
+    before.stamp(makeAddressInBucket(BUCKET, 2))
+    before.stamp(makeAddressInBucket(NUM_BUCKETS - 1, 3))
+    await before.flush()
+    expect([...rows.values()].every((r) => r.format === CACHE_ROW_FORMAT)).toBe(
+      true,
+    )
+
+    const after = await create(cache, 32)
+    expect(after.getUtilizationState().dataCounters[BUCKET]).toBe(2)
+    expect(after.getUtilizationState().dataCounters[NUM_BUCKETS - 1]).toBe(1)
+    expect(after.getUtilizationState().dataCounters).toEqual(
+      before.getUtilizationState().dataCounters,
+    )
+  })
+
+  it("converts rows written before the fixed layout (uint16 at depth ≤ 31) and marks them", async () => {
+    // 32 legacy rows of 2,048 little-endian uint16 counters, no format marker.
+    const LEGACY_PER_ROW = 2048
+    const legacy: ChunkCacheEntry[] = []
+    const expected = new Uint32Array(NUM_BUCKETS)
+    expected[5] = 7
+    expected[3000] = 9
+    expected[NUM_BUCKETS - 1] = 65535
+    for (let i = 0; i < NUM_BUCKETS / LEGACY_PER_ROW; i++) {
+      const data = new Uint8Array(CHUNK_SIZE)
+      const view = new DataView(data.buffer)
+      for (let j = 0; j < LEGACY_PER_ROW; j++) {
+        view.setUint16(j * 2, expected[i * LEGACY_PER_ROW + j], true)
+      }
+      legacy.push({
+        batchId: BATCH_HEX,
+        chunkIndex: i,
+        data,
+        contentHash: "old",
+        nonce: 3,
+        lastAccess: 0,
+      })
+    }
+    const { cache, rows } = makeRecordingCache(legacy)
+
+    const stamper = await create(cache, 24)
+    expect(stamper.getUtilizationState().dataCounters).toEqual(expected)
+
+    // Rewritten in the fixed layout: 64 marked rows of uint32 counters.
+    expect(rows.size).toBe(NUM_UTILIZATION_CHUNKS)
+    expect([...rows.values()].every((r) => r.format === CACHE_ROW_FORMAT)).toBe(
+      true,
+    )
+    expect(deserializeUint32Array(rows.get(0)!.data)[5]).toBe(7)
+    expect(deserializeUint32Array(rows.get(2)!.data)[3000 - 2048]).toBe(9)
+    expect(deserializeUint32Array(rows.get(63)!.data)[1023]).toBe(65535)
+
+    // And a second load reads the converted rows, not the legacy rule.
+    expect(
+      (await create(cache, 24)).getUtilizationState().dataCounters,
+    ).toEqual(expected)
+  })
+
+  it("keeps rows written before the fixed layout at uint32 (depth ≥ 32, or a scratch drive) and marks them", async () => {
+    for (const [depth, scratch] of [
+      [32, false],
+      [20, true],
+    ] as const) {
+      const expected = new Uint32Array(NUM_BUCKETS)
+      expected[1500] = 70_000
+      const { cache, rows } = makeRecordingCache([
+        {
+          batchId: BATCH_HEX,
+          chunkIndex: 1,
+          data: serializeUint32Array(expected.slice(1024, 2048)),
+          contentHash: "old",
+          nonce: 0,
+          lastAccess: 0,
+        },
+      ])
+      const stamper = await create(cache, depth, scratch)
+      expect(stamper.getUtilizationState().dataCounters).toEqual(expected)
+      expect(rows.size).toBe(NUM_UTILIZATION_CHUNKS)
+      expect(
+        [...rows.values()].every((r) => r.format === CACHE_ROW_FORMAT),
+      ).toBe(true)
+      expect(deserializeUint32Array(rows.get(1)!.data)[1500 - 1024]).toBe(
+        70_000,
+      )
+    }
   })
 })
 
