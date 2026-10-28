@@ -13,6 +13,7 @@ import {
   type PostageStamp,
   PostageStampSchemaV1,
   SETTINGS_CLOCKS,
+  type SharingSwitchName,
   type SyncedAccount,
   createAccountsStorageManager,
   isScratchDrive,
@@ -29,7 +30,7 @@ import { daysToMs } from '$lib/duration'
 
 /** What an app holds that the user edits on its page, each field on its own clock (`GRANT_CLOCKS`). */
 export type AppPermissionsPatch = Partial<
-  Pick<ConnectedApp, 'drives' | 'dataSharing' | 'writeAccess' | 'sessionDuration'>
+  Pick<ConnectedApp, 'drives' | PermissionName | 'sessionDuration'>
 >
 
 /**
@@ -356,7 +357,7 @@ export class Account {
   }
 
   /** The account-wide default of a sharing switch, every unpinned app follows (#885). */
-  setSharingDefault(permission: PermissionName, on: boolean) {
+  setSharingDefault(permission: SharingSwitchName, on: boolean) {
     this.#setSettings({ [permission]: on })
   }
 
@@ -633,6 +634,7 @@ function revoked(app: ConnectedApp, tombstone: boolean): ConnectedApp {
             drives: undefined,
             dataSharing: undefined,
             writeAccess: undefined,
+            revealSecrets: undefined,
             sessionDuration: undefined,
           },
           GRANT_CLOCKS,

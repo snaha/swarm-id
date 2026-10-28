@@ -158,7 +158,7 @@ const { dataSharing, writeAccess } = await client.getPermissions()
 const scratch = await client.requestDrives([{ kind: 'scratch' }])
 ```
 
-A write names a drive with `batchID`, or goes to the app's primary drive. A call that needs a
+A write names a drive with its `driveId`, or goes to the app's primary drive. A call that needs a
 sharing switch the user turned off rejects with `permission-denied`. All of it, including what the
 user sees in Swarm ID, is on [Drives & Permissions](../drives-and-permissions/).
 

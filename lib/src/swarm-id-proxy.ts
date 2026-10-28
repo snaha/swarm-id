@@ -41,12 +41,15 @@ import type {
   ActAddGranteesMessage,
   ActRevokeGranteesMessage,
   ActGetGranteesMessage,
-  GetPostageBatchMessage,
+  RevealPostageBatchMessage,
   GetDrivesMessage,
   GetPermissionsMessage,
   PermissionName,
   RequestPermissionsMessage,
-  Drive,
+  DriveRow,
+  DerivedRef,
+  TopicRef,
+  SignerRef,
   Permissions,
   CreateFeedManifestMessage,
   AppMetadata,
@@ -810,6 +813,57 @@ export class SwarmIdProxy {
       isScratchDrive(stamp),
     )
     return drive
+  }
+
+  /**
+   * The app's name for `batchId` (#746): `HMAC(appSecret, "drive-id:" + id)`.
+   * Per app, so two apps cannot correlate a user through a shared drive, and
+   * derived rather than stored, so it is the same after a reload and on every
+   * device without the proxy keeping a table.
+   */
+  private driveIdFor(batchId: string): Promise<string> {
+    return this.deriveFor({ derived: `drive-id:${batchId}` })
+  }
+
+  /** The granted stamp an app's `driveId` names, or `drive-not-granted`. */
+  private async stampForDriveId(driveId: string): Promise<PostageStamp> {
+    // ponytail: one HMAC per granted drive per write; cache if it ever shows.
+    for (const stamp of this.lookupDrivesForApp().granted) {
+      if ((await this.driveIdFor(stamp.batchID.toHex())) === driveId) {
+        return stamp
+      }
+    }
+    throw new SwarmIdError(
+      "drive-not-granted",
+      "This app has not been granted that drive in Swarm ID.",
+    )
+  }
+
+  /** `HMAC(appSecret, label)` as hex: what an `AppSecret` handle stands for (#889). */
+  private deriveFor(ref: DerivedRef): Promise<string> {
+    if (!this.authenticated || !this.appSecret) {
+      throw new SwarmIdError(
+        "not-authenticated",
+        "Not authenticated. Please login first.",
+      )
+    }
+    return deriveSecret(this.appSecret, ref.derived)
+  }
+
+  /** A feed topic as the app spelled it: hex as is, an `AppSecret` as `keccak256` of its bytes. */
+  private async resolveTopic(topic: TopicRef): Promise<string> {
+    if (typeof topic === "string") return topic
+    return uint8ArrayToHex(
+      Binary.keccak256(hexToUint8Array(await this.deriveFor(topic))),
+    )
+  }
+
+  /** A signer as the app spelled it: hex as is, an `AppSecret` as its derived key. */
+  private async resolveSigner(
+    signer: SignerRef | undefined,
+  ): Promise<string | undefined> {
+    if (signer === undefined || typeof signer === "string") return signer
+    return this.deriveFor(signer)
   }
 
   /**
@@ -2137,10 +2191,11 @@ export class SwarmIdProxy {
   private async withModeAwareWriteLock<T>(
     targetOptions: { useWorkers?: boolean; workerCount?: number } | undefined,
     operation: (target: UploadTarget) => Promise<T>,
-    batchId?: string,
+    driveId?: string,
   ): Promise<T> {
-    if (batchId !== undefined) {
-      const drive = await this.writePathFor(batchId)
+    if (driveId !== undefined) {
+      const stamp = await this.stampForDriveId(driveId)
+      const drive = await this.writePathFor(stamp.batchID.toHex())
       this.refuseDrive(drive)
       if (!drive.coordinator) {
         throw new SwarmIdError(
@@ -2475,8 +2530,8 @@ export class SwarmIdProxy {
         await this.handleActGetGrantees(message, event)
         break
 
-      case "getPostageBatch":
-        await this.handleGetPostageBatch(message, event)
+      case "revealPostageBatch":
+        await this.handleRevealPostageBatch(message, event)
         break
 
       case "getDrives":
@@ -4008,8 +4063,8 @@ export class SwarmIdProxy {
     } = message
 
     try {
-      const batchID = options?.batchID
-      this.ensureCanUpload(batchID)
+      const driveId = options?.driveId
+      this.ensureCanUpload(driveId)
 
       // Create progress callback if enabled (works in both modes)
       const onProgress = this.createProgressCallback(
@@ -4034,7 +4089,7 @@ export class SwarmIdProxy {
           })
           return result
         },
-        batchID,
+        driveId,
       )
 
       // Send response
@@ -4094,8 +4149,8 @@ export class SwarmIdProxy {
     const fileName = name || "index.bin"
 
     try {
-      const batchID = options?.batchID
-      this.ensureCanUpload(batchID)
+      const driveId = options?.driveId
+      this.ensureCanUpload(driveId)
 
       // Create progress callback if enabled
       const onProgress = this.createProgressCallback(
@@ -4155,7 +4210,7 @@ export class SwarmIdProxy {
 
           return result
         },
-        batchID,
+        driveId,
       )
 
       // Send response
@@ -4254,8 +4309,8 @@ export class SwarmIdProxy {
     } = message
 
     try {
-      const batchID = options?.batchID
-      this.ensureCanUpload(batchID)
+      const driveId = options?.driveId
+      this.ensureCanUpload(driveId)
       const onProgress = this.createProgressCallback(
         event,
         requestId,
@@ -4272,7 +4327,7 @@ export class SwarmIdProxy {
             onProgress,
             requestOptions,
           }),
-        batchID,
+        driveId,
       )
 
       this.postMessage(event, {
@@ -4307,8 +4362,8 @@ export class SwarmIdProxy {
     const { requestId, data, options, requestOptions } = message
 
     try {
-      const batchID = options?.batchID
-      this.ensureCanUpload(batchID)
+      const driveId = options?.driveId
+      this.ensureCanUpload(driveId)
 
       // Validate chunk size (must be between 1 and 4096 bytes)
       if (data.length < 1 || data.length > 4096) {
@@ -4331,7 +4386,7 @@ export class SwarmIdProxy {
             requestOptions,
           })
         },
-        batchID,
+        driveId,
       )
 
       this.postMessage(event, {
@@ -4395,8 +4450,8 @@ export class SwarmIdProxy {
     const { requestId, signer, identifier, data, options } = message
 
     try {
-      const batchID = options?.batchID
-      this.ensureCanUpload(batchID)
+      const driveId = options?.driveId
+      this.ensureCanUpload(driveId)
 
       const signerKey = new PrivateKey(signer)
       const id = new Identifier(identifier)
@@ -4410,7 +4465,7 @@ export class SwarmIdProxy {
             tag: options?.tag,
           })
         },
-        batchID,
+        driveId,
       )
 
       this.postMessage(event, {
@@ -4432,12 +4487,13 @@ export class SwarmIdProxy {
     message: SocUploadMessage,
     event: MessageEvent,
   ): Promise<void> {
-    const { requestId, identifier, data, signer, options } = message
+    const { requestId, identifier, data, options } = message
 
     try {
-      const batchID = options?.batchID
-      this.ensureCanUpload(batchID)
+      const driveId = options?.driveId
+      this.ensureCanUpload(driveId)
 
+      const signer = await this.resolveSigner(message.signer)
       const signerKey = signer ?? this.appSecret!
       const signerKeyObj = new PrivateKey(signerKey)
       const id = new Identifier(identifier)
@@ -4452,7 +4508,7 @@ export class SwarmIdProxy {
             tag: options?.tag,
           })
         },
-        batchID,
+        driveId,
       )
 
       this.postMessage(event, {
@@ -4474,12 +4530,13 @@ export class SwarmIdProxy {
     message: SocRawUploadMessage,
     event: MessageEvent,
   ): Promise<void> {
-    const { requestId, identifier, data, signer, options } = message
+    const { requestId, identifier, data, options } = message
 
     try {
-      const batchID = options?.batchID
-      this.ensureCanUpload(batchID)
+      const driveId = options?.driveId
+      this.ensureCanUpload(driveId)
 
+      const signer = await this.resolveSigner(message.signer)
       const signerKey = signer ?? this.appSecret!
       const signerKeyObj = new PrivateKey(signerKey)
       const id = new Identifier(identifier)
@@ -4493,7 +4550,7 @@ export class SwarmIdProxy {
             tag: options?.tag,
           })
         },
-        batchID,
+        driveId,
       )
 
       this.postMessage(event, {
@@ -4617,7 +4674,11 @@ export class SwarmIdProxy {
         )
       }
 
-      const owner = new PrivateKey(this.appSecret).publicKey().address().toHex()
+      const signer = await this.resolveSigner(message.signer)
+      const owner = new PrivateKey(signer ?? this.appSecret)
+        .publicKey()
+        .address()
+        .toHex()
 
       this.postMessage(event, {
         type: "socGetOwnerResponse",
@@ -4630,10 +4691,10 @@ export class SwarmIdProxy {
   }
 
   /**
-   * Derive a stable, app-scoped secret HMAC(appSecret, label) for the connected
-   * app. `appSecret` is genuinely secret (unlike the recoverable appKey public
-   * key) and never leaves the iframe — only the derived bytes are returned, so
-   * the app can seed an unguessable feed topic without exposing metadata (#520).
+   * `AppSecret.reveal()`: the bytes of HMAC(appSecret, label) for the connected
+   * app (#520), handed to the page only under `revealSecrets` (#889). Using
+   * the secret as a topic or signer needs no permission — the handle carries
+   * the label and the proxy derives from it in place.
    */
   private async handleDeriveAppSecret(
     message: DeriveAppSecretMessage,
@@ -4649,6 +4710,9 @@ export class SwarmIdProxy {
         )
       }
 
+      if (!this.sessionPermissions().revealSecrets) {
+        throw this.permissionDenied("revealSecrets")
+      }
       const secretHex = await deriveSecret(this.appSecret, label)
 
       this.postMessage(event, {
@@ -4733,7 +4797,11 @@ export class SwarmIdProxy {
         )
       }
 
-      const owner = new PrivateKey(this.appSecret).publicKey().address().toHex()
+      const signer = await this.resolveSigner(message.signer)
+      const owner = new PrivateKey(signer ?? this.appSecret)
+        .publicKey()
+        .address()
+        .toHex()
 
       this.postMessage(event, {
         type: "feedGetOwnerResponse",
@@ -4749,9 +4817,10 @@ export class SwarmIdProxy {
     message: EpochFeedDownloadReferenceMessage,
     event: MessageEvent,
   ): Promise<void> {
-    const { requestId, topic, owner, at, after, encryptionKey } = message
+    const { requestId, owner, at, after, encryptionKey } = message
 
     try {
+      const topic = await this.resolveTopic(message.topic)
       let resolvedOwner = owner
       if (!resolvedOwner) {
         if (!this.appSecret) {
@@ -4814,17 +4883,19 @@ export class SwarmIdProxy {
   ): Promise<void> {
     const {
       requestId,
-      topic,
-      signer,
+      topic: topicRef,
+      signer: signerRef,
       at,
       reference,
       encryptionKey,
       hints,
-      batchID,
+      driveId,
     } = message
 
     try {
-      this.ensureCanUpload(batchID)
+      const topic = await this.resolveTopic(topicRef)
+      const signer = await this.resolveSigner(signerRef)
+      this.ensureCanUpload(driveId)
 
       const signerKey = signer ?? this.appSecret!
       const signerKeyObj = new PrivateKey(signerKey)
@@ -4878,7 +4949,7 @@ export class SwarmIdProxy {
 
           return result
         },
-        batchID,
+        driveId,
       )
 
       // Verify upload with read-back
@@ -4928,7 +4999,11 @@ export class SwarmIdProxy {
         )
       }
 
-      const owner = new PrivateKey(this.appSecret).publicKey().address().toHex()
+      const signer = await this.resolveSigner(message.signer)
+      const owner = new PrivateKey(signer ?? this.appSecret)
+        .publicKey()
+        .address()
+        .toHex()
 
       this.postMessage(event, {
         type: "seqFeedGetOwnerResponse",
@@ -5070,7 +5145,7 @@ export class SwarmIdProxy {
   ): Promise<void> {
     const {
       requestId,
-      topic,
+      topic: topicRef,
       owner,
       index,
       at,
@@ -5081,6 +5156,7 @@ export class SwarmIdProxy {
     } = message
 
     try {
+      const topic = await this.resolveTopic(topicRef)
       if (!encryptionKey) {
         throw new SwarmIdError(
           "invalid-request",
@@ -5144,7 +5220,7 @@ export class SwarmIdProxy {
   ): Promise<void> {
     const {
       requestId,
-      topic,
+      topic: topicRef,
       owner,
       index,
       at,
@@ -5155,6 +5231,7 @@ export class SwarmIdProxy {
     } = message
 
     try {
+      const topic = await this.resolveTopic(topicRef)
       const resolvedOwner = await this.resolveSequentialOwner(owner)
       const ownerAddress = new EthAddress(resolvedOwner)
       const topicBytes = hexToUint8Array(topic)
@@ -5213,7 +5290,7 @@ export class SwarmIdProxy {
   ): Promise<void> {
     const {
       requestId,
-      topic,
+      topic: topicRef,
       owner,
       index,
       at,
@@ -5224,6 +5301,7 @@ export class SwarmIdProxy {
     } = message
 
     try {
+      const topic = await this.resolveTopic(topicRef)
       if (!encryptionKey) {
         throw new SwarmIdError(
           "invalid-request",
@@ -5306,8 +5384,8 @@ export class SwarmIdProxy {
   ): Promise<void> {
     const {
       requestId,
-      topic,
-      signer,
+      topic: topicRef,
+      signer: signerRef,
       data,
       index,
       at,
@@ -5318,8 +5396,10 @@ export class SwarmIdProxy {
     } = message
 
     try {
-      const batchID = options?.batchID
-      this.ensureCanUpload(batchID)
+      const topic = await this.resolveTopic(topicRef)
+      const signer = await this.resolveSigner(signerRef)
+      const driveId = options?.driveId
+      this.ensureCanUpload(driveId)
 
       const signerKey = signer ?? this.appSecret!
       const signerKeyObj = new PrivateKey(signerKey)
@@ -5369,7 +5449,7 @@ export class SwarmIdProxy {
             tag: options?.tag,
           })
         },
-        batchID,
+        driveId,
       )
 
       this.postMessage(event, {
@@ -5399,8 +5479,8 @@ export class SwarmIdProxy {
   ): Promise<void> {
     const {
       requestId,
-      topic,
-      signer,
+      topic: topicRef,
+      signer: signerRef,
       data,
       index,
       at,
@@ -5412,8 +5492,10 @@ export class SwarmIdProxy {
     } = message
 
     try {
-      const batchID = options?.batchID
-      this.ensureCanUpload(batchID)
+      const topic = await this.resolveTopic(topicRef)
+      const signer = await this.resolveSigner(signerRef)
+      const driveId = options?.driveId
+      this.ensureCanUpload(driveId)
 
       const signerKey = signer ?? this.appSecret!
       const signerKeyObj = new PrivateKey(signerKey)
@@ -5465,7 +5547,7 @@ export class SwarmIdProxy {
             tag: options?.tag,
           })
         },
-        batchID,
+        driveId,
       )
 
       this.postMessage(event, {
@@ -5493,8 +5575,8 @@ export class SwarmIdProxy {
   ): Promise<void> {
     const {
       requestId,
-      topic,
-      signer,
+      topic: topicRef,
+      signer: signerRef,
       reference,
       index,
       at,
@@ -5505,8 +5587,10 @@ export class SwarmIdProxy {
     } = message
 
     try {
-      const batchID = options?.batchID
-      this.ensureCanUpload(batchID)
+      const topic = await this.resolveTopic(topicRef)
+      const signer = await this.resolveSigner(signerRef)
+      const driveId = options?.driveId
+      this.ensureCanUpload(driveId)
 
       const signerKey = signer ?? this.appSecret!
       const signerKeyObj = new PrivateKey(signerKey)
@@ -5561,7 +5645,7 @@ export class SwarmIdProxy {
             tag: options?.tag,
           })
         },
-        batchID,
+        driveId,
       )
 
       this.postMessage(event, {
@@ -5610,7 +5694,9 @@ export class SwarmIdProxy {
       "permission-denied",
       permission === "dataSharing"
         ? "This app is not allowed to access data shared by other apps. Ask with requestPermissions({ dataSharing: true })."
-        : "This app is not allowed to share data with other apps. Ask with requestPermissions({ writeAccess: true }).",
+        : permission === "writeAccess"
+          ? "This app is not allowed to share data with other apps. Ask with requestPermissions({ writeAccess: true })."
+          : "This app is not allowed to read its keys and postage batches as raw values. Ask with requestPermissions({ revealSecrets: true }).",
       { permission },
     )
   }
@@ -5649,8 +5735,8 @@ export class SwarmIdProxy {
     } = message
 
     try {
-      const batchID = options?.batchID
-      this.ensureCanUpload(batchID)
+      const driveId = options?.driveId
+      this.ensureCanUpload(driveId)
 
       // Parse grantee public keys from compressed hex
       const granteePublicKeys = grantees.map((hex) =>
@@ -5742,7 +5828,7 @@ export class SwarmIdProxy {
             contentUpload: contentUploadResult,
           }
         },
-        batchID,
+        driveId,
       )
 
       // Send final response
@@ -5843,11 +5929,11 @@ export class SwarmIdProxy {
     message: ActAddGranteesMessage,
     event: MessageEvent,
   ): Promise<void> {
-    const { requestId, historyReference, grantees, batchID, requestOptions } =
+    const { requestId, historyReference, grantees, driveId, requestOptions } =
       message
 
     try {
-      this.ensureCanUpload(batchID)
+      this.ensureCanUpload(driveId)
 
       const publisherPrivateKey = this.actKeys("writeAccess")
 
@@ -5870,7 +5956,7 @@ export class SwarmIdProxy {
             requestOptions,
           )
         },
-        batchID,
+        driveId,
       )
 
       this.postMessage(event, {
@@ -5894,12 +5980,12 @@ export class SwarmIdProxy {
       historyReference,
       encryptedReference,
       revokeGrantees,
-      batchID,
+      driveId,
       requestOptions,
     } = message
 
     try {
-      this.ensureCanUpload(batchID)
+      this.ensureCanUpload(driveId)
 
       const publisherPrivateKey = this.actKeys("writeAccess")
 
@@ -5923,7 +6009,7 @@ export class SwarmIdProxy {
             requestOptions,
           )
         },
-        batchID,
+        driveId,
       )
 
       this.postMessage(event, {
@@ -5978,34 +6064,58 @@ export class SwarmIdProxy {
     }
   }
 
-  private async handleGetPostageBatch(
-    message: GetPostageBatchMessage,
+  /** `Drive.revealPostageBatch()`: the batch behind a drive, under `revealSecrets` (#746). */
+  private async handleRevealPostageBatch(
+    message: RevealPostageBatchMessage,
     event: MessageEvent,
   ): Promise<void> {
-    const stamp = this.lookupDrivesForApp().primary
-    this.postMessage(event, {
-      type: "getPostageBatchResponse",
-      requestId: message.requestId,
-      postageBatch: stamp ? await this.describeStamp(stamp) : undefined,
-    })
+    try {
+      if (!this.sessionPermissions().revealSecrets) {
+        throw this.permissionDenied("revealSecrets")
+      }
+      const stamp = await this.stampForDriveId(message.driveId)
+      this.postMessage(event, {
+        type: "revealPostageBatchResponse",
+        requestId: message.requestId,
+        postageBatch: await this.describeStamp(stamp),
+      })
+    } catch (error) {
+      this.sendErrorToParent(
+        event,
+        message.requestId,
+        error,
+        "Reveal postage batch failed",
+      )
+    }
   }
 
-  /** Every drive the app was granted, the primary marked (#862). */
+  /**
+   * Every drive the app was granted, the primary marked (#862), each under
+   * its per-app drive id and without the fields that would identify the
+   * batch on chain (#746).
+   */
   private async handleGetDrives(
     message: GetDrivesMessage,
     event: MessageEvent,
   ): Promise<void> {
     const { primary, granted } = this.lookupDrivesForApp()
     const drives = await Promise.all(
-      granted.map(
-        async (stamp): Promise<Drive> => ({
-          ...(await this.describeStamp(stamp)),
+      granted.map(async (stamp): Promise<DriveRow> => {
+        const batchId = stamp.batchID.toHex()
+        const { label, depth, utilization, usable, batchTTL } =
+          await this.describeStamp(stamp)
+        return {
+          driveId: await this.driveIdFor(batchId),
           kind: stamp.kind ?? "regular",
-          primary: stamp.batchID.toHex() === primary?.batchID.toHex(),
-          partition: this.drives.get(stamp.batchID.toHex())?.coordinator
-            ?.currentPartition,
-        }),
-      ),
+          primary: batchId === primary?.batchID.toHex(),
+          partition: this.drives.get(batchId)?.coordinator?.currentPartition,
+          label,
+          depth,
+          utilization,
+          usable,
+          batchTTL,
+        }
+      }),
     )
     this.postMessage(event, {
       type: "getDrivesResponse",
@@ -6093,7 +6203,7 @@ export class SwarmIdProxy {
     message: CreateFeedManifestMessage,
     event: MessageEvent,
   ): Promise<void> {
-    const { topic, owner, feedType, uploadOptions } = message
+    const { owner, feedType, uploadOptions } = message
 
     // Resolve owner - use provided or fall back to app signer
     let resolvedOwner = owner
@@ -6116,8 +6226,9 @@ export class SwarmIdProxy {
     }
 
     try {
-      const batchID = uploadOptions?.batchID
-      this.ensureCanUpload(batchID)
+      const topic = await this.resolveTopic(message.topic)
+      const driveId = uploadOptions?.driveId
+      this.ensureCanUpload(driveId)
 
       const result = await this.withModeAwareWriteLock(
         undefined,
@@ -6133,7 +6244,7 @@ export class SwarmIdProxy {
             uploadOptions,
           )
         },
-        batchID,
+        driveId,
       )
 
       this.postMessage(event, {

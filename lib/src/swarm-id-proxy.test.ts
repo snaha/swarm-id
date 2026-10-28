@@ -8,10 +8,12 @@ vi.mock("virtual:stamp-worker-code", () => ({ default: "" }))
 
 import { DEFAULT_BEE_NODE_URL } from "./schemas"
 import { SwarmIdProxy } from "./swarm-id-proxy"
-import { deriveSecret } from "./utils/key-derivation"
-import { uint8ArrayToHex } from "./utils/hex"
+import { deriveSecret, deriveSecretSync } from "./utils/key-derivation"
+import { hexToUint8Array, uint8ArrayToHex } from "./utils/hex"
 import { STORAGE_KEY_NETWORK_SETTINGS } from "./types"
-import type { ButtonConfig } from "./types"
+import type { AppPermissions, ButtonConfig } from "./types"
+import { PrivateKey } from "@ethersphere/bee-js"
+import { Binary } from "cafe-utility"
 import type { StampLifetimeFields } from "./utils/stamp-lifespan"
 import { DriveWritePath } from "./proxy/drive-write-path"
 
@@ -32,6 +34,13 @@ type ProxyInternals = {
   ) => void
   authenticated: boolean
   appSecret: string
+  sessionPermissions: () => AppPermissions
+  resolveTopic: (topic: unknown) => Promise<string>
+  resolveSigner: (signer: unknown) => Promise<string | undefined>
+  handleSocGetOwner: (
+    message: { type: string; requestId: string; signer?: unknown },
+    event: MessageEvent,
+  ) => Promise<void>
   /** The primary drive's write path (read-only: a getter over `drives`). */
   readonly drive?: DriveWritePath
   drives: Map<string, DriveWritePath>
@@ -254,9 +263,17 @@ describe("SwarmIdProxy deriveAppSecret (#520)", () => {
   const lastMessage = () =>
     source.postMessage.mock.calls[source.postMessage.mock.calls.length - 1][0]
 
+  const grantKeyExport = (revealSecrets: boolean) =>
+    vi.spyOn(internals(proxy), "sessionPermissions").mockReturnValue({
+      dataSharing: true,
+      writeAccess: true,
+      revealSecrets,
+    })
+
   it("returns HMAC(appSecret, label) as bytes, stable and label-scoped", async () => {
     internals(proxy).authenticated = true
     internals(proxy).appSecret = APP_SECRET_HEX
+    grantKeyExport(true)
 
     await derive("topic-seed")
     const first = lastMessage()
@@ -288,6 +305,63 @@ describe("SwarmIdProxy deriveAppSecret (#520)", () => {
       requestId: "r1",
       code: "not-authenticated",
     })
+  })
+
+  // #889: the bytes are a permission. The handle works without one.
+  it("refuses the bytes without the revealSecrets permission", async () => {
+    internals(proxy).authenticated = true
+    internals(proxy).appSecret = APP_SECRET_HEX
+    grantKeyExport(false)
+
+    await derive("topic-seed")
+    expect(lastMessage()).toMatchObject({
+      type: "error",
+      requestId: "r1",
+      code: "permission-denied",
+      permission: "revealSecrets",
+    })
+    expect(lastMessage().secret).toBeUndefined()
+  })
+
+  it("derives a topic and a signer from a handle without a permission", async () => {
+    internals(proxy).authenticated = true
+    internals(proxy).appSecret = APP_SECRET_HEX
+    grantKeyExport(false)
+    const derived = deriveSecretSync(APP_SECRET_HEX, "state-feed")
+
+    await expect(
+      internals(proxy).resolveTopic({ derived: "state-feed" }),
+    ).resolves.toBe(uint8ArrayToHex(Binary.keccak256(hexToUint8Array(derived))))
+    await expect(internals(proxy).resolveTopic("ab".repeat(32))).resolves.toBe(
+      "ab".repeat(32),
+    )
+    await expect(
+      internals(proxy).resolveSigner({ derived: "state-feed" }),
+    ).resolves.toBe(derived)
+    await expect(internals(proxy).resolveSigner(undefined)).resolves.toBe(
+      undefined,
+    )
+
+    // The owner of a derived signer is the proxy's to tell.
+    await internals(proxy).handleSocGetOwner(
+      {
+        type: "socGetOwner",
+        requestId: "o1",
+        signer: { derived: "state-feed" },
+      },
+      { source, origin: PARENT_ORIGIN } as unknown as MessageEvent,
+    )
+    expect(lastMessage()).toMatchObject({
+      type: "socGetOwnerResponse",
+      requestId: "o1",
+      owner: new PrivateKey(derived).publicKey().address().toHex(),
+    })
+  })
+
+  it("refuses to derive from a handle when not authenticated", async () => {
+    await expect(
+      internals(proxy).resolveTopic({ derived: "state-feed" }),
+    ).rejects.toMatchObject({ code: "not-authenticated" })
   })
 
   // `effectivePermissions(undefined, undefined)` is on/on: without a session

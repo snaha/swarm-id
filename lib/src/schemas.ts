@@ -169,6 +169,11 @@ export const ConnectedAppSchemaV1 = z.object({
   dataSharingAt: z.number().optional(),
   writeAccess: z.boolean().optional(),
   writeAccessAt: z.number().optional(),
+  // Whether the app may read its derived secrets and the postage batches
+  // behind its drives as raw values (#889, #746). Per app only, no account
+  // default: absent is off.
+  revealSecrets: z.boolean().optional(),
+  revealSecretsAt: z.number().optional(),
   // How long this app's connections last, in ms, when the user set it for
   // this app rather than the account (`settings.appSessionDuration`).
   // Applied at the next connect (`appSessionDuration`).

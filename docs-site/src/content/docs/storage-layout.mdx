@@ -83,7 +83,8 @@ schema (the per-field clocks, `settings`, `defaultPostageStampBatchID`, `lastMod
 out of a fresh record; the UI sets them as the user edits. `settings` holds the app session
 duration and the account-wide sharing switches (`dataSharing`, `writeAccess`, on when absent),
 which a connected app may pin for itself with the same two fields on its entry, as it may its own
-`sessionDuration`.
+`sessionDuration`. An app's entry may also carry `revealSecrets`, the key-export switch, which has
+no account-wide default.
 
 Everything on the record except `access` and `encryptedSeed` is the synced projection, and a
 record with the same `id` may already exist from an earlier import. Replace it only with the

@@ -103,6 +103,7 @@ export {
   type Permissions,
   type AppPermissions,
   type PermissionName,
+  type SharingSwitchName,
   type AccountSettings,
   STORAGE_CHALLENGE_KEY,
   STORAGE_KEY_ACCOUNTS,

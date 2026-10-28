@@ -7,7 +7,10 @@
  * the proxy into a first-class writer; a payload without one is refused.
  */
 
-import { derivePostageSignerKeySync } from "./utils/key-derivation"
+import {
+  derivePostageSignerKeySync,
+  deriveSecretSync,
+} from "./utils/key-derivation"
 import type { ActKeyCandidates } from "./proxy/act"
 import {
   describe,
@@ -866,6 +869,16 @@ describe("SwarmIdProxy partitioned write enablement", () => {
 
     const internals = () => proxy as unknown as DriveInternals
 
+    // What the dApp calls a drive (#746): the per-app id the proxy derives
+    // from the batch id with this app's secret. The real batch id is not a
+    // name the dApp may use.
+    const APP_SECRET_HEX = "44".repeat(32)
+    const driveIdOf = (batchHex: string): string =>
+      deriveSecretSync(APP_SECRET_HEX, `drive-id:${batchHex}`)
+    const FIRST_DRIVE_ID = driveIdOf(BATCH_ID_HEX)
+    const SECOND_DRIVE_ID = driveIdOf(SECOND_BATCH_ID_HEX)
+    const UNGRANTED_DRIVE_ID = driveIdOf(UNGRANTED_BATCH_ID_HEX)
+
     // `coordinatorFor` reads every coordinator built, so only this test's.
     beforeEach(() => {
       vi.mocked(BatchWriteCoordinator).mockClear()
@@ -914,6 +927,7 @@ describe("SwarmIdProxy partitioned write enablement", () => {
     /** Connect the dApp to an account with two drives, both granted. */
     const connectWithTwoDrives = async (
       postageStamps = [stampOf(BATCH_ID_HEX), stampOf(SECOND_BATCH_ID_HEX)],
+      appFields: Partial<ConnectedApp> = {},
     ): Promise<void> => {
       seedConnectedAccount({
         account: { postageStamps },
@@ -921,13 +935,14 @@ describe("SwarmIdProxy partitioned write enablement", () => {
           {
             appUrl: PARENT_ORIGIN,
             appName: "dApp",
-            appSecret: "44".repeat(32),
+            appSecret: APP_SECRET_HEX,
             lastConnectedAt: Date.now(),
             connectedUntil: Date.now() + 60_000,
             drives: [
               new BatchId(BATCH_ID_HEX),
               new BatchId(SECOND_BATCH_ID_HEX),
             ],
+            ...appFields,
           },
         ],
       })
@@ -975,12 +990,12 @@ describe("SwarmIdProxy partitioned write enablement", () => {
       await internals().withModeAwareWriteLock(
         undefined,
         async () => undefined,
-        SECOND_BATCH_ID_HEX,
+        SECOND_DRIVE_ID,
       )
       await internals().withModeAwareWriteLock(
         undefined,
         async () => undefined,
-        SECOND_BATCH_ID_HEX,
+        SECOND_DRIVE_ID,
       )
 
       const second = coordinatorFor(SECOND_BATCH_ID_HEX)!
@@ -999,7 +1014,7 @@ describe("SwarmIdProxy partitioned write enablement", () => {
     // Every write handler has to hand its drive on: one that drops `batchID`
     // fails silently, landing the write on the primary instead.
     const HEX_32 = "ab".repeat(32)
-    const targeted = { batchID: SECOND_BATCH_ID_HEX }
+    const targeted = { driveId: SECOND_DRIVE_ID }
     const bytes = () => new Uint8Array([1, 2, 3])
     it.each([
       { type: "uploadData", data: bytes(), options: targeted },
@@ -1034,7 +1049,7 @@ describe("SwarmIdProxy partitioned write enablement", () => {
         topic: HEX_32,
         at: 1,
         reference: HEX_32,
-        batchID: SECOND_BATCH_ID_HEX,
+        driveId: SECOND_DRIVE_ID,
       },
       {
         type: "seqFeedUploadPayload",
@@ -1062,14 +1077,14 @@ describe("SwarmIdProxy partitioned write enablement", () => {
         type: "actAddGrantees",
         historyReference: HEX_32,
         grantees: [],
-        batchID: SECOND_BATCH_ID_HEX,
+        driveId: SECOND_DRIVE_ID,
       },
       {
         type: "actRevokeGrantees",
         historyReference: HEX_32,
         encryptedReference: HEX_32,
         revokeGrantees: [],
-        batchID: SECOND_BATCH_ID_HEX,
+        driveId: SECOND_DRIVE_ID,
       },
       { type: "createFeedManifest", topic: HEX_32, uploadOptions: targeted },
     ])("$type writes through the drive it names", async (message) => {
@@ -1099,10 +1114,82 @@ describe("SwarmIdProxy partitioned write enablement", () => {
         internals().withModeAwareWriteLock(
           undefined,
           async () => undefined,
-          UNGRANTED_BATCH_ID_HEX,
+          UNGRANTED_DRIVE_ID,
         ),
       ).rejects.toMatchObject({ code: "drive-not-granted" })
       expect(coordinatorFor(UNGRANTED_BATCH_ID_HEX)).toBeUndefined()
+    })
+
+    // #746: the batch id is the user's. A dApp that learned one anyway cannot
+    // name a drive by it.
+    it("refuses a real batch id as a drive name", async () => {
+      nextStamper()
+      await connectWithTwoDrives()
+
+      await expect(
+        internals().withModeAwareWriteLock(
+          undefined,
+          async () => undefined,
+          SECOND_BATCH_ID_HEX,
+        ),
+      ).rejects.toMatchObject({ code: "drive-not-granted" })
+      expect(coordinatorFor(SECOND_BATCH_ID_HEX)).toBeUndefined()
+    })
+
+    it("reveals the postage batch behind a drive only under revealSecrets", async () => {
+      nextStamper()
+      await connectWithTwoDrives()
+
+      await dispatch(
+        {
+          type: "revealPostageBatch",
+          requestId: "rv1",
+          driveId: SECOND_DRIVE_ID,
+        },
+        PARENT_ORIGIN,
+        parentWindow,
+      )
+      await vi.waitFor(() =>
+        expect(messagesOfType("error")).toContainEqual(
+          expect.objectContaining({
+            requestId: "rv1",
+            code: "permission-denied",
+            permission: "revealSecrets",
+          }),
+        ),
+      )
+      expect(messagesOfType("revealPostageBatchResponse")).toHaveLength(0)
+
+      updateAccount((account) => ({
+        ...account,
+        connectedApps: account.connectedApps.map((app) => ({
+          ...app,
+          revealSecrets: true,
+          revealSecretsAt: Date.now(),
+        })),
+      }))
+      await vi.waitFor(() =>
+        expect(
+          messagesOfType("connectionInfoChanged").at(-1)!.permissions,
+        ).toMatchObject({ revealSecrets: true }),
+      )
+
+      await dispatch(
+        {
+          type: "revealPostageBatch",
+          requestId: "rv2",
+          driveId: SECOND_DRIVE_ID,
+        },
+        PARENT_ORIGIN,
+        parentWindow,
+      )
+      await vi.waitFor(() =>
+        expect(messagesOfType("revealPostageBatchResponse")).toHaveLength(1),
+      )
+      expect(messagesOfType("revealPostageBatchResponse")[0]).toMatchObject({
+        requestId: "rv2",
+        postageBatch: { batchID: SECOND_BATCH_ID_HEX, batchTTL: 3600 },
+      })
     })
 
     // #885: the sharing switches. Enforced where the sharing key is used,
@@ -1242,10 +1329,12 @@ describe("SwarmIdProxy partitioned write enablement", () => {
         await expect(getPermissions()).resolves.toEqual({
           dataSharing: true,
           writeAccess: true,
+          revealSecrets: false,
         })
         expect(lastInfo().permissions).toEqual({
           dataSharing: true,
           writeAccess: true,
+          revealSecrets: false,
         })
         expect(lastInfo().identity.sharingPublicKey).toMatch(/^0[23]/)
       })
@@ -1255,6 +1344,7 @@ describe("SwarmIdProxy partitioned write enablement", () => {
         await expect(getPermissions()).resolves.toEqual({
           dataSharing: true,
           writeAccess: true,
+          revealSecrets: false,
         })
       })
 
@@ -1264,6 +1354,7 @@ describe("SwarmIdProxy partitioned write enablement", () => {
         expect(lastInfo().permissions).toEqual({
           dataSharing: false,
           writeAccess: false,
+          revealSecrets: false,
         })
         expect(lastInfo().identity.sharingPublicKey).toBeUndefined()
       })
@@ -1307,11 +1398,13 @@ describe("SwarmIdProxy partitioned write enablement", () => {
           expect(lastInfo().permissions).toEqual({
             dataSharing: false,
             writeAccess: false,
+            revealSecrets: false,
           }),
         )
         await expect(getPermissions()).resolves.toEqual({
           dataSharing: false,
           writeAccess: false,
+          revealSecrets: false,
         })
       })
     })
@@ -1325,7 +1418,7 @@ describe("SwarmIdProxy partitioned write enablement", () => {
           type: "uploadData",
           requestId: "w1",
           data: new Uint8Array([1]),
-          options: { batchID: UNGRANTED_BATCH_ID_HEX },
+          options: { driveId: UNGRANTED_DRIVE_ID },
         },
         PARENT_ORIGIN,
         parentWindow,
@@ -1353,7 +1446,7 @@ describe("SwarmIdProxy partitioned write enablement", () => {
           type: "uploadData",
           requestId: "w2",
           data: new Uint8Array([1]),
-          options: { batchID: `0x${SECOND_BATCH_ID_HEX.toUpperCase()}` },
+          options: { driveId: `0x${SECOND_DRIVE_ID.toUpperCase()}` },
         },
         PARENT_ORIGIN,
         parentWindow,
@@ -1376,7 +1469,7 @@ describe("SwarmIdProxy partitioned write enablement", () => {
       await internals().withModeAwareWriteLock(
         undefined,
         async () => undefined,
-        SECOND_BATCH_ID_HEX,
+        SECOND_DRIVE_ID,
       )
 
       const options = vi
@@ -1408,34 +1501,26 @@ describe("SwarmIdProxy partitioned write enablement", () => {
         expect(messagesOfType("getDrivesResponse")).toHaveLength(1),
       )
       const [response] = messagesOfType("getDrivesResponse")
-      expect(
-        (
-          response.drives as {
-            batchID: string
-            kind: string
-            primary: boolean
-            batchTTL: number
-          }[]
-        ).map(({ batchID, kind, primary, batchTTL }) => ({
-          batchID,
-          kind,
-          primary,
-          batchTTL,
-        })),
-      ).toEqual([
-        {
-          batchID: BATCH_ID_HEX,
+      // Under the app's drive ids, with the batch's on-chain fields left out.
+      expect(response.drives).toEqual([
+        expect.objectContaining({
+          driveId: FIRST_DRIVE_ID,
           kind: "regular",
           primary: true,
           batchTTL: 3600,
-        },
-        {
-          batchID: SECOND_BATCH_ID_HEX,
+        }),
+        expect.objectContaining({
+          driveId: SECOND_DRIVE_ID,
           kind: "scratch",
           primary: false,
           batchTTL: 3600,
-        },
+        }),
       ])
+      for (const drive of response.drives as Record<string, unknown>[]) {
+        expect(drive).not.toHaveProperty("batchID")
+        expect(drive).not.toHaveProperty("blockNumber")
+        expect(drive).not.toHaveProperty("amount")
+      }
     })
 
     // #882: each drive's lane is its own, and the dApp hears about every move.
@@ -1446,7 +1531,7 @@ describe("SwarmIdProxy partitioned write enablement", () => {
       await internals().withModeAwareWriteLock(
         undefined,
         async () => undefined,
-        SECOND_BATCH_ID_HEX,
+        SECOND_DRIVE_ID,
       )
       const first = coordinatorFor(BATCH_ID_HEX)!
       const second = coordinatorFor(SECOND_BATCH_ID_HEX)!
@@ -1467,13 +1552,13 @@ describe("SwarmIdProxy partitioned write enablement", () => {
           expect(messagesOfType("getDrivesResponse")).toHaveLength(before + 1),
         )
         const { drives } = messagesOfType("getDrivesResponse").at(-1)! as {
-          drives: { batchID: string; partition?: number }[]
+          drives: { driveId: string; partition?: number }[]
         }
-        return drives.map(({ batchID, partition }) => ({ batchID, partition }))
+        return drives.map(({ driveId, partition }) => ({ driveId, partition }))
       }
       expect(await lanes()).toEqual([
-        { batchID: BATCH_ID_HEX, partition: 0 },
-        { batchID: SECOND_BATCH_ID_HEX, partition: 1 },
+        { driveId: FIRST_DRIVE_ID, partition: 0 },
+        { driveId: SECOND_DRIVE_ID, partition: 1 },
       ])
 
       // The second drive's lease goes: nothing in the connection info moves
@@ -1486,8 +1571,8 @@ describe("SwarmIdProxy partitioned write enablement", () => {
       )
       expect(messagesOfType("connectionInfoChanged").at(-1)!.partition).toBe(0)
       expect(await lanes()).toEqual([
-        { batchID: BATCH_ID_HEX, partition: 0 },
-        { batchID: SECOND_BATCH_ID_HEX, partition: undefined },
+        { driveId: FIRST_DRIVE_ID, partition: 0 },
+        { driveId: SECOND_DRIVE_ID, partition: undefined },
       ])
       // And nothing moved: nothing is sent.
       second.deps.onLeaseChange()
@@ -1503,7 +1588,7 @@ describe("SwarmIdProxy partitioned write enablement", () => {
       await internals().withModeAwareWriteLock(
         undefined,
         async () => undefined,
-        SECOND_BATCH_ID_HEX,
+        SECOND_DRIVE_ID,
       )
       const first = coordinatorFor(BATCH_ID_HEX)!
       const second = coordinatorFor(SECOND_BATCH_ID_HEX)!
@@ -1528,7 +1613,7 @@ describe("SwarmIdProxy partitioned write enablement", () => {
       await internals().withModeAwareWriteLock(
         undefined,
         async () => undefined,
-        SECOND_BATCH_ID_HEX,
+        SECOND_DRIVE_ID,
       )
       await awaitBusJoin()
       const busChannel = new BroadcastChannel(accountChannelName)
@@ -1560,7 +1645,7 @@ describe("SwarmIdProxy partitioned write enablement", () => {
       await internals().withModeAwareWriteLock(
         undefined,
         async () => undefined,
-        SECOND_BATCH_ID_HEX,
+        SECOND_DRIVE_ID,
       )
       await awaitBusJoin()
       const busChannel = new BroadcastChannel(accountChannelName)
@@ -1594,7 +1679,7 @@ describe("SwarmIdProxy partitioned write enablement", () => {
       await internals().withModeAwareWriteLock(
         undefined,
         async () => undefined,
-        SECOND_BATCH_ID_HEX,
+        SECOND_DRIVE_ID,
       )
       const first = coordinatorFor(BATCH_ID_HEX)!
       const second = coordinatorFor(SECOND_BATCH_ID_HEX)!
@@ -1706,7 +1791,7 @@ describe("SwarmIdProxy partitioned write enablement", () => {
       await internals().withModeAwareWriteLock(
         undefined,
         async () => undefined,
-        SECOND_BATCH_ID_HEX,
+        SECOND_DRIVE_ID,
       )
       first.currentPartition = undefined
       second.currentPartition = undefined
@@ -1738,7 +1823,7 @@ describe("SwarmIdProxy partitioned write enablement", () => {
       await internals().withModeAwareWriteLock(
         undefined,
         async () => undefined,
-        SECOND_BATCH_ID_HEX,
+        SECOND_DRIVE_ID,
       )
       second.currentPartition = undefined
       await awaitBusJoin()
@@ -1784,13 +1869,11 @@ describe("SwarmIdProxy partitioned write enablement", () => {
       nextStamper()
 
       expect(() => internals().ensureCanUpload()).toThrow(/expired/)
-      expect(() =>
-        internals().ensureCanUpload(SECOND_BATCH_ID_HEX),
-      ).not.toThrow()
+      expect(() => internals().ensureCanUpload(SECOND_DRIVE_ID)).not.toThrow()
       await internals().withModeAwareWriteLock(
         undefined,
         async () => undefined,
-        SECOND_BATCH_ID_HEX,
+        SECOND_DRIVE_ID,
       )
       expect(
         coordinatorFor(SECOND_BATCH_ID_HEX)!.withWrite,
@@ -3300,12 +3383,14 @@ describe("SwarmIdProxy partitioned write enablement", () => {
             parentWindow,
           )
           const drives = messagesOfType("getDrivesResponse").at(-1)!.drives as {
-            batchID: string
+            driveId: string
           }[]
-          expect(drives.map((drive) => drive.batchID)).toEqual([
-            BATCH_ID_HEX,
-            OTHER_BATCH_ID_HEX,
-          ])
+          const { appSecret } = proxy as unknown as { appSecret: string }
+          expect(drives.map((drive) => drive.driveId)).toEqual(
+            [BATCH_ID_HEX, OTHER_BATCH_ID_HEX].map((hex) =>
+              deriveSecretSync(appSecret, `drive-id:${hex}`),
+            ),
+          )
         })
       } finally {
         busChannel.close()

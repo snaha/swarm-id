@@ -13,6 +13,10 @@
 // The client: embeds the hidden iframe, proxies Bee API calls
 export { SwarmIdClient } from "./swarm-id-client"
 
+// A derived secret as the SDK hands it out: a handle the proxy derives from on
+// use, bytes only through `reveal()` under the `revealSecrets` permission (#889)
+export { AppSecret } from "./app-secret"
+
 export type {
   ClientOptions,
   AuthStatus,
@@ -21,12 +25,14 @@ export type {
   AvatarSource,
   PostageBatch,
   Drive,
+  DriveRow,
   DriveKind,
   DriveRequest,
   DriveRequirement,
   Permissions,
   AppPermissions,
   PermissionName,
+  SharingSwitchName,
   DriveTargetOptions,
   AppMetadata,
   ButtonConfig,
