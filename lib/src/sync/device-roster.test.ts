@@ -16,6 +16,7 @@ import {
   readRoster,
   ensureInRoster,
   resetRosterScanCache,
+  rosterRetryDelayMs,
   RosterScanInconclusiveError,
   rosterTopic,
   rosterIdentifier,
@@ -356,7 +357,7 @@ describe("readRoster / ensureInRoster — inconclusive is not empty", () => {
       },
       chunk: { download: downloadChunk },
     }
-    await ensureInRoster({
+    const confirmed = await ensureInRoster({
       bee: bee as never,
       accountKey: new PrivateKey("11".repeat(32)),
       owner: OWNER,
@@ -366,6 +367,15 @@ describe("readRoster / ensureInRoster — inconclusive is not empty", () => {
       target: { mode: "stamper" } as never,
     })
     expect(downloadChunk).not.toHaveBeenCalled()
+    // The skip must be reportable (#920): the caller retries later instead of
+    // calling the publish a success and leaving the roster empty.
+    expect(confirmed).toBe(false)
+  })
+
+  it("backs off the roster retry exponentially up to a cap", () => {
+    expect(rosterRetryDelayMs(0)).toBe(30_000)
+    expect(rosterRetryDelayMs(1)).toBe(60_000)
+    expect(rosterRetryDelayMs(10)).toBe(600_000)
   })
 })
 

@@ -125,6 +125,7 @@ import {
 } from "./sync"
 import type { DeviceStateSnapshot } from "./sync"
 import { mergeDevicesList } from "./sync/merge-snapshot"
+import { rosterRetryDelayMs } from "./sync/device-roster"
 import { foldAccountFromSwarm } from "./sync/fold-account-from-swarm"
 import {
   accountDeltaFromSnapshot,
@@ -469,6 +470,10 @@ export class SwarmIdProxy {
    * motivation #4) and when account state changes while a lease is held.
    */
   private publishTimer: ReturnType<typeof setTimeout> | undefined
+  // Re-arms the announce publish after a partial one (roster append skipped
+  // on an inconclusive scan, #920); attempt drives the backoff.
+  private rosterRetryTimer: ReturnType<typeof setTimeout> | undefined
+  private rosterRetryAttempt = 0
   private publishInFlight: boolean = false
   /**
    * Why the next debounced publish was scheduled. `"acquired"` (announce on
@@ -1384,6 +1389,10 @@ export class SwarmIdProxy {
     if (this.publishTimer !== undefined) {
       clearTimeout(this.publishTimer)
       this.publishTimer = undefined
+    }
+    if (this.rosterRetryTimer !== undefined) {
+      clearTimeout(this.rosterRetryTimer)
+      this.rosterRetryTimer = undefined
     }
 
     // Retire any join still deriving its key — its continuation would
@@ -3107,7 +3116,7 @@ export class SwarmIdProxy {
       // never-edited field) are derived by `accountStateToDeviceView`.
       const view = accountStateToDeviceView(snapshot)
 
-      await coordinator.withWrite((target) =>
+      const published = await coordinator.withWrite((target) =>
         publishDeviceState({
           bee: this.nodeBee,
           accountId: snapshot.accountId,
@@ -3119,6 +3128,20 @@ export class SwarmIdProxy {
           target,
         }),
       )
+      if (published.status === "partial") {
+        // The roster append was skipped (#920). Re-run the announce path with
+        // backoff: it re-reads the roster and appends once the scan is clean.
+        const delay = rosterRetryDelayMs(this.rosterRetryAttempt++)
+        console.warn(`[Proxy] ${published.warning}; retrying in ${delay}ms`)
+        if (this.rosterRetryTimer !== undefined)
+          clearTimeout(this.rosterRetryTimer)
+        this.rosterRetryTimer = setTimeout(() => {
+          this.rosterRetryTimer = undefined
+          this.schedulePublish("acquired")
+        }, delay)
+        return
+      }
+      this.rosterRetryAttempt = 0
       // `ui/tests/three-devices.test.ts` counts this line to tell a busy
       // holder from an idle one (#707); reword it there too.
       console.info(
@@ -3338,6 +3361,10 @@ export class SwarmIdProxy {
     if (this.publishTimer !== undefined) {
       clearTimeout(this.publishTimer)
       this.publishTimer = undefined
+    }
+    if (this.rosterRetryTimer !== undefined) {
+      clearTimeout(this.rosterRetryTimer)
+      this.rosterRetryTimer = undefined
     }
     this.pendingLaneUpdates.clear()
     this.storagePartitioned = false

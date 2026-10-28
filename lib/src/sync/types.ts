@@ -21,4 +21,14 @@ export type SyncResult =
       chunkAddresses: Uint8Array[]
       warning: string
     }
+  | {
+      // This device's state was written, but its roster membership could not
+      // be confirmed (the scan was inconclusive) so the append was skipped.
+      // A second device cannot find the account until a retry lands (#920).
+      status: "partial"
+      reference: string
+      timestamp: bigint
+      chunkAddresses: Uint8Array[]
+      warning: string
+    }
   | { status: "error"; error: string }

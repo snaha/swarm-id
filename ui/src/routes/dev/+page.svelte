@@ -985,10 +985,8 @@
         const stamp = defaultStamp ? postageStampsStore.getStamp(defaultStamp) : undefined
         const utilization = stamp ? stamp.utilization.toFixed(2) : 'unknown'
 
-        if (result.status === 'success-unverified') {
-          results.push(
-            `⚠️ ${account.name}: synced, but root chunk not retrievable — ${result.warning}`,
-          )
+        if (result.status === 'success-unverified' || result.status === 'partial') {
+          results.push(`⚠️ ${account.name}: synced, but ${result.warning}`)
           errorCount++
           continue
         }

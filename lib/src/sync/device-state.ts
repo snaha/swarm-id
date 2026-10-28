@@ -250,7 +250,7 @@ export async function publishDeviceState(opts: {
     })
   }
 
-  await ensureInRoster({
+  const inRoster = await ensureInRoster({
     bee: opts.bee,
     accountKey: opts.accountKey,
     owner: opts.owner,
@@ -260,12 +260,17 @@ export async function publishDeviceState(opts: {
     target: opts.target,
   })
 
-  return {
-    status: "success",
+  const base = {
     reference: written.reference,
     timestamp: BigInt(Math.floor(Date.now() / 1000)),
     chunkAddresses: written.chunkAddresses,
   }
+  if (!inRoster) {
+    const warning = `roster membership unconfirmed for ${opts.accountId}: the scan was inconclusive, so the append was skipped`
+    console.warn(`[publishDeviceState] ${warning}`)
+    return { status: "partial", warning, ...base }
+  }
+  return { status: "success", ...base }
 }
 
 /**

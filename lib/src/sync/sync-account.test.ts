@@ -5,7 +5,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest"
 import { EthAddress, BatchId, type Bee } from "@ethersphere/bee-js"
 import { createSyncAccount } from "./sync-account"
 import { deserializeDeviceState } from "./device-state"
-import { ensureInRoster } from "./device-roster"
+import { ensureInRoster, rosterRetryDelayMs } from "./device-roster"
 import type {
   AccountsStoreInterface,
   PostageStampsStoreInterface,
@@ -206,8 +206,9 @@ vi.mock("./batch-write-coordinator", () => ({
 // The append-only roster does its own Swarm I/O (sequential feed + makeSOCReader)
 // that the bee mock here doesn't cover; mock it so these tests focus on the
 // device-state write. Roster behaviour is exercised by the integration test.
-vi.mock("./device-roster", () => ({
-  ensureInRoster: vi.fn(async () => {}),
+vi.mock("./device-roster", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("./device-roster")>()),
+  ensureInRoster: vi.fn(async () => true),
   readRoster: vi.fn(async () => []),
 }))
 
@@ -409,6 +410,39 @@ describe("createSyncAccount", () => {
         device: expect.objectContaining({ deviceId: "test-device-self" }),
       }),
     )
+  })
+
+  it("reports a partial publish when the roster append was skipped, and retries it (#920)", async () => {
+    // The gateway 500s during the cold roster scan → ensureInRoster cannot
+    // confirm membership and skips the append. The publish must say so, and a
+    // retry must run on its own: nothing else re-runs the append until the user
+    // edits the account, so the second device stays signed out.
+    vi.useFakeTimers()
+    try {
+      const stores = createMockStores()
+      const syncAccount = createSyncAccount({
+        bee: createMockBee(),
+        ...stores,
+        utilizationStore: {} as UtilizationStoreDB,
+        utilizationUploader: {
+          scheduleUpload: vi.fn().mockResolvedValue(undefined),
+        } as unknown as DebouncedUtilizationUploader,
+      })
+      vi.mocked(ensureInRoster).mockClear().mockResolvedValueOnce(false)
+
+      const result = await syncAccount(TEST_ETH_ADDRESS_HEX)
+      expect(result?.status).toBe("partial")
+      expect(ensureInRoster).toHaveBeenCalledTimes(1)
+
+      // The scan is clean on the retry: it confirms the roster and stops. The
+      // retried sync awaits real WebCrypto work, so wait for it after the timer.
+      await vi.advanceTimersByTimeAsync(rosterRetryDelayMs(0))
+      await vi.waitFor(() => expect(ensureInRoster).toHaveBeenCalledTimes(2))
+      await vi.advanceTimersByTimeAsync(rosterRetryDelayMs(1))
+      expect(ensureInRoster).toHaveBeenCalledTimes(2)
+    } finally {
+      vi.useRealTimers()
+    }
   })
 
   it("should include SOC address in returned chunk addresses", async () => {
