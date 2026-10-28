@@ -4,8 +4,6 @@
 import { describe, it, expect, vi } from "vitest"
 import { BatchId, EthAddress, PrivateKey } from "@ethersphere/bee-js"
 
-import { PartitionLease } from "./partition-lease"
-
 type MockLease = ReturnType<typeof makeLease>
 
 // The lease primitive and the lock-SOC read are mocked so the coordinator's
@@ -83,7 +81,6 @@ const BATCH_ID = "ab".repeat(32)
 function makeStamper(calls: string[]) {
   return {
     depth: 20,
-    counterDepth: 20,
     invalidateLease: vi.fn(() => calls.push("invalidate")),
     unbindPartition: vi.fn(() => calls.push("unbind")),
     bindPartition: vi.fn(() => calls.push("bind")),
@@ -2122,41 +2119,5 @@ describe("BatchWriteCoordinator — bus-accelerated leases (docs/Account-Bus.md)
     const coordinator = new BatchWriteCoordinator(makeDeps())
     coordinator.teardown()
     await expect(coordinator.yieldForPeer()).resolves.toBeUndefined()
-  })
-})
-
-describe("BatchWriteCoordinator — scratch drive counter layout", () => {
-  it("builds the lease at the stamper's counterDepth, not the batch depth", async () => {
-    // A scratch drive's counters wrap within the lane, so they serialize as
-    // uint32 at a wider layout depth than the batch. The lease publishes and
-    // resumes partition state at that layout; on the batch depth a bucket's
-    // counter passing 65535 (an SOC rewritten once a second for ~18 hours)
-    // would make `serializeUint16Array` throw.
-    leaseController.lease = makeLease({
-      acquireResult: {
-        partition: 1,
-        partitionCount: 4,
-        localCounter: new Uint32Array(8),
-        isReadOnly: false,
-      },
-    })
-    const fromSwarmEncryptionKey = vi.mocked(
-      PartitionLease.fromSwarmEncryptionKey,
-    )
-    fromSwarmEncryptionKey.mockClear()
-    const stamper = { ...makeStamper([]), depth: 20, counterDepth: 24 }
-    const coordinator = new BatchWriteCoordinator(
-      makeDeps({
-        stamper: stamper as unknown as BatchWriteCoordinatorDeps["stamper"],
-        mode: "oneshot",
-      }),
-    )
-
-    await coordinator.withWrite(async () => "ok", { wait: "block" })
-
-    expect(fromSwarmEncryptionKey).toHaveBeenCalledTimes(1)
-    expect(fromSwarmEncryptionKey.mock.calls[0][0]).toMatchObject({
-      batchDepth: 24,
-    })
   })
 })

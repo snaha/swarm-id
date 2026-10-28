@@ -118,16 +118,16 @@ Capacity is enforced per partition: a write is rejected when `j` would reach
 
 ## 5. Persistence of the counter
 
-The counter is a `Uint32Array(65536)` (one entry per bucket), serialised and split into
-chunks by `getChunkLayout(depth)`:
-
-- counter codec is uint16 for `depth ≤ UINT16_COUNTER_MAX_DEPTH`, else uint32;
-- `bucketsPerChunk = CHUNK_SIZE / counterByteSize`; `numUtilizationChunks = 65536 /
-bucketsPerChunk` (uint16 → 2,048 buckets/chunk → **32 chunks**).
+The counter is a `Uint32Array(65536)` (one entry per bucket). Locally it is cached as 64
+fixed uint32 chunks (`NUM_UTILIZATION_CHUNKS`), whatever the depth. On the wire it is
+packed with the SBU1 leaf encoding (`sync/counter-codec.ts`, #463): a per-publish frame
+(base + bit width chosen from the counters' spread), deltas packed to that width, outliers
+listed as exceptions in the reference chunk — typically 8–20 leaves instead of a fixed 32
+or 64, and independent of the batch depth, so a dilute changes nothing published.
 
 Persistence rules:
 
-- **Each counter chunk is routed to its bucket's reserved slot `p`** (mutable overwrite),
+- **Each leaf is routed to its bucket's reserved slot `p`** (mutable overwrite),
   so persisting the counter never consumes data capacity. Per-chunk keys are varied so a
   partition's chunks land in **distinct buckets**; each then occupies slot `p` of its
   bucket.
@@ -143,18 +143,19 @@ consuming capacity and eventually throwing "Bucket is full" — even on a fresh 
 `writePartitionState` (`partition-state.ts`) turns the live counter into durable Swarm
 state:
 
-1. Each non-zero counter chunk is uploaded with a random encryption key to a reserved slot,
+1. Each non-zero leaf is uploaded with a random encryption key to a reserved slot,
    yielding a 64-byte **encrypted reference** (`address ‖ key`).
-2. A single **reference chunk** lists those N references (`N·64 ≤ 4096` even at `N = 64`)
-   and is itself uploaded the same way. A chunk that is entirely zero (never written) is
-   not uploaded — the reference chunk carries an **all-zero sentinel** at that index and the
-   reader defaults it to a zero chunk (a sparse first publish).
+2. A single **reference chunk** carries the frame, the exceptions and those L references
+   (within one chunk at the width cap) and is itself uploaded the same way. A leaf that is
+   entirely zero (never written) is not uploaded — the reference chunk carries an
+   **all-zero sentinel** at that index and the reader defaults it to a zero leaf (a sparse
+   first publish).
 3. The reference chunk's reference is published in the rotating state-pointer SOC (§8).
 
-**Incremental.** Given the previous publish's references and the counter it published,
-only the chunks whose serialized bytes changed are re-uploaded; unchanged chunks reuse the
-retained reference. A typical upload changes the data SOC's bucket plus the previous
-publish's feed bucket → ~3–4 chunk writes in one `Promise.all`, not all 32. On acquire the
+**Incremental.** Given the previous publish's references, the counter it published and
+the frame it packed with — kept while it still fits, so leaf boundaries hold — only the
+leaves whose bytes changed are re-uploaded; unchanged leaves reuse the retained reference.
+A small upload changes a leaf or two → a few writes in one `Promise.all`, not every leaf. On acquire the
 lease seeds this baseline from the resumed state, so even the **first** publish of a
 session is incremental, not a full re-publish. A genuinely fresh account (no recovered
 refs) falls back to the sparse-full path.

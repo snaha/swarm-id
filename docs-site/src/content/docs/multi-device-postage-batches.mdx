@@ -128,19 +128,14 @@ Each device tracks, per bucket, how many data chunks **its partition** has writt
 the `j` counter above. This is held in memory as a `Uint32Array(65536)` (`dataCounters`),
 always uint32 in memory regardless of how it is serialized.
 
-### On-disk / on-wire codec
+### Local layout
 
-The counter array is serialized into fixed `CHUNK_SIZE = 4096`-byte chunks. The per-bucket
-counter is **uint16** when it always fits (`D ≤ 31`, max `2^15`), else **uint32**
-(`D ≥ 32`). This sets the chunk layout (`getChunkLayout`):
-
-| Codec  | Applies when | `bucketsPerChunk` | `numUtilizationChunks` |
-| ------ | ------------ | ----------------- | ---------------------- |
-| uint16 | `D ≤ 31`     | 2 048             | 32                     |
-| uint32 | `D ≥ 32`     | 1 024             | 64                     |
-
-Counters are little-endian in the serialized chunk. Chunk `i` covers buckets
-`[i·bucketsPerChunk, (i+1)·bucketsPerChunk)`.
+The counter array is cached as fixed `CHUNK_SIZE = 4096`-byte chunks of 1 024
+little-endian **uint32** counters, 64 chunks for the table, whatever the batch depth
+(`BUCKETS_PER_CHUNK`, `NUM_UTILIZATION_CHUNKS`). Chunk `i` covers buckets
+`[i · 1024, (i + 1) · 1024)`. Nothing in the cache depends on depth, so a dilute changes no
+cached byte. The partition state published on Swarm packs the same counters far more
+densely — see the wire format below.
 
 ### Per-chunk encryption key
 
@@ -156,7 +151,7 @@ chunkKey = HMAC-SHA256(
 
 `nonce` starts at 0 and is incremented only when the resulting encrypted address would
 land in the same bucket as another utilization chunk in the same save (collisions are
-vanishingly rare — ≈0.008 bumps per save with 32 chunks over 65 536 buckets). The nonce
+vanishingly rare — ≈0.03 bumps per save with 64 chunks over 65 536 buckets). The nonce
 that produced a chunk is cached so an unchanged plaintext reuses the same key and the
 upload is skipped.
 
@@ -315,7 +310,7 @@ The counter is not a single blob. It is split into the same `numUtilizationChunk
 chunks, each uploaded with a **random** encryption key to the partition's reserved slot,
 yielding a 64-byte **encrypted reference** (`address ‖ key`). A single **reference chunk**
 concatenates those references (`N · 64 ≤ 4096` bytes, one chunk even at `N = 64`). A taking
-over device follows **pointer → reference chunk → counter chunks**, decrypting each from its
+over device follows **pointer → reference chunk → leaves**, decrypting each from its
 embedded key.
 
 ### The state pointer
@@ -343,36 +338,64 @@ counter.
 ### Wire format (byte layout)
 
 The format is **binary** and is versioned by the topic domain
-(`swarm-id-partition-state-v1`); there is no in-blob version byte. A future v2 publishes
-under a v2 topic and never collides with v1 readers.
+(`swarm-id-partition-state-v2`); there is no in-blob version byte. A new version publishes
+under its own topic and never collides with older readers.
 
-**Reference chunk** — exactly `N × 64` bytes, where
-`N = numUtilizationChunks(batchDepth)`:
+The counter table is packed with the leaf encoding of Nectar's **SBU1** usage snapshot
+([`docs/spec/sbu1.md`](https://github.com/nxm-rs/nectar/blob/main/docs/spec/sbu1.md) §4
+and §6; `lib/src/sync/counter-codec.ts`), byte for byte, so its golden vectors pin ours. A
+**frame** is a `base` (at most the smallest counter) and a bit width `w` (0 to 23). Every
+bucket stores `count − base` as a `w`-bit field, packed MSB-first with no gaps; a bucket
+whose delta does not fit is an **exception**: its field is all ones and its absolute count
+is listed in the reference chunk (at most 128). A leaf holds `floor(32768 / w)` buckets, so
+`L = ceil(65536 / floor(32768 / w))` leaves cover the table (none at `w = 0`), the last one
+short. The canonical encoder takes `base = min` and the width that minimizes the packed
+bits plus 8 bytes per exception plus 64 per leaf.
 
-| Offset        | Size | Content                                                             |
-| ------------- | ---- | ------------------------------------------------------------------- |
-| `i · 64`      | 32   | Swarm address of counter chunk `i`, or all zeros if never written   |
-| `i · 64 + 32` | 32   | Decryption key of counter chunk `i` (random, generated per publish) |
+The width follows the _spread_ of the counters, not the batch depth, so a dilute changes
+no published byte. Lane counters are Poisson over the buckets, so the spread grows with
+the square root of the fill and a real drive packs into far fewer chunks than a fixed
+width would take (32 at uint16, 64 at uint32):
 
-A counter chunk that is entirely zero is not uploaded; its entry in the reference chunk is
-all zeros and the reader treats it as a zero chunk.
+| Data written by one lane | `w` | Leaves |
+| ------------------------ | --- | ------ |
+| 300 MB                   | 3   | 7      |
+| 2.5 GB                   | 5   | 11     |
+| 25 GB                    | 7   | 15     |
+| 1 TB                     | 9   | 19     |
+| 16 TB                    | 11  | 23     |
 
-**Counter chunk `i`** — exactly 4096 bytes (`CHUNK_SIZE`): `bucketsPerChunk` consecutive
-per-bucket counters, **little-endian**, covering buckets
-`[i · bucketsPerChunk, (i + 1) · bucketsPerChunk)`. The counter width depends on the batch
-depth (`getChunkLayout`):
+**Reference chunk** — `7 + 8·E + 64·L` bytes, big-endian, within one chunk at the width
+cap:
 
-| Batch depth                         | Counter width | `bucketsPerChunk` | `N` (chunks) |
-| ----------------------------------- | ------------- | ----------------- | ------------ |
-| `≤ 31` (`UINT16_COUNTER_MAX_DEPTH`) | `uint16` LE   | 2048              | 32           |
-| `≥ 32`                              | `uint32` LE   | 1024              | 64           |
+| Offset                 | Size | Content                                                    |
+| ---------------------- | ---- | ---------------------------------------------------------- |
+| 0                      | 1    | Width `w`                                                  |
+| 1                      | 4    | Base                                                       |
+| 5                      | 2    | Exception count `E`                                        |
+| `7 + k · 8`            | 4    | Bucket of exception `k` (strictly ascending)               |
+| `7 + k · 8 + 4`        | 4    | Its absolute count                                         |
+| `7 + 8E + i · 64`      | 32   | Swarm address of leaf `i`, or all zeros if never written   |
+| `7 + 8E + i · 64 + 32` | 32   | Decryption key of leaf `i` (random, generated per publish) |
 
-The decoded result is always a `Uint32Array(65536)` regardless of the on-wire width.
-`writePartitionState` validates its input against `PartitionStateSchemaV1`, and
-`readPartitionState` validates the reassembled counter, the reference chunk's length and
-each counter chunk's length before returning.
+A leaf whose bytes are all zero is not uploaded; its entry in the reference chunk is all
+zeros and the reader treats it as a zero leaf.
+
+**Leaf `i`** — `ceil(n · w / 8)` bytes for the `n` buckets it covers: their deltas packed
+MSB-first, the trailing padding bits zero.
+
+The decoded result is always a `Uint32Array(65536)`. `writePartitionState` validates its
+input against `PartitionStateSchemaV1`; `readPartitionState` validates the reference chunk
+against the frame it names, each leaf's length and padding, the exception list, and the
+reassembled counter before returning. There is no checksum: each reference binds its
+leaf's exact bytes.
 
 ### Incremental publish
+
+The previous publish's frame is kept while it still fits the counter, so leaf boundaries
+hold and only the leaves a write touched are re-uploaded. A frame that no longer fits (or
+the once-per-epoch full re-pin) packs under the canonical frame and publishes every
+non-zero leaf.
 
 Given the previous publish's references and the counter it published, only the chunks whose
 bytes changed are uploaded again; unchanged chunks keep their reference. A typical upload
@@ -588,9 +611,9 @@ To interoperate with the reference implementation, an external client must:
    reference-chunk → counter-chunks structure, publish-before-acknowledge, and the
    fail-safe (read-only, never zero-seed) handling of an unreadable published counter.
    Skipping the last one re-introduces silent slot-reuse data loss.
-6. **Track per-bucket counters** with the uint16/uint32 codec and the
-   `swarm-id-util-chunk-v1` key derivation (only needed to publish counters that the
-   reference client can read).
+6. **Track per-bucket counters** and pack them with the SBU1 leaf encoding for the
+   partition state (the `swarm-id-util-chunk-v1` key derivation is only needed to publish
+   the developer-tool utilization chunks that the reference client can read).
 7. **Implement account-state sync**: the append-only roster feed, one device-state epoch
    feed per device with the snapshot schema above, and the fold with its recency clocks
    and tombstones.
