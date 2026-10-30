@@ -9,29 +9,13 @@
  */
 
 import { Binary } from "cafe-utility"
-import { EthAddress, Topic, PrivateKey, Identifier } from "@ethersphere/bee-js"
+import { EthAddress, Topic, PrivateKey } from "@ethersphere/bee-js"
 import { makeSOCAddress } from "@ethersphere/core-sdk"
 import { EpochIndex, MAX_LEVEL } from "./epoch"
 import { uploadSOC, isStamperTarget, type UploadTarget } from "../../upload"
 import type { EpochUpdater, EpochUpdateHints, EpochUpdateResult } from "./types"
 import { AsyncEpochFinder } from "./async-finder"
-
-/**
- * Build the SOC identifier for one epoch of a topic's epoch feed:
- * `keccak256(topic ‖ epoch.marshalBinary())`. Exported so readers can
- * reconstruct the SOC address of a feed entry they found (e.g. the
- * partition-state reader compensates for the slot the entry's own SOC
- * consumed).
- */
-export async function makeEpochIdentifier(
-  topic: Topic,
-  epoch: EpochIndex,
-): Promise<Identifier> {
-  const epochHash = await epoch.marshalBinary()
-  return new Identifier(
-    Binary.keccak256(Binary.concatBytes(topic.toUint8Array(), epochHash)),
-  )
-}
+import { makeEpochIdentifier } from "./utils"
 
 /**
  * 32-byte SOC chunk address of one epoch-feed entry:

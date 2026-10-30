@@ -4,7 +4,8 @@
 /**
  * How both epoch finders read one entry off the plain (unencrypted) path: the
  * payload layouts they accept, and the ones they reject. The SOCs are signed
- * for real, as Bee would serve them.
+ * for real, as Bee would serve them, and one signed by anyone but the feed's
+ * owner is not an entry: a gateway serves whatever bytes it holds.
  */
 
 import { describe, it, expect } from "vitest"
@@ -14,11 +15,13 @@ import { AsyncEpochFinder } from "./async-finder"
 import { EpochIndex } from "./epoch"
 import { SyncEpochFinder } from "./finder"
 import type { EpochFinder } from "./types"
-import { epochSocAddress, makeEpochIdentifier } from "./updater"
+import { epochSocAddress } from "./updater"
+import { makeEpochIdentifier } from "./utils"
 import { uint8ArrayToHex } from "../../../utils/hex"
 
 const TOPIC = Topic.fromString("epoch-finder-payload")
 const SIGNER = new PrivateKey("11".repeat(32))
+const IMPOSTOR_KEY = "33".repeat(32)
 const OWNER = SIGNER.publicKey().address()
 const AT = 1_700_000_000n
 const TIMESTAMP_SIZE = 8
@@ -94,6 +97,15 @@ describe.each(FINDERS)("%s — plain entry payload", (_, makeFinder) => {
   it("skips an entry written after the requested time", async () => {
     const reference = new Uint8Array(PLAIN_REF_SIZE).fill(FILL)
     const bee = await beeWithEntry(feedPayload(AT + 1n, reference, false))
+    expect(await makeFinder(bee).findAt(AT)).toBeUndefined()
+  })
+
+  it("skips an entry at the owner's address signed by another key", async () => {
+    const reference = new Uint8Array(PLAIN_REF_SIZE).fill(FILL)
+    const bee = await beeWithEntry(
+      feedPayload(AT, reference, false),
+      new PrivateKey(IMPOSTOR_KEY),
+    )
     expect(await makeFinder(bee).findAt(AT)).toBeUndefined()
   })
 

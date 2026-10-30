@@ -15,7 +15,8 @@ import { PrivateKey, Topic } from "@ethersphere/bee-js"
 import { makeContentAddressedChunk } from "@ethersphere/core-sdk"
 import { AsyncEpochFinder } from "./async-finder"
 import { EpochIndex, MAX_LEVEL } from "./epoch"
-import { epochSocAddress, makeEpochIdentifier } from "./updater"
+import { epochSocAddress } from "./updater"
+import { makeEpochIdentifier } from "./utils"
 import { uint8ArrayToHex } from "../../../utils/hex"
 
 const TOPIC = Topic.fromString("async-finder-test")
