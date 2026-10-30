@@ -496,6 +496,30 @@ balance, so resuming needs the target depth persisted on the record. Tracked, al
 copy that currently promises otherwise, in
 [#541](https://github.com/snaha/swarm-id/issues/541).
 
+## Delete account
+
+A postage batch has no cancel and its balance cannot be withdrawn, so deleting an account
+**dilutes** each drive instead: `increaseDepth` halves the per-chunk balance per step down to the
+contract's minimum (~1 day of storage), and the drive lapses within a day or two. Nothing is
+erased; the data stops being paid for. `planDeleteDilution` (`ui/src/lib/payment/delete-dilution.ts`)
+says how far each drive goes and which are left alone, and `runDeleteDilution`
+(`drive-operation.ts`) funds the gas for all of them in one payment, through the same screens as
+extend and resize. A drive a first attempt diluted plans as `expires-soon`, so a retry sends
+nothing twice.
+
+| Outcome                                         | Result                                                                                 |
+| ----------------------------------------------- | -------------------------------------------------------------------------------------- |
+| every planned drive diluted (or none to dilute) | **Account deleted**                                                                    |
+| gas declined, nothing sent                      | **Drives can't be shortened**: Back keeps the account, Delete anyway goes on undiluted |
+| deleted undiluted                               | **Some data couldn't be deleted**, with the postage signer key that owns the drives    |
+| the gas payment failed or delivered short       | nothing is torn down: **Deletion failed**, Retry                                       |
+| a transaction failed                            | nothing is torn down: **Deletion failed**, Retry                                       |
+| the deletion could not be published             | the account stays, unmarked: **Deletion failed**, Retry                                |
+
+The signer key is derived before anything is torn down, since nothing is left to derive it from
+afterwards; with it the batches can still be diluted, topped up or left to run out from any wallet.
+What the teardown publishes, and when, is in docs/Account-State.md, "Account deletion".
+
 ## Dev and testing
 
 **Locally only one method really settles, and it is the built-in one over the direct rail.**
@@ -604,4 +628,7 @@ than assumes; whether Relay's own solver does is what the canary has to establis
   path), `local-payment-rail.test.ts`, `relay.test.ts` (the delivery bound).
 - Live contract test: `relay.live.test.ts` (`pnpm --filter @swarm-id/ui test:live`).
 - E2E: `ui/tests/payment-rail.test.ts` (payment screens end to end),
-  `ui/tests/drive-onchain.test.ts` (the engine's flows).
+  `ui/tests/drive-onchain.test.ts` (the engine's flows), `ui/tests/delete-account.test.ts`
+  (deletion; its synced tests run in the Three Devices workflow).
+- Deletion units: `delete-dilution.test.ts`, `drive-operation.test.ts` (`runDeleteDilution`),
+  `ui/src/lib/delete-account.test.ts`.

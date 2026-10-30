@@ -265,7 +265,7 @@ With the bus in place the partitioned iframe is a first-class writer:
   context's own feed and cannot be deleted by their absence here. What it does hold cannot
   revive anything either — collections merge per entry on tombstone clocks, so a peer's
   `revokedAt` / `deletedAt` beats the connect-time copy, and the scalars ride per-field clocks
-  (`accountNameAt`, `defaultStampAt`, `settingsAt`), so a stale rename loses rather than
+  (`accountNameAt`, `defaultStampAt`, `settingsAt`, `deletedAt`), so a stale rename loses rather than
   clobbers. Pinned by tests in `lib/src/sync/device-state.test.ts` ("a stale, narrowed
   publisher"). Since #568 the view is not frozen for the session either: a delta that lands
   folds in and is re-persisted, so what it publishes is the handover plus every overlap since.

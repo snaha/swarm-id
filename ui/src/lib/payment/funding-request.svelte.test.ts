@@ -10,9 +10,9 @@ import type { FundingQuote } from '$lib/payment/funding'
 import type { PaymentRail } from '$lib/payment/payment-rail'
 import type { Account } from '$lib/types'
 
+import { PaymentCancelledError } from './drive-operation'
 import {
   type FundingRequester,
-  PaymentCancelledError,
   UseCardError,
   UseWidgetError,
   createFundingRequester,

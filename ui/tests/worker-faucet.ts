@@ -36,21 +36,24 @@ import { privateKeyToAccount } from 'viem/accounts'
 const WORKER_XDAI_WEI = 5n * 10n ** 18n // 5 xDAI
 
 /**
- * BZZ each worker keeps to hand out — twelve fundings at the 3 BZZ a purchase
+ * BZZ each worker keeps to hand out — twenty fundings at the 3 BZZ a purchase
  * takes (`DRIVE_FUNDING` in `helpers.ts`).
  *
- * Sized for the worst distribution, not the average one: work is handed out a
- * FILE at a time, so nothing stops one worker drawing every funding suite. The
- * suites ask for eight fundings between them today, and a float that merely
- * covers the average leaves a worker empty mid-run — which surfaces as a
- * reverted transfer inside whichever test was unlucky, not as a budget
- * problem. Add a funding suite and this is the number to raise.
+ * Sized for a bad distribution, not the average one: work is handed out a
+ * FILE at a time, so one worker can draw several funding suites. The suites
+ * ask for about two dozen fundings between them today, nine of them in
+ * `done-page` and six in `bus-propagation`, and a float that merely covers the
+ * average leaves a worker empty mid-run — which surfaces as a reverted
+ * transfer inside whichever test was unlucky, not as a budget problem. Twenty
+ * covers those two on one worker with a smaller suite beside them. Add a
+ * funding suite and this is the number to raise.
  *
- * The chain's faucet is baked with 250 BZZ, so stocking a handful of workers
- * from a fresh one is affordable; a long-lived one only replaces what was
- * spent, since the addresses are stable.
+ * The chain's faucet is baked with 250 BZZ, so stocking three workers takes
+ * 180 of it from a fresh chain; a long-lived one only replaces what was spent,
+ * since the addresses are stable, until the faucet runs low and the chain needs
+ * restarting from its snapshot.
  */
-const WORKER_BZZ_FLOAT_PLUR = 36n * 10n ** 16n // 36 BZZ (16 decimals)
+const WORKER_BZZ_FLOAT_PLUR = 60n * 10n ** 16n // 60 BZZ (16 decimals)
 
 /** Domain separator, so these addresses collide with nothing else on the chain. */
 const KEY_PREFIX = 'swarm-id e2e worker faucet '

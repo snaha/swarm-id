@@ -22,6 +22,8 @@
   interface Props {
     /** Omitted for pending states which render their own centered content. */
     title?: string
+    /** Names a dialog that has no title, for assistive technology. */
+    label?: string
     /** Rendered left of the title — e.g. a back arrow in a multi-step flow. */
     leading?: Snippet
     /** Hide the X button while an operation is pending. */
@@ -31,7 +33,15 @@
     children: Snippet
   }
 
-  let { title, leading, dismissable = true, onclose, class: className, children }: Props = $props()
+  let {
+    title,
+    label,
+    leading,
+    dismissable = true,
+    onclose,
+    class: className,
+    children,
+  }: Props = $props()
 
   let panel = $state<HTMLDivElement>()
 
@@ -125,10 +135,10 @@
     bind:this={panel}
     role="dialog"
     aria-modal="true"
-    aria-label={title}
+    aria-label={title ?? label}
     tabindex="-1"
     class={cn(
-      'bg-popover flex w-96 max-w-[calc(100vw-4rem)] flex-col gap-4 rounded-lg border p-4 shadow-lg outline-none',
+      'bg-popover flex max-h-[calc(100dvh-4rem)] w-96 max-w-[calc(100vw-4rem)] flex-col gap-4 overflow-y-auto rounded-lg border p-4 shadow-lg outline-none',
       className,
     )}
   >

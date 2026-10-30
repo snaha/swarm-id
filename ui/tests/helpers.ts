@@ -396,7 +396,7 @@ export async function fundPostageSigner(
  * `derivePostageSignerKey` in `lib/src/utils/key-derivation.ts`, the source of
  * truth this must match.
  */
-async function postageSignerAddress(page: Page): Promise<`0x${string}`> {
+export async function postageSignerAddress(page: Page): Promise<`0x${string}`> {
   const signerKey = await page.evaluate(async () => {
     const doc = JSON.parse(localStorage.getItem('swarm-id-accounts') ?? '{}') as {
       data?: { derivationKey?: string }[]

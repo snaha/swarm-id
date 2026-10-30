@@ -20,6 +20,7 @@
   import { goto } from '$app/navigation'
   import { resolve } from '$app/paths'
 
+  import { reclaimed } from '$lib/account-deleted'
   import { type Attempt, createAttemptTracker } from '$lib/attempt'
   import AppHeader from '$lib/components/app-header.svelte'
   import NewPasswordFields, { isNewPasswordValid } from '$lib/components/new-password-fields.svelte'
@@ -122,8 +123,10 @@
       postageStamps: carried?.postageStamps ?? [],
       partitionCount: carried?.partitionCount ?? PARTITION_COUNT,
     }
-    // `add` returns the live reactive account; the handshake mutates it.
-    const liveAccount = accountsStore.add(account)
+    // `add` returns the live reactive account; the handshake mutates it. A
+    // restore claims the account back, even one a peer deleted (`reclaimed`);
+    // a brand-new account has never been deleted.
+    const liveAccount = accountsStore.add(carried ? reclaimed(account) : account)
     sessionStore.setCurrentAccount(liveAccount.id)
     // `add` persists but doesn't fire the sync hook (only field mutations do),
     // so publish once here to register this device in the Swarm roster. No-ops

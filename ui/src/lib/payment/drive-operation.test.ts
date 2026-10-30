@@ -14,13 +14,19 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { Account } from '$lib/stores/accounts.svelte'
 
 import {
+  PaymentCancelledError,
   SizeIncreasePendingError,
   reconciledChainDepth,
+  runDeleteDilution,
   runExtend,
   runPurchase,
   runResize,
 } from './drive-operation'
-import { CreatePendingError } from './postage-onchain'
+import {
+  CreatePendingError,
+  GAS_BUDGET_XDAI_WEI,
+  GAS_PER_TRANSACTION_XDAI_WEI,
+} from './postage-onchain'
 import { stampAmountForSeconds, ttlSecondsFor } from './purchase'
 
 // The accounts store reads `browser` and (via the lib storage manager)
@@ -63,6 +69,7 @@ const onchain = vi.hoisted(() => ({
   increaseDepthOnChain: vi.fn(),
   preflightExtend: vi.fn(),
   preflightResize: vi.fn(),
+  readDilutionState: vi.fn(),
   reconcileStampFromChain: vi.fn(),
   topUpOnChain: vi.fn(),
 }))
@@ -333,7 +340,12 @@ describe('runExtend', () => {
     await runExtend({ account, drive: account.stamps[0], addedSeconds: 30 * DAY, requestFunding })
 
     const expected = stampAmountForSeconds(PRICE, 30 * DAY) << 20n
-    expect(onchain.fundingShortfall).toHaveBeenCalledWith(OWNER, expected, chain)
+    expect(onchain.fundingShortfall).toHaveBeenCalledWith(
+      OWNER,
+      expected,
+      chain,
+      GAS_BUDGET_XDAI_WEI,
+    )
     expect(onchain.bundledExtend.mock.calls[0][3]).toBe(expected)
     expect(onchain.ensureBzzAllowance.mock.calls[0][1]).toBe(expected)
   })
@@ -525,6 +537,273 @@ describe('the pre-spend checkpoint', () => {
     expect(onchain.fundingShortfall).toHaveBeenCalled()
     expect(onchain.bundledResize).not.toHaveBeenCalled()
     expect(onchain.topUpOnChain).not.toHaveBeenCalled()
+    expect(onchain.increaseDepthOnChain).not.toHaveBeenCalled()
+  })
+})
+
+describe('runDeleteDilution', () => {
+  const SIGNER_ADDRESS = SIGNER_KEY.publicKey().address().toChecksum()
+  const DRIVE_DEPTH = 20
+  /** 50 floors' worth: five halvings fit before the floor. */
+  const DILUTED_DEPTH = DRIVE_DEPTH + 5
+  const declined = new PaymentCancelledError()
+
+  function batchHex(index: number): string {
+    return index.toString(16).padStart(64, '0')
+  }
+
+  function drives(count: number): PostageStamp[] {
+    return Array.from({ length: count }, (_, index) =>
+      stampRecord({ batchID: new BatchId(batchHex(index + 1)), name: `Drive ${index + 1}` }),
+    )
+  }
+
+  beforeEach(() => {
+    onchain.readDilutionState.mockResolvedValue({
+      depth: DRIVE_DEPTH,
+      remaining: REMAINING,
+      owner: SIGNER_ADDRESS,
+      immutable: false,
+    })
+    onchain.increaseDepthOnChain.mockResolvedValue(undefined)
+  })
+
+  it('dilutes every drive it can, funding gas for all of them once', async () => {
+    const account = makeAccount(drives(2))
+
+    const result = await runDeleteDilution({
+      account,
+      signerKey: SIGNER_KEY,
+      keep: new Set(),
+      requestFunding,
+    })
+
+    expect(result.status).toBe('complete')
+    expect(result.drives.map((drive) => drive.outcome)).toEqual(['diluted', 'diluted'])
+    // One gas check, for the whole set, and no BZZ: a dilution pays nothing.
+    expect(onchain.fundingShortfall).toHaveBeenCalledTimes(1)
+    expect(onchain.fundingShortfall).toHaveBeenCalledWith(
+      SIGNER_ADDRESS,
+      0n,
+      chain,
+      GAS_BUDGET_XDAI_WEI,
+    )
+    expect(onchain.increaseDepthOnChain).toHaveBeenCalledTimes(2)
+    for (const call of onchain.increaseDepthOnChain.mock.calls) {
+      expect(call[2]).toBe(DILUTED_DEPTH)
+    }
+    expect(onchain.reconcileStampFromChain).toHaveBeenCalledTimes(2)
+  })
+
+  it('asks for gas per transaction once that exceeds the fixed budget', async () => {
+    const count = Number(GAS_BUDGET_XDAI_WEI / GAS_PER_TRANSACTION_XDAI_WEI) + 2
+    const account = makeAccount(drives(count))
+
+    await runDeleteDilution({ account, signerKey: SIGNER_KEY, keep: new Set(), requestFunding })
+
+    expect(onchain.fundingShortfall).toHaveBeenCalledWith(
+      SIGNER_ADDRESS,
+      0n,
+      chain,
+      BigInt(count) * GAS_PER_TRANSACTION_XDAI_WEI,
+    )
+  })
+
+  it('leaves a kept drive alone without reading it', async () => {
+    const account = makeAccount(drives(2))
+    const kept = account.stamps[0].batchID.toHex()
+
+    const result = await runDeleteDilution({
+      account,
+      signerKey: SIGNER_KEY,
+      keep: new Set([kept]),
+      requestFunding,
+    })
+
+    expect(result.drives[0]).toMatchObject({ outcome: 'skipped', reason: 'kept' })
+    expect(result.drives[1].outcome).toBe('diluted')
+    expect(onchain.readDilutionState).toHaveBeenCalledTimes(1)
+    expect(onchain.increaseDepthOnChain).toHaveBeenCalledTimes(1)
+    expect(onchain.increaseDepthOnChain.mock.calls[0][1].batchID.toHex()).not.toBe(kept)
+  })
+
+  it('reports each skip reason the plan gives', async () => {
+    const account = makeAccount(drives(4))
+    onchain.readDilutionState
+      .mockResolvedValueOnce(undefined)
+      .mockResolvedValueOnce({
+        depth: DRIVE_DEPTH,
+        remaining: MINIMUM,
+        owner: SIGNER_ADDRESS,
+        immutable: false,
+      })
+      .mockResolvedValueOnce({
+        depth: DRIVE_DEPTH,
+        remaining: REMAINING,
+        owner: OWNER,
+        immutable: false,
+      })
+      .mockResolvedValueOnce({
+        depth: DRIVE_DEPTH,
+        remaining: REMAINING,
+        owner: SIGNER_ADDRESS,
+        immutable: true,
+      })
+
+    const result = await runDeleteDilution({
+      account,
+      signerKey: SIGNER_KEY,
+      keep: new Set(),
+      requestFunding,
+    })
+
+    expect(result.status).toBe('complete')
+    expect(result.drives.map((drive) => drive.outcome === 'skipped' && drive.reason)).toEqual([
+      'expired',
+      'expires-soon',
+      'not-owned',
+      'immutable',
+    ])
+    // Nothing to send, so nothing to fund.
+    expect(onchain.fundingShortfall).not.toHaveBeenCalled()
+    expect(onchain.increaseDepthOnChain).not.toHaveBeenCalled()
+  })
+
+  it('sends nothing when the payment is declined', async () => {
+    const account = makeAccount(drives(2))
+    onchain.fundingShortfall.mockResolvedValue({ bzz: 0n, xdai: GAS_BUDGET_XDAI_WEI })
+    requestFunding.mockRejectedValueOnce(declined)
+    const beforeSpend = vi.fn()
+
+    const result = await runDeleteDilution({
+      account,
+      signerKey: SIGNER_KEY,
+      keep: new Set(),
+      requestFunding,
+      beforeSpend,
+    })
+
+    expect(result.status).toBe('unfunded')
+    expect(result.drives.map((drive) => drive.outcome)).toEqual(['unsent', 'unsent'])
+    expect(requestFunding).toHaveBeenCalledWith({
+      destination: SIGNER_ADDRESS,
+      bzz: 0n,
+      xdai: GAS_BUDGET_XDAI_WEI,
+    })
+    expect(beforeSpend).not.toHaveBeenCalled()
+    expect(onchain.increaseDepthOnChain).not.toHaveBeenCalled()
+  })
+
+  // Only the user's decline lets the deletion go ahead undiluted; anything
+  // else must fail, so the account is kept for a retry.
+  it('throws, sending nothing, when the payment did not deliver enough', async () => {
+    const account = makeAccount(drives(1))
+    onchain.fundingShortfall.mockResolvedValue({ bzz: 0n, xdai: 1n })
+
+    await expect(
+      runDeleteDilution({ account, signerKey: SIGNER_KEY, keep: new Set(), requestFunding }),
+    ).rejects.toThrow('did not deliver enough')
+    expect(onchain.increaseDepthOnChain).not.toHaveBeenCalled()
+  })
+
+  it('throws, sending nothing, when the balance cannot be read', async () => {
+    const account = makeAccount(drives(1))
+    onchain.fundingShortfall.mockRejectedValueOnce(new Error('RPC unreachable'))
+
+    await expect(
+      runDeleteDilution({ account, signerKey: SIGNER_KEY, keep: new Set(), requestFunding }),
+    ).rejects.toThrow('RPC unreachable')
+    expect(requestFunding).not.toHaveBeenCalled()
+    expect(onchain.increaseDepthOnChain).not.toHaveBeenCalled()
+  })
+
+  it('throws, sending nothing, when the payment failed rather than being declined', async () => {
+    const account = makeAccount(drives(1))
+    onchain.fundingShortfall.mockResolvedValue({ bzz: 0n, xdai: GAS_BUDGET_XDAI_WEI })
+    requestFunding.mockRejectedValueOnce(new Error('Payment could not be confirmed.'))
+
+    await expect(
+      runDeleteDilution({ account, signerKey: SIGNER_KEY, keep: new Set(), requestFunding }),
+    ).rejects.toThrow('could not be confirmed')
+    expect(onchain.increaseDepthOnChain).not.toHaveBeenCalled()
+  })
+
+  it('carries on past a failed transaction and reports it', async () => {
+    const account = makeAccount(drives(2))
+    const reverted = new Error('execution reverted')
+    onchain.increaseDepthOnChain.mockRejectedValueOnce(reverted)
+
+    const result = await runDeleteDilution({
+      account,
+      signerKey: SIGNER_KEY,
+      keep: new Set(),
+      requestFunding,
+    })
+
+    expect(result.status).toBe('failed')
+    expect(result.drives[0]).toMatchObject({ outcome: 'failed', error: reverted })
+    expect(result.drives[1].outcome).toBe('diluted')
+  })
+
+  it('records the projected dilution when the chain cannot be re-read', async () => {
+    const account = makeAccount(drives(1))
+    onchain.reconcileStampFromChain.mockResolvedValue(false)
+
+    await runDeleteDilution({ account, signerKey: SIGNER_KEY, keep: new Set(), requestFunding })
+
+    const left = REMAINING >> BigInt(DILUTED_DEPTH - DRIVE_DEPTH)
+    expect(account.stamps[0]).toMatchObject({
+      depth: DILUTED_DEPTH,
+      amount: left,
+      batchTTL: ttlSecondsFor(left, PRICE),
+    })
+  })
+
+  it('reports progress per drive', async () => {
+    const account = makeAccount(drives(2))
+    const onProgress = vi.fn()
+
+    await runDeleteDilution({
+      account,
+      signerKey: SIGNER_KEY,
+      keep: new Set(),
+      requestFunding,
+      onProgress,
+    })
+
+    expect(onProgress.mock.calls.map(([progress]) => progress)).toEqual([
+      { step: 'checking' },
+      expect.objectContaining({ step: 'diluting', index: 0, total: 2 }),
+      expect.objectContaining({ step: 'diluting', index: 1, total: 2 }),
+    ])
+  })
+
+  it('aborts at the pre-spend checkpoint with nothing sent', async () => {
+    const account = makeAccount(drives(1))
+    const cancelled = new Error('superseded')
+
+    await expect(
+      runDeleteDilution({
+        account,
+        signerKey: SIGNER_KEY,
+        keep: new Set(),
+        requestFunding,
+        beforeSpend: () => {
+          throw cancelled
+        },
+      }),
+    ).rejects.toBe(cancelled)
+
+    expect(onchain.increaseDepthOnChain).not.toHaveBeenCalled()
+  })
+
+  it('refuses while the contract is paused', async () => {
+    const account = makeAccount(drives(1))
+    chain.getPostageWriteConstraints.mockResolvedValue({ ...CONSTRAINTS, paused: true })
+
+    await expect(
+      runDeleteDilution({ account, signerKey: SIGNER_KEY, keep: new Set(), requestFunding }),
+    ).rejects.toThrow(/paused/)
     expect(onchain.increaseDepthOnChain).not.toHaveBeenCalled()
   })
 })

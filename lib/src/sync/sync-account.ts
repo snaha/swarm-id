@@ -288,7 +288,41 @@ export function createSyncAccount(
     }
   }
 
-  return async function syncAccount(
+  // One sync per account at a time: two publishes of one account contend for
+  // the same partition lease, and the loser fails (`PartitionLeaseLostError`).
+  // A call made while one runs waits for it, then publishes the account as it
+  // is by then; every call made in that wait shares that one later publish.
+  const running = new Map<string, Promise<SyncResult | undefined>>()
+  const queued = new Map<string, Promise<SyncResult | undefined>>()
+
+  function start(accountId: string): Promise<SyncResult | undefined> {
+    const run = syncAccountNow(accountId)
+    running.set(accountId, run)
+    const forget = () => {
+      if (running.get(accountId) === run) running.delete(accountId)
+    }
+    run.then(forget, forget)
+    return run
+  }
+
+  return function syncAccount(
+    accountId: string,
+  ): Promise<SyncResult | undefined> {
+    const waiting = queued.get(accountId)
+    if (waiting) return waiting
+    const current = running.get(accountId)
+    if (!current) return start(accountId)
+    const next = current
+      .catch(() => undefined)
+      .then(() => {
+        queued.delete(accountId)
+        return start(accountId)
+      })
+    queued.set(accountId, next)
+    return next
+  }
+
+  async function syncAccountNow(
     accountId: string,
   ): Promise<SyncResult | undefined> {
     const startTime = performance.now()

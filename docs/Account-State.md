@@ -46,20 +46,22 @@ The document splits in two, and the split is the model:
 The vault never leaves the device, so it is no part of what syncs. The table below is the **synced**
 projection; `serializeAccount` writes it plus the local tail to storage.
 
-| Field                                           | Notes                                                                                                                                                                                                                                                                                                      |
-| ----------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `id`, `name`, `createdAt`                       | there is exactly one kind of account — a BIP-39 seed account, no `type` discriminant. **How** the seed is protected on this device is the vault's `access` (`AccessMethodSchemaV1`: `passkey` / `eth-wallet` / `password`), which is device-local and therefore not here                                   |
-| `derivationKey`, `publicKey`                    | `derivationKey` is the shared account key every device holds (see Assumptions)                                                                                                                                                                                                                             |
-| `devices: Device[]`                             | each: `deviceId, name, createdAt, lastSignedInAt`, rename clock `nameUpdatedAt?`, tombstone `removedAt?`                                                                                                                                                                                                   |
-| `connectedApps: ConnectedApp[]`                 | each: app fields, optional `drives` grant (a batch list or `"all"`) the pinned sharing switches `dataSharing?` / `writeAccess?` and the app's own `sessionDuration?`, each on its own clock (`drivesAt`, `dataSharingAt`, `writeAccessAt`, `sessionDurationAt`), `disconnectedAt?`, tombstone `revokedAt?` |
-| `postageStamps: PostageStamp[]`                 | account-owned set; each: stamp fields + `createdAt`, drive `kind?` (`"scratch"`, else regular), node-state edit clock `updatedAt?` (dilute / top-up), rename clock `nameUpdatedAt?`, tombstone `deletedAt?`                                                                                                |
-| `defaultPostageStampBatchID`                    | the account's default batch (stores account data; default for app uploads)                                                                                                                                                                                                                                 |
-| `settings`                                      | e.g. `appSessionDuration`                                                                                                                                                                                                                                                                                  |
-| `accountNameAt`, `defaultStampAt`, `settingsAt` | **per-field LWW clocks** for the three scalars above (optional; fall back to the account's `createdAt` — never a fresh timestamp, which would let a device that never touched the field clobber a peer's edit)                                                                                             |
-| `partitionCount`, `lastModified`                | partition count for the shared batch; local modified clock                                                                                                                                                                                                                                                 |
+| Field                                                        | Notes                                                                                                                                                                                                                                                                                                      |
+| ------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `id`, `name`, `createdAt`                                    | there is exactly one kind of account — a BIP-39 seed account, no `type` discriminant. **How** the seed is protected on this device is the vault's `access` (`AccessMethodSchemaV1`: `passkey` / `eth-wallet` / `password`), which is device-local and therefore not here                                   |
+| `derivationKey`, `publicKey`                                 | `derivationKey` is the shared account key every device holds (see Assumptions)                                                                                                                                                                                                                             |
+| `devices: Device[]`                                          | each: `deviceId, name, createdAt, lastSignedInAt`, rename clock `nameUpdatedAt?`, tombstone `removedAt?`                                                                                                                                                                                                   |
+| `connectedApps: ConnectedApp[]`                              | each: app fields, optional `drives` grant (a batch list or `"all"`) the pinned sharing switches `dataSharing?` / `writeAccess?` and the app's own `sessionDuration?`, each on its own clock (`drivesAt`, `dataSharingAt`, `writeAccessAt`, `sessionDurationAt`), `disconnectedAt?`, tombstone `revokedAt?` |
+| `postageStamps: PostageStamp[]`                              | account-owned set; each: stamp fields + `createdAt`, drive `kind?` (`"scratch"`, else regular), node-state edit clock `updatedAt?` (dilute / top-up), rename clock `nameUpdatedAt?`, tombstone `deletedAt?`                                                                                                |
+| `defaultPostageStampBatchID`                                 | the account's default batch (stores account data; default for app uploads)                                                                                                                                                                                                                                 |
+| `settings`                                                   | e.g. `appSessionDuration`                                                                                                                                                                                                                                                                                  |
+| `deleted`                                                    | the account was deleted (optional; absent = never). A peer whose fold lets `true` win forgets the account; a restore writes `false` on a fresh clock to bring it back — see [Account deletion](#account-deletion)                                                                                          |
+| `accountNameAt`, `defaultStampAt`, `settingsAt`, `deletedAt` | **per-field LWW clocks** for the four scalars above (optional; fall back to the account's `createdAt` — never a fresh timestamp, which would let a device that never touched the field clobber a peer's edit)                                                                                              |
+| `partitionCount`, `lastModified`                             | partition count for the shared batch; local modified clock                                                                                                                                                                                                                                                 |
 
-Collections converge by **per-entry tombstones** (`removedAt` / `revokedAt` / `deletedAt`); the three
-scalars converge by **per-field LWW** using their `*At` clocks. Tombstones are kept in the document (so a
+Collections converge by **per-entry tombstones** (`removedAt` / `revokedAt` / `deletedAt` on a stamp);
+the four scalars converge by **per-field LWW** using their `*At` clocks. (The account's `deletedAt` is
+the clock of its `deleted` scalar — not a tombstone: the record keeps every field.) Tombstones are kept in the document (so a
 delete propagates), not dropped.
 
 ## Position in the stack
@@ -105,7 +107,7 @@ gateway could clobber.)
 
 `DEVICE_STATE_TOPIC_PREFIX = "swarm-id-devstate-v1"`, an **epoch feed** (`BasicEpochUpdater` /
 `AsyncEpochFinder`, latest-pointer). Payload `DeviceStateSnapshotSchemaV1`: `connectedApps`,
-`postageStamps` (with their tombstones), the three scalars as clocked `{ value, at }`, plus account
+`postageStamps` (with their tombstones), the four scalars as clocked `{ value, at }`, plus account
 immutables ridden here so the fold can reconstruct them without a shared doc (`accountPublicKey`,
 `accountCreatedAt`, `partitionCount`). Each device writes its **full merged view** to its **own** feed on a
 local mutation — never on a read/fold — so write amplification is bounded and the fold is idempotent.
@@ -137,7 +139,7 @@ device's latest view **in parallel** (`Promise.all`) → `foldAccount(views, ros
   `foldedToSyncedAccount` → the account record the sign-in/import flow stores.
 - **Refresh (an existing device)** — ui `refresh-account-from-swarm.ts` → merge the folded remote
   into the local account (`mergeConnectedApps` / `mergePostageStamps` / `mergeDevicesList` + `mergeDevices`
-  to keep self first-class) → `accountsStore.applyRefreshed(...)` with `skipSync`; the three scalars are
+  to keep self first-class) → `accountsStore.applyRefreshed(...)` with `skipSync`; the four scalars are
   applied by per-field LWW (folded `at` > local `*At`).
 - **A peer's bus delta** — the same fold, fed from the bus instead of Swarm: `applyAccountDelta`
   (`ui/src/lib/stores/account-delta.ts` for the SwarmID tab and shared storage; `swarm-id-proxy.ts` for
@@ -166,6 +168,35 @@ on one clock every write bumped let a drive picked on a stale copy outrank a rev
 restore the credential it had cleared ([#681](https://github.com/snaha/swarm-id/issues/681)). Scalars (`accountName`, `defaultPostageStampBatchID`,
 `settings`) converge by per-field LWW on their `*At` clocks, so concurrent changes to _different_ scalars
 on different devices both survive.
+
+## Account deletion
+
+Deleting an account sets the fourth scalar, `deleted`, to `true`. It is not a tombstone on the
+account's entries: drives and devices stay live, because the marker is published through the
+default drive and the fold skips a removed device's view.
+
+- **The deleting device** (`tearDownAccount`, `ui/src/lib/delete-account.ts`) marks the account,
+  **awaits** its feed publish, revokes every connected app, sends an account-bus delta, and only
+  then removes the record. The bus goes last because live peers forget the account the moment its
+  delta lands; the revokes wait for the publish so a failed attempt leaves apps connected. A failed
+  or skipped publish (every partition held) takes the marker back on a newer clock and keeps the
+  account. Without a live default drive no device can read the account from Swarm, so the feed
+  publish is skipped and the bus alone carries the deletion.
+- **A marker found at load** is a teardown the page closed on, and is taken back the same way. If
+  the page closed after the feed publish landed, during the bus step, the account reappears on that
+  device; deleting it again finishes the job.
+- **A peer** that folds a winning `true`, from the bus or a Swarm refresh, removes the account and
+  says "This account was deleted on another device". `applyRefreshed` reports only the transition
+  from live to deleted, so the deleting device never treats its own deletion as news.
+- **A restore**, recovery phrase or sign-back-in, writes `deleted: false` on a fresh clock
+  (`reclaimed`, `ui/src/lib/account-deleted.ts`). Every restore does, since a sign-back-in from the
+  local snapshot cannot see a deletion made while it was signed out. Kept drives come back with it.
+
+**Offline devices.** A device that is closed during the deletion can only learn of it from the feed,
+which lives on the default drive. Once that drive expires the feed can no longer be read, and a
+device that comes back after that keeps the account. The window is the default drive's remaining
+lifespan: one to two days when the deletion dilutes it, its natural lifespan when its data is kept
+or it cannot be diluted, and none at all when there is no live default drive.
 
 ## Assumptions
 
