@@ -10,6 +10,7 @@
 
 import { Binary } from "cafe-utility"
 import { EthAddress, Topic, PrivateKey, Identifier } from "@ethersphere/bee-js"
+import { makeSOCAddress } from "@ethersphere/core-sdk"
 import { EpochIndex, MAX_LEVEL } from "./epoch"
 import { uploadSOC, isStamperTarget, type UploadTarget } from "../../upload"
 import type { EpochUpdater, EpochUpdateHints, EpochUpdateResult } from "./types"
@@ -42,9 +43,7 @@ export async function epochSocAddress(
   owner: EthAddress,
 ): Promise<Uint8Array> {
   const identifier = await makeEpochIdentifier(topic, epoch)
-  return Binary.keccak256(
-    Binary.concatBytes(identifier.toUint8Array(), owner.toUint8Array()),
-  )
+  return makeSOCAddress(identifier, owner).toUint8Array()
 }
 
 /**

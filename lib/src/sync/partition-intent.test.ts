@@ -14,12 +14,15 @@ import {
   INTENT_EPOCH_MS,
   INTENT_LIVENESS_GRACE_MS,
   intentEpochBucket,
+  intentSocAddress,
   makePartitionIntentIdentifier,
+  partitionOccupancyAddress,
   readPartitionIntent,
   resolveIntentRound,
   writePartitionIntent,
 } from "./partition-intent"
 import { makeDeviceTiebreaker } from "./partition-lock"
+import { uint8ArrayToHex } from "../utils/hex"
 import {
   MockBee,
   MockChunkStore,
@@ -91,6 +94,39 @@ describe("makePartitionIntentIdentifier", () => {
     expect(
       makePartitionIntentIdentifier(TEST_BATCH_ID, 1, DEVICE_A, 5).toHex(),
     ).not.toBe(base)
+  })
+})
+
+// The stamper reserves slots by these addresses before the upload, so they
+// must be exactly where the SOC lands: pinned to bytes.
+describe("intent and occupancy SOC addresses", () => {
+  const EPOCH_BUCKET = 5
+
+  it("derives the intent SOC address", () => {
+    expect(
+      uint8ArrayToHex(
+        intentSocAddress(
+          TEST_BATCH_ID,
+          PARTITION,
+          DEVICE_A,
+          EPOCH_BUCKET,
+          OWNER,
+        ),
+      ),
+    ).toBe("96ad19b5de540f714937a7b0923d4af733fa0ca54a4a8fa1fa78fc3a4b5424a2")
+  })
+
+  it("derives the occupancy beacon SOC address", () => {
+    expect(
+      uint8ArrayToHex(
+        partitionOccupancyAddress(
+          TEST_BATCH_ID,
+          PARTITION,
+          EPOCH_BUCKET,
+          OWNER,
+        ),
+      ),
+    ).toBe("5e2d36ed3f2906648ff47d9c7dd08a23be7c76363afff43787373f466f73b865")
   })
 })
 

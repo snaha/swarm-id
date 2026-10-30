@@ -10,22 +10,13 @@
 
 import { Binary } from "cafe-utility"
 import type { EthAddress, Topic, BeeRequestOptions } from "@ethersphere/bee-js"
-import { Reference } from "@ethersphere/bee-js"
+import { makeSOCAddress } from "@ethersphere/core-sdk"
 import type { ChunkDownloader } from "../../download-data"
 import type { SequentialFinder, SequentialLookupResult } from "./types"
 
 function makeSequentialIdentifier(topic: Topic, index: bigint): Uint8Array {
   const indexBytes = Binary.numberToUint64(index, "BE")
   return Binary.keccak256(Binary.concatBytes(topic.toUint8Array(), indexBytes))
-}
-
-function makeSequentialAddress(
-  identifier: Uint8Array,
-  owner: EthAddress,
-): Reference {
-  return new Reference(
-    Binary.keccak256(Binary.concatBytes(identifier, owner.toUint8Array())),
-  )
 }
 
 export class SyncSequentialFinder implements SequentialFinder {
@@ -56,7 +47,7 @@ export class SyncSequentialFinder implements SequentialFinder {
     requestOptions?: BeeRequestOptions,
   ): Promise<boolean> {
     const identifier = makeSequentialIdentifier(this.topic, index)
-    const address = makeSequentialAddress(identifier, this.owner)
+    const address = makeSOCAddress(identifier, this.owner)
 
     // Bee's /chunks endpoint returns 500 ("read chunk failed") for a genuinely
     // absent chunk — indistinguishable by status from a transient 500 — so a

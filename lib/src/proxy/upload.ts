@@ -41,7 +41,10 @@ import {
   PLAIN_REFS_PER_CHUNK,
 } from "./chunking"
 import { ChunkUploadStream } from "./chunk-upload-stream"
-import { convertEnvelopeToMarshaledStamp } from "@ethersphere/core-sdk"
+import {
+  convertEnvelopeToMarshaledStamp,
+  makeSOCAddress,
+} from "@ethersphere/core-sdk"
 import type { ChunkReference, UploadProgress } from "./types"
 import type { StampWorkerPool } from "./stamp-worker-pool"
 import { tryCreateTag } from "../utils/tag"
@@ -923,10 +926,7 @@ export async function uploadSOC(
   const toSign = Binary.concatBytes(identifier.toUint8Array(), chunkAddress)
   const signature = signer.sign(toSign)
 
-  // Calculate SOC address
-  const socAddressBytes = Binary.keccak256(
-    Binary.concatBytes(identifier.toUint8Array(), owner.toUint8Array()),
-  )
+  const socAddressBytes = makeSOCAddress(identifier, owner).toUint8Array()
 
   if (isSubsidisedTarget(target)) {
     // Subsidised gateway mode - no stamp needed
