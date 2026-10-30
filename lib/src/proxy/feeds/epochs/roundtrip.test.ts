@@ -10,9 +10,10 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest"
 import { Binary } from "cafe-utility"
 import { PrivateKey } from "@ethersphere/bee-js"
+import { makeContentAddressedChunk } from "@ethersphere/core-sdk"
 import { SyncEpochFinder } from "./finder"
 import { AsyncEpochFinder } from "./async-finder"
-import { BasicEpochUpdater } from "./updater"
+import { BasicEpochUpdater, makeEpochIdentifier } from "./updater"
 import { EpochIndex, MAX_LEVEL } from "./epoch"
 import type { EpochUpdateHints, EpochUpdateResult } from "./types"
 import type { UploadTarget } from "../../upload"
@@ -25,8 +26,6 @@ import {
   createMockStamper,
   mockFetch,
 } from "./test-utils"
-
-const SPAN_SIZE = 8
 
 function createTestReference64(seed: number): Uint8Array {
   const ref = new Uint8Array(64)
@@ -78,24 +77,12 @@ async function putEpochSoc(
   epoch: EpochIndex,
   payload: Uint8Array,
 ): Promise<void> {
-  const epochHash = await epoch.marshalBinary()
-  const identifier = Binary.keccak256(
-    Binary.concatBytes(topic.toUint8Array(), epochHash),
-  )
-  const span = new Uint8Array(SPAN_SIZE)
-  new DataView(span.buffer).setBigUint64(0, BigInt(payload.length), true)
-  const contentHash = Binary.keccak256(Binary.concatBytes(span, payload))
-  const toSign = Binary.concatBytes(identifier, contentHash)
-  const signature = signer.sign(toSign)
-  const socData = Binary.concatBytes(
+  const identifier = await makeEpochIdentifier(topic, epoch)
+  const soc = makeContentAddressedChunk(payload).toSingleOwnerChunk(
     identifier,
-    signature.toUint8Array(),
-    span,
-    payload,
+    signer,
   )
-  const owner = signer.publicKey().address().toUint8Array()
-  const address = Binary.keccak256(Binary.concatBytes(identifier, owner))
-  await store.put(Binary.uint8ArrayToHex(address), socData)
+  await store.put(soc.address.toHex(), soc.data)
 }
 
 function payloadWithTimestamp(
