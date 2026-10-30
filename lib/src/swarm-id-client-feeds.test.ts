@@ -425,7 +425,7 @@ describe("SwarmIdClient feed readers and writers", () => {
       ])
     })
 
-    it("uploads a raw reference with no key and no drive", async () => {
+    it("uploads a raw reference with no key, to the drive named", async () => {
       const writer = client.makeEpochFeedWriter({
         topic: TOPIC,
         signer: SIGNER,
@@ -450,11 +450,14 @@ describe("SwarmIdClient feed readers and writers", () => {
           at: AT.toString(),
           reference: ENCRYPTED_REF,
           hints: HINTS,
+          batchID: BATCH,
         },
       ])
     })
 
-    it("uploads a raw payload unencrypted, its reference with no drive", async () => {
+    // As for an encrypted update: the payload and its SOC go to one drive,
+    // whichever option named it.
+    it("uploads a raw payload and its reference to the upload options' drive", async () => {
       answers.uploadData = () => ({ reference: REF })
       const writer = client.makeEpochFeedWriter({ topic: TOPIC })
       const result = await writer.uploadRawPayload(DATA, {
@@ -474,6 +477,32 @@ describe("SwarmIdClient feed readers and writers", () => {
           topic: TOPIC,
           at: AT.toString(),
           reference: REF,
+          batchID: BATCH,
+        },
+      ])
+    })
+
+    it("uploads a raw payload and its reference to the drive named", async () => {
+      answers.uploadData = () => ({ reference: REF })
+      const writer = client.makeEpochFeedWriter({ topic: TOPIC })
+      await writer.uploadRawPayload(DATA, {
+        at: AT,
+        batchID: BATCH,
+        uploadOptions: { batchID: OTHER_BATCH },
+      })
+      expect(sent()).toEqual([
+        {
+          type: "uploadData",
+          data: DATA,
+          options: { batchID: BATCH, encrypt: false },
+          enableProgress: false,
+        },
+        {
+          type: "epochFeedUploadReference",
+          topic: TOPIC,
+          at: AT.toString(),
+          reference: REF,
+          batchID: BATCH,
         },
       ])
     })
