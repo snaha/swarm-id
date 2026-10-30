@@ -1,14 +1,11 @@
 // Copyright 2026 The Swarm Authors. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 /**
- * Deleting an account, everything after the unlock that proves control of it:
- * dilute its drives so they lapse (`runDeleteDilution`), tell its other
- * devices and live dApp sessions it is gone, and only then drop the record.
- * The dialog owns the ceremony and the screens; this owns the order.
- *
- * See docs/Drive-Payment-Flow.md, "Delete account".
+ * Deleting an account, everything after the unlock: dilute its drives, tell
+ * its other devices, then drop the record. The dialog owns the screens; this
+ * owns the order (docs/Account-State.md, "Account deletion").
  */
-import type { SyncResult } from '@snaha/swarm-id/internal'
+import { type SyncResult, isScratchDrive, stampRefusal } from '@snaha/swarm-id/internal'
 
 import { prefix0x } from '$lib/crypto/hex'
 import { syncStore } from '$lib/dev/sync.svelte'
@@ -26,39 +23,39 @@ import type { Account } from '$lib/types'
 export type DeletionProgress = DilutionProgress | { step: 'publishing' }
 
 /**
- * `partial`: the account is gone but its drives were not diluted — the
- * payment for the gas was declined or did not arrive — so the user is handed
- * the postage signer key that still owns them.
+ * - `unfunded`: the gas payment was declined, so nothing was sent and nothing
+ *   torn down; the caller asks whether to delete without diluting.
+ * - `partial`: deleted without diluting, so the user gets the postage signer
+ *   key that still owns the drives.
  */
-export type DeletionResult = { status: 'deleted' } | { status: 'partial'; signerPrivateKey: string }
+export type DeletionResult =
+  | { status: 'deleted' }
+  | { status: 'unfunded' }
+  | { status: 'partial'; signerPrivateKey: string }
 
 export interface DeleteAccountOptions {
   account: Account
   /** Batch ids (hex) of the drives whose data the user chose to keep. */
   keep: ReadonlySet<string>
   requestFunding: RequestFunding
-  /**
-   * Consulted before each step that changes something — the first spend and
-   * the teardown — and throws once the caller has moved on (a closed dialog).
-   */
+  /** The user already declined the gas and chose to delete anyway. */
+  undiluted?: boolean
+  /** Throws once the caller has moved on; run before the first spend and the teardown. */
   checkpoint: () => void | Promise<void>
   onProgress?: (progress: DeletionProgress) => void
 }
 
 /**
  * Delete `account` from every device. Throws, leaving the account in place,
- * when a dilution transaction failed or the deletion could not be published;
- * running it again is safe — diluted drives plan as `expires-soon`, and the
- * account is marked and published afresh.
+ * when a dilution or the publish failed; running it again is safe, since a
+ * diluted drive plans as `expires-soon`.
  */
 export async function deleteAccount(options: DeleteAccountOptions): Promise<DeletionResult> {
-  const { account, keep, requestFunding, checkpoint, onProgress } = options
-  // Before anything is torn down: the drives are owned by this key, and once
-  // the record is gone there is nothing left to derive it from.
+  const { account, keep, requestFunding, undiluted = false, checkpoint, onProgress } = options
+  // Derived up front: once the record is gone there is nothing to derive it from.
   const { signerKey } = await derivePostageSigner(account.derivationKey)
 
-  let diluted = true
-  if (!account.isLocal) {
+  if (!account.isLocal && !undiluted) {
     const dilution = await runDeleteDilution({
       account,
       signerKey,
@@ -70,57 +67,69 @@ export async function deleteAccount(options: DeleteAccountOptions): Promise<Dele
     if (dilution.status === 'failed') {
       throw new Error('Some drives could not be prepared for deletion.')
     }
-    diluted = dilution.status === 'complete'
+    if (dilution.status === 'unfunded') {
+      return { status: 'unfunded' }
+    }
   }
 
   await checkpoint()
   onProgress?.({ step: 'publishing' })
   await tearDownAccount(account)
-  return diluted
-    ? { status: 'deleted' }
-    : { status: 'partial', signerPrivateKey: prefix0x(signerKey.toHex()) }
+  return undiluted
+    ? { status: 'partial', signerPrivateKey: prefix0x(signerKey.toHex()) }
+    : { status: 'deleted' }
+}
+
+/**
+ * Whether the account's default drive can still carry a feed write. Without
+ * one no device can read the account from Swarm anyway, so the deletion goes
+ * out on the bus alone.
+ */
+export function canPublishToSwarm(account: Account): boolean {
+  const id = account.defaultPostageStampBatchID
+  const drive = id && account.stamps.find((stamp) => stamp.batchID.equals(id))
+  return !!drive && !isScratchDrive(drive) && stampRefusal(drive) === undefined
 }
 
 /**
  * Mark the account deleted, publish that, then remove it from this device.
- *
- * The publish is awaited, not left to the debounced sync hook, because the
- * record is what publishes it: removed first, a failed publish would leave
- * every peer holding a live account this device can no longer delete. The feed
- * goes first and the bus only once it has landed, since live peers forget the
- * account on the bus delta. On failure the marker is taken back
- * (`cancelDeletion`), the account stays, and this throws; calling again marks
- * and publishes afresh. A local account has nothing on Swarm and no drive to
- * publish through, so it is simply removed.
+ * The record is what publishes the marker, so it goes only once the feed
+ * write has landed; a failed publish takes the marker back and throws. Apps
+ * are revoked only after that, so a failed attempt leaves them connected.
  */
 export async function tearDownAccount(account: Account): Promise<void> {
   if (!account.isLocal) {
     account.markDeleted()
-    let published: SyncResult | undefined
-    try {
-      published = await syncStore.syncAccount(account.id.toHex())
-    } finally {
-      if (!published || published.status === 'error') {
-        account.cancelDeletion()
-      }
+    if (canPublishToSwarm(account)) {
+      await publishToSwarm(account)
     }
-    if (!published) {
-      throw new Error('The deletion could not be published to your other devices.')
-    }
-    if (published.status === 'error') {
-      throw new Error(`The deletion could not be published: ${published.error}`)
-    }
-    if (!account.deleted) {
-      // Taken back mid-publish — another tab loading (`load` in the accounts
-      // store) — so what went out is unknown. A retry marks and sends afresh.
-      throw new Error('The deletion was interrupted.')
-    }
-    // The feed reaches devices that are closed; the bus reaches live sessions
-    // now — a partitioned dApp iframe hears of the revoke no other way.
+    account.revokeAllApps()
+    // The bus goes last: live peers forget the account the moment it lands.
     await accountBusStore.publishBeforeClose(account.toSyncedRecord())
   }
   accountsStore.remove(account.id)
   if (sessionStore.currentAccountId === account.id.toHex()) {
     sessionStore.clearCurrentAccount()
+  }
+}
+
+async function publishToSwarm(account: Account): Promise<void> {
+  let published: SyncResult | undefined
+  try {
+    published = await syncStore.syncAccount(account.id.toHex())
+  } finally {
+    if (!published || published.status === 'error') {
+      account.cancelDeletion()
+    }
+  }
+  if (!published) {
+    throw new Error('The deletion could not be published to your other devices.')
+  }
+  if (published.status === 'error') {
+    throw new Error(`The deletion could not be published: ${published.error}`)
+  }
+  if (!account.deleted) {
+    // Taken back mid-publish by another tab loading, so what went out is unknown.
+    throw new Error('The deletion was interrupted.')
   }
 }

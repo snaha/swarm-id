@@ -545,9 +545,9 @@ describe('Account.markDeleted', () => {
     )
   }
 
-  // One commit, and not a published one: the deletion is published by the
-  // caller, awaited, so the record is removed only once peers can hear it.
-  it('revokes every live app and marks the account deleted, in one unpublished commit', () => {
+  // Not a published commit: the caller awaits the publish itself, and the
+  // apps are only revoked once it has landed.
+  it('marks the account deleted in one unpublished commit, leaving its apps', () => {
     const commit = vi.fn()
     const account = accountWithApps(commit)
 
@@ -557,11 +557,21 @@ describe('Account.markDeleted', () => {
     expect(commit).toHaveBeenCalledWith(account, { skipSync: true })
     expect(account.deleted).toBe(true)
     expect(account.deletedAt).toEqual(expect.any(Number))
+    expect(account.connectedApps[0].revokedAt).toBeUndefined()
+    expect(account.toSyncedRecord().deleted).toBe(true)
+  })
+
+  it('revokes every live app in one unpublished commit', () => {
+    const commit = vi.fn()
+    const account = accountWithApps(commit)
+
+    account.revokeAllApps()
+
+    expect(commit).toHaveBeenCalledWith(account, { skipSync: true })
     const [live, removed] = account.connectedApps
     expect(live.revokedAt).toEqual(expect.any(Number))
     expect(live.appSecret).toBeUndefined()
     expect(removed.revokedAt).toBe(REVOKED_AT)
-    expect(account.toSyncedRecord().deleted).toBe(true)
   })
 
   // Drives stay: the account publishes through its default drive, and the
@@ -599,9 +609,9 @@ describe('Account.markDeleted', () => {
 
 describe('Account.cancelDeletion', () => {
   // The marker comes off on a clock after the marking, so it outvotes one that
-  // reached Swarm; the revokes stay; and nothing is published, so a retry's
-  // own publish is not contended.
-  it('takes the marker back on a newer clock, keeping the revokes, unpublished', () => {
+  // reached Swarm; and nothing is published, so a retry's own publish is not
+  // contended.
+  it('takes the marker back on a newer clock, unpublished', () => {
     const commit = vi.fn()
     const account = new Account(
       {
@@ -628,7 +638,6 @@ describe('Account.cancelDeletion', () => {
     }
     expect(account.deleted).toBe(false)
     expect(account.deletedAt).toBeGreaterThan(markedAt)
-    expect(account.connectedApps[0].revokedAt).toEqual(expect.any(Number))
     expect(commit).toHaveBeenLastCalledWith(account, { skipSync: true })
   })
 })
