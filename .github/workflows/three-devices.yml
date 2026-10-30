@@ -1,5 +1,6 @@
-# The device scenarios (`ui/tests/three-devices.test.ts`, `ui/tests/two-drives.test.ts`)
-# in real browsers against a real cluster. Minutes per run by design — the lease
+# The device scenarios (`ui/tests/three-devices.test.ts`, `ui/tests/two-drives.test.ts`,
+# and the synced deletions in `ui/tests/delete-account.test.ts`) in real browsers
+# against a real cluster. Minutes per run by design — the lease
 # TTL, the idle yield and the beacon grace are each 30 s and the suite waits
 # them out — so it does not run on every change:
 #
@@ -29,6 +30,9 @@ on:
       - 'ui/src/routes/proxy/**'
       - 'ui/tests/three-devices.test.ts'
       - 'ui/tests/two-drives.test.ts'
+      - 'ui/tests/delete-account.test.ts'
+      - 'ui/src/lib/delete-account.ts'
+      - 'ui/src/lib/payment/drive-operation.ts'
       - 'ui/tests/devices-rig.ts'
       - 'ui/tests/global-setup-devices.ts'
       - 'ui/tests/helpers.ts'
