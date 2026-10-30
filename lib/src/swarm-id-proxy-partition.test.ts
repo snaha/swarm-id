@@ -965,6 +965,7 @@ describe("SwarmIdProxy partitioned write enablement", () => {
     // not from the write that fails.
     describe("announces a change to the app's drives", () => {
       const announced = () => messagesOfType("connectionInfoChanged").length
+      const drivesAnnounced = () => messagesOfType("drivesChanged").length
       const lastInfo = () => messagesOfType("connectionInfoChanged").at(-1)!
       const grantOnly = (...batchIds: string[]) =>
         updateAccount((account) => ({
@@ -982,11 +983,42 @@ describe("SwarmIdProxy partitioned write enablement", () => {
           expect(coordinatorFor(BATCH_ID_HEX)).toBeDefined(),
         )
         const before = announced()
+        const drivesBefore = drivesAnnounced()
         // The second drive goes, the primary stays: nothing in the info moves.
         grantOnly(BATCH_ID_HEX)
         await flushBus()
         expect(announced()).toBe(before + 1)
         expect(lastInfo().canUpload).toBe(true)
+        // And the drives' own event, after the info it accompanies.
+        expect(drivesAnnounced()).toBe(drivesBefore + 1)
+        expect(
+          parentWindow.postMessage.mock.calls.map(([message]) => message.type),
+        ).toEqual(
+          expect.arrayContaining(["connectionInfoChanged", "drivesChanged"]),
+        )
+        expect(parentWindow.postMessage.mock.calls.at(-1)![0].type).toBe(
+          "drivesChanged",
+        )
+      })
+
+      it("sends no drivesChanged for a change that is not a drive's", async () => {
+        await connectWithTwoDrives()
+        await vi.waitFor(() =>
+          expect(coordinatorFor(BATCH_ID_HEX)).toBeDefined(),
+        )
+        const before = announced()
+        const drivesBefore = drivesAnnounced()
+        // A permission switch: the info moves, the drives do not.
+        updateAccount((account) => ({
+          ...account,
+          connectedApps: account.connectedApps.map((app) => ({
+            ...app,
+            dataSharing: false,
+          })),
+        }))
+        await flushBus()
+        expect(announced()).toBe(before + 1)
+        expect(drivesAnnounced()).toBe(drivesBefore)
       })
 
       it("re-sends it when a drive joins the grant", async () => {

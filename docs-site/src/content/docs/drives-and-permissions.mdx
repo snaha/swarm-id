@@ -113,10 +113,12 @@ button.onclick = async () => {
 ### What the user can change
 
 On the app's page under **Apps**, the user can swap a drive, set one to **None** to take it away,
-or untick full drive access. The change reaches the app's live session at once: `onConnectionChange`
-fires, `getDrives()` reflects it, and an upload in flight on a drive taken away is aborted. The same
-callback fires when a drive expires while the page is open, with `uploadUnavailableReason:
-"stamp-expired"` once it was the primary, so an app that caches `canUpload` need not poll.
+or untick full drive access. The change reaches the app's live session at once: `onDrivesChange`
+and `onConnectionChange` fire, `getDrives()` reflects it, and an upload in flight on a drive taken
+away is aborted. Both fire when a drive expires while the page is open too, with
+`uploadUnavailableReason: "stamp-expired"` once it was the primary, so an app that caches
+`canUpload` need not poll. `onDrivesChange` is the one to use for the drives alone: it carries no
+payload and fires for nothing else.
 
 ### Scratch drives
 

@@ -3707,6 +3707,7 @@ export class SwarmIdProxy {
       return
     }
     this.lastConnectionInfo = info
+    const drivesChanged = drives !== this.lastDriveState
     this.lastDriveState = drives
     this.sendToParent({
       type: "connectionInfoChanged",
@@ -3720,6 +3721,8 @@ export class SwarmIdProxy {
       partition: info.partition,
       permissions: info.permissions,
     })
+    // After the info, so a `getDrives()` read in the handler is current.
+    if (drivesChanged) this.sendToParent({ type: "drivesChanged" })
   }
 
   private async handleIsConnected(
