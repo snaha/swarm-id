@@ -22,10 +22,24 @@ import {
 const MAX_TIMER_DELAY_MS = 2 ** 31 - 1
 
 interface PendingRequest {
+  /** The request's type, for the error when the answer's type is wrong. */
+  requestType: string
+  /** The only answer type that settles the request. */
+  responseType: string
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   resolve: (value: any) => void
   reject: (error: Error) => void
   timeoutId: ReturnType<typeof setTimeout>
+}
+
+/**
+ * The answer type for a request type: `${type}Response`, except `checkAuth`,
+ * answered by the `authStatusResponse` the proxy also pushes unasked.
+ */
+function responseTypeFor(requestType: string): string {
+  return requestType === "checkAuth"
+    ? "authStatusResponse"
+    : `${requestType}Response`
 }
 
 export interface MessageTransportOptions {
@@ -99,18 +113,42 @@ export class MessageTransport {
       }, timeout)
 
       this.pending.set(message.requestId, {
+        requestType: message.type,
+        responseType: responseTypeFor(message.type),
         resolve,
         reject,
         timeoutId,
       })
 
-      this.post(message)
+      try {
+        this.post(message)
+      } catch (error) {
+        this.take(message.requestId)
+        throw error
+      }
     })
   }
 
-  /** Settle the request `requestId` with its answer, if it is still waiting. */
-  resolve(requestId: string, response: unknown): void {
-    this.take(requestId)?.resolve(response)
+  /**
+   * Settle the request `requestId` with its answer, if it is still waiting.
+   * An answer of another type than the request's fails it with `internal`.
+   */
+  resolve<TResponse extends { type: string }>(
+    requestId: string,
+    response: TResponse,
+  ): void {
+    const pending = this.take(requestId)
+    if (!pending) return
+    if (response.type !== pending.responseType) {
+      pending.reject(
+        new SwarmIdError(
+          "internal",
+          `Expected ${pending.responseType} for ${pending.requestType}, got ${response.type}`,
+        ),
+      )
+      return
+    }
+    pending.resolve(response)
   }
 
   /** Fail the request `requestId`, if it is still waiting. */

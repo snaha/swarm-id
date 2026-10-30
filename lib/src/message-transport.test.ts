@@ -39,6 +39,13 @@ describe("MessageTransport", () => {
       requestOptions: { timeout },
     })
 
+  const listFilesOf = (reference: string) =>
+    transport.request({
+      type: "listFiles",
+      requestId: transport.nextRequestId(),
+      reference,
+    })
+
   beforeEach(() => {
     vi.useFakeTimers()
     postMessage = vi.fn()
@@ -80,6 +87,28 @@ describe("MessageTransport", () => {
     })
   })
 
+  // Posting fails before anything is in flight, so nothing may stay armed:
+  // no timer to fire later, no entry for a late answer to find.
+  describe("a request that cannot be posted", () => {
+    it("leaves no timer or entry behind without an iframe", async () => {
+      target = undefined
+
+      await expect(getPostageBatch()).rejects.toMatchObject({
+        code: "invalid-state",
+      })
+      expect(transport.pendingCount).toBe(0)
+      expect(vi.getTimerCount()).toBe(0)
+    })
+
+    it("leaves no timer or entry behind when the schema refuses it", async () => {
+      await expect(listFilesOf("not a reference")).rejects.toMatchObject({
+        code: "invalid-request",
+      })
+      expect(transport.pendingCount).toBe(0)
+      expect(vi.getTimerCount()).toBe(0)
+    })
+  })
+
   it("hands out a new id per request", () => {
     expect(transport.nextRequestId()).not.toBe(transport.nextRequestId())
   })
@@ -96,9 +125,40 @@ describe("MessageTransport", () => {
     expect(vi.getTimerCount()).toBe(0)
   })
 
+  it("accepts authStatusResponse as the answer to checkAuth", async () => {
+    const request = transport.request({
+      type: "checkAuth",
+      requestId: transport.nextRequestId(),
+    })
+    const { requestId } = lastPosted() as { requestId: string }
+    const answer = { type: "authStatusResponse", requestId }
+
+    transport.resolve(requestId, answer)
+
+    await expect(request).resolves.toBe(answer)
+  })
+
+  // The id says which request an answer is for; the type says it is an answer
+  // to that kind of request. A proxy that confuses the two must not hand a
+  // caller a payload of another shape under the type it asked for.
+  it("rejects an answer of another type with internal", async () => {
+    const request = getPostageBatch()
+    const { requestId } = lastPosted() as { requestId: string }
+
+    transport.resolve(requestId, { type: "getNodeInfoResponse", requestId })
+
+    await expect(request).rejects.toMatchObject({
+      code: "internal",
+      message:
+        "Expected getPostageBatchResponse for getPostageBatch, got getNodeInfoResponse",
+    })
+    expect(transport.pendingCount).toBe(0)
+    expect(vi.getTimerCount()).toBe(0)
+  })
+
   it("leaves a request waiting when an answer carries another id", () => {
     getPostageBatch()
-    transport.resolve("someone-else", {})
+    transport.resolve("someone-else", { type: "getPostageBatchResponse" })
     expect(transport.pendingCount).toBe(1)
   })
 
@@ -134,7 +194,7 @@ describe("MessageTransport", () => {
       await vi.advanceTimersByTimeAsync(TIMEOUT_MS)
       await rejected
 
-      transport.resolve(requestId, {})
+      transport.resolve(requestId, { type: "getPostageBatchResponse" })
 
       expect(transport.pendingCount).toBe(0)
     })
