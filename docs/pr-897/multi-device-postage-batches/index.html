@@ -627,10 +627,8 @@ pointer — each ride their own clock and are laid over the winner, so a rename 
 stale copy cannot outrank a revoke made elsewhere. The four scalars converge per field on
 their <code dir="auto">at</code> clocks, so concurrent changes to different scalars on different devices both
 survive. A winning <code dir="auto">deleted: true</code> makes every other device forget the account; a restore
-writes <code dir="auto">deleted: false</code> on a fresh clock and brings it back. A device that is offline when the
-account is deleted only learns of it from the feed, which lives on the default drive: if that
-drive expires first — within a day or two when the deletion shortens it — the device keeps the
-account.</p>
+writes <code dir="auto">deleted: false</code> on a fresh clock and brings it back. A device that stays offline until the
+default drive expires never reads the deletion, and keeps the account.</p>
 <div class="sl-heading-wrapper level-h3"><h3 id="restore-refresh-and-the-bus">Restore, refresh, and the bus</h3><a class="sl-anchor-link" href="#restore-refresh-and-the-bus"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 1 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 0 0-1.42-1.42m8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 1 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 0 0 0 1.42 1 1 0 0 0 1.42 0l3.88-3.89a4.49 4.49 0 0 0 0-6.33M8.83 15.17a1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.92-4.92a1 1 0 1 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42"></path></svg></span><span class="sr-only" data-pagefind-ignore>Section titled “Restore, refresh, and the bus”</span></a></div>
 <ul>
 <li><strong>Restore</strong> (a device signing in to an account it has never seen): fold from Swarm and
