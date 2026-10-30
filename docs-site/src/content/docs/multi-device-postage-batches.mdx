@@ -545,10 +545,8 @@ pointer — each ride their own clock and are laid over the winner, so a rename 
 stale copy cannot outrank a revoke made elsewhere. The four scalars converge per field on
 their `at` clocks, so concurrent changes to different scalars on different devices both
 survive. A winning `deleted: true` makes every other device forget the account; a restore
-writes `deleted: false` on a fresh clock and brings it back. A device that is offline when the
-account is deleted only learns of it from the feed, which lives on the default drive: if that
-drive expires first — within a day or two when the deletion shortens it — the device keeps the
-account.
+writes `deleted: false` on a fresh clock and brings it back. A device that stays offline until the
+default drive expires never reads the deletion, and keeps the account.
 
 ### Restore, refresh, and the bus
 

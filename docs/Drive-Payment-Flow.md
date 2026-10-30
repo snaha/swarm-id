@@ -498,51 +498,27 @@ copy that currently promises otherwise, in
 
 ## Delete account
 
-Deleting an account cannot take its drives with it: a postage batch has no cancel, and its balance
-cannot be withdrawn. What the contract does allow the owner is `increaseDepth`, which halves the
-per-chunk balance per step and refuses a result below `minimumInitialBalancePerChunk` (~1 day of
-storage). So deletion **dilutes** each drive as far as it will go, and the drive lapses within a day
-or two instead of running out its lifespan. Dilution does not erase anything — data already stored
-stays retrievable until the batch expires, and nobody can be stopped from having downloaded it — it
-only stops paying for it. Diluting the default drive also shortens how long the deletion itself
-stays readable to devices that are offline (docs/Account-State.md, "Offline devices").
+A postage batch has no cancel and its balance cannot be withdrawn, so deleting an account
+**dilutes** each drive instead: `increaseDepth` halves the per-chunk balance per step down to the
+contract's minimum (~1 day of storage), and the drive lapses within a day or two. Nothing is
+erased; the data stops being paid for. `planDeleteDilution` (`ui/src/lib/payment/delete-dilution.ts`)
+says how far each drive goes and which are left alone, and `runDeleteDilution`
+(`drive-operation.ts`) funds the gas for all of them in one payment, through the same screens as
+extend and resize. A drive a first attempt diluted plans as `expires-soon`, so a retry sends
+nothing twice.
 
-The plan (`planDeleteDilution`, `ui/src/lib/payment/delete-dilution.ts`) takes k whole steps, the
-largest with `remaining >> k` still at or above the floor, so the balance lands in
-[floor, 2·floor). The floor is the minimum plus `FLOOR_MARGIN_BLOCKS` of decay, for the same reason
-`resizePlan` keeps it: the contract measures the balance when the transaction mines. A drive is
-left alone, with a reason, when the user turned **Keep data** on (`kept`), when no whole step fits
-(`expires-soon`), when it is gone or empty (`expired`), owned by another key (`not-owned`), or
-immutable (`immutable`). All of an account's drives share one owner, the derived postage signer, so
-one key signs every dilution.
+| Outcome                                         | Result                                                                                 |
+| ----------------------------------------------- | -------------------------------------------------------------------------------------- |
+| every planned drive diluted (or none to dilute) | **Account deleted**                                                                    |
+| gas declined, nothing sent                      | **Drives can't be shortened**: Back keeps the account, Delete anyway goes on undiluted |
+| deleted undiluted                               | **Some data couldn't be deleted**, with the postage signer key that owns the drives    |
+| the gas payment failed or delivered short       | nothing is torn down: **Deletion failed**, Retry                                       |
+| a transaction failed                            | nothing is torn down: **Deletion failed**, Retry                                       |
+| the deletion could not be published             | the account stays, unmarked: **Deletion failed**, Retry                                |
 
-`runDeleteDilution` (`drive-operation.ts`) reads every drive's chain truth, plans each, and checks
-gas **once** for all the planned transactions: `max(GAS_BUDGET_XDAI_WEI, N ×
-GAS_PER_TRANSACTION_XDAI_WEI)`, raised through the same `requestFunding` seam and payment screens
-as extend and resize. A dilution moves no BZZ, so the need is gas alone. Then `beforeSpend`, then
-one `increaseDepth` per drive, each recorded from chain truth (or the plan's projection when the
-re-read fails). A failed transaction does not stop the others.
-
-What the dialog does with the outcome:
-
-| Outcome                                         | Result                                                                          |
-| ----------------------------------------------- | ------------------------------------------------------------------------------- |
-| every planned drive diluted (or none to dilute) | the account is deleted — **Account deleted**                                    |
-| gas declined, nothing sent                      | the account is deleted anyway — **Some data couldn't be deleted**, with the key |
-| the gas payment failed or delivered short       | nothing is torn down — **Deletion failed**, Retry                               |
-| a transaction failed                            | nothing is torn down — **Deletion failed**, Retry                               |
-| the deletion could not be published             | the account stays, unmarked — **Deletion failed**, Retry                        |
-
-**The partial handover.** When the drives could not be diluted, the user asked for the account to
-go and it goes; but the drives still hold balance, and their only owner is the postage signer,
-derived from the account. It is derived before anything is torn down and shown on the outcome
-screen as **Private key** — "used to manage postage batches directly" — so the batches can still be
-diluted, topped up or left to run out from any wallet.
-
-**Retry is idempotent.** A drive a first attempt diluted sits in [floor, 2·floor), so planning it
-again yields `expires-soon` and sends nothing; the account is marked and published afresh
-(docs/Account-State.md, "Account deletion"). A local account — no drives, nothing synced — skips
-both and is simply removed.
+The signer key is derived before anything is torn down, since nothing is left to derive it from
+afterwards; with it the batches can still be diluted, topped up or left to run out from any wallet.
+What the teardown publishes, and when, is in docs/Account-State.md, "Account deletion".
 
 ## Dev and testing
 
@@ -653,7 +629,6 @@ than assumes; whether Relay's own solver does is what the canary has to establis
 - Live contract test: `relay.live.test.ts` (`pnpm --filter @swarm-id/ui test:live`).
 - E2E: `ui/tests/payment-rail.test.ts` (payment screens end to end),
   `ui/tests/drive-onchain.test.ts` (the engine's flows), `ui/tests/delete-account.test.ts`
-  (deletion: a local account everywhere, dilution with a kept drive against the local chain).
-- Deletion units: `delete-dilution.test.ts` (the plan's boundaries and idempotence),
-  `drive-operation.test.ts` (`runDeleteDilution`), `ui/src/lib/delete-account.test.ts` (the
-  publish-before-remove order and the partial handover).
+  (deletion; its synced tests run in the Three Devices workflow).
+- Deletion units: `delete-dilution.test.ts`, `drive-operation.test.ts` (`runDeleteDilution`),
+  `ui/src/lib/delete-account.test.ts`.

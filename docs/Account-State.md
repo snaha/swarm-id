@@ -171,40 +171,32 @@ on different devices both survive.
 
 ## Account deletion
 
-Deleting an account is the fourth scalar, `deleted`, set to `true` on the deleting device and
-published like any other change. It is deliberately not a tombstone on the account's own entries:
+Deleting an account sets the fourth scalar, `deleted`, to `true`. It is not a tombstone on the
+account's entries: drives and devices stay live, because the marker is published through the
+default drive and the fold skips a removed device's view.
 
-- **The deleting device** (`Account.markDeleted`, `ui/src/lib/delete-account.ts`) revokes every live
-  connected app and sets `deleted` in one `skipSync` commit, then **awaits** its own feed publish
-  (`syncStore.syncAccount`), then an account-bus delta, and only then removes the record. The bus
-  goes second because live peers forget the account the moment its delta lands. Drives and devices
-  stay live: the publish goes through the default drive, and the fold skips a removed device's
-  view, so tombstoning either would silence the publish that carries the deletion. A publish that
-  fails (or is skipped: no default drive, every partition held) takes the marker back on a newer
-  clock (`Account.cancelDeletion`) and keeps the account; the revokes stand. A marker still on a
-  stored record at load is a teardown the page closed on, and is taken back the same way.
-- **A peer** that folds a winning `true` — from the bus (`applyAccountDelta`) or a Swarm refresh —
-  removes the account locally, leaves the session if it was current, and says "This account was
-  deleted on another device". `applyRefreshed` reports only the transition from live to deleted,
-  so the deleting device, which already holds the marker, never treats its own deletion as news.
-- **A restore** — recovery phrase or sign-back-in — claims the account back: it writes
-  `deleted: false` on a fresh clock (`reclaimed`, `ui/src/lib/account-deleted.ts`), which outranks
-  the deletion. It does so on every restore, not only one that folded a deletion, because a
-  sign-back-in from the local snapshot cannot see a deletion made while it was signed out. The
-  drives the user kept at deletion come back with it.
+- **The deleting device** (`tearDownAccount`, `ui/src/lib/delete-account.ts`) marks the account,
+  **awaits** its feed publish, revokes every connected app, sends an account-bus delta, and only
+  then removes the record. The bus goes last because live peers forget the account the moment its
+  delta lands; the revokes wait for the publish so a failed attempt leaves apps connected. A failed
+  or skipped publish (every partition held) takes the marker back on a newer clock and keeps the
+  account. Without a live default drive no device can read the account from Swarm, so the feed
+  publish is skipped and the bus alone carries the deletion.
+- **A marker found at load** is a teardown the page closed on, and is taken back the same way. If
+  the page closed after the feed publish landed, during the bus step, the account reappears on that
+  device; deleting it again finishes the job.
+- **A peer** that folds a winning `true`, from the bus or a Swarm refresh, removes the account and
+  says "This account was deleted on another device". `applyRefreshed` reports only the transition
+  from live to deleted, so the deleting device never treats its own deletion as news.
+- **A restore**, recovery phrase or sign-back-in, writes `deleted: false` on a fresh clock
+  (`reclaimed`, `ui/src/lib/account-deleted.ts`). Every restore does, since a sign-back-in from the
+  local snapshot cannot see a deletion made while it was signed out. Kept drives come back with it.
 
-**Offline devices.** A device that is not open when the account is deleted misses the bus delta and
-can only learn of the deletion from the feed, which is stamped with the default drive. Once that
-drive expires its chunks are evicted and the feed can no longer be read, so a device that comes back
-after that keeps the account: nothing it can read says it was deleted. The window is the default
-drive's remaining lifespan — about one to two days when deletion dilutes it, its natural lifespan
-when the user keeps its data (or it cannot be diluted: owned elsewhere, immutable). The delete
-dialog says so. Such a device cannot delete the account itself either, because its publish needs a
-live default drive.
-
-The revokes are what cut a partitioned dApp session off from the stamp signer keys; the marker is
-what makes the account disappear. The proxy carries the marker through its fold, its stored
-session and its own publishes like the other scalars, so it never republishes the account as live.
+**Offline devices.** A device that is closed during the deletion can only learn of it from the feed,
+which lives on the default drive. Once that drive expires the feed can no longer be read, and a
+device that comes back after that keeps the account. The window is the default drive's remaining
+lifespan: one to two days when the deletion dilutes it, its natural lifespan when its data is kept
+or it cannot be diluted, and none at all when there is no live default drive.
 
 ## Assumptions
 
