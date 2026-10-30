@@ -30,6 +30,8 @@ import {
 const SYNCED_DELETE_TIMEOUT_MS = 6 * 60 * 1000
 /** Dilutions and the publish, after the dialog is confirmed. */
 const DELETION_SETTLE_TIMEOUT_MS = 120_000
+/** The first page load can wait on the dev server compiling the home page. */
+const FIRST_LOAD_TIMEOUT_MS = 15_000
 
 const chainUp = await chainReachable()
 const beeUp = await beeReachable()
@@ -51,7 +53,9 @@ function storedAccounts(page: Page): Promise<StoredAccount[]> {
 
 async function createLocalAccount(page: Page): Promise<string> {
   await page.goto('/')
-  await page.getByRole('link', { name: 'Get started' }).first().click()
+  const getStarted = page.getByRole('link', { name: 'Get started' }).first()
+  await expect(getStarted).toBeVisible({ timeout: FIRST_LOAD_TIMEOUT_MS })
+  await getStarted.click()
   await completeCreateFlow(page)
   await page.getByRole('button', { name: 'Stay local for now' }).click()
   await expect(page).toHaveURL(/\/$/)
