@@ -1696,6 +1696,16 @@ export const ErrorMessageSchema = WireErrorSchema.extend({
   requestId: z.string(),
 })
 
+/**
+ * The app's drives changed (#933): one joined or left the grant, the primary
+ * moved, a lane moved, a drive ran out. Sent after the `connectionInfoChanged`
+ * it accompanies, for a dApp that wants drive changes alone and re-reads
+ * `getDrives()` on it.
+ */
+export const DrivesChangedMessageSchema = z.object({
+  type: z.literal("drivesChanged"),
+})
+
 export const ConnectionInfoChangedMessageSchema = z.object({
   type: z.literal("connectionInfoChanged"),
   canUpload: z.boolean(),
@@ -1983,6 +1993,7 @@ export const IframeToParentMessageSchema = z.discriminatedUnion("type", [
   UploadProgressMessageSchema,
   ErrorMessageSchema,
   ConnectionInfoChangedMessageSchema,
+  DrivesChangedMessageSchema,
   ConnectResponseMessageSchema,
   IsConnectedResponseMessageSchema,
   GetNodeInfoResponseMessageSchema,
@@ -2056,6 +2067,7 @@ export type ErrorMessage = z.infer<typeof ErrorMessageSchema>
 export type ConnectionInfoChangedMessage = z.infer<
   typeof ConnectionInfoChangedMessageSchema
 >
+export type DrivesChangedMessage = z.infer<typeof DrivesChangedMessageSchema>
 export type ConnectResponseMessage = z.infer<
   typeof ConnectResponseMessageSchema
 >
@@ -2247,6 +2259,15 @@ export interface ClientOptions {
    * via `client.connectionInfo`.
    */
   onConnectionChange?: (info: ConnectionInfo) => void
+  /**
+   * Invoked when the app's drives change (#933): one joins or leaves the
+   * grant, the primary moves, a lane moves, a drive runs out. Fires once at
+   * connect and then on every such change, after `onConnectionChange` for
+   * the same event, so `getDrives()` read here is current. For a dApp that
+   * wants drive changes alone, without sifting them out of every connection
+   * change.
+   */
+  onDrivesChange?: () => void
   popupMode?: "popup" | "window" // Default: 'window'
   metadata: AppMetadata
   buttonConfig?: ButtonConfig
