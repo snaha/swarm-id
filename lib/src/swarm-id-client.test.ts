@@ -29,8 +29,8 @@ type ClientInternals = {
   iframe: unknown
   storageShared?: boolean
   lastConnectionInfo?: unknown
-  /** The in-flight requests `sendRequest` is holding open. */
-  pendingRequests: Map<string, unknown>
+  /** Holds the in-flight requests `sendRequest` opened. */
+  transport: { pendingCount: number }
 }
 
 const internals = (c: SwarmIdClient): ClientInternals =>
@@ -1713,7 +1713,7 @@ describe("SwarmIdClient request timeout", () => {
     await vi.advanceTimersByTimeAsync(TIMEOUT_MS)
 
     await rejected
-    expect(internals(client).pendingRequests.size).toBe(0)
+    expect(internals(client).transport.pendingCount).toBe(0)
   })
 
   // The pending is gone by then, so the late answer has nothing to settle —
@@ -1729,7 +1729,7 @@ describe("SwarmIdClient request timeout", () => {
 
     env.dispatch({ data: { type: "getPostageBatchResponse", requestId } })
 
-    expect(internals(client).pendingRequests.size).toBe(0)
+    expect(internals(client).transport.pendingCount).toBe(0)
   })
 
   it("clears the timer when an answer settles the request", async () => {
@@ -1741,7 +1741,7 @@ describe("SwarmIdClient request timeout", () => {
     env.dispatch({ data: { type: "getPostageBatchResponse", requestId } })
 
     await expect(request).resolves.toBeUndefined()
-    expect(internals(client).pendingRequests.size).toBe(0)
+    expect(internals(client).transport.pendingCount).toBe(0)
     expect(vi.getTimerCount()).toBe(0)
   })
 
@@ -1767,7 +1767,7 @@ describe("SwarmIdClient request timeout", () => {
     })
 
     expect(progress).toEqual([{ total: 10, processed: 9 }])
-    expect(internals(client).pendingRequests.size).toBe(1)
+    expect(internals(client).transport.pendingCount).toBe(1)
 
     await vi.advanceTimersByTimeAsync(1)
     await rejected
@@ -1807,7 +1807,7 @@ describe("SwarmIdClient destroy()", () => {
     client.destroy()
 
     expect(vi.getTimerCount()).toBe(0)
-    expect(internals(client).pendingRequests.size).toBe(0)
+    expect(internals(client).transport.pendingCount).toBe(0)
   })
 
   it("stops listening for messages", () => {

@@ -14,7 +14,6 @@ import type {
   UploadFilesOptions,
   CollectionFileInput,
   CollectionEntry,
-  UploadProgress,
   ActUploadOptions,
   DownloadOptions,
   RequestOptions,
@@ -89,7 +88,6 @@ import type {
 } from "./types"
 import {
   IframeToParentMessageSchema,
-  ParentToIframeMessageSchema,
   AppMetadataSchema,
   PermissionsSchema,
 } from "./types"
@@ -100,10 +98,9 @@ import { collectionPath } from "./utils/collection"
 import { PERMISSIONS_POPUP_MAX_MS, untilPopupClosed } from "./utils/popup"
 import { buildAuthUrl } from "./utils/url"
 import { TimeoutError, withTimeout } from "./utils/promise"
+import { MessageTransport } from "./message-transport"
 
 const DEFAULT_TIMEOUT_MS = 30000
-/** The largest delay `setTimeout` honours; past it, it fires almost at once. */
-const MAX_TIMER_DELAY_MS = 2 ** 31 - 1
 const DEFAULT_INITIALIZATION_TIMEOUT_MS = 30000
 /**
  * The round trip of a `requestPermissions` message: the proxy answers it
@@ -166,7 +163,7 @@ export class SwarmIdClient {
   private iframe: HTMLIFrameElement | undefined
   private iframeOrigin: string
   private iframePath: string
-  private timeout: number
+  private readonly transport: MessageTransport
   private initializationTimeout: number
   private onConnectionChange?: (info: ConnectionInfo) => void
   private lastConnectionInfo: ConnectionInfo | undefined
@@ -191,23 +188,6 @@ export class SwarmIdClient {
   private readyPromise: Promise<void> | undefined
   private readyResolve?: () => void
   private readyReject?: (error: SwarmIdError) => void
-  private pendingRequests: Map<
-    string,
-    {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      resolve: (value: any) => void
-      reject: (error: Error) => void
-      timeoutId: NodeJS.Timeout
-    }
-  > = new Map()
-  /**
-   * Progress callbacks of in-flight uploads, by request id. Dispatched from
-   * the one window listener, so progress passes the same source and origin
-   * checks as every other message from the iframe.
-   */
-  private progressListeners: Map<string, (progress: UploadProgress) => void> =
-    new Map()
-  private requestIdCounter = 0
   private messageListener: ((event: MessageEvent) => void) | undefined
   private proxyInitializedPromise: Promise<void> | undefined
   private proxyInitializedResolve?: () => void
@@ -252,7 +232,11 @@ export class SwarmIdClient {
     }
     this.iframeOrigin = options.iframeOrigin
     this.iframePath = options.iframePath || "/proxy"
-    this.timeout = options.timeout ?? DEFAULT_TIMEOUT_MS
+    this.transport = new MessageTransport({
+      target: () => this.iframe?.contentWindow ?? undefined,
+      targetOrigin: this.iframeOrigin,
+      timeout: options.timeout ?? DEFAULT_TIMEOUT_MS,
+    })
     this.initializationTimeout =
       options.initializationTimeout ?? DEFAULT_INITIALIZATION_TIMEOUT_MS
     this.onConnectionChange = options.onConnectionChange
@@ -436,9 +420,9 @@ export class SwarmIdClient {
     await this.proxyInitializedPromise
 
     // Identify ourselves to the iframe
-    this.sendMessage({
+    this.transport.post({
       type: "parentIdentify",
-      requestId: this.generateRequestId(),
+      requestId: this.transport.nextRequestId(),
       popupMode: this.popupMode,
       metadata: this.metadata,
       buttonConfig: this.buttonConfig,
@@ -536,15 +520,7 @@ export class SwarmIdClient {
         if (this.iframe) {
           this.iframe.style.display = "block"
         }
-        // Handle as response if there's a matching request
-        if ("requestId" in message) {
-          const pending = this.pendingRequests.get(message.requestId)
-          if (pending) {
-            clearTimeout(pending.timeoutId)
-            this.pendingRequests.delete(message.requestId)
-            pending.resolve(message)
-          }
-        }
+        this.transport.resolve(message.requestId, message)
         break
 
       case "authSuccess":
@@ -589,31 +565,17 @@ export class SwarmIdClient {
         break
 
       case "disconnectResponse":
-        // Handle as response if there's a matching request
-        if ("requestId" in message) {
-          const pending = this.pendingRequests.get(message.requestId)
-          if (pending) {
-            clearTimeout(pending.timeoutId)
-            this.pendingRequests.delete(message.requestId)
-            pending.resolve(message)
-          }
-        }
+        this.transport.resolve(message.requestId, message)
         break
 
-      case "error": {
-        const pending = this.pendingRequests.get(message.requestId)
-        if (pending) {
-          clearTimeout(pending.timeoutId)
-          this.pendingRequests.delete(message.requestId)
-          pending.reject(SwarmIdError.fromWire(message))
-        }
+      case "error":
+        this.transport.reject(message.requestId, SwarmIdError.fromWire(message))
         break
-      }
 
       case "uploadProgress":
         // Report to the upload's callback, if it registered one. Don't resolve
         // the pending request - the response does that
-        this.progressListeners.get(message.requestId)?.({
+        this.transport.progress(message.requestId, {
           total: message.total,
           processed: message.processed,
         })
@@ -622,96 +584,22 @@ export class SwarmIdClient {
       default:
         // Handle response messages with requestId
         if ("requestId" in message) {
-          const pending = this.pendingRequests.get(message.requestId)
-          if (pending) {
-            clearTimeout(pending.timeoutId)
-            this.pendingRequests.delete(message.requestId)
-            pending.resolve(message)
-          }
+          this.transport.resolve(message.requestId, message)
         }
     }
   }
 
   /**
-   * Send message to iframe
-   */
-  private sendMessage(message: ParentToIframeMessage): void {
-    if (!this.iframe || !this.iframe.contentWindow) {
-      throw new SwarmIdError("invalid-state", "Iframe not initialized")
-    }
-
-    // Validate message before sending
-    try {
-      ParentToIframeMessageSchema.parse(message)
-    } catch (error) {
-      throw new SwarmIdError(
-        "invalid-request",
-        `Invalid message format: ${error}`,
-        { cause: error },
-      )
-    }
-
-    this.iframe.contentWindow.postMessage(message, this.iframeOrigin)
-  }
-
-  /**
    * Send request and wait for response
    */
-  private async sendRequest<
+  private sendRequest<
     TResponse,
     TRequest extends ParentToIframeMessage & { requestId: string } =
       ParentToIframeMessage & {
         requestId: string
       },
   >(message: TRequest): Promise<TResponse> {
-    // A per-call `requestOptions.timeout` bounds this whole round trip, not
-    // only the Bee request the proxy makes with it: a caller raising it for a
-    // large upload must not be cut off at the constructor default (#775).
-    const timeout = this.roundTripTimeout(
-      (message as { requestOptions?: RequestOptions }).requestOptions?.timeout,
-    )
-    return new Promise((resolve, reject) => {
-      const timeoutId = setTimeout(() => {
-        this.pendingRequests.delete(message.requestId)
-        reject(
-          new SwarmIdError("timeout", `Request timeout after ${timeout}ms`),
-        )
-      }, timeout)
-
-      this.pendingRequests.set(message.requestId, {
-        resolve,
-        reject,
-        timeoutId,
-      })
-
-      this.sendMessage(message)
-    })
-  }
-
-  /**
-   * The round-trip bound for one call, from its own `requestOptions.timeout`.
-   *
-   * Only a value `setTimeout` can honour is taken. Zero and negatives mean
-   * "no timeout" to Bee, which is where this option went before it also bound
-   * the round trip — taken literally here they would reject on the next tick,
-   * the opposite of what the caller asked, so they fall back to the client
-   * default and still reach Bee unchanged. A value past the 32-bit timer
-   * ceiling means "as long as it takes", and `setTimeout` would wrap it into
-   * firing almost at once, so it clamps to the ceiling instead. `Infinity` and
-   * `NaN` never get this far: `z.number()` rejects them on the way out.
-   */
-  private roundTripTimeout(perCall: number | undefined): number {
-    if (perCall === undefined || perCall <= 0) {
-      return this.timeout
-    }
-    return Math.min(perCall, MAX_TIMER_DELAY_MS)
-  }
-
-  /**
-   * Generate unique request ID
-   */
-  private generateRequestId(): string {
-    return `req-${++this.requestIdCounter}-${Date.now()}`
+    return this.transport.request<TResponse, TRequest>(message)
   }
 
   private normalizeSocIdentifier(
@@ -865,7 +753,7 @@ export class SwarmIdClient {
    */
   async checkAuthStatus(): Promise<AuthStatus> {
     this.ensureReady()
-    const requestId = this.generateRequestId()
+    const requestId = this.transport.nextRequestId()
 
     const response = await this.sendRequest<{
       type: "authStatusResponse"
@@ -910,7 +798,7 @@ export class SwarmIdClient {
    */
   async getPostageBatch(): Promise<PostageBatch | undefined> {
     this.ensureReady()
-    const requestId = this.generateRequestId()
+    const requestId = this.transport.nextRequestId()
 
     const response = await this.sendRequest<{
       type: "getPostageBatchResponse"
@@ -938,7 +826,7 @@ export class SwarmIdClient {
    */
   async getDrives(): Promise<Drive[]> {
     this.ensureReady()
-    const requestId = this.generateRequestId()
+    const requestId = this.transport.nextRequestId()
 
     const response = await this.sendRequest<{
       type: "getDrivesResponse"
@@ -973,7 +861,7 @@ export class SwarmIdClient {
    */
   async disconnect(): Promise<void> {
     this.ensureReady()
-    const requestId = this.generateRequestId()
+    const requestId = this.transport.nextRequestId()
 
     const response = await this.sendRequest<{
       type: "disconnectResponse"
@@ -1053,7 +941,7 @@ export class SwarmIdClient {
     // channel into a partitioned frame. `storageShared` is undefined against a
     // proxy too old to report it, and that takes this path too: it works in
     // both storage modes, where the one above works in only one.
-    const requestId = this.generateRequestId()
+    const requestId = this.transport.nextRequestId()
     const response = await this.sendRequest<{
       type: "connectResponse"
       requestId: string
@@ -1125,7 +1013,7 @@ export class SwarmIdClient {
       permissions: AppPermissions
     }>({
       type: "getPermissions",
-      requestId: this.generateRequestId(),
+      requestId: this.transport.nextRequestId(),
     })
     return response.permissions
   }
@@ -1179,7 +1067,7 @@ export class SwarmIdClient {
         opened: boolean
       }>({
         type: "requestPermissions",
-        requestId: this.generateRequestId(),
+        requestId: this.transport.nextRequestId(),
         permissions,
         popupMode: this.popupMode,
         requestOptions: { timeout: PERMISSIONS_REQUEST_TIMEOUT_MS },
@@ -1320,7 +1208,7 @@ export class SwarmIdClient {
   async isBeeConnected(): Promise<boolean> {
     try {
       this.ensureReady()
-      const requestId = this.generateRequestId()
+      const requestId = this.transport.nextRequestId()
 
       const response = await this.sendRequest<{
         type: "isConnectedResponse"
@@ -1374,7 +1262,7 @@ export class SwarmIdClient {
     swapEnabled: boolean
   }> {
     this.ensureReady()
-    const requestId = this.generateRequestId()
+    const requestId = this.transport.nextRequestId()
 
     const response = await this.sendRequest<{
       type: "getNodeInfoResponse"
@@ -1441,7 +1329,7 @@ export class SwarmIdClient {
     requestOptions?: RequestOptions,
   ): Promise<UploadResult> {
     this.ensureReady()
-    const requestId = this.generateRequestId()
+    const requestId = this.transport.nextRequestId()
     const {
       onProgress,
       useWebSocket,
@@ -1451,7 +1339,7 @@ export class SwarmIdClient {
       ...serializableOptions
     } = options ?? {}
 
-    const stopProgress = this.listenForProgress(requestId, onProgress)
+    const stopProgress = this.transport.listenForProgress(requestId, onProgress)
     try {
       const response = await this.sendRequest<{
         type: "uploadDataResponse"
@@ -1513,7 +1401,7 @@ export class SwarmIdClient {
     requestOptions?: RequestOptions,
   ): Promise<Uint8Array> {
     this.ensureReady()
-    const requestId = this.generateRequestId()
+    const requestId = this.transport.nextRequestId()
 
     const response = await this.sendRequest<{
       type: "downloadDataResponse"
@@ -1552,7 +1440,7 @@ export class SwarmIdClient {
    */
   async deriveAppSecret(label: string): Promise<Uint8Array> {
     this.ensureReady()
-    const requestId = this.generateRequestId()
+    const requestId = this.transport.nextRequestId()
 
     const response = await this.sendRequest<{
       type: "deriveAppSecretResponse"
@@ -1621,7 +1509,7 @@ export class SwarmIdClient {
     requestOptions?: RequestOptions,
   ): Promise<UploadResult> {
     this.ensureReady()
-    const requestId = this.generateRequestId()
+    const requestId = this.transport.nextRequestId()
     const {
       onProgress,
       useWebSocket,
@@ -1646,7 +1534,7 @@ export class SwarmIdClient {
       )
     }
 
-    const stopProgress = this.listenForProgress(requestId, onProgress)
+    const stopProgress = this.transport.listenForProgress(requestId, onProgress)
     try {
       const response = await this.sendRequest<{
         type: "uploadFileResponse"
@@ -1720,7 +1608,7 @@ export class SwarmIdClient {
     requestOptions?: RequestOptions,
   ): Promise<FileData> {
     this.ensureReady()
-    const requestId = this.generateRequestId()
+    const requestId = this.transport.nextRequestId()
 
     const response = await this.sendRequest<{
       type: "downloadFileResponse"
@@ -1789,7 +1677,7 @@ export class SwarmIdClient {
     requestOptions?: RequestOptions,
   ): Promise<UploadResult> {
     this.ensureReady()
-    const requestId = this.generateRequestId()
+    const requestId = this.transport.nextRequestId()
     const { onProgress, useWorkers, workerCount, ...serializableOptions } =
       options ?? {}
 
@@ -1807,7 +1695,7 @@ export class SwarmIdClient {
       }),
     )
 
-    const stopProgress = this.listenForProgress(requestId, onProgress)
+    const stopProgress = this.transport.listenForProgress(requestId, onProgress)
     try {
       const response = await this.sendRequest<{
         type: "uploadFilesResponse"
@@ -1854,29 +1742,13 @@ export class SwarmIdClient {
     requestOptions?: RequestOptions,
   ): Promise<CollectionEntry[]> {
     this.ensureReady()
-    const requestId = this.generateRequestId()
+    const requestId = this.transport.nextRequestId()
     const response = await this.sendRequest<{
       type: "listFilesResponse"
       requestId: string
       entries: CollectionEntry[]
     }>({ type: "listFiles", requestId, reference, requestOptions })
     return response.entries
-  }
-
-  /**
-   * Forward the proxy's `uploadProgress` messages for one request to a
-   * callback, through the window listener's checks. Returns the function that
-   * stops forwarding; a no-op without a callback.
-   */
-  private listenForProgress(
-    requestId: string,
-    onProgress: ((progress: UploadProgress) => void) | undefined,
-  ): () => void {
-    if (!onProgress) return () => {}
-    this.progressListeners.set(requestId, onProgress)
-    return () => {
-      this.progressListeners.delete(requestId)
-    }
   }
 
   // ============================================================================
@@ -1924,7 +1796,7 @@ export class SwarmIdClient {
     requestOptions?: RequestOptions,
   ): Promise<UploadResult> {
     this.ensureReady()
-    const requestId = this.generateRequestId()
+    const requestId = this.transport.nextRequestId()
     const { onProgress: _onProgress, ...serializableOptions } = options ?? {}
 
     const response = await this.sendRequest<{
@@ -1976,7 +1848,7 @@ export class SwarmIdClient {
     requestOptions?: RequestOptions,
   ): Promise<Uint8Array> {
     this.ensureReady()
-    const requestId = this.generateRequestId()
+    const requestId = this.transport.nextRequestId()
 
     const response = await this.sendRequest<{
       type: "downloadChunkResponse"
@@ -2024,7 +1896,7 @@ export class SwarmIdClient {
       identifier: Identifier | Uint8Array | string,
       encryptionKey: Uint8Array | string,
     ): Promise<SingleOwnerChunk> => {
-      const requestId = this.generateRequestId()
+      const requestId = this.transport.nextRequestId()
       const response = await this.sendRequest<
         SocDownloadResponseMessage,
         SocDownloadMessage
@@ -2044,7 +1916,7 @@ export class SwarmIdClient {
       identifier: Identifier | Uint8Array | string,
       encryptionKey?: Uint8Array | string,
     ): Promise<SingleOwnerChunk> => {
-      const requestId = this.generateRequestId()
+      const requestId = this.transport.nextRequestId()
       const response = await this.sendRequest<
         SocRawDownloadResponseMessage,
         SocRawDownloadMessage
@@ -2105,7 +1977,7 @@ export class SwarmIdClient {
         return owner
       }
 
-      const requestId = this.generateRequestId()
+      const requestId = this.transport.nextRequestId()
       const response = await this.sendRequest<
         SocGetOwnerResponseMessage,
         SocGetOwnerMessage
@@ -2122,7 +1994,7 @@ export class SwarmIdClient {
       identifier: Identifier | Uint8Array | string,
       encryptionKey: Uint8Array | string,
     ): Promise<SingleOwnerChunk> => {
-      const requestId = this.generateRequestId()
+      const requestId = this.transport.nextRequestId()
 
       const response = await this.sendRequest<
         SocDownloadResponseMessage,
@@ -2143,7 +2015,7 @@ export class SwarmIdClient {
       identifier: Identifier | Uint8Array | string,
       encryptionKey?: Uint8Array | string,
     ): Promise<SingleOwnerChunk> => {
-      const requestId = this.generateRequestId()
+      const requestId = this.transport.nextRequestId()
 
       const response = await this.sendRequest<
         SocRawDownloadResponseMessage,
@@ -2167,7 +2039,7 @@ export class SwarmIdClient {
       data: Uint8Array,
       options?: UploadOptions,
     ): Promise<SocUploadResult> => {
-      const requestId = this.generateRequestId()
+      const requestId = this.transport.nextRequestId()
       const response = await this.sendRequest<
         SocUploadResponseMessage,
         SocUploadMessage
@@ -2196,7 +2068,7 @@ export class SwarmIdClient {
       data: Uint8Array,
       options?: UploadOptions,
     ): Promise<SocRawUploadResult> => {
-      const requestId = this.generateRequestId()
+      const requestId = this.transport.nextRequestId()
       const response = await this.sendRequest<
         SocRawUploadResponseMessage,
         SocRawUploadMessage
@@ -2259,7 +2131,7 @@ export class SwarmIdClient {
         return owner
       }
 
-      const requestId = this.generateRequestId()
+      const requestId = this.transport.nextRequestId()
       const response = await this.sendRequest<
         FeedGetOwnerResponseMessage,
         FeedGetOwnerMessage
@@ -2279,7 +2151,7 @@ export class SwarmIdClient {
         options?.at !== undefined
           ? options.at
           : BigInt(Math.floor(Date.now() / 1000))
-      const requestId = this.generateRequestId()
+      const requestId = this.transport.nextRequestId()
       const response = await this.sendRequest<
         EpochFeedDownloadReferenceResponseMessage,
         EpochFeedDownloadReferenceMessage
@@ -2337,7 +2209,7 @@ export class SwarmIdClient {
         options?.at !== undefined
           ? options.at
           : BigInt(Math.floor(Date.now() / 1000))
-      const requestId = this.generateRequestId()
+      const requestId = this.transport.nextRequestId()
       const response = await this.sendRequest<
         EpochFeedDownloadReferenceResponseMessage,
         EpochFeedDownloadReferenceMessage
@@ -2420,7 +2292,7 @@ export class SwarmIdClient {
         return owner
       }
 
-      const requestId = this.generateRequestId()
+      const requestId = this.transport.nextRequestId()
       const response = await this.sendRequest<
         FeedGetOwnerResponseMessage,
         FeedGetOwnerMessage
@@ -2440,7 +2312,7 @@ export class SwarmIdClient {
         options?.at !== undefined
           ? options.at
           : BigInt(Math.floor(Date.now() / 1000))
-      const requestId = this.generateRequestId()
+      const requestId = this.transport.nextRequestId()
       const response = await this.sendRequest<
         EpochFeedDownloadReferenceResponseMessage,
         EpochFeedDownloadReferenceMessage
@@ -2506,7 +2378,7 @@ export class SwarmIdClient {
       const derivedKey =
         cleanRef.length === 128 ? cleanRef.slice(64) : undefined
       const feedKey = options?.encryptionKey ?? derivedKey
-      const requestId = this.generateRequestId()
+      const requestId = this.transport.nextRequestId()
       const response = await this.sendRequest<
         EpochFeedUploadReferenceResponseMessage,
         EpochFeedUploadReferenceMessage
@@ -2556,7 +2428,7 @@ export class SwarmIdClient {
       const derivedKey =
         cleanRef.length === 128 ? cleanRef.slice(64) : undefined
       const feedKey = options?.encryptionKey ?? derivedKey
-      const requestId = this.generateRequestId()
+      const requestId = this.transport.nextRequestId()
       const response = await this.sendRequest<
         EpochFeedUploadReferenceResponseMessage,
         EpochFeedUploadReferenceMessage
@@ -2591,7 +2463,7 @@ export class SwarmIdClient {
         options?.at !== undefined
           ? options.at
           : BigInt(Math.floor(Date.now() / 1000))
-      const requestId = this.generateRequestId()
+      const requestId = this.transport.nextRequestId()
       const response = await this.sendRequest<
         EpochFeedDownloadReferenceResponseMessage,
         EpochFeedDownloadReferenceMessage
@@ -2644,7 +2516,7 @@ export class SwarmIdClient {
           ? options.at
           : BigInt(Math.floor(Date.now() / 1000))
       const normalizedRef = this.normalizeReference(reference)
-      const requestId = this.generateRequestId()
+      const requestId = this.transport.nextRequestId()
       const response = await this.sendRequest<
         EpochFeedUploadReferenceResponseMessage,
         EpochFeedUploadReferenceMessage
@@ -2683,7 +2555,7 @@ export class SwarmIdClient {
         { ...options?.uploadOptions, encrypt: false },
         requestOptions,
       )
-      const requestId = this.generateRequestId()
+      const requestId = this.transport.nextRequestId()
       const response = await this.sendRequest<
         EpochFeedUploadReferenceResponseMessage,
         EpochFeedUploadReferenceMessage
@@ -2744,7 +2616,7 @@ export class SwarmIdClient {
       if (owner) {
         return owner
       }
-      const requestId = this.generateRequestId()
+      const requestId = this.transport.nextRequestId()
       const response = await this.sendRequest<
         SequentialFeedGetOwnerResponseMessage,
         SequentialFeedGetOwnerMessage
@@ -2760,7 +2632,7 @@ export class SwarmIdClient {
       encryptionKey: Uint8Array | string,
       options?: SequentialFeedUpdateOptions,
     ): Promise<SequentialFeedPayloadResult> => {
-      const requestId = this.generateRequestId()
+      const requestId = this.transport.nextRequestId()
       const response = await this.sendRequest<
         SequentialFeedDownloadPayloadResponseMessage,
         SequentialFeedDownloadPayloadMessage
@@ -2796,7 +2668,7 @@ export class SwarmIdClient {
     const downloadRawPayload = async (
       options?: SequentialFeedDownloadRawOptions,
     ): Promise<SequentialFeedPayloadResult> => {
-      const requestId = this.generateRequestId()
+      const requestId = this.transport.nextRequestId()
       const response = await this.sendRequest<
         SequentialFeedDownloadRawPayloadResponseMessage,
         SequentialFeedDownloadRawPayloadMessage
@@ -2835,7 +2707,7 @@ export class SwarmIdClient {
       encryptionKey: Uint8Array | string,
       options?: SequentialFeedUpdateOptions,
     ): Promise<SequentialFeedReferenceResult> => {
-      const requestId = this.generateRequestId()
+      const requestId = this.transport.nextRequestId()
       const response = await this.sendRequest<
         SequentialFeedDownloadReferenceResponseMessage,
         SequentialFeedDownloadReferenceMessage
@@ -2902,7 +2774,7 @@ export class SwarmIdClient {
       if (owner) {
         return owner
       }
-      const requestId = this.generateRequestId()
+      const requestId = this.transport.nextRequestId()
       const response = await this.sendRequest<
         SequentialFeedGetOwnerResponseMessage,
         SequentialFeedGetOwnerMessage
@@ -2918,7 +2790,7 @@ export class SwarmIdClient {
       encryptionKey: Uint8Array | string,
       options?: SequentialFeedUpdateOptions,
     ): Promise<SequentialFeedPayloadResult> => {
-      const requestId = this.generateRequestId()
+      const requestId = this.transport.nextRequestId()
       const response = await this.sendRequest<
         SequentialFeedDownloadPayloadResponseMessage,
         SequentialFeedDownloadPayloadMessage
@@ -2953,7 +2825,7 @@ export class SwarmIdClient {
     const downloadRawPayload = async (
       options?: SequentialFeedDownloadRawOptions,
     ): Promise<SequentialFeedPayloadResult> => {
-      const requestId = this.generateRequestId()
+      const requestId = this.transport.nextRequestId()
       const response = await this.sendRequest<
         SequentialFeedDownloadRawPayloadResponseMessage,
         SequentialFeedDownloadRawPayloadMessage
@@ -2991,7 +2863,7 @@ export class SwarmIdClient {
       encryptionKey: Uint8Array | string,
       options?: SequentialFeedUpdateOptions,
     ): Promise<SequentialFeedReferenceResult> => {
-      const requestId = this.generateRequestId()
+      const requestId = this.transport.nextRequestId()
       const response = await this.sendRequest<
         SequentialFeedDownloadReferenceResponseMessage,
         SequentialFeedDownloadReferenceMessage
@@ -3026,7 +2898,7 @@ export class SwarmIdClient {
       data: Uint8Array | string,
       options?: SequentialFeedUploadOptions,
     ): Promise<SequentialFeedUploadResult> => {
-      const requestId = this.generateRequestId()
+      const requestId = this.transport.nextRequestId()
       const response = await this.sendRequest<
         SequentialFeedUploadPayloadResponseMessage,
         SequentialFeedUploadPayloadMessage
@@ -3067,7 +2939,7 @@ export class SwarmIdClient {
       data: Uint8Array | string,
       options?: SequentialFeedUploadRawOptions,
     ): Promise<SequentialFeedUploadResult> => {
-      const requestId = this.generateRequestId()
+      const requestId = this.transport.nextRequestId()
       const response = await this.sendRequest<
         SequentialFeedUploadRawPayloadResponseMessage,
         SequentialFeedUploadRawPayloadMessage
@@ -3111,7 +2983,7 @@ export class SwarmIdClient {
       reference: Uint8Array | string,
       options?: SequentialFeedUploadOptions,
     ): Promise<SequentialFeedUploadResult> => {
-      const requestId = this.generateRequestId()
+      const requestId = this.transport.nextRequestId()
       const response = await this.sendRequest<
         SequentialFeedUploadReferenceResponseMessage,
         SequentialFeedUploadReferenceMessage
@@ -3204,7 +3076,7 @@ export class SwarmIdClient {
   ): Promise<string> {
     this.ensureReady()
     const normalizedTopic = this.normalizeFeedTopic(topic)
-    const requestId = this.generateRequestId()
+    const requestId = this.transport.nextRequestId()
 
     const response = await this.sendRequest<
       CreateFeedManifestResponseMessage,
@@ -3254,7 +3126,7 @@ export class SwarmIdClient {
     proximity?: number,
   ): Promise<string> {
     this.ensureReady()
-    const requestId = this.generateRequestId()
+    const requestId = this.transport.nextRequestId()
 
     const response = await this.sendRequest<{
       type: "gsocMineResponse"
@@ -3303,7 +3175,7 @@ export class SwarmIdClient {
     requestOptions?: RequestOptions,
   ): Promise<UploadResult> {
     this.ensureReady()
-    const requestId = this.generateRequestId()
+    const requestId = this.transport.nextRequestId()
 
     const response = await this.sendRequest<{
       type: "gsocSendResponse"
@@ -3387,10 +3259,10 @@ export class SwarmIdClient {
     tagUid?: number
   }> {
     this.ensureReady()
-    const requestId = this.generateRequestId()
+    const requestId = this.transport.nextRequestId()
     const { onProgress, ...serializableOptions } = options ?? {}
 
-    const stopProgress = this.listenForProgress(requestId, onProgress)
+    const stopProgress = this.transport.listenForProgress(requestId, onProgress)
     try {
       const response = await this.sendRequest<{
         type: "actUploadDataResponse"
@@ -3462,7 +3334,7 @@ export class SwarmIdClient {
     requestOptions?: RequestOptions,
   ): Promise<Uint8Array> {
     this.ensureReady()
-    const requestId = this.generateRequestId()
+    const requestId = this.transport.nextRequestId()
 
     const response = await this.sendRequest<{
       type: "actDownloadDataResponse"
@@ -3519,7 +3391,7 @@ export class SwarmIdClient {
     actReference: string
   }> {
     this.ensureReady()
-    const requestId = this.generateRequestId()
+    const requestId = this.transport.nextRequestId()
 
     const response = await this.sendRequest<{
       type: "actAddGranteesResponse"
@@ -3591,7 +3463,7 @@ export class SwarmIdClient {
     actReference: string
   }> {
     this.ensureReady()
-    const requestId = this.generateRequestId()
+    const requestId = this.transport.nextRequestId()
 
     const response = await this.sendRequest<{
       type: "actRevokeGranteesResponse"
@@ -3643,7 +3515,7 @@ export class SwarmIdClient {
     requestOptions?: RequestOptions,
   ): Promise<string[]> {
     this.ensureReady()
-    const requestId = this.generateRequestId()
+    const requestId = this.transport.nextRequestId()
 
     const response = await this.sendRequest<{
       type: "actGetGranteesResponse"
@@ -3694,13 +3566,7 @@ export class SwarmIdClient {
     const destroyed = () =>
       new SwarmIdError("invalid-state", "Client destroyed")
 
-    // Clear pending requests
-    this.pendingRequests.forEach((pending) => {
-      clearTimeout(pending.timeoutId)
-      pending.reject(destroyed())
-    })
-    this.pendingRequests.clear()
-    this.progressListeners.clear()
+    this.transport.close(destroyed)
 
     // Remove message listener
     if (this.messageListener) {
