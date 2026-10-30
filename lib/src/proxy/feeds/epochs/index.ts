@@ -23,11 +23,8 @@ export type {
 // Implementation exports
 export { SyncEpochFinder } from "./finder"
 export { AsyncEpochFinder } from "./async-finder"
-export {
-  BasicEpochUpdater,
-  epochSocAddress,
-  makeEpochIdentifier,
-} from "./updater"
+export { BasicEpochUpdater, epochSocAddress } from "./updater"
+export { makeEpochIdentifier } from "./utils"
 
 // Convenience factory functions
 import { SyncEpochFinder } from "./finder"

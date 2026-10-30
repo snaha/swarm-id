@@ -8,17 +8,11 @@
  * using epoch-based indexing with parallel chunk fetching.
  */
 
-import { Binary } from "cafe-utility"
-import { makeSOCAddress } from "@ethersphere/core-sdk"
-import type { BeeRequestOptions } from "@ethersphere/bee-js"
 import { EthAddress, Topic } from "@ethersphere/bee-js"
 import type { ChunkDownloader } from "../../download-data"
 import { EpochIndex, MAX_LEVEL } from "./epoch"
 import type { EpochFinder, EpochLookupResult } from "./types"
-import { downloadEncryptedSOC } from "../../download-data"
-import { findPreviousLeaf } from "./utils"
-
-const EPOCH_LOOKUP_TIMEOUT_MS = 2000
+import { fetchEpochEntry, findPreviousLeaf, type EpochEntry } from "./utils"
 
 /**
  * Async concurrent finder for epoch-based feeds
@@ -265,100 +259,20 @@ export class AsyncEpochFinder implements EpochFinder {
    * @param at - Target timestamp for validation
    * @param epoch - Epoch to fetch
    * @returns Object with reference and timestamp, or undefined if timestamp > at
-   * @throws Error if chunk not found
+   * @throws Error if chunk not found or not signed by the owner
    */
-  private async getEpochChunkWithMetadata(
+  private getEpochChunkWithMetadata(
     at: bigint,
     epoch: EpochIndex,
-  ): Promise<{ reference: Uint8Array; timestamp: bigint } | undefined> {
-    const requestOptions: BeeRequestOptions = {
-      timeout: EPOCH_LOOKUP_TIMEOUT_MS,
-    }
-    // Calculate epoch identifier: Keccak256(topic || Keccak256(start || level))
-    const epochHash = await epoch.marshalBinary()
-    const identifier = Binary.keccak256(
-      Binary.concatBytes(this.topic.toUint8Array(), epochHash),
+  ): Promise<EpochEntry | undefined> {
+    return fetchEpochEntry(
+      this.bee,
+      this.topic,
+      this.owner,
+      epoch,
+      at,
+      this.encryptionKey,
     )
-
-    let payload: Uint8Array
-    if (this.encryptionKey) {
-      const soc = await downloadEncryptedSOC(
-        this.bee,
-        this.owner,
-        identifier,
-        this.encryptionKey,
-        requestOptions,
-      )
-      payload = soc.payload
-    } else {
-      const address = makeSOCAddress(identifier, this.owner)
-
-      // Download chunk
-      const chunkData = await this.bee.chunk.download(
-        address.toHex(),
-        undefined,
-        requestOptions,
-      )
-
-      // Extract payload from SOC (Single Owner Chunk)
-      const IDENTIFIER_SIZE = 32
-      const SIGNATURE_SIZE = 65
-      const SPAN_SIZE = 8
-      const SOC_HEADER_SIZE = IDENTIFIER_SIZE + SIGNATURE_SIZE
-
-      // Read span to get payload length
-      const spanStart = SOC_HEADER_SIZE
-      const span = chunkData.slice(spanStart, spanStart + SPAN_SIZE)
-      const spanView = new DataView(
-        span.buffer,
-        span.byteOffset,
-        span.byteLength,
-      )
-      const payloadLength = Number(spanView.getBigUint64(0, true)) // little-endian
-
-      // Extract full payload (timestamp + reference)
-      const payloadStart = spanStart + SPAN_SIZE
-      payload = chunkData.slice(payloadStart, payloadStart + payloadLength)
-    }
-
-    // Detect payload format based on length:
-    // - 40 bytes: timestamp(8) + reference(32) - from /soc endpoint
-    // - 48 bytes: span(8) + timestamp(8) + reference(32) - from /chunks with v1 format
-    // - 72 bytes: timestamp(8) + encrypted_reference(64) - from /soc endpoint
-    // - 80 bytes: span(8) + timestamp(8) + encrypted_reference(64) - from /chunks with v1 format
-    const VALID_PAYLOAD_LENGTHS = [40, 48, 72, 80]
-    if (!VALID_PAYLOAD_LENGTHS.includes(payload.length)) {
-      console.warn(
-        `Unexpected feed payload length: ${payload.length}. Expected 40, 48, 72, or 80 bytes.`,
-      )
-      return undefined
-    }
-
-    const TIMESTAMP_SIZE = 8
-    const hasSpanPrefix = payload.length === 48 || payload.length === 80
-
-    const timestampOffset = hasSpanPrefix ? 8 : 0
-    const timestampBytes = payload.slice(
-      timestampOffset,
-      timestampOffset + TIMESTAMP_SIZE,
-    )
-    const timestampView = new DataView(
-      timestampBytes.buffer,
-      timestampBytes.byteOffset,
-      timestampBytes.byteLength,
-    )
-    const timestamp = timestampView.getBigUint64(0, false) // big-endian
-
-    // Validate timestamp - update must be at or before target time
-    if (timestamp > at) {
-      return undefined
-    }
-
-    // Return reference and timestamp (skip timestamp and optional span prefix)
-    return {
-      reference: payload.slice(timestampOffset + TIMESTAMP_SIZE),
-      timestamp,
-    }
   }
 
   private findPreviousLeaf(

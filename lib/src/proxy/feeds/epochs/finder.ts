@@ -8,16 +8,11 @@
  * using epoch-based indexing.
  */
 
-import { Binary } from "cafe-utility"
-import { makeSOCAddress } from "@ethersphere/core-sdk"
-import type { BeeRequestOptions } from "@ethersphere/bee-js"
 import { EthAddress, Topic } from "@ethersphere/bee-js"
 import type { ChunkDownloader } from "../../download-data"
 import { EpochIndex, lca, MAX_LEVEL } from "./epoch"
 import type { EpochFinder } from "./types"
-import { findPreviousLeaf } from "./utils"
-
-const EPOCH_LOOKUP_TIMEOUT_MS = 2000
+import { fetchEpochEntry, findPreviousLeaf } from "./utils"
 
 /**
  * Synchronous recursive finder for epoch-based feeds
@@ -187,88 +182,23 @@ export class SyncEpochFinder implements EpochFinder {
   /**
    * Fetch chunk for a specific epoch
    *
-   * Calculates the chunk address from topic, epoch, and owner,
-   * then downloads it from the Bee node.
-   *
    * @param at - Target timestamp for validation
    * @param epoch - Epoch to fetch
    * @returns Chunk reference (32 or 64 bytes), or undefined if timestamp invalid
-   * @throws Error if chunk not found or network error
+   * @throws Error if chunk not found, not signed by the owner, or network error
    */
   private async getEpochChunk(
     at: bigint,
     epoch: EpochIndex,
   ): Promise<Uint8Array | undefined> {
-    const requestOptions: BeeRequestOptions = {
-      timeout: EPOCH_LOOKUP_TIMEOUT_MS,
-    }
-    // Calculate epoch identifier: Keccak256(topic || Keccak256(start || level))
-    const epochHash = await epoch.marshalBinary()
-    const identifier = Binary.keccak256(
-      Binary.concatBytes(this.topic.toUint8Array(), epochHash),
+    const entry = await fetchEpochEntry(
+      this.bee,
+      this.topic,
+      this.owner,
+      epoch,
+      at,
     )
-
-    const address = makeSOCAddress(identifier, this.owner)
-
-    // Download chunk
-    const chunkData = await this.bee.chunk.download(
-      address.toHex(),
-      undefined,
-      requestOptions,
-    )
-
-    // Extract payload from SOC (Single Owner Chunk)
-    // SOC structure: [identifier (32 bytes)][signature (65 bytes)][span (8 bytes)][payload]
-    const IDENTIFIER_SIZE = 32
-    const SIGNATURE_SIZE = 65
-    const SPAN_SIZE = 8
-    const TIMESTAMP_SIZE = 8
-    const SOC_HEADER_SIZE = IDENTIFIER_SIZE + SIGNATURE_SIZE
-
-    // Read span to get payload length
-    const spanStart = SOC_HEADER_SIZE
-    const span = chunkData.slice(spanStart, spanStart + SPAN_SIZE)
-    const spanView = new DataView(span.buffer, span.byteOffset, span.byteLength)
-    const payloadLength = Number(spanView.getBigUint64(0, true)) // little-endian
-
-    // Extract full payload (timestamp + reference)
-    const payloadStart = spanStart + SPAN_SIZE
-    const payload = chunkData.slice(payloadStart, payloadStart + payloadLength)
-
-    // Detect payload format based on length:
-    // - 40 bytes: timestamp(8) + reference(32) - from /soc endpoint
-    // - 48 bytes: span(8) + timestamp(8) + reference(32) - from /chunks with v1 format
-    // - 72 bytes: timestamp(8) + encrypted_reference(64) - from /soc endpoint
-    // - 80 bytes: span(8) + timestamp(8) + encrypted_reference(64) - from /chunks with v1 format
-    const VALID_PAYLOAD_LENGTHS = [40, 48, 72, 80]
-    if (!VALID_PAYLOAD_LENGTHS.includes(payload.length)) {
-      console.warn(
-        `Unexpected feed payload length: ${payload.length}. Expected 40, 48, 72, or 80 bytes.`,
-      )
-      return undefined
-    }
-
-    const hasSpanPrefix = payload.length === 48 || payload.length === 80
-
-    const timestampOffset = hasSpanPrefix ? 8 : 0
-    const timestampBytes = payload.slice(
-      timestampOffset,
-      timestampOffset + TIMESTAMP_SIZE,
-    )
-    const timestampView = new DataView(
-      timestampBytes.buffer,
-      timestampBytes.byteOffset,
-      timestampBytes.byteLength,
-    )
-    const timestamp = timestampView.getBigUint64(0, false) // big-endian
-
-    // Validate timestamp - update must be at or before target time
-    if (timestamp > at) {
-      return undefined
-    }
-
-    // Return reference only (skip timestamp and optional span prefix)
-    return payload.slice(timestampOffset + TIMESTAMP_SIZE)
+    return entry?.reference
   }
 
   private findPreviousLeaf(
