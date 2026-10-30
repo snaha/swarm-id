@@ -6184,7 +6184,7 @@ export class SwarmIdProxy {
       batchID: stamp.batchID.toHex(),
       utilization: stamp.utilization,
       usable: details?.usable ?? stamp.usable,
-      label: "", // PostageStamp doesn't store label
+      label: stamp.name ?? "",
       depth: stamp.depth,
       amount: stamp.amount.toString(),
       bucketDepth: stamp.bucketDepth,

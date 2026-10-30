@@ -34,7 +34,6 @@ import {
   TTL_LAPSE_MS,
   UPLOAD_TIMEOUT_MS,
   createAccountWithDrives,
-  drivesOf,
   rigUp,
   sleep,
 } from './devices-rig'
@@ -49,16 +48,16 @@ const GRANT_PROPAGATION_MS = LEASE_REFRESH_MS * 3
 
 /** The lanes held on one drive are pairwise distinct across devices. */
 async function expectNoDualHoldOn(
-  batchHex: string,
+  driveId: string,
   devices: Device[],
 ): Promise<Map<string, number | undefined>> {
   const live = devices.filter((device) => !device.page.isClosed())
-  const lanes = await Promise.all(live.map((device) => device.lane(batchHex)))
+  const lanes = await Promise.all(live.map((device) => device.lane(driveId)))
   const held = new Map(live.map((device, index) => [device.label, lanes[index]]))
   const taken = [...held.values()].filter((lane): lane is number => lane !== undefined)
   expect(
     new Set(taken).size,
-    `dual hold on ${batchHex.slice(0, LANE_PREFIX_LENGTH)}: ${JSON.stringify([...held])}`,
+    `dual hold on ${driveId.slice(0, LANE_PREFIX_LENGTH)}: ${JSON.stringify([...held])}`,
   ).toBe(taken.length)
   return held
 }
@@ -71,7 +70,7 @@ test.describe('two devices on two drives', () => {
 
   let A: Device
   let B: Device
-  /** The account's two regular drives: the default, which is the app's primary, and the other. */
+  /** The app's two drive ids: the account's default, which is the app's primary, and the other. */
   let D1: string
   let D2: string
   const all = () => [A, B]
@@ -92,8 +91,9 @@ test.describe('two devices on two drives', () => {
       writeFileSync(seedPath, JSON.stringify(seed))
     }
     B = await Device.open(browser, 'B', seed, 'all')
-    ;[D1, D2] = drivesOf(seed)
-    expect(D2, 'the seeded account holds one drive, not two').toBeDefined()
+    await A.ensureConnected()
+    ;[D1, D2] = await A.driveIds()
+    expect(D2, 'the app was granted one drive, not two').toBeDefined()
   })
 
   // Playwright reads fixtures off the destructured first argument; none are needed here.
@@ -120,14 +120,14 @@ test.describe('two devices on two drives', () => {
   })
 
   /** The lane a device holds on a drive, once the sidebar shows one. */
-  async function laneHeld(device: Device, batchHex: string): Promise<number> {
+  async function laneHeld(device: Device, driveId: string): Promise<number> {
     await expect
-      .poll(() => device.lane(batchHex), {
-        message: `${device.label} holds no lane on ${batchHex.slice(0, LANE_PREFIX_LENGTH)}`,
+      .poll(() => device.lane(driveId), {
+        message: `${device.label} holds no lane on ${driveId.slice(0, LANE_PREFIX_LENGTH)}`,
         timeout: LEASE_REFRESH_MS,
       })
       .not.toBeUndefined()
-    return (await device.lane(batchHex))!
+    return (await device.lane(driveId))!
   }
 
   // Holders idle past IDLE_YIELD_MS let go once a rival is known, so every

@@ -61,7 +61,9 @@
         <option value="">Primary drive</option>
         {#each clientStore.drives as drive (drive.driveId)}
           <option value={drive.driveId}>
-            {drive.label} · {drive.kind}{drive.primary ? ' · primary' : ''}
+            {drive.label || drive.driveId.slice(0, 8)} · {drive.kind}{drive.primary
+              ? ' · primary'
+              : ''}
           </option>
         {/each}
       </select>
@@ -69,7 +71,7 @@
     <!-- One lane per drive: each drive's lease is its own (#882). -->
     {#each clientStore.drives as drive (drive.driveId)}
       <div class="text-xs text-muted-foreground pl-6">
-        Lane on {drive.label}: {drive.partition ?? 'Inactive'}
+        Lane on {drive.driveId.slice(0, 8)}…: {drive.partition ?? 'Inactive'}
       </div>
     {/each}
   {/if}
