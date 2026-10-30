@@ -2247,7 +2247,6 @@ export class SwarmIdClient {
       )
     }
 
-    // Raw updates carry no key, and name no drive for the SOC.
     const uploadRawReference = (
       reference: Uint8Array | string,
       options?: Omit<EpochFeedUploadOptions, "encryptionKey">,
@@ -2256,7 +2255,7 @@ export class SwarmIdClient {
         this.normalizeReference(reference),
         options,
         undefined,
-        undefined,
+        options?.batchID ?? options?.uploadOptions?.batchID,
         undefined,
       )
 
@@ -2264,16 +2263,17 @@ export class SwarmIdClient {
       data: Uint8Array | string,
       options?: Omit<EpochFeedUploadOptions, "encryptionKey" | "encrypt">,
     ): Promise<EpochFeedUploadResult> => {
+      const batchID = options?.batchID ?? options?.uploadOptions?.batchID
       const uploadResult = await this.uploadData(
         this.normalizePayload(data),
-        { ...options?.uploadOptions, encrypt: false },
+        { ...options?.uploadOptions, encrypt: false, batchID },
         requestOptions,
       )
       return publish(
         uploadResult.reference,
         options,
         undefined,
-        undefined,
+        batchID,
         undefined,
       )
     }
