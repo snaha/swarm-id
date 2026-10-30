@@ -28,6 +28,7 @@
   /** What a later request asks for, ticked here. */
   let askDataSharing = $state(false)
   let askWriteAccess = $state(false)
+  let askRevealSecrets = $state(false)
   let askAll = $state(false)
   let askRegular = $state(false)
   let askScratch = $state(false)
@@ -42,6 +43,7 @@
       ...(askAll ? { drives: 'all' } : drives.length > 0 && { drives }),
       ...(askDataSharing && { dataSharing: true }),
       ...(askWriteAccess && { writeAccess: true }),
+      ...(askRevealSecrets && { revealSecrets: true }),
     }
     return Object.keys(permissions).length > 0 ? permissions : undefined
   })
@@ -54,10 +56,8 @@
     if (!request) return
     const held = await clientStore.requestPermissions(request)
     lastResult = held
-      ? `Data sharing ${onOff(held.dataSharing)}, write access ${onOff(held.writeAccess)}; drives: ${
-          clientStore.drives
-            .map((drive) => `${drive.kind} ${drive.batchID.slice(0, 8)}…`)
-            .join(', ') || 'none'
+      ? `Data sharing ${onOff(held.dataSharing)}, write access ${onOff(held.writeAccess)}, key export ${onOff(held.revealSecrets)}; drives: ${
+          clientStore.drives.map((drive) => `${drive.kind} ${drive.label}`).join(', ') || 'none'
         }`
       : 'The request failed — see the console'
   }
@@ -127,6 +127,7 @@
       {#if clientStore.authenticated}
         <p>Data sharing: {onOff(clientStore.permissions?.dataSharing)}</p>
         <p>Write access: {onOff(clientStore.permissions?.writeAccess)}</p>
+        <p>Key export: {onOff(clientStore.permissions?.revealSecrets)}</p>
         <p>
           Sharing key: {clientStore.identity?.sharingPublicKey
             ? 'available'
@@ -134,10 +135,7 @@
         </p>
         <p>
           Drives: {clientStore.drives
-            .map(
-              (drive) =>
-                `${drive.kind} ${drive.batchID.slice(0, 8)}…${drive.primary ? ' (primary)' : ''}`,
-            )
+            .map((drive) => `${drive.kind} ${drive.label}${drive.primary ? ' (primary)' : ''}`)
             .join(', ') || 'none'}
         </p>
       {:else}
@@ -162,6 +160,10 @@
       <div class="flex items-center gap-2">
         <Checkbox id="ask-write-access" bind:checked={askWriteAccess} />
         <Label for="ask-write-access" class="cursor-pointer text-sm">Write access</Label>
+      </div>
+      <div class="flex items-center gap-2">
+        <Checkbox id="ask-reveal-secrets" bind:checked={askRevealSecrets} />
+        <Label for="ask-reveal-secrets" class="cursor-pointer text-sm">Key export</Label>
       </div>
       <div class="flex items-center gap-2">
         <Checkbox id="ask-all" bind:checked={askAll} />

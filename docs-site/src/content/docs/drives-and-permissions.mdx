@@ -83,13 +83,19 @@ optional row left empty is simply not granted, and the app finds out from
 
 The app's **primary drive** is its first granted regular drive, or the account default for an
 `'all'` grant and for no request. A write that names no drive goes there. Any other granted drive,
-a scratch drive included, is named on the write with its batch id:
+a scratch drive included, is named on the write with its **drive id**:
 
 ```typescript
 const drives = await client.getDrives()
 const scratch = drives.find((drive) => drive.kind === 'scratch')
-await client.uploadData(frame, { batchID: scratch?.batchID })
+await client.uploadData(frame, { driveId: scratch?.driveId })
 ```
+
+A drive id is the app's own name for the drive, derived per app from the batch id: the same on
+every device and after a reload, so an app can keep it, but different in every app and nothing
+that identifies the batch on chain. The batch itself — its id, amount and block — is the user's,
+and an app sees it only through `drive.revealPostageBatch()` under the **key export** switch
+below.
 
 A scratch drive is never the primary, so a write that names nothing never lands on one. Naming a
 drive outside the grant rejects with `drive-not-granted`.
@@ -106,7 +112,7 @@ button.onclick = async () => {
   const drives = await client.requestDrives([{ kind: 'scratch' }])
   const scratch = drives.find((drive) => drive.kind === 'scratch')
   if (!scratch) return showStreamingUnavailable()
-  startStreaming(scratch.batchID)
+  startStreaming(scratch.driveId)
 }
 ```
 
@@ -158,12 +164,19 @@ Two switches decide what an app may do with it:
   `actUploadData`, and adding or revoking grantees of such a share). Never on without data
   sharing.
 
+A third switch gates what the app may take out of Swarm ID as raw values:
+
+- **Key export** (`revealSecrets`) — read the bytes of a secret from `deriveAppSecret()` with
+  `AppSecret.reveal()`, and the postage batch behind a drive with `drive.revealPostageBatch()`.
+  Without it both work only as handles: the proxy derives from the secret and writes to the
+  drive on the app's behalf, and the app never holds the value. Off until granted, per app only.
+
 The app key is never gated: a share made out to it, or published by it, works whatever the
 switches say. Drives are not affected either.
 
 ### Defaults, and per app
 
-Both switches are **on by default**. The user sets the account-wide defaults at the top of the
+The sharing switches are **on by default**; key export has no account default and is off. The user sets the account-wide defaults at the top of the
 **Apps** tab, and can pin either switch the other way for one app on that app's page. A pin
 survives later changes to the default until the user takes **Use account default**; an app
 pinned apart from the defaults is marked **Custom permissions** in the list. The app's own
@@ -196,7 +209,7 @@ await client.actUploadData(data, grantees, { publisher: 'identity' })
 
 ### Checking, and being refused
 
-[`getPermissions()`](../api/#getpermissions) returns the two booleans in effect, and the same two
+[`getPermissions()`](../api/#getpermissions) returns the booleans in effect, and the same ones
 ride `connectionInfo.permissions`, so a switch the user flips while the app runs arrives through
 `onConnectionChange`. Check before a call that needs one, and ask before failing.
 

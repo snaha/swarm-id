@@ -137,12 +137,12 @@ describe('an edit', () => {
 
 // #885: the two sharing switches beside the drives.
 describe('the sharing switches', () => {
-  const off = { dataSharing: false, writeAccess: false }
-  const readOnly = { dataSharing: true, writeAccess: false }
+  const off = { dataSharing: false, writeAccess: false, revealSecrets: false }
+  const readOnly = { dataSharing: true, writeAccess: false, revealSecrets: false }
   const both = ['dataSharing', 'writeAccess'] as const
 
   it('are asked for only while not in effect, data sharing along with write access', () => {
-    const on = { dataSharing: true, writeAccess: true }
+    const on = { dataSharing: true, writeAccess: true, revealSecrets: false }
     expect(switchesToAsk(undefined, off)).toEqual([])
     expect(switchesToAsk({ drives: [] }, off)).toEqual([])
     expect(switchesToAsk({ dataSharing: true, writeAccess: true }, on)).toEqual([])
@@ -151,27 +151,49 @@ describe('the sharing switches', () => {
     expect(switchesToAsk({ writeAccess: true }, off)).toEqual(['dataSharing', 'writeAccess'])
   })
 
+  // #889: key export stands alone — asked when requested and off, pinned
+  // when the user turned it on, untouched by the sharing switches.
+  it('ask for key export on its own, and pin it when moved', () => {
+    const noExport = { dataSharing: true, writeAccess: true, revealSecrets: false }
+    expect(switchesToAsk({ revealSecrets: true }, noExport)).toEqual(['revealSecrets'])
+    expect(switchesToAsk({ revealSecrets: true }, { ...noExport, revealSecrets: true })).toEqual([])
+    expect(askedPatch(noExport, { ...noExport, revealSecrets: true }, ['revealSecrets'])).toEqual({
+      revealSecrets: true,
+    })
+    expect(askedPatch(noExport, { ...noExport, revealSecrets: true }, both)).toEqual({})
+  })
+
   it('pin what an ask moved', () => {
     expect(askedPatch(off, off, both)).toEqual({})
     expect(askedPatch(readOnly, readOnly, ['writeAccess'])).toEqual({})
-    expect(askedPatch(readOnly, { dataSharing: true, writeAccess: true }, ['writeAccess'])).toEqual(
-      { writeAccess: true },
-    )
+    expect(
+      askedPatch(readOnly, { dataSharing: true, writeAccess: true, revealSecrets: false }, [
+        'writeAccess',
+      ]),
+    ).toEqual({ writeAccess: true })
   })
 
   // The screen showed write access off (or not at all) while data sharing
   // was off, whatever the account default or an old pin says underneath:
   // turning data sharing on grants exactly what was shown.
   it('pin write access to what was shown once data sharing is turned on', () => {
-    expect(askedPatch(off, { dataSharing: true, writeAccess: false }, both)).toEqual({
+    expect(
+      askedPatch(off, { dataSharing: true, writeAccess: false, revealSecrets: false }, both),
+    ).toEqual({
       dataSharing: true,
       writeAccess: false,
     })
-    expect(askedPatch(off, { dataSharing: true, writeAccess: true }, both)).toEqual({
+    expect(
+      askedPatch(off, { dataSharing: true, writeAccess: true, revealSecrets: false }, both),
+    ).toEqual({
       dataSharing: true,
       writeAccess: true,
     })
-    expect(askedPatch(off, { dataSharing: true, writeAccess: false }, ['dataSharing'])).toEqual({
+    expect(
+      askedPatch(off, { dataSharing: true, writeAccess: false, revealSecrets: false }, [
+        'dataSharing',
+      ]),
+    ).toEqual({
       dataSharing: true,
       writeAccess: false,
     })

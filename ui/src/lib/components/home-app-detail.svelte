@@ -156,7 +156,8 @@
         <div class="flex flex-col gap-1 text-sm">
           <span class="font-medium">{SWITCH_COPY[name].label}</span>
           <span class="text-muted-foreground">{SWITCH_COPY[name].description}</span>
-          {#if pinnedSwitches.includes(name)}
+          <!-- Key export has no account default to go back to (#889). -->
+          {#if pinnedSwitches.includes(name) && name !== 'revealSecrets'}
             <span class="text-muted-foreground">
               Account default: {sharingDefault(account.settings, name) ? 'on' : 'off'} ·
               <button type="button" class="underline" onclick={() => useDefault(name)}>

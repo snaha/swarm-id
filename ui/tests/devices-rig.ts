@@ -68,7 +68,7 @@ export const YIELDED_LINE = 'Released idle partition'
 export const BUSY_PUBLISHES = 3
 
 export const PARTITION_LINE = /^Partition: /
-/** The sidebar's per-drive lane line: `Lane on <8 hex>…: <n|Inactive>`. */
+/** The sidebar's per-drive lane line: `Lane on <8 hex of the drive id>…: <n|Inactive>`. */
 export const LANE_LINE = /^Lane on ([0-9a-f]{8})…: (\d+|Inactive)$/
 export const LANE_PREFIX_LENGTH = 8
 /** The storage page uploads encrypted by default: a 64-byte reference, 128 hex. */
@@ -251,12 +251,12 @@ export class Device {
    * "Bucket is full" — a limit, not a lease event. Distinct content spreads
    * across buckets the way real uploads do.
    */
-  async upload(page: Page = this.page, batchHex?: string): Promise<string> {
+  async upload(page: Page = this.page, driveId?: string): Promise<string> {
     // A named drive, else the primary: the sidebar's "Write to" select, shown
     // once the app holds more than one drive. It keeps its last choice, so an
     // unnamed upload sets it back rather than inheriting the previous target.
     const target = page.getByRole('combobox', { name: 'Write to' })
-    if ((await target.count()) > 0) await target.selectOption(batchHex ?? '')
+    if ((await target.count()) > 0) await target.selectOption(driveId ?? '')
     const payload = `${this.label} ${Date.now()} ${Math.random()}`
     await page.getByPlaceholder('Enter data to upload...').fill(payload)
     // The upload has started once a write leaves for the node (from the proxy
@@ -296,7 +296,7 @@ export class Device {
 
   /**
    * The lane this tab's session holds on each drive it was granted, keyed by
-   * the drive's batch id prefix as the sidebar prints it; `undefined` for a
+   * the drive id prefix as the sidebar prints it; `undefined` for a
    * lane it does not hold. Empty while the app holds a single drive — the
    * sidebar lists lanes only beside its "Write to" select (#882).
    */
@@ -310,9 +310,28 @@ export class Device {
     )
   }
 
-  /** The lane held on one drive, by its batch id. */
-  async lane(batchHex: string, page: Page = this.page): Promise<number | undefined> {
-    return (await this.lanes(page)).get(batchHex.slice(0, LANE_PREFIX_LENGTH))
+  /** The lane held on one drive, by its drive id. */
+  async lane(driveId: string, page: Page = this.page): Promise<number | undefined> {
+    return (await this.lanes(page)).get(driveId.slice(0, LANE_PREFIX_LENGTH))
+  }
+
+  /**
+   * The drive ids the app was granted, the primary first, read off the
+   * sidebar's "Write to" select: the app never sees a batch id (#746), so the
+   * seed's batch ids cannot name a drive to it.
+   */
+  async driveIds(page: Page = this.page): Promise<string[]> {
+    const options = page
+      .getByRole('combobox', { name: 'Write to' })
+      .locator('option[value]:not([value=""])')
+    await expect(options.first()).toBeAttached()
+    const rows = await options.evaluateAll((nodes) =>
+      nodes.map((node) => ({
+        id: (node as HTMLOptionElement).value,
+        primary: (node.textContent ?? '').trim().endsWith('· primary'),
+      })),
+    )
+    return rows.sort((a, b) => Number(b.primary) - Number(a.primary)).map((row) => row.id)
   }
 
   /** Upload and return the partition the session held for it. */

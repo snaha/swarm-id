@@ -55,21 +55,23 @@
       Write to
       <select
         class="mt-1 w-full rounded-md border border-border bg-background px-2 py-1 font-mono text-xs text-foreground"
-        value={clientStore.targetBatchID ?? ''}
-        onchange={(event) => (clientStore.targetBatchID = event.currentTarget.value || undefined)}
+        value={clientStore.targetDriveId ?? ''}
+        onchange={(event) => (clientStore.targetDriveId = event.currentTarget.value || undefined)}
       >
         <option value="">Primary drive</option>
-        {#each clientStore.drives as drive (drive.batchID)}
-          <option value={drive.batchID}>
-            {drive.batchID.slice(0, 8)}… · {drive.kind}{drive.primary ? ' · primary' : ''}
+        {#each clientStore.drives as drive (drive.driveId)}
+          <option value={drive.driveId}>
+            {drive.label || drive.driveId.slice(0, 8)} · {drive.kind}{drive.primary
+              ? ' · primary'
+              : ''}
           </option>
         {/each}
       </select>
     </label>
     <!-- One lane per drive: each drive's lease is its own (#882). -->
-    {#each clientStore.drives as drive (drive.batchID)}
+    {#each clientStore.drives as drive (drive.driveId)}
       <div class="text-xs text-muted-foreground pl-6">
-        Lane on {drive.batchID.slice(0, 8)}…: {drive.partition ?? 'Inactive'}
+        Lane on {drive.driveId.slice(0, 8)}…: {drive.partition ?? 'Inactive'}
       </div>
     {/each}
   {/if}
@@ -84,21 +86,23 @@
   {#if expanded}
     {#if clientStore.stamp}
       <dl class="grid grid-cols-[90px_1fr] gap-x-2 gap-y-1 text-xs pl-6">
-        <dt class="text-muted-foreground">Batch ID</dt>
-        <dd class="font-mono text-foreground break-all">{clientStore.stamp.batchID}</dd>
+        <dt class="text-muted-foreground">Drive</dt>
+        <dd class="text-foreground break-all">{clientStore.stamp.label}</dd>
+        <dt class="text-muted-foreground">Drive ID</dt>
+        <dd class="font-mono text-foreground break-all">{clientStore.stamp.driveId}</dd>
         <dt class="text-muted-foreground">Utilization</dt>
         <dd class="font-mono text-foreground">{clientStore.stamp.utilization}%</dd>
         <dt class="text-muted-foreground">Depth</dt>
         <dd class="font-mono text-foreground">{clientStore.stamp.depth}</dd>
-        <dt class="text-muted-foreground">Bucket Depth</dt>
-        <dd class="font-mono text-foreground">{clientStore.stamp.bucketDepth}</dd>
-        <dt class="text-muted-foreground">Amount</dt>
-        <dd class="font-mono text-foreground">{clientStore.stamp.amount}</dd>
-        <dt class="text-muted-foreground">Block</dt>
-        <dd class="font-mono text-foreground">{clientStore.stamp.blockNumber}</dd>
-        <dt class="text-muted-foreground">Immutable</dt>
-        <dd class="font-mono text-foreground">{clientStore.stamp.immutableFlag ? 'Yes' : 'No'}</dd>
       </dl>
+      <!-- The batch id is the user's, not the app's (#746): the proxy hands it out only under "Key export". -->
+      <button
+        type="button"
+        class="mt-1 pl-6 text-xs text-muted-foreground underline"
+        onclick={() => clientStore.revealPrimaryBatch()}
+      >
+        Reveal postage batch (needs Key export)
+      </button>
     {:else if clientStore.uploadMode === 'subsidised'}
       <div class="text-xs text-muted-foreground pl-6">Using public gateway for uploads</div>
     {/if}
