@@ -124,7 +124,13 @@
 <td><code dir="auto">options.onConnectionChange</code></td>
 <td><code dir="auto">(info: ConnectionInfo) =&gt; void</code></td>
 <td>No</td>
-<td>Callback invoked when the app-visible connection state changes (identity, app key, account, auth, permissions), and whenever the app’s drives change: one joins or leaves the grant, the primary moves, a lane moves, a drive expires. Re-read <a href="#getdrives"><code dir="auto">getDrives()</code></a> there. The current snapshot is also available synchronously via <code dir="auto">client.connectionInfo</code>.</td>
+<td>Callback invoked when the app-visible connection state changes (identity, app key, account, auth, permissions), and whenever the app’s drives change. The current snapshot is also available synchronously via <code dir="auto">client.connectionInfo</code>.</td>
+</tr>
+<tr>
+<td><code dir="auto">options.onDrivesChange</code></td>
+<td><code dir="auto">() =&gt; void</code></td>
+<td>No</td>
+<td>Callback invoked only when the app’s drives change: one joins or leaves the grant, the primary moves, a lane moves, a drive expires. Fires once at connect, then after the <code dir="auto">onConnectionChange</code> of the same event. Re-read <a href="#getdrives"><code dir="auto">getDrives()</code></a> there.</td>
 </tr>
 <tr>
 <td><code dir="auto">options.popupMode</code></td>
