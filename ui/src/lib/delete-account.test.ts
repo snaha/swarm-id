@@ -3,8 +3,7 @@
 /**
  * The deleting device's teardown. What it pins is the ordering: the record is
  * removed only once the deletion has been published, because the record is
- * what publishes it — remove first and a failed publish leaves peers holding a
- * live account nobody can delete from here any more.
+ * what publishes it, and apps are revoked only once the deletion is certain.
  */
 import { BatchId, EthAddress, PrivateKey } from '@ethersphere/bee-js'
 import type { SignedInAccount, SyncedAccount } from '@snaha/swarm-id/internal'
@@ -101,7 +100,7 @@ afterEach(() => {
 })
 
 describe('tearDownAccount', () => {
-  it('publishes the deletion and revokes, then removes the account', async () => {
+  it('publishes the deletion, revokes, then removes the account', async () => {
     const account = accountsStore.add(record(true))
     sessionStore.setCurrentAccount(account.id)
     // What the account says at the moment it is published.
@@ -115,9 +114,10 @@ describe('tearDownAccount', () => {
     await tearDownAccount(account)
 
     expect(sync.syncAccount).toHaveBeenCalledWith(ID_HEX)
-    expect(atPublish).toEqual({ deleted: true, revokedAt: expect.any(Number) })
+    expect(atPublish).toEqual({ deleted: true, revokedAt: undefined })
     const announced = bus.publishBeforeClose.mock.calls[0][0] as SyncedAccount
     expect(announced.deleted).toBe(true)
+    expect(announced.connectedApps[0].revokedAt).toEqual(expect.any(Number))
     expect(accountsStore.get(ID_HEX)).toBeUndefined()
     expect(sessionStore.currentAccountId).toBeUndefined()
   })
@@ -158,6 +158,8 @@ describe('tearDownAccount', () => {
     const kept = accountsStore.get(ID_HEX)
     expect(kept?.deleted).toBe(false)
     expect(kept?.deletedAt).toEqual(expect.any(Number))
+    // Nothing was deleted, so nothing was disconnected either.
+    expect(kept?.connectedApps[0].revokedAt).toBeUndefined()
     expect(bus.publishBeforeClose).not.toHaveBeenCalled()
   })
 
@@ -200,6 +202,28 @@ describe('tearDownAccount', () => {
     expect(accountsStore.get(ID_HEX)).toBeUndefined()
   })
 
+  // No device can read the account from Swarm without a live default drive,
+  // so there is nothing to publish there; live peers still hear of it.
+  it.each([
+    ['has no default drive', { defaultPostageStampBatchID: undefined }],
+    ['has an expired default drive', { batchTTL: 0, createdAt: 1 }],
+  ])('tells only the bus when the account %s', async (_label, patch) => {
+    const base = record(true)
+    const account = accountsStore.add({
+      ...base,
+      defaultPostageStampBatchID:
+        'defaultPostageStampBatchID' in patch ? undefined : base.defaultPostageStampBatchID,
+      postageStamps: base.postageStamps.map((stamp) => ({ ...stamp, ...patch })),
+    })
+
+    await tearDownAccount(account)
+
+    expect(sync.syncAccount).not.toHaveBeenCalled()
+    const announced = bus.publishBeforeClose.mock.calls[0][0] as SyncedAccount
+    expect(announced.deleted).toBe(true)
+    expect(accountsStore.get(ID_HEX)).toBeUndefined()
+  })
+
   // Nothing of a local account lives on Swarm, and it has no drive to publish
   // through.
   it('removes a local account without publishing', async () => {
@@ -237,16 +261,33 @@ describe('deleteAccount', () => {
     expect(accountsStore.get(ID_HEX)).toBeUndefined()
   })
 
-  // Declining the gas is not a reason to keep an account the user asked to
-  // delete: it goes, and they get the key that still owns its drives.
-  it('deletes anyway when the gas was not paid, handing over the signer key', async () => {
+  // Declining the gas is a question for the user, not a decision: nothing is
+  // torn down until they choose to delete without diluting.
+  it('tears nothing down when the gas was declined', async () => {
     const account = accountsStore.add(record(true))
-    const { signerKey } = await derivePostageSigner(account.derivationKey)
     dilution.runDeleteDilution.mockResolvedValue({ status: 'unfunded', drives: [] })
 
     const result = await deleteAccount({ account, keep: new Set(), requestFunding, checkpoint })
 
+    expect(result).toEqual({ status: 'unfunded' })
+    expect(sync.syncAccount).not.toHaveBeenCalled()
+    expect(accountsStore.get(ID_HEX)?.deleted).toBe(false)
+  })
+
+  it('deletes undiluted when asked, handing over the signer key', async () => {
+    const account = accountsStore.add(record(true))
+    const { signerKey } = await derivePostageSigner(account.derivationKey)
+
+    const result = await deleteAccount({
+      account,
+      keep: new Set(),
+      requestFunding,
+      undiluted: true,
+      checkpoint,
+    })
+
     expect(result).toEqual({ status: 'partial', signerPrivateKey: `0x${signerKey.toHex()}` })
+    expect(dilution.runDeleteDilution).not.toHaveBeenCalled()
     expect(accountsStore.get(ID_HEX)).toBeUndefined()
   })
 

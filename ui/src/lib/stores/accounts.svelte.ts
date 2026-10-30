@@ -360,22 +360,13 @@ export class Account {
   }
 
   /**
-   * The deleting device's teardown, in one commit: revoke every live app —
-   * the revoke is what cuts a partitioned dApp session off from the stamp
-   * signer keys, over the bus — and mark the account deleted, so a peer that
-   * folds it forgets the account.
-   *
-   * Drives and devices are deliberately left live. The account publishes
-   * through its default drive, and the fold skips a removed device's view, so
-   * tombstoning either would silence the very publish that carries this.
-   * `skipSync`, because that publish is the caller's to await: the record may
-   * only be removed once it has landed (`tearDownAccount`).
+   * Mark the account deleted, so a peer that folds it forgets the account.
+   * Drives and devices stay live: the marker is published through the default
+   * drive, and the fold skips a removed device's view. `skipSync`: the caller
+   * awaits that publish itself (`tearDownAccount`).
    */
   markDeleted() {
     const now = Date.now()
-    this.connectedApps = this.connectedApps.map((app) =>
-      app.revokedAt === undefined ? revoked(app, true) : app,
-    )
     this.deleted = true
     this.deletedAt = now
     this.lastModified = now
@@ -383,13 +374,8 @@ export class Account {
   }
 
   /**
-   * Take back a `markDeleted` whose publish never landed: the account stays,
-   * and a marker left on it would go out with the next routine sync and delete
-   * it everywhere else unannounced. On a fresh clock, so it also outvotes a
-   * marker that reached Swarm before the failure. The revokes stand — the user
-   * was deleting, and an app can reconnect. `skipSync`, like the marking: a
-   * retry is the likely next step, and a sync started here would contend with
-   * its publish.
+   * Take back a `markDeleted` whose publish never landed, on a newer clock so
+   * it also outvotes a marker that reached Swarm before the failure.
    */
   cancelDeletion() {
     // Strictly after the marker, even within the millisecond it was set.
@@ -397,6 +383,18 @@ export class Account {
     this.deleted = false
     this.deletedAt = now
     this.lastModified = now
+    this.#commit({ skipSync: true })
+  }
+
+  /**
+   * Revoke every live app: a deleted account's last word to its partitioned
+   * dApp sessions, which the bus delta carries. `skipSync`, like the marker.
+   */
+  revokeAllApps() {
+    this.connectedApps = this.connectedApps.map((app) =>
+      app.revokedAt === undefined ? revoked(app, true) : app,
+    )
+    this.lastModified = Date.now()
     this.#commit({ skipSync: true })
   }
 
@@ -779,11 +777,8 @@ function load(): Account[] {
   if (!browser) return []
   return storageManager.load().map((record) => {
     const account = hydrate(record)
-    // A marker still on a stored record is a teardown the page closed on
-    // before it was confirmed (`tearDownAccount`): take it back rather than
-    // let the next routine sync publish it. A tab still mid-teardown of the
-    // same account has its marker taken back too; it notices before removing
-    // anything and fails over to its Retry.
+    // A teardown the page closed on: take the marker back rather than let the
+    // next routine sync publish it (docs/Account-State.md, "Account deletion").
     if (account.deleted) account.cancelDeletion()
     return account
   })

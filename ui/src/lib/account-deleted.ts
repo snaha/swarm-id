@@ -1,14 +1,9 @@
 // Copyright 2026 The Swarm Authors. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 /**
- * The two ends of the account deletion marker away from the deleting device:
- * a peer forgetting an account that was deleted elsewhere, and a restore
- * bringing a deleted account back (docs/Account-State.md, the scalars).
- *
- * Both folds — a peer's bus delta and the Swarm refresh — land the marker
- * through `applyRefreshed`, which reports when it is the fold that deleted the
- * account; the deleting device already holds the marker, so it never takes
- * this path for its own deletion.
+ * The deletion marker away from the deleting device: a peer forgetting the
+ * account, and a restore claiming it back (docs/Account-State.md, "Account
+ * deletion").
  */
 import type { SyncedAccount } from '@snaha/swarm-id/internal'
 
@@ -29,14 +24,9 @@ export function forgetAccountDeletedElsewhere(account: Account): void {
 }
 
 /**
- * A restored record, claimed back: not deleted, on a fresh clock.
- *
- * Every restore states it — recovery phrase or sign-back-in — not only one
- * that folded a deletion. Unlocking the account is the user saying they want
- * it, and a sign-back-in from the local snapshot cannot see a deletion made
- * elsewhere while it was signed out; without the claim the next fold would
- * remove the account the user just signed back into. Drives kept at deletion
- * come back with it.
+ * A restored record, claimed back: not deleted, on a fresh clock. Every
+ * restore claims it, since a sign-back-in from the local snapshot cannot see a
+ * deletion made while it was signed out.
  */
 export function reclaimed<T extends Pick<SyncedAccount, 'deleted' | 'deletedAt'>>(record: T): T {
   return { ...record, deleted: false, deletedAt: Date.now() }
