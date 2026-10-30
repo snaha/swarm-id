@@ -959,6 +959,64 @@ describe("SwarmIdProxy partitioned write enablement", () => {
         })),
       }))
 
+    // The dApp is told of every change to its drives (#933), not only to the
+    // primary's write path: a drive gone from the grant, or run out, is
+    // learnt from the re-sent connection info and a `getDrives()` re-read,
+    // not from the write that fails.
+    describe("announces a change to the app's drives", () => {
+      const announced = () => messagesOfType("connectionInfoChanged").length
+      const lastInfo = () => messagesOfType("connectionInfoChanged").at(-1)!
+      const grantOnly = (...batchIds: string[]) =>
+        updateAccount((account) => ({
+          ...account,
+          postageStamps: batchIds.map(stampOf),
+          connectedApps: account.connectedApps.map((app) => ({
+            ...app,
+            drives: batchIds.map((id) => new BatchId(id)),
+          })),
+        }))
+
+      it("re-sends the connection info when a non-primary drive leaves the grant", async () => {
+        await connectWithTwoDrives()
+        await vi.waitFor(() =>
+          expect(coordinatorFor(BATCH_ID_HEX)).toBeDefined(),
+        )
+        const before = announced()
+        // The second drive goes, the primary stays: nothing in the info moves.
+        grantOnly(BATCH_ID_HEX)
+        await flushBus()
+        expect(announced()).toBe(before + 1)
+        expect(lastInfo().canUpload).toBe(true)
+      })
+
+      it("re-sends it when a drive joins the grant", async () => {
+        await connectWithTwoDrives([stampOf(BATCH_ID_HEX)])
+        await vi.waitFor(() =>
+          expect(coordinatorFor(BATCH_ID_HEX)).toBeDefined(),
+        )
+        const before = announced()
+        grantOnly(BATCH_ID_HEX, SECOND_BATCH_ID_HEX)
+        await flushBus()
+        expect(announced()).toBe(before + 1)
+      })
+
+      it("re-sends it the moment the primary drive expires (#793)", async () => {
+        // One second left, measured now.
+        await connectWithTwoDrives([
+          { ...stampOf(BATCH_ID_HEX), batchTTL: 1, createdAt: Date.now() },
+          stampOf(SECOND_BATCH_ID_HEX),
+        ])
+        await vi.waitFor(() =>
+          expect(coordinatorFor(BATCH_ID_HEX)).toBeDefined(),
+        )
+        expect(lastInfo().uploadMode).toBe("user-stamp")
+        await vi.waitFor(
+          () => expect(lastInfo().uploadMode).not.toBe("user-stamp"),
+          { timeout: 3000, interval: 50 },
+        )
+      })
+    })
+
     it("builds the primary drive's write path at connect, and no other", async () => {
       nextStamper()
       await connectWithTwoDrives()
