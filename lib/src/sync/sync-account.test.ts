@@ -560,6 +560,37 @@ describe("createSyncAccount", () => {
     expect(maxActive).toBe(1)
   })
 
+  // Every call made while one runs would publish the same account as it is
+  // once that one ends, so they share one publish instead of queueing several.
+  it("merges the calls made while one runs into a single later sync", async () => {
+    const stores = createMockStores()
+    let calls = 0
+    let release: (() => void) | undefined
+    coordinatorController.withWrite = async (op) => {
+      calls++
+      if (calls === 1) await new Promise<void>((resolve) => (release = resolve))
+      return op({ mode: "stamper" })
+    }
+    const syncAccount = createSyncAccount({
+      bee: createMockBee(),
+      ...stores,
+      utilizationStore: {} as UtilizationStoreDB,
+      utilizationUploader: {
+        scheduleUpload: vi.fn().mockResolvedValue(undefined),
+      } as unknown as DebouncedUtilizationUploader,
+    })
+
+    const first = syncAccount(TEST_ETH_ADDRESS_HEX)
+    const second = syncAccount(TEST_ETH_ADDRESS_HEX)
+    const third = syncAccount(TEST_ETH_ADDRESS_HEX)
+    await vi.waitFor(() => expect(release).toBeDefined())
+    release?.()
+
+    await Promise.all([first, second, third])
+    expect(calls).toBe(2)
+    expect(third).toBe(second)
+  })
+
   it("still runs a later sync when the earlier one failed", async () => {
     const stores = createMockStores()
     let calls = 0
