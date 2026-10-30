@@ -9,8 +9,9 @@
  */
 
 import { Binary } from "cafe-utility"
+import { makeSOCAddress } from "@ethersphere/core-sdk"
 import type { BeeRequestOptions } from "@ethersphere/bee-js"
-import { EthAddress, Reference, Topic } from "@ethersphere/bee-js"
+import { EthAddress, Topic } from "@ethersphere/bee-js"
 import type { ChunkDownloader } from "../../download-data"
 import { EpochIndex, lca, MAX_LEVEL } from "./epoch"
 import type { EpochFinder } from "./types"
@@ -207,12 +208,7 @@ export class SyncEpochFinder implements EpochFinder {
       Binary.concatBytes(this.topic.toUint8Array(), epochHash),
     )
 
-    // Calculate chunk address: Keccak256(identifier || owner)
-    const address = new Reference(
-      Binary.keccak256(
-        Binary.concatBytes(identifier, this.owner.toUint8Array()),
-      ),
-    )
+    const address = makeSOCAddress(identifier, this.owner)
 
     // Download chunk
     const chunkData = await this.bee.chunk.download(
