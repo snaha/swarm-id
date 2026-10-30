@@ -63,6 +63,7 @@ import {
   type Stamper,
 } from "@ethersphere/bee-js"
 import { Binary } from "cafe-utility"
+import { makeSOCAddress } from "@ethersphere/core-sdk"
 import { downloadEncryptedSOC } from "../proxy/download-data"
 import { uploadSOC, type UploadTarget } from "../proxy/upload"
 import { UtilizationAwareStamper } from "../utils/batch-utilization"
@@ -173,9 +174,7 @@ export function intentSocAddress(
     deviceId,
     epochBucket,
   )
-  return Binary.keccak256(
-    Binary.concatBytes(identifier.toUint8Array(), owner.toUint8Array()),
-  )
+  return makeSOCAddress(identifier, owner).toUint8Array()
 }
 
 /** Build the deviceId-INDEPENDENT occupancy identifier for (batch, partition,
@@ -206,9 +205,7 @@ export function partitionOccupancyAddress(
     partition,
     epochBucket,
   )
-  return Binary.keccak256(
-    Binary.concatBytes(identifier.toUint8Array(), owner.toUint8Array()),
-  )
+  return makeSOCAddress(identifier, owner).toUint8Array()
 }
 
 /**
