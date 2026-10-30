@@ -592,6 +592,24 @@ describe("SwarmIdClient feed readers and writers", () => {
       ])
     })
 
+    // The writer's reads are the reader's: a lookup bound the caller set must
+    // reach the proxy from either.
+    it("reads with the caller's lookup timeout, as the reader does", async () => {
+      const writer = client.makeSequentialFeedWriter({
+        topic: TOPIC,
+        signer: SIGNER,
+      })
+      const options = { lookupTimeoutMs: LOOKUP_TIMEOUT_MS }
+      await writer.downloadPayload(KEY, options)
+      await writer.downloadRawPayload(options)
+      await writer.downloadReference(KEY, options)
+      expect(sent().map((m) => m.lookupTimeoutMs)).toEqual([
+        LOOKUP_TIMEOUT_MS,
+        LOOKUP_TIMEOUT_MS,
+        LOOKUP_TIMEOUT_MS,
+      ])
+    })
+
     it("uploads a payload", async () => {
       const writer = client.makeSequentialFeedWriter({
         topic: TOPIC,
