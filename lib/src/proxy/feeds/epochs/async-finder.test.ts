@@ -11,40 +11,38 @@
  */
 
 import { describe, it, expect, vi } from "vitest"
-import { EthAddress, Reference, Topic } from "@ethersphere/bee-js"
-import { Binary } from "cafe-utility"
+import { PrivateKey, Topic } from "@ethersphere/bee-js"
+import { makeContentAddressedChunk } from "@ethersphere/core-sdk"
 import { AsyncEpochFinder } from "./async-finder"
 import { EpochIndex, MAX_LEVEL } from "./epoch"
+import { epochSocAddress, makeEpochIdentifier } from "./updater"
+import { uint8ArrayToHex } from "../../../utils/hex"
 
 const TOPIC = Topic.fromString("async-finder-test")
-const OWNER = new EthAddress("a".repeat(40))
+const SIGNER = new PrivateKey("22".repeat(32))
+const OWNER = SIGNER.publicKey().address()
 const AT = 1_700_000_000n
+const TIMESTAMP_SIZE = 8
 
 /** The chunk address `getEpochChunk` computes for an epoch of our topic/owner. */
 async function epochAddressHex(epoch: EpochIndex): Promise<string> {
-  const epochHash = await epoch.marshalBinary()
-  const identifier = Binary.keccak256(
-    Binary.concatBytes(TOPIC.toUint8Array(), epochHash),
-  )
-  return new Reference(
-    Binary.keccak256(Binary.concatBytes(identifier, OWNER.toUint8Array())),
-  ).toHex()
+  return uint8ArrayToHex(await epochSocAddress(TOPIC, epoch, OWNER))
 }
 
-/** A minimal unencrypted SOC feed chunk: 40-byte payload = ts(8 BE) + ref(32). */
-function socChunk(timestamp: bigint, ref: Uint8Array): Uint8Array {
-  const IDENTIFIER_SIZE = 32
-  const SIGNATURE_SIZE = 65
-  const SPAN_SIZE = 8
-  const TIMESTAMP_SIZE = 8
-  const PAYLOAD_LENGTH = TIMESTAMP_SIZE + ref.length
-  const spanStart = IDENTIFIER_SIZE + SIGNATURE_SIZE
-  const chunk = new Uint8Array(spanStart + SPAN_SIZE + PAYLOAD_LENGTH)
-  const view = new DataView(chunk.buffer)
-  view.setBigUint64(spanStart, BigInt(PAYLOAD_LENGTH), true) // span, LE
-  view.setBigUint64(spanStart + SPAN_SIZE, timestamp, false) // timestamp, BE
-  chunk.set(ref, spanStart + SPAN_SIZE + TIMESTAMP_SIZE)
-  return chunk
+/** A signed SOC feed entry for `epoch`: 40-byte payload = ts(8 BE) + ref(32). */
+async function socChunk(
+  epoch: EpochIndex,
+  timestamp: bigint,
+  ref: Uint8Array,
+): Promise<Uint8Array> {
+  const payload = new Uint8Array(TIMESTAMP_SIZE + ref.length)
+  new DataView(payload.buffer).setBigUint64(0, timestamp, false)
+  payload.set(ref, TIMESTAMP_SIZE)
+  const identifier = await makeEpochIdentifier(TOPIC, epoch)
+  return makeContentAddressedChunk(payload).toSingleOwnerChunk(
+    identifier,
+    SIGNER,
+  ).data
 }
 
 function notFound(): Error {
@@ -79,12 +77,13 @@ describe("AsyncEpochFinder — exact probe does not gate the traversal (#400)", 
   })
 
   it("an exact hit wins even when the traversal finds nothing (poisoned ancestors)", async () => {
-    const exactAddr = await epochAddressHex(new EpochIndex(AT, 0))
+    const exactEpoch = new EpochIndex(AT, 0)
+    const exactAddr = await epochAddressHex(exactEpoch)
     const ref = new Uint8Array(32).fill(7)
     const bee = {
       chunk: {
         download: async (addr: string) => {
-          if (addr === exactAddr) return socChunk(AT, ref)
+          if (addr === exactAddr) return socChunk(exactEpoch, AT, ref)
           throw notFound() // every ancestor missing
         },
       },
@@ -98,12 +97,13 @@ describe("AsyncEpochFinder — exact probe does not gate the traversal (#400)", 
   })
 
   it("an exact miss falls back to the traversal's result", async () => {
-    const rootAddr = await epochAddressHex(new EpochIndex(0n, MAX_LEVEL))
+    const rootEpoch = new EpochIndex(0n, MAX_LEVEL)
+    const rootAddr = await epochAddressHex(rootEpoch)
     const ref = new Uint8Array(32).fill(9)
     const bee = {
       chunk: {
         download: async (addr: string) => {
-          if (addr === rootAddr) return socChunk(AT - 100n, ref)
+          if (addr === rootAddr) return socChunk(rootEpoch, AT - 100n, ref)
           throw notFound()
         },
       },
