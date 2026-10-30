@@ -43,6 +43,8 @@
     pendingTitle?: string
     /** Destructive confirm styling for delete-style ceremonies. */
     destructive?: boolean
+    /** Extra classes for the form dialog, e.g. a wider panel. */
+    class?: string
     onunlocked: (entropy: Uint8Array) => void | Promise<void>
     onclose: () => void
   }
@@ -59,6 +61,7 @@
     confirmLabel,
     pendingTitle,
     destructive = false,
+    class: className,
     onunlocked,
     onclose,
   }: Props = $props()
@@ -149,7 +152,7 @@
     <Button variant="outline" class="w-full" onclick={close}>Cancel</Button>
   </Dialog>
 {:else}
-  <Dialog onclose={close} {title}>
+  <Dialog onclose={close} {title} class={className}>
     {@render header?.()}
 
     {#if children}

@@ -18,7 +18,8 @@
   import { toastStore } from '$lib/stores/toast.svelte'
   import { copyToClipboard } from '$lib/utils'
 
-  const MASKED_KEY = '•'.repeat(66)
+  /** A 0x-prefixed 32-byte key, the length the mask stands in for by default. */
+  const KEY_LENGTH = 66
 
   interface Props {
     label: string
@@ -30,9 +31,21 @@
     onreveal: () => void
     /** Offered once revealed; without it a revealed key stays shown. */
     onhide?: () => void
+    /** How many dots stand in for the hidden key. */
+    maskLength?: number
   }
 
-  let { label, description, value, copyValue, onreveal, onhide }: Props = $props()
+  let {
+    label,
+    description,
+    value,
+    copyValue,
+    onreveal,
+    onhide,
+    maskLength = KEY_LENGTH,
+  }: Props = $props()
+
+  const masked = $derived('•'.repeat(maskLength))
 
   async function copy(text: string) {
     toastStore.show(
@@ -52,7 +65,7 @@
     {#if value}
       <p class="min-w-0 flex-1 text-sm break-all">{value}</p>
     {:else}
-      <p class="min-w-0 flex-1 text-sm break-all select-none">{MASKED_KEY}</p>
+      <p class="min-w-0 flex-1 text-sm break-all select-none">{masked}</p>
     {/if}
     {#if !value}
       <Button

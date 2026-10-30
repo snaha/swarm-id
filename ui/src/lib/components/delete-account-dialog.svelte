@@ -15,6 +15,7 @@
   import { onDestroy, untrack } from 'svelte'
 
   import ChevronDown from '@lucide/svelte/icons/chevron-down'
+  import ChevronRight from '@lucide/svelte/icons/chevron-right'
   import CircleCheck from '@lucide/svelte/icons/circle-check'
   import Info from '@lucide/svelte/icons/info'
   import LoaderCircle from '@lucide/svelte/icons/loader-circle'
@@ -35,7 +36,7 @@
   import { appsUsingDrive, describeDrive } from '$lib/drives'
   import { createFundingRequester } from '$lib/payment/funding-request.svelte'
   import type { Account } from '$lib/types'
-  import { cn, truncateAddress } from '$lib/utils'
+  import { truncateAddress } from '$lib/utils'
 
   interface Props {
     account: Account
@@ -45,6 +46,9 @@
   let { account, onClose }: Props = $props()
 
   type Phase = 'form' | 'deleting' | 'success' | 'failure' | 'partial'
+
+  /** Dots standing in for the handed-over key, as the design draws it. */
+  const KEY_MASK_LENGTH = 8
 
   // Fixed for the dialog's life, read once: the record changes under it as the
   // deletion runs (dilutions, the deletion marker) and is removed at the end.
@@ -166,34 +170,38 @@
     </div>
   </Dialog>
 {:else if phase === 'success'}
-  <Dialog onclose={onClose} title="Delete account">
-    <div class="flex flex-col items-center gap-2 py-2 text-center">
-      <CircleCheck class="size-6 text-green-600" />
-      <p class="text-base font-medium">Account deleted</p>
-      <p class="text-muted-foreground text-sm">Your account has been permanently deleted.</p>
+  <Dialog onclose={onClose} label="Account deleted">
+    <div class="flex flex-col items-center gap-2 text-center">
+      <CircleCheck class="size-6 fill-green-600 text-white" />
+      <div class="text-sm">
+        <p class="font-bold">Account deleted</p>
+        <p>Your account has been permanently deleted.</p>
+      </div>
     </div>
     <Button class="w-full" onclick={onClose}>Done</Button>
   </Dialog>
 {:else if phase === 'failure'}
-  <Dialog onclose={close} title="Delete account">
-    <div class="flex flex-col items-center gap-2 py-2 text-center">
-      <TriangleAlert class="text-destructive size-6" />
-      <p class="text-base font-medium">Deletion failed</p>
-      <p class="text-muted-foreground text-sm">
-        Your account could not be deleted. Please try again.
-      </p>
+  <Dialog onclose={close} label="Deletion failed">
+    <div class="flex flex-col items-center gap-2 text-center">
+      <TriangleAlert class="fill-destructive size-6 text-white" />
+      <div class="text-sm">
+        <p class="font-bold">Deletion failed</p>
+        <p>Your account could not be deleted. Please try again.</p>
+      </div>
     </div>
     <Button class="w-full" onclick={run}>Retry</Button>
   </Dialog>
 {:else if phase === 'partial' && signerPrivateKey}
-  <Dialog onclose={onClose} title="Delete account">
-    <div class="flex flex-col items-center gap-2 py-2 text-center">
-      <Info class="text-muted-foreground size-6" />
-      <p class="text-base font-medium">Some data couldn't be deleted</p>
-      <p class="text-muted-foreground text-sm">
-        Your account was deleted but some drives could not be removed due to insufficient funds on
-        your account. Here is the private key to manage the postage batches directly.
-      </p>
+  <Dialog onclose={onClose} label="Some data couldn't be deleted">
+    <div class="flex flex-col items-center gap-2 text-center">
+      <Info class="fill-foreground text-background size-6" />
+      <div class="text-sm">
+        <p class="font-bold">Some data couldn't be deleted</p>
+        <p>
+          Your account was deleted but some drives could not be removed due to insufficient funds on
+          your account. Here is the private key to manage the postage batches directly.
+        </p>
+      </div>
     </div>
     <SecretRow
       label="Private key"
@@ -202,6 +210,7 @@
       copyValue={signerPrivateKey}
       onreveal={() => (keyShown = true)}
       onhide={() => (keyShown = false)}
+      maskLength={KEY_MASK_LENGTH}
     />
     <Button class="w-full" onclick={onClose}>OK</Button>
   </Dialog>
@@ -216,6 +225,7 @@
     passwordLabel="Account password"
     canConfirm={typedName === account.name}
     destructive
+    class="w-[36rem]"
     onunlocked={unlocked}
     onclose={close}
   >
@@ -263,15 +273,19 @@
         <div class="flex w-full flex-col gap-2">
           <button
             type="button"
-            class="flex w-full cursor-pointer items-center justify-between text-sm font-medium"
+            class="flex w-full cursor-pointer items-center justify-between px-2 text-sm font-medium"
             aria-expanded={manageOpen}
             onclick={() => (manageOpen = !manageOpen)}
           >
             Manage data
-            <ChevronDown class={cn('size-4 transition-transform', manageOpen && 'rotate-180')} />
+            {#if manageOpen}
+              <ChevronDown class="size-4" />
+            {:else}
+              <ChevronRight class="size-4" />
+            {/if}
           </button>
           {#if manageOpen}
-            <p class="text-muted-foreground text-sm">
+            <p class="text-muted-foreground px-2 text-xs">
               By default, all drives data is deleted with your account. Enable 'Keep data' on a
               drive to let its data remain on Swarm until the drive expires naturally.
             </p>
@@ -280,31 +294,33 @@
                 <div class="flex items-center gap-2">
                   <p class="truncate text-sm font-medium">{display.name}</p>
                   {#if isDefault}
-                    <Badge>Default</Badge>
+                    <Badge variant="outline">Default</Badge>
                   {/if}
                   <div class="flex flex-1 items-center justify-end gap-2">
-                    <span class="text-sm whitespace-nowrap">Keep data</span>
                     <Switch
                       bind:checked={() => keep[key] ?? false, (value) => (keep[key] = value)}
                       aria-label="Keep data on {display.name}"
                     />
+                    <span class="text-sm whitespace-nowrap">Keep data</span>
                   </div>
                 </div>
-                <div class="flex flex-wrap items-center gap-2">
-                  {#if display.storageFull}
-                    <Badge variant="destructive">Storage full</Badge>
-                  {:else}
-                    <span class="text-sm whitespace-nowrap">{display.sizeLabel}</span>
-                    {#if !display.scratch}
-                      <UtilizationBar percent={display.usedPercent} />
+                <div class="flex flex-wrap items-center justify-between gap-2">
+                  <div class="flex items-center gap-2">
+                    {#if display.storageFull}
+                      <Badge variant="destructive">Storage full</Badge>
+                    {:else}
+                      <span class="text-xs whitespace-nowrap">{display.sizeLabel}</span>
+                      {#if !display.scratch}
+                        <UtilizationBar percent={display.usedPercent} />
+                      {/if}
                     {/if}
-                  {/if}
+                  </div>
                   {#if display.status === 'expired'}
                     <Badge variant="destructive">Expired</Badge>
                   {:else if display.status === 'expires-soon'}
                     <Badge variant="destructive">Expires soon</Badge>
                   {:else if display.timeLeftLabel}
-                    <Badge variant="outline">{display.timeLeftLabel}</Badge>
+                    <Badge>{display.timeLeftLabel}</Badge>
                   {/if}
                 </div>
                 <p class="text-muted-foreground text-xs">
