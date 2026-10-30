@@ -82,6 +82,7 @@ import {
   toBucket,
 } from "../utils/batch-utilization"
 import { lockSocBucket } from "../utils/lock-soc"
+import { uint8ArrayToHex } from "../utils/hex"
 import {
   MockBee,
   MockChunkStore,
@@ -153,6 +154,20 @@ async function publishOneChunk(
   })
   return result.stateBuckets
 }
+
+// `writePartitionState` keeps its reserved-slot chunks out of this address's
+// bucket, so it must be exactly where the pointer SOC lands: pinned to bytes.
+describe("statePointerAddress", () => {
+  const POINTER_NOW_MS = 1_700_000_000_000
+
+  it("derives the state-pointer SOC address", () => {
+    expect(
+      uint8ArrayToHex(
+        statePointerAddress(TEST_BATCH_ID, PARTITION, OWNER, POINTER_NOW_MS),
+      ),
+    ).toBe("17461bbea226a1f86c59cc2c3eceb97ed6fabd35dc401152a34fb4e9c1caeb8d")
+  })
+})
 
 describe("writePartitionState — reserved-slot bucket-collision avoidance", () => {
   it("does not place a counter chunk in the state-pointer's bucket", async () => {
