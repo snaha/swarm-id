@@ -292,9 +292,11 @@ export type BatchTTLSource = z.infer<typeof BatchTTLSourceSchema>
 export const PostageBatchSchema = z.object({
   batchID: BatchIdSchema,
   /**
-   * Bee's fill count of the fullest bucket — NOT a percentage. Usage is
-   * `utilization / 2^(depth - bucketDepth)`, and a batch stops accepting
-   * uploads when one bucket fills, before the nominal `2^depth * 4096` bytes.
+   * How full the fullest bucket is, as a fraction from 0 to 1 of what one
+   * partition may write into a bucket — NOT Bee's fill count. Swarm ID keeps
+   * it from the last write, in the partition that write went to, so it can
+   * trail another device's writes. A batch stops accepting uploads when one
+   * bucket fills, before the nominal `2^depth * 4096` bytes.
    */
   utilization: z.number(),
   usable: z.boolean(),
