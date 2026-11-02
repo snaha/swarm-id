@@ -8,13 +8,12 @@
  * using epoch-based indexing with parallel chunk fetching.
  */
 
-import { Binary } from "cafe-utility"
 import type { BeeRequestOptions } from "@ethersphere/bee-js"
-import { EthAddress, Reference, Topic } from "@ethersphere/bee-js"
+import { EthAddress, Topic } from "@ethersphere/bee-js"
 import type { ChunkDownloader } from "../../download-data"
-import { EpochIndex, MAX_LEVEL } from "./epoch"
+import { EpochIndex, MAX_LEVEL, makeEpochIdentifier } from "./epoch"
 import type { EpochFinder, EpochLookupResult } from "./types"
-import { downloadEncryptedSOC } from "../../download-data"
+import { downloadEncryptedSOC, downloadSOC } from "../../download-data"
 import { findPreviousLeaf } from "./utils"
 
 const EPOCH_LOOKUP_TIMEOUT_MS = 2000
@@ -273,11 +272,7 @@ export class AsyncEpochFinder implements EpochFinder {
     const requestOptions: BeeRequestOptions = {
       timeout: EPOCH_LOOKUP_TIMEOUT_MS,
     }
-    // Calculate epoch identifier: Keccak256(topic || Keccak256(start || level))
-    const epochHash = await epoch.marshalBinary()
-    const identifier = Binary.keccak256(
-      Binary.concatBytes(this.topic.toUint8Array(), epochHash),
-    )
+    const identifier = await makeEpochIdentifier(this.topic, epoch)
 
     let payload: Uint8Array
     if (this.encryptionKey) {
@@ -290,39 +285,15 @@ export class AsyncEpochFinder implements EpochFinder {
       )
       payload = soc.payload
     } else {
-      // Calculate chunk address: Keccak256(identifier || owner)
-      const address = new Reference(
-        Binary.keccak256(
-          Binary.concatBytes(identifier, this.owner.toUint8Array()),
-        ),
-      )
-
-      // Download chunk
-      const chunkData = await this.bee.chunk.download(
-        address.toHex(),
-        undefined,
+      // Rejects a SOC not signed by the owner, as the encrypted path does:
+      // the gateway serves whatever it holds at the address.
+      const soc = await downloadSOC(
+        this.bee,
+        this.owner,
+        identifier,
         requestOptions,
       )
-
-      // Extract payload from SOC (Single Owner Chunk)
-      const IDENTIFIER_SIZE = 32
-      const SIGNATURE_SIZE = 65
-      const SPAN_SIZE = 8
-      const SOC_HEADER_SIZE = IDENTIFIER_SIZE + SIGNATURE_SIZE
-
-      // Read span to get payload length
-      const spanStart = SOC_HEADER_SIZE
-      const span = chunkData.slice(spanStart, spanStart + SPAN_SIZE)
-      const spanView = new DataView(
-        span.buffer,
-        span.byteOffset,
-        span.byteLength,
-      )
-      const payloadLength = Number(spanView.getBigUint64(0, true)) // little-endian
-
-      // Extract full payload (timestamp + reference)
-      const payloadStart = spanStart + SPAN_SIZE
-      payload = chunkData.slice(payloadStart, payloadStart + payloadLength)
+      payload = soc.payload
     }
 
     // Detect payload format based on length:
