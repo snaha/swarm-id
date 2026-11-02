@@ -397,6 +397,8 @@ export class SwarmIdProxy {
    * rather than on every reconcile.
    */
   private chainHead: number | undefined
+  /** When `chainHead` was read, so it can be advanced by the time since. */
+  private chainHeadReadAt = 0
   private chainHeadAttemptedAt = 0
   private chainHeadRead: Promise<void> | undefined
   /** Re-reads the head while a drive may be warming up, see `armWarmUpTimer`. */
@@ -975,36 +977,47 @@ export class SwarmIdProxy {
   }
 
   /**
-   * The chain head is re-read on a timer of its own while a drive may be
-   * warming up (#924): at once when it was never read, every block while the
-   * blocks Bee waits for pass (or the head predates the batch), and at the
-   * re-measure floor after a read that failed. Never while a read is in
-   * flight: whoever started it adopts the readings when it lands, and that
-   * re-arms this. An immediate read is kicked synchronously, so nothing
-   * emitted in between calls a fresh drive ready.
+   * A timer of its own for a drive that may be warming up (#924), set for
+   * the moment its countdown should clear: then the head is re-read, or for
+   * a record with no block nothing is read, and the readings adopted. A
+   * read that says the chain is slower re-arms for what is left; one that
+   * fails leaves the countdown running on the clock (`estimatedHead`), so a
+   * failing RPC is asked once per drive, not every block. With no head yet
+   * it is read at once, then at most once a minute until one answers; that
+   * first read is kicked synchronously, so nothing emitted before it lands
+   * calls a fresh drive ready. Never while a read is in flight: whoever
+   * started it adopts when it lands, and that re-arms this.
    */
   private armWarmUpTimer(granted: PostageStamp[], now: number): void {
     clearTimeout(this.warmUpTimer)
     this.warmUpTimer = undefined
     const fresh = granted.filter((stamp) => this.mayBeWarmingUp(stamp, now))
     if (fresh.length === 0 || this.chainHeadRead !== undefined) return
-    let delay: number
-    if (this.chainHead === undefined) {
-      delay = Math.max(0, REMEASURE_MIN_MS - (now - this.chainHeadAttemptedAt))
-    } else if (fresh.some((stamp) => this.blocksUntilUsable(stamp) > 0)) {
-      delay = BLOCK_MS
-    } else {
-      return
-    }
+    const needsHead = fresh.some((stamp) => stamp.blockNumber > 0)
     const readThenAdopt = () =>
       this.refreshChainHead().then(() => {
         if (!this.destroyed) this.adoptLifetimeReadings()
       })
-    if (delay === 0) {
-      void readThenAdopt()
+    if (needsHead && this.chainHead === undefined) {
+      const delay = Math.max(
+        0,
+        REMEASURE_MIN_MS - (now - this.chainHeadAttemptedAt),
+      )
+      if (delay === 0) {
+        void readThenAdopt()
+        return
+      }
+      this.warmUpTimer = setTimeout(() => void readThenAdopt(), delay)
       return
     }
-    this.warmUpTimer = setTimeout(() => void readThenAdopt(), delay)
+    const waits = fresh
+      .map((stamp) => this.blocksUntilUsable(stamp, now))
+      .filter((blocks) => blocks > 0)
+    if (waits.length === 0) return
+    this.warmUpTimer = setTimeout(
+      () => void (needsHead ? readThenAdopt() : this.adoptLifetimeReadings()),
+      Math.min(...waits) * BLOCK_MS,
+    )
   }
 
   /** Whether the record is fresh enough for the warm-up rule to apply at all. */
@@ -1012,36 +1025,58 @@ export class SwarmIdProxy {
     stamp: StampLifetimeFields,
     now = Date.now(),
   ): boolean {
-    return (
-      (stamp.blockNumber ?? 0) > 0 && now - stamp.createdAt < WARM_UP_WINDOW_MS
-    )
+    return now - stamp.createdAt < WARM_UP_WINDOW_MS
   }
 
   /**
-   * Blocks the batch still has to wait before Bee would stamp with it (#924),
-   * by the last head read; `0` for a record too old to be warming up. With
-   * no head yet: the full wait while the first read is in flight, so a fresh
-   * drive is never called ready and then refused a moment later; `0` once a
-   * read has failed, since refusing on missing data would keep a good drive
-   * off.
+   * The last head read, advanced by the blocks the clock says have passed
+   * since; `undefined` before any read answered.
    */
-  private blocksUntilUsable(stamp: StampLifetimeFields): number {
-    if (!this.mayBeWarmingUp(stamp)) return 0
-    if (this.chainHead === undefined) {
+  private estimatedHead(now: number): number | undefined {
+    if (this.chainHead === undefined) return undefined
+    return this.chainHead + Math.floor((now - this.chainHeadReadAt) / BLOCK_MS)
+  }
+
+  /**
+   * Blocks the batch still has to wait before Bee would stamp with it
+   * (#924); `0` for a record too old to be warming up. A record with no
+   * block (a purchase whose read-back failed records `0`) counts its blocks
+   * from when it was written. Otherwise from the head, advanced by the
+   * clock since it was read. With no head yet: the full wait while the
+   * first read is in flight, so a fresh drive is never called ready and
+   * then refused a moment later; `0` once a read has failed, since refusing
+   * on missing data would keep a good drive off.
+   */
+  private blocksUntilUsable(
+    stamp: StampLifetimeFields,
+    now = Date.now(),
+  ): number {
+    if (!this.mayBeWarmingUp(stamp, now)) return 0
+    const blockNumber = stamp.blockNumber ?? 0
+    if (blockNumber <= 0) {
+      const passed = Math.floor((now - stamp.createdAt) / BLOCK_MS)
+      return Math.max(0, BATCH_USABLE_BLOCKS - passed)
+    }
+    const head = this.estimatedHead(now)
+    if (head === undefined) {
       return this.chainHeadRead === undefined ? 0 : BATCH_USABLE_BLOCKS
     }
-    return blocksUntilUsable(stamp.blockNumber ?? 0, this.chainHead)
+    return blocksUntilUsable(blockNumber, head)
   }
 
   /**
-   * One chain head read at a time; a failure keeps the last head. The caller
-   * adopts the readings once it lands.
+   * One chain head read at a time; a failure keeps the last head, which
+   * `estimatedHead` keeps advancing. The caller adopts once it lands.
    */
   private refreshChainHead(): Promise<void> {
     this.chainHeadRead ??= (async () => {
-      this.chainHeadAttemptedAt = Date.now()
+      const attemptedAt = Date.now()
+      this.chainHeadAttemptedAt = attemptedAt
       const head = await fetchBlockNumber(this.gnosisRpcUrl)
-      if (head !== undefined) this.chainHead = head
+      if (head !== undefined) {
+        this.chainHead = head
+        this.chainHeadReadAt = attemptedAt
+      }
       this.chainHeadRead = undefined
     })()
     return this.chainHeadRead
@@ -1091,7 +1126,7 @@ export class SwarmIdProxy {
         batchId,
         this.postageStampContractAddress,
       ),
-      this.mayBeWarmingUp(stamp, measuredAt)
+      this.mayBeWarmingUp(stamp, measuredAt) && stamp.blockNumber > 0
         ? this.refreshChainHead()
         : undefined,
     ])

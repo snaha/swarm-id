@@ -252,7 +252,8 @@ function projectedStamp(record: PurchaseRecord): NewStamp {
     depth: record.depth,
     bucketDepth: BUCKET_DEPTH,
     amount: record.amountPerChunk,
-    // Not knowable without the read-back; only the dev tools display it.
+    // Not knowable without the read-back. `0` means unknown: the proxy then
+    // holds the fresh drive back by time from when it was recorded (#924).
     blockNumber: 0,
     immutableFlag: false,
     utilization: 0,

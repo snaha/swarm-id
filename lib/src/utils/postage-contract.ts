@@ -371,11 +371,14 @@ export async function fetchAuthoritativeBatchTTL(
 }
 
 /**
- * How many blocks Bee waits after a batch's block before it stamps with it:
- * `blockThreshold` in `pkg/postage/service.go`, checked by `IssuerUsable`.
- * Every node's batch store trails the chain tip by a few blocks, so a stamp
- * signed before the storer nodes have the batch is refused along the push
- * path. A client-signed stamp is held to the same rule here (#924).
+ * How many blocks a client-signed stamp waits after its batch's block, from
+ * the RPC head (#924). What actually refuses an early stamp is a node's
+ * batch store, which trails the tip by `tailSize = 4` blocks
+ * (`pkg/postage/listener`). Bee's own issuers wait `blockThreshold = 10`
+ * (`IssuerUsable` in `pkg/postage/service.go`) counted from that lagging
+ * state, so 14 from the head; ten from the head is deliberately looser than
+ * Bee and still a sound margin over the four that matter. Not a copy of
+ * Bee's rule, so do not "fix" it to match.
  */
 export const BATCH_USABLE_BLOCKS = 10
 
