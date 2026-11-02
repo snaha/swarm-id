@@ -105,7 +105,10 @@ vi.mock("./utils/ttl", async (importActual) => ({
 import { fetchAuthoritativeBatchTTL } from "./utils/postage-contract"
 vi.mock("./utils/postage-contract", async (importActual) => ({
   ...(await importActual<typeof import("./utils/postage-contract")>()),
-  fetchAuthoritativeBatchTTL: vi.fn(async () => 3600),
+  fetchAuthoritativeBatchTTL: vi.fn(async () => ({
+    batchTTL: 3600,
+    source: "chain" as const,
+  })),
 }))
 vi.mock("./storage/utilization-store", () => ({
   UtilizationStoreDB: vi.fn(function () {
@@ -273,6 +276,7 @@ import {
 } from "./utils/storage-managers"
 import { serializeAccountStateSnapshot } from "./utils/account-state-snapshot"
 import {
+  type Drive,
   IframeToParentMessageSchema,
   STORAGE_CHALLENGE_KEY,
   STORAGE_KEY_ACCOUNTS,
@@ -1040,9 +1044,12 @@ describe("SwarmIdProxy partitioned write enablement", () => {
       ) =>
         vi
           .mocked(fetchAuthoritativeBatchTTL)
-          .mockImplementation(async (_rpc, _bee, batchId) =>
-            batchId in perBatch ? perBatch[batchId] : ttl,
-          )
+          .mockImplementation(async (_rpc, _bee, batchId) => {
+            const batchTTL = batchId in perBatch ? perBatch[batchId] : ttl
+            return batchTTL === undefined
+              ? undefined
+              : { batchTTL, source: "chain" }
+          })
       afterEach(() => chainSays(3600))
 
       it("re-sends it the moment the primary drive expires (#793)", async () => {
@@ -1159,6 +1166,13 @@ describe("SwarmIdProxy partitioned write enablement", () => {
         await vi.waitFor(() =>
           expect(messagesOfType("getDrivesResponse")).toHaveLength(1),
         )
+        // The dApp is told where the figure came from and when.
+        const [response] = messagesOfType("getDrivesResponse")
+        const drive = response.drives.find(
+          (candidate: Drive) => candidate.batchID === BATCH_ID_HEX,
+        )
+        expect(drive).toMatchObject({ batchTTL: 0, batchTTLSource: "chain" })
+        expect(drive.batchTTLMeasuredAt).toBeLessThanOrEqual(Date.now())
         // The refusal follows the same reading the dApp was just given.
         await vi.waitFor(() =>
           expect(lastInfo().uploadUnavailableReason).toBe("stamp-expired"),

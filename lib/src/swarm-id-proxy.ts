@@ -59,6 +59,7 @@ import type {
   PartitionSession,
 } from "./types"
 import {
+  type BatchTTLSource,
   ParentToIframeMessageSchema,
   ParentIdentifyMessageSchema,
   PopupToIframeMessageSchema,
@@ -182,6 +183,7 @@ import {
   fetchSwarmPrice,
 } from "./utils/ttl"
 import {
+  type BatchTTLReading,
   fetchAuthoritativeBatchTTL,
   POSTAGE_STAMP_CONTRACT_ADDRESS,
 } from "./utils/postage-contract"
@@ -970,23 +972,22 @@ export class SwarmIdProxy {
    */
   private async measureLifetime(
     stamp: PostageStamp,
-  ): Promise<number | undefined> {
+  ): Promise<(BatchTTLReading & { measuredAt: number }) | undefined> {
     const batchId = stamp.batchID.toHex()
     const measuredAt = Date.now()
-    const batchTTL = await fetchAuthoritativeBatchTTL(
+    const reading = await fetchAuthoritativeBatchTTL(
       this.gnosisRpcUrl,
       this.beeApiUrl,
       batchId,
       this.postageStampContractAddress,
     )
-    if (batchTTL !== undefined) {
-      this.liveLifetimes.set(batchId, {
-        batchTTL,
-        measuredAt,
-        recordMeasuredAt: stamp.updatedAt ?? stamp.createdAt,
-      })
-    }
-    return batchTTL
+    if (reading === undefined) return undefined
+    this.liveLifetimes.set(batchId, {
+      batchTTL: reading.batchTTL,
+      measuredAt,
+      recordMeasuredAt: stamp.updatedAt ?? stamp.createdAt,
+    })
+    return { ...reading, measuredAt }
   }
 
   /**
@@ -6302,12 +6303,20 @@ export class SwarmIdProxy {
     // only when neither authoritative source can answer (e.g. RPC unreachable
     // and a public gateway that does not track the batch).
     // The reading is kept, so the refusal and the expiry timer follow what the
-    // dApp is told (#927); the caller adopts it once the answer is out.
-    let batchTTL = await this.measureLifetime(stamp)
-    if (batchTTL === undefined) {
+    // dApp is told (#927); the caller adopts it once the answer is out. The
+    // dApp is also told where the figure came from and when, so it can show
+    // an estimate as one and age the rest.
+    let lifetime:
+      | { batchTTL: number; source: BatchTTLSource; measuredAt: number }
+      | undefined = await this.measureLifetime(stamp)
+    if (lifetime === undefined) {
       try {
         const pricePerGBPerMonth = await fetchSwarmPrice()
-        batchTTL = calculateTTLSeconds(stamp.amount, pricePerGBPerMonth)
+        lifetime = {
+          batchTTL: calculateTTLSeconds(stamp.amount, pricePerGBPerMonth),
+          source: "estimate",
+          measuredAt: Date.now(),
+        }
       } catch (error) {
         console.warn("[Proxy] Failed to calculate TTL:", error)
       }
@@ -6324,7 +6333,9 @@ export class SwarmIdProxy {
       blockNumber: stamp.blockNumber,
       immutableFlag: stamp.immutableFlag,
       exists: details?.exists ?? stamp.exists,
-      batchTTL,
+      batchTTL: lifetime?.batchTTL,
+      batchTTLSource: lifetime?.source,
+      batchTTLMeasuredAt: lifetime?.measuredAt,
     }
   }
 
