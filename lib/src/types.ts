@@ -329,6 +329,30 @@ export type PostageBatch = z.infer<typeof PostageBatchSchema>
 export const DriveKindSchema = z.enum(["regular", "scratch"])
 export type DriveKind = z.infer<typeof DriveKindSchema>
 
+/** One partition's share of a drive (#772, #334), in payload bytes */
+export const PartitionCapacitySchema = z.object({
+  partition: z.number().int().min(0),
+  /** What the partition holds when empty */
+  sizeBytes: z.number(),
+  /** Slots already written, as bytes */
+  usedBytes: z.number(),
+  /** The largest save that still fits, as likely as not */
+  leftBytes: z.number(),
+})
+export type PartitionCapacity = z.infer<typeof PartitionCapacitySchema>
+
+/**
+ * How much a drive holds and has left (#772): its partitions' figures added
+ * up, so the whole drive. One save goes into one partition, though, so ask
+ * `fitProbability()` whether it fits rather than comparing to `leftBytes`.
+ */
+export const DriveCapacitySchema = PartitionCapacitySchema.omit({
+  partition: true,
+}).extend({
+  partitions: z.array(PartitionCapacitySchema),
+})
+export type DriveCapacity = z.infer<typeof DriveCapacitySchema>
+
 /** One drive the app was granted (#862), as `getDrives()` reports it */
 export const DriveSchema = PostageBatchSchema.extend({
   // An identity site newer than this client may report a kind it does not
@@ -350,11 +374,19 @@ export const DriveSchema = PostageBatchSchema.extend({
    * moved with it, so `onConnectionChange` is where to re-read the drives.
    */
   partition: z.number().int().min(0).optional(),
+  /**
+   * Used, left and size (#772). Absent on a scratch drive, whose partitions
+   * wrap instead of filling, and when a partition's counter could not be read.
+   */
+  capacity: DriveCapacitySchema.optional(),
 })
 export type Drive = z.infer<typeof DriveSchema>
 
 /** Which drive a call that takes no upload options writes to */
 export type DriveTargetOptions = Pick<UploadOptions, "batchID">
+
+/** Which drive `fitProbability()` asks about, and whether the save is encrypted (the default) */
+export type FitOptions = Pick<UploadOptions, "batchID" | "encrypt">
 
 const DRIVE_DESCRIPTION_MAX_LENGTH = 120
 const DRIVE_REQUEST_MAX_ROWS = 8
@@ -1399,6 +1431,14 @@ export const GetPermissionsMessageSchema = z.object({
   requestId: z.string(),
 })
 
+export const FitProbabilityMessageSchema = z.object({
+  type: z.literal("fitProbability"),
+  requestId: z.string(),
+  bytes: z.number().int().min(0),
+  batchID: DriveTargetSchema,
+  encrypt: z.boolean().optional(),
+})
+
 /**
  * Ask the user for more (#711): the proxy opens the permissions popup and
  * answers once it closes, or at once with `opened: false` when the browser
@@ -1459,6 +1499,7 @@ export const ParentToIframeMessageSchema = z.discriminatedUnion("type", [
   GetPostageBatchMessageSchema,
   GetDrivesMessageSchema,
   GetPermissionsMessageSchema,
+  FitProbabilityMessageSchema,
   ConnectMessageSchema,
   RequestPermissionsMessageSchema,
 ])
@@ -1531,6 +1572,7 @@ export type GetPostageBatchMessage = z.infer<
 >
 export type GetDrivesMessage = z.infer<typeof GetDrivesMessageSchema>
 export type GetPermissionsMessage = z.infer<typeof GetPermissionsMessageSchema>
+export type FitProbabilityMessage = z.infer<typeof FitProbabilityMessageSchema>
 export type ConnectMessage = z.infer<typeof ConnectMessageSchema>
 export type RequestPermissionsMessage = z.infer<
   typeof RequestPermissionsMessageSchema
@@ -1985,6 +2027,12 @@ export const GetPermissionsResponseMessageSchema = z.object({
   permissions: AppPermissionsSchema,
 })
 
+export const FitProbabilityResponseMessageSchema = z.object({
+  type: z.literal("fitProbabilityResponse"),
+  requestId: z.string(),
+  probability: z.number().min(0).max(1),
+})
+
 export const RequestPermissionsResponseMessageSchema = z.object({
   type: z.literal("requestPermissionsResponse"),
   requestId: z.string(),
@@ -2039,6 +2087,7 @@ export const IframeToParentMessageSchema = z.discriminatedUnion("type", [
   GetPostageBatchResponseMessageSchema,
   GetDrivesResponseMessageSchema,
   GetPermissionsResponseMessageSchema,
+  FitProbabilityResponseMessageSchema,
   RequestPermissionsResponseMessageSchema,
 ])
 

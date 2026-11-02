@@ -22,6 +22,9 @@ export type {
   PostageBatch,
   BatchTTLSource,
   Drive,
+  DriveCapacity,
+  PartitionCapacity,
+  FitOptions,
   DriveKind,
   DriveRequest,
   DriveRequirement,
@@ -76,6 +79,10 @@ export { collectionPath } from "./utils/collection"
 
 // Stamp lifetime display
 export { formatTTL } from "./utils/ttl"
+
+// The fit probability `Drive.capacity` is reported at, to compare
+// `fitProbability()` against
+export { DEFAULT_FIT_CONFIDENCE } from "./utils/drive-capacity"
 
 // Byte⇄hex, 0x-tolerant, throws on malformed input
 export { hexToUint8Array, uint8ArrayToHex } from "./utils/hex"

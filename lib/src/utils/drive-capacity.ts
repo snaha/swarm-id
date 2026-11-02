@@ -30,6 +30,7 @@ import {
   PLAIN_REFS_PER_CHUNK,
   estimateTotalChunks,
 } from "../proxy/chunking"
+import type { DriveCapacity, PartitionCapacity } from "../types"
 
 /**
  * The fit probability `leftBytes` and `sizeBytes` are reported at: the median,
@@ -46,24 +47,6 @@ export const SAVE_OVERHEAD_CHUNKS = 4
 
 /** Buckets per headroom: how many more chunks each bucket still takes */
 export type HeadroomHistogram = ReadonlyMap<number, number>
-
-export interface PartitionCapacity {
-  partition: number
-  /** What the partition holds when empty, at the given confidence */
-  sizeBytes: number
-  /** Slots already written, as bytes */
-  usedBytes: number
-  /** What still fits in one save, at the given confidence */
-  leftBytes: number
-}
-
-export interface DriveCapacity {
-  /** The partitions' figures added up */
-  sizeBytes: number
-  usedBytes: number
-  leftBytes: number
-  partitions: PartitionCapacity[]
-}
 
 export interface CapacityOptions {
   /** Fit probability the byte figures are reported at */

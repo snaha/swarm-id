@@ -86,6 +86,7 @@ import type {
   Permissions,
   AppPermissions,
   DriveTargetOptions,
+  FitOptions,
 } from "./types"
 import {
   IframeToParentMessageSchema,
@@ -989,6 +990,37 @@ export class SwarmIdClient {
     })
 
     return response.drives
+  }
+
+  /**
+   * The chance, from 0 to 1, that a save of `bytes` fits in a drive (#772):
+   * the primary, or the one `batchID` names. A save goes into the one
+   * partition this device writes to and fails if any of its chunks lands in a
+   * full bucket there, so ask this rather than comparing with
+   * `capacity.leftBytes`. The chunk tree and the save's own extra chunks are
+   * counted. Always 1 on a scratch drive, which overwrites its oldest data.
+   *
+   * @example
+   * ```typescript
+   * if ((await client.fitProbability(file.size)) < DEFAULT_FIT_CONFIDENCE) {
+   *   showDriveFull()
+   * }
+   * ```
+   */
+  async fitProbability(bytes: number, options?: FitOptions): Promise<number> {
+    this.ensureReady()
+    const response = await this.sendRequest<{
+      type: "fitProbabilityResponse"
+      requestId: string
+      probability: number
+    }>({
+      type: "fitProbability",
+      requestId: this.generateRequestId(),
+      bytes,
+      batchID: options?.batchID,
+      encrypt: options?.encrypt,
+    })
+    return response.probability
   }
 
   /**

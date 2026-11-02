@@ -1000,6 +1000,62 @@ describe("SwarmIdClient request seam", () => {
     await expect(promise).resolves.toEqual(drives)
   })
 
+  it("fitProbability asks about the named drive and returns the proxy's answer", async () => {
+    const batchID = "ab".repeat(32)
+    const promise = client.fitProbability(4096, { batchID, encrypt: false })
+    const sent = lastPostedMessage()
+    expect(sent).toMatchObject({
+      type: "fitProbability",
+      bytes: 4096,
+      batchID,
+      encrypt: false,
+    })
+
+    deliver({
+      type: "fitProbabilityResponse",
+      requestId: sent.requestId,
+      probability: 0.75,
+    })
+    await expect(promise).resolves.toBe(0.75)
+  })
+
+  it("carries a drive's capacity through the getDrives response", () => {
+    const partition = {
+      partition: 0,
+      sizeBytes: 100,
+      usedBytes: 10,
+      leftBytes: 90,
+    }
+    const capacity = {
+      sizeBytes: 100,
+      usedBytes: 10,
+      leftBytes: 90,
+      partitions: [partition],
+    }
+    const parsed = IframeToParentMessageSchema.parse({
+      type: "getDrivesResponse",
+      requestId: "r",
+      drives: [
+        {
+          batchID: "ab".repeat(32),
+          utilization: 0,
+          usable: true,
+          label: "",
+          depth: 20,
+          amount: "1",
+          bucketDepth: 16,
+          blockNumber: 1,
+          immutableFlag: false,
+          exists: true,
+          kind: "regular",
+          primary: true,
+          capacity,
+        },
+      ],
+    })
+    expect(parsed).toMatchObject({ drives: [{ capacity }] })
+  })
+
   // The identity site and a dApp's client deploy separately: a kind this
   // client does not know must not fail the whole list.
   it("reads a drive kind it does not know as scratch", () => {

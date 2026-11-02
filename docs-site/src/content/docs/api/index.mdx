@@ -492,11 +492,12 @@ if (batch) {
 
 Lists every drive the app was granted in Swarm ID. Each entry carries the fields of [`getPostageBatch()`](#getpostagebatch) plus:
 
-| Property    | Type                     | Description                                                                                                                                                                                                                                                                                                                                                                               |
-| ----------- | ------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `kind`      | `'regular' \| 'scratch'` | A scratch drive overwrites its oldest data once full; its contents carry no warranty                                                                                                                                                                                                                                                                                                      |
-| `primary`   | `boolean`                | The drive a write goes to when it names none: the account default for an `'all'` grant, otherwise the first granted regular drive. A scratch drive is never primary                                                                                                                                                                                                                       |
-| `partition` | `number \| undefined`    | The write partition this session holds on the drive, as `connectionInfo.partition` reports it for the primary: `undefined` while it holds none: until the drive's write path is built (at connect for the primary, on the first write that names it for any other), and after an idle release or a disconnect. Every lease change fires `onConnectionChange`, so re-read the drives there |
+| Property    | Type                         | Description                                                                                                                                                                                                                                                                                                                                                                               |
+| ----------- | ---------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `kind`      | `'regular' \| 'scratch'`     | A scratch drive overwrites its oldest data once full; its contents carry no warranty                                                                                                                                                                                                                                                                                                      |
+| `primary`   | `boolean`                    | The drive a write goes to when it names none: the account default for an `'all'` grant, otherwise the first granted regular drive. A scratch drive is never primary                                                                                                                                                                                                                       |
+| `partition` | `number \| undefined`        | The write partition this session holds on the drive, as `connectionInfo.partition` reports it for the primary: `undefined` while it holds none: until the drive's write path is built (at connect for the primary, on the first write that names it for any other), and after an idle release or a disconnect. Every lease change fires `onConnectionChange`, so re-read the drives there |
+| `capacity`  | `DriveCapacity \| undefined` | How much the drive holds and has left, in bytes you can save: `sizeBytes`, `usedBytes`, `leftBytes`, and the same per partition in `partitions`. See [Drive capacity](#drive-capacity). Absent on a scratch drive, and when a partition's counter could not be read                                                                                                                       |
 
 **Returns:** `Promise<Drive[]>` — empty when the app was granted no drive
 
@@ -523,6 +524,47 @@ const client = new SwarmIdClient({
 ```typescript
 const scratch = (await client.getDrives()).find((drive) => drive.kind === 'scratch')
 await client.uploadData(frame, { batchID: scratch?.batchID })
+```
+
+#### Drive capacity
+
+A drive is not filled byte by byte. Every chunk lands in one of 65,536 buckets, picked by its address, and a save fails as soon as one of its chunks lands in a bucket that is already full. So how much still fits is a likelihood, and `capacity` reports it at `DEFAULT_FIT_CONFIDENCE` (0.5): `leftBytes` is a save that fits as likely as not, and `sizeBytes` is the same figure for an empty drive. The figures count the bytes you save: the chunks Swarm adds to address them, and a save's own manifest and feed update, are already taken off.
+
+A drive is split into partitions, so two devices can write to it at once. `capacity` adds them up, but one save goes into the one partition this device writes to. Before a save, ask [`fitProbability()`](#fitprobabilitybytes-options) rather than comparing with `leftBytes`.
+
+```typescript
+import { DEFAULT_FIT_CONFIDENCE } from '@snaha/swarm-id'
+
+const [drive] = await client.getDrives()
+if (drive.capacity) {
+  const { leftBytes, sizeBytes } = drive.capacity
+  show(`About ${format(leftBytes)} left of ${format(sizeBytes)}`)
+  if (leftBytes < sizeBytes / 10) showLow()
+}
+```
+
+### `fitProbability(bytes, options?)`
+
+The chance, from 0 to 1, that a save of `bytes` fits in a drive. It asks about the partition this device writes to, or, while it holds none, the fullest one. Always `1` on a scratch drive, which overwrites its oldest data instead.
+
+**Parameters:**
+
+| Parameter         | Type      | Required | Description                                                          |
+| ----------------- | --------- | -------- | -------------------------------------------------------------------- |
+| `bytes`           | `number`  | Yes      | The size of the save                                                 |
+| `options.batchID` | `string`  | No       | The drive, from [`getDrives()`](#getdrives); defaults to the primary |
+| `options.encrypt` | `boolean` | No       | Whether the save is encrypted, as uploads are by default             |
+
+**Returns:** `Promise<number>`. Rejects with `drive-not-granted` for a drive outside the grant, and with `network` when a partition's counter could not be read.
+
+**Example:**
+
+```typescript
+import { DEFAULT_FIT_CONFIDENCE } from '@snaha/swarm-id'
+
+if ((await client.fitProbability(file.size)) < DEFAULT_FIT_CONFIDENCE) {
+  showDriveFull()
+}
 ```
 
 ### `requestDrives(drives)`
@@ -1791,11 +1833,14 @@ import type {
   AvatarSource,
   PostageBatch,
   Drive,
+  DriveCapacity,
+  PartitionCapacity,
   DriveKind,
   DriveRequest,
   DriveRequirement,
   Permissions,
   DriveTargetOptions,
+  FitOptions,
   AppMetadata,
   ButtonConfig,
   RequestOptions,
