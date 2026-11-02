@@ -13,7 +13,11 @@ import { PrivateKey } from "@ethersphere/bee-js"
 import { makeContentAddressedChunk } from "@ethersphere/core-sdk"
 import { SyncEpochFinder } from "./finder"
 import { AsyncEpochFinder } from "./async-finder"
-import { BasicEpochUpdater, makeEpochIdentifier } from "./updater"
+import {
+  BasicEpochUpdater,
+  epochSocAddress,
+  makeEpochIdentifier,
+} from "./updater"
 import { EpochIndex, MAX_LEVEL } from "./epoch"
 import type { EpochUpdateHints, EpochUpdateResult } from "./types"
 import type { UploadTarget } from "../../upload"
@@ -626,9 +630,7 @@ describe("Epoch Feeds Integration", () => {
       const forged = makeContentAddressedChunk(
         payloadWithTimestamp(at, createTestReference(4242)),
       ).toSingleOwnerChunk(identifier, impostor)
-      const ownersAddress = Binary.keccak256(
-        Binary.concatBytes(identifier.toUint8Array(), owner.toUint8Array()),
-      )
+      const ownersAddress = await epochSocAddress(topic, epoch, owner)
       await store.put(Binary.uint8ArrayToHex(ownersAddress), forged.data)
 
       for (const finder of [
