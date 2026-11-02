@@ -425,9 +425,7 @@ describe("SwarmIdClient feed readers and writers", () => {
       ])
     })
 
-    // Which drive a raw update goes to is pinned beside the code that
-    // routes it; here it names none.
-    it("uploads a raw reference with no key", async () => {
+    it("uploads a raw reference with no key, to its drive", async () => {
       const writer = client.makeEpochFeedWriter({
         topic: TOPIC,
         signer: SIGNER,
@@ -435,6 +433,7 @@ describe("SwarmIdClient feed readers and writers", () => {
       const result = await writer.uploadRawReference(ENCRYPTED_REF, {
         at: AT,
         hints: HINTS,
+        batchID: BATCH,
       })
       expect(result).toEqual({
         socAddress: SOC_ADDRESS,
@@ -451,20 +450,24 @@ describe("SwarmIdClient feed readers and writers", () => {
           at: AT.toString(),
           reference: ENCRYPTED_REF,
           hints: HINTS,
+          batchID: BATCH,
         },
       ])
     })
 
-    it("uploads a raw payload unencrypted, then its reference", async () => {
+    it("uploads a raw payload unencrypted, then its reference, to one drive", async () => {
       answers.uploadData = () => ({ reference: REF })
       const writer = client.makeEpochFeedWriter({ topic: TOPIC })
-      const result = await writer.uploadRawPayload(DATA, { at: AT })
+      const result = await writer.uploadRawPayload(DATA, {
+        at: AT,
+        uploadOptions: { batchID: OTHER_BATCH },
+      })
       expect(result.encryptionKey).toBeUndefined()
       expect(sent()).toEqual([
         {
           type: "uploadData",
           data: DATA,
-          options: { encrypt: false },
+          options: { encrypt: false, batchID: OTHER_BATCH },
           enableProgress: false,
         },
         {
@@ -472,6 +475,7 @@ describe("SwarmIdClient feed readers and writers", () => {
           topic: TOPIC,
           at: AT.toString(),
           reference: REF,
+          batchID: OTHER_BATCH,
         },
       ])
     })
@@ -574,25 +578,35 @@ describe("SwarmIdClient feed readers and writers", () => {
       expect(sent()).toEqual([])
     })
 
-    // Which lookup bound the writer's reads send is pinned beside the code
-    // that forwards it; here they set none.
     it("reads like the reader, with its signer's owner", async () => {
       const writer = client.makeSequentialFeedWriter({
         topic: TOPIC,
         signer: SIGNER,
       })
-      expect(await writer.downloadPayload(KEY, { index: INDEX })).toEqual(
-        seqPayloadAnswer(),
-      )
+      const lookup = { lookupTimeoutMs: LOOKUP_TIMEOUT_MS }
       expect(
-        await writer.downloadRawPayload({ index: INDEX, encryptionKey: KEY }),
+        await writer.downloadPayload(KEY, { index: INDEX, ...lookup }),
       ).toEqual(seqPayloadAnswer())
-      expect(await writer.downloadReference(KEY, { at: AT })).toEqual({
+      expect(
+        await writer.downloadRawPayload({
+          index: INDEX,
+          encryptionKey: KEY,
+          ...lookup,
+        }),
+      ).toEqual(seqPayloadAnswer())
+      expect(
+        await writer.downloadReference(KEY, { at: AT, ...lookup }),
+      ).toEqual({
         reference: REF,
         feedIndex: "3",
         feedIndexNext: "4",
       })
-      const read = { topic: TOPIC, owner: SIGNER_OWNER, encryptionKey: KEY }
+      const read = {
+        topic: TOPIC,
+        owner: SIGNER_OWNER,
+        encryptionKey: KEY,
+        ...lookup,
+      }
       expect(sent()).toEqual([
         { type: "seqFeedDownloadPayload", ...read, index: INDEX.toString() },
         { type: "seqFeedDownloadRawPayload", ...read, index: INDEX.toString() },
@@ -616,6 +630,9 @@ describe("SwarmIdClient feed readers and writers", () => {
       ])
     })
 
+    // The uploads repeat `index`, `at`, `hasTimestamp` and `lookupTimeoutMs`
+    // inside `options`, which the proxy reads only for its drive: a wire quirk
+    // pinned as it is, not a contract (#963).
     it("uploads a payload", async () => {
       const writer = client.makeSequentialFeedWriter({
         topic: TOPIC,
