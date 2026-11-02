@@ -7,15 +7,15 @@
  * for real, as Bee would serve them.
  */
 
-import { describe, it, expect } from "vitest"
+import { describe, it, expect, vi } from "vitest"
 import { PrivateKey, Topic } from "@ethersphere/bee-js"
 import { makeContentAddressedChunk } from "@ethersphere/core-sdk"
 import { AsyncEpochFinder } from "./async-finder"
-import { EpochIndex } from "./epoch"
+import { EpochIndex, makeEpochIdentifier } from "./epoch"
 import { SyncEpochFinder } from "./finder"
 import type { EpochFinder } from "./types"
 import type { ChunkDownloader } from "../../download-data"
-import { epochSocAddress, makeEpochIdentifier } from "./updater"
+import { epochSocAddress } from "./updater"
 import { uint8ArrayToHex } from "../../../utils/hex"
 
 const TOPIC = Topic.fromString("epoch-finder-payload")
@@ -78,25 +78,36 @@ async function beeWithEntry(payload: Uint8Array): Promise<ChunkDownloader> {
 }
 
 describe.each(FINDERS)("%s — plain entry payload", (_, makeFinder) => {
+  // The span-prefixed layouts are a legacy tolerance nothing writes; they go
+  // with it (#962).
   it.each([
     ["timestamp ‖ reference", PLAIN_REF_SIZE, false],
-    ["span ‖ timestamp ‖ reference", PLAIN_REF_SIZE, true],
+    ["(legacy tolerance) span ‖ timestamp ‖ reference", PLAIN_REF_SIZE, true],
     ["timestamp ‖ encrypted reference", ENCRYPTED_REF_SIZE, false],
-    ["span ‖ timestamp ‖ encrypted reference", ENCRYPTED_REF_SIZE, true],
+    [
+      "(legacy tolerance) span ‖ timestamp ‖ encrypted reference",
+      ENCRYPTED_REF_SIZE,
+      true,
+    ],
   ])("reads %s", async (_layout, refSize, spanPrefix) => {
     const reference = new Uint8Array(refSize).fill(FILL)
     const bee = await beeWithEntry(feedPayload(AT, reference, spanPrefix))
     expect(await makeFinder(bee).findAt(AT)).toEqual(reference)
   })
 
-  it("skips an entry written after the requested time", async () => {
+  it("skips an exact-epoch entry written after the requested time", async () => {
     const reference = new Uint8Array(PLAIN_REF_SIZE).fill(FILL)
     const bee = await beeWithEntry(feedPayload(AT + 1n, reference, false))
     expect(await makeFinder(bee).findAt(AT)).toBeUndefined()
   })
 
   it("skips a payload of no known length", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {})
     const bee = await beeWithEntry(new Uint8Array(MALFORMED_PAYLOAD_SIZE))
     expect(await makeFinder(bee).findAt(AT)).toBeUndefined()
+    expect(warn).toHaveBeenCalledWith(
+      expect.stringContaining(`length: ${MALFORMED_PAYLOAD_SIZE}`),
+    )
+    warn.mockRestore()
   })
 })
