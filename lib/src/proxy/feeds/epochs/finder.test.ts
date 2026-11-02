@@ -14,6 +14,7 @@ import { AsyncEpochFinder } from "./async-finder"
 import { EpochIndex } from "./epoch"
 import { SyncEpochFinder } from "./finder"
 import type { EpochFinder } from "./types"
+import type { ChunkDownloader } from "../../download-data"
 import { epochSocAddress, makeEpochIdentifier } from "./updater"
 import { uint8ArrayToHex } from "../../../utils/hex"
 
@@ -28,7 +29,7 @@ const ENCRYPTED_REF_SIZE = 64
 const MALFORMED_PAYLOAD_SIZE = 41
 const FILL = 7
 
-type FinderFactory = (bee: never) => EpochFinder
+type FinderFactory = (bee: ChunkDownloader) => EpochFinder
 
 const FINDERS: [string, FinderFactory][] = [
   ["SyncEpochFinder", (bee) => new SyncEpochFinder(bee, TOPIC, OWNER)],
@@ -56,19 +57,17 @@ function feedPayload(
   return payload
 }
 
-/** A Bee with one SOC, signed by `signer`, stored at the exact epoch of `AT`. */
-async function beeWithEntry(
-  payload: Uint8Array,
-  signer: PrivateKey = SIGNER,
-): Promise<never> {
+/** A Bee with one SOC, signed by the owner, stored at the exact epoch of `AT`. */
+async function beeWithEntry(payload: Uint8Array): Promise<ChunkDownloader> {
   const epoch = new EpochIndex(AT, 0)
   const identifier = await makeEpochIdentifier(TOPIC, epoch)
   const soc = makeContentAddressedChunk(payload).toSingleOwnerChunk(
     identifier,
-    signer,
+    SIGNER,
   )
   const address = uint8ArrayToHex(await epochSocAddress(TOPIC, epoch, OWNER))
-  const bee = {
+  return {
+    url: "http://localhost:1633",
     chunk: {
       download: async (addr: string) => {
         if (addr === address) return soc.data
@@ -76,7 +75,6 @@ async function beeWithEntry(
       },
     },
   }
-  return bee as never
 }
 
 describe.each(FINDERS)("%s — plain entry payload", (_, makeFinder) => {
