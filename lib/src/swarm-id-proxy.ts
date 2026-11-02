@@ -3388,6 +3388,9 @@ export class SwarmIdProxy {
       clearTimeout(this.publishTimer)
       this.publishTimer = undefined
     }
+    // The cancelled publish's reason goes with it, or the next session's
+    // first announce would run as this session's change.
+    this.publishReason = undefined
     this.clearRosterRetry()
     this.pendingLaneUpdates.clear()
     this.storagePartitioned = false
