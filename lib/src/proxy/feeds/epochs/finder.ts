@@ -8,11 +8,10 @@
  * using epoch-based indexing.
  */
 
-import { Binary } from "cafe-utility"
 import type { BeeRequestOptions } from "@ethersphere/bee-js"
 import { EthAddress, Topic } from "@ethersphere/bee-js"
 import { downloadSOC, type ChunkDownloader } from "../../download-data"
-import { EpochIndex, lca, MAX_LEVEL } from "./epoch"
+import { EpochIndex, lca, MAX_LEVEL, makeEpochIdentifier } from "./epoch"
 import type { EpochFinder } from "./types"
 import { findPreviousLeaf } from "./utils"
 
@@ -201,11 +200,7 @@ export class SyncEpochFinder implements EpochFinder {
     const requestOptions: BeeRequestOptions = {
       timeout: EPOCH_LOOKUP_TIMEOUT_MS,
     }
-    // Calculate epoch identifier: Keccak256(topic || Keccak256(start || level))
-    const epochHash = await epoch.marshalBinary()
-    const identifier = Binary.keccak256(
-      Binary.concatBytes(this.topic.toUint8Array(), epochHash),
-    )
+    const identifier = await makeEpochIdentifier(this.topic, epoch)
 
     // Rejects a SOC not signed by the owner: the gateway serves whatever it
     // holds at the address.

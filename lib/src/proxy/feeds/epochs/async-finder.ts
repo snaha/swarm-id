@@ -8,11 +8,10 @@
  * using epoch-based indexing with parallel chunk fetching.
  */
 
-import { Binary } from "cafe-utility"
 import type { BeeRequestOptions } from "@ethersphere/bee-js"
 import { EthAddress, Topic } from "@ethersphere/bee-js"
 import type { ChunkDownloader } from "../../download-data"
-import { EpochIndex, MAX_LEVEL } from "./epoch"
+import { EpochIndex, MAX_LEVEL, makeEpochIdentifier } from "./epoch"
 import type { EpochFinder, EpochLookupResult } from "./types"
 import { downloadEncryptedSOC, downloadSOC } from "../../download-data"
 import { findPreviousLeaf } from "./utils"
@@ -273,11 +272,7 @@ export class AsyncEpochFinder implements EpochFinder {
     const requestOptions: BeeRequestOptions = {
       timeout: EPOCH_LOOKUP_TIMEOUT_MS,
     }
-    // Calculate epoch identifier: Keccak256(topic || Keccak256(start || level))
-    const epochHash = await epoch.marshalBinary()
-    const identifier = Binary.keccak256(
-      Binary.concatBytes(this.topic.toUint8Array(), epochHash),
-    )
+    const identifier = await makeEpochIdentifier(this.topic, epoch)
 
     let payload: Uint8Array
     if (this.encryptionKey) {

@@ -13,12 +13,8 @@ import { PrivateKey } from "@ethersphere/bee-js"
 import { makeContentAddressedChunk } from "@ethersphere/core-sdk"
 import { SyncEpochFinder } from "./finder"
 import { AsyncEpochFinder } from "./async-finder"
-import {
-  BasicEpochUpdater,
-  epochSocAddress,
-  makeEpochIdentifier,
-} from "./updater"
-import { EpochIndex, MAX_LEVEL } from "./epoch"
+import { BasicEpochUpdater, epochSocAddress } from "./updater"
+import { EpochIndex, MAX_LEVEL, makeEpochIdentifier } from "./epoch"
 import type { EpochUpdateHints, EpochUpdateResult } from "./types"
 import type { UploadTarget } from "../../upload"
 import {

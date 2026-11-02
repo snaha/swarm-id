@@ -11,6 +11,7 @@
  */
 
 import { Binary } from "cafe-utility"
+import { Identifier, type Topic } from "@ethersphere/bee-js"
 
 /** Maximum epoch level (2^32 seconds ≈ 136 years) */
 export const MAX_LEVEL = 32
@@ -181,4 +182,21 @@ export function next(
     return new EpochIndex(0n, MAX_LEVEL)
   }
   return prevEpoch.next(last, at)
+}
+
+/**
+ * Build the SOC identifier for one epoch of a topic's epoch feed:
+ * `keccak256(topic ‖ epoch.marshalBinary())`. Exported so readers can
+ * reconstruct the SOC address of a feed entry they found (e.g. the
+ * partition-state reader compensates for the slot the entry's own SOC
+ * consumed).
+ */
+export async function makeEpochIdentifier(
+  topic: Topic,
+  epoch: EpochIndex,
+): Promise<Identifier> {
+  const epochHash = await epoch.marshalBinary()
+  return new Identifier(
+    Binary.keccak256(Binary.concatBytes(topic.toUint8Array(), epochHash)),
+  )
 }
