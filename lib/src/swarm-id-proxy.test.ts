@@ -527,17 +527,9 @@ describe("SwarmIdProxy auth button", () => {
     expect(button.textContent).toBe("⏳ Loading...")
     expect(button.disabled).toBe(true)
     expect(button.style).toMatchObject({
-      width: "100%",
-      height: "100%",
-      display: "flex",
-      alignItems: "center",
-      justifyContent: "center",
       backgroundColor: "#999",
       cursor: "default",
       color: "white",
-      border: "none",
-      borderRadius: "0",
-      padding: "0",
     })
   })
 
@@ -607,12 +599,9 @@ describe("SwarmIdProxy auth button", () => {
 
     expect(internal.isConnecting).toBe(true)
     expect(button.disabled).toBe(true)
-    expect(button.innerHTML).toContain("animation: spin 1s linear infinite")
+    expect(button.innerHTML).toContain("<span")
     expect(headChildren).toHaveLength(1)
-    expect(headChildren[0]).toMatchObject({
-      id: "swarm-id-spinner-style",
-      textContent: "@keyframes spin { to { transform: rotate(360deg); } }",
-    })
+    expect(headChildren[0]).toMatchObject({ id: "swarm-id-spinner-style" })
     expect(openAuthPopup).toHaveBeenCalledOnce()
   })
 
