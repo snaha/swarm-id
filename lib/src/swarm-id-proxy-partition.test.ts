@@ -1042,10 +1042,47 @@ describe("SwarmIdProxy partitioned write enablement", () => {
           expect(coordinatorFor(BATCH_ID_HEX)).toBeDefined(),
         )
         expect(lastInfo().uploadMode).toBe("user-stamp")
+        const drivesBefore = drivesAnnounced()
         await vi.waitFor(
-          () => expect(lastInfo().uploadMode).not.toBe("user-stamp"),
+          () =>
+            expect(lastInfo().uploadUnavailableReason).toBe("stamp-expired"),
           { timeout: 3000, interval: 50 },
         )
+        expect(drivesAnnounced()).toBe(drivesBefore + 1)
+      })
+
+      it("re-sends it when a granted drive the app never wrote to expires", async () => {
+        // The second drive has no write path (#862); its expiry is still a
+        // change to the app's drives.
+        await connectWithTwoDrives([
+          stampOf(BATCH_ID_HEX),
+          {
+            ...stampOf(SECOND_BATCH_ID_HEX),
+            batchTTL: 1,
+            createdAt: Date.now(),
+          },
+        ])
+        await vi.waitFor(() =>
+          expect(coordinatorFor(BATCH_ID_HEX)).toBeDefined(),
+        )
+        expect(coordinatorFor(SECOND_BATCH_ID_HEX)).toBeUndefined()
+        const before = announced()
+        const drivesBefore = drivesAnnounced()
+        await vi.waitFor(
+          () => expect(drivesAnnounced()).toBe(drivesBefore + 1),
+          {
+            timeout: 3000,
+            interval: 50,
+          },
+        )
+        expect(announced()).toBe(before + 1)
+        expect(lastInfo().canUpload).toBe(true)
+      })
+
+      it("sends drivesChanged at connect for an app with no drives", async () => {
+        await connectWithTwoDrives([])
+        await vi.waitFor(() => expect(announced()).toBeGreaterThan(0))
+        expect(drivesAnnounced()).toBe(1)
       })
     })
 

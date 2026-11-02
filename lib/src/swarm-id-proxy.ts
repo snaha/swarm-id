@@ -118,6 +118,7 @@ import {
 import {
   remainingLifespanSeconds,
   sameStampLifetime,
+  stampRefusal,
 } from "./utils/stamp-lifespan"
 import {
   accountStateToDeviceView,
@@ -342,9 +343,13 @@ export class SwarmIdProxy {
    * delegates all writes to these coordinators via `withModeAwareWriteLock`.
    */
   private drives = new Map<string, DriveWritePath>()
-  /** The drives `connectionInfoChanged` last went out with (see `driveState`). */
-  private lastDriveState = ""
-  /** Armed for the earliest expiry among the built drives (#793), see `armExpiryTimer`. */
+  /**
+   * The drives `connectionInfoChanged` last went out with (see `driveState`).
+   * Starts unset, not empty, so the first emit sends `drivesChanged` for an
+   * app with no drives too.
+   */
+  private lastDriveState: string | undefined
+  /** Armed for the earliest expiry among the granted drives (#793), see `armExpiryTimer`. */
   private expiryTimer: ReturnType<typeof setTimeout> | undefined
   /** The primary drive's batch: where a write that names no drive goes. */
   private primaryBatchId: string | undefined
@@ -799,6 +804,9 @@ export class SwarmIdProxy {
       }
     }
     this.primaryBatchId = primary?.batchID.toHex()
+    // The grant is what expires, so it is re-read here, not as write paths
+    // come and go.
+    this.armExpiryTimer()
     if (primary && !this.drives.has(primary.batchID.toHex())) {
       await this.addDrive(primary).ready
     }
@@ -812,7 +820,6 @@ export class SwarmIdProxy {
       stamp,
     )
     this.drives.set(drive.batchId, drive)
-    this.armExpiryTimer()
     drive.ready = this.initializeStamper(
       drive,
       stamp.depth,
@@ -855,21 +862,24 @@ export class SwarmIdProxy {
     this.dropBufferedLanes(drive.batchId)
     drive.teardown()
     this.drives.delete(drive.batchId)
-    this.armExpiryTimer()
   }
 
   /**
-   * One timer for the earliest expiry among the built drives, so the flip to
-   * `stamp-expired` reaches the dApp when it happens rather than on the next
-   * unrelated event (#793, #933). Re-armed as drives come and go, and from its
-   * own tick when a lifetime outlasts what a timer can hold.
+   * One timer for the earliest expiry among the granted drives, built or not,
+   * so the flip to `stamp-expired` reaches the dApp at the stored expiry
+   * rather than on the next unrelated event (#793, #933). Re-armed as drives
+   * come and go (`reconcileDrives`), cleared with them (`teardownDrives`), and
+   * re-armed from its own tick when a lifetime outlasts what a timer can
+   * hold. The stored expiry is exact only until the chain's price moves
+   * (#927), and a hidden tab's timers are throttled, so "at" means within
+   * about a minute.
    */
   private armExpiryTimer(): void {
     clearTimeout(this.expiryTimer)
     this.expiryTimer = undefined
     const now = Date.now()
-    const [next] = [...this.drives.values()]
-      .map((drive) => remainingLifespanSeconds(drive.lifetime, now))
+    const [next] = this.lookupDrivesForApp()
+      .granted.map((stamp) => remainingLifespanSeconds(stamp, now))
       .filter((left): left is number => left !== undefined && left > 0)
       .sort((a, b) => a - b)
     if (next === undefined) return
@@ -892,6 +902,8 @@ export class SwarmIdProxy {
   private teardownDrives(): void {
     for (const drive of [...this.drives.values()]) this.teardownDrive(drive)
     this.primaryBatchId = undefined
+    clearTimeout(this.expiryTimer)
+    this.expiryTimer = undefined
   }
 
   /** Tear everything down and build the write paths afresh. */
@@ -1414,9 +1426,8 @@ export class SwarmIdProxy {
 
     // Release the partition leases (best-effort) so peers see this device
     // vacate its partitions promptly.
+    // Also clears the expiry timer: nothing is left to expire.
     this.teardownDrives()
-    clearTimeout(this.expiryTimer)
-    this.expiryTimer = undefined
     if (this.publishTimer !== undefined) {
       clearTimeout(this.publishTimer)
       this.publishTimer = undefined
@@ -3664,25 +3675,23 @@ export class SwarmIdProxy {
   }
 
   /**
-   * The app's drives as one comparable string (#933): the grant and its
-   * primary, and for each built write path its lane and its refusal. A change
-   * here re-sends `connectionInfoChanged` even when the info itself is the
-   * same, so the dApp re-reads `getDrives()` rather than learning of a drive
-   * gone from the grant, moved (#882) or run out (#793) from a failing write.
+   * The app's drives as one comparable string (#933): the primary, each
+   * granted drive with its refusal, and each built write path's lane. A
+   * change here re-sends `connectionInfoChanged` even when the info itself is
+   * the same, so the dApp re-reads `getDrives()` rather than learning of a
+   * drive gone from the grant, moved (#882) or run out (#793) from a failing
+   * write. The refusal is read off every granted drive, not only the built
+   * ones: a drive the app never wrote to expires all the same.
    */
   private driveState(): string {
     const { primary, granted } = this.lookupDrivesForApp()
-    const lanes = [...this.drives.values()]
-      .map(
-        (drive) =>
-          `${drive.batchId}:${drive.coordinator?.currentPartition}:${drive.refusal}`,
-      )
+    const drives = granted
+      .map((stamp) => `${stamp.batchID.toHex()}:${stampRefusal(stamp)}`)
       .sort()
-    return [
-      primary?.batchID.toHex(),
-      ...granted.map((stamp) => stamp.batchID.toHex()).sort(),
-      ...lanes,
-    ].join(",")
+    const lanes = [...this.drives.values()]
+      .map((drive) => `${drive.batchId}@${drive.coordinator?.currentPartition}`)
+      .sort()
+    return [primary?.batchID.toHex(), ...drives, ...lanes].join(",")
   }
 
   /**

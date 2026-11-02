@@ -2261,9 +2261,10 @@ export interface ClientOptions {
   onConnectionChange?: (info: ConnectionInfo) => void
   /**
    * Invoked when the app's drives change (#933): one joins or leaves the
-   * grant, the primary moves, a lane moves, a drive runs out. Fires once at
-   * connect and then on every such change, after `onConnectionChange` for
-   * the same event, so `getDrives()` read here is current. For a dApp that
+   * grant, the primary moves, a lane moves, a drive runs out (written to or
+   * not). Fires once at connect, with or without drives, and then on every
+   * such change, after `onConnectionChange` for the same event, so a
+   * `getDrives()` read here is current. For a dApp that
    * wants drive changes alone, without sifting them out of every connection
    * change.
    */
