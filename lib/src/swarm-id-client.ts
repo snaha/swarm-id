@@ -2433,6 +2433,11 @@ export class SwarmIdClient {
       return owner
     }
 
+    // The drive an update goes to, payload and SOC both.
+    const driveOf = (
+      update?: Pick<EpochFeedUploadOptions, "batchID" | "uploadOptions">,
+    ): string | undefined => update?.batchID ?? update?.uploadOptions?.batchID
+
     const downloadReference = async (
       options?: EpochFeedDownloadOptions,
     ): Promise<EpochFeedDownloadReferenceResult> => {
@@ -2520,7 +2525,7 @@ export class SwarmIdClient {
         encryptionKey:
           feedKey !== undefined ? this.normalizeSocKey(feedKey) : undefined,
         hints: options?.hints,
-        batchID: options?.batchID ?? options?.uploadOptions?.batchID,
+        batchID: driveOf(options),
         requestOptions,
       })
       const socAddress = response.socAddress
@@ -2543,8 +2548,7 @@ export class SwarmIdClient {
           ? options.at
           : BigInt(Math.floor(Date.now() / 1000))
       const encrypt = options?.encrypt !== false
-      // Payload and SOC go to one drive, whichever option named it.
-      const batchID = options?.batchID ?? options?.uploadOptions?.batchID
+      const batchID = driveOf(options)
       const uploadResult = await this.uploadData(
         this.normalizePayload(data),
         { ...options?.uploadOptions, encrypt, batchID },
@@ -2657,6 +2661,7 @@ export class SwarmIdClient {
         reference: normalizedRef,
         encryptionKey: undefined, // No encryption for raw upload
         hints: options?.hints,
+        batchID: driveOf(options),
         requestOptions,
       })
       const socAddress = response.socAddress
@@ -2677,10 +2682,11 @@ export class SwarmIdClient {
         options?.at !== undefined
           ? options.at
           : BigInt(Math.floor(Date.now() / 1000))
+      const batchID = driveOf(options)
       // Upload with encrypt: false for raw payload
       const uploadResult = await this.uploadData(
         this.normalizePayload(data),
-        { ...options?.uploadOptions, encrypt: false },
+        { ...options?.uploadOptions, encrypt: false, batchID },
         requestOptions,
       )
       const requestId = this.generateRequestId()
@@ -2696,6 +2702,7 @@ export class SwarmIdClient {
         reference: uploadResult.reference,
         encryptionKey: undefined, // No encryption for raw upload
         hints: options?.hints,
+        batchID,
         requestOptions,
       })
       const socAddress = response.socAddress

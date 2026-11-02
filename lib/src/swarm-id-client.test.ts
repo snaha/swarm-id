@@ -1043,6 +1043,50 @@ describe("SwarmIdClient request seam", () => {
     void upload.catch(() => {})
   })
 
+  // The raw updates name a drive the same way, and go to it, SOC and all.
+  const RAW_DRIVE = "cd".repeat(32)
+  const RAW_DRIVE_OPTIONS = [
+    ["batchID", { batchID: RAW_DRIVE }],
+    ["uploadOptions.batchID", { uploadOptions: { batchID: RAW_DRIVE } }],
+  ] as const
+
+  it.each(RAW_DRIVE_OPTIONS)(
+    "sends a raw epoch reference to the drive named by %s",
+    async (_, options) => {
+      const writer = client.makeEpochFeedWriter({ topic: "12".repeat(32) })
+      void writer.uploadRawReference("ab".repeat(32), options).catch(() => {})
+      expect(lastPostedMessage()).toMatchObject({
+        type: "epochFeedUploadReference",
+        batchID: RAW_DRIVE,
+      })
+    },
+  )
+
+  it.each(RAW_DRIVE_OPTIONS)(
+    "sends a raw epoch payload and its SOC to the drive named by %s",
+    async (_, options) => {
+      const writer = client.makeEpochFeedWriter({ topic: "12".repeat(32) })
+      const upload = writer.uploadRawPayload(new Uint8Array([1]), options)
+      const payloadUpload = lastPostedMessage()
+      expect(payloadUpload).toMatchObject({
+        type: "uploadData",
+        options: { batchID: RAW_DRIVE, encrypt: false },
+      })
+      deliver({
+        type: "uploadDataResponse",
+        requestId: payloadUpload.requestId,
+        reference: "ab".repeat(32),
+      })
+      await vi.waitFor(() =>
+        expect(lastPostedMessage()).toMatchObject({
+          type: "epochFeedUploadReference",
+          batchID: RAW_DRIVE,
+        }),
+      )
+      void upload.catch(() => {})
+    },
+  )
+
   it("getPostageBatch rejects on a proxy error message", async () => {
     const promise = client.getPostageBatch()
 
