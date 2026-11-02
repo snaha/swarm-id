@@ -37,6 +37,34 @@ function seededRandom(seed: number): () => number {
   }
 }
 
+/** Place `chunks` chunks at random, skipping any whose bucket is full */
+function fillRandomly(
+  counters: Uint32Array,
+  chunks: number,
+  random: () => number,
+  capacity: number,
+): void {
+  for (let placed = 0; placed < chunks; placed++) {
+    const bucket = Math.floor(random() * NUM_BUCKETS)
+    if (counters[bucket] < capacity) counters[bucket]++
+  }
+}
+
+/** How many more random chunks land before one hits a full bucket */
+function chunksUntilOverflow(
+  counters: Uint32Array,
+  random: () => number,
+  capacity: number,
+): number {
+  let chunks = 0
+  for (;;) {
+    const bucket = Math.floor(random() * NUM_BUCKETS)
+    if (counters[bucket] >= capacity) return chunks
+    counters[bucket]++
+    chunks++
+  }
+}
+
 describe("chunksForBytes", () => {
   it("counts a small save as one chunk plus the save's overhead", () => {
     expect(chunksForBytes(0)).toBe(1 + SAVE_OVERHEAD_CHUNKS)
@@ -181,15 +209,7 @@ describe("chunksThatFit", () => {
     const runs = 101
     const filled: number[] = []
     for (let run = 0; run < runs; run++) {
-      const counters = emptyCounters()
-      let chunks = 0
-      for (;;) {
-        const bucket = Math.floor(random() * NUM_BUCKETS)
-        if (counters[bucket] >= capacity) break
-        counters[bucket]++
-        chunks++
-      }
-      filled.push(chunks)
+      filled.push(chunksUntilOverflow(emptyCounters(), random, capacity))
     }
     filled.sort((a, b) => a - b)
     const median = filled[Math.floor(runs / 2)]
@@ -198,6 +218,36 @@ describe("chunksThatFit", () => {
     expect(
       Math.abs(chunksThatFit(histogram, MEDIAN) - median) / median,
     ).toBeLessThan(tolerance)
+  })
+
+  // Independence is the model's assumption, and its weakest where some
+  // buckets are already fuller than others
+  it("agrees with simulated uploads into a partly filled partition", () => {
+    const capacity = partitionCapacity(SMALL_DEPTH, 2)
+    const random = seededRandom(2)
+    const prefilled = emptyCounters()
+    const prefilledChunks = 30_000
+    fillRandomly(prefilled, prefilledChunks, random, capacity)
+    const partly = headroomHistogram(prefilled, SMALL_DEPTH)
+    const runs = 201
+    const filled: number[] = []
+    for (let run = 0; run < runs; run++) {
+      filled.push(chunksUntilOverflow(prefilled.slice(), random, capacity))
+    }
+    filled.sort((a, b) => a - b)
+    const median = filled[Math.floor(runs / 2)]
+
+    const tolerance = 0.05
+    expect(
+      Math.abs(chunksThatFit(partly, MEDIAN) - median) / median,
+    ).toBeLessThan(tolerance)
+    // About nine runs in ten take the figure the model gives at 0.9
+    const confidence = 0.9
+    const atConfidence = chunksThatFit(partly, confidence)
+    const share =
+      filled.filter((chunks) => chunks >= atConfidence).length / runs
+    const shareTolerance = 0.06
+    expect(Math.abs(share - confidence)).toBeLessThan(shareTolerance)
   })
 })
 
@@ -230,6 +280,30 @@ describe("estimatePartitionCapacity", () => {
     const figures = estimatePartitionCapacity(0, counters, DEPTH)
     expect(figures.leftBytes).toBeGreaterThan(0)
     expect(figures.leftBytes).toBeLessThan(figures.sizeBytes / 10)
+  })
+
+  it("never has more left than its size minus what is used", () => {
+    const counters = emptyCounters()
+    // 1.5 GiB placed at random leaves the model more than size minus used
+    const chunks = 393_216
+    fillRandomly(counters, chunks, seededRandom(3), capacity)
+    const figures = estimatePartitionCapacity(0, counters, DEPTH)
+    expect(figures.leftBytes).toBe(figures.sizeBytes - figures.usedBytes)
+  })
+
+  it("has nothing left once used passes its size, though a small save may still fit", () => {
+    const counters = emptyCounters()
+    const chunks = 700_000
+    fillRandomly(counters, chunks, seededRandom(4), capacity)
+    const figures = estimatePartitionCapacity(0, counters, DEPTH)
+    expect(figures.usedBytes).toBeGreaterThan(figures.sizeBytes)
+    expect(figures.leftBytes).toBe(0)
+    expect(
+      fitProbability(
+        headroomHistogram(counters, DEPTH),
+        chunksForBytes(CHUNK_SIZE),
+      ),
+    ).toBeGreaterThan(DEFAULT_FIT_CONFIDENCE)
   })
 
   it("caps a wrapped counter at the lane's capacity", () => {

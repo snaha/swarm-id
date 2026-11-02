@@ -9,14 +9,16 @@
  * addresses are uniform, so how much still fits is a probability, not a
  * number: `N` more chunks fit when every bucket receives no more than its
  * headroom. Each bucket's share of `N` is Poisson with mean `N / NUM_BUCKETS`,
- * and the buckets are treated as independent (which slightly understates the
- * fit, as one bucket's chunks are another's missing ones), so
+ * and the buckets are treated as independent, so
  *
  *   P(fit N) = Π_b PoissonCDF(headroom_b; N / NUM_BUCKETS)
  *
  * Buckets with the same headroom share a factor, so this costs one pass over
- * the distinct headroom values. Sizes are in payload bytes: the chunk tree's
- * intermediate chunks and a save's own extra chunks are already taken off.
+ * the distinct headroom values. Independence overstates the fit a little, as
+ * one bucket's chunks are another's missing ones, and the Poisson marginals
+ * understate it a little; at 65,536 buckets both are small. Sizes are in
+ * payload bytes: the chunk tree's intermediate chunks and a save's own extra
+ * chunks are already taken off.
  */
 
 import {
@@ -48,6 +50,9 @@ export const SAVE_OVERHEAD_CHUNKS = 4
 
 /** Buckets per headroom: how many more chunks each bucket still takes */
 export type HeadroomHistogram = ReadonlyMap<number, number>
+
+/** `chunksThatFit` for an empty partition, per `<depth>:<partitions>:<confidence>` */
+const emptyPartitionChunks = new Map<string, number>()
 
 export interface CapacityOptions {
   /** Fit probability the byte figures are reported at */
@@ -167,14 +172,35 @@ export function estimatePartitionCapacity(
   for (const counter of dataCounters) {
     usedChunks += Math.min(counter, capacity)
   }
-  const empty = new Map([[capacity, NUM_BUCKETS]])
+  const sizeBytes = bytesForChunks(
+    chunksThatFitEmpty(capacity, depth, partitionCount, confidence),
+    encrypt,
+  )
+  const usedBytes = usedChunks * CHUNK_SIZE
   const current = headroomHistogram(dataCounters, depth, partitionCount)
-  return {
-    partition,
-    sizeBytes: bytesForChunks(chunksThatFit(empty, confidence), encrypt),
-    usedBytes: usedChunks * CHUNK_SIZE,
-    leftBytes: bytesForChunks(chunksThatFit(current, confidence), encrypt),
+  // Chunks already placed are no longer a gamble, so the model alone leaves
+  // `used + left` above `size`; capped, "left of size" adds up. Once used
+  // passes size, left reads 0 while a small save may still fit
+  const leftBytes = Math.min(
+    bytesForChunks(chunksThatFit(current, confidence), encrypt),
+    Math.max(0, sizeBytes - usedBytes),
+  )
+  return { partition, sizeBytes, usedBytes, leftBytes }
+}
+
+function chunksThatFitEmpty(
+  capacity: number,
+  depth: number,
+  partitionCount: number,
+  confidence: number,
+): number {
+  const key = `${depth}:${partitionCount}:${confidence}`
+  let chunks = emptyPartitionChunks.get(key)
+  if (chunks === undefined) {
+    chunks = chunksThatFit(new Map([[capacity, NUM_BUCKETS]]), confidence)
+    emptyPartitionChunks.set(key, chunks)
   }
+  return chunks
 }
 
 /** Every partition's figures, and the drive's as their sums */
