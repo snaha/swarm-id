@@ -16,7 +16,7 @@ knowing by name:
 - **Parent → Iframe**: `parentIdentify`, `checkAuth`, `connect`, `requestPermissions` (#711), `getPermissions` (#885),
   `disconnect`, `uploadData`, `downloadData`, `deriveAppSecret`
 - **Iframe → Parent**: `proxyReady`, `initError`, `authStatusResponse`, `authSuccess`,
-  `connectResponse`, `connectionInfoChanged` (what `initialize()` awaits), `uploadDataResponse`,
+  `connectResponse`, `connectionInfoChanged` (what `initialize()` awaits; `drivesChanged: true` on it when the app's drives moved, #933), `uploadDataResponse`,
   `error`
 - **Popup → Iframe**: `setSecret` — the partitioned handover, below — and `grantUpdated`, the
   permissions popup handing a partitioned session its new grant as an account delta (#711)

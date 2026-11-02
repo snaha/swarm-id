@@ -472,6 +472,7 @@ describe("SwarmIdClient connectionInfo", () => {
   let client: SwarmIdClient
   let env: ReturnType<typeof stubBrowserGlobals>
   let onConnectionChange: Mock<(info: ConnectionInfo) => void>
+  let onDrivesChange: Mock<() => void>
 
   // Delivered through the listener, not into `handleIframeMessage`: a snapshot
   // shaped like something the proxy cannot actually put on the wire would
@@ -485,12 +486,30 @@ describe("SwarmIdClient connectionInfo", () => {
     env = stubBrowserGlobals()
 
     onConnectionChange = vi.fn()
+    onDrivesChange = vi.fn()
     client = new SwarmIdClient({
       iframeOrigin: IFRAME_ORIGIN,
       metadata: APP_METADATA,
       onConnectionChange,
+      onDrivesChange,
     })
     internals(client).iframe = env.iframeElement
+  })
+
+  // The drives' own event (#933): a dApp that cares about its drives alone
+  // need not sift them out of every connection change.
+  it("invokes onDrivesChange after onConnectionChange when the info carries the flag, else not", () => {
+    const order: string[] = []
+    onConnectionChange.mockImplementation(() => order.push("connection"))
+    onDrivesChange.mockImplementation(() => order.push("drives"))
+    deliver({ type: "connectionInfoChanged", canUpload: false })
+    expect(onDrivesChange).not.toHaveBeenCalled()
+    deliver({
+      type: "connectionInfoChanged",
+      canUpload: false,
+      drivesChanged: true,
+    })
+    expect(order).toEqual(["connection", "connection", "drives"])
   })
 
   it("invokes onConnectionChange with the pushed snapshot and caches it", () => {

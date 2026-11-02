@@ -1698,6 +1698,15 @@ export const ErrorMessageSchema = WireErrorSchema.extend({
 
 export const ConnectionInfoChangedMessageSchema = z.object({
   type: z.literal("connectionInfoChanged"),
+  /**
+   * The app's drives changed with this one (#933): one joined or left the
+   * grant, the primary moved, a lane moved, a drive ran out. Set on the first
+   * snapshot too. Carried on the message a client already knows rather than
+   * sent as one of its own, so a client older than the flag drops the key
+   * and nothing else; the client calls `onDrivesChange` after
+   * `onConnectionChange` when it is set.
+   */
+  drivesChanged: z.boolean().optional(),
   canUpload: z.boolean(),
   storagePartitioned: z.boolean().optional(),
   uploadMode: UploadModeSchema.optional(),
@@ -2247,6 +2256,15 @@ export interface ClientOptions {
    * via `client.connectionInfo`.
    */
   onConnectionChange?: (info: ConnectionInfo) => void
+  /**
+   * Invoked when the app's drives change (#933): one joins or leaves the
+   * grant, the primary moves, a lane moves, a drive runs out (written to or
+   * not). Fires once when the client initialises, connected or not, and then
+   * on every such change, after `onConnectionChange` for the same event, so
+   * a `getDrives()` read here is current. For a dApp that wants drive
+   * changes alone, without sifting them out of every connection change.
+   */
+  onDrivesChange?: () => void
   popupMode?: "popup" | "window" // Default: 'window'
   metadata: AppMetadata
   buttonConfig?: ButtonConfig

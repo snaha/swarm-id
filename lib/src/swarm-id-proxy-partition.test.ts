@@ -961,6 +961,191 @@ describe("SwarmIdProxy partitioned write enablement", () => {
         })),
       }))
 
+    // The dApp is told of every change to its drives (#933), not only to the
+    // primary's write path: a drive gone from the grant, or run out, is
+    // learnt from the re-sent connection info and a `getDrives()` re-read,
+    // not from the write that fails.
+    describe("announces a change to the app's drives", () => {
+      const announced = () => messagesOfType("connectionInfoChanged").length
+      const drivesAnnounced = () =>
+        messagesOfType("connectionInfoChanged").filter(
+          (message) => message.drivesChanged === true,
+        ).length
+      const lastInfo = () => messagesOfType("connectionInfoChanged").at(-1)!
+      const grantOnly = (...batchIds: string[]) =>
+        updateAccount((account) => ({
+          ...account,
+          postageStamps: batchIds.map(stampOf),
+          connectedApps: account.connectedApps.map((app) => ({
+            ...app,
+            drives: batchIds.map((id) => new BatchId(id)),
+          })),
+        }))
+
+      it("re-sends the connection info when a non-primary drive leaves the grant", async () => {
+        await connectWithTwoDrives()
+        await vi.waitFor(() =>
+          expect(coordinatorFor(BATCH_ID_HEX)).toBeDefined(),
+        )
+        const before = announced()
+        const drivesBefore = drivesAnnounced()
+        // The second drive goes, the primary stays: nothing in the info moves.
+        grantOnly(BATCH_ID_HEX)
+        await flushBus()
+        expect(announced()).toBe(before + 1)
+        expect(lastInfo().canUpload).toBe(true)
+        // And the drives' own flag, on the info it accompanies.
+        expect(drivesAnnounced()).toBe(drivesBefore + 1)
+        expect(lastInfo().drivesChanged).toBe(true)
+      })
+
+      it("sends no drivesChanged for a change that is not a drive's", async () => {
+        await connectWithTwoDrives()
+        await vi.waitFor(() =>
+          expect(coordinatorFor(BATCH_ID_HEX)).toBeDefined(),
+        )
+        const before = announced()
+        const drivesBefore = drivesAnnounced()
+        // A permission switch: the info moves, the drives do not.
+        updateAccount((account) => ({
+          ...account,
+          connectedApps: account.connectedApps.map((app) => ({
+            ...app,
+            dataSharing: false,
+          })),
+        }))
+        await flushBus()
+        expect(announced()).toBe(before + 1)
+        expect(drivesAnnounced()).toBe(drivesBefore)
+      })
+
+      it("re-sends it when a drive joins the grant", async () => {
+        await connectWithTwoDrives([stampOf(BATCH_ID_HEX)])
+        await vi.waitFor(() =>
+          expect(coordinatorFor(BATCH_ID_HEX)).toBeDefined(),
+        )
+        const before = announced()
+        grantOnly(BATCH_ID_HEX, SECOND_BATCH_ID_HEX)
+        await flushBus()
+        expect(announced()).toBe(before + 1)
+      })
+
+      it("re-sends it the moment the primary drive expires (#793)", async () => {
+        // One second left, measured now.
+        await connectWithTwoDrives([
+          { ...stampOf(BATCH_ID_HEX), batchTTL: 1, createdAt: Date.now() },
+          stampOf(SECOND_BATCH_ID_HEX),
+        ])
+        await vi.waitFor(() =>
+          expect(coordinatorFor(BATCH_ID_HEX)).toBeDefined(),
+        )
+        expect(lastInfo().uploadMode).toBe("user-stamp")
+        const drivesBefore = drivesAnnounced()
+        await vi.waitFor(
+          () =>
+            expect(lastInfo().uploadUnavailableReason).toBe("stamp-expired"),
+          { timeout: 3000, interval: 50 },
+        )
+        expect(drivesAnnounced()).toBe(drivesBefore + 1)
+      })
+
+      it("re-sends it when a granted drive the app never wrote to expires", async () => {
+        // The second drive has no write path (#862); its expiry is still a
+        // change to the app's drives.
+        await connectWithTwoDrives([
+          stampOf(BATCH_ID_HEX),
+          {
+            ...stampOf(SECOND_BATCH_ID_HEX),
+            batchTTL: 1,
+            createdAt: Date.now(),
+          },
+        ])
+        await vi.waitFor(() =>
+          expect(coordinatorFor(BATCH_ID_HEX)).toBeDefined(),
+        )
+        expect(coordinatorFor(SECOND_BATCH_ID_HEX)).toBeUndefined()
+        const before = announced()
+        const drivesBefore = drivesAnnounced()
+        await vi.waitFor(
+          () => expect(drivesAnnounced()).toBe(drivesBefore + 1),
+          {
+            timeout: 3000,
+            interval: 50,
+          },
+        )
+        expect(announced()).toBe(before + 1)
+        expect(lastInfo().canUpload).toBe(true)
+      })
+
+      it("sends drivesChanged at connect for an app with no drives", async () => {
+        await connectWithTwoDrives([])
+        await vi.waitFor(() => expect(announced()).toBeGreaterThan(0))
+        expect(drivesAnnounced()).toBe(1)
+      })
+
+      // The two lines that keep the timer right over a drive's real lifetime.
+      const withFakeTimers = async (run: () => Promise<void>) => {
+        vi.useFakeTimers({
+          toFake: ["setTimeout", "clearTimeout", "Date"],
+          shouldAdvanceTime: true,
+        })
+        try {
+          await run()
+        } finally {
+          vi.useRealTimers()
+        }
+      }
+
+      it("holds a month-long expiry without ticking: a delay past what setTimeout takes fires at once", async () => {
+        await withFakeTimers(async () => {
+          const THIRTY_DAYS_S = 30 * 24 * 60 * 60
+          await connectWithTwoDrives([
+            {
+              ...stampOf(BATCH_ID_HEX),
+              batchTTL: THIRTY_DAYS_S,
+              createdAt: Date.now(),
+            },
+          ])
+          await vi.waitFor(() =>
+            expect(coordinatorFor(BATCH_ID_HEX)).toBeDefined(),
+          )
+          // Unclamped, the timer fires at once and re-arms on every pass:
+          // thousands of arms in this second instead of none.
+          const arms = vi.spyOn(
+            proxy as unknown as { armExpiryTimer: () => void },
+            "armExpiryTimer",
+          )
+          await vi.advanceTimersByTimeAsync(1000)
+          expect(arms.mock.calls.length).toBeLessThan(100)
+          expect(lastInfo().uploadMode).toBe("user-stamp")
+        })
+      })
+
+      it("flips a second drive after the first: the tick re-arms for the next expiry", async () => {
+        await withFakeTimers(async () => {
+          await connectWithTwoDrives([
+            { ...stampOf(BATCH_ID_HEX), batchTTL: 2, createdAt: Date.now() },
+            {
+              ...stampOf(SECOND_BATCH_ID_HEX),
+              batchTTL: 5,
+              createdAt: Date.now(),
+            },
+          ])
+          await vi.waitFor(() =>
+            expect(coordinatorFor(BATCH_ID_HEX)).toBeDefined(),
+          )
+          const drivesBefore = drivesAnnounced()
+          await vi.advanceTimersByTimeAsync(2500)
+          expect(lastInfo().uploadUnavailableReason).toBe("stamp-expired")
+          expect(drivesAnnounced()).toBe(drivesBefore + 1)
+          // Three seconds on, the second drive runs out: its refusal is part
+          // of the drive state, so it is announced too.
+          await vi.advanceTimersByTimeAsync(3000)
+          expect(drivesAnnounced()).toBe(drivesBefore + 2)
+        })
+      })
+    })
+
     it("builds the primary drive's write path at connect, and no other", async () => {
       nextStamper()
       await connectWithTwoDrives()

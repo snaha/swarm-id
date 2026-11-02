@@ -115,7 +115,11 @@ import {
   resolveStampForApp,
   stampsReachableByApp,
 } from "./utils/postage-stamp-association"
-import { sameStampLifetime } from "./utils/stamp-lifespan"
+import {
+  remainingLifespanSeconds,
+  sameStampLifetime,
+  stampRefusal,
+} from "./utils/stamp-lifespan"
 import {
   accountStateToDeviceView,
   foldAccount,
@@ -244,6 +248,9 @@ function newLeaseRequestId(): string {
 const DEFAULT_ACT_FILENAME = "index.bin"
 const DEFAULT_ACT_CONTENT_TYPE = "application/octet-stream"
 const SEQUENTIAL_INDEX_LOOKUP_TIMEOUT_MS = 2000
+/** The longest delay `setTimeout` holds; a longer lifetime re-arms from its tick. */
+const MAX_TIMER_MS = 2 ** 31 - 1
+const MS_PER_SECOND = 1000
 
 /**
  * localStorage key holding optional partition-coordination timing overrides
@@ -338,8 +345,14 @@ export class SwarmIdProxy {
    * delegates all writes to these coordinators via `withModeAwareWriteLock`.
    */
   private drives = new Map<string, DriveWritePath>()
-  /** The lanes `connectionInfoChanged` last went out with (see `heldLanes`). */
-  private lastHeldLanes = ""
+  /**
+   * The drives `connectionInfoChanged` last went out with (see `driveState`).
+   * Starts unset, not empty, so the first emit carries `drivesChanged` for
+   * an app with no drives too.
+   */
+  private lastDriveState: string | undefined
+  /** Armed for the earliest expiry among the granted drives (#793), see `armExpiryTimer`. */
+  private expiryTimer: ReturnType<typeof setTimeout> | undefined
   /** The primary drive's batch: where a write that names no drive goes. */
   private primaryBatchId: string | undefined
   private storagePartitioned: boolean = false
@@ -797,6 +810,9 @@ export class SwarmIdProxy {
       }
     }
     this.primaryBatchId = primary?.batchID.toHex()
+    // The grant is what expires, so it is re-read here, not as write paths
+    // come and go.
+    this.armExpiryTimer()
     if (primary && !this.drives.has(primary.batchID.toHex())) {
       await this.addDrive(primary).ready
     }
@@ -855,6 +871,34 @@ export class SwarmIdProxy {
   }
 
   /**
+   * One timer for the earliest expiry among the granted drives, built or not,
+   * so the flip to `stamp-expired` reaches the dApp at the stored expiry
+   * rather than on the next unrelated event (#793, #933). Re-armed as drives
+   * come and go (`reconcileDrives`), cleared with them (`teardownDrives`), and
+   * re-armed from its own tick when a lifetime outlasts what a timer can
+   * hold. The stored expiry is exact only until the chain's price moves
+   * (#927), and a hidden tab's timers are throttled, so "at" means within
+   * about a minute.
+   */
+  private armExpiryTimer(): void {
+    clearTimeout(this.expiryTimer)
+    this.expiryTimer = undefined
+    const now = Date.now()
+    const [next] = this.lookupDrivesForApp()
+      .granted.map((stamp) => remainingLifespanSeconds(stamp, now))
+      .filter((left): left is number => left !== undefined && left > 0)
+      .sort((a, b) => a - b)
+    if (next === undefined) return
+    this.expiryTimer = setTimeout(
+      () => {
+        this.emitConnectionInfoIfChanged()
+        this.armExpiryTimer()
+      },
+      Math.min(next * MS_PER_SECOND, MAX_TIMER_MS),
+    )
+  }
+
+  /**
    * Tear every write path down, announcing each partition held so waiting
    * peers wake now instead of sleeping out their poll interval
    * (docs/Account-Bus.md, bus-accelerated leases). The announcement races the
@@ -864,6 +908,8 @@ export class SwarmIdProxy {
   private teardownDrives(): void {
     for (const drive of [...this.drives.values()]) this.teardownDrive(drive)
     this.primaryBatchId = undefined
+    clearTimeout(this.expiryTimer)
+    this.expiryTimer = undefined
   }
 
   /** Tear everything down and build the write paths afresh. */
@@ -1386,6 +1432,7 @@ export class SwarmIdProxy {
 
     // Release the partition leases (best-effort) so peers see this device
     // vacate its partitions promptly.
+    // Also clears the expiry timer: nothing is left to expire.
     this.teardownDrives()
     this.cancelScheduledPublish()
     this.clearRosterRetry()
@@ -3684,17 +3731,29 @@ export class SwarmIdProxy {
     return undefined
   }
 
-  /** Every lane this session holds, as one comparable string. */
-  private heldLanes(): string {
-    return [...this.drives.values()]
-      .map((drive) => `${drive.batchId}:${drive.coordinator?.currentPartition}`)
+  /**
+   * The app's drives as one comparable string (#933): the primary, each
+   * granted drive with its refusal, and each built write path's lane. A
+   * change here re-sends `connectionInfoChanged` even when the info itself is
+   * the same, so the dApp re-reads `getDrives()` rather than learning of a
+   * drive gone from the grant, moved (#882) or run out (#793) from a failing
+   * write. The refusal is read off every granted drive, not only the built
+   * ones: a drive the app never wrote to expires all the same.
+   */
+  private driveState(): string {
+    const { primary, granted } = this.lookupDrivesForApp()
+    const drives = granted
+      .map((stamp) => `${stamp.batchID.toHex()}:${stampRefusal(stamp)}`)
       .sort()
-      .join(",")
+    const lanes = [...this.drives.values()]
+      .map((drive) => `${drive.batchId}@${drive.coordinator?.currentPartition}`)
+      .sort()
+    return [primary?.batchID.toHex(), ...drives, ...lanes].join(",")
   }
 
   /**
    * Recompute ConnectionInfo and send `connectionInfoChanged` to the parent
-   * if it actually differs from the last value we sent, or a lane moved.
+   * if it actually differs from the last value we sent, or its drives changed.
    * Used both on auth transitions and on storage events that affect derived
    * fields.
    */
@@ -3703,20 +3762,24 @@ export class SwarmIdProxy {
       return
     }
     const info = this.buildConnectionInfo()
-    const lanes = this.heldLanes()
-    // A lease moving on a drive other than the primary changes nothing in
-    // the info itself; it is still sent, so the dApp re-reads `getDrives()`
-    // for the drive's `partition` (#882).
+    const drives = this.driveState()
+    // A change to the drives alone, a lease moving on a non-primary drive or
+    // a drive leaving the grant, changes nothing in the info itself; it is
+    // still sent, so the dApp re-reads `getDrives()` (#882, #933).
     if (
       connectionInfoEqual(this.lastConnectionInfo, info) &&
-      lanes === this.lastHeldLanes
+      drives === this.lastDriveState
     ) {
       return
     }
     this.lastConnectionInfo = info
-    this.lastHeldLanes = lanes
+    const drivesChanged = drives !== this.lastDriveState
+    this.lastDriveState = drives
     this.sendToParent({
       type: "connectionInfoChanged",
+      // On the info rather than as a message of its own, so a client older
+      // than the flag drops the key instead of logging an unknown message.
+      drivesChanged: drivesChanged || undefined,
       canUpload: info.canUpload,
       storagePartitioned: info.storagePartitioned,
       uploadMode: info.uploadMode,
