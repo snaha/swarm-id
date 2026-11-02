@@ -102,16 +102,6 @@ import { buildAuthUrl } from "./utils/url"
 import { TimeoutError, withTimeout } from "./utils/promise"
 
 const DEFAULT_TIMEOUT_MS = 30000
-
-/**
- * The answer type for a request type: `${type}Response`, except `checkAuth`,
- * answered by the `authStatusResponse` the proxy also pushes unasked.
- */
-function responseTypeFor(requestType: string): string {
-  return requestType === "checkAuth"
-    ? "authStatusResponse"
-    : `${requestType}Response`
-}
 /** The largest delay `setTimeout` honours; past it, it fires almost at once. */
 const MAX_TIMER_DELAY_MS = 2 ** 31 - 1
 const DEFAULT_INITIALIZATION_TIMEOUT_MS = 30000
@@ -123,6 +113,16 @@ const DEFAULT_INITIALIZATION_TIMEOUT_MS = 30000
  */
 const PERMISSIONS_REQUEST_TIMEOUT_MS =
   PERMISSIONS_POPUP_MAX_MS + DEFAULT_TIMEOUT_MS
+
+/**
+ * The answer type for a request type: `${type}Response`, except `checkAuth`,
+ * answered by the `authStatusResponse` the proxy also pushes unasked.
+ */
+function responseTypeFor(requestType: string): string {
+  return requestType === "checkAuth"
+    ? "authStatusResponse"
+    : `${requestType}Response`
+}
 
 /**
  * {@link withTimeout} for one of `initialize()`'s waits: a missed deadline
