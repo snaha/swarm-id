@@ -102,6 +102,16 @@ import { buildAuthUrl } from "./utils/url"
 import { TimeoutError, withTimeout } from "./utils/promise"
 
 const DEFAULT_TIMEOUT_MS = 30000
+
+/**
+ * The answer type for a request type: `${type}Response`, except `checkAuth`,
+ * answered by the `authStatusResponse` the proxy also pushes unasked.
+ */
+function responseTypeFor(requestType: string): string {
+  return requestType === "checkAuth"
+    ? "authStatusResponse"
+    : `${requestType}Response`
+}
 /** The largest delay `setTimeout` honours; past it, it fires almost at once. */
 const MAX_TIMER_DELAY_MS = 2 ** 31 - 1
 const DEFAULT_INITIALIZATION_TIMEOUT_MS = 30000
@@ -194,6 +204,10 @@ export class SwarmIdClient {
   private pendingRequests: Map<
     string,
     {
+      /** The request's type, for the error when the answer's type is wrong. */
+      requestType: string
+      /** The only answer type that settles the request. */
+      responseType: string
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       resolve: (value: any) => void
       reject: (error: Error) => void
@@ -538,12 +552,7 @@ export class SwarmIdClient {
         }
         // Handle as response if there's a matching request
         if ("requestId" in message) {
-          const pending = this.pendingRequests.get(message.requestId)
-          if (pending) {
-            clearTimeout(pending.timeoutId)
-            this.pendingRequests.delete(message.requestId)
-            pending.resolve(message)
-          }
+          this.resolvePending(message)
         }
         break
 
@@ -591,12 +600,7 @@ export class SwarmIdClient {
       case "disconnectResponse":
         // Handle as response if there's a matching request
         if ("requestId" in message) {
-          const pending = this.pendingRequests.get(message.requestId)
-          if (pending) {
-            clearTimeout(pending.timeoutId)
-            this.pendingRequests.delete(message.requestId)
-            pending.resolve(message)
-          }
+          this.resolvePending(message)
         }
         break
 
@@ -622,12 +626,7 @@ export class SwarmIdClient {
       default:
         // Handle response messages with requestId
         if ("requestId" in message) {
-          const pending = this.pendingRequests.get(message.requestId)
-          if (pending) {
-            clearTimeout(pending.timeoutId)
-            this.pendingRequests.delete(message.requestId)
-            pending.resolve(message)
-          }
+          this.resolvePending(message)
         }
     }
   }
@@ -679,13 +678,42 @@ export class SwarmIdClient {
       }, timeout)
 
       this.pendingRequests.set(message.requestId, {
+        requestType: message.type,
+        responseType: responseTypeFor(message.type),
         resolve,
         reject,
         timeoutId,
       })
 
-      this.sendMessage(message)
+      try {
+        this.sendMessage(message)
+      } catch (error) {
+        clearTimeout(timeoutId)
+        this.pendingRequests.delete(message.requestId)
+        throw error
+      }
     })
+  }
+
+  /**
+   * Settle the request an answer carries the id of, if it is still waiting.
+   * An answer of another type than the request's fails it with `internal`.
+   */
+  private resolvePending(message: { type: string; requestId: string }): void {
+    const pending = this.pendingRequests.get(message.requestId)
+    if (!pending) return
+    clearTimeout(pending.timeoutId)
+    this.pendingRequests.delete(message.requestId)
+    if (message.type !== pending.responseType) {
+      pending.reject(
+        new SwarmIdError(
+          "internal",
+          `Expected ${pending.responseType} for ${pending.requestType}, got ${message.type}`,
+        ),
+      )
+      return
+    }
+    pending.resolve(message)
   }
 
   /**
