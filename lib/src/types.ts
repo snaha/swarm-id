@@ -265,9 +265,20 @@ export interface ActUploadOptions extends UploadOptions {
 // Upload/Download Results
 // ============================================================================
 
+/**
+ * How many chunks a write sent (#932): one per stamp the proxy signed in
+ * stamper mode, one per chunk the gateway accepted in subsidised mode, so a
+ * dApp can show what a save cost against what it estimated. The partition
+ * lease's own lock and intent chunks are not counted. Optional on the wire:
+ * an identity site older than the field sends none.
+ */
+const StampedChunksSchema = z.number().int().min(0).optional()
+
 export const UploadResultSchema = z.object({
   reference: ReferenceSchema,
   tagUid: z.number().optional(),
+  /** Chunks this write sent, see `StampedChunksSchema` (#932) */
+  stampedChunks: StampedChunksSchema,
 })
 
 export const SocUploadResultSchema = UploadResultSchema.extend({
@@ -562,6 +573,8 @@ export interface EpochFeedDownloadReferenceResult {
 }
 
 export interface EpochFeedUploadResult {
+  /** Chunks this write sent (#932); absent from an identity site older than the field */
+  stampedChunks?: number
   /** SOC address for the feed update. */
   socAddress: Reference
   /** Reference stored in the feed update. */
@@ -714,6 +727,8 @@ export interface SequentialFeedReferenceResult {
  * Result from sequential feed upload.
  */
 export interface SequentialFeedUploadResult {
+  /** Chunks this write sent (#932); absent from an identity site older than the field */
+  stampedChunks?: number
   /** SOC address of the feed update. */
   reference: string
   /** Feed index used for the update (stringified uint64). */
@@ -1579,6 +1594,7 @@ export const AuthSuccessMessageSchema = z.object({
 export const UploadDataResponseMessageSchema = z.object({
   type: z.literal("uploadDataResponse"),
   requestId: z.string(),
+  stampedChunks: StampedChunksSchema,
   reference: ReferenceSchema,
   tagUid: z.number().optional(),
 })
@@ -1598,6 +1614,7 @@ export const DeriveAppSecretResponseMessageSchema = z.object({
 export const UploadFileResponseMessageSchema = z.object({
   type: z.literal("uploadFileResponse"),
   requestId: z.string(),
+  stampedChunks: StampedChunksSchema,
   reference: ReferenceSchema,
   tagUid: z.number().optional(),
 })
@@ -1612,6 +1629,7 @@ export const DownloadFileResponseMessageSchema = z.object({
 export const UploadFilesResponseMessageSchema = z.object({
   type: z.literal("uploadFilesResponse"),
   requestId: z.string(),
+  stampedChunks: StampedChunksSchema,
   reference: ReferenceSchema,
   tagUid: z.number().optional(),
 })
@@ -1625,6 +1643,7 @@ export const ListFilesResponseMessageSchema = z.object({
 export const UploadChunkResponseMessageSchema = z.object({
   type: z.literal("uploadChunkResponse"),
   requestId: z.string(),
+  stampedChunks: StampedChunksSchema,
   reference: ReferenceSchema,
 })
 
@@ -1778,6 +1797,7 @@ export const GsocMineResponseMessageSchema = z.object({
 export const GsocSendResponseMessageSchema = z.object({
   type: z.literal("gsocSendResponse"),
   requestId: z.string(),
+  stampedChunks: StampedChunksSchema,
   reference: ReferenceSchema,
   tagUid: z.number().optional(),
 })
@@ -1785,6 +1805,7 @@ export const GsocSendResponseMessageSchema = z.object({
 export const SocUploadResponseMessageSchema = z.object({
   type: z.literal("socUploadResponse"),
   requestId: z.string(),
+  stampedChunks: StampedChunksSchema,
   reference: ReferenceSchema,
   tagUid: z.number().optional(),
   encryptionKey: z.string().optional(),
@@ -1794,6 +1815,7 @@ export const SocUploadResponseMessageSchema = z.object({
 export const SocRawUploadResponseMessageSchema = z.object({
   type: z.literal("socRawUploadResponse"),
   requestId: z.string(),
+  stampedChunks: StampedChunksSchema,
   reference: ReferenceSchema,
   tagUid: z.number().optional(),
   encryptionKey: z.string().optional(),
@@ -1839,6 +1861,7 @@ export const EpochFeedDownloadReferenceResponseMessageSchema = z.object({
 export const EpochFeedUploadReferenceResponseMessageSchema = z.object({
   type: z.literal("epochFeedUploadReferenceResponse"),
   requestId: z.string(),
+  stampedChunks: StampedChunksSchema,
   socAddress: ReferenceSchema,
   encryptionKey: EncryptionKeySchema.optional(),
   // Epoch info for next update (stateless hints)
@@ -1890,6 +1913,7 @@ export const SequentialFeedDownloadReferenceResponseMessageSchema = z.object({
 export const SequentialFeedUploadPayloadResponseMessageSchema = z.object({
   type: z.literal("seqFeedUploadPayloadResponse"),
   requestId: z.string(),
+  stampedChunks: StampedChunksSchema,
   reference: ReferenceSchema,
   feedIndex: z.string(),
   owner: AddressSchema,
@@ -1900,6 +1924,7 @@ export const SequentialFeedUploadPayloadResponseMessageSchema = z.object({
 export const SequentialFeedUploadRawPayloadResponseMessageSchema = z.object({
   type: z.literal("seqFeedUploadRawPayloadResponse"),
   requestId: z.string(),
+  stampedChunks: StampedChunksSchema,
   reference: ReferenceSchema,
   feedIndex: z.string(),
   owner: AddressSchema,
@@ -1910,6 +1935,7 @@ export const SequentialFeedUploadRawPayloadResponseMessageSchema = z.object({
 export const SequentialFeedUploadReferenceResponseMessageSchema = z.object({
   type: z.literal("seqFeedUploadReferenceResponse"),
   requestId: z.string(),
+  stampedChunks: StampedChunksSchema,
   reference: ReferenceSchema,
   feedIndex: z.string(),
   owner: AddressSchema,
@@ -1921,6 +1947,7 @@ export const SequentialFeedUploadReferenceResponseMessageSchema = z.object({
 export const CreateFeedManifestResponseMessageSchema = z.object({
   type: z.literal("createFeedManifestResponse"),
   requestId: z.string(),
+  stampedChunks: StampedChunksSchema,
   reference: ReferenceSchema,
 })
 
@@ -1928,6 +1955,7 @@ export const CreateFeedManifestResponseMessageSchema = z.object({
 export const ActUploadDataResponseMessageSchema = z.object({
   type: z.literal("actUploadDataResponse"),
   requestId: z.string(),
+  stampedChunks: StampedChunksSchema,
   encryptedReference: ReferenceSchema,
   historyReference: ReferenceSchema,
   granteeListReference: ReferenceSchema,
@@ -1945,6 +1973,7 @@ export const ActDownloadDataResponseMessageSchema = z.object({
 export const ActAddGranteesResponseMessageSchema = z.object({
   type: z.literal("actAddGranteesResponse"),
   requestId: z.string(),
+  stampedChunks: StampedChunksSchema,
   historyReference: ReferenceSchema,
   granteeListReference: ReferenceSchema,
   actReference: ReferenceSchema,
@@ -1953,6 +1982,7 @@ export const ActAddGranteesResponseMessageSchema = z.object({
 export const ActRevokeGranteesResponseMessageSchema = z.object({
   type: z.literal("actRevokeGranteesResponse"),
   requestId: z.string(),
+  stampedChunks: StampedChunksSchema,
   encryptedReference: ReferenceSchema,
   historyReference: ReferenceSchema,
   granteeListReference: ReferenceSchema,

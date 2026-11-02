@@ -671,10 +671,11 @@ The data is uploaded using the authenticated user's postage stamp. Progress can 
 
 **Returns:** `Promise<UploadResult>`
 
-| Property    | Type                  | Description                                     |
-| ----------- | --------------------- | ----------------------------------------------- |
-| `reference` | `string`              | The Swarm reference (hash) of the uploaded data |
-| `tagUid`    | `number \| undefined` | The tag UID if a tag was created                |
+| Property        | Type                  | Description                                                                                                                                                                                                                                                                                    |
+| --------------- | --------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `reference`     | `string`              | The Swarm reference (hash) of the uploaded data                                                                                                                                                                                                                                                |
+| `tagUid`        | `number \| undefined` | The tag UID if a tag was created                                                                                                                                                                                                                                                               |
+| `stampedChunks` | `number \| undefined` | Chunks this write sent: one per stamp in `user-stamp` mode, one per chunk the gateway accepted in `subsidised` mode. Compare it with an estimate to show what a save cost. The partition lease's own lock and intent chunks are not counted. Absent from an identity site older than the field |
 
 **Throws:**
 
@@ -1061,21 +1062,23 @@ Creates an SOC writer for uploading and downloading SOCs. If `signer` is omitted
 
 **Returns (`upload`):** `Promise<SocUploadResult>`
 
-| Property        | Type     | Description                           |
-| --------------- | -------- | ------------------------------------- |
-| `reference`     | `string` | SOC chunk reference                   |
-| `owner`         | `string` | SOC owner address                     |
-| `encryptionKey` | `string` | Encryption key for decrypting the SOC |
-| `tagUid`        | `number` | Upload tag UID, if provided           |
+| Property        | Type                  | Description                                   |
+| --------------- | --------------------- | --------------------------------------------- |
+| `reference`     | `string`              | SOC chunk reference                           |
+| `owner`         | `string`              | SOC owner address                             |
+| `encryptionKey` | `string`              | Encryption key for decrypting the SOC         |
+| `tagUid`        | `number`              | Upload tag UID, if provided                   |
+| `stampedChunks` | `number \| undefined` | Chunks this write sent, as for `uploadData()` |
 
 **Returns (`rawUpload`):** `Promise<SocRawUploadResult>`
 
-| Property        | Type     | Description                                 |
-| --------------- | -------- | ------------------------------------------- |
-| `reference`     | `string` | SOC chunk reference                         |
-| `owner`         | `string` | SOC owner address                           |
-| `encryptionKey` | `string` | Optional; present only if returned by proxy |
-| `tagUid`        | `number` | Upload tag UID, if provided                 |
+| Property        | Type                  | Description                                   |
+| --------------- | --------------------- | --------------------------------------------- |
+| `reference`     | `string`              | SOC chunk reference                           |
+| `owner`         | `string`              | SOC owner address                             |
+| `encryptionKey` | `string`              | Optional; present only if returned by proxy   |
+| `tagUid`        | `number`              | Upload tag UID, if provided                   |
+| `stampedChunks` | `number \| undefined` | Chunks this write sent, as for `uploadData()` |
 
 **Throws:**
 
@@ -1217,13 +1220,14 @@ Creates a feed writer for updating and reading a topic. If `signer` is omitted, 
 
 **Returns (`uploadPayload` / `uploadReference` / `uploadRawPayload` / `uploadRawReference`):**
 
-| Property        | Type                               | Description                                    |
-| --------------- | ---------------------------------- | ---------------------------------------------- |
-| `socAddress`    | `string`                           | SOC address for the feed update                |
-| `reference`     | `string`                           | Swarm reference stored in the feed             |
-| `encryptionKey` | `string \| undefined`              | Encryption key (hex) if reference is encrypted |
-| `epoch`         | `{ start: string; level: number }` | The epoch where the update was stored          |
-| `timestamp`     | `string`                           | The timestamp used (stringified bigint)        |
+| Property        | Type                               | Description                                                                                                       |
+| --------------- | ---------------------------------- | ----------------------------------------------------------------------------------------------------------------- |
+| `socAddress`    | `string`                           | SOC address for the feed update                                                                                   |
+| `reference`     | `string`                           | Swarm reference stored in the feed                                                                                |
+| `encryptionKey` | `string \| undefined`              | Encryption key (hex) if reference is encrypted                                                                    |
+| `epoch`         | `{ start: string; level: number }` | The epoch where the update was stored                                                                             |
+| `timestamp`     | `string`                           | The timestamp used (stringified bigint)                                                                           |
+| `stampedChunks` | `number \| undefined`              | Chunks this update sent, the payload's upload included, as for `uploadData()`; absent when either part is unknown |
 
 **Example:**
 
@@ -1509,14 +1513,15 @@ The data is encrypted using ACT (Access Control Tries) and can only be downloade
 
 **Returns:** `Promise<ActUploadResult>`
 
-| Property               | Type                  | Description                                                 |
-| ---------------------- | --------------------- | ----------------------------------------------------------- |
-| `encryptedReference`   | `string`              | The encrypted Swarm reference (pass to actDownloadData)     |
-| `historyReference`     | `string`              | The history reference (pass to add/revoke grantees)         |
-| `granteeListReference` | `string`              | Reference to the grantee list                               |
-| `publisherPubKey`      | `string`              | Publisher's compressed public key (pass to actDownloadData) |
-| `actReference`         | `string`              | The ACT reference                                           |
-| `tagUid`               | `number \| undefined` | The tag UID if a tag was created                            |
+| Property               | Type                  | Description                                                                               |
+| ---------------------- | --------------------- | ----------------------------------------------------------------------------------------- |
+| `encryptedReference`   | `string`              | The encrypted Swarm reference (pass to actDownloadData)                                   |
+| `historyReference`     | `string`              | The history reference (pass to add/revoke grantees)                                       |
+| `granteeListReference` | `string`              | Reference to the grantee list                                                             |
+| `publisherPubKey`      | `string`              | Publisher's compressed public key (pass to actDownloadData)                               |
+| `actReference`         | `string`              | The ACT reference                                                                         |
+| `tagUid`               | `number \| undefined` | The tag UID if a tag was created                                                          |
+| `stampedChunks`        | `number \| undefined` | Chunks this write sent, the ACT, history and grantee list included, as for `uploadData()` |
 
 **Throws:**
 
@@ -1609,11 +1614,12 @@ This method adds new public keys to the ACT's access list. The encrypted referen
 
 **Returns:** `Promise<ActAddGranteesResult>`
 
-| Property               | Type     | Description                                |
-| ---------------------- | -------- | ------------------------------------------ |
-| `historyReference`     | `string` | New history reference (use for future ops) |
-| `granteeListReference` | `string` | Reference to the updated grantee list      |
-| `actReference`         | `string` | The ACT reference                          |
+| Property               | Type                  | Description                                   |
+| ---------------------- | --------------------- | --------------------------------------------- |
+| `historyReference`     | `string`              | New history reference (use for future ops)    |
+| `granteeListReference` | `string`              | Reference to the updated grantee list         |
+| `actReference`         | `string`              | The ACT reference                             |
+| `stampedChunks`        | `number \| undefined` | Chunks this write sent, as for `uploadData()` |
 
 **Throws:**
 
@@ -1668,12 +1674,13 @@ under a new ACT.
 
 **Returns:** `Promise<ActRevokeGranteesResult>`
 
-| Property               | Type     | Description                                                  |
-| ---------------------- | -------- | ------------------------------------------------------------ |
-| `encryptedReference`   | `string` | The content reference, **unchanged** — see the caution above |
-| `historyReference`     | `string` | **New** history reference, without the revoked entries       |
-| `granteeListReference` | `string` | Reference to the updated grantee list                        |
-| `actReference`         | `string` | The ACT reference                                            |
+| Property               | Type                  | Description                                                  |
+| ---------------------- | --------------------- | ------------------------------------------------------------ |
+| `encryptedReference`   | `string`              | The content reference, **unchanged** — see the caution above |
+| `historyReference`     | `string`              | **New** history reference, without the revoked entries       |
+| `granteeListReference` | `string`              | Reference to the updated grantee list                        |
+| `actReference`         | `string`              | The ACT reference                                            |
+| `stampedChunks`        | `number \| undefined` | Chunks this write sent, as for `uploadData()`                |
 
 **Throws:**
 

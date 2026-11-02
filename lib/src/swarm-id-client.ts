@@ -179,6 +179,19 @@ function initDeadline(
  * }
  * ```
  */
+/**
+ * The chunks of a client call made of two writes (#932), or `undefined` when
+ * either is unknown: a total missing a part would read as the whole cost.
+ */
+function sumChunkCounts(
+  first: number | undefined,
+  second: number | undefined,
+): number | undefined {
+  return first === undefined || second === undefined
+    ? undefined
+    : first + second
+}
+
 export class SwarmIdClient {
   private iframe: HTMLIFrameElement | undefined
   private iframeOrigin: string
@@ -1497,6 +1510,7 @@ export class SwarmIdClient {
         requestId: string
         reference: Reference
         tagUid?: number
+        stampedChunks?: number
       }>({
         type: "uploadData",
         requestId,
@@ -1513,6 +1527,7 @@ export class SwarmIdClient {
       return {
         reference: response.reference,
         tagUid: response.tagUid,
+        stampedChunks: response.stampedChunks,
       }
     } finally {
       stopProgress()
@@ -1692,6 +1707,7 @@ export class SwarmIdClient {
         requestId: string
         reference: Reference
         tagUid?: number
+        stampedChunks?: number
       }>({
         type: "uploadFile",
         requestId,
@@ -1709,6 +1725,7 @@ export class SwarmIdClient {
       return {
         reference: response.reference,
         tagUid: response.tagUid,
+        stampedChunks: response.stampedChunks,
       }
     } finally {
       stopProgress()
@@ -1853,6 +1870,7 @@ export class SwarmIdClient {
         requestId: string
         reference: Reference
         tagUid?: number
+        stampedChunks?: number
       }>({
         type: "uploadFiles",
         requestId,
@@ -1863,7 +1881,11 @@ export class SwarmIdClient {
         useWorkers,
         workerCount,
       })
-      return { reference: response.reference, tagUid: response.tagUid }
+      return {
+        reference: response.reference,
+        tagUid: response.tagUid,
+        stampedChunks: response.stampedChunks,
+      }
     } finally {
       stopProgress()
     }
@@ -1970,6 +1992,7 @@ export class SwarmIdClient {
       type: "uploadChunkResponse"
       requestId: string
       reference: Reference
+      stampedChunks?: number
     }>({
       type: "uploadChunk",
       requestId,
@@ -1980,6 +2003,7 @@ export class SwarmIdClient {
 
     return {
       reference: response.reference,
+      stampedChunks: response.stampedChunks,
     }
   }
 
@@ -2225,6 +2249,7 @@ export class SwarmIdClient {
       return {
         reference: response.reference,
         tagUid: response.tagUid,
+        stampedChunks: response.stampedChunks,
         encryptionKey: response.encryptionKey,
         owner: response.owner,
       }
@@ -2254,6 +2279,7 @@ export class SwarmIdClient {
       return {
         reference: response.reference,
         tagUid: response.tagUid,
+        stampedChunks: response.stampedChunks,
         encryptionKey: response.encryptionKey,
         owner: response.owner,
       }
@@ -2575,6 +2601,7 @@ export class SwarmIdClient {
         encryptionKey,
         epoch: response.epoch,
         timestamp: response.timestamp,
+        stampedChunks: response.stampedChunks,
       }
     }
 
@@ -2624,6 +2651,11 @@ export class SwarmIdClient {
         encryptionKey,
         epoch: response.epoch,
         timestamp: response.timestamp,
+        // The payload's upload and the feed update are two writes.
+        stampedChunks: sumChunkCounts(
+          uploadResult.stampedChunks,
+          response.stampedChunks,
+        ),
       }
     }
 
@@ -2710,6 +2742,7 @@ export class SwarmIdClient {
         encryptionKey: undefined,
         epoch: response.epoch,
         timestamp: response.timestamp,
+        stampedChunks: response.stampedChunks,
       }
     }
 
@@ -2751,6 +2784,10 @@ export class SwarmIdClient {
         encryptionKey: undefined,
         epoch: response.epoch,
         timestamp: response.timestamp,
+        stampedChunks: sumChunkCounts(
+          uploadResult.stampedChunks,
+          response.stampedChunks,
+        ),
       }
     }
 
@@ -3109,6 +3146,7 @@ export class SwarmIdClient {
         owner: response.owner,
         encryptionKey: response.encryptionKey,
         tagUid: response.tagUid,
+        stampedChunks: response.stampedChunks,
       }
     }
 
@@ -3153,6 +3191,7 @@ export class SwarmIdClient {
         owner: response.owner,
         encryptionKey: response.encryptionKey,
         tagUid: response.tagUid,
+        stampedChunks: response.stampedChunks,
       }
     }
 
@@ -3194,6 +3233,7 @@ export class SwarmIdClient {
         owner: response.owner,
         encryptionKey: response.encryptionKey,
         tagUid: response.tagUid,
+        stampedChunks: response.stampedChunks,
       }
     }
 
@@ -3359,6 +3399,7 @@ export class SwarmIdClient {
       requestId: string
       reference: Reference
       tagUid?: number
+      stampedChunks?: number
     }>({
       type: "gsocSend",
       requestId,
@@ -3372,6 +3413,7 @@ export class SwarmIdClient {
     return {
       reference: response.reference,
       tagUid: response.tagUid,
+      stampedChunks: response.stampedChunks,
     }
   }
 
@@ -3434,6 +3476,7 @@ export class SwarmIdClient {
     publisherPubKey: string
     actReference: string
     tagUid?: number
+    stampedChunks?: number
   }> {
     this.ensureReady()
     const requestId = this.generateRequestId()
@@ -3450,6 +3493,7 @@ export class SwarmIdClient {
         publisherPubKey: string
         actReference: string
         tagUid?: number
+        stampedChunks?: number
       }>({
         type: "actUploadData",
         requestId,
@@ -3467,6 +3511,7 @@ export class SwarmIdClient {
         publisherPubKey: response.publisherPubKey,
         actReference: response.actReference,
         tagUid: response.tagUid,
+        stampedChunks: response.stampedChunks,
       }
     } finally {
       stopProgress()
@@ -3566,6 +3611,8 @@ export class SwarmIdClient {
     historyReference: string
     granteeListReference: string
     actReference: string
+    /** Chunks this write sent (#932) */
+    stampedChunks?: number
   }> {
     this.ensureReady()
     const requestId = this.generateRequestId()
@@ -3576,6 +3623,7 @@ export class SwarmIdClient {
       historyReference: string
       granteeListReference: string
       actReference: string
+      stampedChunks?: number
     }>({
       type: "actAddGrantees",
       requestId,
@@ -3589,6 +3637,7 @@ export class SwarmIdClient {
       historyReference: response.historyReference,
       granteeListReference: response.granteeListReference,
       actReference: response.actReference,
+      stampedChunks: response.stampedChunks,
     }
   }
 
@@ -3638,6 +3687,8 @@ export class SwarmIdClient {
     historyReference: string
     granteeListReference: string
     actReference: string
+    /** Chunks this write sent (#932) */
+    stampedChunks?: number
   }> {
     this.ensureReady()
     const requestId = this.generateRequestId()
@@ -3649,6 +3700,7 @@ export class SwarmIdClient {
       historyReference: string
       granteeListReference: string
       actReference: string
+      stampedChunks?: number
     }>({
       type: "actRevokeGrantees",
       requestId,
@@ -3664,6 +3716,7 @@ export class SwarmIdClient {
       historyReference: response.historyReference,
       granteeListReference: response.granteeListReference,
       actReference: response.actReference,
+      stampedChunks: response.stampedChunks,
     }
   }
 
