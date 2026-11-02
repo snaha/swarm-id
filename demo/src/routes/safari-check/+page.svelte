@@ -74,7 +74,7 @@
       ? (clientStore.uploadUnavailableReason ?? '(none)')
       : '(not connected)',
     drive: clientStore.stamp
-      ? `${clientStore.stamp.batchID.slice(0, 12)}… usable=${clientStore.stamp.usable} utilization=${clientStore.stamp.utilization}`
+      ? `${clientStore.stamp.driveId.slice(0, 12)}… usable=${clientStore.stamp.usable} utilization=${clientStore.stamp.utilization}`
       : '(no drive on this account)',
     reference: reference ?? '(nothing uploaded)',
   })

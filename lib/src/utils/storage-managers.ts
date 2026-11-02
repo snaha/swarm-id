@@ -175,6 +175,8 @@ export function serializeConnectedApp(
     dataSharingAt: app.dataSharingAt,
     writeAccess: app.writeAccess,
     writeAccessAt: app.writeAccessAt,
+    revealSecrets: app.revealSecrets,
+    revealSecretsAt: app.revealSecretsAt,
     sessionDuration: app.sessionDuration,
     sessionDurationAt: app.sessionDurationAt,
     drivesAt: app.drivesAt,

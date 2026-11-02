@@ -5,13 +5,13 @@ import type {
   AccountSettings,
   AppPermissions,
   ConnectedApp,
-  PermissionName,
+  SharingSwitchName,
 } from "./types"
 
-/** The account-wide default of a switch, what an unpinned app gets: on. */
+/** The account-wide default of a sharing switch, what an unpinned app gets: on. */
 export function sharingDefault(
   settings: AccountSettings | undefined,
-  name: PermissionName,
+  name: SharingSwitchName,
 ): boolean {
   return settings?.[name] ?? true
 }
@@ -20,11 +20,14 @@ export function sharingDefault(
  * What an app may do with the account-wide sharing key (#885): its own
  * pinned values, else the account defaults, else on. Write access never
  * outlives data sharing — the switch is only shown once data sharing is on.
- * One function for the proxy (which enforces it) and the identity UI (which
- * shows it), so the two cannot disagree.
+ * `revealSecrets` (#889) has no account default: off unless granted to the
+ * app. One function for the proxy (which enforces it) and the identity UI
+ * (which shows it), so the two cannot disagree.
  */
 export function effectivePermissions(
-  app: Pick<ConnectedApp, "dataSharing" | "writeAccess"> | undefined,
+  app:
+    | Pick<ConnectedApp, "dataSharing" | "writeAccess" | "revealSecrets">
+    | undefined,
   settings: AccountSettings | undefined,
 ): AppPermissions {
   const dataSharing =
@@ -34,6 +37,7 @@ export function effectivePermissions(
     writeAccess:
       dataSharing &&
       (app?.writeAccess ?? sharingDefault(settings, "writeAccess")),
+    revealSecrets: app?.revealSecrets ?? false,
   }
 }
 
@@ -44,11 +48,12 @@ export function effectivePermissions(
  */
 export type FieldClocks = Readonly<Record<string, string>>
 
-/** What an app holds: the drives (#862), the two switches and its session length (#885). */
+/** What an app holds: the drives (#862), the three switches and its session length (#885, #889). */
 export const GRANT_CLOCKS: FieldClocks = {
   drives: "drivesAt",
   dataSharing: "dataSharingAt",
   writeAccess: "writeAccessAt",
+  revealSecrets: "revealSecretsAt",
   sessionDuration: "sessionDurationAt",
 } satisfies Partial<Record<keyof ConnectedApp, keyof ConnectedApp>>
 

@@ -121,15 +121,13 @@ interface AppKeyInfo {
   publicKey: string
 }
 
+/** The primary drive as the sidebar shows it: what `getDrives()` reports, no batch id (#746). */
 interface StampInfo {
-  batchID: string
+  driveId: string
+  label: string
   utilization: string
   usable: boolean
   depth: number
-  bucketDepth: number
-  amount: string
-  blockNumber: number
-  immutableFlag: boolean
   ttl: string
 }
 
@@ -153,7 +151,7 @@ let stamp = $state<StampInfo | undefined>(undefined)
 let drives = $state<Drive[]>([])
 // The sharing switches (#885), off the snapshot: the user flips them in Swarm ID.
 let permissions = $state<AppPermissions | undefined>(undefined)
-let targetBatchID = $state<string | undefined>(undefined)
+let targetDriveId = $state<string | undefined>(undefined)
 let partition = $state<number | undefined>(undefined)
 let deferred = $state(false)
 let initializing = $state(false)
@@ -217,28 +215,23 @@ async function updatePostageStampInfo(generation: number) {
   if (!client) return
 
   try {
-    const batch = await client.getPostageBatch()
-    if (generation !== connectionGeneration) return
     drives = await client.getDrives()
     if (generation !== connectionGeneration) return
-    if (!drives.some((drive) => drive.batchID === targetBatchID)) targetBatchID = undefined
+    if (!drives.some((drive) => drive.driveId === targetDriveId)) targetDriveId = undefined
+    const batch = drives.find((drive) => drive.primary)
     if (batch) {
-      const batchIdStr = String(batch.batchID)
       const previous = stamp
       stamp = {
-        batchID: batchIdStr,
+        driveId: batch.driveId,
+        label: batch.label,
         utilization: batch.utilization.toFixed(2),
         usable: batch.usable,
         depth: batch.depth,
-        bucketDepth: batch.bucketDepth,
-        amount: batch.amount,
-        blockNumber: batch.blockNumber,
-        immutableFlag: batch.immutableFlag,
         ttl: formatTTL(batch.batchTTL),
       }
       // Poll re-runs only log when something the user can see changed.
-      if (previous === undefined || previous.batchID !== batchIdStr) {
-        logStore.log(`Postage stamp loaded: ${batchIdStr.slice(0, 16)}...`)
+      if (previous === undefined || previous.driveId !== batch.driveId) {
+        logStore.log(`Primary drive loaded: ${batch.driveId.slice(0, 16)}...`)
       } else if (previous.usable !== batch.usable) {
         logStore.log(`Postage stamp is now ${batch.usable ? 'usable' : 'unusable'}`)
       }
@@ -340,7 +333,7 @@ async function onConnectionChange(info: ConnectionInfo) {
   } else {
     stamp = undefined
     drives = []
-    targetBatchID = undefined
+    targetDriveId = undefined
   }
 }
 
@@ -556,7 +549,7 @@ export const clientStore = {
       const held = await client.requestPermissions(request)
       drives = await client.getDrives()
       logStore.log(
-        `Permissions after the request: data sharing ${held.dataSharing ? 'on' : 'off'}, write access ${held.writeAccess ? 'on' : 'off'}, drives ${drives.map((drive) => `${drive.batchID.slice(0, 8)} (${drive.kind})`).join(', ') || 'none'}`,
+        `Permissions after the request: data sharing ${held.dataSharing ? 'on' : 'off'}, write access ${held.writeAccess ? 'on' : 'off'}, drives ${drives.map((drive) => `${drive.driveId.slice(0, 8)} (${drive.kind})`).join(', ') || 'none'}`,
       )
       return held
     } catch (error) {
@@ -570,15 +563,34 @@ export const clientStore = {
   get drives() {
     return drives
   },
-  get targetBatchID() {
-    return targetBatchID
+  get targetDriveId() {
+    return targetDriveId
   },
-  set targetBatchID(value: string | undefined) {
-    targetBatchID = value
+  set targetDriveId(value: string | undefined) {
+    targetDriveId = value
   },
   /** Spread into any write's options: the drive the user picked, or none. */
-  get uploadTarget(): { batchID?: string } {
-    return { batchID: targetBatchID }
+  get uploadTarget(): { driveId?: string } {
+    return { driveId: targetDriveId }
+  },
+  /**
+   * The postage batch behind the primary drive (#746): needs the `revealSecrets`
+   * permission, so a refusal here is the permission at work, not a bug.
+   */
+  async revealPrimaryBatch(): Promise<void> {
+    const primary = drives.find((drive) => drive.primary)
+    if (!primary) return
+    try {
+      const batch = await primary.revealPostageBatch()
+      logStore.log(
+        `Postage batch behind the primary drive: ${batch.batchID} (depth ${batch.depth}, amount ${batch.amount}, block ${batch.blockNumber})`,
+      )
+    } catch (error) {
+      logStore.log(
+        `Reveal refused: ${error instanceof Error ? error.message : String(error)}`,
+        'warn',
+      )
+    }
   },
   get partition() {
     return partition
@@ -679,7 +691,7 @@ export const clientStore = {
     appKey = undefined
     stamp = undefined
     drives = []
-    targetBatchID = undefined
+    targetDriveId = undefined
     partition = undefined
   },
 }

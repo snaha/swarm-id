@@ -16,6 +16,7 @@ describe("effectivePermissions", () => {
     expect(effectivePermissions(undefined, undefined)).toEqual({
       dataSharing: true,
       writeAccess: true,
+      revealSecrets: false,
     })
     expect(sharingDefault(undefined, "writeAccess")).toBe(true)
   })
@@ -24,29 +25,42 @@ describe("effectivePermissions", () => {
     expect(effectivePermissions({}, { dataSharing: false })).toEqual({
       dataSharing: false,
       writeAccess: false,
+      revealSecrets: false,
     })
     expect(effectivePermissions({}, { writeAccess: false })).toEqual({
       dataSharing: true,
       writeAccess: false,
+      revealSecrets: false,
     })
   })
 
   it("lets a pinned app value override the account default either way", () => {
     expect(
       effectivePermissions({ dataSharing: true }, { dataSharing: false }),
-    ).toEqual({ dataSharing: true, writeAccess: true })
+    ).toEqual({ dataSharing: true, writeAccess: true, revealSecrets: false })
     expect(
       effectivePermissions(
         { writeAccess: false },
         { dataSharing: true, writeAccess: true },
       ),
-    ).toEqual({ dataSharing: true, writeAccess: false })
+    ).toEqual({ dataSharing: true, writeAccess: false, revealSecrets: false })
+  })
+
+  // #889: no account-wide default to follow — the app's own pin or nothing.
+  it("grants key export only when pinned on the app", () => {
+    expect(effectivePermissions({ revealSecrets: true }, {})).toMatchObject({
+      revealSecrets: true,
+    })
+    expect(effectivePermissions({ revealSecrets: false }, {})).toMatchObject({
+      revealSecrets: false,
+    })
+    expect(GRANT_CLOCKS.revealSecrets).toBe("revealSecretsAt")
   })
 
   it("never grants write access without data sharing", () => {
     expect(
       effectivePermissions({ dataSharing: false, writeAccess: true }, {}),
-    ).toEqual({ dataSharing: false, writeAccess: false })
+    ).toEqual({ dataSharing: false, writeAccess: false, revealSecrets: false })
   })
 })
 

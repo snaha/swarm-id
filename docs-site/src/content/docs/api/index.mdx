@@ -49,22 +49,22 @@ Creates a new SwarmIdClient instance.
 
 **Parameters:**
 
-| Parameter                       | Type                             | Required | Description                                                                                                                                                                                                                                                                                                                                                                                                                     |
-| ------------------------------- | -------------------------------- | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `options.iframeOrigin`          | `string`                         | Yes      | The origin URL where the Swarm ID proxy iframe is hosted                                                                                                                                                                                                                                                                                                                                                                        |
-| `options.iframePath`            | `string`                         | No       | The path to the proxy iframe (defaults to `"/proxy"`)                                                                                                                                                                                                                                                                                                                                                                           |
-| `options.timeout`               | `number`                         | No       | Request timeout in milliseconds (defaults to `30000`). Bounds each call's whole round trip through the iframe; a call's own `requestOptions.timeout` replaces it for that call                                                                                                                                                                                                                                                  |
-| `options.initializationTimeout` | `number`                         | No       | Initialization timeout in milliseconds (defaults to `30000`)                                                                                                                                                                                                                                                                                                                                                                    |
-| `options.onConnectionChange`    | `(info: ConnectionInfo) => void` | No       | Callback invoked when the app-visible connection state changes (identity, app key, postage stamp, account, auth). The current snapshot is also available synchronously via `client.connectionInfo`.                                                                                                                                                                                                                             |
-| `options.popupMode`             | `"popup" \| "window"`            | No       | How to display the authentication popup (defaults to `"window"`)                                                                                                                                                                                                                                                                                                                                                                |
-| `options.metadata`              | `AppMetadata`                    | Yes      | Application metadata shown to users during authentication                                                                                                                                                                                                                                                                                                                                                                       |
-| `options.metadata.name`         | `string`                         | Yes      | Application name (1-100 characters)                                                                                                                                                                                                                                                                                                                                                                                             |
-| `options.metadata.description`  | `string`                         | No       | Application description (max 500 characters)                                                                                                                                                                                                                                                                                                                                                                                    |
-| `options.metadata.icon`         | `string`                         | No       | Application icon as a data URL (SVG or PNG, max 4KB)                                                                                                                                                                                                                                                                                                                                                                            |
-| `options.buttonConfig`          | `ButtonConfig`                   | No       | Button configuration for the authentication UI                                                                                                                                                                                                                                                                                                                                                                                  |
-| `options.containerId`           | `string`                         | No       | ID of container element to place iframe in (optional)                                                                                                                                                                                                                                                                                                                                                                           |
-| `options.subsidisedGatewayUrl`  | `string`                         | No       | URL of a subsidised gateway for uploads without user's postage stamp. See [Subsidised Gateway](../subsidised-gateway/) for details.                                                                                                                                                                                                                                                                                             |
-| `options.permissions`           | `Permissions`                    | No       | What the app asks the user for on the connect screen. `permissions.drives` is `'all'`, or a row per drive (`{ kind, description?, optional? }`), regular ones first (up to 8 rows, `description` max 120 characters); `[]` opts out of drives. `permissions.dataSharing` / `permissions.writeAccess` (each `true`) ask for the sharing switches too; see [`getPermissions()`](#getpermissions). See [`getDrives()`](#getdrives) |
+| Parameter                       | Type                             | Required | Description                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
+| ------------------------------- | -------------------------------- | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `options.iframeOrigin`          | `string`                         | Yes      | The origin URL where the Swarm ID proxy iframe is hosted                                                                                                                                                                                                                                                                                                                                                                                                                              |
+| `options.iframePath`            | `string`                         | No       | The path to the proxy iframe (defaults to `"/proxy"`)                                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| `options.timeout`               | `number`                         | No       | Request timeout in milliseconds (defaults to `30000`). Bounds each call's whole round trip through the iframe; a call's own `requestOptions.timeout` replaces it for that call                                                                                                                                                                                                                                                                                                        |
+| `options.initializationTimeout` | `number`                         | No       | Initialization timeout in milliseconds (defaults to `30000`)                                                                                                                                                                                                                                                                                                                                                                                                                          |
+| `options.onConnectionChange`    | `(info: ConnectionInfo) => void` | No       | Callback invoked when the app-visible connection state changes (identity, app key, postage stamp, account, auth). The current snapshot is also available synchronously via `client.connectionInfo`.                                                                                                                                                                                                                                                                                   |
+| `options.popupMode`             | `"popup" \| "window"`            | No       | How to display the authentication popup (defaults to `"window"`)                                                                                                                                                                                                                                                                                                                                                                                                                      |
+| `options.metadata`              | `AppMetadata`                    | Yes      | Application metadata shown to users during authentication                                                                                                                                                                                                                                                                                                                                                                                                                             |
+| `options.metadata.name`         | `string`                         | Yes      | Application name (1-100 characters)                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
+| `options.metadata.description`  | `string`                         | No       | Application description (max 500 characters)                                                                                                                                                                                                                                                                                                                                                                                                                                          |
+| `options.metadata.icon`         | `string`                         | No       | Application icon as a data URL (SVG or PNG, max 4KB)                                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| `options.buttonConfig`          | `ButtonConfig`                   | No       | Button configuration for the authentication UI                                                                                                                                                                                                                                                                                                                                                                                                                                        |
+| `options.containerId`           | `string`                         | No       | ID of container element to place iframe in (optional)                                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| `options.subsidisedGatewayUrl`  | `string`                         | No       | URL of a subsidised gateway for uploads without user's postage stamp. See [Subsidised Gateway](../subsidised-gateway/) for details.                                                                                                                                                                                                                                                                                                                                                   |
+| `options.permissions`           | `Permissions`                    | No       | What the app asks the user for on the connect screen. `permissions.drives` is `'all'`, or a row per drive (`{ kind, description?, optional? }`), regular ones first (up to 8 rows, `description` max 120 characters); `[]` opts out of drives. `permissions.dataSharing` / `permissions.writeAccess` (each `true`) ask for the sharing switches too, and `permissions.revealSecrets: true` for key export; see [`getPermissions()`](#getpermissions). See [`getDrives()`](#getdrives) |
 
 **Throws:**
 
@@ -377,7 +377,12 @@ console.log('User logged out')
 
 ### `deriveAppSecret(label)`
 
-Derive 32 bytes of app material from this app's secret and a label of the app's choosing. The same account, app and label give the same bytes on every device, and nobody without the account can guess them. Use it to seed a feed topic or other app material without exposing the app's public key.
+A stable, app-scoped secret as a **handle**: `HMAC(appSecret, label)`, derived inside the proxy iframe whenever the handle is used, so the bytes never reach the page. The same account, app and label name the same secret on every device, nobody without the account can guess it, and the handle is only the label, so it survives a reload. Pass it where a feed or SOC writer takes a `topic` or a `signer`:
+
+- as a **topic**, the proxy uses `keccak256` of the derived bytes: a feed topic nobody else can compute
+- as a **signer**, the proxy signs with the derived bytes as a private key: a feed owner of the app's own, apart from the app key
+
+Anywhere a `topic` or `signer` is accepted, the plain `string` / `Uint8Array` forms keep working: a key the app brought itself is the app's to hold.
 
 **Parameters:**
 
@@ -385,13 +390,17 @@ Derive 32 bytes of app material from this app's secret and a label of the app's 
 | --------- | -------- | ------------------------------------------------------- |
 | `label`   | `string` | Domain separator chosen by the app, e.g. `"state-feed"` |
 
-**Returns:** `Promise<Uint8Array>` — the derived 32 bytes
+**Returns:** `AppSecret` — the handle. `toString()`, `toJSON()` and the console print `AppSecret(<label>)`, never bytes
 
-**Throws:** `Error` if the client is not initialized or not authenticated
+**`AppSecret.reveal()`:** `Promise<Uint8Array>` — the 32 derived bytes, for an app that must hold them (to persist, or to use outside Swarm ID). Needs the **key export** permission (`revealSecrets`); without it the call rejects with `permission-denied` and `permission: 'revealSecrets'`. Ask with [`requestPermissions({ revealSecrets: true })`](#requestpermissionspermissions).
 
 ```typescript
-const seed = await client.deriveAppSecret('state-feed')
-const topic = keccak256(seed) // a stable feed topic nobody else can compute
+const topic = client.deriveAppSecret('state-feed')
+const writer = client.makeEpochFeedWriter({ topic }) // an unguessable, stable feed
+const inbox = client.makeSOCWriter(client.deriveAppSecret('inbox-signer')) // its own owner
+
+// Only with revealSecrets granted:
+const bytes = await topic.reveal()
 ```
 
 ### `connectionInfo` (property)
@@ -442,64 +451,39 @@ if (info.canUpload) {
 
 ---
 
-### `getPostageBatch()`
-
-Gets the app's **primary drive**: the one a write goes to when it names none. The app's other drives, if it was granted any, are listed by [`getDrives()`](#getdrives).
-
-Returns information about the postage stamp behind it, including batch ID, utilization, depth, and TTL.
-
-**Returns:** `Promise<PostageBatch | undefined>` - The postage batch info, or `undefined` if none is configured
-
-| Property        | Type                  | Description                                                                                                                                                                                                      |
-| --------------- | --------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `batchID`       | `string`              | The batch ID (64 hex characters)                                                                                                                                                                                 |
-| `utilization`   | `number`              | Bee's fill count of the fullest bucket, **not** a percentage. Usage is `utilization / 2^(depth - bucketDepth)`; a batch stops accepting uploads when one bucket fills, before the nominal `2^depth × 4096` bytes |
-| `usable`        | `boolean`             | Whether the batch is usable                                                                                                                                                                                      |
-| `label`         | `string`              | Human-readable label                                                                                                                                                                                             |
-| `depth`         | `number`              | Batch depth                                                                                                                                                                                                      |
-| `amount`        | `string`              | Batch amount                                                                                                                                                                                                     |
-| `bucketDepth`   | `number`              | Bucket depth                                                                                                                                                                                                     |
-| `blockNumber`   | `number`              | Block number when created                                                                                                                                                                                        |
-| `immutableFlag` | `boolean`             | Whether the batch is immutable                                                                                                                                                                                   |
-| `exists`        | `boolean`             | Whether the batch exists                                                                                                                                                                                         |
-| `batchTTL`      | `number \| undefined` | Time-to-live in seconds                                                                                                                                                                                          |
-
-**Throws:**
-
-- `Error` if the client is not initialized
-- `Error` if the request times out
-
-**Example:**
-
-```typescript
-const batch = await client.getPostageBatch()
-if (batch) {
-  console.log('Batch ID:', batch.batchID)
-  console.log('Utilization:', batch.utilization)
-  console.log('Depth:', batch.depth)
-  console.log('TTL:', batch.batchTTL)
-} else {
-  console.log('No postage batch configured')
-}
-```
-
----
-
 ### `getDrives()`
 
-Lists every drive the app was granted in Swarm ID. Each entry carries the fields of [`getPostageBatch()`](#getpostagebatch) plus:
+Lists every drive the app was granted in Swarm ID. A drive is reported under its **drive id**, the app's own name for it: derived per app from the batch id, so it is the same on every device and after a reload, differs between apps (two apps cannot tell they share a drive), and does not identify the batch on chain. The batch's on-chain fields are left out for the same reason; see `revealPostageBatch()` below.
 
-| Property    | Type                     | Description                                                                                                                                                                                                                                                                                                                                                                               |
-| ----------- | ------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `kind`      | `'regular' \| 'scratch'` | A scratch drive overwrites its oldest data once full; its contents carry no warranty                                                                                                                                                                                                                                                                                                      |
-| `primary`   | `boolean`                | The drive a write goes to when it names none: the account default for an `'all'` grant, otherwise the first granted regular drive. A scratch drive is never primary                                                                                                                                                                                                                       |
-| `partition` | `number \| undefined`    | The write partition this session holds on the drive, as `connectionInfo.partition` reports it for the primary: `undefined` while it holds none: until the drive's write path is built (at connect for the primary, on the first write that names it for any other), and after an idle release or a disconnect. Every lease change fires `onConnectionChange`, so re-read the drives there |
+| Property      | Type                     | Description                                                                                                                                                                                                                                                                                                                                                                               |
+| ------------- | ------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `driveId`     | `string`                 | The app's id for the drive (64 hex characters): what a write names                                                                                                                                                                                                                                                                                                                        |
+| `kind`        | `'regular' \| 'scratch'` | A scratch drive overwrites its oldest data once full; its contents carry no warranty                                                                                                                                                                                                                                                                                                      |
+| `primary`     | `boolean`                | The drive a write goes to when it names none: the account default for an `'all'` grant, otherwise the first granted regular drive. A scratch drive is never primary                                                                                                                                                                                                                       |
+| `partition`   | `number \| undefined`    | The write partition this session holds on the drive, as `connectionInfo.partition` reports it for the primary: `undefined` while it holds none: until the drive's write path is built (at connect for the primary, on the first write that names it for any other), and after an idle release or a disconnect. Every lease change fires `onConnectionChange`, so re-read the drives there |
+| `label`       | `string`                 | The user-given drive name                                                                                                                                                                                                                                                                                                                                                                 |
+| `depth`       | `number`                 | Batch depth                                                                                                                                                                                                                                                                                                                                                                               |
+| `utilization` | `number`                 | Bee's fill count of the fullest bucket, **not** a percentage. Usage is `utilization / 2^(depth - 16)`; a batch stops accepting uploads when one bucket fills, before the nominal `2^depth × 4096` bytes                                                                                                                                                                                   |
+| `usable`      | `boolean`                | Whether the batch accepts uploads                                                                                                                                                                                                                                                                                                                                                         |
+| `batchTTL`    | `number \| undefined`    | Time-to-live in seconds                                                                                                                                                                                                                                                                                                                                                                   |
 
-**Returns:** `Promise<Drive[]>` — empty when the app was granted no drive
+**Returns:** `Promise<Drive[]>` — empty when the app was granted no drive. The primary drive is the one with `primary: true`.
 
-Every write takes an optional `batchID` (in its upload options, or as its own `options` where there are none) naming one of these drives. A feed update's payload and its SOC always go to the same drive. Naming a drive outside the grant rejects with `drive-not-granted`.
+Every write takes an optional `driveId` (in its upload options, or as its own `options` where there are none) naming one of these drives. A feed update's payload and its SOC always go to the same drive. Naming a drive outside the grant rejects with `drive-not-granted`.
 
-**Asking for the sharing switches.** `options.permissions.dataSharing: true` / `writeAccess: true` put the switch on the connect screen when it is not already on for this app — off, for the user to turn on — and a switch turned on is pinned for the app. A switch left off is simply not granted; the app sees what it got from [`getPermissions()`](#getpermissions) and can ask again later with [`requestPermissions()`](#requestpermissionspermissions).
+**`drive.revealPostageBatch()`:** `Promise<PostageBatch>` — the postage batch behind the drive: `batchID`, `amount`, `blockNumber`, `bucketDepth`, `immutableFlag`, `exists`, and the fields above. For an app that must show the batch or top it up itself. Needs the **key export** permission (`revealSecrets`), as [`AppSecret.reveal()`](#deriveappsecretlabel) does; without it the call rejects with `permission-denied`.
+
+```typescript
+const drives = await client.getDrives()
+const primary = drives.find((drive) => drive.primary)
+console.log('Primary drive:', primary?.label, primary?.driveId)
+
+// Only with revealSecrets granted:
+const batch = await primary.revealPostageBatch()
+console.log('Batch ID:', batch.batchID)
+```
+
+**Asking for the switches.** `options.permissions.dataSharing: true` / `writeAccess: true` / `revealSecrets: true` put the switch on the connect screen when it is not already on for this app — off, for the user to turn on — and a switch turned on is pinned for the app. A switch left off is simply not granted; the app sees what it got from [`getPermissions()`](#getpermissions) and can ask again later with [`requestPermissions()`](#requestpermissionspermissions).
 
 **Asking for drives.** Without `options.permissions.drives` the app gets the account's default drive. With it, the connect screen asks the user for what the app needs: one row per entry, each a select over the user's drives of that kind with a way to create one there, or a single "full drive access" checkbox for `'all'`, which also covers drives the user adds later. A row's `description` replaces the helper text under it ("Used to store permanent data" / "Used to store streaming data"); an `optional` row may be left empty, and the app sees what it got from `getDrives()`. Rows are granted in order, regular drives first, and the first regular one is the primary.
 
@@ -519,7 +503,7 @@ const client = new SwarmIdClient({
 
 ```typescript
 const scratch = (await client.getDrives()).find((drive) => drive.kind === 'scratch')
-await client.uploadData(frame, { batchID: scratch?.batchID })
+await client.uploadData(frame, { driveId: scratch?.driveId })
 ```
 
 ### `requestDrives(drives)`
@@ -540,7 +524,7 @@ button.onclick = async () => {
   const drives = await client.requestDrives([{ kind: 'scratch' }])
   const scratch = drives.find((drive) => drive.kind === 'scratch')
   if (!scratch) return showStreamingUnavailable()
-  startStreaming(scratch.batchID)
+  startStreaming(scratch.driveId)
 }
 ```
 
@@ -552,10 +536,11 @@ What this app may do with the account-wide sharing key (see [Which key do I gran
 
 - **`dataSharing`** — read what was shared with the sharing key, and see it as `identity.sharingPublicKey`
 - **`writeAccess`** — publish and manage shares as the identity (`publisher: "identity"`, and adding or revoking grantees of such a share); never on without `dataSharing`
+- **`revealSecrets`** — **key export**: read a derived secret's bytes ([`AppSecret.reveal()`](#deriveappsecretlabel)) and the postage batch behind a drive ([`drive.revealPostageBatch()`](#getdrives)). Off until the user grants it to this app; there is no account-wide default
 
-Both are on unless the user switched them off in Swarm ID — for every app (**Apps**), or for this one (its page under **Apps**). A call that needs one that is off rejects with `permission-denied`, with `permission` naming the switch; check here first to ask before that happens. The same two booleans ride `connectionInfo.permissions`, so `onConnectionChange` sees a switch flipped while the app runs.
+The sharing switches are on unless the user switched them off in Swarm ID — for every app (**Apps**), or for this one (its page under **Apps**). A call that needs a switch that is off rejects with `permission-denied`, with `permission` naming the switch; check here first to ask before that happens. The same booleans ride `connectionInfo.permissions`, so `onConnectionChange` sees a switch flipped while the app runs.
 
-**Returns:** `Promise<{ dataSharing: boolean, writeAccess: boolean }>`
+**Returns:** `Promise<{ dataSharing: boolean, writeAccess: boolean, revealSecrets: boolean }>`
 
 ```typescript
 const { dataSharing } = await client.getPermissions()
@@ -564,9 +549,9 @@ if (!dataSharing) showSharedInboxLocked()
 
 ### `requestPermissions(permissions)`
 
-The general form of [`requestDrives()`](#requestdrivesdrives): asks the user for drives and the sharing switches in one popup. `permissions` is `{ drives?, dataSharing?: true, writeAccess?: true }`. The **Permissions for &lt;app&gt;** page shows only what is asked — the drive rows empty, each switch at its current value — and the user turns on what they allow, or nothing. Asking for `writeAccess` shows `dataSharing` too, which it implies.
+The general form of [`requestDrives()`](#requestdrivesdrives): asks the user for drives and the sharing switches in one popup. `permissions` is `{ drives?, dataSharing?: true, writeAccess?: true, revealSecrets?: true }`. The **Permissions for &lt;app&gt;** page shows only what is asked — the drive rows empty, each switch at its current value — and the user turns on what they allow, or nothing. Asking for `writeAccess` shows `dataSharing` too, which it implies.
 
-**Returns:** `Promise<{ dataSharing: boolean, writeAccess: boolean }>` — what the app holds once the popup is closed, as [`getPermissions()`](#getpermissions) reports it. When every switch asked for is already on and no drives were asked for, no popup opens and the call resolves at once.
+**Returns:** `Promise<{ dataSharing: boolean, writeAccess: boolean, revealSecrets: boolean }>` — what the app holds once the popup is closed, as [`getPermissions()`](#getpermissions) reports it. When every switch asked for is already on and no drives were asked for, no popup opens and the call resolves at once.
 
 **Throws:**
 
@@ -655,7 +640,7 @@ The data is uploaded using the authenticated user's postage stamp. Progress can 
 | ------------------------------- | ------------------------ | -------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `data`                          | `Uint8Array`             | Yes      | The binary data to upload                                                                                                                                                                                                                                                                |
 | `options`                       | `UploadOptions`          | No       | Upload configuration                                                                                                                                                                                                                                                                     |
-| `options.batchID`               | `string`                 | No       | The drive to write to, from [`getDrives()`](#getdrives). Defaults to the primary drive. Every writer takes it                                                                                                                                                                            |
+| `options.driveId`               | `string`                 | No       | The drive to write to, by `driveId` from [`getDrives()`](#getdrives). Defaults to the primary drive. Every writer takes it                                                                                                                                                               |
 | `options.pin`                   | `boolean`                | No       | Whether to pin the data locally (defaults to `false`; ignored on a subsidised gateway)                                                                                                                                                                                                   |
 | `options.encrypt`               | `boolean`                | No       | Whether to encrypt the data (defaults to `false`). The 128-hex reference then contains the decryption key: a capability, not an address — see [Quick Start](../getting-started/#upload-and-download-bytes)                                                                               |
 | `options.tag`                   | `number`                 | No       | Tag ID for tracking upload progress (ignored on a subsidised gateway)                                                                                                                                                                                                                    |
@@ -1040,7 +1025,7 @@ Creates an SOC writer for uploading and downloading SOCs. If `signer` is omitted
 
 | Parameter                       | Type                     | Required | Description                                                                                                                            |
 | ------------------------------- | ------------------------ | -------- | -------------------------------------------------------------------------------------------------------------------------------------- |
-| `signer`                        | `string`                 | No       | Private key hex string for the SOC signer                                                                                              |
+| `signer`                        | `string \| AppSecret`    | No       | Private key hex string for the SOC signer, or an `AppSecret` the proxy signs with ([`deriveAppSecret()`](#deriveappsecretlabel))       |
 | `requestOptions`                | `RequestOptions`         | No       | Request configuration                                                                                                                  |
 | `requestOptions.timeout`        | `number`                 | No       | Request timeout in milliseconds for this call. Replaces the client's default (30 s) for the whole round trip, not only the Bee request |
 | `requestOptions.headers`        | `Record<string, string>` | No       | Custom headers                                                                                                                         |
@@ -1119,7 +1104,7 @@ Creates a feed reader bound to a topic and optional owner.
 
 | Parameter                       | Type                     | Required | Description                                                                                                                            |
 | ------------------------------- | ------------------------ | -------- | -------------------------------------------------------------------------------------------------------------------------------------- |
-| `options.topic`                 | `string`                 | Yes      | Feed topic (32-byte hex string)                                                                                                        |
+| `options.topic`                 | `string \| AppSecret`    | Yes      | Feed topic (32-byte hex string), or an `AppSecret` the proxy turns into one ([`deriveAppSecret()`](#deriveappsecretlabel))             |
 | `options.owner`                 | `string`                 | No       | Feed owner address; if omitted, resolved via proxy                                                                                     |
 | `requestOptions`                | `RequestOptions`         | No       | Request configuration                                                                                                                  |
 | `requestOptions.timeout`        | `number`                 | No       | Request timeout in milliseconds for this call. Replaces the client's default (30 s) for the whole round trip, not only the Bee request |
@@ -1180,8 +1165,8 @@ Creates a feed writer for updating and reading a topic. If `signer` is omitted, 
 
 | Parameter                       | Type                     | Required | Description                                                                                                                            |
 | ------------------------------- | ------------------------ | -------- | -------------------------------------------------------------------------------------------------------------------------------------- |
-| `options.topic`                 | `string`                 | Yes      | Feed topic (32-byte hex string)                                                                                                        |
-| `options.signer`                | `string`                 | No       | Private key hex string for the feed signer                                                                                             |
+| `options.topic`                 | `string \| AppSecret`    | Yes      | Feed topic (32-byte hex string), or an `AppSecret` the proxy turns into one ([`deriveAppSecret()`](#deriveappsecretlabel))             |
+| `options.signer`                | `string \| AppSecret`    | No       | Private key hex string for the feed signer, or an `AppSecret` the proxy signs with                                                     |
 | `requestOptions`                | `RequestOptions`         | No       | Request configuration                                                                                                                  |
 | `requestOptions.timeout`        | `number`                 | No       | Request timeout in milliseconds for this call. Replaces the client's default (30 s) for the whole round trip, not only the Bee request |
 | `requestOptions.headers`        | `Record<string, string>` | No       | Custom headers                                                                                                                         |
@@ -1244,11 +1229,11 @@ Creates a sequential feed reader bound to a topic and optional owner.
 
 **Parameters:**
 
-| Parameter        | Type             | Required | Description                                        |
-| ---------------- | ---------------- | -------- | -------------------------------------------------- |
-| `options.topic`  | `string`         | Yes      | Feed topic (32-byte hex string)                    |
-| `options.owner`  | `string`         | No       | Feed owner address; if omitted, resolved via proxy |
-| `requestOptions` | `RequestOptions` | No       | Request configuration                              |
+| Parameter        | Type                  | Required | Description                                        |
+| ---------------- | --------------------- | -------- | -------------------------------------------------- |
+| `options.topic`  | `string \| AppSecret` | Yes      | Feed topic (32-byte hex string), or an `AppSecret` |
+| `options.owner`  | `string`              | No       | Feed owner address; if omitted, resolved via proxy |
+| `requestOptions` | `RequestOptions`      | No       | Request configuration                              |
 
 **Returns:** `SequentialFeedReader`
 
@@ -1286,11 +1271,11 @@ Creates a sequential feed writer for updating and reading a topic. If `signer` i
 
 **Parameters:**
 
-| Parameter        | Type             | Required | Description                                |
-| ---------------- | ---------------- | -------- | ------------------------------------------ |
-| `options.topic`  | `string`         | Yes      | Feed topic (32-byte hex string)            |
-| `options.signer` | `string`         | No       | Private key hex string for the feed signer |
-| `requestOptions` | `RequestOptions` | No       | Request configuration                      |
+| Parameter        | Type                  | Required | Description                                                    |
+| ---------------- | --------------------- | -------- | -------------------------------------------------------------- |
+| `options.topic`  | `string \| AppSecret` | Yes      | Feed topic (32-byte hex string), or an `AppSecret`             |
+| `options.signer` | `string \| AppSecret` | No       | Private key hex string, or an `AppSecret` the proxy signs with |
+| `requestOptions` | `RequestOptions`      | No       | Request configuration                                          |
 
 **Returns:** `SequentialFeedWriter`
 
@@ -1788,6 +1773,7 @@ import type {
   AvatarSource,
   PostageBatch,
   Drive,
+  DriveRow,
   DriveKind,
   DriveRequest,
   DriveRequirement,

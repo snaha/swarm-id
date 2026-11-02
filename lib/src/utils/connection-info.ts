@@ -33,6 +33,7 @@ export function connectionInfoEqual(
     a.identity?.sharingPublicKey === b.identity?.sharingPublicKey &&
     a.permissions?.dataSharing === b.permissions?.dataSharing &&
     a.permissions?.writeAccess === b.permissions?.writeAccess &&
+    a.permissions?.revealSecrets === b.permissions?.revealSecrets &&
     // Compared explicitly rather than assumed to follow the id: an avatar not
     // derived from the id could change while the id stays put.
     a.identity?.avatar.source === b.identity?.avatar.source &&

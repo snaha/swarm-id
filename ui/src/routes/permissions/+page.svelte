@@ -58,8 +58,16 @@
   let rows = $state<PickerRow[]>([])
   let allTicked = $state(false)
   /** The sharing switches: what was in effect at load, and what they show now. */
-  let initialSharing = $state<AppPermissions>({ dataSharing: true, writeAccess: true })
-  let sharing = $state<AppPermissions>({ dataSharing: true, writeAccess: true })
+  let initialSharing = $state<AppPermissions>({
+    dataSharing: true,
+    writeAccess: true,
+    revealSecrets: false,
+  })
+  let sharing = $state<AppPermissions>({
+    dataSharing: true,
+    writeAccess: true,
+    revealSecrets: false,
+  })
 
   /** Flip a switch; write access cannot outlive data sharing. */
   function flip(name: PermissionName) {

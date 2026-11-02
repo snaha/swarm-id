@@ -95,12 +95,20 @@ describe("connectionInfoEqual", () => {
   it("returns false when a sharing switch flips", () => {
     const on = {
       ...BASE,
-      permissions: { dataSharing: true, writeAccess: true },
+      permissions: {
+        dataSharing: true,
+        writeAccess: true,
+        revealSecrets: false,
+      },
     }
     expect(
       connectionInfoEqual(on, {
         ...on,
-        permissions: { dataSharing: true, writeAccess: false },
+        permissions: {
+          dataSharing: true,
+          writeAccess: false,
+          revealSecrets: false,
+        },
       }),
     ).toBe(false)
     expect(connectionInfoEqual(on, { ...on })).toBe(true)

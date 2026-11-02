@@ -5,6 +5,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest"
 import type { Mock, MockInstance } from "vitest"
 import { ZodError } from "zod"
 import { SwarmIdClient } from "./swarm-id-client"
+import { AppSecret } from "./app-secret"
 import { SwarmIdError } from "./errors"
 import {
   IframeToParentMessageSchema,
@@ -314,9 +315,17 @@ describe("SwarmIdClient connect()", () => {
       setStorageShared(true)
       internals(client).lastConnectionInfo = {
         identity: { id: "aa".repeat(20) },
-        permissions: { dataSharing: true, writeAccess: false },
+        permissions: {
+          dataSharing: true,
+          writeAccess: false,
+          revealSecrets: false,
+        },
       }
-      const held = { dataSharing: true, writeAccess: false }
+      const held = {
+        dataSharing: true,
+        writeAccess: false,
+        revealSecrets: false,
+      }
       vi.spyOn(client, "getPermissions").mockResolvedValue(held)
 
       await expect(
@@ -332,9 +341,17 @@ describe("SwarmIdClient connect()", () => {
         setStorageShared(true)
         internals(client).lastConnectionInfo = {
           identity: { id: "aa".repeat(20) },
-          permissions: { dataSharing: true, writeAccess: false },
+          permissions: {
+            dataSharing: true,
+            writeAccess: false,
+            revealSecrets: false,
+          },
         }
-        const held = { dataSharing: true, writeAccess: true }
+        const held = {
+          dataSharing: true,
+          writeAccess: true,
+          revealSecrets: false,
+        }
         vi.spyOn(client, "getPermissions").mockResolvedValue(held)
         vi.mocked(window.open).mockReturnValueOnce({ closed: true } as Window)
 
@@ -955,19 +972,14 @@ describe("SwarmIdClient request seam", () => {
     await expect(promise).resolves.toEqual(entries)
   })
 
-  it("getDrives returns the proxy's list as it is", async () => {
+  it("getDrives returns the proxy's rows, each with its reveal bound (#746)", async () => {
     const drives = [
       {
-        batchID: "ab".repeat(32),
+        driveId: "ab".repeat(32),
         utilization: 1,
         usable: true,
-        label: "",
+        label: "Photos",
         depth: 20,
-        amount: "1000",
-        bucketDepth: 16,
-        blockNumber: 1,
-        immutableFlag: false,
-        exists: true,
         batchTTL: 3600,
         kind: "regular",
         primary: true,
@@ -978,7 +990,28 @@ describe("SwarmIdClient request seam", () => {
     expect(sent).toMatchObject({ type: "getDrives" })
 
     deliver({ type: "getDrivesResponse", requestId: sent.requestId, drives })
-    await expect(promise).resolves.toEqual(drives)
+    const [drive] = await promise
+    expect(drive).toMatchObject(drives[0])
+
+    // The batch behind the drive: one message naming the drive id, answered
+    // under `revealSecrets`, refused without it.
+    const reveal = drive.revealPostageBatch()
+    const revealSent = lastPostedMessage()
+    expect(revealSent).toMatchObject({
+      type: "revealPostageBatch",
+      driveId: "ab".repeat(32),
+    })
+    deliver({
+      type: "error",
+      requestId: revealSent.requestId,
+      code: "permission-denied",
+      permission: "revealSecrets",
+      error: "not allowed",
+    })
+    await expect(reveal).rejects.toMatchObject({
+      code: "permission-denied",
+      permission: "revealSecrets",
+    })
   })
 
   // The identity site and a dApp's client deploy separately: a kind this
@@ -989,16 +1022,11 @@ describe("SwarmIdClient request seam", () => {
       requestId: "r",
       drives: [
         {
-          batchID: "ab".repeat(32),
+          driveId: "ab".repeat(32),
           utilization: 0,
           usable: true,
           label: "",
           depth: 20,
-          amount: "1",
-          bucketDepth: 16,
-          blockNumber: 1,
-          immutableFlag: false,
-          exists: true,
           kind: "archival",
           primary: false,
         },
@@ -1008,26 +1036,26 @@ describe("SwarmIdClient request seam", () => {
   })
 
   it("carries the drive a write names (#862)", async () => {
-    const batchID = "cd".repeat(32)
-    void client.uploadData(new Uint8Array([1]), { batchID }).catch(() => {})
+    const driveId = "cd".repeat(32)
+    void client.uploadData(new Uint8Array([1]), { driveId }).catch(() => {})
     expect(lastPostedMessage()).toMatchObject({
       type: "uploadData",
-      options: { batchID },
+      options: { driveId },
     })
 
-    void client.actAddGrantees("ef".repeat(32), [], { batchID }).catch(() => {})
+    void client.actAddGrantees("ef".repeat(32), [], { driveId }).catch(() => {})
     expect(lastPostedMessage()).toMatchObject({
       type: "actAddGrantees",
-      batchID,
+      driveId,
     })
 
     // An epoch update's payload and its SOC go to the one drive named.
     const writer = client.makeEpochFeedWriter({ topic: "12".repeat(32) })
-    const upload = writer.uploadPayload(new Uint8Array([1]), { batchID })
+    const upload = writer.uploadPayload(new Uint8Array([1]), { driveId })
     const payloadUpload = lastPostedMessage()
     expect(payloadUpload).toMatchObject({
       type: "uploadData",
-      options: { batchID },
+      options: { driveId },
     })
     deliver({
       type: "uploadDataResponse",
@@ -1037,52 +1065,95 @@ describe("SwarmIdClient request seam", () => {
     await vi.waitFor(() =>
       expect(lastPostedMessage()).toMatchObject({
         type: "epochFeedUploadReference",
-        batchID,
+        driveId,
       }),
     )
     void upload.catch(() => {})
   })
 
-  it("getPostageBatch rejects on a proxy error message", async () => {
-    const promise = client.getPostageBatch()
+  // #889: the secret is a handle. Nothing crosses to the page until
+  // `reveal()`, and the handle prints as its label, never as bytes.
+  it("deriveAppSecret returns a handle that reveals only on request", async () => {
+    const secret = client.deriveAppSecret("topic-seed")
+    expect(secret).toBeInstanceOf(AppSecret)
+    expect(secret.label).toBe("topic-seed")
+    expect(JSON.stringify({ secret })).toBe(
+      '{"secret":"AppSecret(topic-seed)"}',
+    )
+    expect(`${secret}`).toBe("AppSecret(topic-seed)")
+    expect(postMessage).not.toHaveBeenCalled()
 
-    const sent = lastPostedMessage()
-    expect(sent).toMatchObject({ type: "getPostageBatch" })
-
-    deliver({
-      type: "error",
-      requestId: sent.requestId,
-      error: "Bee node unreachable",
-    })
-    await expect(promise).rejects.toThrow("Bee node unreachable")
-  })
-
-  it("deriveAppSecret round-trips the label and returns the secret (#520)", async () => {
-    const secret = new Uint8Array([9, 8, 7, 6])
-
-    const promise = client.deriveAppSecret("topic-seed")
-
+    const bytes = new Uint8Array([9, 8, 7, 6])
+    const promise = secret.reveal()
     const sent = lastPostedMessage()
     expect(sent).toMatchObject({ type: "deriveAppSecret", label: "topic-seed" })
-
     deliver({
       type: "deriveAppSecretResponse",
       requestId: sent.requestId,
-      secret,
+      secret: bytes,
     })
-    await expect(promise).resolves.toEqual(secret)
+    await expect(promise).resolves.toEqual(bytes)
   })
 
-  it("deriveAppSecret rejects when the proxy is not authenticated (#520)", async () => {
-    const promise = client.deriveAppSecret("topic-seed")
-
+  it("reveal() rejects with permission-denied when key export is off", async () => {
+    const promise = client.deriveAppSecret("topic-seed").reveal()
     const sent = lastPostedMessage()
     deliver({
       type: "error",
       requestId: sent.requestId,
-      error: "Not authenticated. Please login first.",
+      code: "permission-denied",
+      permission: "revealSecrets",
+      error: "This app is not allowed to read its keys.",
     })
-    await expect(promise).rejects.toThrow("Not authenticated")
+    await expect(promise).rejects.toMatchObject({
+      code: "permission-denied",
+      permission: "revealSecrets",
+    })
+  })
+
+  // A handle used as a topic or signer goes over the wire as its label; the
+  // proxy derives from it. The owner of a derived signer is the proxy's to
+  // tell, so the writer asks before its first read.
+  it("sends an AppSecret topic and signer as derived refs (#889)", async () => {
+    const topic = client.deriveAppSecret("state-feed")
+    const signer = client.deriveAppSecret("state-signer")
+    const writer = client.makeEpochFeedWriter({ topic, signer })
+
+    const read = writer.downloadReference()
+    const ownerAsk = lastPostedMessage()
+    expect(ownerAsk).toMatchObject({
+      type: "feedGetOwner",
+      signer: { derived: "state-signer" },
+    })
+    deliver({
+      type: "feedGetOwnerResponse",
+      requestId: ownerAsk.requestId,
+      owner: "11".repeat(20),
+    })
+    await vi.waitFor(() =>
+      expect(lastPostedMessage()).toMatchObject({
+        type: "epochFeedDownloadReference",
+        topic: { derived: "state-feed" },
+        owner: "11".repeat(20),
+      }),
+    )
+    void read.catch(() => {})
+
+    void writer.uploadReference("ab".repeat(32)).catch(() => {})
+    expect(lastPostedMessage()).toMatchObject({
+      type: "epochFeedUploadReference",
+      topic: { derived: "state-feed" },
+      signer: { derived: "state-signer" },
+    })
+
+    void client
+      .makeSOCWriter(signer)
+      .upload("cd".repeat(32), new Uint8Array([1]))
+      .catch(() => {})
+    expect(lastPostedMessage()).toMatchObject({
+      type: "socUpload",
+      signer: { derived: "state-signer" },
+    })
   })
 
   it("rejects a request still pending at destroy() with invalid-state", async () => {
@@ -1704,7 +1775,7 @@ describe("SwarmIdClient request timeout", () => {
   // constructor's `timeout`, and the bookkeeping it leaves behind.
   it("times out at the constructor's timeout, and forgets the request", async () => {
     vi.useFakeTimers()
-    const request = client.getPostageBatch()
+    const request = client.getDrives()
     const rejected = expect(request).rejects.toMatchObject({
       code: "timeout",
       message: `Request timeout after ${TIMEOUT_MS}ms`,
@@ -1720,27 +1791,31 @@ describe("SwarmIdClient request timeout", () => {
   // what matters is that it does not throw or resurrect an entry.
   it("ignores an answer that arrives after the timeout", async () => {
     vi.useFakeTimers()
-    const request = client.getPostageBatch()
+    const request = client.getDrives()
     const rejected = expect(request).rejects.toMatchObject({ code: "timeout" })
     const { requestId } = env.lastPostedMessage()
 
     await vi.advanceTimersByTimeAsync(TIMEOUT_MS)
     await rejected
 
-    env.dispatch({ data: { type: "getPostageBatchResponse", requestId } })
+    env.dispatch({
+      data: { type: "getDrivesResponse", requestId, drives: [] },
+    })
 
     expect(internals(client).pendingRequests.size).toBe(0)
   })
 
   it("clears the timer when an answer settles the request", async () => {
     vi.useFakeTimers()
-    const request = client.getPostageBatch()
+    const request = client.getDrives()
     const { requestId } = env.lastPostedMessage()
     expect(vi.getTimerCount()).toBe(1)
 
-    env.dispatch({ data: { type: "getPostageBatchResponse", requestId } })
+    env.dispatch({
+      data: { type: "getDrivesResponse", requestId, drives: [] },
+    })
 
-    await expect(request).resolves.toBeUndefined()
+    await expect(request).resolves.toEqual([])
     expect(internals(client).pendingRequests.size).toBe(0)
     expect(vi.getTimerCount()).toBe(0)
   })
@@ -1800,7 +1875,7 @@ describe("SwarmIdClient destroy()", () => {
   it("clears the timers and pendings those requests armed", () => {
     vi.useFakeTimers()
     markReady()
-    client.getPostageBatch().catch(() => {})
+    client.getDrives().catch(() => {})
     client.getNodeInfo().catch(() => {})
     expect(vi.getTimerCount()).toBe(2)
 

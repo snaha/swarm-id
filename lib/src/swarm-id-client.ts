@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { SwarmIdError } from "./errors"
+import { AppSecret } from "./app-secret"
 import type {
   ClientOptions,
   ConnectOptions,
@@ -82,6 +83,11 @@ import type {
   ButtonConfig,
   PostageBatch,
   Drive,
+  DriveRow,
+  SignerRef,
+  TopicRef,
+  RevealPostageBatchMessage,
+  RevealPostageBatchResponseMessage,
   DriveRequest,
   Permissions,
   AppPermissions,
@@ -733,9 +739,28 @@ export class SwarmIdClient {
     return key
   }
 
+  /**
+   * A signer as the proxy takes it, and its owner when that is known here:
+   * an `AppSecret` is sent as its label and the proxy derives the key, so its
+   * owner comes back from the proxy on first use (#889).
+   */
+  private normalizeSigner(
+    signer: PrivateKey | Uint8Array | string | AppSecret | undefined,
+  ): { signer: SignerRef | undefined; owner: string | undefined } {
+    if (signer === undefined) return { signer: undefined, owner: undefined }
+    if (signer instanceof AppSecret) {
+      return { signer: signer.toRef(), owner: undefined }
+    }
+    const key = new PrivateKey(signer)
+    return { signer: key.toHex(), owner: key.publicKey().address().toHex() }
+  }
+
   private normalizeFeedTopic(
-    topic: Topic | Identifier | Uint8Array | string,
-  ): string {
+    topic: Topic | Identifier | Uint8Array | string | AppSecret,
+  ): TopicRef {
+    if (topic instanceof AppSecret) {
+      return topic.toRef()
+    }
     if (topic instanceof Topic) {
       return uint8ArrayToHex(topic.toUint8Array())
     }
@@ -886,54 +911,17 @@ export class SwarmIdClient {
   }
 
   /**
-   * Gets the current postage batch for the authenticated identity.
-   *
-   * Returns information about the postage stamp associated with the
-   * connected identity, including batch ID, utilization, depth, and TTL.
-   *
-   * @returns A promise resolving to the PostageBatch or undefined if none is configured
-   * @throws {Error} If the client is not initialized
-   * @throws {Error} If the request times out
-   *
-   * @example
-   * ```typescript
-   * const batch = await client.getPostageBatch()
-   * if (batch) {
-   *   console.log('Batch ID:', batch.batchID)
-   *   console.log('Utilization:', batch.utilization)
-   *   console.log('Depth:', batch.depth)
-   *   console.log('TTL:', batch.batchTTL)
-   * } else {
-   *   console.log('No postage batch configured')
-   * }
-   * ```
-   */
-  async getPostageBatch(): Promise<PostageBatch | undefined> {
-    this.ensureReady()
-    const requestId = this.generateRequestId()
-
-    const response = await this.sendRequest<{
-      type: "getPostageBatchResponse"
-      requestId: string
-      postageBatch?: PostageBatch
-    }>({
-      type: "getPostageBatch",
-      requestId,
-    })
-
-    return response.postageBatch
-  }
-
-  /**
-   * The drives this app was granted (#862): each with the fields of
-   * {@link getPostageBatch}, its `kind`, and whether it is the primary — the
-   * one a write goes to when it names none. Name any of them on a write with
-   * `batchID`; one outside the grant rejects with `drive-not-granted`.
+   * The drives this app was granted (#862): each with its `driveId`, the app's
+   * own name for the drive (#746), its `kind`, its capacity and expiry, and
+   * whether it is the primary — the one a write goes to when it names none.
+   * Name any of them on a write with `driveId`; one outside the grant rejects
+   * with `drive-not-granted`. The postage batch behind a drive is
+   * `drive.revealPostageBatch()`, under the `revealSecrets` permission.
    *
    * @example
    * ```typescript
    * const scratch = (await client.getDrives()).find((d) => d.kind === 'scratch')
-   * await client.uploadData(frame, { batchID: scratch?.batchID })
+   * await client.uploadData(frame, { driveId: scratch?.driveId })
    * ```
    */
   async getDrives(): Promise<Drive[]> {
@@ -943,13 +931,30 @@ export class SwarmIdClient {
     const response = await this.sendRequest<{
       type: "getDrivesResponse"
       requestId: string
-      drives: Drive[]
+      drives: DriveRow[]
     }>({
       type: "getDrives",
       requestId,
     })
 
-    return response.drives
+    return response.drives.map((row) => ({
+      ...row,
+      revealPostageBatch: () => this.revealPostageBatch(row.driveId),
+    }))
+  }
+
+  /** `Drive.revealPostageBatch()`: the batch behind `driveId`, under `revealSecrets` (#746). */
+  private async revealPostageBatch(driveId: string): Promise<PostageBatch> {
+    this.ensureReady()
+    const response = await this.sendRequest<
+      RevealPostageBatchResponseMessage,
+      RevealPostageBatchMessage
+    >({
+      type: "revealPostageBatch",
+      requestId: this.generateRequestId(),
+      driveId,
+    })
+    return response.postageBatch
   }
 
   /**
@@ -1154,7 +1159,8 @@ export class SwarmIdClient {
     const satisfied =
       permissions.drives === undefined &&
       (!permissions.dataSharing || held?.dataSharing === true) &&
-      (!permissions.writeAccess || held?.writeAccess === true)
+      (!permissions.writeAccess || held?.writeAccess === true) &&
+      (!permissions.revealSecrets || held?.revealSecrets === true)
     if (!satisfied) await this.openPermissions(permissions)
     return this.getPermissions()
   }
@@ -1531,39 +1537,43 @@ export class SwarmIdClient {
   }
 
   /**
-   * Derive a stable, app-scoped secret for this identity + app origin.
+   * A stable, app-scoped secret for this identity + app origin, as a handle
+   * (#889): `HMAC(appSecret, label)`, derived inside the iframe whenever the
+   * handle is used — as the `topic` of a feed reader or writer, or the
+   * `signer` of a SOC or feed writer — so the bytes never reach the page. The
+   * same identity, app origin and label name the same secret across sessions
+   * and devices, and the handle is only the label, so it survives a reload
+   * (#520).
    *
-   * Computes `HMAC(appSecret, label)` inside the iframe, where `appSecret` is the
-   * app-specific secret that never leaves the trusted context. The result is
-   * deterministic — the same identity, app origin, and label always yield the
-   * same bytes across sessions and devices — yet unguessable to anyone without
-   * the identity. Use it to seed feed topics or other app material without
-   * exposing the recoverable app public key (#520).
+   * `secret.reveal()` returns the 32 bytes themselves, and only when the user
+   * granted the `revealSecrets` permission; otherwise it rejects with
+   * `permission-denied`.
    *
    * @param label - Application-chosen domain separator (e.g. `"state-feed"`)
-   * @returns A promise resolving to the 32-byte derived secret
-   * @throws {Error} If the client is not initialized or not authenticated
+   * @throws {Error} If the client is not initialized
    *
    * @example
    * ```typescript
-   * const seed = await client.deriveAppSecret('state-feed')
-   * const topic = keccak256(seed) // an unguessable, stable feed topic
+   * const topic = client.deriveAppSecret('state-feed')
+   * const feed = client.makeEpochFeedWriter({ topic }) // an unguessable, stable feed
    * ```
    */
-  async deriveAppSecret(label: string): Promise<Uint8Array> {
+  deriveAppSecret(label: string): AppSecret {
     this.ensureReady()
-    const requestId = this.generateRequestId()
+    return new AppSecret(label, (name) => this.revealAppSecret(name))
+  }
 
+  private async revealAppSecret(label: string): Promise<Uint8Array> {
+    this.ensureReady()
     const response = await this.sendRequest<{
       type: "deriveAppSecretResponse"
       requestId: string
       secret: Uint8Array
     }>({
       type: "deriveAppSecret",
-      requestId,
+      requestId: this.generateRequestId(),
       label,
     })
-
     return response.secret
   }
 
@@ -2076,7 +2086,7 @@ export class SwarmIdClient {
    *
    * Uploads are encrypted by default. Use `rawUpload` for unencrypted SOCs.
    *
-   * @param signer - Optional SOC signer private key. If omitted, the proxy uses the app signer.
+   * @param signer - Optional SOC signer: a private key, or an `AppSecret` the proxy signs with (#889). If omitted, the proxy uses the app signer.
    * @param requestOptions - Optional request configuration (timeout, headers, endlesslyRetry). `timeout` replaces the client default for this call's whole round trip, not only the Bee request
    * @returns SOCWriter with `upload`, `rawUpload`, `download`, and `rawDownload`
    * @throws {Error} If the client is not initialized
@@ -2090,15 +2100,13 @@ export class SwarmIdClient {
    * ```
    */
   makeSOCWriter(
-    signer?: PrivateKey | Uint8Array | string,
+    signer?: PrivateKey | Uint8Array | string | AppSecret,
     requestOptions?: RequestOptions,
   ): SOCWriter {
     this.ensureReady()
-    const signerObj = signer ? new PrivateKey(signer) : undefined
-    const signerKey = signerObj ? signerObj.toHex() : undefined
-    let owner: string | undefined = signerObj
-      ? signerObj.publicKey().address().toHex()
-      : undefined
+    const { signer: signerKey, owner: knownOwner } =
+      this.normalizeSigner(signer)
+    let owner = knownOwner
 
     const resolveOwner = async (): Promise<string> => {
       if (owner) {
@@ -2112,11 +2120,16 @@ export class SwarmIdClient {
       >({
         type: "socGetOwner",
         requestId,
+        signer: signerKey,
       })
 
       owner = response.owner
       return owner
     }
+    // A read before any write: the proxy fills in the app signer's owner for
+    // a plain writer, but a derived signer's owner only it can tell.
+    const ownerForRead = async (): Promise<string | undefined> =>
+      owner ?? (typeof signerKey === "object" ? resolveOwner() : undefined)
 
     const sendSocDownload = async (
       identifier: Identifier | Uint8Array | string,
@@ -2130,7 +2143,7 @@ export class SwarmIdClient {
       >({
         type: "socDownload",
         requestId,
-        owner,
+        owner: await ownerForRead(),
         identifier: this.normalizeSocIdentifier(identifier),
         encryptionKey: this.normalizeSocKey(encryptionKey),
         requestOptions,
@@ -2151,7 +2164,7 @@ export class SwarmIdClient {
       >({
         type: "socRawDownload",
         requestId,
-        owner,
+        owner: await ownerForRead(),
         identifier: this.normalizeSocIdentifier(identifier),
         encryptionKey: encryptionKey
           ? this.normalizeSocKey(encryptionKey)
@@ -2395,7 +2408,7 @@ export class SwarmIdClient {
    *
    * @param options - Feed writer options
    * @param options.topic - Feed topic (32 bytes)
-   * @param options.signer - Optional feed signer private key. If omitted, the proxy uses the app signer.
+   * @param options.signer - Optional feed signer: a private key, or an `AppSecret` the proxy signs with (#889). If omitted, the proxy uses the app signer.
    * @param requestOptions - Optional request configuration (timeout, headers, endlesslyRetry). `timeout` replaces the client default for this call's whole round trip, not only the Bee request
    * @returns FeedWriter with `getOwner`, `downloadReference`, `downloadPayload`, `uploadPayload`, and `uploadReference`
    * @throws {Error} If the client is not initialized
@@ -2407,13 +2420,10 @@ export class SwarmIdClient {
   ): FeedWriter {
     this.ensureReady()
     const topic = this.normalizeFeedTopic(options.topic)
-    const signerObj = options.signer
-      ? new PrivateKey(options.signer)
-      : undefined
-    const signerKey = signerObj ? signerObj.toHex() : undefined
-    let owner: string | undefined = signerObj
-      ? signerObj.publicKey().address().toHex()
-      : undefined
+    const { signer: signerKey, owner: knownOwner } = this.normalizeSigner(
+      options.signer,
+    )
+    let owner = knownOwner
 
     const resolveOwner = async (): Promise<string> => {
       if (owner) {
@@ -2427,11 +2437,16 @@ export class SwarmIdClient {
       >({
         type: "feedGetOwner",
         requestId,
+        signer: signerKey,
       })
 
       owner = response.owner
       return owner
     }
+    // A read before any write: the proxy fills in the app signer's owner for
+    // a plain writer, but a derived signer's owner only it can tell.
+    const ownerForRead = async (): Promise<string | undefined> =>
+      owner ?? (typeof signerKey === "object" ? resolveOwner() : undefined)
 
     const downloadReference = async (
       options?: EpochFeedDownloadOptions,
@@ -2448,7 +2463,7 @@ export class SwarmIdClient {
         type: "epochFeedDownloadReference",
         requestId,
         topic,
-        owner,
+        owner: await ownerForRead(),
         at: this.normalizeFeedTimestamp(atValue),
         after:
           options?.after !== undefined
@@ -2520,7 +2535,7 @@ export class SwarmIdClient {
         encryptionKey:
           feedKey !== undefined ? this.normalizeSocKey(feedKey) : undefined,
         hints: options?.hints,
-        batchID: options?.batchID ?? options?.uploadOptions?.batchID,
+        driveId: options?.driveId ?? options?.uploadOptions?.driveId,
         requestOptions,
       })
       const socAddress = response.socAddress
@@ -2544,10 +2559,10 @@ export class SwarmIdClient {
           : BigInt(Math.floor(Date.now() / 1000))
       const encrypt = options?.encrypt !== false
       // Payload and SOC go to one drive, whichever option named it.
-      const batchID = options?.batchID ?? options?.uploadOptions?.batchID
+      const driveId = options?.driveId ?? options?.uploadOptions?.driveId
       const uploadResult = await this.uploadData(
         this.normalizePayload(data),
-        { ...options?.uploadOptions, encrypt, batchID },
+        { ...options?.uploadOptions, encrypt, driveId },
         requestOptions,
       )
       const cleanRef = uploadResult.reference.startsWith("0x")
@@ -2570,7 +2585,7 @@ export class SwarmIdClient {
         encryptionKey:
           feedKey !== undefined ? this.normalizeSocKey(feedKey) : undefined,
         hints: options?.hints,
-        batchID,
+        driveId,
         requestOptions,
       })
       const socAddress = response.socAddress
@@ -2599,7 +2614,7 @@ export class SwarmIdClient {
         type: "epochFeedDownloadReference",
         requestId,
         topic,
-        owner,
+        owner: await ownerForRead(),
         at: this.normalizeFeedTimestamp(atValue),
         after:
           options?.after !== undefined
@@ -2880,7 +2895,7 @@ export class SwarmIdClient {
    *
    * @param options - Sequential feed writer options
    * @param options.topic - Feed topic (32 bytes)
-   * @param options.signer - Optional signer private key. If omitted, proxy uses app signer.
+   * @param options.signer - Optional signer: a private key, or an `AppSecret` the proxy signs with (#889). If omitted, proxy uses app signer.
    * @param requestOptions - Optional request configuration (timeout, headers, endlesslyRetry). `timeout` replaces the client default for this call's whole round trip, not only the Bee request
    * @returns SequentialFeedWriter with payload/reference upload helpers
    */
@@ -2890,13 +2905,10 @@ export class SwarmIdClient {
   ): SequentialFeedWriter {
     this.ensureReady()
     const topic = this.normalizeFeedTopic(options.topic)
-    const signerObj = options.signer
-      ? new PrivateKey(options.signer)
-      : undefined
-    const signerKey = signerObj ? signerObj.toHex() : undefined
-    let owner: string | undefined = signerObj
-      ? signerObj.publicKey().address().toHex()
-      : undefined
+    const { signer: signerKey, owner: knownOwner } = this.normalizeSigner(
+      options.signer,
+    )
+    let owner = knownOwner
 
     const resolveOwner = async (): Promise<string> => {
       if (owner) {
@@ -2909,10 +2921,15 @@ export class SwarmIdClient {
       >({
         type: "seqFeedGetOwner",
         requestId,
+        signer: signerKey,
       })
       owner = response.owner
       return owner
     }
+    // A read before any write: the proxy fills in the app signer's owner for
+    // a plain writer, but a derived signer's owner only it can tell.
+    const ownerForRead = async (): Promise<string | undefined> =>
+      owner ?? (typeof signerKey === "object" ? resolveOwner() : undefined)
 
     const downloadPayload = async (
       encryptionKey: Uint8Array | string,
@@ -2926,7 +2943,7 @@ export class SwarmIdClient {
         type: "seqFeedDownloadPayload",
         requestId,
         topic,
-        owner,
+        owner: await ownerForRead(),
         index:
           options?.index !== undefined
             ? this.normalizeFeedIndex(options.index as bigint | number | string)
@@ -2961,7 +2978,7 @@ export class SwarmIdClient {
         type: "seqFeedDownloadRawPayload",
         requestId,
         topic,
-        owner,
+        owner: await ownerForRead(),
         index:
           options?.index !== undefined
             ? this.normalizeFeedIndex(options.index as bigint | number | string)
@@ -2999,7 +3016,7 @@ export class SwarmIdClient {
         type: "seqFeedDownloadReference",
         requestId,
         topic,
-        owner,
+        owner: await ownerForRead(),
         index:
           options?.index !== undefined
             ? this.normalizeFeedIndex(options.index as bigint | number | string)
@@ -3193,7 +3210,7 @@ export class SwarmIdClient {
    * ```
    */
   async createFeedManifest(
-    topic: string,
+    topic: string | AppSecret,
     options?: {
       owner?: string
       /** Feed type: "Sequence" for sequential feeds, "Epoch" for epoch feeds. Default: "Sequence" */
@@ -3490,7 +3507,7 @@ export class SwarmIdClient {
    *
    * @param historyReference - The current history reference
    * @param grantees - Array of new grantee public keys as compressed hex strings
-   * @param options - Optional `batchID`: the drive the new history and grantee list go to (#862)
+   * @param options - Optional `driveId`: the drive the new history and grantee list go to (#862)
    * @param requestOptions - Optional request configuration (timeout, headers, endlesslyRetry). `timeout` replaces the client default for this call's whole round trip, not only the Bee request
    * @returns A promise resolving to the new references
    * @returns return.historyReference - The new history reference after adding grantees
@@ -3532,7 +3549,7 @@ export class SwarmIdClient {
       requestId,
       historyReference,
       grantees,
-      batchID: options?.batchID,
+      driveId: options?.driveId,
       requestOptions,
     })
 
@@ -3559,7 +3576,7 @@ export class SwarmIdClient {
    * @param historyReference - The current history reference
    * @param encryptedReference - The current encrypted reference
    * @param revokeGrantees - Array of grantee public keys to revoke as compressed hex strings
-   * @param options - Optional `batchID`: the drive the rotated history goes to (#862)
+   * @param options - Optional `driveId`: the drive the rotated history goes to (#862)
    * @param requestOptions - Optional request configuration (timeout, headers, endlesslyRetry). `timeout` replaces the client default for this call's whole round trip, not only the Bee request
    * @returns A promise resolving to the new references after revocation
    * @returns return.encryptedReference - The content reference, unchanged
@@ -3606,7 +3623,7 @@ export class SwarmIdClient {
       historyReference,
       encryptedReference,
       revokeGrantees,
-      batchID: options?.batchID,
+      driveId: options?.driveId,
       requestOptions,
     })
 

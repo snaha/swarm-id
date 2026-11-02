@@ -199,9 +199,13 @@ function toBatchId(hex: string): BatchId {
 // The sharing switches (#885)
 // ----------------------------------------------------------------------------
 
-export const PERMISSION_NAMES: readonly PermissionName[] = ['dataSharing', 'writeAccess']
+export const PERMISSION_NAMES: readonly PermissionName[] = [
+  'dataSharing',
+  'writeAccess',
+  'revealSecrets',
+]
 
-/** The two switches as the designs word them (SwarmID-MVP, PERMISSIONS). */
+/** The switches as the designs word them (SwarmID-MVP, PERMISSIONS); key export is #889. */
 export const SWITCH_COPY: Record<PermissionName, { label: string; description: string }> = {
   dataSharing: {
     label: 'Data sharing',
@@ -210,6 +214,10 @@ export const SWITCH_COPY: Record<PermissionName, { label: string; description: s
   writeAccess: {
     label: 'Write access',
     description: 'Allow this app to share data with other apps',
+  },
+  revealSecrets: {
+    label: 'Key export',
+    description: 'Allow this app to read its keys and postage batches as raw values',
   },
 }
 
@@ -227,6 +235,7 @@ export function switchesToAsk(
   const names: PermissionName[] = []
   if (requested?.dataSharing || requested?.writeAccess) names.push('dataSharing')
   if (requested?.writeAccess) names.push('writeAccess')
+  if (requested?.revealSecrets) names.push('revealSecrets')
   return names.filter((name) => !current[name])
 }
 
@@ -237,16 +246,19 @@ export function switchesToAsk(
  * sharing was just turned on, to what the screen showed: off unless it was
  * asked and turned on. The screen showed write access off, or not at all,
  * and what sits underneath (the account default, an old pin) is not what the
- * user agreed to.
+ * user agreed to. Key export stands alone: pinned when asked and moved.
  */
 export function askedPatch(
   initial: AppPermissions,
   shown: AppPermissions,
   asked: readonly PermissionName[],
-): Partial<Pick<ConnectedApp, 'dataSharing' | 'writeAccess'>> {
-  const patch: Partial<Pick<ConnectedApp, 'dataSharing' | 'writeAccess'>> = {}
+): Partial<Pick<ConnectedApp, PermissionName>> {
+  const patch: Partial<Pick<ConnectedApp, PermissionName>> = {}
   if (asked.includes('dataSharing') && shown.dataSharing !== initial.dataSharing) {
     patch.dataSharing = shown.dataSharing
+  }
+  if (asked.includes('revealSecrets') && shown.revealSecrets !== initial.revealSecrets) {
+    patch.revealSecrets = shown.revealSecrets
   }
   const writeAsked = asked.includes('writeAccess') && shown.dataSharing
   const writeAccess = writeAsked && shown.writeAccess
@@ -264,7 +276,7 @@ export function askedPatch(
  * follows the account, so turning a switch off account-wide leaves it be.
  */
 export function customised(
-  app: Pick<ConnectedApp, 'dataSharing' | 'writeAccess' | 'sessionDuration'>,
+  app: Pick<ConnectedApp, PermissionName | 'sessionDuration'>,
   settings: AccountSettings | undefined,
 ): boolean {
   return pinned(app, settings).length > 0 || app.sessionDuration !== undefined
@@ -277,7 +289,7 @@ export function customised(
  * back on.
  */
 export function pinned(
-  app: Pick<ConnectedApp, 'dataSharing' | 'writeAccess'>,
+  app: Pick<ConnectedApp, PermissionName>,
   settings: AccountSettings | undefined,
 ): PermissionName[] {
   const { dataSharing } = effectivePermissions(app, settings)

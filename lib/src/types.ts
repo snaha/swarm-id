@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { z } from "zod"
+import type { AppSecret } from "./app-secret"
 import { AccountDeltaMessageSchema } from "./bus/messages"
 import type {
   PrivateKey as BeePrivateKey,
@@ -114,7 +115,8 @@ export function partitionSessionStorageKey(parentOrigin: string): string {
 /**
  * The drive a write names, as a dApp may spell it: `0x`-prefixed or uppercase
  * hex is taken, and the proxy sees bare lowercase — how `getDrives()` reports
- * it and how the grant is keyed (#862).
+ * it (#862). The value is the app's drive id, not the batch id (#746): the
+ * proxy maps it back to the granted stamp.
  */
 export const DriveTargetSchema = z
   .preprocess(
@@ -127,7 +129,7 @@ export const DriveTargetSchema = z
   .optional()
 
 const UploadOptionsObjectSchema = z.object({
-  batchID: DriveTargetSchema,
+  driveId: DriveTargetSchema,
   pin: z.boolean().optional(),
   encrypt: z.boolean().optional(),
   encryptManifest: z.boolean().optional(),
@@ -176,11 +178,11 @@ export interface UploadProgress {
 
 export interface UploadOptions {
   /**
-   * The drive to write to, by batch id, from `getDrives()`. Without it the
-   * write goes to the app's primary drive. A drive the app was not granted
-   * rejects with `drive-not-granted` (#862).
+   * The drive to write to, by its `driveId` from `getDrives()`. Without it
+   * the write goes to the app's primary drive. A drive the app was not
+   * granted rejects with `drive-not-granted` (#862).
    */
-  batchID?: string
+  driveId?: string
   /** Pin on the user's own node. Ignored on a subsidised gateway (#752). */
   pin?: boolean
   encrypt?: boolean
@@ -208,7 +210,7 @@ export type DownloadOptions = z.infer<typeof DownloadOptionsSchema>
  */
 export interface UploadFilesOptions extends Pick<
   UploadOptions,
-  | "batchID"
+  | "driveId"
   | "pin"
   | "encrypt"
   | "encryptManifest"
@@ -313,8 +315,16 @@ export type PostageBatch = z.infer<typeof PostageBatchSchema>
 export const DriveKindSchema = z.enum(["regular", "scratch"])
 export type DriveKind = z.infer<typeof DriveKindSchema>
 
-/** One drive the app was granted (#862), as `getDrives()` reports it */
-export const DriveSchema = PostageBatchSchema.extend({
+/**
+ * One drive the app was granted (#862), as the proxy reports it. `driveId` is
+ * the app's own name for the drive, derived per app from the batch id (#746):
+ * stable across reloads and devices, different for every app, and nothing an
+ * app can link to the on-chain batch. The batch's on-chain fields (block,
+ * amount, owner) stay out for the same reason; `revealPostageBatch()` returns
+ * them under the `revealSecrets` permission.
+ */
+export const DriveRowSchema = z.object({
+  driveId: BatchIdSchema,
   // An identity site newer than this client may report a kind it does not
   // know. Read it as scratch, the kind that promises nothing, rather than
   // failing the whole response and every drive in it (as #811 did for codes).
@@ -334,11 +344,28 @@ export const DriveSchema = PostageBatchSchema.extend({
    * moved with it, so `onConnectionChange` is where to re-read the drives.
    */
   partition: z.number().int().min(0).optional(),
+  /** The user-given drive name */
+  label: z.string(),
+  depth: z.number(),
+  /** Bee's fill count of the fullest bucket, see `PostageBatch.utilization` */
+  utilization: z.number(),
+  usable: z.boolean(),
+  batchTTL: z.number().optional(),
 })
-export type Drive = z.infer<typeof DriveSchema>
+export type DriveRow = z.infer<typeof DriveRowSchema>
+
+/** A `DriveRow` with its reveal bound to the client that listed it */
+export interface Drive extends DriveRow {
+  /**
+   * The postage batch behind the drive, batch id and on-chain fields
+   * included. Needs the `revealSecrets` permission; rejects with
+   * `permission-denied` without it (#746).
+   */
+  revealPostageBatch(): Promise<PostageBatch>
+}
 
 /** Which drive a call that takes no upload options writes to */
-export type DriveTargetOptions = Pick<UploadOptions, "batchID">
+export type DriveTargetOptions = Pick<UploadOptions, "driveId">
 
 const DRIVE_DESCRIPTION_MAX_LENGTH = 120
 const DRIVE_REQUEST_MAX_ROWS = 8
@@ -376,21 +403,35 @@ export const PermissionsSchema = z.object({
   dataSharing: z.literal(true).optional(),
   /** Ask to publish and manage ACTs with that key; implies `dataSharing` */
   writeAccess: z.literal(true).optional(),
+  /**
+   * Ask to read the app's derived secrets (`AppSecret.reveal()`) and the
+   * postage batches behind its drives (`Drive.revealPostageBatch()`) as raw
+   * values (#889, #746). Off until the user grants it; no account default.
+   */
+  revealSecrets: z.literal(true).optional(),
 })
 export type Permissions = z.infer<typeof PermissionsSchema>
 
-/** The two sharing switches, as the account and its apps store them (#885) */
-export const PermissionNameSchema = z.enum(["dataSharing", "writeAccess"])
+/** The switches, as the account and its apps store them (#885, #889) */
+export const PermissionNameSchema = z.enum([
+  "dataSharing",
+  "writeAccess",
+  "revealSecrets",
+])
 export type PermissionName = z.infer<typeof PermissionNameSchema>
 
+/** The switches with an account-wide default; `revealSecrets` is per app only */
+export type SharingSwitchName = Exclude<PermissionName, "revealSecrets">
+
 /**
- * What the app holds of the account-wide sharing key right now (#885): its
- * own pinned values, else the account defaults, else on. `writeAccess` is
- * never on without `dataSharing`.
+ * What the app holds right now (#885, #889): its own pinned values, else the
+ * account defaults, else on — except `revealSecrets`, off unless granted.
+ * `writeAccess` is never on without `dataSharing`.
  */
 export const AppPermissionsSchema = z.object({
   dataSharing: z.boolean(),
   writeAccess: z.boolean(),
+  revealSecrets: z.boolean(),
 })
 export type AppPermissions = z.infer<typeof AppPermissionsSchema>
 
@@ -482,8 +523,8 @@ export interface SOCWriter extends SOCReader {
  * Options for epoch feed reader creation.
  */
 export interface FeedReaderOptions {
-  /** Feed topic (32 bytes). */
-  topic: Identifier | Uint8Array | string | BeeTopic
+  /** Feed topic (32 bytes), or an `AppSecret` the proxy turns into one (#889). */
+  topic: Identifier | Uint8Array | string | BeeTopic | AppSecret
   /** Optional feed owner address (20 bytes). */
   owner?: Address | Uint8Array | string
 }
@@ -492,10 +533,10 @@ export interface FeedReaderOptions {
  * Options for epoch feed writer creation.
  */
 export interface FeedWriterOptions {
-  /** Feed topic (32 bytes). */
-  topic: Identifier | Uint8Array | string | BeeTopic
-  /** Optional signer private key (32 bytes). */
-  signer?: BeePrivateKey | Uint8Array | string
+  /** Feed topic (32 bytes), or an `AppSecret` the proxy turns into one (#889). */
+  topic: Identifier | Uint8Array | string | BeeTopic | AppSecret
+  /** Optional signer private key (32 bytes), or an `AppSecret` the proxy signs with. */
+  signer?: BeePrivateKey | Uint8Array | string | AppSecret
 }
 
 /**
@@ -515,9 +556,9 @@ export interface EpochFeedUploadOptions {
   at?: bigint | number | string
   /**
    * The drive the update goes to, payload and SOC both (#862). Without it,
-   * `uploadOptions.batchID`, then the primary drive.
+   * `uploadOptions.driveId`, then the primary drive.
    */
-  batchID?: string
+  driveId?: string
   /** Optional upload options for the payload upload. */
   uploadOptions?: UploadOptions
   /** Whether to encrypt payload uploads (defaults to true). */
@@ -618,8 +659,8 @@ export interface FeedWriter extends FeedReader {
  * Options for sequential feed reader creation.
  */
 export interface SequentialFeedReaderOptions {
-  /** Feed topic (32 bytes). */
-  topic: Identifier | Uint8Array | string | BeeTopic
+  /** Feed topic (32 bytes), or an `AppSecret` the proxy turns into one (#889). */
+  topic: Identifier | Uint8Array | string | BeeTopic | AppSecret
   /** Optional feed owner address (20 bytes). */
   owner?: Address | Uint8Array | string
 }
@@ -628,10 +669,10 @@ export interface SequentialFeedReaderOptions {
  * Options for sequential feed writer creation.
  */
 export interface SequentialFeedWriterOptions {
-  /** Feed topic (32 bytes). */
-  topic: Identifier | Uint8Array | string | BeeTopic
-  /** Optional signer private key (32 bytes). */
-  signer?: BeePrivateKey | Uint8Array | string
+  /** Feed topic (32 bytes), or an `AppSecret` the proxy turns into one (#889). */
+  topic: Identifier | Uint8Array | string | BeeTopic | AppSecret
+  /** Optional signer private key (32 bytes), or an `AppSecret` the proxy signs with. */
+  signer?: BeePrivateKey | Uint8Array | string | AppSecret
 }
 
 /**
@@ -1136,12 +1177,24 @@ export const GsocSendMessageSchema = z.object({
 })
 
 // SOC (Single Owner Chunk) Message Schemas
+/**
+ * An `AppSecret` on the wire (#889): the label it was derived from. The proxy
+ * recomputes `HMAC(appSecret, label)` on use — as a feed topic
+ * (`keccak256` of it) or a signing key — so the bytes never cross to the page.
+ */
+export const DerivedRefSchema = z.object({ derived: z.string() })
+export type DerivedRef = z.infer<typeof DerivedRefSchema>
+export const TopicRefSchema = z.union([IdentifierSchema, DerivedRefSchema])
+export type TopicRef = z.infer<typeof TopicRefSchema>
+export const SignerRefSchema = z.union([PrivateKeySchema, DerivedRefSchema])
+export type SignerRef = z.infer<typeof SignerRefSchema>
+
 export const SocUploadMessageSchema = z.object({
   type: z.literal("socUpload"),
   requestId: z.string(),
   identifier: IdentifierSchema,
   data: z.instanceof(Uint8Array),
-  signer: PrivateKeySchema.optional(),
+  signer: SignerRefSchema.optional(),
   options: UploadOptionsSchema,
   requestOptions: RequestOptionsSchema,
 })
@@ -1151,7 +1204,7 @@ export const SocRawUploadMessageSchema = z.object({
   requestId: z.string(),
   identifier: IdentifierSchema,
   data: z.instanceof(Uint8Array),
-  signer: PrivateKeySchema.optional(),
+  signer: SignerRefSchema.optional(),
   options: UploadOptionsSchema,
   requestOptions: RequestOptionsSchema,
 })
@@ -1177,12 +1230,14 @@ export const SocRawDownloadMessageSchema = z.object({
 export const SocGetOwnerMessageSchema = z.object({
   type: z.literal("socGetOwner"),
   requestId: z.string(),
+  /** The owner of this signer instead of the app signer's (#889) */
+  signer: SignerRefSchema.optional(),
 })
 
 export const EpochFeedDownloadReferenceMessageSchema = z.object({
   type: z.literal("epochFeedDownloadReference"),
   requestId: z.string(),
-  topic: IdentifierSchema,
+  topic: TopicRefSchema,
   owner: AddressSchema.optional(),
   at: TimestampSchema,
   after: TimestampSchema.optional(),
@@ -1206,30 +1261,34 @@ export const EpochHintsSchema = z
 export const EpochFeedUploadReferenceMessageSchema = z.object({
   type: z.literal("epochFeedUploadReference"),
   requestId: z.string(),
-  topic: IdentifierSchema,
-  signer: PrivateKeySchema.optional(),
+  topic: TopicRefSchema,
+  signer: SignerRefSchema.optional(),
   at: TimestampSchema,
   reference: ReferenceSchema,
   encryptionKey: EncryptionKeySchema.optional(),
   hints: EpochHintsSchema,
-  batchID: DriveTargetSchema,
+  driveId: DriveTargetSchema,
   requestOptions: RequestOptionsSchema,
 })
 
 export const FeedGetOwnerMessageSchema = z.object({
   type: z.literal("feedGetOwner"),
   requestId: z.string(),
+  /** The owner of this signer instead of the app signer's (#889) */
+  signer: SignerRefSchema.optional(),
 })
 
 export const SequentialFeedGetOwnerMessageSchema = z.object({
   type: z.literal("seqFeedGetOwner"),
   requestId: z.string(),
+  /** The owner of this signer instead of the app signer's (#889) */
+  signer: SignerRefSchema.optional(),
 })
 
 export const SequentialFeedDownloadPayloadMessageSchema = z.object({
   type: z.literal("seqFeedDownloadPayload"),
   requestId: z.string(),
-  topic: IdentifierSchema,
+  topic: TopicRefSchema,
   owner: AddressSchema.optional(),
   index: FeedIndexSchema.optional(),
   at: TimestampSchema.optional(),
@@ -1242,7 +1301,7 @@ export const SequentialFeedDownloadPayloadMessageSchema = z.object({
 export const SequentialFeedDownloadRawPayloadMessageSchema = z.object({
   type: z.literal("seqFeedDownloadRawPayload"),
   requestId: z.string(),
-  topic: IdentifierSchema,
+  topic: TopicRefSchema,
   owner: AddressSchema.optional(),
   index: FeedIndexSchema.optional(),
   at: TimestampSchema.optional(),
@@ -1255,7 +1314,7 @@ export const SequentialFeedDownloadRawPayloadMessageSchema = z.object({
 export const SequentialFeedDownloadReferenceMessageSchema = z.object({
   type: z.literal("seqFeedDownloadReference"),
   requestId: z.string(),
-  topic: IdentifierSchema,
+  topic: TopicRefSchema,
   owner: AddressSchema.optional(),
   index: FeedIndexSchema.optional(),
   at: TimestampSchema.optional(),
@@ -1268,8 +1327,8 @@ export const SequentialFeedDownloadReferenceMessageSchema = z.object({
 export const SequentialFeedUploadPayloadMessageSchema = z.object({
   type: z.literal("seqFeedUploadPayload"),
   requestId: z.string(),
-  topic: IdentifierSchema,
-  signer: PrivateKeySchema.optional(),
+  topic: TopicRefSchema,
+  signer: SignerRefSchema.optional(),
   data: z.instanceof(Uint8Array),
   index: FeedIndexSchema.optional(),
   at: TimestampSchema.optional(),
@@ -1282,8 +1341,8 @@ export const SequentialFeedUploadPayloadMessageSchema = z.object({
 export const SequentialFeedUploadRawPayloadMessageSchema = z.object({
   type: z.literal("seqFeedUploadRawPayload"),
   requestId: z.string(),
-  topic: IdentifierSchema,
-  signer: PrivateKeySchema.optional(),
+  topic: TopicRefSchema,
+  signer: SignerRefSchema.optional(),
   data: z.instanceof(Uint8Array),
   index: FeedIndexSchema.optional(),
   at: TimestampSchema.optional(),
@@ -1297,8 +1356,8 @@ export const SequentialFeedUploadRawPayloadMessageSchema = z.object({
 export const SequentialFeedUploadReferenceMessageSchema = z.object({
   type: z.literal("seqFeedUploadReference"),
   requestId: z.string(),
-  topic: IdentifierSchema,
-  signer: PrivateKeySchema.optional(),
+  topic: TopicRefSchema,
+  signer: SignerRefSchema.optional(),
   reference: ReferenceSchema,
   index: FeedIndexSchema.optional(),
   at: TimestampSchema.optional(),
@@ -1312,7 +1371,7 @@ export const SequentialFeedUploadReferenceMessageSchema = z.object({
 export const CreateFeedManifestMessageSchema = z.object({
   type: z.literal("createFeedManifest"),
   requestId: z.string(),
-  topic: IdentifierSchema,
+  topic: TopicRefSchema,
   owner: AddressSchema.optional(),
   feedType: z.enum(["Sequence", "Epoch"]).optional(),
   uploadOptions: UploadOptionsSchema,
@@ -1345,7 +1404,7 @@ export const ActAddGranteesMessageSchema = z.object({
   requestId: z.string(),
   historyReference: ReferenceSchema,
   grantees: z.array(z.string()), // Compressed public keys to add
-  batchID: DriveTargetSchema,
+  driveId: DriveTargetSchema,
   requestOptions: RequestOptionsSchema,
 })
 
@@ -1355,7 +1414,7 @@ export const ActRevokeGranteesMessageSchema = z.object({
   historyReference: ReferenceSchema,
   encryptedReference: ReferenceSchema, // Needed for key rotation
   revokeGrantees: z.array(z.string()), // Compressed public keys to revoke
-  batchID: DriveTargetSchema,
+  driveId: DriveTargetSchema,
   requestOptions: RequestOptionsSchema,
 })
 
@@ -1366,9 +1425,11 @@ export const ActGetGranteesMessageSchema = z.object({
   requestOptions: RequestOptionsSchema,
 })
 
-export const GetPostageBatchMessageSchema = z.object({
-  type: z.literal("getPostageBatch"),
+/** The postage batch behind a drive, under `revealSecrets` (#746) */
+export const RevealPostageBatchMessageSchema = z.object({
+  type: z.literal("revealPostageBatch"),
   requestId: z.string(),
+  driveId: BatchIdSchema,
 })
 
 export const GetDrivesMessageSchema = z.object({
@@ -1438,7 +1499,7 @@ export const ParentToIframeMessageSchema = z.discriminatedUnion("type", [
   ActAddGranteesMessageSchema,
   ActRevokeGranteesMessageSchema,
   ActGetGranteesMessageSchema,
-  GetPostageBatchMessageSchema,
+  RevealPostageBatchMessageSchema,
   GetDrivesMessageSchema,
   GetPermissionsMessageSchema,
   ConnectMessageSchema,
@@ -1508,8 +1569,8 @@ export type ActRevokeGranteesMessage = z.infer<
   typeof ActRevokeGranteesMessageSchema
 >
 export type ActGetGranteesMessage = z.infer<typeof ActGetGranteesMessageSchema>
-export type GetPostageBatchMessage = z.infer<
-  typeof GetPostageBatchMessageSchema
+export type RevealPostageBatchMessage = z.infer<
+  typeof RevealPostageBatchMessageSchema
 >
 export type GetDrivesMessage = z.infer<typeof GetDrivesMessageSchema>
 export type GetPermissionsMessage = z.infer<typeof GetPermissionsMessageSchema>
@@ -1940,16 +2001,16 @@ export const ActGetGranteesResponseMessageSchema = z.object({
   grantees: z.array(z.string()),
 })
 
-export const GetPostageBatchResponseMessageSchema = z.object({
-  type: z.literal("getPostageBatchResponse"),
+export const RevealPostageBatchResponseMessageSchema = z.object({
+  type: z.literal("revealPostageBatchResponse"),
   requestId: z.string(),
-  postageBatch: PostageBatchSchema.optional(),
+  postageBatch: PostageBatchSchema,
 })
 
 export const GetDrivesResponseMessageSchema = z.object({
   type: z.literal("getDrivesResponse"),
   requestId: z.string(),
-  drives: z.array(DriveSchema),
+  drives: z.array(DriveRowSchema),
 })
 
 export const GetPermissionsResponseMessageSchema = z.object({
@@ -2009,7 +2070,7 @@ export const IframeToParentMessageSchema = z.discriminatedUnion("type", [
   ActAddGranteesResponseMessageSchema,
   ActRevokeGranteesResponseMessageSchema,
   ActGetGranteesResponseMessageSchema,
-  GetPostageBatchResponseMessageSchema,
+  RevealPostageBatchResponseMessageSchema,
   GetDrivesResponseMessageSchema,
   GetPermissionsResponseMessageSchema,
   RequestPermissionsResponseMessageSchema,
@@ -2134,8 +2195,8 @@ export type ActRevokeGranteesResponseMessage = z.infer<
 export type ActGetGranteesResponseMessage = z.infer<
   typeof ActGetGranteesResponseMessageSchema
 >
-export type GetPostageBatchResponseMessage = z.infer<
-  typeof GetPostageBatchResponseMessageSchema
+export type RevealPostageBatchResponseMessage = z.infer<
+  typeof RevealPostageBatchResponseMessageSchema
 >
 export type GetDrivesResponseMessage = z.infer<
   typeof GetDrivesResponseMessageSchema
