@@ -1390,10 +1390,7 @@ export class SwarmIdProxy {
       clearTimeout(this.publishTimer)
       this.publishTimer = undefined
     }
-    if (this.rosterRetryTimer !== undefined) {
-      clearTimeout(this.rosterRetryTimer)
-      this.rosterRetryTimer = undefined
-    }
+    this.clearRosterRetry()
 
     // Retire any join still deriving its key — its continuation would
     // otherwise attach a freshly-opened socket to the bus we are closing,
@@ -2054,6 +2051,16 @@ export class SwarmIdProxy {
    * operation so acquire / refresh / validate never disagree about who we
    * are (which previously caused false "reclaimed by another device").
    */
+  /** Drop a pending roster-append retry (#920) and its backoff, so the next
+   *  session on this proxy starts over at the base delay. */
+  private clearRosterRetry(): void {
+    if (this.rosterRetryTimer !== undefined) {
+      clearTimeout(this.rosterRetryTimer)
+      this.rosterRetryTimer = undefined
+    }
+    this.rosterRetryAttempt = 0
+  }
+
   private requireDeviceId(): string {
     if (!this.deviceId) this.deviceId = getOrCreateDeviceId()
     return this.deviceId
@@ -3131,6 +3138,14 @@ export class SwarmIdProxy {
       if (published.status === "partial") {
         // The roster append was skipped (#920). Re-run the announce path with
         // backoff: it re-reads the roster and appends once the scan is clean.
+        //
+        // Only while this session still holds a partition: the guard at the
+        // top of this method drops a retry that fires after the lease idled
+        // out (the first retry lands at `IDLE_YIELD_MS`), and the retry does
+        // not acquire one just to announce. The next acquire's own
+        // `onLeaseAcquired` announce re-reads the roster and appends then —
+        // the gap is this device's roster entry, not the account, which the
+        // identity UI's `syncAccount` retry keeps reachable.
         const delay = rosterRetryDelayMs(this.rosterRetryAttempt++)
         console.warn(`[Proxy] ${published.warning}; retrying in ${delay}ms`)
         if (this.rosterRetryTimer !== undefined)
@@ -3362,10 +3377,7 @@ export class SwarmIdProxy {
       clearTimeout(this.publishTimer)
       this.publishTimer = undefined
     }
-    if (this.rosterRetryTimer !== undefined) {
-      clearTimeout(this.rosterRetryTimer)
-      this.rosterRetryTimer = undefined
-    }
+    this.clearRosterRetry()
     this.pendingLaneUpdates.clear()
     this.storagePartitioned = false
     this.partitionAccount = undefined
