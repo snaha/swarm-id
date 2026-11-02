@@ -20,6 +20,7 @@ export type {
   Avatar,
   AvatarSource,
   PostageBatch,
+  BatchTTLSource,
   Drive,
   DriveKind,
   DriveRequest,

@@ -346,7 +346,7 @@ describe("fetchAuthoritativeBatchTTL", () => {
 
     const ttl = await fetchAuthoritativeBatchTTL(RPC, BEE, BATCH_ID)
 
-    expect(ttl).toBe(EXPECTED_TTL_SECONDS)
+    expect(ttl).toEqual({ batchTTL: EXPECTED_TTL_SECONDS, source: "chain" })
   })
 
   it("falls back to the Bee node batchTTL when the contract read fails", async () => {
@@ -358,7 +358,7 @@ describe("fetchAuthoritativeBatchTTL", () => {
 
     const ttl = await fetchAuthoritativeBatchTTL(RPC, BEE, BATCH_ID)
 
-    expect(ttl).toBe(86400)
+    expect(ttl).toEqual({ batchTTL: 86400, source: "bee" })
   })
 
   it("returns undefined when both sources fail", async () => {

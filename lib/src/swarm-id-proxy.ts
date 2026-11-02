@@ -59,6 +59,7 @@ import type {
   PartitionSession,
 } from "./types"
 import {
+  type BatchTTLSource,
   ParentToIframeMessageSchema,
   ParentIdentifyMessageSchema,
   PopupToIframeMessageSchema,
@@ -119,6 +120,8 @@ import {
   remainingLifespanSeconds,
   sameStampLifetime,
   stampRefusal,
+  type StampLifetimeFields,
+  type StampRefusal,
 } from "./utils/stamp-lifespan"
 import {
   accountStateToDeviceView,
@@ -180,6 +183,7 @@ import {
   fetchSwarmPrice,
 } from "./utils/ttl"
 import {
+  type BatchTTLReading,
   fetchAuthoritativeBatchTTL,
   POSTAGE_STAMP_CONTRACT_ADDRESS,
 } from "./utils/postage-contract"
@@ -248,9 +252,17 @@ function newLeaseRequestId(): string {
 const DEFAULT_ACT_FILENAME = "index.bin"
 const DEFAULT_ACT_CONTENT_TYPE = "application/octet-stream"
 const SEQUENTIAL_INDEX_LOOKUP_TIMEOUT_MS = 2000
-/** The longest delay `setTimeout` holds; a longer lifetime re-arms from its tick. */
-const MAX_TIMER_MS = 2 ** 31 - 1
 const MS_PER_SECOND = 1000
+/**
+ * How often a drive's lifetime is re-read from the chain (#927): halfway to
+ * its stored expiry — no sooner than a minute, no later than six hours — and
+ * at the expiry itself when that comes first.
+ * The oracle moves the price by at most ±0.08 % a round (≈12.7 min), about
+ * ±9.5 % a day compounded, so six hours bounds the drift at about 2.4 %, and
+ * the halving tightens the reads as the expiry nears.
+ */
+const REMEASURE_MIN_MS = 60 * MS_PER_SECOND
+const REMEASURE_MAX_MS = 6 * 60 * 60 * MS_PER_SECOND
 
 /**
  * localStorage key holding optional partition-coordination timing overrides
@@ -353,6 +365,21 @@ export class SwarmIdProxy {
   private lastDriveState: string | undefined
   /** Armed for the earliest expiry among the granted drives (#793), see `armExpiryTimer`. */
   private expiryTimer: ReturnType<typeof setTimeout> | undefined
+  /** When the pending `expiryTimer` fires, so a re-arm keeps the earlier of two. */
+  private expiryDueAt = 0
+  /**
+   * What the chain last said about each granted drive's lifetime (#927), by
+   * batch id: a remaining-seconds reading, when it was taken, and the
+   * measurement instant of the record it was taken over. Laid over the stored
+   * record for as long as that record stands (`lifetimeOf`), so the refusal,
+   * the expiry timer and `getDrives()` all follow one reading. Never written
+   * back: the record is the identity UI's.
+   */
+  private liveLifetimes = new Map<
+    string,
+    { batchTTL: number; measuredAt: number; recordMeasuredAt: number }
+  >()
+  private destroyed = false
   /** The primary drive's batch: where a write that names no drive goes. */
   private primaryBatchId: string | undefined
   private storagePartitioned: boolean = false
@@ -875,27 +902,131 @@ export class SwarmIdProxy {
    * so the flip to `stamp-expired` reaches the dApp at the stored expiry
    * rather than on the next unrelated event (#793, #933). Re-armed as drives
    * come and go (`reconcileDrives`), cleared with them (`teardownDrives`), and
-   * re-armed from its own tick when a lifetime outlasts what a timer can
-   * hold. The stored expiry is exact only until the chain's price moves
-   * (#927), and a hidden tab's timers are throttled, so "at" means within
+   * re-armed from its own tick.
+   *
+   * A stored expiry is exact only until the chain's price moves, so the tick
+   * comes earlier than the expiry — halfway there, within
+   * `REMEASURE_MIN_MS`..`REMEASURE_MAX_MS`, or at the expiry itself when that
+   * is sooner — and every tick re-reads the chain
+   * before it trusts the record (#927): a price rise is caught early, and a
+   * price fall or a top-up made elsewhere does not refuse a drive the chain
+   * still funds. A hidden tab's timers are throttled, so "at" means within
    * about a minute.
    */
   private armExpiryTimer(): void {
-    clearTimeout(this.expiryTimer)
-    this.expiryTimer = undefined
     const now = Date.now()
-    const [next] = this.lookupDrivesForApp()
-      .granted.map((stamp) => remainingLifespanSeconds(stamp, now))
+    const { granted } = this.lookupDrivesForApp()
+    if (granted.length === 0) {
+      clearTimeout(this.expiryTimer)
+      this.expiryTimer = undefined
+      return
+    }
+    const [next] = granted
+      .map((stamp) =>
+        remainingLifespanSeconds(
+          this.lifetimeOf(stamp.batchID.toHex(), stamp),
+          now,
+        ),
+      )
       .filter((left): left is number => left !== undefined && left > 0)
       .sort((a, b) => a - b)
-    if (next === undefined) return
-    this.expiryTimer = setTimeout(
-      () => {
-        this.emitConnectionInfoIfChanged()
-        this.armExpiryTimer()
-      },
-      Math.min(next * MS_PER_SECOND, MAX_TIMER_MS),
+    // An unmeasured drive, or one already run out, is still re-read at the cap.
+    const untilExpiry = next === undefined ? Infinity : next * MS_PER_SECOND
+    const untilRemeasure = Math.min(
+      Math.max(untilExpiry / 2, REMEASURE_MIN_MS),
+      REMEASURE_MAX_MS,
     )
+    const delay = Math.min(untilExpiry, untilRemeasure)
+    // Keep an earlier tick already pending: an early one only re-reads, and
+    // re-arming from now on every `getPostageBatch()` would keep pushing a
+    // halfway re-read of the other drives back.
+    if (this.expiryTimer !== undefined && this.expiryDueAt <= now + delay) {
+      return
+    }
+    clearTimeout(this.expiryTimer)
+    this.expiryDueAt = now + delay
+    this.expiryTimer = setTimeout(() => {
+      this.expiryTimer = undefined
+      void this.onExpiryTick()
+    }, delay)
+  }
+
+  /**
+   * Re-read every granted drive, then announce what moved and re-arm. The
+   * reads swallow their own failures; this catches anyway, because a throw
+   * here would end expiry tracking for the session with nothing to show.
+   */
+  private async onExpiryTick(): Promise<void> {
+    try {
+      // ponytail: every granted drive, not only the one nearest expiry; a
+      // grant is a handful of drives and the reads go out as one batch each.
+      await Promise.all(
+        this.lookupDrivesForApp().granted.map((stamp) =>
+          this.measureLifetime(stamp),
+        ),
+      )
+    } catch (error) {
+      console.warn("[Proxy] Re-reading drive lifetimes failed:", error)
+    }
+    if (this.destroyed) return
+    this.adoptLifetimeReadings()
+  }
+
+  /** Let the refusal and the expiry timer follow the latest chain readings. */
+  private adoptLifetimeReadings(): void {
+    this.emitConnectionInfoIfChanged()
+    this.armExpiryTimer()
+  }
+
+  /**
+   * One authoritative read of a drive's remaining lifetime (#927): the
+   * PostageStamp contract, then the Bee node. A reading is kept in
+   * `liveLifetimes`; a failed read keeps whatever was known.
+   */
+  private async measureLifetime(
+    stamp: PostageStamp,
+  ): Promise<(BatchTTLReading & { measuredAt: number }) | undefined> {
+    const batchId = stamp.batchID.toHex()
+    const measuredAt = Date.now()
+    const reading = await fetchAuthoritativeBatchTTL(
+      this.gnosisRpcUrl,
+      this.beeApiUrl,
+      batchId,
+      this.postageStampContractAddress,
+    )
+    if (reading === undefined) return undefined
+    this.liveLifetimes.set(batchId, {
+      batchTTL: reading.batchTTL,
+      measuredAt,
+      recordMeasuredAt: stamp.updatedAt ?? stamp.createdAt,
+    })
+    return { ...reading, measuredAt }
+  }
+
+  /**
+   * The stored lifetime with the chain's reading laid over it, for as long as
+   * the record is the one the reading was taken over: a renewal or a
+   * reconcile written since is the fresher of the two. Matched by the
+   * record's own measurement instant, not by comparing clocks, so a top-up
+   * recorded on a device whose clock runs behind still displaces the reading.
+   */
+  private lifetimeOf(
+    batchId: string,
+    stored: StampLifetimeFields,
+  ): StampLifetimeFields {
+    const live = this.liveLifetimes.get(batchId)
+    if (
+      !live ||
+      live.recordMeasuredAt !== (stored.updatedAt ?? stored.createdAt)
+    ) {
+      return stored
+    }
+    return { ...stored, batchTTL: live.batchTTL, updatedAt: live.measuredAt }
+  }
+
+  /** Why the session refuses to stamp with `drive`, if it does. */
+  private refusalOf(drive: DriveWritePath): StampRefusal | undefined {
+    return stampRefusal(this.lifetimeOf(drive.batchId, drive.lifetime))
   }
 
   /**
@@ -910,6 +1041,7 @@ export class SwarmIdProxy {
     this.primaryBatchId = undefined
     clearTimeout(this.expiryTimer)
     this.expiryTimer = undefined
+    this.liveLifetimes.clear()
   }
 
   /** Tear everything down and build the write paths afresh. */
@@ -1432,6 +1564,7 @@ export class SwarmIdProxy {
 
     // Release the partition leases (best-effort) so peers see this device
     // vacate its partitions promptly.
+    this.destroyed = true
     // Also clears the expiry timer: nothing is left to expire.
     this.teardownDrives()
     this.cancelScheduledPublish()
@@ -2234,7 +2367,7 @@ export class SwarmIdProxy {
    * persist.
    */
   private async saveStamperStateIfNeeded(drive: DriveWritePath): Promise<void> {
-    if (this.subsidisedGatewayUrl && drive.refusal) return
+    if (this.subsidisedGatewayUrl && this.refusalOf(drive)) return
     await this.saveStamperState(drive)
   }
 
@@ -3510,7 +3643,7 @@ export class SwarmIdProxy {
    * contention (#745).
    */
   private refuseDrive(drive: DriveWritePath): void {
-    const refusal = drive.refusal
+    const refusal = this.refusalOf(drive)
     if (refusal === "stamp-expired") {
       throw new SwarmIdError(
         "upload-unavailable",
@@ -3537,7 +3670,7 @@ export class SwarmIdProxy {
     // the stamps over, so a partitioned session resolves its own like any other.
     if (!this.drive) return false
     // The drive has expired, or its record says the node cannot use it.
-    if (this.drive.refusal) return false
+    if (this.refusalOf(this.drive)) return false
     // The stamp resolved but no stamper was built from it, a state the proxy
     // really reaches: `initializeStamper` logs and returns rather than
     // throwing, and the stamp is set before an init's first await. The
@@ -3722,7 +3855,7 @@ export class SwarmIdProxy {
   private uploadUnavailableReason(): UploadUnavailableReason | undefined {
     if (!this.authenticated || !this.appSecret) return undefined
     if (!this.drive) return "no-stamp"
-    const refusal = this.drive.refusal
+    const refusal = this.refusalOf(this.drive)
     if (refusal) return refusal
     // The stamp resolved and the write path still did not build:
     // `initializeStamper` logs and returns rather than throwing, so this is the
@@ -3743,7 +3876,10 @@ export class SwarmIdProxy {
   private driveState(): string {
     const { primary, granted } = this.lookupDrivesForApp()
     const drives = granted
-      .map((stamp) => `${stamp.batchID.toHex()}:${stampRefusal(stamp)}`)
+      .map(
+        (stamp) =>
+          `${stamp.batchID.toHex()}:${stampRefusal(this.lifetimeOf(stamp.batchID.toHex(), stamp))}`,
+      )
       .sort()
     const lanes = [...this.drives.values()]
       .map((drive) => `${drive.batchId}@${drive.coordinator?.currentPartition}`)
@@ -6108,6 +6244,7 @@ export class SwarmIdProxy {
       requestId: message.requestId,
       postageBatch: stamp ? await this.describeStamp(stamp) : undefined,
     })
+    this.adoptLifetimeReadings()
   }
 
   /** Every drive the app was granted, the primary marked (#862). */
@@ -6132,6 +6269,9 @@ export class SwarmIdProxy {
       requestId: message.requestId,
       drives,
     })
+    // After the answer, so a change this read turned up follows the drives
+    // the dApp was just given rather than interleaving with them.
+    this.adoptLifetimeReadings()
   }
 
   private handleGetPermissions(
@@ -6175,16 +6315,21 @@ export class SwarmIdProxy {
     // the Bee node's batchTTL. Fall back to the Swarmscan-price approximation
     // only when neither authoritative source can answer (e.g. RPC unreachable
     // and a public gateway that does not track the batch).
-    let batchTTL: number | undefined = await fetchAuthoritativeBatchTTL(
-      this.gnosisRpcUrl,
-      this.beeApiUrl,
-      stamp.batchID.toHex(),
-      this.postageStampContractAddress,
-    )
-    if (batchTTL === undefined) {
+    // The reading is kept, so the refusal and the expiry timer follow what the
+    // dApp is told (#927); the caller adopts it once the answer is out. The
+    // dApp is also told where the figure came from and when, so it can show
+    // an estimate as one and age the rest.
+    let lifetime:
+      | { batchTTL: number; source: BatchTTLSource; measuredAt: number }
+      | undefined = await this.measureLifetime(stamp)
+    if (lifetime === undefined) {
       try {
         const pricePerGBPerMonth = await fetchSwarmPrice()
-        batchTTL = calculateTTLSeconds(stamp.amount, pricePerGBPerMonth)
+        lifetime = {
+          batchTTL: calculateTTLSeconds(stamp.amount, pricePerGBPerMonth),
+          source: "estimate",
+          measuredAt: Date.now(),
+        }
       } catch (error) {
         console.warn("[Proxy] Failed to calculate TTL:", error)
       }
@@ -6201,7 +6346,9 @@ export class SwarmIdProxy {
       blockNumber: stamp.blockNumber,
       immutableFlag: stamp.immutableFlag,
       exists: details?.exists ?? stamp.exists,
-      batchTTL,
+      batchTTL: lifetime?.batchTTL,
+      batchTTLSource: lifetime?.source,
+      batchTTLMeasuredAt: lifetime?.measuredAt,
     }
   }
 

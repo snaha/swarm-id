@@ -285,6 +285,10 @@ export const FileDataSchema = z.object({
   data: z.instanceof(Uint8Array),
 })
 
+/** Where a `batchTTL` came from: exact from the chain or Bee, a guess otherwise */
+export const BatchTTLSourceSchema = z.enum(["chain", "bee", "estimate"])
+export type BatchTTLSource = z.infer<typeof BatchTTLSourceSchema>
+
 export const PostageBatchSchema = z.object({
   batchID: BatchIdSchema,
   /**
@@ -301,7 +305,17 @@ export const PostageBatchSchema = z.object({
   blockNumber: z.number(),
   immutableFlag: z.boolean(),
   exists: z.boolean(),
+  /**
+   * Remaining lifetime in seconds, as of `batchTTLMeasuredAt`: read from the
+   * PostageStamp contract (`chain`) or the Bee node (`bee`) on every call, or
+   * failing both an estimate from the batch's purchase amount and the current
+   * price (`estimate`), which knows nothing of top-ups, dilutes or price moves
+   * since. `batchTTLSource` says which (#927).
+   */
   batchTTL: z.number().optional(),
+  batchTTLSource: BatchTTLSourceSchema.optional(),
+  /** When `batchTTL` was measured, ms since the epoch; present with it */
+  batchTTLMeasuredAt: z.number().optional(),
 })
 
 export type UploadResult = z.infer<typeof UploadResultSchema>

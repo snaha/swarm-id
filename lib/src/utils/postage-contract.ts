@@ -21,6 +21,7 @@
 
 import { fetchBatchTTL, GNOSIS_BLOCK_TIME } from "./ttl"
 import { CHAIN_READ_TIMEOUT_MS, jsonRpcBatch } from "./json-rpc"
+import type { BatchTTLSource } from "../types"
 
 /**
  * PostageStamp contract address on Gnosis Chain. Lowercased — RPC nodes accept
@@ -344,22 +345,35 @@ export async function fetchBatchTTLFromContract(
  *          honoured when `gnosisRpcUrl` targets a local node; against any remote
  *          RPC the Gnosis mainnet deployment is used regardless (see
  *          {@link resolvePostageStampContractAddress}).
- * @returns Remaining TTL in seconds, or `undefined` if neither source can answer.
+ * @returns The remaining TTL in seconds with its source, or `undefined` if
+ *          neither source can answer.
  */
 export async function fetchAuthoritativeBatchTTL(
   gnosisRpcUrl: string,
   beeUrl: string,
   batchId: string,
   localContractAddress?: string,
-): Promise<number | undefined> {
+): Promise<BatchTTLReading | undefined> {
   const contractAddress = resolvePostageStampContractAddress(
     gnosisRpcUrl,
     localContractAddress,
   )
-  return (
-    (await fetchBatchTTLFromContract(gnosisRpcUrl, batchId, contractAddress)) ??
-    (await fetchBatchTTL(beeUrl, batchId))
+  const fromChain = await fetchBatchTTLFromContract(
+    gnosisRpcUrl,
+    batchId,
+    contractAddress,
   )
+  if (fromChain !== undefined) return { batchTTL: fromChain, source: "chain" }
+  const fromBee = await fetchBatchTTL(beeUrl, batchId)
+  return fromBee === undefined
+    ? undefined
+    : { batchTTL: fromBee, source: "bee" }
+}
+
+/** A remaining lifetime in seconds, and which authoritative source said so. */
+export interface BatchTTLReading {
+  batchTTL: number
+  source: Extract<BatchTTLSource, "chain" | "bee">
 }
 
 /**
