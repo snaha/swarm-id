@@ -456,6 +456,7 @@ describe("SwarmIdProxy auth button", () => {
     authenticated: boolean
     authLoading: boolean
     isConnecting: boolean
+    parentOrigin: string | undefined
     showAuthButton: () => void
     openAuthPopup: () => boolean
     clearAuthData: () => void
@@ -613,6 +614,24 @@ describe("SwarmIdProxy auth button", () => {
       textContent: "@keyframes spin { to { transform: rotate(360deg); } }",
     })
     expect(openAuthPopup).toHaveBeenCalledOnce()
+  })
+
+  // Mobile Safari blocks the popup more often than not; the user must get a
+  // button to try again, not a spinner that never stops.
+  it("puts the connect button back when the popup is blocked", () => {
+    vi.stubGlobal("window", {
+      ...window,
+      location: { origin: "https://id.example.com", pathname: "/proxy" },
+      open: vi.fn(() => undefined),
+    })
+    internal.parentOrigin = "https://app.example.com"
+    show({ authenticated: false, authLoading: false }).click()
+
+    expect(window.open).toHaveBeenCalledOnce()
+    expect(internal.isConnecting).toBe(false)
+    expect(buttons).toHaveLength(2)
+    expect(buttons[1].textContent).toBe("🔐 Login with Swarm ID")
+    expect(buttons[1].disabled).toBe(false)
   })
 
   it("adds the spinner style only once", () => {
