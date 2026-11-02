@@ -153,6 +153,9 @@ let stamp = $state<StampInfo | undefined>(undefined)
 let drives = $state<Drive[]>([])
 // The sharing switches (#885), off the snapshot: the user flips them in Swarm ID.
 let permissions = $state<AppPermissions | undefined>(undefined)
+// Which identity site the client is running against (#849): the configured
+// one, or the one the user chose on the connect screen.
+let identitySite = $state<string | undefined>(undefined)
 let targetBatchID = $state<string | undefined>(undefined)
 let partition = $state<number | undefined>(undefined)
 let deferred = $state(false)
@@ -308,6 +311,10 @@ async function onConnectionChange(info: ConnectionInfo) {
   logStore.log(`Connection info: canUpload=${info.canUpload}, identity=${loggableIdentity}`)
   partition = info.partition
   permissions = info.permissions
+  if (info.identitySite !== identitySite) {
+    logStore.log(`Identity site: ${info.identitySite}`)
+    identitySite = info.identitySite
+  }
 
   if (isAuthenticated && !info.canUpload) {
     // Say which of the three it is rather than guessing from `storagePartitioned`:
@@ -544,6 +551,17 @@ export const clientStore = {
   },
   get permissions() {
     return permissions
+  },
+  get identitySite() {
+    return identitySite
+  },
+  /** Whether the user chose a site other than the one this demo is configured with (#849). */
+  get identitySiteChosen() {
+    return identitySite !== undefined && identitySite !== resolveProxyOrigin()
+  },
+  /** Back to the configured site: forgets the choice and re-embeds the proxy. */
+  async useDefaultIdentitySite() {
+    await client?.useIdentitySite(undefined)
   },
   /**
    * Ask the user for more (#711, #885): opens the "Permissions for Swarm ID

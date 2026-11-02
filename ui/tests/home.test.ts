@@ -97,7 +97,7 @@ test('the URL hash selects a tab and opens what it names', async ({ page }) => {
 
 // Frame 157 (#892). Chain-free: the two expired drives are written straight
 // into the stored account, the default one among them.
-test('expired drives are alerted on every tab until dismissed', async ({ page }) => {
+test('expired drives are alerted on every tab until dismissed', async ({ page, context }) => {
   await seedNoChain(page)
   await page.goto('/?signin')
   await completeCreateFlow(page)
@@ -149,6 +149,23 @@ test('expired drives are alerted on every tab until dismissed', async ({ page })
   await expect(page.getByText('Drive expired')).toHaveCount(2)
 
   // The connect popup's account chooser flags the account too (Frame 148).
-  await page.goto('/connect#origin=https%3A%2F%2Fapp.example')
-  await expect(page.getByRole('button', { name: 'Drive expired' })).toBeVisible()
+  // Opened from this page, which answers the popup's opener check (#915) the
+  // way the proxy iframe does: from the identity origin, vouching for the app.
+  await page.evaluate(() =>
+    window.addEventListener('message', (event) => {
+      if (event.data?.type !== 'openerCheck') return
+      ;(event.source as Window).postMessage(
+        {
+          type: 'openerCheckResponse',
+          nonce: event.data.nonce,
+          parentOrigin: 'https://app.example',
+        },
+        event.origin,
+      )
+    }),
+  )
+  const opened = context.waitForEvent('page')
+  await page.evaluate(() => window.open('/connect#origin=https%3A%2F%2Fapp.example'))
+  const popup = await opened
+  await expect(popup.getByRole('button', { name: 'Drive expired' })).toBeVisible()
 })

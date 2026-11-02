@@ -105,6 +105,21 @@ importers:
         specifier: 4.0.14
         version: 4.0.14(@types/node@24.10.1)(@vitest/ui@4.0.16)(jiti@2.6.1)(lightningcss@1.32.0)(terser@5.44.1)(tsx@4.23.12)
 
+  demo-mini:
+    devDependencies:
+      '@snaha/swarm-id':
+        specifier: workspace:*
+        version: link:../lib
+      prettier:
+        specifier: 3.7.3
+        version: 3.7.3
+      typescript:
+        specifier: 5.8.3
+        version: 5.8.3
+      vite:
+        specifier: 7.2.6
+        version: 7.2.6(@types/node@24.10.1)(jiti@2.6.1)(lightningcss@1.32.0)(terser@5.44.1)(tsx@4.23.12)
+
   docs-site:
     devDependencies:
       '@astrojs/starlight':

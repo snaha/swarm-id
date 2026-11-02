@@ -42,6 +42,7 @@ export default defineConfig({
             { label: 'Subsidised Gateway', slug: 'subsidised-gateway' },
             { label: 'Drives & Permissions', slug: 'drives-and-permissions' },
             { label: 'The Public Gateway', slug: 'public-gateway' },
+            { label: 'Using Your Own Identity Site', slug: 'identity-sites' },
             { label: 'Self-Hosting the Identity Site', slug: 'self-hosting' },
             { label: 'Using Your Own Bee Node', slug: 'own-bee-node' },
             { label: 'Local Development', slug: 'local-development' },

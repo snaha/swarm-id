@@ -3,6 +3,7 @@ packages:
   - 'multichain'
   - 'signaling'
   - 'demo'
+  - 'demo-mini'
   - 'ui'
   - 'docs-site'
   - 'eslint-rules'

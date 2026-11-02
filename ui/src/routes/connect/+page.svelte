@@ -8,6 +8,7 @@
 
   import ChevronLeft from '@lucide/svelte/icons/chevron-left'
   import CircleAlert from '@lucide/svelte/icons/circle-alert'
+  import { IDENTITY_SITE_STORAGE_KEY, isHttpUrl } from '@snaha/swarm-id/internal'
 
   import { goto } from '$app/navigation'
   import { resolve } from '$app/paths'
@@ -19,9 +20,11 @@
   import UserAddFill from '$lib/components/icons/user-add-fill.svelte'
   import SignBackInDialog from '$lib/components/sign-back-in-dialog.svelte'
   import { Button } from '$lib/components/ui/button'
+  import { Input } from '$lib/components/ui/input'
   import UnlockDialog from '$lib/components/unlock-dialog.svelte'
-  import { deriveAppSecret, reusableAppSecret } from '$lib/connect-handshake'
+  import { chooseIdentitySite, deriveAppSecret, reusableAppSecret } from '$lib/connect-handshake'
   import { type DriveAttention, driveAttentionDescription } from '$lib/drives'
+  import { verifyOpener } from '$lib/opener-check'
   import routes from '$lib/routes'
   import { accountsStore } from '$lib/stores/accounts.svelte'
   import { connectStore } from '$lib/stores/connect.svelte'
@@ -29,6 +32,11 @@
   import type { Account } from '$lib/types'
 
   let missingRequest = $state(false)
+  /**
+   * Whether the request comes from the app it names (#915): undefined while
+   * the opener is asked, and nothing is shown or granted until it says so.
+   */
+  let openerVerified = $state<boolean | undefined>(undefined)
   /** Account being unlocked to approve the connection. */
   let unlocking = $state<Account | undefined>(undefined)
   /** Signed-out account being unlocked to see the drive needing attention,
@@ -37,6 +45,14 @@
   let checkingDrive = $state<{ account: Account; attention: DriveAttention } | undefined>(undefined)
   /** Shows the create/import choice while other accounts exist on the device. */
   let addingAccount = $state(false)
+  /** The "use another identity site" form (#849): open, and what is typed in it. */
+  let choosingSite = $state(false)
+  let siteUrl = $state('')
+  const siteUrlValid = $derived(isHttpUrl(siteUrl.trim()))
+  /** The site chosen on an earlier connect on this device, offered instead of the form. */
+  let rememberedSite = $state<string | undefined>(undefined)
+  /** The user answered the warning about a chosen site that did not come up (#849). */
+  let failedSiteAnswered = $state(false)
 
   const request = $derived(connectStore.request)
   const appIcon = $derived(
@@ -66,6 +82,16 @@
 
   onMount(() => {
     missingRequest = !connectStore.initFromHash(window.location.hash)
+    const appOrigin = connectStore.request?.appOrigin
+    if (appOrigin !== undefined) {
+      void verifyOpener(appOrigin).then((verified) => (openerVerified = verified))
+    }
+    try {
+      const stored = localStorage.getItem(IDENTITY_SITE_STORAGE_KEY)
+      rememberedSite = stored !== null && isHttpUrl(stored) ? stored : undefined
+    } catch {
+      rememberedSite = undefined
+    }
   })
 
   async function select(account: Account) {
@@ -117,6 +143,30 @@
     addingAccount = true
   }
 
+  function submitSite() {
+    if (request && siteUrlValid) {
+      chooseIdentitySite(request, siteUrl.trim().replace(/\/+$/, ''))
+    }
+  }
+
+  /** Stay on this site after the warning: stop sending apps to the failed one. */
+  function useThisSite() {
+    if (rememberedSite === request?.failedSite) {
+      forgetSite()
+    }
+    failedSiteAnswered = true
+  }
+
+  /** Decline the remembered site, here and for the next app. */
+  function forgetSite() {
+    try {
+      localStorage.removeItem(IDENTITY_SITE_STORAGE_KEY)
+    } catch {
+      // Storage unavailable: there was nothing remembered to forget.
+    }
+    rememberedSite = undefined
+  }
+
   /**
    * Drive warning on a row: open that account's Storage tab in a NEW
    * window — navigating this popup away would lose the connect request
@@ -149,7 +199,17 @@
           </div>
         </div>
       </div>
-    {:else if request}
+    {:else if openerVerified === false}
+      <div class="flex w-full max-w-96 flex-col items-center gap-8">
+        <div class="flex flex-col items-center gap-2">
+          <CircleAlert class="text-destructive size-5" />
+          <div class="flex flex-col items-center text-center">
+            <p class="text-sm font-bold">This connection request could not be verified</p>
+            <p class="text-sm">Open this page from the app you want to connect to Swarm ID.</p>
+          </div>
+        </div>
+      </div>
+    {:else if request && openerVerified}
       <div class="flex w-full max-w-96 flex-col items-center gap-8">
         {#if addingAccount && accounts.length > 0}
           <Button
@@ -170,6 +230,63 @@
             <p class="text-sm">{request.appOrigin}</p>
           </div>
         </div>
+
+        <!-- The site the user chose did not come up — offline, or a version
+             the app cannot talk to — so the app fell back to this one (#849):
+             stay here, or name another site. -->
+        {#if request.failedSite !== undefined && !failedSiteAnswered}
+          <div class="flex w-full flex-col gap-2 rounded-lg border p-4" role="alert">
+            <p class="flex items-center gap-1.5 text-sm font-bold">
+              <CircleAlert class="text-destructive size-4 shrink-0" />
+              Your identity site is not working right now
+            </p>
+            <p class="font-mono text-xs break-all">{request.failedSite}</p>
+            <p class="text-xs">
+              {request.appName} could not reach it, or it runs a version {request.appName} cannot work
+              with. Sign in here on {window.location.host} instead, or choose another identity site.
+            </p>
+            <div class="flex gap-2">
+              <Button size="sm" class="flex-1" onclick={useThisSite}>Use this site</Button>
+              <Button
+                size="sm"
+                variant="outline"
+                class="flex-1"
+                onclick={() => {
+                  failedSiteAnswered = true
+                  choosingSite = true
+                }}
+              >
+                Choose another site
+              </Button>
+            </div>
+          </div>
+        {/if}
+
+        <!-- A site chosen on this device before (#849): one click to send
+             the app there, or decline and sign in here. Not the one that
+             just failed: the warning above covers that. -->
+        {#if rememberedSite !== undefined && rememberedSite !== request.failedSite}
+          <div class="flex w-full flex-col gap-2 rounded-lg border p-4">
+            <p class="text-sm font-bold">Your account is on another site</p>
+            <p class="font-mono text-xs break-all">{rememberedSite}</p>
+            <p class="text-xs">
+              This window closes and {request.appName} switches to that site. Then press Connect in
+              {request.appName} again: it opens your site, where you sign in.
+            </p>
+            <div class="flex gap-2">
+              <Button
+                size="sm"
+                class="flex-1"
+                onclick={() => request && chooseIdentitySite(request, rememberedSite ?? '')}
+              >
+                Switch to that site
+              </Button>
+              <Button size="sm" variant="outline" class="flex-1" onclick={forgetSite}>
+                Stay here
+              </Button>
+            </div>
+          </div>
+        {/if}
 
         {#if accounts.length > 0 && !addingAccount}
           <div class="flex w-full flex-col gap-4">
@@ -205,6 +322,38 @@
           </div>
         {:else}
           <AccountStartChoice />
+        {/if}
+
+        <!-- The site this popup runs on is the app's default; a user whose
+             account lives on another copy of Swarm ID names it here and
+             connects there instead (#849). -->
+        {#if choosingSite}
+          <form
+            class="flex w-full flex-col gap-2"
+            onsubmit={(event) => {
+              event.preventDefault()
+              submitSite()
+            }}
+          >
+            <label for="identity-site" class="text-sm font-bold">Your identity site</label>
+            <Input
+              id="identity-site"
+              type="url"
+              bind:value={siteUrl}
+              placeholder="https://"
+              class="font-mono"
+              aria-invalid={siteUrl.length > 0 && !siteUrlValid}
+            />
+            <p class="text-xs">
+              This window closes and {request.appName} switches to that site. Then press Connect in
+              {request.appName} again: it opens your site, where you sign in.
+            </p>
+            <Button type="submit" size="sm" disabled={!siteUrlValid}>Switch to this site</Button>
+          </form>
+        {:else}
+          <Button variant="link" size="sm" onclick={() => (choosingSite = true)}>
+            My account is on another identity site
+          </Button>
         {/if}
       </div>
     {/if}

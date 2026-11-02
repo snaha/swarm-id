@@ -116,6 +116,24 @@
       >
         {clientStore.authenticated ? 'Disconnect' : 'Connect'}
       </Button>
+      {#if clientStore.identitySite}
+        <p class="text-xs text-muted-foreground mt-2 truncate" title={clientStore.identitySite}>
+          Identity site: <span class="font-mono">{clientStore.identitySite}</span>
+        </p>
+        {#if clientStore.identitySiteChosen}
+          <Button
+            variant="outline"
+            size="sm"
+            class="w-full mt-2"
+            onclick={() => {
+              clientStore.useDefaultIdentitySite()
+              popoverOpen = false
+            }}
+          >
+            Use the app's default site
+          </Button>
+        {/if}
+      {/if}
     </div>
 
     <Separator />
