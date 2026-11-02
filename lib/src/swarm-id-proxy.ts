@@ -124,6 +124,7 @@ import {
   readRoster,
 } from "./sync"
 import type { DeviceStateSnapshot } from "./sync"
+import { RosterScanInconclusiveError } from "./sync/device-roster"
 import { mergeDevicesList } from "./sync/merge-snapshot"
 import { foldAccountFromSwarm } from "./sync/fold-account-from-swarm"
 import {
@@ -2648,13 +2649,18 @@ export class SwarmIdProxy {
       this.clearAuthData()
       this.emitConnectionInfoIfChanged()
     } catch (error) {
-      // Fail open, as above — an unreachable gateway says nothing. The message
-      // alone: the error object prints its whole stack, which reads as a crash
-      // for what is a routine read failure (#911).
-      console.warn(
-        "[Proxy] Could not verify the restored session, keeping it:",
-        error instanceof Error ? error.message : String(error),
-      )
+      // Fail open, as above — an unreachable gateway says nothing. The routine
+      // inconclusive read logs its message alone: the error object prints its
+      // whole stack, which reads as a crash (#911). Anything else is not
+      // routine, and keeps the object so the stack says where.
+      if (error instanceof RosterScanInconclusiveError) {
+        console.warn(
+          "[Proxy] Could not verify the restored session, keeping it:",
+          error.message,
+        )
+      } else {
+        console.warn("[Proxy] Could not verify the restored session:", error)
+      }
     }
   }
 

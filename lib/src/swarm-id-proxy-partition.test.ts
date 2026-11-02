@@ -282,6 +282,7 @@ import { KNOWN_DEVICE_MAX_AGE_MS } from "./utils/active-devices"
 import { PRESENCE_INTERVAL_MS, PRESENCE_MAX_AGE_MS } from "./bus/presence"
 import { mergeDevicesList } from "./sync/merge-snapshot"
 import { foldAccountFromSwarm } from "./sync/fold-account-from-swarm"
+import { RosterScanInconclusiveError } from "./sync/device-roster"
 import { DEFAULT_BEE_NODE_URL } from "./schemas"
 import type {
   ConnectedApp,
@@ -3033,15 +3034,12 @@ describe("SwarmIdProxy partitioned write enablement", () => {
     })
 
     // The check fails open when the roster cannot be read, which is routine
-    // whenever the gateway cannot serve the account's feeds. Logging the error
-    // object printed its whole stack, which read as a crash (#911): one line,
-    // the message, and what was decided.
+    // whenever the gateway cannot serve the account's feeds. A routine read
+    // failure logs one line: the message and what was decided (#911).
     it("logs one line, not a stack, when it cannot read the roster", async () => {
       await connectPartitionedAt(Date.now())
       vi.mocked(foldAccountFromSwarm).mockRejectedValueOnce(
-        new Error(
-          "roster scan inconclusive: cannot confirm the roster is empty",
-        ),
+        new RosterScanInconclusiveError(),
       )
       const warn = vi.spyOn(console, "warn").mockImplementation(() => {})
       try {
@@ -3050,6 +3048,27 @@ describe("SwarmIdProxy partitioned write enablement", () => {
           expect(warn).toHaveBeenCalledWith(
             "[Proxy] Could not verify the restored session, keeping it:",
             "roster scan inconclusive: cannot confirm the roster is empty",
+          ),
+        )
+        expect(storedSession()).toBeTruthy()
+      } finally {
+        warn.mockRestore()
+      }
+    })
+
+    // Only that one is routine. Any other error keeps the object, and with it
+    // the stack that says where it came from.
+    it("logs any other error with its stack", async () => {
+      await connectPartitionedAt(Date.now())
+      const bug = new TypeError("Cannot read properties of undefined")
+      vi.mocked(foldAccountFromSwarm).mockRejectedValueOnce(bug)
+      const warn = vi.spyOn(console, "warn").mockImplementation(() => {})
+      try {
+        await reload()
+        await vi.waitFor(() =>
+          expect(warn).toHaveBeenCalledWith(
+            "[Proxy] Could not verify the restored session:",
+            bug,
           ),
         )
         expect(storedSession()).toBeTruthy()
