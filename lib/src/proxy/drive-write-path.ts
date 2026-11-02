@@ -3,11 +3,7 @@
 
 import type { BatchWriteCoordinator } from "../sync/batch-write-coordinator"
 import type { UtilizationAwareStamper } from "../utils/batch-utilization"
-import {
-  stampRefusal,
-  type StampLifetimeFields,
-  type StampRefusal,
-} from "../utils/stamp-lifespan"
+import type { StampLifetimeFields } from "../utils/stamp-lifespan"
 import { StampWorkerPool } from "./stamp-worker-pool"
 
 const DEFAULT_WORKER_COUNT = 4
@@ -88,11 +84,6 @@ export class DriveWritePath {
     this._stamper = stamper
     this._accountFingerprint = accountFingerprint
     this._coordinator = coordinator
-  }
-
-  /** Why the session refuses to stamp with this drive, if it does. */
-  get refusal(): StampRefusal | undefined {
-    return stampRefusal(this.lifetime)
   }
 
   /**

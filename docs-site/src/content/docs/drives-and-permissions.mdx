@@ -117,9 +117,10 @@ or untick full drive access. The change reaches the app's live session at once: 
 and `onConnectionChange` fire, `getDrives()` reflects it, and an upload in flight on a drive taken
 away is aborted. Both fire when a drive expires while the page is open too, whether or not the
 app has written to it, with `uploadUnavailableReason: "stamp-expired"` once it was the primary, so
-an app that caches `canUpload` need not poll. The moment is the stored expiry, read from the chain
-the last time the drive was measured; a price change since then moves the real one (#927), and a
-hidden tab's timers run late by up to a minute. `onDrivesChange` is the one to use for the drives alone: it carries no
+an app that caches `canUpload` need not poll. The session re-reads each drive's remaining lifetime
+from the chain as the expiry nears, and before it refuses a drive as expired, so a storage price
+change or a top-up made elsewhere moves the moment rather than the refusal being wrong in either
+direction. A hidden tab's timers run late by up to a minute. `onDrivesChange` is the one to use for the drives alone: it carries no
 payload and fires for nothing else.
 
 ### Scratch drives

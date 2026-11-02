@@ -102,6 +102,7 @@ vi.mock("./utils/ttl", async (importActual) => ({
     throw new Error("offline")
   }),
 }))
+import { fetchAuthoritativeBatchTTL } from "./utils/postage-contract"
 vi.mock("./utils/postage-contract", async (importActual) => ({
   ...(await importActual<typeof import("./utils/postage-contract")>()),
   fetchAuthoritativeBatchTTL: vi.fn(async () => 3600),
@@ -916,6 +917,7 @@ describe("SwarmIdProxy partitioned write enablement", () => {
     /** Connect the dApp to an account with two drives, both granted. */
     const connectWithTwoDrives = async (
       postageStamps = [stampOf(BATCH_ID_HEX), stampOf(SECOND_BATCH_ID_HEX)],
+      connectedForMs = 60_000,
     ): Promise<void> => {
       seedConnectedAccount({
         account: { postageStamps },
@@ -925,7 +927,7 @@ describe("SwarmIdProxy partitioned write enablement", () => {
             appName: "dApp",
             appSecret: "44".repeat(32),
             lastConnectedAt: Date.now(),
-            connectedUntil: Date.now() + 60_000,
+            connectedUntil: Date.now() + connectedForMs,
             drives: [
               new BatchId(BATCH_ID_HEX),
               new BatchId(SECOND_BATCH_ID_HEX),
@@ -1030,7 +1032,21 @@ describe("SwarmIdProxy partitioned write enablement", () => {
         expect(announced()).toBe(before + 1)
       })
 
+      // The chain is read before a flip (#927): what the record says is only
+      // as current as its last measurement.
+      const chainSays = (
+        ttl: number | undefined,
+        perBatch: Record<string, number> = {},
+      ) =>
+        vi
+          .mocked(fetchAuthoritativeBatchTTL)
+          .mockImplementation(async (_rpc, _bee, batchId) =>
+            batchId in perBatch ? perBatch[batchId] : ttl,
+          )
+      afterEach(() => chainSays(3600))
+
       it("re-sends it the moment the primary drive expires (#793)", async () => {
+        chainSays(0)
         // One second left, measured now.
         await connectWithTwoDrives([
           { ...stampOf(BATCH_ID_HEX), batchTTL: 1, createdAt: Date.now() },
@@ -1049,7 +1065,102 @@ describe("SwarmIdProxy partitioned write enablement", () => {
         expect(drivesAnnounced()).toBe(drivesBefore + 1)
       })
 
+      it("flips on the stored expiry when the chain cannot be read", async () => {
+        chainSays(undefined)
+        await connectWithTwoDrives([
+          { ...stampOf(BATCH_ID_HEX), batchTTL: 1, createdAt: Date.now() },
+          stampOf(SECOND_BATCH_ID_HEX),
+        ])
+        await vi.waitFor(
+          () =>
+            expect(lastInfo().uploadUnavailableReason).toBe("stamp-expired"),
+          { timeout: 3000, interval: 50 },
+        )
+      })
+
+      it("keeps the drive when the chain still funds it at the stored expiry (#927)", async () => {
+        // The record says one second; the chain, read on the tick, says an
+        // hour: the price fell, or someone topped the batch up.
+        chainSays(3600)
+        await connectWithTwoDrives([
+          { ...stampOf(BATCH_ID_HEX), batchTTL: 1, createdAt: Date.now() },
+          stampOf(SECOND_BATCH_ID_HEX),
+        ])
+        await vi.waitFor(() =>
+          expect(coordinatorFor(BATCH_ID_HEX)).toBeDefined(),
+        )
+        await vi.waitFor(
+          () =>
+            expect(vi.mocked(fetchAuthoritativeBatchTTL)).toHaveBeenCalledWith(
+              expect.anything(),
+              expect.anything(),
+              BATCH_ID_HEX,
+              expect.anything(),
+            ),
+          { timeout: 3000, interval: 50 },
+        )
+        await flushBus()
+        expect(lastInfo().uploadMode).toBe("user-stamp")
+        expect(lastInfo().uploadUnavailableReason).toBeUndefined()
+      })
+
+      it("re-measures before the stored expiry and flips early when the chain says so (#927)", async () => {
+        vi.useFakeTimers({
+          toFake: ["setTimeout", "clearTimeout", "Date"],
+          shouldAdvanceTime: true,
+        })
+        try {
+          const TEN_MINUTES = 600
+          // The faked clock runs through the app's connection too.
+          await connectWithTwoDrives(
+            [
+              {
+                ...stampOf(BATCH_ID_HEX),
+                batchTTL: TEN_MINUTES,
+                createdAt: Date.now(),
+              },
+              stampOf(SECOND_BATCH_ID_HEX),
+            ],
+            TEN_MINUTES * 1000 * 2,
+          )
+          await vi.waitFor(() =>
+            expect(coordinatorFor(BATCH_ID_HEX)).toBeDefined(),
+          )
+          expect(lastInfo().uploadMode).toBe("user-stamp")
+          // The price rose: by the first re-measure the batch has run out.
+          chainSays(0)
+          await vi.advanceTimersByTimeAsync((TEN_MINUTES / 2) * 1000 + 1000)
+          await vi.waitFor(() =>
+            expect(lastInfo().uploadUnavailableReason).toBe("stamp-expired"),
+          )
+        } finally {
+          vi.useRealTimers()
+        }
+      })
+
+      it("adopts what getDrives() read from the chain (#927)", async () => {
+        await connectWithTwoDrives()
+        await vi.waitFor(() =>
+          expect(coordinatorFor(BATCH_ID_HEX)).toBeDefined(),
+        )
+        expect(lastInfo().uploadMode).toBe("user-stamp")
+        chainSays(0)
+        await dispatch(
+          { type: "getDrives", requestId: "g-live" },
+          PARENT_ORIGIN,
+          parentWindow,
+        )
+        await vi.waitFor(() =>
+          expect(messagesOfType("getDrivesResponse")).toHaveLength(1),
+        )
+        // The refusal follows the same reading the dApp was just given.
+        await vi.waitFor(() =>
+          expect(lastInfo().uploadUnavailableReason).toBe("stamp-expired"),
+        )
+      })
+
       it("re-sends it when a granted drive the app never wrote to expires", async () => {
+        chainSays(3600, { [SECOND_BATCH_ID_HEX]: 0 })
         // The second drive has no write path (#862); its expiry is still a
         // change to the app's drives.
         await connectWithTwoDrives([
