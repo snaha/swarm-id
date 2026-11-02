@@ -1387,10 +1387,7 @@ export class SwarmIdProxy {
     // Release the partition leases (best-effort) so peers see this device
     // vacate its partitions promptly.
     this.teardownDrives()
-    if (this.publishTimer !== undefined) {
-      clearTimeout(this.publishTimer)
-      this.publishTimer = undefined
-    }
+    this.cancelScheduledPublish()
     this.clearRosterRetry()
 
     // Retire any join still deriving its key — its continuation would
@@ -3024,6 +3021,18 @@ export class SwarmIdProxy {
   }
 
   /**
+   * Drop a scheduled publish, its reason with it, or the next session's first
+   * announce would run as this session's change.
+   */
+  private cancelScheduledPublish(): void {
+    if (this.publishTimer !== undefined) {
+      clearTimeout(this.publishTimer)
+      this.publishTimer = undefined
+    }
+    this.publishReason = undefined
+  }
+
+  /**
    * Publish the account snapshot: to the account's live peers over the bus,
    * and to the shared feed via the coordinator (same write lock + held
    * partition). The feed write needs a partition; the bus message does not, so
@@ -3384,13 +3393,7 @@ export class SwarmIdProxy {
     // Before dropping `deviceId` — the release announcement is sent as us.
     this.teardownDrives()
     this.deviceId = undefined
-    if (this.publishTimer !== undefined) {
-      clearTimeout(this.publishTimer)
-      this.publishTimer = undefined
-    }
-    // The cancelled publish's reason goes with it, or the next session's
-    // first announce would run as this session's change.
-    this.publishReason = undefined
+    this.cancelScheduledPublish()
     this.clearRosterRetry()
     this.pendingLaneUpdates.clear()
     this.storagePartitioned = false
