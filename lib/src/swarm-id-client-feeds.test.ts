@@ -574,6 +574,32 @@ describe("SwarmIdClient feed readers and writers", () => {
       expect(sent()).toEqual([])
     })
 
+    // Which lookup bound the writer's reads send is pinned beside the code
+    // that forwards it; here they set none.
+    it("reads like the reader, with its signer's owner", async () => {
+      const writer = client.makeSequentialFeedWriter({
+        topic: TOPIC,
+        signer: SIGNER,
+      })
+      expect(await writer.downloadPayload(KEY, { index: INDEX })).toEqual(
+        seqPayloadAnswer(),
+      )
+      expect(
+        await writer.downloadRawPayload({ index: INDEX, encryptionKey: KEY }),
+      ).toEqual(seqPayloadAnswer())
+      expect(await writer.downloadReference(KEY, { at: AT })).toEqual({
+        reference: REF,
+        feedIndex: "3",
+        feedIndexNext: "4",
+      })
+      const read = { topic: TOPIC, owner: SIGNER_OWNER, encryptionKey: KEY }
+      expect(sent()).toEqual([
+        { type: "seqFeedDownloadPayload", ...read, index: INDEX.toString() },
+        { type: "seqFeedDownloadRawPayload", ...read, index: INDEX.toString() },
+        { type: "seqFeedDownloadReference", ...read, at: AT.toString() },
+      ])
+    })
+
     it("reads as the owner its last upload reported", async () => {
       const writer = client.makeSequentialFeedWriter({ topic: TOPIC })
       await writer.uploadReference(REF)
