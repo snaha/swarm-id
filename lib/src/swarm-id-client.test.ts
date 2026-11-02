@@ -1044,29 +1044,33 @@ describe("SwarmIdClient request seam", () => {
   })
 
   // The raw updates name a drive the same way, and go to it, SOC and all.
-  it("sends a raw epoch reference to the drive it names", async () => {
-    const batchID = "cd".repeat(32)
-    const writer = client.makeEpochFeedWriter({ topic: "12".repeat(32) })
-    void writer.uploadRawReference("ab".repeat(32), { batchID }).catch(() => {})
-    expect(lastPostedMessage()).toMatchObject({
-      type: "epochFeedUploadReference",
-      batchID,
-    })
-  })
+  const RAW_DRIVE = "cd".repeat(32)
+  const RAW_DRIVE_OPTIONS = [
+    ["batchID", { batchID: RAW_DRIVE }],
+    ["uploadOptions.batchID", { uploadOptions: { batchID: RAW_DRIVE } }],
+  ] as const
 
-  it.each([
-    ["batchID", { batchID: "cd".repeat(32) }],
-    ["uploadOptions.batchID", { uploadOptions: { batchID: "cd".repeat(32) } }],
-  ])(
+  it.each(RAW_DRIVE_OPTIONS)(
+    "sends a raw epoch reference to the drive named by %s",
+    async (_, options) => {
+      const writer = client.makeEpochFeedWriter({ topic: "12".repeat(32) })
+      void writer.uploadRawReference("ab".repeat(32), options).catch(() => {})
+      expect(lastPostedMessage()).toMatchObject({
+        type: "epochFeedUploadReference",
+        batchID: RAW_DRIVE,
+      })
+    },
+  )
+
+  it.each(RAW_DRIVE_OPTIONS)(
     "sends a raw epoch payload and its SOC to the drive named by %s",
     async (_, options) => {
-      const batchID = "cd".repeat(32)
       const writer = client.makeEpochFeedWriter({ topic: "12".repeat(32) })
       const upload = writer.uploadRawPayload(new Uint8Array([1]), options)
       const payloadUpload = lastPostedMessage()
       expect(payloadUpload).toMatchObject({
         type: "uploadData",
-        options: { batchID, encrypt: false },
+        options: { batchID: RAW_DRIVE, encrypt: false },
       })
       deliver({
         type: "uploadDataResponse",
@@ -1076,7 +1080,7 @@ describe("SwarmIdClient request seam", () => {
       await vi.waitFor(() =>
         expect(lastPostedMessage()).toMatchObject({
           type: "epochFeedUploadReference",
-          batchID,
+          batchID: RAW_DRIVE,
         }),
       )
       void upload.catch(() => {})
