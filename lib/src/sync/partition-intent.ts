@@ -65,7 +65,7 @@ import {
 import { Binary } from "cafe-utility"
 import { downloadEncryptedSOC } from "../proxy/download-data"
 import { uploadSOC, type UploadTarget } from "../proxy/upload"
-import { UtilizationAwareStamper } from "../utils/batch-utilization"
+import { UtilizationAwareStamper } from "../utilization/stamper"
 import { TimeoutError, sleep, withTimeout } from "../utils/promise"
 import { INTENT_EPOCH_MS, SYNC_READ_TIMEOUT_MS } from "./timing-constants"
 import {

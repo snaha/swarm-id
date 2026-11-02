@@ -16,7 +16,7 @@
 import type { Stamper, EnvelopeWithBatchId, BatchId } from "@ethersphere/bee-js"
 import { EthAddress, Signature } from "@ethersphere/bee-js"
 import { Binary } from "cafe-utility"
-import type { SlotAssigner } from "../utils/batch-utilization"
+import type { SlotAssigner } from "../utilization/stamper"
 import type {
   StampWorkerReadyResponse,
   StampWorkerSignedResponse,

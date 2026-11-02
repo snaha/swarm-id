@@ -130,7 +130,7 @@ import {
   accountDeltaFromSnapshot,
   restoreLocalSessionFields,
 } from "./bus/account-delta"
-import { UtilizationAwareStamper } from "./utils/batch-utilization"
+import { UtilizationAwareStamper } from "./utilization/stamper"
 import { UtilizationStoreDB } from "./storage/utilization-store"
 import type { PartitionLeaseStateSnapshot } from "./sync/partition-lease"
 import { BatchWriteCoordinator } from "./sync/batch-write-coordinator"

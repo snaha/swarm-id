@@ -65,11 +65,13 @@ import {
   LEASE_TTL_MS,
   PARTITION_COUNT,
   NUM_BUCKETS,
-  PartitionLeaseLostError,
   getChunkLayout,
   toBucket,
-  UtilizationAwareStamper,
 } from "../utils/batch-utilization"
+import {
+  PartitionLeaseLostError,
+  UtilizationAwareStamper,
+} from "../utilization/stamper"
 import { makeEncryptedContentAddressedChunk } from "../chunk"
 import { uploadData, type UploadTarget } from "../proxy/upload"
 import {

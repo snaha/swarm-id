@@ -3,7 +3,7 @@
 
 import { describe, expect, it, vi } from "vitest"
 import type { BatchWriteCoordinator } from "../sync/batch-write-coordinator"
-import type { UtilizationAwareStamper } from "../utils/batch-utilization"
+import type { UtilizationAwareStamper } from "../utilization/stamper"
 import { DriveWritePath } from "./drive-write-path"
 import { StampWorkerPool } from "./stamp-worker-pool"
 

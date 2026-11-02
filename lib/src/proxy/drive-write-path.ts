@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import type { BatchWriteCoordinator } from "../sync/batch-write-coordinator"
-import type { UtilizationAwareStamper } from "../utils/batch-utilization"
+import type { UtilizationAwareStamper } from "../utilization/stamper"
 import {
   stampRefusal,
   type StampLifetimeFields,

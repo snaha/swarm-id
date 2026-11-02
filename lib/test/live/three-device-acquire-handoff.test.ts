@@ -31,10 +31,10 @@ import {
   type CoordinatorMode,
 } from "../../src/sync/batch-write-coordinator"
 import {
-  UtilizationAwareStamper,
   PARTITION_COUNT,
   LEASE_TTL_MS,
 } from "../../src/utils/batch-utilization"
+import { UtilizationAwareStamper } from "../../src/utilization/stamper"
 import { deviceHomePartition } from "../../src/sync/partition-lock"
 import { INTENT_LIVENESS_GRACE_MS } from "../../src/sync/partition-intent"
 import { uploadSOC, type UploadTarget } from "../../src/proxy/upload"

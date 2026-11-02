@@ -110,6 +110,8 @@ export {
   leaseCacheStorageKey,
 } from "./types"
 
+export { UtilizationAwareStamper } from "./utilization/stamper"
+
 export type { AccountStateSnapshot } from "./utils/account-state-snapshot"
 
 export {
@@ -124,7 +126,6 @@ export {
   BUCKET_DEPTH,
   MIN_USABLE_BATCH_DEPTH,
   PARTITION_COUNT,
-  UtilizationAwareStamper,
 } from "./utils/batch-utilization"
 
 export { runCoalescedAcrossTabs } from "./utils/coalesced-task"

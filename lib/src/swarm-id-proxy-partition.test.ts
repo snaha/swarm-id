@@ -62,9 +62,8 @@ const stamperStub = vi.hoisted(() => ({
 
 // Stub the stamper/store/coordinator machinery so `initializeStamper` can run
 // without IndexedDB or network access.
-vi.mock("./utils/batch-utilization", async (importActual) => {
-  const actual =
-    await importActual<typeof import("./utils/batch-utilization")>()
+vi.mock("./utilization/stamper", async (importActual) => {
+  const actual = await importActual<typeof import("./utilization/stamper")>()
   return {
     ...actual,
     UtilizationAwareStamper: {
@@ -262,7 +261,7 @@ import { BusMessageSchema } from "./bus/messages"
 import { deriveBusContext } from "./bus/bus-context"
 import { BatchWriteCoordinator } from "./sync/batch-write-coordinator"
 import { publishDeviceState, readRoster } from "./sync"
-import { UtilizationAwareStamper } from "./utils/batch-utilization"
+import { UtilizationAwareStamper } from "./utilization/stamper"
 import { DriveWritePath } from "./proxy/drive-write-path"
 import {
   createAccountsStorageManager,

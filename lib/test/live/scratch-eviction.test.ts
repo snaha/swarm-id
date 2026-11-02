@@ -30,9 +30,9 @@ import { uploadSOC } from "../../src/proxy/upload"
 import { downloadSOC } from "../../src/proxy/download-data"
 import {
   PARTITION_COUNT,
-  UtilizationAwareStamper,
   partitionCapacity,
 } from "../../src/utils/batch-utilization"
+import { UtilizationAwareStamper } from "../../src/utilization/stamper"
 import { isNotFoundError } from "../../src/utils/bee-error"
 import { mineIdentifierInBucket } from "../soc-bucket"
 import { createContext, delay, liveEnv, makeInMemoryCache } from "./env"

@@ -23,10 +23,8 @@ import { randomBytes } from "node:crypto"
 import { describe, it, expect, beforeAll } from "vitest"
 import { Identifier, PrivateKey } from "@ethersphere/bee-js"
 import { BatchWriteCoordinator } from "../../src/sync/batch-write-coordinator"
-import {
-  UtilizationAwareStamper,
-  PARTITION_COUNT,
-} from "../../src/utils/batch-utilization"
+import { PARTITION_COUNT } from "../../src/utils/batch-utilization"
+import { UtilizationAwareStamper } from "../../src/utilization/stamper"
 import { uploadSOC, type UploadTarget } from "../../src/proxy/upload"
 import { hexToUint8Array } from "../../src/utils/hex"
 import {

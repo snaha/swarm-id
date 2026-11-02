@@ -36,12 +36,8 @@ import { uint8ArrayToHex } from "../utils/hex"
 import { withTimeout } from "../utils/promise"
 import { SYNC_READ_TIMEOUT_MS } from "./timing-constants"
 import { deriveSecret, BACKUP_KEY_LABEL } from "../utils/key-derivation"
-import {
-  LEASE_TTL_MS,
-  NUM_BUCKETS,
-  UtilizationAwareStamper,
-  toBucket,
-} from "../utils/batch-utilization"
+import { LEASE_TTL_MS, NUM_BUCKETS, toBucket } from "../utils/batch-utilization"
+import { UtilizationAwareStamper } from "../utilization/stamper"
 import { lockSocBucket } from "../utils/lock-soc"
 import {
   acquirePartitionLock,

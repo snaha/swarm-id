@@ -25,9 +25,9 @@ import { downloadSOC } from "../../src/proxy/download-data"
 import type { UtilizationStoreDB } from "../../src/storage/utilization-store"
 import {
   PARTITION_COUNT,
-  UtilizationAwareStamper,
   partitionCapacity,
 } from "../../src/utils/batch-utilization"
+import { UtilizationAwareStamper } from "../../src/utilization/stamper"
 import { QUEEN_KEY, TEST_STAMP_DEPTH, createQueenBee } from "./cluster"
 
 const ID_BYTES = 32

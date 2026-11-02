@@ -14,7 +14,7 @@ import { toWireError } from "./errors"
 import { SwarmIdError } from "../errors"
 import { TimeoutError } from "../utils/promise"
 import { PartitionContendedError } from "../sync/batch-write-coordinator"
-import { PartitionLeaseLostError } from "../utils/batch-utilization"
+import { PartitionLeaseLostError } from "../utilization/stamper"
 import { SocUploadError } from "./upload"
 
 describe("toWireError", () => {

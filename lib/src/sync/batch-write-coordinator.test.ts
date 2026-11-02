@@ -63,10 +63,12 @@ import {
   LEASE_REFRESH_MS,
   LEASE_TTL_MS,
   NUM_BUCKETS,
-  PartitionLeaseLostError,
-  UtilizationAwareStamper,
   dataSlot,
 } from "../utils/batch-utilization"
+import {
+  PartitionLeaseLostError,
+  UtilizationAwareStamper,
+} from "../utilization/stamper"
 import type { UtilizationStoreDB } from "../storage/utilization-store"
 import { uploadData } from "../proxy/upload"
 import { CHUNK_SIZE } from "../proxy/chunking"

@@ -172,6 +172,9 @@ vi.mock("../utils/batch-utilization", async (importOriginal) => ({
   saveUtilizationState: vi.fn().mockResolvedValue(undefined),
   calculateUtilization: vi.fn().mockReturnValue(0.01),
   LEASE_TTL_MS: 30_000,
+}))
+vi.mock("../utilization/stamper", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../utilization/stamper")>()),
   UtilizationAwareStamper: MockUtilizationAwareStamper,
 }))
 

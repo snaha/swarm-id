@@ -16,7 +16,8 @@ the release fencing. This is the current-state reference for the multi-device wr
 > below works with no server at all — the bus only shortens the waits.
 
 Source of truth in code:
-`lib/src/utils/batch-utilization.ts` (the stamper + slot routing),
+`lib/src/utilization/stamper.ts` (the stamper + slot routing),
+`lib/src/utils/batch-utilization.ts` (the per-bucket counters and their chunks),
 `lib/src/sync/partition-state.ts` (counter publish + state pointer),
 `lib/src/sync/partition-lease.ts` (lease state machine),
 `lib/src/sync/partition-lock.ts` (the cross-device lock SOC + fencing),
@@ -333,7 +334,7 @@ that feeds the rival set. The beacon is a correctness mechanism; the heartbeat i
   a peer reading the same `leasedUntil` could validly take over. A long multi-chunk `op`
   aborts mid-stream; the chunk is content-addressed, so the upload cleanly fails and retries.
   The residual is now just the irreducible clock skew below, not a full refresh interval.
-  (Fence: `batch-utilization.ts` `leaseLocallyLapsed`; deadline pushed by
+  (Fence: `utilization/stamper.ts` `leaseLocallyLapsed`; deadline pushed by
   `batch-write-coordinator.ts` `syncStamperLeaseDeadline` on bind + every renewal.)
 - **Bounded clock skew.** A device with a slow clock can believe its lease is valid while
   peers correctly took over. Irreducible; bounded by NTP-level skew + the TTL margin, the

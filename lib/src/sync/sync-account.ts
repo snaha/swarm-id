@@ -26,8 +26,8 @@ import {
   updateAfterWrite,
   saveUtilizationState,
   calculateUtilization,
-  UtilizationAwareStamper,
 } from "../utils/batch-utilization"
+import { UtilizationAwareStamper } from "../utilization/stamper"
 import type { UtilizationStoreDB } from "../storage/utilization-store"
 import type { DebouncedUtilizationUploader } from "../storage/debounced-uploader"
 import type {

@@ -78,9 +78,9 @@ import {
 import {
   NUM_BUCKETS,
   PARTITION_COUNT,
-  UtilizationAwareStamper,
   toBucket,
 } from "../utils/batch-utilization"
+import { UtilizationAwareStamper } from "../utilization/stamper"
 import { lockSocBucket } from "../utils/lock-soc"
 import {
   MockBee,

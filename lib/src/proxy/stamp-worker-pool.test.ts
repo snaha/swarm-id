@@ -38,11 +38,13 @@ import { MockBee, MockChunkStore } from "./feeds/epochs/test-utils"
 import {
   NUM_BUCKETS,
   PARTITION_COUNT,
-  PartitionLeaseLostError,
-  UtilizationAwareStamper,
   dataSlot,
   partitionCapacity,
 } from "../utils/batch-utilization"
+import {
+  PartitionLeaseLostError,
+  UtilizationAwareStamper,
+} from "../utilization/stamper"
 import {
   handleMessage,
   type StampWorkerMessage,

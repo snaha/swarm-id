@@ -50,12 +50,12 @@ import { makeEncryptedContentAddressedChunk } from "../chunk"
 import {
   LEASE_TTL_MS,
   NUM_BUCKETS,
-  UtilizationAwareStamper,
   extractChunk,
   getChunkLayout,
   mergeChunk,
   toBucket,
 } from "../utils/batch-utilization"
+import { UtilizationAwareStamper } from "../utilization/stamper"
 import { lockSocBucket } from "../utils/lock-soc"
 import {
   INTENT_EPOCH_MS,
