@@ -22,14 +22,14 @@ const MAX_WORKER_COUNT = 8
  * resolves and dropped as a unit when it changes or leaves the grant: the stamper, the account it
  * was built for and the coordinator that writes through it arrive together
  * (`attach`), and the proxy never sets one of them alone. That is also how a
- * stale `initializeStamper` knows it has been superseded: the proxy holds a
+ * stale build (`DriveRegistry`) knows it has been superseded: the proxy holds a
  * different instance (#862).
  */
 export class DriveWritePath {
   private _stamper: UtilizationAwareStamper | undefined
   private _accountFingerprint: string | undefined
   private _coordinator: BatchWriteCoordinator | undefined
-  /** Settles when `initializeStamper` for this drive is done, either way. */
+  /** Settles when this drive's build is done, either way. */
   ready: Promise<void> = Promise.resolve()
   private workerPool: StampWorkerPool | undefined
   private tornDown = false
@@ -46,7 +46,7 @@ export class DriveWritePath {
   ) {}
 
   /**
-   * Attached by `SwarmIdProxy.initializeStamper` once it builds one. Undefined
+   * Attached by `DriveRegistry` once it builds one. Undefined
    * before that, and for good when that init gave up: it logs and returns
    * rather than throwing, so a resolved stamp with no stamper is a state the
    * proxy really reaches.

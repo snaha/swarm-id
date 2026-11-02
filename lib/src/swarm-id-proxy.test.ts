@@ -32,10 +32,17 @@ type ProxyInternals = {
   ) => void
   authenticated: boolean
   appSecret: string
-  /** The primary drive's write path (read-only: a getter over `drives`). */
+  /** The primary drive's write path (read-only: the registry's primary). */
   readonly drive?: DriveWritePath
-  drives: Map<string, DriveWritePath>
-  primaryBatchId?: string
+  driveRegistry: {
+    drives: Map<string, DriveWritePath>
+    primaryBatchId?: string
+    build: (
+      drive: DriveWritePath,
+      stampDepth: number,
+      scratch: boolean,
+    ) => Promise<void>
+  }
   buildConnectionInfo: () => {
     canUpload: boolean
     uploadMode: string
@@ -46,10 +53,6 @@ type ProxyInternals = {
     targetOptions: undefined,
     operation: (target: unknown) => Promise<T>,
   ) => Promise<T>
-  initializeStamper: (
-    drive: DriveWritePath,
-    stampDepth: number,
-  ) => Promise<void>
   lookupAccountForApp: () => Promise<unknown>
   /** The Bee client the proxy reads (and subsidised-uploads) through now. */
   bee: { url: string }
@@ -530,7 +533,7 @@ describe("SwarmIdProxy subsidised-mode selection", () => {
 
   /**
    * Put the proxy in the state a given account leaves it in. `stamper` is the
-   * one that is not a straight consequence of the others: `initializeStamper`
+   * one that is not a straight consequence of the others: a drive build
    * logs and returns rather than throwing, so a resolved stamp with no stamper
    * is a state the proxy really reaches.
    */
@@ -563,9 +566,10 @@ describe("SwarmIdProxy subsidised-mode selection", () => {
         >,
       )
     }
-    internals(proxy).drives.clear()
-    if (drive) internals(proxy).drives.set(drive.batchId, drive)
-    internals(proxy).primaryBatchId = drive?.batchId
+    const registry = internals(proxy).driveRegistry
+    registry.drives.clear()
+    if (drive) registry.drives.set(drive.batchId, drive)
+    registry.primaryBatchId = drive?.batchId
   }
 
   const connectionInfo = () => internals(proxy).buildConnectionInfo()
@@ -687,7 +691,7 @@ describe("SwarmIdProxy subsidised-mode selection", () => {
       })
     })
 
-    // `initializeStamper` awaits the account lookup before it builds anything,
+    // A drive build awaits the account lookup before it builds anything,
     // and the stamp is already set while it does: the window in which an
     // upload sees a stamp and no stamper.
     it("routes to the gateway while the stamper is still being built, and after it fails", async () => {
@@ -701,9 +705,10 @@ describe("SwarmIdProxy subsidised-mode selection", () => {
           }),
       )
 
-      const init = internals(proxy).initializeStamper(
+      const init = internals(proxy).driveRegistry.build(
         internals(proxy).drive!,
         STAMP_DEPTH,
+        false,
       )
       await vi.waitFor(() => expect(finishLookup).toBeDefined())
 

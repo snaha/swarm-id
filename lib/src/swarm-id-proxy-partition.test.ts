@@ -60,7 +60,7 @@ const stamperStub = vi.hoisted(() => ({
   applyUtilizationUpdate: vi.fn(),
 }))
 
-// Stub the stamper/store/coordinator machinery so `initializeStamper` can run
+// Stub the stamper/store/coordinator machinery so a drive build can run
 // without IndexedDB or network access.
 vi.mock("./utils/batch-utilization", async (importActual) => {
   const actual =
@@ -666,7 +666,7 @@ describe("SwarmIdProxy partitioned write enablement", () => {
   })
 
   // `loadAuthData` runs in the identify handler, off the reconcile queue, so a
-  // storage event's `refreshStampFromStorage` runs while `initializeStamper`
+  // storage event's `refreshStampFromStorage` runs while a drive build
   // is inside an await. It used to read the batch id again afterwards: cleared
   // in between, the coordinator was built for `batchId: undefined` and every
   // lease op on it threw (#804).
