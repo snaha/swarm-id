@@ -21,10 +21,19 @@ export interface StampLifetimeFields {
   /** What the node last said: absent on a record that predates the fields */
   usable?: boolean
   exists?: boolean
+  /** The block the batch was minted in, for the warm-up rule (#924); `0` unknown */
+  blockNumber?: number
 }
 
-/** Why the session refuses to stamp with the record, or `undefined` if it will. */
-export type StampRefusal = "stamp-expired" | "stamp-not-usable"
+/**
+ * Why the session refuses to stamp with the record, or `undefined` if it will.
+ * `stamp-warming-up` is the proxy's, from the chain head; `stampRefusal` never
+ * returns it.
+ */
+export type StampRefusal =
+  | "stamp-expired"
+  | "stamp-not-usable"
+  | "stamp-warming-up"
 
 /**
  * The readiness rule. Expiry first, because it is the older and the more

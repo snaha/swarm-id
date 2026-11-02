@@ -178,13 +178,17 @@ import {
 import { createAsyncSequentialFinder } from "./proxy/feeds/sequence"
 import { Binary } from "cafe-utility"
 import {
+  GNOSIS_BLOCK_TIME,
   calculateTTLSeconds,
   fetchBatchDetails,
   fetchSwarmPrice,
 } from "./utils/ttl"
 import {
+  BATCH_USABLE_BLOCKS,
   type BatchTTLReading,
+  blocksUntilUsable,
   fetchAuthoritativeBatchTTL,
+  fetchBlockNumber,
   POSTAGE_STAMP_CONTRACT_ADDRESS,
 } from "./utils/postage-contract"
 import { tryCreateTag } from "./utils/tag"
@@ -263,6 +267,14 @@ const MS_PER_SECOND = 1000
  */
 const REMEASURE_MIN_MS = 60 * MS_PER_SECOND
 const REMEASURE_MAX_MS = 6 * 60 * 60 * MS_PER_SECOND
+/**
+ * A drive whose record is younger than this may still be warming up (#924):
+ * Bee stamps with a batch ten blocks after it was minted, under a minute on
+ * Gnosis, so the chain head is read only for records this fresh. Older ones
+ * are past the threshold whatever the head says.
+ */
+const WARM_UP_WINDOW_MS = 10 * 60 * MS_PER_SECOND
+const BLOCK_MS = GNOSIS_BLOCK_TIME * MS_PER_SECOND
 
 /**
  * localStorage key holding optional partition-coordination timing overrides
@@ -379,6 +391,18 @@ export class SwarmIdProxy {
     string,
     { batchTTL: number; measuredAt: number; recordMeasuredAt: number }
   >()
+  /**
+   * The chain head last read for the warm-up rule (#924), and when a read
+   * was last attempted, so a failing RPC is retried at the re-measure floor
+   * rather than on every reconcile.
+   */
+  private chainHead: number | undefined
+  /** When `chainHead` was read, so it can be advanced by the time since. */
+  private chainHeadReadAt = 0
+  private chainHeadAttemptedAt = 0
+  private chainHeadRead: Promise<void> | undefined
+  /** Re-reads the head while a drive may be warming up, see `armWarmUpTimer`. */
+  private warmUpTimer: ReturnType<typeof setTimeout> | undefined
   private destroyed = false
   /** The primary drive's batch: where a write that names no drive goes. */
   private primaryBatchId: string | undefined
@@ -936,6 +960,7 @@ export class SwarmIdProxy {
       Math.max(untilExpiry / 2, REMEASURE_MIN_MS),
       REMEASURE_MAX_MS,
     )
+    this.armWarmUpTimer(granted, now)
     const delay = Math.min(untilExpiry, untilRemeasure)
     // Keep an earlier tick already pending: an early one only re-reads, and
     // re-arming from now on every `getPostageBatch()` would keep pushing a
@@ -949,6 +974,112 @@ export class SwarmIdProxy {
       this.expiryTimer = undefined
       void this.onExpiryTick()
     }, delay)
+  }
+
+  /**
+   * A timer of its own for a drive that may be warming up (#924), set for
+   * the moment its countdown should clear: then the head is re-read, or for
+   * a record with no block nothing is read, and the readings adopted. A
+   * read that says the chain is slower re-arms for what is left; one that
+   * fails leaves the countdown running on the clock (`estimatedHead`), so a
+   * failing RPC is asked once per drive, not every block. With no head yet
+   * it is read at once, then at most once a minute until one answers; that
+   * first read is kicked synchronously, so nothing emitted before it lands
+   * calls a fresh drive ready. Never while a read is in flight: whoever
+   * started it adopts when it lands, and that re-arms this.
+   */
+  private armWarmUpTimer(granted: PostageStamp[], now: number): void {
+    clearTimeout(this.warmUpTimer)
+    this.warmUpTimer = undefined
+    const fresh = granted.filter((stamp) => this.mayBeWarmingUp(stamp, now))
+    if (fresh.length === 0 || this.chainHeadRead !== undefined) return
+    const needsHead = fresh.some((stamp) => stamp.blockNumber > 0)
+    const readThenAdopt = () =>
+      this.refreshChainHead().then(() => {
+        if (!this.destroyed) this.adoptLifetimeReadings()
+      })
+    if (needsHead && this.chainHead === undefined) {
+      const delay = Math.max(
+        0,
+        REMEASURE_MIN_MS - (now - this.chainHeadAttemptedAt),
+      )
+      if (delay === 0) {
+        void readThenAdopt()
+        return
+      }
+      this.warmUpTimer = setTimeout(() => void readThenAdopt(), delay)
+      return
+    }
+    const waits = fresh
+      .map((stamp) => this.blocksUntilUsable(stamp, now))
+      .filter((blocks) => blocks > 0)
+    if (waits.length === 0) return
+    this.warmUpTimer = setTimeout(
+      () => void (needsHead ? readThenAdopt() : this.adoptLifetimeReadings()),
+      Math.min(...waits) * BLOCK_MS,
+    )
+  }
+
+  /** Whether the record is fresh enough for the warm-up rule to apply at all. */
+  private mayBeWarmingUp(
+    stamp: StampLifetimeFields,
+    now = Date.now(),
+  ): boolean {
+    return now - stamp.createdAt < WARM_UP_WINDOW_MS
+  }
+
+  /**
+   * The last head read, advanced by the blocks the clock says have passed
+   * since; `undefined` before any read answered.
+   */
+  private estimatedHead(now: number): number | undefined {
+    if (this.chainHead === undefined) return undefined
+    return this.chainHead + Math.floor((now - this.chainHeadReadAt) / BLOCK_MS)
+  }
+
+  /**
+   * Blocks the batch still has to wait before Bee would stamp with it
+   * (#924); `0` for a record too old to be warming up. A record with no
+   * block (a purchase whose read-back failed records `0`) counts its blocks
+   * from when it was written. Otherwise from the head, advanced by the
+   * clock since it was read. With no head yet: the full wait while the
+   * first read is in flight, so a fresh drive is never called ready and
+   * then refused a moment later; `0` once a read has failed, since refusing
+   * on missing data would keep a good drive off.
+   */
+  private blocksUntilUsable(
+    stamp: StampLifetimeFields,
+    now = Date.now(),
+  ): number {
+    if (!this.mayBeWarmingUp(stamp, now)) return 0
+    const blockNumber = stamp.blockNumber ?? 0
+    if (blockNumber <= 0) {
+      const passed = Math.floor((now - stamp.createdAt) / BLOCK_MS)
+      return Math.max(0, BATCH_USABLE_BLOCKS - passed)
+    }
+    const head = this.estimatedHead(now)
+    if (head === undefined) {
+      return this.chainHeadRead === undefined ? 0 : BATCH_USABLE_BLOCKS
+    }
+    return blocksUntilUsable(blockNumber, head)
+  }
+
+  /**
+   * One chain head read at a time; a failure keeps the last head, which
+   * `estimatedHead` keeps advancing. The caller adopts once it lands.
+   */
+  private refreshChainHead(): Promise<void> {
+    this.chainHeadRead ??= (async () => {
+      const attemptedAt = Date.now()
+      this.chainHeadAttemptedAt = attemptedAt
+      const head = await fetchBlockNumber(this.gnosisRpcUrl)
+      if (head !== undefined) {
+        this.chainHead = head
+        this.chainHeadReadAt = attemptedAt
+      }
+      this.chainHeadRead = undefined
+    })()
+    return this.chainHeadRead
   }
 
   /**
@@ -988,12 +1119,17 @@ export class SwarmIdProxy {
   ): Promise<(BatchTTLReading & { measuredAt: number }) | undefined> {
     const batchId = stamp.batchID.toHex()
     const measuredAt = Date.now()
-    const reading = await fetchAuthoritativeBatchTTL(
-      this.gnosisRpcUrl,
-      this.beeApiUrl,
-      batchId,
-      this.postageStampContractAddress,
-    )
+    const [reading] = await Promise.all([
+      fetchAuthoritativeBatchTTL(
+        this.gnosisRpcUrl,
+        this.beeApiUrl,
+        batchId,
+        this.postageStampContractAddress,
+      ),
+      this.mayBeWarmingUp(stamp, measuredAt) && stamp.blockNumber > 0
+        ? this.refreshChainHead()
+        : undefined,
+    ])
     if (reading === undefined) return undefined
     this.liveLifetimes.set(batchId, {
       batchTTL: reading.batchTTL,
@@ -1026,7 +1162,22 @@ export class SwarmIdProxy {
 
   /** Why the session refuses to stamp with `drive`, if it does. */
   private refusalOf(drive: DriveWritePath): StampRefusal | undefined {
-    return stampRefusal(this.lifetimeOf(drive.batchId, drive.lifetime))
+    return this.refusalOfStamp(drive.batchId, drive.lifetime)
+  }
+
+  /**
+   * Expiry and the record's own verdict first (`stampRefusal`), then the
+   * warm-up rule (#924): a batch younger than the blocks Bee waits for is
+   * refused as `stamp-warming-up` until the tick sees them pass.
+   */
+  private refusalOfStamp(
+    batchId: string,
+    stamp: StampLifetimeFields,
+  ): StampRefusal | undefined {
+    return (
+      stampRefusal(this.lifetimeOf(batchId, stamp)) ??
+      (this.blocksUntilUsable(stamp) > 0 ? "stamp-warming-up" : undefined)
+    )
   }
 
   /**
@@ -1041,6 +1192,8 @@ export class SwarmIdProxy {
     this.primaryBatchId = undefined
     clearTimeout(this.expiryTimer)
     this.expiryTimer = undefined
+    clearTimeout(this.warmUpTimer)
+    this.warmUpTimer = undefined
     this.liveLifetimes.clear()
   }
 
@@ -3658,6 +3811,14 @@ export class SwarmIdProxy {
         { reason: "stamp-not-usable" },
       )
     }
+    if (refusal === "stamp-warming-up") {
+      const seconds = this.blocksUntilUsable(drive.lifetime) * GNOSIS_BLOCK_TIME
+      throw new SwarmIdError(
+        "upload-unavailable",
+        `The account's drive is new and the network has not seen its batch yet. Uploads work in about ${seconds} seconds; onConnectionChange fires when they do.`,
+        { reason: "stamp-warming-up" },
+      )
+    }
   }
 
   /**
@@ -3878,7 +4039,7 @@ export class SwarmIdProxy {
     const drives = granted
       .map(
         (stamp) =>
-          `${stamp.batchID.toHex()}:${stampRefusal(this.lifetimeOf(stamp.batchID.toHex(), stamp))}`,
+          `${stamp.batchID.toHex()}:${this.refusalOfStamp(stamp.batchID.toHex(), stamp)}`,
       )
       .sort()
     const lanes = [...this.drives.values()]
@@ -6338,7 +6499,11 @@ export class SwarmIdProxy {
     return {
       batchID: stamp.batchID.toHex(),
       utilization: stamp.utilization,
-      usable: details?.usable ?? stamp.usable,
+      // Bee's own answer when it serves `/stamps`; otherwise the stored
+      // verdict, held back while the batch is warming up (#924).
+      usable:
+        details?.usable ??
+        (stamp.usable && this.blocksUntilUsable(stamp) === 0),
       label: "", // PostageStamp doesn't store label
       depth: stamp.depth,
       amount: stamp.amount.toString(),

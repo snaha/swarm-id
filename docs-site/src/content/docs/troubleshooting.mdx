@@ -57,7 +57,8 @@ expired drive used to land here too, and so did one whose stored record already 
 drive has expired` with `uploadUnavailableReason` set to `stamp-expired`, or `The account's drive
 is not usable` with `stamp-not-usable` — as `upload-unavailable` with that `reason`.
 
-**Fix.** A batch the node has not ingested yet needs a moment after purchase. Otherwise check the drive:
+**Fix.** A batch the node has not ingested yet needs a moment after purchase; the session says so
+as `stamp-warming-up` and `onConnectionChange` fires when it is over. Otherwise check the drive:
 `getPostageBatch()` reports `exists` and `usable` from a real node, and `connectionInfo.canUpload`
 with `uploadUnavailableReason` says whether the session will stamp at all. See the
 [upload availability table](../subsidised-gateway/#upload-availability-truth-table).
@@ -70,7 +71,7 @@ Swarm ID has no drive, so without a `subsidisedGatewayUrl` every first-time user
 **Fix.** Gate uploads on `connectionInfo.canUpload`, and show `uploadUnavailableReason` when it is
 false: `no-stamp` and `stamp-expired` are the user's to fix (attach, buy or renew a drive),
 `stamp-not-usable` is the user's too (open the drive in Swarm ID, which refreshes its record),
-`stamper-failed` is a bug to report. Pass the public gateway as `subsidisedGatewayUrl` for a
+`stamp-warming-up` clears by itself within a minute, `stamper-failed` is a bug to report. Pass the public gateway as `subsidisedGatewayUrl` for a
 free tier. See [Quick Start](../getting-started/#a-batch-you-were-given) and
 [Why Uploads Are Unavailable](../subsidised-gateway/#why-uploads-are-unavailable).
 

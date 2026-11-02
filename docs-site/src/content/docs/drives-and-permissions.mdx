@@ -122,7 +122,10 @@ from the chain halfway to its stored expiry, at least every six hours, and again
 before it refuses the drive, so a storage price change or a top-up made elsewhere moves the moment
 rather than the refusal being wrong in either direction. Each drive's `batchTTL` comes with where it
 was read from (`batchTTLSource`) and when (`batchTTLMeasuredAt`), so an estimate can be shown as one
-and an exact reading aged. A hidden tab's timers run late by up to a minute. `onDrivesChange` is the one to use for the drives alone: it carries no
+and an exact reading aged. A drive bought moments ago is held back as `stamp-warming-up` for the
+ten blocks Bee waits before stamping with a new batch, under a minute on Gnosis; `usable` is
+`false` meanwhile, and both callbacks fire when the wait is over, so an app that queued an upload
+behind a purchase needs no polling loop. A hidden tab's timers run late by up to a minute. `onDrivesChange` is the one to use for the drives alone: it carries no
 payload and fires for nothing else.
 
 ### Scratch drives

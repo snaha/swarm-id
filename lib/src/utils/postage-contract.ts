@@ -20,7 +20,7 @@
  */
 
 import { fetchBatchTTL, GNOSIS_BLOCK_TIME } from "./ttl"
-import { CHAIN_READ_TIMEOUT_MS, jsonRpcBatch } from "./json-rpc"
+import { CHAIN_READ_TIMEOUT_MS, jsonRpcBatch, jsonRpcCall } from "./json-rpc"
 import type { BatchTTLSource } from "../types"
 
 /**
@@ -368,6 +368,40 @@ export async function fetchAuthoritativeBatchTTL(
   return fromBee === undefined
     ? undefined
     : { batchTTL: fromBee, source: "bee" }
+}
+
+/**
+ * How many blocks a client-signed stamp waits after its batch's block, from
+ * the RPC head (#924). What actually refuses an early stamp is a node's
+ * batch store, which trails the tip by `tailSize = 4` blocks
+ * (`pkg/postage/listener`). Bee's own issuers wait `blockThreshold = 10`
+ * (`IssuerUsable` in `pkg/postage/service.go`) counted from that lagging
+ * state, so 14 from the head; ten from the head is deliberately looser than
+ * Bee and still a sound margin over the four that matter. Not a copy of
+ * Bee's rule, so do not "fix" it to match.
+ */
+export const BATCH_USABLE_BLOCKS = 10
+
+/** The chain's latest block number, or `undefined` when the RPC cannot answer. */
+export async function fetchBlockNumber(
+  rpcUrl: string,
+): Promise<number | undefined> {
+  try {
+    const result = await jsonRpcCall<unknown>(rpcUrl, "eth_blockNumber", [], {
+      timeoutMs: CHAIN_READ_TIMEOUT_MS,
+    })
+    return typeof result === "string" ? Number(BigInt(result)) : undefined
+  } catch {
+    return undefined
+  }
+}
+
+/**
+ * Blocks still to pass, at chain head `head`, before Bee would stamp with a
+ * batch minted in block `blockNumber`; `0` once it would.
+ */
+export function blocksUntilUsable(blockNumber: number, head: number): number {
+  return Math.max(0, BATCH_USABLE_BLOCKS - (head - blockNumber))
 }
 
 /** A remaining lifetime in seconds, and which authoritative source said so. */

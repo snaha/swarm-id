@@ -102,13 +102,19 @@ vi.mock("./utils/ttl", async (importActual) => ({
     throw new Error("offline")
   }),
 }))
-import { fetchAuthoritativeBatchTTL } from "./utils/postage-contract"
+import {
+  fetchAuthoritativeBatchTTL,
+  fetchBlockNumber,
+} from "./utils/postage-contract"
 vi.mock("./utils/postage-contract", async (importActual) => ({
   ...(await importActual<typeof import("./utils/postage-contract")>()),
   fetchAuthoritativeBatchTTL: vi.fn(async () => ({
     batchTTL: 3600,
     source: "chain" as const,
   })),
+  // Far past every fixture's `blockNumber: 1`: no drive is warming up unless
+  // a test mints one near the head.
+  fetchBlockNumber: vi.fn(async () => 1_000_000),
 }))
 vi.mock("./storage/utilization-store", () => ({
   UtilizationStoreDB: vi.fn(function () {
@@ -1056,6 +1062,223 @@ describe("SwarmIdProxy partitioned write enablement", () => {
       afterEach(() => chainSays(3600))
       /** A connection that outlasts every fake-timer test below. */
       const A_DAY_MS = 24 * 60 * 60 * 1000
+      const withFakeTimers = async (run: () => Promise<void>) => {
+        vi.useFakeTimers({
+          toFake: ["setTimeout", "clearTimeout", "Date"],
+          shouldAdvanceTime: true,
+        })
+        try {
+          await run()
+        } finally {
+          vi.useRealTimers()
+        }
+      }
+      const CHAIN_HEAD = 1_000_000
+      const headSays = (head: number | undefined) =>
+        vi.mocked(fetchBlockNumber).mockImplementation(async () => head)
+      afterEach(() => headSays(CHAIN_HEAD))
+
+      it("holds a drive back while its batch is younger than Bee's threshold, and lets it through once it is not (#924)", async () => {
+        vi.useFakeTimers({
+          toFake: ["setTimeout", "clearTimeout", "Date"],
+          shouldAdvanceTime: true,
+        })
+        try {
+          // Minted two blocks ago: eight more to wait.
+          await connectWithTwoDrives([
+            {
+              ...stampOf(BATCH_ID_HEX),
+              blockNumber: CHAIN_HEAD - 2,
+              createdAt: Date.now(),
+            },
+            stampOf(SECOND_BATCH_ID_HEX),
+          ])
+          await vi.waitFor(() =>
+            expect(coordinatorFor(BATCH_ID_HEX)).toBeDefined(),
+          )
+          await vi.waitFor(() =>
+            expect(lastInfo().uploadUnavailableReason).toBe("stamp-warming-up"),
+          )
+          expect(lastInfo().canUpload).toBe(false)
+          // `getDrives()` says so too, without Bee's `/stamps`.
+          await dispatch(
+            { type: "getDrives", requestId: "g-warm" },
+            PARENT_ORIGIN,
+            parentWindow,
+          )
+          await vi.waitFor(() =>
+            expect(messagesOfType("getDrivesResponse")).toHaveLength(1),
+          )
+          const [response] = messagesOfType("getDrivesResponse")
+          const drive = response.drives.find(
+            (candidate: Drive) => candidate.batchID === BATCH_ID_HEX,
+          )
+          expect(drive.usable).toBe(false)
+          // Eight blocks on, the tick re-reads the head and lets it through.
+          headSays(CHAIN_HEAD + 8)
+          await vi.advanceTimersByTimeAsync(8 * 5 * 1000 + 1000)
+          await vi.waitFor(() =>
+            expect(lastInfo().uploadMode).toBe("user-stamp"),
+          )
+          expect(lastInfo().uploadUnavailableReason).toBeUndefined()
+        } finally {
+          vi.useRealTimers()
+        }
+      })
+
+      it("never calls a fresh drive ready before its first head read lands (#924)", async () => {
+        // The read hangs until released: everything announced meanwhile
+        // must hold the drive back, or a dApp would see it flap.
+        let release: (head: number) => void = () => undefined
+        vi.mocked(fetchBlockNumber).mockImplementation(
+          () => new Promise((resolve) => (release = resolve)),
+        )
+        await connectWithTwoDrives([
+          {
+            ...stampOf(BATCH_ID_HEX),
+            blockNumber: CHAIN_HEAD - 100,
+            createdAt: Date.now(),
+          },
+        ])
+        await vi.waitFor(() =>
+          expect(coordinatorFor(BATCH_ID_HEX)).toBeDefined(),
+        )
+        await flushBus()
+        const before = messagesOfType("connectionInfoChanged")
+        expect(before.length).toBeGreaterThan(0)
+        expect(before.every((info) => info.uploadMode !== "user-stamp")).toBe(
+          true,
+        )
+        // Long past the threshold: it clears as soon as the head lands.
+        release(CHAIN_HEAD)
+        await vi.waitFor(() => expect(lastInfo().uploadMode).toBe("user-stamp"))
+      })
+
+      it("announces a fresh drive joining the grant as warming up, not ready, while its head read is in flight (#924)", async () => {
+        await connectWithTwoDrives([stampOf(BATCH_ID_HEX)])
+        await vi.waitFor(() =>
+          expect(coordinatorFor(BATCH_ID_HEX)).toBeDefined(),
+        )
+        await flushBus()
+        let release: (head: number) => void = () => undefined
+        vi.mocked(fetchBlockNumber).mockImplementation(
+          () => new Promise((resolve) => (release = resolve)),
+        )
+        const before = drivesAnnounced()
+        // A drive bought moments ago joins: the reconcile announces it in
+        // the same turn, before any timer could start the read.
+        updateAccount((account) => ({
+          ...account,
+          postageStamps: [
+            stampOf(BATCH_ID_HEX),
+            {
+              ...stampOf(SECOND_BATCH_ID_HEX),
+              blockNumber: CHAIN_HEAD - 100,
+              createdAt: Date.now(),
+            },
+          ],
+          connectedApps: account.connectedApps.map((app) => ({
+            ...app,
+            drives: [
+              new BatchId(BATCH_ID_HEX),
+              new BatchId(SECOND_BATCH_ID_HEX),
+            ],
+          })),
+        }))
+        await vi.waitFor(() => expect(drivesAnnounced()).toBe(before + 1))
+        // Announced as warming up, so the head landing is a second change.
+        release(CHAIN_HEAD)
+        await vi.waitFor(() => expect(drivesAnnounced()).toBe(before + 2))
+      })
+
+      it("leaves a record older than the warm-up window alone, whatever the head says (#924)", async () => {
+        // A head that would call the batch brand new, on a record written
+        // eleven minutes ago: the window, not the head, decides.
+        await connectWithTwoDrives([
+          {
+            ...stampOf(BATCH_ID_HEX),
+            blockNumber: CHAIN_HEAD,
+            createdAt: Date.now() - 11 * 60 * 1000,
+          },
+        ])
+        await vi.waitFor(() =>
+          expect(coordinatorFor(BATCH_ID_HEX)).toBeDefined(),
+        )
+        await flushBus()
+        expect(lastInfo().uploadMode).toBe("user-stamp")
+      })
+
+      it("holds a fresh record with no block back by time, from when it was written (#924)", async () => {
+        await withFakeTimers(async () => {
+          // A purchase whose read-back failed is recorded with block 0.
+          await connectWithTwoDrives(
+            [
+              {
+                ...stampOf(BATCH_ID_HEX),
+                blockNumber: 0,
+                createdAt: Date.now(),
+              },
+            ],
+            A_DAY_MS,
+          )
+          await vi.waitFor(() =>
+            expect(lastInfo().uploadUnavailableReason).toBe("stamp-warming-up"),
+          )
+          const reads = vi.mocked(fetchBlockNumber).mock.calls.length
+          await vi.advanceTimersByTimeAsync(10 * 5 * 1000 + 1000)
+          await vi.waitFor(() =>
+            expect(lastInfo().uploadMode).toBe("user-stamp"),
+          )
+          // The head says nothing about a batch with no block: never read.
+          expect(vi.mocked(fetchBlockNumber).mock.calls.length).toBe(reads)
+        })
+      })
+
+      it("counts down on the clock when the RPC fails after a good read, and stops asking it every block (#924)", async () => {
+        await withFakeTimers(async () => {
+          // Minted at the head: ten blocks to wait.
+          await connectWithTwoDrives(
+            [
+              {
+                ...stampOf(BATCH_ID_HEX),
+                blockNumber: CHAIN_HEAD,
+                createdAt: Date.now(),
+              },
+            ],
+            A_DAY_MS,
+          )
+          await vi.waitFor(() =>
+            expect(lastInfo().uploadUnavailableReason).toBe("stamp-warming-up"),
+          )
+          headSays(undefined)
+          const reads = vi.mocked(fetchBlockNumber).mock.calls.length
+          await vi.advanceTimersByTimeAsync(10 * 5 * 1000 + 1000)
+          await vi.waitFor(() =>
+            expect(lastInfo().uploadMode).toBe("user-stamp"),
+          )
+          // One read at the moment the countdown cleared, not one a block.
+          expect(
+            vi.mocked(fetchBlockNumber).mock.calls.length - reads,
+          ).toBeLessThanOrEqual(2)
+        })
+      })
+
+      it("does not hold a fresh drive back when the chain head cannot be read (#924)", async () => {
+        headSays(undefined)
+        await connectWithTwoDrives([
+          {
+            ...stampOf(BATCH_ID_HEX),
+            blockNumber: CHAIN_HEAD,
+            createdAt: Date.now(),
+          },
+          stampOf(SECOND_BATCH_ID_HEX),
+        ])
+        await vi.waitFor(() =>
+          expect(coordinatorFor(BATCH_ID_HEX)).toBeDefined(),
+        )
+        await flushBus()
+        expect(lastInfo().uploadMode).toBe("user-stamp")
+      })
 
       it("re-sends it the moment the primary drive expires (#793)", async () => {
         chainSays(0)
@@ -1336,17 +1559,6 @@ describe("SwarmIdProxy partitioned write enablement", () => {
       })
 
       // The two lines that keep the timer right over a drive's real lifetime.
-      const withFakeTimers = async (run: () => Promise<void>) => {
-        vi.useFakeTimers({
-          toFake: ["setTimeout", "clearTimeout", "Date"],
-          shouldAdvanceTime: true,
-        })
-        try {
-          await run()
-        } finally {
-          vi.useRealTimers()
-        }
-      }
 
       it("holds a month-long expiry without ticking: a delay past what setTimeout takes fires at once", async () => {
         await withFakeTimers(async () => {
