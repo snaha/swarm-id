@@ -99,6 +99,20 @@ describe("fitProbability", () => {
     expect(fitProbability(headroomHistogram(emptyCounters(), DEPTH), 0)).toBe(1)
   })
 
+  // Rounding in the log-space sum once gave 1.0000000000000053, which the
+  // response schema refuses, so the dApp's call timed out instead
+  it.each([20, 22, 24, 26])(
+    "never exceeds 1 for a small save to an empty depth-%i partition",
+    (depth) => {
+      const histogram = headroomHistogram(emptyCounters(), depth)
+      for (const bytes of [1, CHUNK_SIZE, 10_000, 100_000, 1_000_000]) {
+        expect(
+          fitProbability(histogram, chunksForBytes(bytes)),
+        ).toBeLessThanOrEqual(1)
+      }
+    },
+  )
+
   it("is the chance of missing the one full bucket", () => {
     const histogram = new Map([
       [0, 1],

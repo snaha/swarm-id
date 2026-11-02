@@ -126,7 +126,8 @@ export function fitProbability(
   for (const [headroom, buckets] of histogram) {
     logProbability += buckets * logCdf[headroom]
   }
-  return Math.exp(logProbability)
+  // Rounding in the log-space sum can leave it a hair above 0
+  return Math.min(1, Math.exp(logProbability))
 }
 
 /** The most chunks that still fit with at least `confidence` probability */

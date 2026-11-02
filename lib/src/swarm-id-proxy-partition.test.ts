@@ -2272,6 +2272,20 @@ describe("SwarmIdProxy partitioned write enablement", () => {
         expect(drive.capacity).toBeUndefined()
       })
 
+      // The answer has to pass the client's schema, which the file-wide
+      // `unsendable` check enforces: a probability a hair above 1 was dropped
+      // and the dApp's call timed out
+      it("answers small saves to an empty partition in a form the client accepts", async () => {
+        nextStamper()
+        await connectWithTwoDrives([stampOf(BATCH_ID_HEX)])
+
+        for (const bytes of [1, CHUNK_SIZE, 10_000, 100_000, 1_000_000]) {
+          const answer = await askFit({ bytes })
+          expect(answer.type).toBe("fitProbabilityResponse")
+          expect(answer.probability).toBeLessThanOrEqual(1)
+        }
+      })
+
       it("asks only the held partition whether a save fits", async () => {
         const stamper = nextStamper()
         stamper.dataCounters[0] = partitionCapacity(DEPTH, 2)
