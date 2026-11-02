@@ -195,6 +195,14 @@ function writerPath(input: CheckInput): CheckResult {
         detail:
           'The account’s drive record says the node lacks or cannot use it, so the session refuses to stamp and the writer path was never exercised. Open the drive on the identity site to refresh its record, or add another, then run this again.',
       }
+    case 'stamp-warming-up':
+      return {
+        id,
+        title,
+        verdict: 'unknown',
+        detail:
+          'The account’s drive is new and the network has not seen its batch yet, so the session refuses to stamp and the writer path was never exercised. Wait a minute, then run this again.',
+      }
     default:
       // Not red: `uploadUnavailableReason` is optional on the wire, so an older
       // identity deployment sends `unavailable` without one and this branch is

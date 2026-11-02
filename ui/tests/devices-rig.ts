@@ -49,6 +49,10 @@ export const DISCONNECT_SETTLE_MS = 5_000
 export const CONNECT_TIMEOUT_MS = 60_000
 /** One SOC upload, its publish, and the read-back — seconds on the cluster. */
 export const UPLOAD_TIMEOUT_MS = 60_000
+/** A drive bought moments ago is held back for the ten blocks Bee waits before
+ *  stamping with it (#924): 50 s at anvil's 5 s block time, the proxy's
+ *  per-block re-check, and margin. The demo's upload button follows `canUpload`. */
+export const WARM_UP_TIMEOUT_MS = 90_000
 /** A bus-accelerated handover is ~one round trip; this is the poll fallback plus margin. */
 export const HANDOVER_TIMEOUT_MS = LEASE_REFRESH_MS * 3
 /** How long a slot nobody released stays taken: its lock lapses at the TTL, its
@@ -270,7 +274,17 @@ export class Device {
         /\/(bytes|chunks)(\?|$)/.test(request.url()),
       { timeout: UPLOAD_TIMEOUT_MS },
     )
-    await page.getByRole('button', { name: 'Upload Data' }).click()
+    // Enabled once the session will stamp with the primary: a freshly bought
+    // drive is held back until the network has had its blocks to see the
+    // batch (#924). A named drive has its own "Setting up" line meanwhile.
+    const uploadButton = page.getByRole('button', { name: 'Upload Data' })
+    await expect(uploadButton).toBeEnabled({ timeout: WARM_UP_TIMEOUT_MS })
+    if (batchHex) {
+      await expect(
+        page.getByText(`Setting up ${batchHex.slice(0, LANE_PREFIX_LENGTH)}…`),
+      ).toHaveCount(0, { timeout: WARM_UP_TIMEOUT_MS })
+    }
+    await uploadButton.click()
     // A slot wait that times out fails before any write leaves, so the card's
     // error is the only signal then — race it against the first request.
     const failed = page

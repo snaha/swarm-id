@@ -829,6 +829,8 @@ export const UploadUnavailableReasonSchema = z.enum([
   "stamper-failed",
   "stamp-expired",
   "stamp-not-usable",
+  /** The batch is younger than the ten blocks Bee waits before stamping with one (#924) */
+  "stamp-warming-up",
 ])
 
 export type UploadUnavailableReason = z.infer<

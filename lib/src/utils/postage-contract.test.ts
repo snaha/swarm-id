@@ -7,7 +7,10 @@ import {
   calculateContractTTLSeconds,
   decodeBatches,
   decodeUint,
+  BATCH_USABLE_BLOCKS,
+  blocksUntilUsable,
   fetchAuthoritativeBatchTTL,
+  fetchBlockNumber,
   fetchBatchTTLFromContract,
   fetchOnChainBatchState,
   fetchOnChainBatchStateResult,
@@ -375,6 +378,33 @@ describe("fetchAuthoritativeBatchTTL", () => {
     const ttl = await fetchAuthoritativeBatchTTL(RPC, BEE, BATCH_ID)
 
     expect(ttl).toBeUndefined()
+  })
+})
+
+describe("blocksUntilUsable", () => {
+  it("counts Bee's threshold down from the batch's block", () => {
+    expect(blocksUntilUsable(100, 100)).toBe(BATCH_USABLE_BLOCKS)
+    expect(blocksUntilUsable(100, 102)).toBe(BATCH_USABLE_BLOCKS - 2)
+    expect(blocksUntilUsable(100, 110)).toBe(0)
+    expect(blocksUntilUsable(100, 5000)).toBe(0)
+  })
+})
+
+describe("fetchBlockNumber", () => {
+  it("decodes the hex head, and answers undefined when the RPC fails", async () => {
+    const fetchSpy = vi.spyOn(globalThis, "fetch")
+    try {
+      fetchSpy.mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        json: () => Promise.resolve({ jsonrpc: "2.0", id: 1, result: "0x2a" }),
+      } as Response)
+      expect(await fetchBlockNumber("https://rpc.example")).toBe(42)
+      fetchSpy.mockRejectedValueOnce(new Error("rpc down"))
+      expect(await fetchBlockNumber("https://rpc.example")).toBeUndefined()
+    } finally {
+      fetchSpy.mockRestore()
+    }
   })
 })
 
