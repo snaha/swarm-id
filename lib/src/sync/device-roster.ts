@@ -381,10 +381,23 @@ async function appendToRoster(opts: {
   )
 }
 
+// Retry schedule for a publish whose roster append was skipped (#920): the
+// public gateway 500s on absent slots while busy and recovers within minutes.
+const ROSTER_RETRY_BASE_MS = 30_000
+const ROSTER_RETRY_MAX_MS = 600_000
+
+/** Delay before the `attempt`-th retry of an unconfirmed roster append. */
+export function rosterRetryDelayMs(attempt: number): number {
+  return Math.min(ROSTER_RETRY_BASE_MS * 2 ** attempt, ROSTER_RETRY_MAX_MS)
+}
+
 /**
  * Ensure this device is in the roster with current membership. Appends only when
  * the device is absent or its `removedAt` state differs (a new sign-in, a
  * removal, or a resurrection) — keeping the roster a rare, append-only write.
+ *
+ * Returns `false` when membership could not be confirmed: the roster read was
+ * inconclusive, so nothing was appended and the caller must retry later (#920).
  */
 export async function ensureInRoster(opts: {
   bee: Bee
@@ -394,7 +407,7 @@ export async function ensureInRoster(opts: {
   accountId: string
   device: Device
   target: UploadTarget
-}): Promise<void> {
+}): Promise<boolean> {
   // If the roster read is inconclusive we cannot tell "device absent" from "read
   // failed" — skip rather than append on a guess (an append would compute its
   // index against the same failing feed and could clobber a peer's entry).
@@ -406,14 +419,15 @@ export async function ensureInRoster(opts: {
       owner: opts.owner,
     })
   } catch {
-    return
+    return false
   }
   const existing = roster.find((d) => d.deviceId === opts.device.deviceId)
 
   const upToDate =
     existing !== undefined &&
     Boolean(existing.removedAt) === Boolean(opts.device.removedAt)
-  if (upToDate) return
+  if (upToDate) return true
 
   await appendToRoster(opts)
+  return true
 }

@@ -125,6 +125,7 @@ import {
 } from "./sync"
 import type { DeviceStateSnapshot } from "./sync"
 import { mergeDevicesList } from "./sync/merge-snapshot"
+import { rosterRetryDelayMs } from "./sync/device-roster"
 import { foldAccountFromSwarm } from "./sync/fold-account-from-swarm"
 import {
   accountDeltaFromSnapshot,
@@ -469,6 +470,10 @@ export class SwarmIdProxy {
    * motivation #4) and when account state changes while a lease is held.
    */
   private publishTimer: ReturnType<typeof setTimeout> | undefined
+  // Re-arms the announce publish after a partial one (roster append skipped
+  // on an inconclusive scan, #920); attempt drives the backoff.
+  private rosterRetryTimer: ReturnType<typeof setTimeout> | undefined
+  private rosterRetryAttempt = 0
   private publishInFlight: boolean = false
   /**
    * Why the next debounced publish was scheduled. `"acquired"` (announce on
@@ -1385,6 +1390,7 @@ export class SwarmIdProxy {
       clearTimeout(this.publishTimer)
       this.publishTimer = undefined
     }
+    this.clearRosterRetry()
 
     // Retire any join still deriving its key — its continuation would
     // otherwise attach a freshly-opened socket to the bus we are closing,
@@ -2045,6 +2051,16 @@ export class SwarmIdProxy {
    * operation so acquire / refresh / validate never disagree about who we
    * are (which previously caused false "reclaimed by another device").
    */
+  /** Drop a pending roster-append retry (#920) and its backoff, so the next
+   *  session on this proxy starts over at the base delay. */
+  private clearRosterRetry(): void {
+    if (this.rosterRetryTimer !== undefined) {
+      clearTimeout(this.rosterRetryTimer)
+      this.rosterRetryTimer = undefined
+    }
+    this.rosterRetryAttempt = 0
+  }
+
   private requireDeviceId(): string {
     if (!this.deviceId) this.deviceId = getOrCreateDeviceId()
     return this.deviceId
@@ -3107,7 +3123,7 @@ export class SwarmIdProxy {
       // never-edited field) are derived by `accountStateToDeviceView`.
       const view = accountStateToDeviceView(snapshot)
 
-      await coordinator.withWrite((target) =>
+      const published = await coordinator.withWrite((target) =>
         publishDeviceState({
           bee: this.nodeBee,
           accountId: snapshot.accountId,
@@ -3119,6 +3135,28 @@ export class SwarmIdProxy {
           target,
         }),
       )
+      if (published.status === "partial") {
+        // The roster append was skipped (#920). Re-run the announce path with
+        // backoff: it re-reads the roster and appends once the scan is clean.
+        //
+        // Only while this session still holds a partition: the guard at the
+        // top of this method drops a retry that fires after the lease idled
+        // out (the first retry lands at `IDLE_YIELD_MS`), and the retry does
+        // not acquire one just to announce. The next acquire's own
+        // `onLeaseAcquired` announce re-reads the roster and appends then —
+        // the gap is this device's roster entry, not the account, which the
+        // identity UI's `syncAccount` retry keeps reachable.
+        const delay = rosterRetryDelayMs(this.rosterRetryAttempt++)
+        console.warn(`[Proxy] ${published.warning}; retrying in ${delay}ms`)
+        if (this.rosterRetryTimer !== undefined)
+          clearTimeout(this.rosterRetryTimer)
+        this.rosterRetryTimer = setTimeout(() => {
+          this.rosterRetryTimer = undefined
+          this.schedulePublish("acquired")
+        }, delay)
+        return
+      }
+      this.rosterRetryAttempt = 0
       // `ui/tests/three-devices.test.ts` counts this line to tell a busy
       // holder from an idle one (#707); reword it there too.
       console.info(
@@ -3339,6 +3377,7 @@ export class SwarmIdProxy {
       clearTimeout(this.publishTimer)
       this.publishTimer = undefined
     }
+    this.clearRosterRetry()
     this.pendingLaneUpdates.clear()
     this.storagePartitioned = false
     this.partitionAccount = undefined

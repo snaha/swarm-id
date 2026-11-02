@@ -262,6 +262,7 @@ import { BusMessageSchema } from "./bus/messages"
 import { deriveBusContext } from "./bus/bus-context"
 import { BatchWriteCoordinator } from "./sync/batch-write-coordinator"
 import { publishDeviceState, readRoster } from "./sync"
+import { rosterRetryDelayMs } from "./sync/device-roster"
 import { UtilizationAwareStamper } from "./utils/batch-utilization"
 import { DriveWritePath } from "./proxy/drive-write-path"
 import {
@@ -4855,6 +4856,110 @@ describe("SwarmIdProxy partitioned write enablement", () => {
       await publish("acquired")
 
       expect(withWrite).toHaveBeenCalled()
+    })
+  })
+
+  // #920's proxy half: a publish whose roster append was skipped retries the
+  // announce path with backoff. The retry publishes only under a held
+  // partition; after the lease idled out it is the next acquire's announce
+  // that appends. Both are pinned here, since disabling the branch outright
+  // left the suite green.
+  describe("a partial publish (roster append skipped)", () => {
+    const selfId = "self-device-partial"
+
+    async function connectAndArm(): Promise<{
+      publish: (reason: "acquired" | "change") => Promise<void>
+      coordinator: {
+        currentPartition?: number
+        deps: { onLeaseAcquired: (partition: number) => void }
+      }
+    }> {
+      localStorageFake.setItem("swarm-id-device-id", selfId)
+      const challenge = await startPartitionedConnect()
+      await sendSetSecret(challenge, {
+        account: serializeSyncedAccount(makeSyncedAccount()),
+      })
+      const coordinator = vi.mocked(BatchWriteCoordinator).mock.results.at(-1)!
+        .value as {
+        currentPartition?: number
+        accountId?: string
+        withWrite: ReturnType<typeof vi.fn>
+        deps: {
+          accountId: string
+          onLeaseAcquired: (partition: number) => void
+        }
+      }
+      coordinator.currentPartition = 0
+      coordinator.accountId = coordinator.deps.accountId
+      coordinator.withWrite.mockImplementation(
+        (write: (target: unknown) => Promise<unknown>) => write({}),
+      )
+      rosterDevices.length = 0
+      const partial = {
+        status: "partial" as const,
+        reference: "ref",
+        timestamp: 0n,
+        chunkAddresses: [],
+        warning: "roster membership unconfirmed",
+      }
+      vi.mocked(publishDeviceState)
+        .mockClear()
+        .mockResolvedValueOnce(partial)
+        .mockResolvedValue({ ...partial, status: "success" })
+      const internals = proxy as unknown as {
+        runAccountStatePublish(reason: "acquired" | "change"): Promise<void>
+      }
+      return {
+        publish: (reason) => internals.runAccountStatePublish(reason),
+        coordinator,
+      }
+    }
+
+    it("retries the announce after the backoff while the partition is held", async () => {
+      const { publish } = await connectAndArm()
+      vi.useFakeTimers()
+      try {
+        await publish("acquired")
+        expect(publishDeviceState).toHaveBeenCalledTimes(1)
+
+        await vi.advanceTimersByTimeAsync(
+          rosterRetryDelayMs(0) + PUBLISH_DEBOUNCE_MS,
+        )
+        await vi.waitFor(() =>
+          expect(publishDeviceState).toHaveBeenCalledTimes(2),
+        )
+        // Confirmed: the chain stops.
+        await vi.advanceTimersByTimeAsync(
+          rosterRetryDelayMs(1) + PUBLISH_DEBOUNCE_MS,
+        )
+        expect(publishDeviceState).toHaveBeenCalledTimes(2)
+      } finally {
+        vi.useRealTimers()
+      }
+    })
+
+    it("leaves the append to the next acquire's announce once the lease idled out", async () => {
+      const { publish, coordinator } = await connectAndArm()
+      vi.useFakeTimers()
+      try {
+        await publish("acquired")
+        expect(publishDeviceState).toHaveBeenCalledTimes(1)
+
+        coordinator.currentPartition = undefined
+        await vi.advanceTimersByTimeAsync(
+          rosterRetryDelayMs(0) + PUBLISH_DEBOUNCE_MS,
+        )
+        expect(publishDeviceState).toHaveBeenCalledTimes(1)
+
+        coordinator.currentPartition = 0
+        coordinator.deps.onLeaseAcquired(0)
+        await vi.advanceTimersByTimeAsync(PUBLISH_DEBOUNCE_MS)
+        await vi.waitFor(() =>
+          expect(publishDeviceState).toHaveBeenCalledTimes(2),
+        )
+      } finally {
+        vi.useRealTimers()
+      }
     })
   })
 
