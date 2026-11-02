@@ -1789,6 +1789,72 @@ describe("SwarmIdClient request timeout", () => {
     expect(vi.getTimerCount()).toBe(0)
   })
 
+  // Posting fails before anything is in flight, so nothing may stay armed:
+  // no timer to fire later, no pending request for a late answer to find.
+  it.each([
+    [
+      "without an iframe",
+      () => {
+        internals(client).iframe = undefined
+        return client.getPostageBatch()
+      },
+      "invalid-state",
+    ],
+    [
+      "when the message schema refuses it",
+      () => client.downloadData("not-a-reference"),
+      "invalid-request",
+    ],
+  ])(
+    "leaves no timer or pending request behind when it cannot post %s",
+    async (_, request, code) => {
+      vi.useFakeTimers()
+
+      await expect(request()).rejects.toMatchObject({ code })
+
+      expect(internals(client).pendingRequests.size).toBe(0)
+      expect(vi.getTimerCount()).toBe(0)
+    },
+  )
+
+  // The id says which request an answer is for; the type says it is an answer
+  // to that kind of request. One of another kind must not reach the caller as
+  // the shape it asked for.
+  it("rejects an answer of another type with internal", async () => {
+    vi.useFakeTimers()
+    const request = client.getPostageBatch()
+    const { requestId } = env.lastPostedMessage()
+
+    env.dispatch({
+      data: {
+        type: "getNodeInfoResponse",
+        requestId,
+        beeMode: "full",
+        chequebookEnabled: false,
+        swapEnabled: false,
+      },
+    })
+
+    await expect(request).rejects.toMatchObject({
+      code: "internal",
+      message:
+        "Expected getPostageBatchResponse for getPostageBatch, got getNodeInfoResponse",
+    })
+    expect(internals(client).pendingRequests.size).toBe(0)
+    expect(vi.getTimerCount()).toBe(0)
+  })
+
+  it("accepts authStatusResponse as the answer to checkAuth", async () => {
+    const request = client.checkAuthStatus()
+    const { requestId } = env.lastPostedMessage()
+
+    env.dispatch({
+      data: { type: "authStatusResponse", requestId, authenticated: false },
+    })
+
+    await expect(request).resolves.toMatchObject({ authenticated: false })
+  })
+
   // Progress is reported on its own listener and deliberately does not settle
   // the pending. It does not move the deadline either: `timeout` is a flat cap
   // on the whole request, so an upload still transferring when it expires is

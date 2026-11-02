@@ -114,6 +114,23 @@ const DEFAULT_INITIALIZATION_TIMEOUT_MS = 30000
 const PERMISSIONS_REQUEST_TIMEOUT_MS =
   PERMISSIONS_POPUP_MAX_MS + DEFAULT_TIMEOUT_MS
 
+/** A request the client awaits an answer to; `parentIdentify` gets none. */
+type AwaitedRequest = Exclude<ParentToIframeMessage, { type: "parentIdentify" }>
+
+/**
+ * The answer type for a request type: `${type}Response`, except `checkAuth`,
+ * answered by the `authStatusResponse` the proxy also pushes unasked. Typed
+ * against the protocol: a request added without its answer type fails to
+ * compile here, not every call at runtime.
+ */
+function responseTypeFor(
+  requestType: AwaitedRequest["type"],
+): IframeToParentMessage["type"] {
+  return requestType === "checkAuth"
+    ? "authStatusResponse"
+    : `${requestType}Response`
+}
+
 /**
  * {@link withTimeout} for one of `initialize()`'s waits: a missed deadline
  * rejects as `init-failed`, the `TimeoutError` kept as its cause, so every
@@ -194,6 +211,10 @@ export class SwarmIdClient {
   private pendingRequests: Map<
     string,
     {
+      /** The request's type, for the error when the answer's type is wrong. */
+      requestType: string
+      /** The only answer type that settles the request. */
+      responseType: string
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       resolve: (value: any) => void
       reject: (error: Error) => void
@@ -538,12 +559,7 @@ export class SwarmIdClient {
         }
         // Handle as response if there's a matching request
         if ("requestId" in message) {
-          const pending = this.pendingRequests.get(message.requestId)
-          if (pending) {
-            clearTimeout(pending.timeoutId)
-            this.pendingRequests.delete(message.requestId)
-            pending.resolve(message)
-          }
+          this.resolvePending(message)
         }
         break
 
@@ -591,12 +607,7 @@ export class SwarmIdClient {
       case "disconnectResponse":
         // Handle as response if there's a matching request
         if ("requestId" in message) {
-          const pending = this.pendingRequests.get(message.requestId)
-          if (pending) {
-            clearTimeout(pending.timeoutId)
-            this.pendingRequests.delete(message.requestId)
-            pending.resolve(message)
-          }
+          this.resolvePending(message)
         }
         break
 
@@ -622,12 +633,7 @@ export class SwarmIdClient {
       default:
         // Handle response messages with requestId
         if ("requestId" in message) {
-          const pending = this.pendingRequests.get(message.requestId)
-          if (pending) {
-            clearTimeout(pending.timeoutId)
-            this.pendingRequests.delete(message.requestId)
-            pending.resolve(message)
-          }
+          this.resolvePending(message)
         }
     }
   }
@@ -659,10 +665,9 @@ export class SwarmIdClient {
    */
   private async sendRequest<
     TResponse,
-    TRequest extends ParentToIframeMessage & { requestId: string } =
-      ParentToIframeMessage & {
-        requestId: string
-      },
+    TRequest extends AwaitedRequest & { requestId: string } = AwaitedRequest & {
+      requestId: string
+    },
   >(message: TRequest): Promise<TResponse> {
     // A per-call `requestOptions.timeout` bounds this whole round trip, not
     // only the Bee request the proxy makes with it: a caller raising it for a
@@ -679,13 +684,42 @@ export class SwarmIdClient {
       }, timeout)
 
       this.pendingRequests.set(message.requestId, {
+        requestType: message.type,
+        responseType: responseTypeFor(message.type),
         resolve,
         reject,
         timeoutId,
       })
 
-      this.sendMessage(message)
+      try {
+        this.sendMessage(message)
+      } catch (error) {
+        clearTimeout(timeoutId)
+        this.pendingRequests.delete(message.requestId)
+        throw error
+      }
     })
+  }
+
+  /**
+   * Settle the request an answer carries the id of, if it is still waiting.
+   * An answer of another type than the request's fails it with `internal`.
+   */
+  private resolvePending(message: { type: string; requestId: string }): void {
+    const pending = this.pendingRequests.get(message.requestId)
+    if (!pending) return
+    clearTimeout(pending.timeoutId)
+    this.pendingRequests.delete(message.requestId)
+    if (message.type !== pending.responseType) {
+      pending.reject(
+        new SwarmIdError(
+          "internal",
+          `Expected ${pending.responseType} for ${pending.requestType}, got ${message.type}`,
+        ),
+      )
+      return
+    }
+    pending.resolve(message)
   }
 
   /**
