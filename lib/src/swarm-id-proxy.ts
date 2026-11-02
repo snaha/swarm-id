@@ -3011,6 +3011,7 @@ export class SwarmIdProxy {
     // "change" dominates: if a real delta is pending in this debounce window,
     // don't let a coalesced "acquired" downgrade it to the announce-gated path.
     if (this.publishReason !== "change") this.publishReason = reason
+    // Not `cancelScheduledPublish`: a reschedule keeps the pending reason.
     if (this.publishTimer !== undefined) clearTimeout(this.publishTimer)
     this.publishTimer = setTimeout(() => {
       this.publishTimer = undefined
