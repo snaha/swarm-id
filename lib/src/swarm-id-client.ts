@@ -222,7 +222,7 @@ export class SwarmIdClient {
    * @param options.iframePath - The path to the proxy iframe (defaults to "/proxy")
    * @param options.timeout - Request timeout in milliseconds (defaults to 30000). Bounds each call's whole round trip through the iframe; a call's own `requestOptions.timeout` replaces it for that call
    * @param options.onConnectionChange - Callback invoked when the dApp-visible ConnectionInfo changes (identity, stamp, account type, auth)
-   * @param options.onDrivesChange - Callback invoked when the app's drives change (grant, primary, lane, expiry); re-read `getDrives()` there
+   * @param options.onDrivesChange - Callback invoked once at initialisation and when the app's drives change (grant, primary, lane, expiry); re-read `getDrives()` there
    * @param options.popupMode - How to display the authentication popup: "popup" or "window" (defaults to "window")
    * @param options.metadata - Application metadata shown to users during authentication
    * @param options.metadata.name - Application name (1-100 characters)
@@ -577,12 +577,10 @@ export class SwarmIdClient {
         if (this.onConnectionChange) {
           this.onConnectionChange(info)
         }
+        // After the info, so a `getDrives()` read in the handler is current.
+        if (message.drivesChanged) this.onDrivesChange?.()
         break
       }
-
-      case "drivesChanged":
-        this.onDrivesChange?.()
-        break
 
       case "initError":
         // Initialization error from proxy (e.g., origin validation failed)

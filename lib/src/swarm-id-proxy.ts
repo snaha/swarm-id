@@ -345,8 +345,8 @@ export class SwarmIdProxy {
   private drives = new Map<string, DriveWritePath>()
   /**
    * The drives `connectionInfoChanged` last went out with (see `driveState`).
-   * Starts unset, not empty, so the first emit sends `drivesChanged` for an
-   * app with no drives too.
+   * Starts unset, not empty, so the first emit carries `drivesChanged` for
+   * an app with no drives too.
    */
   private lastDriveState: string | undefined
   /** Armed for the earliest expiry among the granted drives (#793), see `armExpiryTimer`. */
@@ -3720,6 +3720,9 @@ export class SwarmIdProxy {
     this.lastDriveState = drives
     this.sendToParent({
       type: "connectionInfoChanged",
+      // On the info rather than as a message of its own, so a client older
+      // than the flag drops the key instead of logging an unknown message.
+      drivesChanged: drivesChanged || undefined,
       canUpload: info.canUpload,
       storagePartitioned: info.storagePartitioned,
       uploadMode: info.uploadMode,
@@ -3730,8 +3733,6 @@ export class SwarmIdProxy {
       partition: info.partition,
       permissions: info.permissions,
     })
-    // After the info, so a `getDrives()` read in the handler is current.
-    if (drivesChanged) this.sendToParent({ type: "drivesChanged" })
   }
 
   private async handleIsConnected(

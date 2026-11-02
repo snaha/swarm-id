@@ -1696,18 +1696,17 @@ export const ErrorMessageSchema = WireErrorSchema.extend({
   requestId: z.string(),
 })
 
-/**
- * The app's drives changed (#933): one joined or left the grant, the primary
- * moved, a lane moved, a drive ran out. Sent after the `connectionInfoChanged`
- * it accompanies, for a dApp that wants drive changes alone and re-reads
- * `getDrives()` on it.
- */
-export const DrivesChangedMessageSchema = z.object({
-  type: z.literal("drivesChanged"),
-})
-
 export const ConnectionInfoChangedMessageSchema = z.object({
   type: z.literal("connectionInfoChanged"),
+  /**
+   * The app's drives changed with this one (#933): one joined or left the
+   * grant, the primary moved, a lane moved, a drive ran out. Set on the first
+   * snapshot too. Carried on the message a client already knows rather than
+   * sent as one of its own, so a client older than the flag drops the key
+   * and nothing else; the client calls `onDrivesChange` after
+   * `onConnectionChange` when it is set.
+   */
+  drivesChanged: z.boolean().optional(),
   canUpload: z.boolean(),
   storagePartitioned: z.boolean().optional(),
   uploadMode: UploadModeSchema.optional(),
@@ -1993,7 +1992,6 @@ export const IframeToParentMessageSchema = z.discriminatedUnion("type", [
   UploadProgressMessageSchema,
   ErrorMessageSchema,
   ConnectionInfoChangedMessageSchema,
-  DrivesChangedMessageSchema,
   ConnectResponseMessageSchema,
   IsConnectedResponseMessageSchema,
   GetNodeInfoResponseMessageSchema,
@@ -2067,7 +2065,6 @@ export type ErrorMessage = z.infer<typeof ErrorMessageSchema>
 export type ConnectionInfoChangedMessage = z.infer<
   typeof ConnectionInfoChangedMessageSchema
 >
-export type DrivesChangedMessage = z.infer<typeof DrivesChangedMessageSchema>
 export type ConnectResponseMessage = z.infer<
   typeof ConnectResponseMessageSchema
 >
@@ -2262,11 +2259,10 @@ export interface ClientOptions {
   /**
    * Invoked when the app's drives change (#933): one joins or leaves the
    * grant, the primary moves, a lane moves, a drive runs out (written to or
-   * not). Fires once at connect, with or without drives, and then on every
-   * such change, after `onConnectionChange` for the same event, so a
-   * `getDrives()` read here is current. For a dApp that
-   * wants drive changes alone, without sifting them out of every connection
-   * change.
+   * not). Fires once when the client initialises, connected or not, and then
+   * on every such change, after `onConnectionChange` for the same event, so
+   * a `getDrives()` read here is current. For a dApp that wants drive
+   * changes alone, without sifting them out of every connection change.
    */
   onDrivesChange?: () => void
   popupMode?: "popup" | "window" // Default: 'window'

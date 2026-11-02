@@ -498,10 +498,18 @@ describe("SwarmIdClient connectionInfo", () => {
 
   // The drives' own event (#933): a dApp that cares about its drives alone
   // need not sift them out of every connection change.
-  it("invokes onDrivesChange on the proxy's drivesChanged, and nothing else", () => {
-    deliver({ type: "drivesChanged" })
-    expect(onDrivesChange).toHaveBeenCalledTimes(1)
-    expect(onConnectionChange).not.toHaveBeenCalled()
+  it("invokes onDrivesChange after onConnectionChange when the info carries the flag, else not", () => {
+    const order: string[] = []
+    onConnectionChange.mockImplementation(() => order.push("connection"))
+    onDrivesChange.mockImplementation(() => order.push("drives"))
+    deliver({ type: "connectionInfoChanged", canUpload: false })
+    expect(onDrivesChange).not.toHaveBeenCalled()
+    deliver({
+      type: "connectionInfoChanged",
+      canUpload: false,
+      drivesChanged: true,
+    })
+    expect(order).toEqual(["connection", "connection", "drives"])
   })
 
   it("invokes onConnectionChange with the pushed snapshot and caches it", () => {

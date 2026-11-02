@@ -965,7 +965,10 @@ describe("SwarmIdProxy partitioned write enablement", () => {
     // not from the write that fails.
     describe("announces a change to the app's drives", () => {
       const announced = () => messagesOfType("connectionInfoChanged").length
-      const drivesAnnounced = () => messagesOfType("drivesChanged").length
+      const drivesAnnounced = () =>
+        messagesOfType("connectionInfoChanged").filter(
+          (message) => message.drivesChanged === true,
+        ).length
       const lastInfo = () => messagesOfType("connectionInfoChanged").at(-1)!
       const grantOnly = (...batchIds: string[]) =>
         updateAccount((account) => ({
@@ -989,16 +992,9 @@ describe("SwarmIdProxy partitioned write enablement", () => {
         await flushBus()
         expect(announced()).toBe(before + 1)
         expect(lastInfo().canUpload).toBe(true)
-        // And the drives' own event, after the info it accompanies.
+        // And the drives' own flag, on the info it accompanies.
         expect(drivesAnnounced()).toBe(drivesBefore + 1)
-        expect(
-          parentWindow.postMessage.mock.calls.map(([message]) => message.type),
-        ).toEqual(
-          expect.arrayContaining(["connectionInfoChanged", "drivesChanged"]),
-        )
-        expect(parentWindow.postMessage.mock.calls.at(-1)![0].type).toBe(
-          "drivesChanged",
-        )
+        expect(lastInfo().drivesChanged).toBe(true)
       })
 
       it("sends no drivesChanged for a change that is not a drive's", async () => {
@@ -1083,6 +1079,68 @@ describe("SwarmIdProxy partitioned write enablement", () => {
         await connectWithTwoDrives([])
         await vi.waitFor(() => expect(announced()).toBeGreaterThan(0))
         expect(drivesAnnounced()).toBe(1)
+      })
+
+      // The two lines that keep the timer right over a drive's real lifetime.
+      const withFakeTimers = async (run: () => Promise<void>) => {
+        vi.useFakeTimers({
+          toFake: ["setTimeout", "clearTimeout", "Date"],
+          shouldAdvanceTime: true,
+        })
+        try {
+          await run()
+        } finally {
+          vi.useRealTimers()
+        }
+      }
+
+      it("holds a month-long expiry without ticking: a delay past what setTimeout takes fires at once", async () => {
+        await withFakeTimers(async () => {
+          const THIRTY_DAYS_S = 30 * 24 * 60 * 60
+          await connectWithTwoDrives([
+            {
+              ...stampOf(BATCH_ID_HEX),
+              batchTTL: THIRTY_DAYS_S,
+              createdAt: Date.now(),
+            },
+          ])
+          await vi.waitFor(() =>
+            expect(coordinatorFor(BATCH_ID_HEX)).toBeDefined(),
+          )
+          // Unclamped, the timer fires at once and re-arms on every pass:
+          // thousands of arms in this second instead of none.
+          const arms = vi.spyOn(
+            proxy as unknown as { armExpiryTimer: () => void },
+            "armExpiryTimer",
+          )
+          await vi.advanceTimersByTimeAsync(1000)
+          expect(arms.mock.calls.length).toBeLessThan(100)
+          expect(lastInfo().uploadMode).toBe("user-stamp")
+        })
+      })
+
+      it("flips a second drive after the first: the tick re-arms for the next expiry", async () => {
+        await withFakeTimers(async () => {
+          await connectWithTwoDrives([
+            { ...stampOf(BATCH_ID_HEX), batchTTL: 2, createdAt: Date.now() },
+            {
+              ...stampOf(SECOND_BATCH_ID_HEX),
+              batchTTL: 5,
+              createdAt: Date.now(),
+            },
+          ])
+          await vi.waitFor(() =>
+            expect(coordinatorFor(BATCH_ID_HEX)).toBeDefined(),
+          )
+          const drivesBefore = drivesAnnounced()
+          await vi.advanceTimersByTimeAsync(2500)
+          expect(lastInfo().uploadUnavailableReason).toBe("stamp-expired")
+          expect(drivesAnnounced()).toBe(drivesBefore + 1)
+          // Three seconds on, the second drive runs out: its refusal is part
+          // of the drive state, so it is announced too.
+          await vi.advanceTimersByTimeAsync(3000)
+          expect(drivesAnnounced()).toBe(drivesBefore + 2)
+        })
       })
     })
 
