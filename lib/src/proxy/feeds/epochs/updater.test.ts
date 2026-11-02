@@ -11,15 +11,13 @@ import { Topic } from "@ethersphere/bee-js"
 import { EpochIndex } from "./epoch"
 import { epochSocAddress } from "./updater"
 import { createTestSigner } from "./test-utils"
+import { uint8ArrayToHex } from "../../../utils/hex"
 
 const TOPIC = Topic.fromString("epoch-vector")
 const OWNER = createTestSigner().publicKey().address()
 const EPOCH_START = 1024n
 const EPOCH_LEVEL = 10
 const ROOT_LEVEL = 32
-
-const hex = (bytes: Uint8Array) =>
-  [...bytes].map((b) => b.toString(16).padStart(2, "0")).join("")
 
 describe("epochSocAddress", () => {
   it("derives the root epoch's address", async () => {
@@ -28,7 +26,7 @@ describe("epochSocAddress", () => {
       new EpochIndex(0n, ROOT_LEVEL),
       OWNER,
     )
-    expect(hex(address)).toBe(
+    expect(uint8ArrayToHex(address)).toBe(
       "8215ab1230bc0868373e67c3a63beeaf02d0b0c52bfebf291e009ded76603070",
     )
   })
@@ -39,7 +37,7 @@ describe("epochSocAddress", () => {
       new EpochIndex(EPOCH_START, EPOCH_LEVEL),
       OWNER,
     )
-    expect(hex(address)).toBe(
+    expect(uint8ArrayToHex(address)).toBe(
       "c3c81cfdac859b439831fbca1784b7a5b886677dc95ded6b14bf722fd3de9cff",
     )
   })
