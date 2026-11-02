@@ -88,7 +88,8 @@ const publishedCounters = vi.hoisted(
       byPartition: Map<number, Uint32Array | undefined>
     },
 )
-vi.mock("./sync/published-counter", () => ({
+vi.mock("./sync/published-counter", async (importActual) => ({
+  ...(await importActual<typeof import("./sync/published-counter")>()),
   readPublishedCounter: vi.fn(async ({ partition }: { partition: number }) => {
     const counters = publishedCounters.byPartition.has(partition)
       ? publishedCounters.byPartition.get(partition)
@@ -140,7 +141,8 @@ vi.mock("./utils/postage-contract", async (importActual) => ({
 }))
 vi.mock("./storage/utilization-store", () => ({
   UtilizationStoreDB: vi.fn(function () {
-    return {}
+    // Nothing stored: a counter loaded from here is all zeros
+    return { getAllChunks: async () => [] }
   }),
 }))
 // The signaling transport opens a real WebSocket; the tests only assert that
@@ -323,7 +325,8 @@ import {
   leaseCacheStorageKey,
   partitionSessionStorageKey,
 } from "./types"
-import type { Drive } from "./types"
+import type { DriveCapacity } from "./types"
+import { deviceHomePartition } from "./sync/partition-lock"
 import { KNOWN_DEVICE_MAX_AGE_MS } from "./utils/active-devices"
 import { PRESENCE_INTERVAL_MS, PRESENCE_MAX_AGE_MS } from "./bus/presence"
 import { mergeDevicesList } from "./sync/merge-snapshot"
@@ -968,9 +971,10 @@ describe("SwarmIdProxy partitioned write enablement", () => {
     const connectWithTwoDrives = async (
       postageStamps = [stampOf(BATCH_ID_HEX), stampOf(SECOND_BATCH_ID_HEX)],
       connectedForMs = 60_000,
+      account: Partial<SyncedAccount> = {},
     ): Promise<void> => {
       seedConnectedAccount({
-        account: { postageStamps },
+        account: { ...account, postageStamps },
         connectedApps: [
           {
             appUrl: PARENT_ORIGIN,
@@ -2193,55 +2197,50 @@ describe("SwarmIdProxy partitioned write enablement", () => {
       const DEPTH = makeSyncedAccount().postageStamps[0].depth
       const SAVE_BYTES = 10 * CHUNK_SIZE
 
-      const drivesNow = async (): Promise<Drive[]> => {
-        const before = messagesOfType("getDrivesResponse").length
-        await dispatch(
-          { type: "getDrives", requestId: `capacity-${before}` },
-          PARENT_ORIGIN,
-          parentWindow,
-        )
-        await vi.waitFor(() =>
-          expect(messagesOfType("getDrivesResponse")).toHaveLength(before + 1),
-        )
-        return messagesOfType("getDrivesResponse").at(-1)!.drives as Drive[]
-      }
-
-      const askFit = async (message: {
-        bytes: number
-        batchID?: string
-      }): Promise<Record<string, unknown>> => {
-        const requestId = `fit-${Math.random()}`
-        await dispatch(
-          { type: "fitProbability", requestId, ...message },
-          PARENT_ORIGIN,
-          parentWindow,
-        )
+      /** Dispatch a request and wait for its answer, or its error */
+      const ask = async (
+        message: Record<string, unknown> & { type: string },
+      ): Promise<Record<string, unknown>> => {
+        const requestId = `${message.type}-${Math.random()}`
+        await dispatch({ ...message, requestId }, PARENT_ORIGIN, parentWindow)
         let answer: Record<string, unknown> | undefined
         await vi.waitFor(() => {
           answer = [
-            ...messagesOfType("fitProbabilityResponse"),
+            ...messagesOfType(`${message.type}Response`),
             ...messagesOfType("error"),
           ].find((posted) => posted.requestId === requestId)
           expect(answer).toBeDefined()
         })
         return answer!
       }
+      const askCapacity = async (batchID?: string) =>
+        (await ask({ type: "getDriveCapacity", batchID })) as {
+          type: string
+          code?: string
+          capacity?: DriveCapacity
+        }
+      const askFit = (message: { bytes: number; batchID?: string }) =>
+        ask({ type: "fitProbability", ...message })
+      const homePartition = (): number =>
+        deviceHomePartition(
+          (proxy as unknown as { requireDeviceId(): string }).requireDeviceId(),
+          2,
+        )
 
-      it("adds up the held partition live and the other as published, and leaves a scratch drive out", async () => {
+      it("reports the held partition live, with the other as published in the breakdown", async () => {
         const stamper = nextStamper()
         stamper.dataCounters[0] = 5
         const published = new Uint32Array(NUM_BUCKETS)
         published[1] = 3
         publishedCounters.byPartition.set(1, published)
-        await connectWithTwoDrives([
-          stampOf(BATCH_ID_HEX),
-          { ...stampOf(SECOND_BATCH_ID_HEX), kind: "scratch" },
-        ])
+        await connectWithTwoDrives([stampOf(BATCH_ID_HEX)])
 
-        const [regular, scratch] = await drivesNow()
+        const { capacity } = await askCapacity()
 
+        expect(capacity?.partition).toBe(0)
+        expect(capacity?.usedBytes).toBe(5 * CHUNK_SIZE)
         expect(
-          regular.capacity?.partitions.map(({ partition, usedBytes }) => ({
+          capacity?.partitions.map(({ partition, usedBytes }) => ({
             partition,
             usedBytes,
           })),
@@ -2249,9 +2248,6 @@ describe("SwarmIdProxy partitioned write enablement", () => {
           { partition: 0, usedBytes: 5 * CHUNK_SIZE },
           { partition: 1, usedBytes: 3 * CHUNK_SIZE },
         ])
-        expect(regular.capacity?.usedBytes).toBe(8 * CHUNK_SIZE)
-        expect(regular.capacity?.leftBytes).toBeGreaterThan(0)
-        expect(scratch.capacity).toBeUndefined()
         // Only the partition this session does not hold is read from Swarm
         expect(
           vi.mocked(readPublishedCounter).mock.calls.map(([opts]) => ({
@@ -2261,15 +2257,72 @@ describe("SwarmIdProxy partitioned write enablement", () => {
         ).toEqual([{ batchId: BATCH_ID_HEX, partition: 1 }])
       })
 
-      it("lists the drive without a capacity when a partition cannot be read", async () => {
+      it("keeps getDrives off Swarm", async () => {
+        nextStamper()
+        await connectWithTwoDrives([stampOf(BATCH_ID_HEX)])
+
+        const answer = await ask({ type: "getDrives" })
+
+        expect(answer.type).toBe("getDrivesResponse")
+        expect(readPublishedCounter).not.toHaveBeenCalled()
+      })
+
+      it("leaves an unreadable other partition out of the breakdown", async () => {
         nextStamper()
         publishedCounters.byPartition.set(1, undefined)
         await connectWithTwoDrives([stampOf(BATCH_ID_HEX)])
 
-        const [drive] = await drivesNow()
+        const { capacity } = await askCapacity()
 
-        expect(drive.batchID).toBe(BATCH_ID_HEX)
-        expect(drive.capacity).toBeUndefined()
+        expect(capacity?.partition).toBe(0)
+        expect(capacity?.partitions.map(({ partition }) => partition)).toEqual([
+          0,
+        ])
+      })
+
+      it("reports the home partition while none is held, and fails when it cannot be read", async () => {
+        const stamper = nextStamper()
+        stamper.currentPartition = undefined
+        await connectWithTwoDrives([stampOf(BATCH_ID_HEX)])
+
+        expect((await askCapacity()).capacity?.partition).toBe(homePartition())
+
+        publishedCounters.byPartition.set(homePartition(), undefined)
+        expect(await askCapacity()).toMatchObject({
+          type: "error",
+          code: "network",
+        })
+      })
+
+      it("reads a single-partition account from its stamper, or from what it stored", async () => {
+        const stamper = nextStamper()
+        stamper.currentPartition = undefined
+        stamper.partitionCount = 1
+        stamper.dataCounters[0] = 2
+        await connectWithTwoDrives(undefined, undefined, { partitionCount: 1 })
+
+        const primary = await askCapacity()
+        const second = await askCapacity(SECOND_BATCH_ID_HEX)
+
+        expect(primary.capacity?.partition).toBe(0)
+        expect(primary.capacity?.usedBytes).toBe(2 * CHUNK_SIZE)
+        // No write path is built for the second drive just to read it
+        expect(second.capacity?.usedBytes).toBe(0)
+        expect(UtilizationAwareStamper.create).toHaveBeenCalledTimes(1)
+        expect(readPublishedCounter).not.toHaveBeenCalled()
+      })
+
+      it("has no capacity for a scratch drive", async () => {
+        nextStamper()
+        await connectWithTwoDrives([
+          stampOf(BATCH_ID_HEX),
+          { ...stampOf(SECOND_BATCH_ID_HEX), kind: "scratch" },
+        ])
+
+        const answer = await askCapacity(SECOND_BATCH_ID_HEX)
+
+        expect(answer.type).toBe("getDriveCapacityResponse")
+        expect(answer.capacity).toBeUndefined()
       })
 
       // The answer has to pass the client's schema, which the file-wide
@@ -2303,22 +2356,27 @@ describe("SwarmIdProxy partitioned write enablement", () => {
         expect(readPublishedCounter).not.toHaveBeenCalled()
       })
 
-      it("answers for the fullest partition while none is held", async () => {
+      it("answers for the home partition while none is held", async () => {
         const stamper = nextStamper()
         stamper.currentPartition = undefined
-        const full = new Uint32Array(NUM_BUCKETS)
-        full.fill(partitionCapacity(DEPTH, 2) - 1)
-        publishedCounters.byPartition.set(1, full)
+        const fuller = new Uint32Array(NUM_BUCKETS)
+        fuller.fill(partitionCapacity(DEPTH, 2) - 1)
+        publishedCounters.byPartition.set(homePartition(), fuller)
         await connectWithTwoDrives([stampOf(BATCH_ID_HEX)])
 
         const answer = await askFit({ bytes: SAVE_BYTES })
 
         expect(answer.probability).toBe(
           fitProbability(
-            headroomHistogram(full, DEPTH, 2),
+            headroomHistogram(fuller, DEPTH, 2),
             chunksForBytes(SAVE_BYTES),
           ),
         )
+        expect(
+          vi
+            .mocked(readPublishedCounter)
+            .mock.calls.map(([opts]) => opts.partition),
+        ).toEqual([homePartition()])
       })
 
       it("says a save always fits a scratch drive", async () => {
@@ -2340,15 +2398,15 @@ describe("SwarmIdProxy partitioned write enablement", () => {
         nextStamper()
         await connectWithTwoDrives([stampOf(BATCH_ID_HEX)])
 
-        const answer = await askFit({
-          bytes: SAVE_BYTES,
-          batchID: "ee".repeat(32),
-        })
-
-        expect(answer).toMatchObject({
-          type: "error",
-          code: "drive-not-granted",
-        })
+        for (const answer of [
+          await askFit({ bytes: SAVE_BYTES, batchID: "ee".repeat(32) }),
+          await askCapacity("ee".repeat(32)),
+        ]) {
+          expect(answer).toMatchObject({
+            type: "error",
+            code: "drive-not-granted",
+          })
+        }
       })
     })
 

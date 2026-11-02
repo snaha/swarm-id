@@ -336,19 +336,23 @@ export const PartitionCapacitySchema = z.object({
   sizeBytes: z.number(),
   /** Slots already written, as bytes */
   usedBytes: z.number(),
-  /** The largest save that still fits, at `DEFAULT_FIT_CONFIDENCE` */
+  /**
+   * The largest save that still fits, at `DEFAULT_FIT_CONFIDENCE`, and never
+   * more than `sizeBytes - usedBytes`: 0 once used passes size, while a small
+   * save may still fit
+   */
   leftBytes: z.number(),
 })
 export type PartitionCapacity = z.infer<typeof PartitionCapacitySchema>
 
 /**
- * How much a drive holds and has left (#772): its partitions' figures added
- * up, so the whole drive. One save goes into one partition, though, so ask
- * `fitProbability()` whether it fits rather than comparing to `leftBytes`.
+ * How much a drive holds and has left for this device (#772, #334): the
+ * figures of the partition it writes to, the one it holds or else the one it
+ * would claim first. One save goes into one partition, so another's room is
+ * not this device's. `partitions` lists every partition whose counter could
+ * be read, this one included.
  */
-export const DriveCapacitySchema = PartitionCapacitySchema.omit({
-  partition: true,
-}).extend({
+export const DriveCapacitySchema = PartitionCapacitySchema.extend({
   partitions: z.array(PartitionCapacitySchema),
 })
 export type DriveCapacity = z.infer<typeof DriveCapacitySchema>
@@ -374,11 +378,6 @@ export const DriveSchema = PostageBatchSchema.extend({
    * moved with it, so `onConnectionChange` is where to re-read the drives.
    */
   partition: z.number().int().min(0).optional(),
-  /**
-   * Used, left and size (#772). Absent on a scratch drive, whose partitions
-   * wrap instead of filling, and when a partition's counter could not be read.
-   */
-  capacity: DriveCapacitySchema.optional(),
 })
 export type Drive = z.infer<typeof DriveSchema>
 
@@ -1431,6 +1430,12 @@ export const GetPermissionsMessageSchema = z.object({
   requestId: z.string(),
 })
 
+export const GetDriveCapacityMessageSchema = z.object({
+  type: z.literal("getDriveCapacity"),
+  requestId: z.string(),
+  batchID: DriveTargetSchema,
+})
+
 export const FitProbabilityMessageSchema = z.object({
   type: z.literal("fitProbability"),
   requestId: z.string(),
@@ -1500,6 +1505,7 @@ export const ParentToIframeMessageSchema = z.discriminatedUnion("type", [
   GetDrivesMessageSchema,
   GetPermissionsMessageSchema,
   FitProbabilityMessageSchema,
+  GetDriveCapacityMessageSchema,
   ConnectMessageSchema,
   RequestPermissionsMessageSchema,
 ])
@@ -1573,6 +1579,9 @@ export type GetPostageBatchMessage = z.infer<
 export type GetDrivesMessage = z.infer<typeof GetDrivesMessageSchema>
 export type GetPermissionsMessage = z.infer<typeof GetPermissionsMessageSchema>
 export type FitProbabilityMessage = z.infer<typeof FitProbabilityMessageSchema>
+export type GetDriveCapacityMessage = z.infer<
+  typeof GetDriveCapacityMessageSchema
+>
 export type ConnectMessage = z.infer<typeof ConnectMessageSchema>
 export type RequestPermissionsMessage = z.infer<
   typeof RequestPermissionsMessageSchema
@@ -2027,6 +2036,13 @@ export const GetPermissionsResponseMessageSchema = z.object({
   permissions: AppPermissionsSchema,
 })
 
+export const GetDriveCapacityResponseMessageSchema = z.object({
+  type: z.literal("getDriveCapacityResponse"),
+  requestId: z.string(),
+  /** Absent for a scratch drive, whose partitions wrap instead of filling */
+  capacity: DriveCapacitySchema.optional(),
+})
+
 export const FitProbabilityResponseMessageSchema = z.object({
   type: z.literal("fitProbabilityResponse"),
   requestId: z.string(),
@@ -2088,6 +2104,7 @@ export const IframeToParentMessageSchema = z.discriminatedUnion("type", [
   GetDrivesResponseMessageSchema,
   GetPermissionsResponseMessageSchema,
   FitProbabilityResponseMessageSchema,
+  GetDriveCapacityResponseMessageSchema,
   RequestPermissionsResponseMessageSchema,
 ])
 

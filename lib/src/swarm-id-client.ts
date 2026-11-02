@@ -86,6 +86,7 @@ import type {
   Permissions,
   AppPermissions,
   DriveTargetOptions,
+  DriveCapacity,
   FitOptions,
 } from "./types"
 import {
@@ -993,12 +994,42 @@ export class SwarmIdClient {
   }
 
   /**
+   * How much a drive holds and has left for this device (#772): the primary,
+   * or the one `batchID` names. The figures are those of the partition this
+   * device writes to; `partitions` breaks the drive down. Reads Swarm for the
+   * partitions this session does not hold, so call it when showing storage,
+   * not on every connection change. `undefined` for a scratch drive, which
+   * overwrites its oldest data instead of filling.
+   *
+   * @example
+   * ```typescript
+   * const capacity = await client.getDriveCapacity()
+   * if (capacity) show(`${capacity.leftBytes} of ${capacity.sizeBytes} left`)
+   * ```
+   */
+  async getDriveCapacity(
+    options?: DriveTargetOptions,
+  ): Promise<DriveCapacity | undefined> {
+    this.ensureReady()
+    const response = await this.sendRequest<{
+      type: "getDriveCapacityResponse"
+      requestId: string
+      capacity?: DriveCapacity
+    }>({
+      type: "getDriveCapacity",
+      requestId: this.generateRequestId(),
+      batchID: options?.batchID,
+    })
+    return response.capacity
+  }
+
+  /**
    * The chance, from 0 to 1, that a save of `bytes` fits in a drive (#772):
-   * the primary, or the one `batchID` names. A save goes into the one
-   * partition this device writes to and fails if any of its chunks lands in a
-   * full bucket there, so ask this rather than comparing with
-   * `capacity.leftBytes`. The chunk tree and the save's own extra chunks are
-   * counted. Always 1 on a scratch drive, which overwrites its oldest data.
+   * the primary, or the one `batchID` names. A save goes into the partition
+   * this device writes to, the same one {@link getDriveCapacity} reports, and
+   * fails if any of its chunks lands in a full bucket there. The chunk tree
+   * and the save's own extra chunks are counted. Always 1 on a scratch drive,
+   * which overwrites its oldest data.
    *
    * @example
    * ```typescript

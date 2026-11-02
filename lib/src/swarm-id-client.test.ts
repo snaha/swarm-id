@@ -1019,41 +1019,25 @@ describe("SwarmIdClient request seam", () => {
     await expect(promise).resolves.toBe(0.75)
   })
 
-  it("carries a drive's capacity through the getDrives response", () => {
+  it("getDriveCapacity asks about the named drive and returns the proxy's figures", async () => {
+    const batchID = "ab".repeat(32)
     const partition = {
       partition: 0,
       sizeBytes: 100,
       usedBytes: 10,
       leftBytes: 90,
     }
-    const capacity = {
-      sizeBytes: 100,
-      usedBytes: 10,
-      leftBytes: 90,
-      partitions: [partition],
-    }
-    const parsed = IframeToParentMessageSchema.parse({
-      type: "getDrivesResponse",
-      requestId: "r",
-      drives: [
-        {
-          batchID: "ab".repeat(32),
-          utilization: 0,
-          usable: true,
-          label: "",
-          depth: 20,
-          amount: "1",
-          bucketDepth: 16,
-          blockNumber: 1,
-          immutableFlag: false,
-          exists: true,
-          kind: "regular",
-          primary: true,
-          capacity,
-        },
-      ],
+    const capacity = { ...partition, partitions: [partition] }
+    const promise = client.getDriveCapacity({ batchID })
+    const sent = lastPostedMessage()
+    expect(sent).toMatchObject({ type: "getDriveCapacity", batchID })
+
+    deliver({
+      type: "getDriveCapacityResponse",
+      requestId: sent.requestId,
+      capacity,
     })
-    expect(parsed).toMatchObject({ drives: [{ capacity }] })
+    await expect(promise).resolves.toEqual(capacity)
   })
 
   // The identity site and a dApp's client deploy separately: a kind this

@@ -339,22 +339,24 @@ describe("estimatePartitionCapacity", () => {
 })
 
 describe("estimateDriveCapacity", () => {
-  it("adds up its partitions", () => {
-    const busy = emptyCounters()
-    busy.fill(3)
-    const drive = estimateDriveCapacity(
-      [
-        { partition: 0, dataCounters: busy },
-        { partition: 1, dataCounters: emptyCounters() },
-      ],
-      DEPTH,
-    )
+  const busy = emptyCounters()
+  busy.fill(3)
+  const partitions = [
+    { partition: 0, dataCounters: busy },
+    { partition: 1, dataCounters: emptyCounters() },
+  ]
+
+  it("reports the partition this device writes to, not the sum", () => {
+    const drive = estimateDriveCapacity(partitions, DEPTH, 0)
     const [first, second] = drive.partitions
-    expect(first.partition).toBe(0)
-    expect(second.partition).toBe(1)
-    expect(drive.sizeBytes).toBe(first.sizeBytes + second.sizeBytes)
-    expect(drive.usedBytes).toBe(first.usedBytes + second.usedBytes)
-    expect(drive.leftBytes).toBe(first.leftBytes + second.leftBytes)
+    expect(drive.partitions.map(({ partition }) => partition)).toEqual([0, 1])
+    expect(drive).toEqual({ ...first, partitions: [first, second] })
     expect(first.leftBytes).toBeLessThan(second.leftBytes)
+  })
+
+  it("refuses a write partition it has no counter for", () => {
+    expect(() => estimateDriveCapacity(partitions.slice(1), DEPTH, 0)).toThrow(
+      RangeError,
+    )
   })
 })

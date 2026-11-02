@@ -203,23 +203,24 @@ function chunksThatFitEmpty(
   return chunks
 }
 
-/** Every partition's figures, and the drive's as their sums */
+/**
+ * Every partition's figures, and the drive's as those of `writePartition`:
+ * one save goes into one partition, so another's room is not this device's
+ */
 export function estimateDriveCapacity(
   partitions: ReadonlyArray<{ partition: number; dataCounters: Uint32Array }>,
   depth: number,
+  writePartition: number,
   options: CapacityOptions = {},
 ): DriveCapacity {
   const figures = partitions.map(({ partition, dataCounters }) =>
     estimatePartitionCapacity(partition, dataCounters, depth, options),
   )
-  const sum = (pick: (figure: PartitionCapacity) => number): number =>
-    figures.reduce((total, figure) => total + pick(figure), 0)
-  return {
-    sizeBytes: sum((figure) => figure.sizeBytes),
-    usedBytes: sum((figure) => figure.usedBytes),
-    leftBytes: sum((figure) => figure.leftBytes),
-    partitions: figures,
+  const written = figures.find((figure) => figure.partition === writePartition)
+  if (!written) {
+    throw new RangeError(`No counter for write partition ${writePartition}`)
   }
+  return { ...written, partitions: figures }
 }
 
 function totalHeadroom(histogram: HeadroomHistogram): number {

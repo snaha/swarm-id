@@ -8,6 +8,12 @@ import { readPartitionLock } from "./partition-lock"
 import { readPartitionState } from "./partition-state"
 import { SYNC_READ_TIMEOUT_MS } from "./timing-constants"
 
+/**
+ * A bound for a caller's whole read: the lock and the state pointer each have
+ * their own, the counter chunks' downloads do not
+ */
+export const PUBLISHED_COUNTER_READ_TIMEOUT_MS = 4 * SYNC_READ_TIMEOUT_MS
+
 export interface PublishedCounter {
   dataCounters: Uint32Array
   /** The published state it came from; undefined when nothing was published */
