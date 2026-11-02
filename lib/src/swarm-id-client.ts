@@ -114,11 +114,18 @@ const DEFAULT_INITIALIZATION_TIMEOUT_MS = 30000
 const PERMISSIONS_REQUEST_TIMEOUT_MS =
   PERMISSIONS_POPUP_MAX_MS + DEFAULT_TIMEOUT_MS
 
+/** A request the client awaits an answer to; `parentIdentify` gets none. */
+type AwaitedRequest = Exclude<ParentToIframeMessage, { type: "parentIdentify" }>
+
 /**
  * The answer type for a request type: `${type}Response`, except `checkAuth`,
- * answered by the `authStatusResponse` the proxy also pushes unasked.
+ * answered by the `authStatusResponse` the proxy also pushes unasked. Typed
+ * against the protocol: a request added without its answer type fails to
+ * compile here, not every call at runtime.
  */
-function responseTypeFor(requestType: string): string {
+function responseTypeFor(
+  requestType: AwaitedRequest["type"],
+): IframeToParentMessage["type"] {
   return requestType === "checkAuth"
     ? "authStatusResponse"
     : `${requestType}Response`
@@ -658,10 +665,9 @@ export class SwarmIdClient {
    */
   private async sendRequest<
     TResponse,
-    TRequest extends ParentToIframeMessage & { requestId: string } =
-      ParentToIframeMessage & {
-        requestId: string
-      },
+    TRequest extends AwaitedRequest & { requestId: string } = AwaitedRequest & {
+      requestId: string
+    },
   >(message: TRequest): Promise<TResponse> {
     // A per-call `requestOptions.timeout` bounds this whole round trip, not
     // only the Bee request the proxy makes with it: a caller raising it for a
