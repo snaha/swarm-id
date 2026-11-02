@@ -623,6 +623,20 @@ describe("SwarmIdProxy auth button", () => {
     expect(buttons[1].disabled).toBe(false)
   })
 
+  // A click before `parentIdentify` lands, or after it was rejected, has no
+  // origin to open the popup for, and must not strand the button either.
+  it("puts the connect button back when there is no parent origin", () => {
+    vi.spyOn(console, "error").mockImplementation(() => {})
+    vi.stubGlobal("window", { ...window, open: vi.fn() })
+    show({ authenticated: false, authLoading: false }).click()
+
+    expect(window.open).not.toHaveBeenCalled()
+    expect(internal.isConnecting).toBe(false)
+    expect(buttons).toHaveLength(2)
+    expect(buttons[1].textContent).toBe("🔐 Login with Swarm ID")
+    expect(buttons[1].disabled).toBe(false)
+  })
+
   it("adds the spinner style only once", () => {
     vi.spyOn(internal, "openAuthPopup").mockReturnValue(true)
     vi.mocked(document.getElementById).mockReturnValue(
