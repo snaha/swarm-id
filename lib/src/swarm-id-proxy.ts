@@ -1387,10 +1387,7 @@ export class SwarmIdProxy {
     // Release the partition leases (best-effort) so peers see this device
     // vacate its partitions promptly.
     this.teardownDrives()
-    if (this.publishTimer !== undefined) {
-      clearTimeout(this.publishTimer)
-      this.publishTimer = undefined
-    }
+    this.cancelScheduledPublish()
     this.clearRosterRetry()
 
     // Retire any join still deriving its key — its continuation would
@@ -3014,6 +3011,7 @@ export class SwarmIdProxy {
     // "change" dominates: if a real delta is pending in this debounce window,
     // don't let a coalesced "acquired" downgrade it to the announce-gated path.
     if (this.publishReason !== "change") this.publishReason = reason
+    // Not `cancelScheduledPublish`: a reschedule keeps the pending reason.
     if (this.publishTimer !== undefined) clearTimeout(this.publishTimer)
     this.publishTimer = setTimeout(() => {
       this.publishTimer = undefined
@@ -3021,6 +3019,18 @@ export class SwarmIdProxy {
       this.publishReason = undefined
       void this.runAccountStatePublish(effectiveReason)
     }, PUBLISH_DEBOUNCE_MS)
+  }
+
+  /**
+   * Drop a scheduled publish, its reason with it, or the next session's first
+   * announce would run as this session's change.
+   */
+  private cancelScheduledPublish(): void {
+    if (this.publishTimer !== undefined) {
+      clearTimeout(this.publishTimer)
+      this.publishTimer = undefined
+    }
+    this.publishReason = undefined
   }
 
   /**
@@ -3384,10 +3394,7 @@ export class SwarmIdProxy {
     // Before dropping `deviceId` — the release announcement is sent as us.
     this.teardownDrives()
     this.deviceId = undefined
-    if (this.publishTimer !== undefined) {
-      clearTimeout(this.publishTimer)
-      this.publishTimer = undefined
-    }
+    this.cancelScheduledPublish()
     this.clearRosterRetry()
     this.pendingLaneUpdates.clear()
     this.storagePartitioned = false

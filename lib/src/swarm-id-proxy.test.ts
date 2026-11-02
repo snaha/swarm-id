@@ -1,13 +1,13 @@
 // Copyright 2026 The Swarm Authors. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { describe, it, expect, vi, beforeEach } from "vitest"
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest"
 
 // Rollup-only virtual module (see rollup.config.js) — not resolvable in vitest
 vi.mock("virtual:stamp-worker-code", () => ({ default: "" }))
 
 import { DEFAULT_BEE_NODE_URL } from "./schemas"
-import { SwarmIdProxy } from "./swarm-id-proxy"
+import { SwarmIdProxy, PUBLISH_DEBOUNCE_MS } from "./swarm-id-proxy"
 import { deriveSecret } from "./utils/key-derivation"
 import { uint8ArrayToHex } from "./utils/hex"
 import { STORAGE_KEY_NETWORK_SETTINGS } from "./types"
@@ -822,5 +822,55 @@ describe("SwarmIdProxy subsidised-mode selection", () => {
     await identify(GATEWAY_URL)
 
     expect(internals(proxy).bee.url).toBe(clientUrl(GATEWAY_URL))
+  })
+})
+
+// A change scheduled in one session is that session's: ending it must not
+// leave the next session's first announce running as a change, which skips
+// the announce-once gate and sends a delta of the new session's account.
+describe("SwarmIdProxy publish scheduling across sessions", () => {
+  type PublishInternals = {
+    schedulePublish: (reason: "acquired" | "change") => void
+    runAccountStatePublish: (reason: "acquired" | "change") => Promise<void>
+    clearAuthData: () => void
+    parentOrigin?: string
+  }
+
+  beforeEach(() => {
+    vi.restoreAllMocks()
+    const store = new Map<string, string>()
+    vi.stubGlobal("localStorage", {
+      getItem: (key: string) => store.get(key) ?? null,
+      setItem: (key: string, value: string) => store.set(key, value),
+      removeItem: (key: string) => store.delete(key),
+    })
+    vi.stubGlobal("window", {
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+      dispatchEvent: vi.fn(),
+      parent: { postMessage: vi.fn() },
+      location: { origin: "https://id.example.com", pathname: "/proxy" },
+    })
+    vi.useFakeTimers()
+  })
+
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+
+  it("runs the next session's announce as an announce", async () => {
+    const internal = new SwarmIdProxy() as unknown as PublishInternals
+    // A session is bound to a parent; without one there is none to end.
+    internal.parentOrigin = "https://app.example.com"
+    const run = vi
+      .spyOn(internal, "runAccountStatePublish")
+      .mockResolvedValue(undefined)
+
+    internal.schedulePublish("change")
+    internal.clearAuthData()
+    internal.schedulePublish("acquired")
+    await vi.advanceTimersByTimeAsync(PUBLISH_DEBOUNCE_MS)
+
+    expect(run.mock.calls).toEqual([["acquired"]])
   })
 })
