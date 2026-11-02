@@ -2979,6 +2979,7 @@ export class SwarmIdClient {
               )
             : undefined,
         hasTimestamp: options?.hasTimestamp,
+        lookupTimeoutMs: options?.lookupTimeoutMs,
         encryptionKey: this.normalizeSocKey(encryptionKey),
         requestOptions,
       })
@@ -3014,6 +3015,7 @@ export class SwarmIdClient {
               )
             : undefined,
         hasTimestamp: options?.hasTimestamp,
+        lookupTimeoutMs: options?.lookupTimeoutMs,
         encryptionKey: options?.encryptionKey
           ? this.normalizeSocKey(options.encryptionKey)
           : undefined,
@@ -3052,6 +3054,7 @@ export class SwarmIdClient {
               )
             : undefined,
         hasTimestamp: options?.hasTimestamp,
+        lookupTimeoutMs: options?.lookupTimeoutMs,
         encryptionKey: this.normalizeSocKey(encryptionKey),
         requestOptions,
       })

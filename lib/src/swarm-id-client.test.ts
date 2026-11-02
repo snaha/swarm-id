@@ -1087,6 +1087,28 @@ describe("SwarmIdClient request seam", () => {
     },
   )
 
+  // The writer's reads are the reader's: a lookup bound the caller set must
+  // reach the proxy from either.
+  it.each(["reader", "writer"] as const)(
+    "the sequential %s's reads carry the caller's lookup timeout",
+    (kind) => {
+      const topic = "12".repeat(32)
+      const feed =
+        kind === "reader"
+          ? client.makeSequentialFeedReader({ topic })
+          : client.makeSequentialFeedWriter({ topic })
+      const options = { lookupTimeoutMs: 1234 }
+      const key = "ef".repeat(32)
+
+      void feed.downloadPayload(key, options).catch(() => {})
+      expect(lastPostedMessage()).toMatchObject(options)
+      void feed.downloadRawPayload(options).catch(() => {})
+      expect(lastPostedMessage()).toMatchObject(options)
+      void feed.downloadReference(key, options).catch(() => {})
+      expect(lastPostedMessage()).toMatchObject(options)
+    },
+  )
+
   it("getPostageBatch rejects on a proxy error message", async () => {
     const promise = client.getPostageBatch()
 
