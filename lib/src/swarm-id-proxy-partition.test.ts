@@ -1081,27 +1081,33 @@ describe("SwarmIdProxy partitioned write enablement", () => {
       it("keeps the drive when the chain still funds it at the stored expiry (#927)", async () => {
         // The record says one second; the chain, read on the tick, says an
         // hour: the price fell, or someone topped the batch up.
-        chainSays(3600)
-        await connectWithTwoDrives([
-          { ...stampOf(BATCH_ID_HEX), batchTTL: 1, createdAt: Date.now() },
-          stampOf(SECOND_BATCH_ID_HEX),
-        ])
-        await vi.waitFor(() =>
-          expect(coordinatorFor(BATCH_ID_HEX)).toBeDefined(),
-        )
-        await vi.waitFor(
-          () =>
-            expect(vi.mocked(fetchAuthoritativeBatchTTL)).toHaveBeenCalledWith(
-              expect.anything(),
-              expect.anything(),
-              BATCH_ID_HEX,
-              expect.anything(),
-            ),
-          { timeout: 3000, interval: 50 },
-        )
-        await flushBus()
-        expect(lastInfo().uploadMode).toBe("user-stamp")
-        expect(lastInfo().uploadUnavailableReason).toBeUndefined()
+        vi.useFakeTimers({
+          toFake: ["setTimeout", "clearTimeout", "Date"],
+          shouldAdvanceTime: true,
+        })
+        try {
+          chainSays(3600)
+          await connectWithTwoDrives([
+            { ...stampOf(BATCH_ID_HEX), batchTTL: 1, createdAt: Date.now() },
+            stampOf(SECOND_BATCH_ID_HEX),
+          ])
+          await vi.waitFor(() =>
+            expect(coordinatorFor(BATCH_ID_HEX)).toBeDefined(),
+          )
+          const before = vi.mocked(fetchAuthoritativeBatchTTL).mock.calls.length
+          // Past the stored expiry: the tick read the chain and kept the drive.
+          await vi.advanceTimersByTimeAsync(2000)
+          expect(
+            vi.mocked(fetchAuthoritativeBatchTTL).mock.calls.length,
+          ).toBeGreaterThan(before)
+          expect(lastInfo().uploadMode).toBe("user-stamp")
+          expect(lastInfo().uploadUnavailableReason).toBeUndefined()
+          // And well past it: the reading, not the record, sets the expiry.
+          await vi.advanceTimersByTimeAsync(60_000)
+          expect(lastInfo().uploadUnavailableReason).toBeUndefined()
+        } finally {
+          vi.useRealTimers()
+        }
       })
 
       it("re-measures before the stored expiry and flips early when the chain says so (#927)", async () => {
@@ -1156,6 +1162,36 @@ describe("SwarmIdProxy partitioned write enablement", () => {
         // The refusal follows the same reading the dApp was just given.
         await vi.waitFor(() =>
           expect(lastInfo().uploadUnavailableReason).toBe("stamp-expired"),
+        )
+      })
+
+      it("yields the reading to a record re-measured since, whatever its clock says (#927)", async () => {
+        await connectWithTwoDrives()
+        await vi.waitFor(() =>
+          expect(coordinatorFor(BATCH_ID_HEX)).toBeDefined(),
+        )
+        chainSays(0)
+        await dispatch(
+          { type: "getDrives", requestId: "g-skew" },
+          PARENT_ORIGIN,
+          parentWindow,
+        )
+        await vi.waitFor(() =>
+          expect(lastInfo().uploadUnavailableReason).toBe("stamp-expired"),
+        )
+        // A top-up recorded on a device whose clock runs a minute behind: its
+        // `updatedAt` predates the reading, and still replaces it.
+        chainSays(3600)
+        updateAccount((account) => ({
+          ...account,
+          postageStamps: account.postageStamps.map((stamp) =>
+            stamp.batchID.toHex() === BATCH_ID_HEX
+              ? { ...stamp, batchTTL: 3600, updatedAt: Date.now() - 60_000 }
+              : stamp,
+          ),
+        }))
+        await vi.waitFor(() =>
+          expect(lastInfo().uploadUnavailableReason).toBeUndefined(),
         )
       })
 

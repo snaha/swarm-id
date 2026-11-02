@@ -250,12 +250,11 @@ function newLeaseRequestId(): string {
 const DEFAULT_ACT_FILENAME = "index.bin"
 const DEFAULT_ACT_CONTENT_TYPE = "application/octet-stream"
 const SEQUENTIAL_INDEX_LOOKUP_TIMEOUT_MS = 2000
-/** The longest delay `setTimeout` holds; a longer lifetime re-arms from its tick. */
-const MAX_TIMER_MS = 2 ** 31 - 1
 const MS_PER_SECOND = 1000
 /**
  * How often a drive's lifetime is re-read from the chain (#927): halfway to
- * its stored expiry, no more than every minute and at least every six hours.
+ * its stored expiry — no sooner than a minute, no later than six hours — and
+ * at the expiry itself when that comes first.
  * The oracle moves the price by at most ±0.08 % a round (≈12.7 min), about
  * ±9.5 % a day compounded, so six hours bounds the drift at about 2.4 %, and
  * the halving tightens the reads as the expiry nears.
@@ -366,14 +365,15 @@ export class SwarmIdProxy {
   private expiryTimer: ReturnType<typeof setTimeout> | undefined
   /**
    * What the chain last said about each granted drive's lifetime (#927), by
-   * batch id: a remaining-seconds reading and when it was taken. Laid over the
-   * stored record when newer than its own measurement (`lifetimeOf`), so the
-   * refusal, the expiry timer and `getDrives()` all follow one reading. Never
-   * written back: the record is the identity UI's.
+   * batch id: a remaining-seconds reading, when it was taken, and the
+   * measurement instant of the record it was taken over. Laid over the stored
+   * record for as long as that record stands (`lifetimeOf`), so the refusal,
+   * the expiry timer and `getDrives()` all follow one reading. Never written
+   * back: the record is the identity UI's.
    */
   private liveLifetimes = new Map<
     string,
-    { batchTTL: number; measuredAt: number }
+    { batchTTL: number; measuredAt: number; recordMeasuredAt: number }
   >()
   private destroyed = false
   /** The primary drive's batch: where a write that names no drive goes. */
@@ -898,12 +898,12 @@ export class SwarmIdProxy {
    * so the flip to `stamp-expired` reaches the dApp at the stored expiry
    * rather than on the next unrelated event (#793, #933). Re-armed as drives
    * come and go (`reconcileDrives`), cleared with them (`teardownDrives`), and
-   * re-armed from its own tick when a lifetime outlasts what a timer can
-   * hold.
+   * re-armed from its own tick.
    *
    * A stored expiry is exact only until the chain's price moves, so the tick
    * comes earlier than the expiry — halfway there, within
-   * `REMEASURE_MIN_MS`..`REMEASURE_MAX_MS` — and every tick re-reads the chain
+   * `REMEASURE_MIN_MS`..`REMEASURE_MAX_MS`, or at the expiry itself when that
+   * is sooner — and every tick re-reads the chain
    * before it trusts the record (#927): a price rise is caught early, and a
    * price fall or a top-up made elsewhere does not refuse a drive the chain
    * still funds. A hidden tab's timers are throttled, so "at" means within
@@ -932,20 +932,33 @@ export class SwarmIdProxy {
     )
     this.expiryTimer = setTimeout(
       () => void this.onExpiryTick(),
-      Math.min(untilExpiry, untilRemeasure, MAX_TIMER_MS),
+      Math.min(untilExpiry, untilRemeasure),
     )
   }
 
-  /** Re-read every granted drive, then announce what moved and re-arm. */
+  /**
+   * Re-read every granted drive, then announce what moved and re-arm. The
+   * reads swallow their own failures; this catches anyway, because a throw
+   * here would end expiry tracking for the session with nothing to show.
+   */
   private async onExpiryTick(): Promise<void> {
-    // ponytail: every granted drive, not only the one nearest expiry; a grant
-    // is a handful of drives and the reads go out as one batch each.
-    await Promise.all(
-      this.lookupDrivesForApp().granted.map((stamp) =>
-        this.measureLifetime(stamp),
-      ),
-    )
+    try {
+      // ponytail: every granted drive, not only the one nearest expiry; a
+      // grant is a handful of drives and the reads go out as one batch each.
+      await Promise.all(
+        this.lookupDrivesForApp().granted.map((stamp) =>
+          this.measureLifetime(stamp),
+        ),
+      )
+    } catch (error) {
+      console.warn("[Proxy] Re-reading drive lifetimes failed:", error)
+    }
     if (this.destroyed) return
+    this.adoptLifetimeReadings()
+  }
+
+  /** Let the refusal and the expiry timer follow the latest chain readings. */
+  private adoptLifetimeReadings(): void {
     this.emitConnectionInfoIfChanged()
     this.armExpiryTimer()
   }
@@ -967,22 +980,31 @@ export class SwarmIdProxy {
       this.postageStampContractAddress,
     )
     if (batchTTL !== undefined) {
-      this.liveLifetimes.set(batchId, { batchTTL, measuredAt })
+      this.liveLifetimes.set(batchId, {
+        batchTTL,
+        measuredAt,
+        recordMeasuredAt: stamp.updatedAt ?? stamp.createdAt,
+      })
     }
     return batchTTL
   }
 
   /**
-   * The stored lifetime with the chain's reading laid over it, when that
-   * reading is newer than the record's own measurement — a renewal or a
-   * reconcile written since is the fresher of the two.
+   * The stored lifetime with the chain's reading laid over it, for as long as
+   * the record is the one the reading was taken over: a renewal or a
+   * reconcile written since is the fresher of the two. Matched by the
+   * record's own measurement instant, not by comparing clocks, so a top-up
+   * recorded on a device whose clock runs behind still displaces the reading.
    */
   private lifetimeOf(
     batchId: string,
     stored: StampLifetimeFields,
   ): StampLifetimeFields {
     const live = this.liveLifetimes.get(batchId)
-    if (!live || live.measuredAt <= (stored.updatedAt ?? stored.createdAt)) {
+    if (
+      !live ||
+      live.recordMeasuredAt !== (stored.updatedAt ?? stored.createdAt)
+    ) {
       return stored
     }
     return { ...stored, batchTTL: live.batchTTL, updatedAt: live.measuredAt }
@@ -6208,6 +6230,7 @@ export class SwarmIdProxy {
       requestId: message.requestId,
       postageBatch: stamp ? await this.describeStamp(stamp) : undefined,
     })
+    this.adoptLifetimeReadings()
   }
 
   /** Every drive the app was granted, the primary marked (#862). */
@@ -6232,6 +6255,9 @@ export class SwarmIdProxy {
       requestId: message.requestId,
       drives,
     })
+    // After the answer, so a change this read turned up follows the drives
+    // the dApp was just given rather than interleaving with them.
+    this.adoptLifetimeReadings()
   }
 
   private handleGetPermissions(
@@ -6276,12 +6302,9 @@ export class SwarmIdProxy {
     // only when neither authoritative source can answer (e.g. RPC unreachable
     // and a public gateway that does not track the batch).
     // The reading is kept, so the refusal and the expiry timer follow what the
-    // dApp was just told (#927).
+    // dApp is told (#927); the caller adopts it once the answer is out.
     let batchTTL = await this.measureLifetime(stamp)
-    if (batchTTL !== undefined) {
-      this.emitConnectionInfoIfChanged()
-      this.armExpiryTimer()
-    } else {
+    if (batchTTL === undefined) {
       try {
         const pricePerGBPerMonth = await fetchSwarmPrice()
         batchTTL = calculateTTLSeconds(stamp.amount, pricePerGBPerMonth)

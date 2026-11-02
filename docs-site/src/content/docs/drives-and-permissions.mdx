@@ -118,9 +118,10 @@ and `onConnectionChange` fire, `getDrives()` reflects it, and an upload in fligh
 away is aborted. Both fire when a drive expires while the page is open too, whether or not the
 app has written to it, with `uploadUnavailableReason: "stamp-expired"` once it was the primary, so
 an app that caches `canUpload` need not poll. The session re-reads each drive's remaining lifetime
-from the chain as the expiry nears, and before it refuses a drive as expired, so a storage price
-change or a top-up made elsewhere moves the moment rather than the refusal being wrong in either
-direction. A hidden tab's timers run late by up to a minute. `onDrivesChange` is the one to use for the drives alone: it carries no
+from the chain halfway to its stored expiry, at least every six hours, and again at the expiry
+before it refuses the drive, so a storage price change or a top-up made elsewhere moves the moment
+rather than the refusal being wrong in either direction. A hidden tab's timers run late by up to a
+minute. `onDrivesChange` is the one to use for the drives alone: it carries no
 payload and fires for nothing else.
 
 ### Scratch drives
