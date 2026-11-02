@@ -448,6 +448,209 @@ describe("SwarmIdProxy auth button typography (#779)", () => {
   })
 })
 
+// What the button shows in each auth state, and what a click on it does.
+describe("SwarmIdProxy auth button", () => {
+  type ButtonInternals = {
+    buttonConfig: ButtonConfig | undefined
+    authButtonContainer: unknown
+    authenticated: boolean
+    authLoading: boolean
+    isConnecting: boolean
+    parentOrigin: string | undefined
+    showAuthButton: () => void
+    openAuthPopup: () => boolean
+    clearAuthData: () => void
+    sendToParent: (message: unknown) => void
+  }
+
+  type FakeButton = {
+    style: Record<string, string>
+    textContent: string
+    innerHTML: string
+    disabled: boolean
+    click: () => void
+  }
+
+  let proxy: SwarmIdProxy
+  let internal: ButtonInternals
+  let container: { innerHTML: string; appendChild: (b: FakeButton) => void }
+  let buttons: FakeButton[]
+  let headChildren: unknown[]
+
+  beforeEach(() => {
+    vi.restoreAllMocks()
+    headChildren = []
+    vi.stubGlobal("window", {
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+      parent: { postMessage: vi.fn() },
+      location: { origin: "https://id.example.com" },
+    })
+    vi.stubGlobal("document", {
+      createElement: vi.fn(() => {
+        const listeners: Array<() => void> = []
+        return {
+          style: {} as Record<string, string>,
+          textContent: "",
+          innerHTML: "",
+          disabled: false,
+          addEventListener: (_type: string, listener: () => void) =>
+            listeners.push(listener),
+          click: () => listeners.forEach((listener) => listener()),
+        }
+      }),
+      getElementById: vi.fn(() => undefined),
+      head: { appendChild: (child: unknown) => headChildren.push(child) },
+    })
+
+    proxy = new SwarmIdProxy()
+    internal = proxy as unknown as ButtonInternals
+    buttons = []
+    container = {
+      innerHTML: "stale",
+      appendChild: (button: FakeButton) => buttons.push(button),
+    }
+    internal.authButtonContainer = container
+  })
+
+  const show = (state: { authenticated: boolean; authLoading: boolean }) => {
+    internal.authenticated = state.authenticated
+    internal.authLoading = state.authLoading
+    internal.showAuthButton()
+    expect(buttons).toHaveLength(1)
+    return buttons[0]
+  }
+
+  it("shows a disabled grey loading button while auth loads", () => {
+    const button = show({ authenticated: false, authLoading: true })
+    expect(container.innerHTML).toBe("")
+    expect(button.textContent).toBe("⏳ Loading...")
+    expect(button.disabled).toBe(true)
+    expect(button.style).toMatchObject({
+      backgroundColor: "#999",
+      cursor: "default",
+      color: "white",
+    })
+  })
+
+  it("shows the connect button when signed out", () => {
+    const button = show({ authenticated: false, authLoading: false })
+    expect(button.textContent).toBe("🔐 Login with Swarm ID")
+    expect(button.disabled).toBe(false)
+    expect(button.style).toMatchObject({
+      backgroundColor: "#dd7200",
+      cursor: "pointer",
+    })
+  })
+
+  it("shows the disconnect button when signed in", () => {
+    const button = show({ authenticated: true, authLoading: false })
+    expect(button.textContent).toBe("🔓 Disconnect from Swarm ID")
+    expect(button.style).toMatchObject({
+      backgroundColor: "#666",
+      cursor: "pointer",
+    })
+  })
+
+  it("takes its texts and colours from buttonConfig", () => {
+    internal.buttonConfig = {
+      connectText: "Connect",
+      disconnectText: "Leave",
+      loadingText: "Wait",
+      backgroundColor: "#123456",
+      color: "black",
+      borderRadius: "8px",
+    }
+    const connect = show({ authenticated: false, authLoading: false })
+    expect(connect.textContent).toBe("Connect")
+    expect(connect.style).toMatchObject({
+      backgroundColor: "#123456",
+      color: "black",
+      borderRadius: "8px",
+    })
+
+    buttons = []
+    expect(show({ authenticated: true, authLoading: false }).textContent).toBe(
+      "Leave",
+    )
+    buttons = []
+    expect(show({ authenticated: false, authLoading: true }).textContent).toBe(
+      "Wait",
+    )
+  })
+
+  it("does nothing while connecting, or without a container", () => {
+    internal.isConnecting = true
+    internal.showAuthButton()
+    internal.isConnecting = false
+    internal.authButtonContainer = undefined
+    internal.showAuthButton()
+    expect(buttons).toHaveLength(0)
+    expect(container.innerHTML).toBe("stale")
+  })
+
+  it("a connect click spins the button and opens the popup", () => {
+    const openAuthPopup = vi
+      .spyOn(internal, "openAuthPopup")
+      .mockReturnValue(true)
+    const button = show({ authenticated: false, authLoading: false })
+
+    button.click()
+
+    expect(internal.isConnecting).toBe(true)
+    expect(button.disabled).toBe(true)
+    expect(button.innerHTML).toContain("<span")
+    expect(headChildren).toHaveLength(1)
+    expect(headChildren[0]).toMatchObject({ id: "swarm-id-spinner-style" })
+    expect(openAuthPopup).toHaveBeenCalledOnce()
+  })
+
+  // Mobile Safari blocks the popup more often than not; the user must get a
+  // button to try again, not a spinner that never stops.
+  it("puts the connect button back when the popup is blocked", () => {
+    vi.stubGlobal("window", {
+      ...window,
+      location: { origin: "https://id.example.com", pathname: "/proxy" },
+      open: vi.fn(() => undefined),
+    })
+    internal.parentOrigin = "https://app.example.com"
+    show({ authenticated: false, authLoading: false }).click()
+
+    expect(window.open).toHaveBeenCalledOnce()
+    expect(internal.isConnecting).toBe(false)
+    expect(buttons).toHaveLength(2)
+    expect(buttons[1].textContent).toBe("🔐 Login with Swarm ID")
+    expect(buttons[1].disabled).toBe(false)
+  })
+
+  it("adds the spinner style only once", () => {
+    vi.spyOn(internal, "openAuthPopup").mockReturnValue(true)
+    vi.mocked(document.getElementById).mockReturnValue(
+      {} as unknown as HTMLElement,
+    )
+    show({ authenticated: false, authLoading: false }).click()
+    expect(headChildren).toEqual([])
+  })
+
+  it("a disconnect click clears the session and tells the parent", () => {
+    const clearAuthData = vi
+      .spyOn(internal, "clearAuthData")
+      .mockImplementation(() => {})
+    const sendToParent = vi
+      .spyOn(internal, "sendToParent")
+      .mockImplementation(() => {})
+    show({ authenticated: true, authLoading: false }).click()
+
+    expect(clearAuthData).toHaveBeenCalledOnce()
+    expect(sendToParent).toHaveBeenCalledWith({
+      type: "authStatusResponse",
+      requestId: "disconnect",
+      authenticated: false,
+      origin: undefined,
+    })
+  })
+})
+
 describe("SwarmIdProxy subsidised-mode selection", () => {
   const GATEWAY_URL = "https://gateway.example.com/"
   const CUSTOM_BEE_URL = "https://custom-node.example.com/"
