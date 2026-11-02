@@ -194,6 +194,7 @@ import { PERMISSIONS_POPUP_MAX_MS, untilPopupClosed } from "./utils/popup"
 import { effectivePermissions } from "./permissions"
 import type { ActKeyCandidate } from "./proxy/act"
 import { buildAuthUrl } from "./utils/url"
+import { renderAuthButton, showButtonSpinner } from "./proxy/auth-button"
 import {
   createActForContent,
   decryptActReference,
@@ -3770,75 +3771,15 @@ export class SwarmIdProxy {
     if (!this.authButtonContainer || this.isConnecting) {
       return
     }
-
-    // Clear existing content
-    this.authButtonContainer.innerHTML = ""
-
-    // Create button based on authentication status
-    const button = document.createElement("button")
-    const isAuthenticated = this.authenticated
-    const isLoading = this.authLoading
-
-    // Get text from buttonConfig or use defaults
-    const config = this.buttonConfig || {}
-    const loadingText = config.loadingText || "⏳ Loading..."
-    const disconnectText =
-      config.disconnectText || "🔓 Disconnect from Swarm ID"
-    const connectText = config.connectText || "🔐 Login with Swarm ID"
-
-    if (isLoading) {
-      button.textContent = loadingText
-      button.disabled = true
-    } else if (isAuthenticated) {
-      button.textContent = disconnectText
-    } else {
-      button.textContent = connectText
-    }
-
-    // Make button fill container
-    button.style.width = "100%"
-    button.style.height = "100%"
-    button.style.display = "flex"
-    button.style.alignItems = "center"
-    button.style.justifyContent = "center"
-
-    if (isLoading) {
-      button.style.backgroundColor = "#999"
-      button.style.cursor = "default"
-    } else if (isAuthenticated) {
-      // Different color for disconnect button
-      button.style.backgroundColor = "#666"
-      button.style.cursor = "pointer"
-    } else {
-      button.style.backgroundColor = config.backgroundColor || "#dd7200"
-      button.style.cursor = "pointer"
-    }
-    button.style.color = config.color || "white"
-    button.style.border = "none"
-    button.style.borderRadius = config.borderRadius || "0"
-    button.style.padding = "0"
-    button.style.fontSize = config.fontSize || "14px"
-    button.style.fontWeight = config.fontWeight?.toString() ?? "600"
-    // No default: left unset the button keeps the font the iframe gives it.
-    // Forcing `inherit` here would inherit the IFRAME's font, not the parent
-    // page's, so it would change the look without getting any closer to the
-    // embedding page. A stack the dApp does pass falls back as usual.
-    if (config.fontFamily) {
-      button.style.fontFamily = config.fontFamily
-    }
-
-    // Click handler
-    button.addEventListener("click", () => {
-      if (isAuthenticated) {
-        // Handle disconnect
-        this.handleDisconnectClick()
-      } else {
-        // Handle login
-        this.handleLoginClick(button)
-      }
+    const state = this.authLoading
+      ? "loading"
+      : this.authenticated
+        ? "authenticated"
+        : "unauthenticated"
+    renderAuthButton(this.authButtonContainer, state, this.buttonConfig, {
+      connect: (button) => this.handleLoginClick(button),
+      disconnect: () => this.handleDisconnectClick(),
     })
-
-    this.authButtonContainer.appendChild(button)
   }
 
   /**
@@ -3986,21 +3927,7 @@ export class SwarmIdProxy {
    */
   private handleLoginClick(button: HTMLButtonElement): void {
     this.isConnecting = true
-    // Disable button and show spinner
-    button.disabled = true
-    button.innerHTML =
-      '<span style="display: inline-block; width: 16px; height: 16px; border: 2px solid rgba(255,255,255,.3); border-radius: 50%; border-top-color: white; animation: spin 1s linear infinite;"></span>'
-
-    // Add spinner animation
-    if (!document.getElementById("swarm-id-spinner-style")) {
-      const style = document.createElement("style")
-      style.id = "swarm-id-spinner-style"
-      style.textContent =
-        "@keyframes spin { to { transform: rotate(360deg); } }"
-      document.head.appendChild(style)
-    }
-
-    // Open auth popup
+    showButtonSpinner(button)
     this.openAuthPopup()
   }
 
