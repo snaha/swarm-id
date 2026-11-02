@@ -60,7 +60,7 @@ pay for drives it never writes; the coordinator's existing idle-yield releases t
 again. The primary's entry is the one the proxy builds today (`uploadMode` and
 `uploadUnavailableReason` report whether its stamper built, and its eager lease spares the
 first upload the acquire), and it keeps today's job: the proxy's own account-state publish
-(`runAccountStatePublish`, for multi-device accounts)
+(`publishFeedSnapshot`, for multi-device accounts)
 writes this device's state feed through the primary drive's coordinator, announced by that
 coordinator's first lease acquire as now. An app with no regular drive granted (zero drives,
 or scratch only) has no entry at connect and publishes no feed: it sends the bus delta, as a

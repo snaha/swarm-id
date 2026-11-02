@@ -118,9 +118,9 @@ feed; then `onChunksUploaded` utilisation hook; then `ensureInRoster`):
 
 - **Oneshot (SwarmID UI)** — `sync-account.ts`: `getAccountStateSnapshot` → `accountStateToDeviceView` →
   `coordinator.withWrite(target => publishDeviceState({ …, view, target, onChunksUploaded }), { wait: "skip" })`.
-- **Persistent (proxy)** — `swarm-id-proxy.ts`: `schedulePublish` (debounced) on two triggers —
+- **Persistent (proxy)** — `AccountStatePublisher.schedule` (debounced) on two triggers —
   `"acquired"` (`onLeaseAcquired`, announces a newly-joining device) and `"change"` (a local
-  identity/stamp/rename delta) — runs `runAccountStatePublish` → `buildAccountStateSnapshotForPublish` →
+  identity/stamp/rename delta) — then `swarm-id-proxy.ts`'s `publishFeedSnapshot` → `buildAccountStateSnapshotForPublish` →
   `publishDeviceState` via the coordinator. `refreshDeviceRegistryFromSwarm` uses `readRoster` to keep the
   known-device set current.
 
@@ -198,7 +198,8 @@ too (#662).
 | `lib/src/sync/fold-account-from-swarm.ts`      | `foldAccountFromSwarm` (roster + parallel device-feed reads)                     |
 | `lib/src/sync/merge-snapshot.ts`               | LWW + tombstone merge primitives                                                 |
 | `lib/src/sync/sync-account.ts`                 | Oneshot publish (SwarmID UI)                                                     |
-| `lib/src/swarm-id-proxy.ts`                    | Persistent publish (`runAccountStatePublish`) + triggers                         |
+| `lib/src/swarm-id-proxy.ts`                    | Persistent publish (`publishFeedSnapshot`) + triggers                            |
+| `lib/src/proxy/account-state-publisher.ts`     | When the persistent publish runs: debounce, coalescing, roster retry             |
 | `lib/src/utils/storage-managers.ts`            | `serializeAccount` (local persistence)                                           |
 | `lib/src/bus/account-delta.ts`                 | The wire form of a snapshot on the bus (session fields stripped) and its restore |
 | `ui/src/lib/stores/account-bus.ts`             | The SwarmID tab as a bus peer: publishes on mutation, folds a peer's delta       |

@@ -101,6 +101,11 @@ import {
 import type { UploadProgress } from "./proxy/types"
 import { DriveWritePath } from "./proxy/drive-write-path"
 import {
+  AccountStatePublisher,
+  type FeedPublishOutcome,
+  type PublishReason,
+} from "./proxy/account-state-publisher"
+import {
   loadMantarayTreeWithChunkAPI,
   saveMantarayTree,
 } from "./proxy/mantaray"
@@ -126,7 +131,6 @@ import {
 import type { DeviceStateSnapshot } from "./sync"
 import { RosterScanInconclusiveError } from "./sync/device-roster"
 import { mergeDevicesList } from "./sync/merge-snapshot"
-import { rosterRetryDelayMs } from "./sync/device-roster"
 import { foldAccountFromSwarm } from "./sync/fold-account-from-swarm"
 import {
   accountDeltaFromSnapshot,
@@ -205,12 +209,6 @@ import {
   publicKeyFromPrivate,
   compressPublicKey,
 } from "./proxy/act"
-
-/**
- * Debounce window for proxy-side account-state publishing. Coalesces a burst of
- * triggers (lease acquisition + storage changes) into a single feed write.
- */
-export const PUBLISH_DEBOUNCE_MS = 1500
 
 /** Min interval between pre-acquire device-registry pulls (throttles the
  *  slot-wait loop's repeated acquires from hammering the feed). */
@@ -464,26 +462,11 @@ export class SwarmIdProxy {
     return this.beeClient.bee
   }
 
-  /**
-   * Debounce timer + in-flight guard for proxy-side account-state publishing.
-   * The proxy publishes the account snapshot to the shared sync feed when it
-   * first acquires a partition (so the device announces itself — see #336
-   * motivation #4) and when account state changes while a lease is held.
-   */
-  private publishTimer: ReturnType<typeof setTimeout> | undefined
-  // Re-arms the announce publish after a partial one (roster append skipped
-  // on an inconclusive scan, #920); attempt drives the backoff.
-  private rosterRetryTimer: ReturnType<typeof setTimeout> | undefined
-  private rosterRetryAttempt = 0
-  private publishInFlight: boolean = false
-  /**
-   * Why the next debounced publish was scheduled. `"acquired"` (announce on
-   * lease acquisition) is gated on this device not yet being in the feed, so a
-   * plain reload doesn't republish. `"change"` (account-state delta) always
-   * publishes. `"change"` dominates a coalesced burst — a real delta must never
-   * be skipped just because an acquisition was also pending.
-   */
-  private publishReason: "acquired" | "change" | undefined
+  /** When the account snapshot is published; see `publishFeedSnapshot`. */
+  private readonly accountStatePublisher = new AccountStatePublisher({
+    publishDelta: () => this.publishAccountDelta(),
+    publishToFeed: (reason) => this.publishFeedSnapshot(reason),
+  })
   /**
    * This device's identity, captured ONCE at authentication and reused for
    * every lease operation. Never re-read from `getOrCreateDeviceId()` mid-
@@ -714,7 +697,7 @@ export class SwarmIdProxy {
       // bus message needs no lease — and a stamp-less account still has apps to
       // revoke and partitioned sessions to tell.
       if (source === "storage") {
-        this.schedulePublish("change")
+        this.accountStatePublisher.schedule("change")
       }
     } else if (
       this.authenticated &&
@@ -1387,11 +1370,7 @@ export class SwarmIdProxy {
     // Release the partition leases (best-effort) so peers see this device
     // vacate its partitions promptly.
     this.teardownDrives()
-    if (this.publishTimer !== undefined) {
-      clearTimeout(this.publishTimer)
-      this.publishTimer = undefined
-    }
-    this.clearRosterRetry()
+    this.accountStatePublisher.cancel()
 
     // Retire any join still deriving its key — its continuation would
     // otherwise attach a freshly-opened socket to the bus we are closing,
@@ -2023,7 +2002,7 @@ export class SwarmIdProxy {
       // publish below reads those counters.
       onLeaseAcquired: () => {
         this.applyPendingLaneUpdate(drive)
-        this.schedulePublish("acquired")
+        this.accountStatePublisher.schedule("acquired")
       },
       // Every release — idle timer, a peer's request, teardown — wakes the
       // waiters' slot polls; the announcement is not each path's to remember.
@@ -2052,16 +2031,6 @@ export class SwarmIdProxy {
    * operation so acquire / refresh / validate never disagree about who we
    * are (which previously caused false "reclaimed by another device").
    */
-  /** Drop a pending roster-append retry (#920) and its backoff, so the next
-   *  session on this proxy starts over at the base delay. */
-  private clearRosterRetry(): void {
-    if (this.rosterRetryTimer !== undefined) {
-      clearTimeout(this.rosterRetryTimer)
-      this.rosterRetryTimer = undefined
-    }
-    this.rosterRetryAttempt = 0
-  }
-
   private requireDeviceId(): string {
     if (!this.deviceId) this.deviceId = getOrCreateDeviceId()
     return this.deviceId
@@ -3002,182 +2971,129 @@ export class SwarmIdProxy {
   }
 
   /**
-   * Schedule a debounced account-state publish. Safe to call from inside the
-   * coordinator's lease callbacks: it only arms a timer, so the actual publish
-   * runs later, outside any held write lock.
-   *
-   * A coordinator is NOT a precondition — only the feed half of the publish
-   * needs one, and `runAccountStatePublish` checks for it there, after the bus
-   * delta has gone out.
-   */
-  private schedulePublish(reason: "acquired" | "change"): void {
-    // "change" dominates: if a real delta is pending in this debounce window,
-    // don't let a coalesced "acquired" downgrade it to the announce-gated path.
-    if (this.publishReason !== "change") this.publishReason = reason
-    if (this.publishTimer !== undefined) clearTimeout(this.publishTimer)
-    this.publishTimer = setTimeout(() => {
-      this.publishTimer = undefined
-      const effectiveReason = this.publishReason ?? "acquired"
-      this.publishReason = undefined
-      void this.runAccountStatePublish(effectiveReason)
-    }, PUBLISH_DEBOUNCE_MS)
-  }
-
-  /**
-   * Publish the account snapshot: to the account's live peers over the bus,
-   * and to the shared feed via the coordinator (same write lock + held
-   * partition). The feed write needs a partition; the bus message does not, so
-   * it goes out first and a read-only session still relays to peers that
+   * The feed half of an account-state publish: write the snapshot to the
+   * shared feed via the coordinator (same write lock + held partition). The
+   * feed write needs a partition; the bus delta does not, so the publisher
+   * sends that first and a read-only session still relays to peers that
    * cannot see storage at all. Single-device accounts' feeds are published by
-   * the SwarmID UI. Re-arms if a publish is already in flight so the latest
-   * state still lands.
+   * the SwarmID UI.
    */
-  private async runAccountStatePublish(
-    reason: "acquired" | "change",
-  ): Promise<void> {
-    // The in-flight guard runs before the delta publish below: a message needs
-    // no lease, but a re-entrant call while a publish is in flight re-arms the
-    // timer instead of sending the delta a second time for one change.
-    if (this.publishInFlight) {
-      this.schedulePublish(reason)
-      return
-    }
-    if (reason === "change") this.publishAccountDelta()
+  private async publishFeedSnapshot(
+    reason: PublishReason,
+  ): Promise<FeedPublishOutcome> {
+    const skipped: FeedPublishOutcome = { status: "skipped" }
     const coordinator = this.drive?.coordinator
-    if (!coordinator || coordinator.currentPartition === undefined) return
-    this.publishInFlight = true
-    try {
-      const assembled = await this.buildAccountStateSnapshotForPublish()
-      if (!assembled) return
-      // Snapshot assembly awaits (crypto + storage reads); a disconnect /
-      // sign-out / re-auth may have torn down or replaced the coordinator in
-      // the meantime. Bail rather than write through a stale instance. (The
-      // coordinator also self-guards against re-acquire when disposed; this
-      // just avoids the needless lock round-trip.)
-      if (this.drive?.coordinator !== coordinator) return
-      const { snapshot, encryptionKey, accountKey, owner } = assembled
+    if (!coordinator || coordinator.currentPartition === undefined)
+      return skipped
+    const assembled = await this.buildAccountStateSnapshotForPublish()
+    if (!assembled) return skipped
+    // Snapshot assembly awaits (crypto + storage reads); a disconnect /
+    // sign-out / re-auth may have torn down or replaced the coordinator in
+    // the meantime. Bail rather than write through a stale instance. (The
+    // coordinator also self-guards against re-acquire when disposed; this
+    // just avoids the needless lock round-trip.)
+    if (this.drive?.coordinator !== coordinator) return skipped
+    const { snapshot, encryptionKey, accountKey, owner } = assembled
 
-      // The snapshot is assembled from the most recent connection for this
-      // origin; if the connected account changed since the coordinator was
-      // built, publishing would pair account B's feed (key derived from the
-      // snapshot) with account A's batch and partition lease. Skip — the
-      // re-initialised coordinator for the new account publishes its own state.
-      if (snapshot.accountId !== coordinator.accountId) {
-        console.warn(
-          `[Proxy] Account changed during publish scheduling (snapshot ${snapshot.accountId} vs coordinator ${coordinator.accountId}); skipping publish.`,
-        )
-        return
-      }
-
-      // Announce-once: a publish triggered purely by acquiring the lease (e.g.
-      // every page reload) has nothing new once this device is already in the
-      // roster. Skip it. A "change" publish carries a real delta and always
-      // re-writes this device's own state feed (no shared contention).
-      const deviceId = this.requireDeviceId()
-      if (reason === "acquired") {
-        const rosterDevices = await readRoster({
-          bee: this.nodeBee,
-          accountId: snapshot.accountId,
-          owner,
-        }).catch(() => [])
-        const rosterEntry = rosterDevices.find((d) => d.deviceId === deviceId)
-        if (rosterEntry?.removedAt) {
-          // A tombstoned self is NOT "not yet announced". Reading it that way
-          // republished us without the tombstone, which resurrected the device
-          // on every peer — the roster half of #611, and the half that
-          // propagates. A removal or an expiry is news to obey, not a gap to
-          // fill: stand down, and let a genuine sign-in put us back
-          // (`reactivateThisDevice`).
-          //
-          // Unless that sign-in has already happened, in which case this is the
-          // publish that carries it: the roster is the only way a reactivation
-          // reaches peers, so skipping here — on either guard — would silence
-          // the very seam this defers to and the removal would never lift
-          // anywhere. Our own view says which case it is, on the same clock
-          // `mergeDevicesList` ranks by: a handover clears `removedAt` AND
-          // stamps a `lastSignedInAt` that outranks the removal. A poll or a
-          // reload does neither.
-          const localSelf = snapshot.metadata.devices.find(
-            (d) => d.deviceId === deviceId,
-          )
-          const signedInSinceRemoval =
-            !!localSelf &&
-            !localSelf.removedAt &&
-            (localSelf.lastSignedInAt ?? 0) > rosterEntry.removedAt
-          if (!signedInSinceRemoval) {
-            console.info(
-              `[Proxy] This device is tombstoned in the roster for ${snapshot.accountId}; not re-announcing.`,
-            )
-            return
-          }
-          console.info(
-            `[Proxy] This device signed in since its removal from ${snapshot.accountId}; announcing the reactivation.`,
-          )
-        } else if (rosterEntry) {
-          // Announce-once proper: the roster already says what we would say.
-          console.info(
-            `[Proxy] Device already in roster for ${snapshot.accountId}; skipping announce publish.`,
-          )
-          return
-        }
-      }
-
-      const thisDevice = snapshot.metadata.devices.find(
-        (d) => d.deviceId === deviceId,
-      ) ?? {
-        deviceId,
-        name: this.announcedDeviceName(),
-        createdAt: Date.now(),
-        lastSignedInAt: Date.now(),
-      }
-      // Per-field scalar clocks (incl. the stable-`createdAt` fallback for a
-      // never-edited field) are derived by `accountStateToDeviceView`.
-      const view = accountStateToDeviceView(snapshot)
-
-      const published = await coordinator.withWrite((target) =>
-        publishDeviceState({
-          bee: this.nodeBee,
-          accountId: snapshot.accountId,
-          device: thisDevice,
-          accountKey,
-          owner,
-          encryptionKey,
-          view,
-          target,
-        }),
+    // The snapshot is assembled from the most recent connection for this
+    // origin; if the connected account changed since the coordinator was
+    // built, publishing would pair account B's feed (key derived from the
+    // snapshot) with account A's batch and partition lease. Skip — the
+    // re-initialised coordinator for the new account publishes its own state.
+    if (snapshot.accountId !== coordinator.accountId) {
+      console.warn(
+        `[Proxy] Account changed during publish scheduling (snapshot ${snapshot.accountId} vs coordinator ${coordinator.accountId}); skipping publish.`,
       )
-      if (published.status === "partial") {
-        // The roster append was skipped (#920). Re-run the announce path with
-        // backoff: it re-reads the roster and appends once the scan is clean.
-        //
-        // Only while this session still holds a partition: the guard at the
-        // top of this method drops a retry that fires after the lease idled
-        // out (the first retry lands at `IDLE_YIELD_MS`), and the retry does
-        // not acquire one just to announce. The next acquire's own
-        // `onLeaseAcquired` announce re-reads the roster and appends then —
-        // the gap is this device's roster entry, not the account, which the
-        // identity UI's `syncAccount` retry keeps reachable.
-        const delay = rosterRetryDelayMs(this.rosterRetryAttempt++)
-        console.warn(`[Proxy] ${published.warning}; retrying in ${delay}ms`)
-        if (this.rosterRetryTimer !== undefined)
-          clearTimeout(this.rosterRetryTimer)
-        this.rosterRetryTimer = setTimeout(() => {
-          this.rosterRetryTimer = undefined
-          this.schedulePublish("acquired")
-        }, delay)
-        return
-      }
-      this.rosterRetryAttempt = 0
-      // `ui/tests/three-devices.test.ts` counts this line to tell a busy
-      // holder from an idle one (#707); reword it there too.
-      console.info(
-        `[Proxy] Published device state for ${snapshot.accountId} (partition ${coordinator.currentPartition})`,
-      )
-    } catch (error) {
-      console.warn("[Proxy] Account-state publish failed:", error)
-    } finally {
-      this.publishInFlight = false
+      return skipped
     }
+
+    // Announce-once: a publish triggered purely by acquiring the lease (e.g.
+    // every page reload) has nothing new once this device is already in the
+    // roster. Skip it. A "change" publish carries a real delta and always
+    // re-writes this device's own state feed (no shared contention).
+    const deviceId = this.requireDeviceId()
+    if (reason === "acquired") {
+      const rosterDevices = await readRoster({
+        bee: this.nodeBee,
+        accountId: snapshot.accountId,
+        owner,
+      }).catch(() => [])
+      const rosterEntry = rosterDevices.find((d) => d.deviceId === deviceId)
+      if (rosterEntry?.removedAt) {
+        // A tombstoned self is NOT "not yet announced". Reading it that way
+        // republished us without the tombstone, which resurrected the device
+        // on every peer — the roster half of #611, and the half that
+        // propagates. A removal or an expiry is news to obey, not a gap to
+        // fill: stand down, and let a genuine sign-in put us back
+        // (`reactivateThisDevice`).
+        //
+        // Unless that sign-in has already happened, in which case this is the
+        // publish that carries it: the roster is the only way a reactivation
+        // reaches peers, so skipping here — on either guard — would silence
+        // the very seam this defers to and the removal would never lift
+        // anywhere. Our own view says which case it is, on the same clock
+        // `mergeDevicesList` ranks by: a handover clears `removedAt` AND
+        // stamps a `lastSignedInAt` that outranks the removal. A poll or a
+        // reload does neither.
+        const localSelf = snapshot.metadata.devices.find(
+          (d) => d.deviceId === deviceId,
+        )
+        const signedInSinceRemoval =
+          !!localSelf &&
+          !localSelf.removedAt &&
+          (localSelf.lastSignedInAt ?? 0) > rosterEntry.removedAt
+        if (!signedInSinceRemoval) {
+          console.info(
+            `[Proxy] This device is tombstoned in the roster for ${snapshot.accountId}; not re-announcing.`,
+          )
+          return skipped
+        }
+        console.info(
+          `[Proxy] This device signed in since its removal from ${snapshot.accountId}; announcing the reactivation.`,
+        )
+      } else if (rosterEntry) {
+        // Announce-once proper: the roster already says what we would say.
+        console.info(
+          `[Proxy] Device already in roster for ${snapshot.accountId}; skipping announce publish.`,
+        )
+        return skipped
+      }
+    }
+
+    const thisDevice = snapshot.metadata.devices.find(
+      (d) => d.deviceId === deviceId,
+    ) ?? {
+      deviceId,
+      name: this.announcedDeviceName(),
+      createdAt: Date.now(),
+      lastSignedInAt: Date.now(),
+    }
+    // Per-field scalar clocks (incl. the stable-`createdAt` fallback for a
+    // never-edited field) are derived by `accountStateToDeviceView`.
+    const view = accountStateToDeviceView(snapshot)
+
+    const published = await coordinator.withWrite((target) =>
+      publishDeviceState({
+        bee: this.nodeBee,
+        accountId: snapshot.accountId,
+        device: thisDevice,
+        accountKey,
+        owner,
+        encryptionKey,
+        view,
+        target,
+      }),
+    )
+    if (published.status === "partial") {
+      // The roster append was skipped (#920); the publisher retries.
+      return { status: "partial", warning: published.warning }
+    }
+    // `ui/tests/three-devices.test.ts` counts this line to tell a busy
+    // holder from an idle one (#707); reword it there too.
+    console.info(
+      `[Proxy] Published device state for ${snapshot.accountId} (partition ${coordinator.currentPartition})`,
+    )
+    return { status: "published" }
   }
 
   /**
@@ -3384,11 +3300,7 @@ export class SwarmIdProxy {
     // Before dropping `deviceId` — the release announcement is sent as us.
     this.teardownDrives()
     this.deviceId = undefined
-    if (this.publishTimer !== undefined) {
-      clearTimeout(this.publishTimer)
-      this.publishTimer = undefined
-    }
-    this.clearRosterRetry()
+    this.accountStatePublisher.cancel()
     this.pendingLaneUpdates.clear()
     this.storagePartitioned = false
     this.partitionAccount = undefined

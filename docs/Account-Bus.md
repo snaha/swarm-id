@@ -377,7 +377,7 @@ Each landed as its own PR chain, in this order:
 
    One echo does survive, bounded: with a SwarmID tab open beside a dApp tab, the tab's fold
    reaches the _unpartitioned_ proxy iframe as a cross-window `storage` event, which carries
-   no origin, and that iframe republishes the merged snapshot (`schedulePublish("change")`).
+   no origin, and that iframe republishes the merged snapshot (`AccountStatePublisher.schedule("change")`).
    It terminates after that one round trip — LWW converges, and an identical-bytes `setItem`
    fires no further storage event — so it is a trailing confirmation of the merge, not a
    loop. This is also why nothing on the bus may stamp a fresh clock into the snapshot on

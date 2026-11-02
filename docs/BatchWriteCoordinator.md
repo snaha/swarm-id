@@ -205,7 +205,7 @@ to an unlocked gateway target; everything else delegates to `coordinator.withWri
 
 In production the user sits on the dApp, not the identity UI, so the proxy iframe is the only
 guaranteed-persistent context that can publish account state. Two triggers, both funnelled through
-a debounced scheduler (`schedulePublish`, `PUBLISH_DEBOUNCE_MS`) so the publish runs **outside**
+a debounced scheduler (`AccountStatePublisher`, `PUBLISH_DEBOUNCE_MS`) so the publish runs **outside**
 the lease callback's write lock (the publish re-enters the lock via `coordinator.withWrite`):
 
 - **`"acquired"`** — `onLeaseAcquired`. Announces a newly joining device by publishing this device's
@@ -217,12 +217,12 @@ the lease callback's write lock (the publish re-enters the lock via `coordinator
   event on the account document): a new identity / stamp / rename should propagate to peers. A
   `"change"` carries a real delta and is never gated; within a debounce window `"change"` dominates
   a coalesced `"acquired"`. A held partition is **not** a precondition — only the feed half of the
-  publish needs one. `runAccountStatePublish` sends the bus delta unconditionally and checks
+  publish needs one. The publisher sends the bus delta unconditionally, and `publishFeedSnapshot` checks
   `coordinator.currentPartition` only before the feed write, so a session with no coordinator at all
-  (a stamp-less account never gets past `initializeStamper`) still relays to peers that cannot see
+  (a stamp-less account never gets past its drive build) still relays to peers that cannot see
   storage.
 
-The publisher (`runAccountStatePublish`) re-arms itself if a publish is already in flight, and bails if
+The publisher re-arms itself if a publish is already in flight, and `publishFeedSnapshot` bails if
 the coordinator was torn down or replaced while the (async) snapshot assembly ran.
 
 ### `sync-account` (`lib/src/sync/sync-account.ts`) — oneshot

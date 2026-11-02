@@ -254,7 +254,8 @@ vi.mock("./sync/batch-write-coordinator", () => ({
 
 import { BatchId, EthAddress, PrivateKey } from "@ethersphere/bee-js"
 
-import { SwarmIdProxy, PUBLISH_DEBOUNCE_MS } from "./swarm-id-proxy"
+import { SwarmIdProxy } from "./swarm-id-proxy"
+import { PUBLISH_DEBOUNCE_MS } from "./proxy/account-state-publisher"
 import type { ProxyConfig } from "./swarm-id-proxy"
 import { SignalingTransport } from "./bus/signaling-transport"
 import { busChannelName } from "./bus/account-bus"
@@ -2207,9 +2208,11 @@ describe("SwarmIdProxy partitioned write enablement", () => {
           await coordinator.deps.refreshKnownDeviceIds()
           await (
             proxy as unknown as {
-              runAccountStatePublish(reason: "acquired"): Promise<void>
+              accountStatePublisher: {
+                run(reason: "acquired"): Promise<void>
+              }
             }
-          ).runAccountStatePublish("acquired")
+          ).accountStatePublisher.run("acquired")
         } finally {
           vi.useRealTimers()
         }
@@ -4067,19 +4070,23 @@ describe("SwarmIdProxy partitioned write enablement", () => {
       const published: Record<string, unknown>[] = []
       busChannel.onmessage = (event) =>
         published.push(event.data as Record<string, unknown>)
-      const internals = proxy as unknown as {
-        publishInFlight: boolean
-        runAccountStatePublish(reason: "acquired" | "change"): Promise<void>
-      }
+      const publisher = (
+        proxy as unknown as {
+          accountStatePublisher: {
+            inFlight: boolean
+            run(reason: "acquired" | "change"): Promise<void>
+          }
+        }
+      ).accountStatePublisher
       try {
-        internals.publishInFlight = true
-        await internals.runAccountStatePublish("change")
+        publisher.inFlight = true
+        await publisher.run("change")
         await flushBus()
         expect(
           published.filter((m) => m.type === "account-delta"),
         ).toHaveLength(0)
       } finally {
-        internals.publishInFlight = false
+        publisher.inFlight = false
         busChannel.close()
       }
     })
@@ -4843,11 +4850,15 @@ describe("SwarmIdProxy partitioned write enablement", () => {
       // carries the id on `deps` only, so mirror it where the guard reads it.
       coordinator.currentPartition = 0
       coordinator.accountId = coordinator.deps.accountId
-      const internals = proxy as unknown as {
-        runAccountStatePublish(reason: "acquired" | "change"): Promise<void>
-      }
+      const publisher = (
+        proxy as unknown as {
+          accountStatePublisher: {
+            run(reason: "acquired" | "change"): Promise<void>
+          }
+        }
+      ).accountStatePublisher
       return {
-        publish: (reason) => internals.runAccountStatePublish(reason),
+        publish: (reason) => publisher.run(reason),
         withWrite: coordinator.withWrite,
       }
     }
@@ -4951,11 +4962,15 @@ describe("SwarmIdProxy partitioned write enablement", () => {
         .mockClear()
         .mockResolvedValueOnce(partial)
         .mockResolvedValue({ ...partial, status: "success" })
-      const internals = proxy as unknown as {
-        runAccountStatePublish(reason: "acquired" | "change"): Promise<void>
-      }
+      const publisher = (
+        proxy as unknown as {
+          accountStatePublisher: {
+            run(reason: "acquired" | "change"): Promise<void>
+          }
+        }
+      ).accountStatePublisher
       return {
-        publish: (reason) => internals.runAccountStatePublish(reason),
+        publish: (reason) => publisher.run(reason),
         coordinator,
       }
     }
