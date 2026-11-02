@@ -124,7 +124,13 @@
 <td><code dir="auto">options.onConnectionChange</code></td>
 <td><code dir="auto">(info: ConnectionInfo) =&gt; void</code></td>
 <td>No</td>
-<td>Callback invoked when the app-visible connection state changes (identity, app key, postage stamp, account, auth). The current snapshot is also available synchronously via <code dir="auto">client.connectionInfo</code>.</td>
+<td>Callback invoked when the app-visible connection state changes (identity, app key, account, auth, permissions), and whenever the app’s drives change. The current snapshot is also available synchronously via <code dir="auto">client.connectionInfo</code>.</td>
+</tr>
+<tr>
+<td><code dir="auto">options.onDrivesChange</code></td>
+<td><code dir="auto">() =&gt; void</code></td>
+<td>No</td>
+<td>Callback invoked only when the app’s drives change: one joins or leaves the grant, the primary moves, a lane moves, a drive expires. Fires once when the client initialises, connected or not, then after the <code dir="auto">onConnectionChange</code> of the same event. Re-read <a href="#getdrives"><code dir="auto">getDrives()</code></a> there.</td>
 </tr>
 <tr>
 <td><code dir="auto">options.popupMode</code></td>
@@ -627,7 +633,17 @@
 <tr>
 <td><code dir="auto">batchTTL</code></td>
 <td><code dir="auto">number | undefined</code></td>
-<td>Time-to-live in seconds</td>
+<td>Remaining lifetime in seconds, as of <code dir="auto">batchTTLMeasuredAt</code></td>
+</tr>
+<tr>
+<td><code dir="auto">batchTTLSource</code></td>
+<td><code dir="auto">'chain' | 'bee' | 'estimate' | undefined</code></td>
+<td>Where <code dir="auto">batchTTL</code> came from: the PostageStamp contract or the Bee node, both exact, or an estimate from the purchase amount and the current price, which knows nothing of top-ups, dilutes or price moves since. Show an estimate as one</td>
+</tr>
+<tr>
+<td><code dir="auto">batchTTLMeasuredAt</code></td>
+<td><code dir="auto">number | undefined</code></td>
+<td>When <code dir="auto">batchTTL</code> was measured, in ms since the epoch; present with it. Age the figure from here, or show “checked …”</td>
 </tr>
 </tbody>
 </table>
