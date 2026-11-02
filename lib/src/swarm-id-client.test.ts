@@ -1019,6 +1019,23 @@ describe("SwarmIdClient request seam", () => {
     await expect(promise).resolves.toBe(0.75)
   })
 
+  // A size a dApp computes (`blob.size * 1.1`) is rarely whole
+  it("fitProbability rounds a fractional size up", () => {
+    void client.fitProbability(10.5)
+    expect(lastPostedMessage()).toMatchObject({
+      type: "fitProbability",
+      bytes: 11,
+    })
+  })
+
+  it.each([-1, Number.NaN, Number.POSITIVE_INFINITY])(
+    "fitProbability rejects a size of %s with invalid-request",
+    async (bytes) => {
+      const error = await rejectionOf(client.fitProbability(bytes))
+      expect(error).toMatchObject({ code: "invalid-request" })
+    },
+  )
+
   it("getDriveCapacity asks about the named drive and returns the proxy's figures", async () => {
     const batchID = "ab".repeat(32)
     const partition = {

@@ -565,11 +565,11 @@ The chance, from 0 to 1, that a save of `bytes` fits in a drive. It asks about t
 
 **Parameters:**
 
-| Parameter         | Type      | Required | Description                                                          |
-| ----------------- | --------- | -------- | -------------------------------------------------------------------- |
-| `bytes`           | `number`  | Yes      | The size of the save                                                 |
-| `options.batchID` | `string`  | No       | The drive, from [`getDrives()`](#getdrives); defaults to the primary |
-| `options.encrypt` | `boolean` | No       | Whether the save is encrypted, as uploads are by default             |
+| Parameter         | Type      | Required | Description                                                                                                  |
+| ----------------- | --------- | -------- | ------------------------------------------------------------------------------------------------------------ |
+| `bytes`           | `number`  | Yes      | The size of the save; a fraction is rounded up, a negative or non-finite size rejects with `invalid-request` |
+| `options.batchID` | `string`  | No       | The drive, from [`getDrives()`](#getdrives); defaults to the primary                                         |
+| `options.encrypt` | `boolean` | No       | Whether the save is encrypted, as uploads are by default                                                     |
 
 **Returns:** `Promise<number>`. Rejects as [`getDriveCapacity()`](#getdrivecapacityoptions) does.
 

@@ -1047,7 +1047,9 @@ export class SwarmIdClient {
     }>({
       type: "fitProbability",
       requestId: this.generateRequestId(),
-      bytes,
+      // A computed size is rarely whole; a negative or non-finite one is
+      // refused by the message schema
+      bytes: Math.ceil(bytes),
       batchID: options?.batchID,
       encrypt: options?.encrypt,
     })
