@@ -30,10 +30,8 @@ import {
   BatchWriteCoordinator,
   type CoordinatorMode,
 } from "../../src/sync/batch-write-coordinator"
-import {
-  PARTITION_COUNT,
-  LEASE_TTL_MS,
-} from "../../src/utils/batch-utilization"
+import { PARTITION_COUNT } from "../../src/utilization/layout"
+import { LEASE_TTL_MS } from "../../src/sync/timing-constants"
 import { UtilizationAwareStamper } from "../../src/utilization/stamper"
 import { deviceHomePartition } from "../../src/sync/partition-lock"
 import { INTENT_LIVENESS_GRACE_MS } from "../../src/sync/partition-intent"

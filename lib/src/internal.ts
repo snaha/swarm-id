@@ -126,7 +126,7 @@ export {
   BUCKET_DEPTH,
   MIN_USABLE_BATCH_DEPTH,
   PARTITION_COUNT,
-} from "./utils/batch-utilization"
+} from "./utilization/layout"
 
 export { runCoalescedAcrossTabs } from "./utils/coalesced-task"
 

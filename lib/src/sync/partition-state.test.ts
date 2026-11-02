@@ -75,11 +75,7 @@ import {
   intentEpochBucket,
   partitionOccupancyAddress,
 } from "./partition-intent"
-import {
-  NUM_BUCKETS,
-  PARTITION_COUNT,
-  toBucket,
-} from "../utils/batch-utilization"
+import { NUM_BUCKETS, PARTITION_COUNT, toBucket } from "../utilization/layout"
 import { UtilizationAwareStamper } from "../utilization/stamper"
 import { lockSocBucket } from "../utils/lock-soc"
 import {

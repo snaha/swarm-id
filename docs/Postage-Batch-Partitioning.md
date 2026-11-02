@@ -17,7 +17,7 @@ the release fencing. This is the current-state reference for the multi-device wr
 
 Source of truth in code:
 `lib/src/utilization/stamper.ts` (the stamper + slot routing),
-`lib/src/utils/batch-utilization.ts` (the per-bucket counters and their chunks),
+`lib/src/utilization/` (the per-bucket counters, their layout and their chunks),
 `lib/src/sync/partition-state.ts` (counter publish + state pointer),
 `lib/src/sync/partition-lease.ts` (lease state machine),
 `lib/src/sync/partition-lock.ts` (the cross-device lock SOC + fencing),
@@ -366,7 +366,7 @@ that feeds the rival set. The beacon is a correctness mechanism; the heartbeat i
   deploy, and the data at risk overlaps the unclean-crash slots already accepted above. A
   future wire-format change must bump the topic domain (`…-v2`) instead of reusing v1.
 
-## Key constants (in `lib/src/utils/batch-utilization.ts` unless noted)
+## Key constants (in `lib/src/utilization/layout.ts` and `lib/src/sync/timing-constants.ts` unless noted)
 
 | Constant                            | Value       | Meaning                                                                                                                         |
 | ----------------------------------- | ----------- | ------------------------------------------------------------------------------------------------------------------------------- |

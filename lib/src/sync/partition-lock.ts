@@ -55,7 +55,7 @@ export type { PartitionLockGeneration, PartitionLockPayload }
 
 // Re-export so external callers continue to import these from the
 // partition-lock module (the implementations live in utils/lock-soc.ts to
-// avoid a circular dependency with batch-utilization.ts).
+// avoid a circular dependency with utilization/).
 export {
   lockSocAddress,
   lockSocBucket,

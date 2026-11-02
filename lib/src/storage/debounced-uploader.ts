@@ -8,7 +8,7 @@
  * Uses a per-batch debounce mechanism with configurable delay.
  */
 
-import type { DirtyChunkTracker } from "../utils/batch-utilization"
+import type { DirtyChunkTracker } from "../utilization/state"
 
 /**
  * Default debounce delay in milliseconds

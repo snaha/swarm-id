@@ -40,7 +40,7 @@ import {
   PARTITION_COUNT,
   dataSlot,
   partitionCapacity,
-} from "../utils/batch-utilization"
+} from "../utilization/layout"
 import {
   PartitionLeaseLostError,
   UtilizationAwareStamper,

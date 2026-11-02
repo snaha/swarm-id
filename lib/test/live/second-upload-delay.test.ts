@@ -30,10 +30,8 @@ import { randomBytes } from "node:crypto"
 import { describe, it, expect, beforeAll } from "vitest"
 import { Identifier, PrivateKey } from "@ethersphere/bee-js"
 import { BatchWriteCoordinator } from "../../src/sync/batch-write-coordinator"
-import {
-  PARTITION_COUNT,
-  LEASE_REFRESH_MS,
-} from "../../src/utils/batch-utilization"
+import { PARTITION_COUNT } from "../../src/utilization/layout"
+import { LEASE_REFRESH_MS } from "../../src/sync/timing-constants"
 import { UtilizationAwareStamper } from "../../src/utilization/stamper"
 import { readRoster } from "../../src/sync/device-roster"
 import { uploadSOC, type UploadTarget } from "../../src/proxy/upload"

@@ -22,7 +22,7 @@ import { calculateChunkAddress } from "../../../chunk"
 import {
   NUM_BUCKETS,
   calculateMaxSlotsPerBucket,
-} from "../../../utils/batch-utilization"
+} from "../../../utilization/layout"
 
 /**
  * In-memory chunk storage for testing

@@ -4,7 +4,7 @@
 /**
  * Address derivation for the per-partition lock SOC. Lives in `utils/` (not
  * `sync/`) so it can be imported by both `sync/partition-lock.ts` (the lock
- * SOC reader/writer) and `utils/batch-utilization.ts` (the stamper that
+ * SOC reader/writer) and `utilization/stamper.ts` (the stamper that
  * routes lock-SOC overstamps to the reserved slot) without a circular
  * dependency through `toBucket`.
  */
@@ -69,6 +69,6 @@ export function lockSocBucket(
 ): number {
   const addr = lockSocAddress(batchId, partition, owner)
   // Inline `toBucket` (first 2 bytes as big-endian uint16) to avoid a
-  // circular import from `batch-utilization.ts`.
+  // circular import from `utilization/`.
   return (addr[0] << 8) | addr[1]
 }

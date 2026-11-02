@@ -43,7 +43,7 @@ import {
   LEASE_REFRESH_MS,
   LEASE_SKEW_MARGIN_MS,
   IDLE_YIELD_MS,
-} from "../utils/batch-utilization"
+} from "./timing-constants"
 import { UtilizationAwareStamper } from "../utilization/stamper"
 import { withBatchWriteLock } from "../utils/batch-write-lock"
 import { withTimeout } from "../utils/promise"

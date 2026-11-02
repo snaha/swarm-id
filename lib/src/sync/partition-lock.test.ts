@@ -29,7 +29,7 @@ import {
 } from "./partition-lock"
 import { PartitionLockPayloadSchemaV1 } from "../schemas"
 import { uploadSOC, type UploadTarget } from "../proxy/upload"
-import { toBucket } from "../utils/batch-utilization"
+import { toBucket } from "../utilization/layout"
 import {
   MockBee,
   MockChunkStore,

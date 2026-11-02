@@ -26,7 +26,7 @@ import type { UtilizationStoreDB } from "../../src/storage/utilization-store"
 import {
   PARTITION_COUNT,
   partitionCapacity,
-} from "../../src/utils/batch-utilization"
+} from "../../src/utilization/layout"
 import { UtilizationAwareStamper } from "../../src/utilization/stamper"
 import { QUEEN_KEY, TEST_STAMP_DEPTH, createQueenBee } from "./cluster"
 

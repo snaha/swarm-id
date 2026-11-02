@@ -31,7 +31,7 @@ import { downloadSOC } from "../../src/proxy/download-data"
 import {
   PARTITION_COUNT,
   partitionCapacity,
-} from "../../src/utils/batch-utilization"
+} from "../../src/utilization/layout"
 import { UtilizationAwareStamper } from "../../src/utilization/stamper"
 import { isNotFoundError } from "../../src/utils/bee-error"
 import { mineIdentifierInBucket } from "../soc-bucket"

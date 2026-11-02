@@ -47,14 +47,14 @@ import {
 import { uploadChunk, uploadSOC, type UploadTarget } from "../proxy/upload"
 import { TimeoutError, withTimeout } from "../utils/promise"
 import { makeEncryptedContentAddressedChunk } from "../chunk"
+import { LEASE_TTL_MS } from "./timing-constants"
 import {
-  LEASE_TTL_MS,
   NUM_BUCKETS,
   extractChunk,
   getChunkLayout,
   mergeChunk,
   toBucket,
-} from "../utils/batch-utilization"
+} from "../utilization/layout"
 import { UtilizationAwareStamper } from "../utilization/stamper"
 import { lockSocBucket } from "../utils/lock-soc"
 import {

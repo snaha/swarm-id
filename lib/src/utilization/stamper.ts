@@ -19,25 +19,29 @@ import type { UtilizationStoreDB } from "../storage/utilization-store"
 import { lockSocAddress } from "../utils/lock-soc"
 import { deriveSecret, BACKUP_KEY_LABEL } from "../utils/key-derivation"
 import { uint8ArrayToHex } from "../utils/hex"
+import { LEASE_SKEW_MARGIN_MS } from "../sync/timing-constants"
 import {
-  LEASE_SKEW_MARGIN_MS,
   NUM_BUCKETS,
   PARTITION_COUNT,
   calculateMaxSlotsPerBucket,
-  chooseUtilizationChunkKey,
-  claimedBucketsForCleanChunks,
   counterLayoutDepth,
   dataSlot,
   extractChunk,
   getChunkIndexForBucket,
   getChunkLayout,
-  initializeBatchUtilization,
   mergeChunk,
   partitionCapacity,
   toBucket,
+} from "./layout"
+import {
+  chooseUtilizationChunkKey,
+  claimedBucketsForCleanChunks,
+} from "./chunk"
+import {
+  initializeBatchUtilization,
   type BatchUtilizationState,
   type UtilizationChunkReserver,
-} from "../utils/batch-utilization"
+} from "./state"
 
 // ============================================================================
 // Errors

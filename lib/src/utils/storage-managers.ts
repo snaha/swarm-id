@@ -28,7 +28,7 @@ import {
   isSignedOutAccount,
   type NetworkSettings,
 } from "../schemas"
-import { PARTITION_COUNT } from "./batch-utilization"
+import { PARTITION_COUNT } from "../utilization/layout"
 
 // ============================================================================
 // Parsers (Zod transforms handle primitive → bee-js conversion)

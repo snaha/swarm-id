@@ -61,13 +61,13 @@ import {
   writePartitionOccupancy,
 } from "./partition-intent"
 import { Binary } from "cafe-utility"
+import { LEASE_TTL_MS } from "./timing-constants"
 import {
-  LEASE_TTL_MS,
   PARTITION_COUNT,
   NUM_BUCKETS,
   getChunkLayout,
   toBucket,
-} from "../utils/batch-utilization"
+} from "../utilization/layout"
 import {
   PartitionLeaseLostError,
   UtilizationAwareStamper,

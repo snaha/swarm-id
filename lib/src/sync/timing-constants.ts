@@ -6,7 +6,7 @@
  *
  * This module has NO imports on purpose: it is the single source of truth for
  * values several sync modules share, so it can be imported by any of them
- * (including `utils/batch-utilization`) without a circular import. Keeping the
+ * (including `utilization/`) without a circular import. Keeping the
  * values here removes the drift risk of the same literal defined independently
  * in each module.
  */
@@ -36,3 +36,29 @@ export const LEASE_TTL_MS = 30 * 1000 // 30 seconds
  * each other — sharing this source keeps them from drifting.
  */
 export const INTENT_EPOCH_MS = LEASE_TTL_MS
+
+/**
+ * How often the holder re-writes its partition lock SOC to bump
+ * `leasedUntil`. One third of the TTL gives three "safety net" refresh
+ * attempts before a peer would consider the lease expired.
+ */
+export const LEASE_REFRESH_MS = 10 * 1000 // 10 seconds
+
+/**
+ * Local-clock margin for treating a lease as "could have lapsed". A holder must
+ * stop writing (and re-validating before ack) once `now >= leasedUntil - margin`
+ * so it ceases before a peer — reading the same `leasedUntil` from the lock SOC
+ * — could validly take over. Bounds the write/ack exposure to NTP-level skew,
+ * the same assumption the lock protocol already makes. Consumed by the stamper's
+ * local-lapse fence and the coordinator's reverse-clobber guard.
+ */
+export const LEASE_SKEW_MARGIN_MS = 2000
+
+/**
+ * How long a holder may go without an upload before it voluntarily yields
+ * its partition (writes the release sentinel + publishes its final counter)
+ * so a waiting device can take the slot without waiting out the full TTL.
+ * The yielded device re-acquires transparently on its next upload. Enables
+ * turn-taking among 3+ devices sharing `PARTITION_COUNT` slots.
+ */
+export const IDLE_YIELD_MS = 30 * 1000 // 30 seconds

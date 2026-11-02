@@ -21,7 +21,7 @@
 import { describe, it, expect, beforeAll } from "vitest"
 import { Stamper } from "@ethersphere/bee-js"
 import { PartitionLease } from "../../src/sync/partition-lease"
-import { PARTITION_COUNT } from "../../src/utils/batch-utilization"
+import { PARTITION_COUNT } from "../../src/utilization/layout"
 import { hexToUint8Array } from "../../src/utils/hex"
 import {
   liveEnv,

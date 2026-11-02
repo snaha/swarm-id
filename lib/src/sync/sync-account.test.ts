@@ -163,15 +163,14 @@ vi.mock("../proxy/download-data", () => ({
 const MockUtilizationAwareStamper = vi.hoisted(
   () => class MockUtilizationAwareStamper {},
 )
-vi.mock("../utils/batch-utilization", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("../utils/batch-utilization")>()),
+vi.mock("../utilization/state", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../utilization/state")>()),
   updateAfterWrite: vi.fn().mockResolvedValue({
     state: { chunks: new Map() },
     tracker: { hasDirtyChunks: () => false, getDirtyChunks: () => [] },
   }),
   saveUtilizationState: vi.fn().mockResolvedValue(undefined),
   calculateUtilization: vi.fn().mockReturnValue(0.01),
-  LEASE_TTL_MS: 30_000,
 }))
 vi.mock("../utilization/stamper", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../utilization/stamper")>()),

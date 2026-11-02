@@ -589,7 +589,7 @@ export const BucketUpdateSchema = z.object({
  *
  * `buckets` carry the writer's PER-PARTITION counter `j`, not an absolute slot
  * — the physical slot is `partitionCount + partition + partitionCount·j`
- * (`dataSlot`, `utils/batch-utilization.ts`). So a delta is only foldable by a
+ * (`dataSlot`, `utilization/layout.ts`). So a delta is only foldable by a
  * context bound to the SAME lane, and the lane travels with the message: the
  * bus reaches other devices, which hold other partitions of the same batch, and
  * folding their `j` in would skip the receiver past its own unused slots.

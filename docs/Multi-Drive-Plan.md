@@ -186,7 +186,7 @@ which becomes public once a second permission exists. Decided for step 6:
 
 The proxy manages the slots; the app writes as normal. Today the stamper allocates
 `dataSlot(partition, counter[bucket]++)` and throws `Bucket is full` at the end of the lane
-(`lib/src/utils/batch-utilization.ts`). On a scratch drive the counter **wraps** instead:
+(`lib/src/utilization/stamper.ts`). On a scratch drive the counter **wraps** instead:
 the slot is `dataSlot(partition, counter mod partitionCapacity, partitionCount)`, so a full
 bucket overwrites its oldest chunk in that lane.
 

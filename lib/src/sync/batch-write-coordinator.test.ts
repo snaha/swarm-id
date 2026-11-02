@@ -59,12 +59,8 @@ import {
 import { NO_HOLDER_DEVICE_ID } from "./partition-lock"
 import type { LeaseRefreshOutcome } from "./partition-lease"
 import { STATE_POINTER_EPOCH_MS } from "./partition-state"
-import {
-  LEASE_REFRESH_MS,
-  LEASE_TTL_MS,
-  NUM_BUCKETS,
-  dataSlot,
-} from "../utils/batch-utilization"
+import { LEASE_REFRESH_MS, LEASE_TTL_MS } from "./timing-constants"
+import { NUM_BUCKETS, dataSlot } from "../utilization/layout"
 import {
   PartitionLeaseLostError,
   UtilizationAwareStamper,

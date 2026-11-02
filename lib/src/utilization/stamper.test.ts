@@ -12,10 +12,9 @@ import {
   partitionCapacity,
   extractChunk,
   getChunkLayout,
-  LEASE_SKEW_MARGIN_MS,
-  LEASE_TTL_MS,
   mergeChunk,
-} from "../utils/batch-utilization"
+} from "./layout"
+import { LEASE_SKEW_MARGIN_MS, LEASE_TTL_MS } from "../sync/timing-constants"
 import { PartitionLeaseLostError, UtilizationAwareStamper } from "./stamper"
 import { EthAddress, PrivateKey } from "@ethersphere/bee-js"
 import type {
