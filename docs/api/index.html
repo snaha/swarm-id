@@ -633,7 +633,17 @@
 <tr>
 <td><code dir="auto">batchTTL</code></td>
 <td><code dir="auto">number | undefined</code></td>
-<td>Time-to-live in seconds</td>
+<td>Remaining lifetime in seconds, as of <code dir="auto">batchTTLMeasuredAt</code></td>
+</tr>
+<tr>
+<td><code dir="auto">batchTTLSource</code></td>
+<td><code dir="auto">'chain' | 'bee' | 'estimate' | undefined</code></td>
+<td>Where <code dir="auto">batchTTL</code> came from: the PostageStamp contract or the Bee node, both exact, or an estimate from the purchase amount and the current price, which knows nothing of top-ups, dilutes or price moves since. Show an estimate as one</td>
+</tr>
+<tr>
+<td><code dir="auto">batchTTLMeasuredAt</code></td>
+<td><code dir="auto">number | undefined</code></td>
+<td>When <code dir="auto">batchTTL</code> was measured, in ms since the epoch; present with it. Age the figure from here, or show “checked …”</td>
 </tr>
 </tbody>
 </table>
