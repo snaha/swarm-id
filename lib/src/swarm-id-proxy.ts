@@ -365,6 +365,8 @@ export class SwarmIdProxy {
   private lastDriveState: string | undefined
   /** Armed for the earliest expiry among the granted drives (#793), see `armExpiryTimer`. */
   private expiryTimer: ReturnType<typeof setTimeout> | undefined
+  /** When the pending `expiryTimer` fires, so a re-arm keeps the earlier of two. */
+  private expiryDueAt = 0
   /**
    * What the chain last said about each granted drive's lifetime (#927), by
    * batch id: a remaining-seconds reading, when it was taken, and the
@@ -912,11 +914,13 @@ export class SwarmIdProxy {
    * about a minute.
    */
   private armExpiryTimer(): void {
-    clearTimeout(this.expiryTimer)
-    this.expiryTimer = undefined
     const now = Date.now()
     const { granted } = this.lookupDrivesForApp()
-    if (granted.length === 0) return
+    if (granted.length === 0) {
+      clearTimeout(this.expiryTimer)
+      this.expiryTimer = undefined
+      return
+    }
     const [next] = granted
       .map((stamp) =>
         remainingLifespanSeconds(
@@ -932,10 +936,19 @@ export class SwarmIdProxy {
       Math.max(untilExpiry / 2, REMEASURE_MIN_MS),
       REMEASURE_MAX_MS,
     )
-    this.expiryTimer = setTimeout(
-      () => void this.onExpiryTick(),
-      Math.min(untilExpiry, untilRemeasure),
-    )
+    const delay = Math.min(untilExpiry, untilRemeasure)
+    // Keep an earlier tick already pending: an early one only re-reads, and
+    // re-arming from now on every `getPostageBatch()` would keep pushing a
+    // halfway re-read of the other drives back.
+    if (this.expiryTimer !== undefined && this.expiryDueAt <= now + delay) {
+      return
+    }
+    clearTimeout(this.expiryTimer)
+    this.expiryDueAt = now + delay
+    this.expiryTimer = setTimeout(() => {
+      this.expiryTimer = undefined
+      void this.onExpiryTick()
+    }, delay)
   }
 
   /**
