@@ -33,11 +33,12 @@ import {
 import type { DriveCapacity, PartitionCapacity } from "../types"
 
 /**
- * The fit probability `leftBytes` and `sizeBytes` are reported at: the median,
- * so "about N GB left" is as likely to be over as under. A starting value, to
- * be revisited once predicted and observed fills can be compared.
+ * The fit probability `leftBytes` and `sizeBytes` are reported at. The
+ * effective volumes bee-js prices drives by (the Swarm docs table) sit at
+ * this point of the same model, so an empty partition's size is the volume a
+ * drive is sold as.
  */
-export const DEFAULT_FIT_CONFIDENCE = 0.5
+export const DEFAULT_FIT_CONFIDENCE = 0.999
 
 /**
  * Chunks a save writes beyond its content's tree: a manifest's nodes and a

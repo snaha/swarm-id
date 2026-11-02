@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, it, expect } from "vitest"
+import { RedundancyLevel, Utils } from "@ethersphere/bee-js"
 import { CHUNK_SIZE, NUM_BUCKETS, partitionCapacity } from "./batch-utilization"
 import {
   DEFAULT_FIT_CONFIDENCE,
@@ -19,7 +20,7 @@ const DEPTH = 22
 const SMALL_DEPTH = 20
 const ENCRYPTED_FAN_OUT = 64
 const PLAIN_FAN_OUT = 128
-const CONFIDENT = 0.95
+const MEDIAN = 0.5
 
 function emptyCounters(): Uint32Array {
   return new Uint32Array(NUM_BUCKETS)
@@ -144,8 +145,8 @@ describe("chunksThatFit", () => {
   })
 
   it("promises less at a higher confidence", () => {
-    expect(chunksThatFit(histogram, CONFIDENT)).toBeLessThan(
-      chunksThatFit(histogram),
+    expect(chunksThatFit(histogram)).toBeLessThan(
+      chunksThatFit(histogram, MEDIAN),
     )
   })
 
@@ -180,9 +181,9 @@ describe("chunksThatFit", () => {
     const median = filled[Math.floor(runs / 2)]
 
     const tolerance = 0.05
-    expect(Math.abs(chunksThatFit(histogram) - median) / median).toBeLessThan(
-      tolerance,
-    )
+    expect(
+      Math.abs(chunksThatFit(histogram, MEDIAN) - median) / median,
+    ).toBeLessThan(tolerance)
   })
 })
 
@@ -223,6 +224,22 @@ describe("estimatePartitionCapacity", () => {
     const figures = estimatePartitionCapacity(0, counters, DEPTH)
     expect(figures.usedBytes).toBe(capacity * CHUNK_SIZE)
   })
+
+  // The identity UI labels a drive with bee-js's effective volume one depth
+  // down, a partition being half of every bucket's slots
+  it.each([20, 22, 24, 26, 28, 30])(
+    "sizes an empty partition of a depth-%i drive as bee-js's effective volume",
+    (depth) => {
+      const { sizeBytes } = estimatePartitionCapacity(0, emptyCounters(), depth)
+      const label = Utils.getStampEffectiveBytes(
+        depth - 1,
+        true,
+        RedundancyLevel.OFF,
+      )
+      const tolerance = 0.02
+      expect(Math.abs(sizeBytes - label) / label).toBeLessThan(tolerance)
+    },
+  )
 
   it("fits more when saves are unencrypted", () => {
     const encrypted = estimatePartitionCapacity(0, emptyCounters(), DEPTH)

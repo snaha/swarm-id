@@ -336,7 +336,7 @@ export const PartitionCapacitySchema = z.object({
   sizeBytes: z.number(),
   /** Slots already written, as bytes */
   usedBytes: z.number(),
-  /** The largest save that still fits, as likely as not */
+  /** The largest save that still fits, at `DEFAULT_FIT_CONFIDENCE` */
   leftBytes: z.number(),
 })
 export type PartitionCapacity = z.infer<typeof PartitionCapacitySchema>
