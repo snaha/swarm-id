@@ -198,7 +198,11 @@ bucket overwrites its oldest chunk in that lane.
   `lib/src/sync/partition-state.ts`), and a monotonic counter keeps it valid unchanged.
 - **Counters need no special width** on a scratch drive. The cache is uint32 and the wire
   packing (`sync/counter-codec.ts`) follows the counters' spread, so a counter past the
-  lane is just a larger delta.
+  lane is just a larger delta, up to a limit: a table encodes only while at most 128
+  buckets sit more than 2^23 − 1 above the smallest counter. Past that, every publish of
+  the partition throws and the drive stops taking writes. Reaching it takes 129 SOCs each
+  rewritten about 8.4 million times more than the rest in one lane; uint32 counters had no
+  such limit.
 - **The drive's own metadata is safe.** Lock SOCs, intent, partition state and utilization
   chunks stamp the reserved slots `[0, partitionCount)`, below the data lane, so the ring
   never evicts them.
