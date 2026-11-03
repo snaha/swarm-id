@@ -24,6 +24,7 @@
 
   import AppIcon from '$lib/components/app-icon.svelte'
   import DriveAddDialog from '$lib/components/drive-add-dialog.svelte'
+  import DriveDefaultDialog from '$lib/components/drive-default-dialog.svelte'
   import DriveExtendDialog from '$lib/components/drive-extend-dialog.svelte'
   import DriveRemoveDialog from '$lib/components/drive-remove-dialog.svelte'
   import DriveResizeDialog from '$lib/components/drive-resize-dialog.svelte'
@@ -60,6 +61,8 @@
   let resizeDrive = $state<PostageStamp | undefined>(undefined)
   let extendDrive = $state<PostageStamp | undefined>(undefined)
   let removeDrive = $state<PostageStamp | undefined>(undefined)
+  // A default change copies nothing, so it is confirmed in a dialog (#958)
+  let defaultDrive = $state<PostageStamp | undefined>(undefined)
 
   function toggle(batchId: string, currentName: string) {
     if (expandedId === batchId) {
@@ -91,8 +94,7 @@
   }
 
   function setDefault(drive: PostageStamp) {
-    account.setDefaultStamp(drive.batchID)
-    toastStore.show('Default drive updated')
+    defaultDrive = drive
   }
 
   async function copyBatchId(drive: PostageStamp) {
@@ -391,6 +393,15 @@
 
 {#if extendDrive}
   <DriveExtendDialog {account} drive={extendDrive} onClose={() => (extendDrive = undefined)} />
+{/if}
+
+{#if defaultDrive}
+  <DriveDefaultDialog
+    {account}
+    drive={defaultDrive}
+    onClose={() => (defaultDrive = undefined)}
+    onChanged={toastStore.show}
+  />
 {/if}
 
 {#if removeDrive}
