@@ -529,17 +529,17 @@ await client.uploadData(frame, { batchID: scratch?.batchID })
 
 How much a drive holds and has left for this device: the primary, or the one `options.batchID` names.
 
-A drive is not filled byte by byte. Every chunk lands in one of 65,536 buckets, picked by its address, and a save fails as soon as one of its chunks lands in a bucket that is already full. So how much still fits is a likelihood, reported at `DEFAULT_FIT_CONFIDENCE` (0.999): `leftBytes` is a save that fits 999 times in 1000, and `sizeBytes` is the same figure for an empty drive, which is the size a drive of its depth is sold as. The figures count the bytes you save: the chunks Swarm adds to address them, and a save's own manifest and feed update, are already taken off.
+A drive is not filled byte by byte. Every chunk lands in one of 65,536 buckets, picked by its address, and a save fails as soon as one of its chunks lands in a bucket that is already full. So how much still fits is a likelihood, reported at `DEFAULT_FIT_CONFIDENCE` (0.999): `leftBytes` is a save that fits 999 times in 1000, and `sizeBytes` is the same figure for an empty drive, which is the size a drive of its depth is sold as. The figures count the bytes you save: the chunks Swarm adds to address them, and a save's own manifest and feed update, are already taken off. They assume encrypted saves; plain ones fit under 1% more.
 
 A drive is split into partitions, so two devices can write to it at once, and one save goes into the one partition this device writes to: the one it holds, or else the one it would claim first. The figures are that partition's; `partitions` breaks the whole drive down.
 
-| Property     | Type                  | Description                                                                                                                                                     |
-| ------------ | --------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `partition`  | `number`              | The partition the figures describe                                                                                                                              |
-| `sizeBytes`  | `number`              | What the partition holds when empty                                                                                                                             |
-| `usedBytes`  | `number`              | What has been written to it                                                                                                                                     |
-| `leftBytes`  | `number`              | The largest save that still fits, never more than `sizeBytes − usedBytes`                                                                                       |
-| `partitions` | `PartitionCapacity[]` | The same four figures for every partition whose counter could be read, this one included; another device's partition comes from what it last published to Swarm |
+| Property     | Type                  | Description                                                                                                                                                            |
+| ------------ | --------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `partition`  | `number`              | The partition the figures describe                                                                                                                                     |
+| `sizeBytes`  | `number`              | What the partition holds when empty                                                                                                                                    |
+| `usedBytes`  | `number`              | What has been written to it, as raw slots: a save's added chunks count here too, so `leftBytes` reaches `0` a little (under 2%) before `usedBytes` reaches `sizeBytes` |
+| `leftBytes`  | `number`              | The largest save that still fits, never more than `sizeBytes − usedBytes`                                                                                              |
+| `partitions` | `PartitionCapacity[]` | The same four figures for every partition whose counter could be read, this one included; another device's partition comes from what it last published to Swarm        |
 
 **Returns:** `Promise<DriveCapacity | undefined>`, `undefined` for a scratch drive, which overwrites its oldest data instead of filling. Rejects with `not-authenticated` without a session, `upload-unavailable` when the app has no drive, `drive-not-granted` for a drive outside the grant, and `network` or `timeout` when this device's partition could not be read.
 

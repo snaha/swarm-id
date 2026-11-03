@@ -6589,7 +6589,8 @@ export class SwarmIdProxy {
     const stamper = this.drives.get(batchId)?.stamper
 
     // A single-partition account publishes no partition state: its counter
-    // is the stamper's, or the one it last stored
+    // is the stamper's, or the one this context last stored, so a context
+    // that never wrote to the drive reads it as empty
     if (partitionCount === 1) {
       if (!this.utilizationStore) {
         this.utilizationStore = new UtilizationStoreDB()

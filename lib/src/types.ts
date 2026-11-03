@@ -329,12 +329,19 @@ export type PostageBatch = z.infer<typeof PostageBatchSchema>
 export const DriveKindSchema = z.enum(["regular", "scratch"])
 export type DriveKind = z.infer<typeof DriveKindSchema>
 
-/** One partition's share of a drive (#772, #334), in payload bytes */
+/**
+ * One partition's share of a drive (#772, #334). `sizeBytes` and `leftBytes`
+ * are payload bytes of encrypted saves; plain ones fit under 1% more
+ */
 export const PartitionCapacitySchema = z.object({
   partition: z.number().int().min(0),
   /** What the partition holds when empty */
   sizeBytes: z.number(),
-  /** Slots already written, as bytes */
+  /**
+   * Slots already written, as bytes: raw, so a save's intermediate chunks
+   * and overhead count here too, and `leftBytes` reaches 0 a little (under
+   * 2%) before `usedBytes` reaches `sizeBytes`
+   */
   usedBytes: z.number(),
   /**
    * The largest save that still fits, at `DEFAULT_FIT_CONFIDENCE`, and never

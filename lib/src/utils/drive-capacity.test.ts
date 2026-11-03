@@ -324,7 +324,7 @@ describe("estimatePartitionCapacity", () => {
         true,
         RedundancyLevel.OFF,
       )
-      const tolerance = 0.02
+      const tolerance = 0.015
       expect(Math.abs(sizeBytes - label) / label).toBeLessThan(tolerance)
     },
   )
