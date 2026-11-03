@@ -451,21 +451,21 @@ Returns information about the postage stamp behind it, including batch ID, utili
 
 **Returns:** `Promise<PostageBatch | undefined>` - The postage batch info, or `undefined` if none is configured
 
-| Property             | Type                                          | Description                                                                                                                                                                                                                             |
-| -------------------- | --------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `batchID`            | `string`                                      | The batch ID (64 hex characters)                                                                                                                                                                                                        |
-| `utilization`        | `number`                                      | Bee's fill count of the fullest bucket, **not** a percentage. Usage is `utilization / 2^(depth - bucketDepth)`; a batch stops accepting uploads when one bucket fills, before the nominal `2^depth × 4096` bytes                        |
-| `usable`             | `boolean`                                     | Whether the batch is usable                                                                                                                                                                                                             |
-| `label`              | `string`                                      | Human-readable label                                                                                                                                                                                                                    |
-| `depth`              | `number`                                      | Batch depth                                                                                                                                                                                                                             |
-| `amount`             | `string`                                      | Batch amount                                                                                                                                                                                                                            |
-| `bucketDepth`        | `number`                                      | Bucket depth                                                                                                                                                                                                                            |
-| `blockNumber`        | `number`                                      | Block number when created                                                                                                                                                                                                               |
-| `immutableFlag`      | `boolean`                                     | Whether the batch is immutable                                                                                                                                                                                                          |
-| `exists`             | `boolean`                                     | Whether the batch exists                                                                                                                                                                                                                |
-| `batchTTL`           | `number \| undefined`                         | Remaining lifetime in seconds, as of `batchTTLMeasuredAt`                                                                                                                                                                               |
-| `batchTTLSource`     | `'chain' \| 'bee' \| 'estimate' \| undefined` | Where `batchTTL` came from: the PostageStamp contract or the Bee node, both exact, or an estimate from the purchase amount and the current price, which knows nothing of top-ups, dilutes or price moves since. Show an estimate as one |
-| `batchTTLMeasuredAt` | `number \| undefined`                         | When `batchTTL` was measured, in ms since the epoch; present with it. Age the figure from here, or show "checked …"                                                                                                                     |
+| Property             | Type                                          | Description                                                                                                                                                                                                                                                                                                      |
+| -------------------- | --------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `batchID`            | `string`                                      | The batch ID (64 hex characters)                                                                                                                                                                                                                                                                                 |
+| `utilization`        | `number`                                      | How full the fullest bucket is, from 0 to 1, of what one partition may write into it; **not** Bee's fill count. Kept from the last write, in the partition it went to, so it can trail another device's writes. A batch stops accepting uploads when one bucket fills, before the nominal `2^depth × 4096` bytes |
+| `usable`             | `boolean`                                     | Whether the batch is usable                                                                                                                                                                                                                                                                                      |
+| `label`              | `string`                                      | Human-readable label                                                                                                                                                                                                                                                                                             |
+| `depth`              | `number`                                      | Batch depth                                                                                                                                                                                                                                                                                                      |
+| `amount`             | `string`                                      | Batch amount                                                                                                                                                                                                                                                                                                     |
+| `bucketDepth`        | `number`                                      | Bucket depth                                                                                                                                                                                                                                                                                                     |
+| `blockNumber`        | `number`                                      | Block number when created                                                                                                                                                                                                                                                                                        |
+| `immutableFlag`      | `boolean`                                     | Whether the batch is immutable                                                                                                                                                                                                                                                                                   |
+| `exists`             | `boolean`                                     | Whether the batch exists                                                                                                                                                                                                                                                                                         |
+| `batchTTL`           | `number \| undefined`                         | Remaining lifetime in seconds, as of `batchTTLMeasuredAt`                                                                                                                                                                                                                                                        |
+| `batchTTLSource`     | `'chain' \| 'bee' \| 'estimate' \| undefined` | Where `batchTTL` came from: the PostageStamp contract or the Bee node, both exact, or an estimate from the purchase amount and the current price, which knows nothing of top-ups, dilutes or price moves since. Show an estimate as one                                                                          |
+| `batchTTLMeasuredAt` | `number \| undefined`                         | When `batchTTL` was measured, in ms since the epoch; present with it. Age the figure from here, or show "checked …"                                                                                                                                                                                              |
 
 **Throws:**
 
@@ -523,6 +523,64 @@ const client = new SwarmIdClient({
 ```typescript
 const scratch = (await client.getDrives()).find((drive) => drive.kind === 'scratch')
 await client.uploadData(frame, { batchID: scratch?.batchID })
+```
+
+### `getDriveCapacity(options?)`
+
+How much a drive holds and has left for this device: the primary, or the one `options.batchID` names.
+
+A drive is not filled byte by byte. Every chunk lands in one of 65,536 buckets, picked by its address, and a save fails as soon as one of its chunks lands in a bucket that is already full. So how much still fits is a likelihood, reported at `DEFAULT_FIT_CONFIDENCE` (0.999): `leftBytes` is a save that fits 999 times in 1000, and `sizeBytes` is the same figure for an empty drive, which is the size a drive of its depth is sold as. The figures count the bytes you save: the chunks Swarm adds to address them, and a save's own manifest and feed update, are already taken off. They assume encrypted saves; plain ones fit under 1% more.
+
+A drive is split into partitions, so two devices can write to it at once, and one save goes into the one partition this device writes to: the one it holds, or else the one it would claim first. The figures are that partition's; `partitions` breaks the whole drive down.
+
+| Property     | Type                  | Description                                                                                                                                                            |
+| ------------ | --------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `partition`  | `number`              | The partition the figures describe                                                                                                                                     |
+| `sizeBytes`  | `number`              | What the partition holds when empty                                                                                                                                    |
+| `usedBytes`  | `number`              | What has been written to it, as raw slots: a save's added chunks count here too, so `leftBytes` reaches `0` a little (under 2%) before `usedBytes` reaches `sizeBytes` |
+| `leftBytes`  | `number`              | The largest save that still fits, never more than `sizeBytes − usedBytes`                                                                                              |
+| `partitions` | `PartitionCapacity[]` | The same four figures for every partition whose counter could be read, this one included; another device's partition comes from what it last published to Swarm        |
+
+**Returns:** `Promise<DriveCapacity | undefined>`, `undefined` for a scratch drive, which overwrites its oldest data instead of filling. Rejects with `not-authenticated` without a session, `upload-unavailable` when the app has no drive, `drive-not-granted` for a drive outside the grant, and `network` or `timeout` when this device's partition could not be read.
+
+It reads Swarm for the partitions this session does not hold, so call it when you show storage, not on every connection change.
+
+**Full, a little still free.** `usedBytes` can pass `sizeBytes`: `sizeBytes` is a cautious figure, and a drive usually takes more. `leftBytes` then reads `0`, while a small save may still fit; ask [`fitProbability()`](#fitprobabilitybytes-options).
+
+**Example:**
+
+```typescript
+const capacity = await client.getDriveCapacity()
+if (capacity) {
+  const { usedBytes, leftBytes, sizeBytes } = capacity
+  if (usedBytes >= sizeBytes) showFullButSomeFree()
+  else if (leftBytes < sizeBytes / 10) showLow(leftBytes)
+  else show(`About ${format(leftBytes)} left of ${format(sizeBytes)}`)
+}
+```
+
+### `fitProbability(bytes, options?)`
+
+The chance, from 0 to 1, that a save of `bytes` fits in a drive. It asks about the partition this device writes to, the same one [`getDriveCapacity()`](#getdrivecapacityoptions) reports. Always `1` on a scratch drive, which overwrites its oldest data instead.
+
+**Parameters:**
+
+| Parameter         | Type      | Required | Description                                                                                                  |
+| ----------------- | --------- | -------- | ------------------------------------------------------------------------------------------------------------ |
+| `bytes`           | `number`  | Yes      | The size of the save; a fraction is rounded up, a negative or non-finite size rejects with `invalid-request` |
+| `options.batchID` | `string`  | No       | The drive, from [`getDrives()`](#getdrives); defaults to the primary                                         |
+| `options.encrypt` | `boolean` | No       | Whether the save is encrypted, as uploads are by default                                                     |
+
+**Returns:** `Promise<number>`. Rejects as [`getDriveCapacity()`](#getdrivecapacityoptions) does.
+
+**Example:**
+
+```typescript
+import { DEFAULT_FIT_CONFIDENCE } from '@snaha/swarm-id'
+
+if ((await client.fitProbability(file.size)) < DEFAULT_FIT_CONFIDENCE) {
+  showDriveFull()
+}
 ```
 
 ### `requestDrives(drives)`
@@ -1791,11 +1849,14 @@ import type {
   AvatarSource,
   PostageBatch,
   Drive,
+  DriveCapacity,
+  PartitionCapacity,
   DriveKind,
   DriveRequest,
   DriveRequirement,
   Permissions,
   DriveTargetOptions,
+  FitOptions,
   AppMetadata,
   ButtonConfig,
   RequestOptions,

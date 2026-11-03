@@ -7,6 +7,35 @@ export const PLAIN_REFS_PER_CHUNK = 128 // 4096 / 32 = 128 plain (unencrypted) r
 export const ENCRYPTED_REFS_PER_CHUNK = 64 // 4096 / 64 = 64 encrypted refs per intermediate chunk
 
 /**
+ * Chunks a file of `span` bytes splits into, for upload progress and drive
+ * capacity. The branching factor depends on the reference width: 128 refs per
+ * intermediate for plain trees (32-byte refs), 64 for encrypted trees (64-byte
+ * refs). It ignores the carry of a lone last reference into the level above,
+ * so it can overcount by a chunk per level, never undercount.
+ */
+export function estimateTotalChunks(
+  span: number,
+  refsPerChunk: number,
+): number {
+  if (span <= CHUNK_SIZE) {
+    return 1
+  }
+
+  // Number of leaf chunks
+  const leafChunks = Math.ceil(span / CHUNK_SIZE)
+
+  // Intermediate chunks for a tree with refsPerChunk-way branching
+  let intermediateChunks = 0
+  let level = leafChunks
+  while (level > 1) {
+    level = Math.ceil(level / refsPerChunk)
+    intermediateChunks += level
+  }
+
+  return leafChunks + intermediateChunks
+}
+
+/**
  * Split data into 4096-byte chunks
  */
 export function splitDataIntoChunks(data: Uint8Array): Uint8Array[] {

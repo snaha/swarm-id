@@ -1000,6 +1000,63 @@ describe("SwarmIdClient request seam", () => {
     await expect(promise).resolves.toEqual(drives)
   })
 
+  it("fitProbability asks about the named drive and returns the proxy's answer", async () => {
+    const batchID = "ab".repeat(32)
+    const promise = client.fitProbability(4096, { batchID, encrypt: false })
+    const sent = lastPostedMessage()
+    expect(sent).toMatchObject({
+      type: "fitProbability",
+      bytes: 4096,
+      batchID,
+      encrypt: false,
+    })
+
+    deliver({
+      type: "fitProbabilityResponse",
+      requestId: sent.requestId,
+      probability: 0.75,
+    })
+    await expect(promise).resolves.toBe(0.75)
+  })
+
+  // A size a dApp computes (`blob.size * 1.1`) is rarely whole
+  it("fitProbability rounds a fractional size up", () => {
+    void client.fitProbability(10.5)
+    expect(lastPostedMessage()).toMatchObject({
+      type: "fitProbability",
+      bytes: 11,
+    })
+  })
+
+  it.each([-1, Number.NaN, Number.POSITIVE_INFINITY])(
+    "fitProbability rejects a size of %s with invalid-request",
+    async (bytes) => {
+      const error = await rejectionOf(client.fitProbability(bytes))
+      expect(error).toMatchObject({ code: "invalid-request" })
+    },
+  )
+
+  it("getDriveCapacity asks about the named drive and returns the proxy's figures", async () => {
+    const batchID = "ab".repeat(32)
+    const partition = {
+      partition: 0,
+      sizeBytes: 100,
+      usedBytes: 10,
+      leftBytes: 90,
+    }
+    const capacity = { ...partition, partitions: [partition] }
+    const promise = client.getDriveCapacity({ batchID })
+    const sent = lastPostedMessage()
+    expect(sent).toMatchObject({ type: "getDriveCapacity", batchID })
+
+    deliver({
+      type: "getDriveCapacityResponse",
+      requestId: sent.requestId,
+      capacity,
+    })
+    await expect(promise).resolves.toEqual(capacity)
+  })
+
   // The identity site and a dApp's client deploy separately: a kind this
   // client does not know must not fail the whole list.
   it("reads a drive kind it does not know as scratch", () => {

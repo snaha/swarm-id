@@ -292,9 +292,11 @@ export type BatchTTLSource = z.infer<typeof BatchTTLSourceSchema>
 export const PostageBatchSchema = z.object({
   batchID: BatchIdSchema,
   /**
-   * Bee's fill count of the fullest bucket — NOT a percentage. Usage is
-   * `utilization / 2^(depth - bucketDepth)`, and a batch stops accepting
-   * uploads when one bucket fills, before the nominal `2^depth * 4096` bytes.
+   * How full the fullest bucket is, as a fraction from 0 to 1 of what one
+   * partition may write into a bucket — NOT Bee's fill count. Swarm ID keeps
+   * it from the last write, in the partition that write went to, so it can
+   * trail another device's writes. A batch stops accepting uploads when one
+   * bucket fills, before the nominal `2^depth * 4096` bytes.
    */
   utilization: z.number(),
   usable: z.boolean(),
@@ -327,6 +329,41 @@ export type PostageBatch = z.infer<typeof PostageBatchSchema>
 export const DriveKindSchema = z.enum(["regular", "scratch"])
 export type DriveKind = z.infer<typeof DriveKindSchema>
 
+/**
+ * One partition's share of a drive (#772, #334). `sizeBytes` and `leftBytes`
+ * are payload bytes of encrypted saves; plain ones fit under 1% more
+ */
+export const PartitionCapacitySchema = z.object({
+  partition: z.number().int().min(0),
+  /** What the partition holds when empty */
+  sizeBytes: z.number(),
+  /**
+   * Slots already written, as bytes: raw, so a save's intermediate chunks
+   * and overhead count here too, and `leftBytes` reaches 0 a little (under
+   * 2%) before `usedBytes` reaches `sizeBytes`
+   */
+  usedBytes: z.number(),
+  /**
+   * The largest save that still fits, at `DEFAULT_FIT_CONFIDENCE`, and never
+   * more than `sizeBytes - usedBytes`: 0 once used passes size, while a small
+   * save may still fit
+   */
+  leftBytes: z.number(),
+})
+export type PartitionCapacity = z.infer<typeof PartitionCapacitySchema>
+
+/**
+ * How much a drive holds and has left for this device (#772, #334): the
+ * figures of the partition it writes to, the one it holds or else the one it
+ * would claim first. One save goes into one partition, so another's room is
+ * not this device's. `partitions` lists every partition whose counter could
+ * be read, this one included.
+ */
+export const DriveCapacitySchema = PartitionCapacitySchema.extend({
+  partitions: z.array(PartitionCapacitySchema),
+})
+export type DriveCapacity = z.infer<typeof DriveCapacitySchema>
+
 /** One drive the app was granted (#862), as `getDrives()` reports it */
 export const DriveSchema = PostageBatchSchema.extend({
   // An identity site newer than this client may report a kind it does not
@@ -353,6 +390,9 @@ export type Drive = z.infer<typeof DriveSchema>
 
 /** Which drive a call that takes no upload options writes to */
 export type DriveTargetOptions = Pick<UploadOptions, "batchID">
+
+/** Which drive `fitProbability()` asks about, and whether the save is encrypted (the default) */
+export type FitOptions = Pick<UploadOptions, "batchID" | "encrypt">
 
 const DRIVE_DESCRIPTION_MAX_LENGTH = 120
 const DRIVE_REQUEST_MAX_ROWS = 8
@@ -1397,6 +1437,20 @@ export const GetPermissionsMessageSchema = z.object({
   requestId: z.string(),
 })
 
+export const GetDriveCapacityMessageSchema = z.object({
+  type: z.literal("getDriveCapacity"),
+  requestId: z.string(),
+  batchID: DriveTargetSchema,
+})
+
+export const FitProbabilityMessageSchema = z.object({
+  type: z.literal("fitProbability"),
+  requestId: z.string(),
+  bytes: z.number().int().min(0),
+  batchID: DriveTargetSchema,
+  encrypt: z.boolean().optional(),
+})
+
 /**
  * Ask the user for more (#711): the proxy opens the permissions popup and
  * answers once it closes, or at once with `opened: false` when the browser
@@ -1457,6 +1511,8 @@ export const ParentToIframeMessageSchema = z.discriminatedUnion("type", [
   GetPostageBatchMessageSchema,
   GetDrivesMessageSchema,
   GetPermissionsMessageSchema,
+  FitProbabilityMessageSchema,
+  GetDriveCapacityMessageSchema,
   ConnectMessageSchema,
   RequestPermissionsMessageSchema,
 ])
@@ -1529,6 +1585,10 @@ export type GetPostageBatchMessage = z.infer<
 >
 export type GetDrivesMessage = z.infer<typeof GetDrivesMessageSchema>
 export type GetPermissionsMessage = z.infer<typeof GetPermissionsMessageSchema>
+export type FitProbabilityMessage = z.infer<typeof FitProbabilityMessageSchema>
+export type GetDriveCapacityMessage = z.infer<
+  typeof GetDriveCapacityMessageSchema
+>
 export type ConnectMessage = z.infer<typeof ConnectMessageSchema>
 export type RequestPermissionsMessage = z.infer<
   typeof RequestPermissionsMessageSchema
@@ -1983,6 +2043,19 @@ export const GetPermissionsResponseMessageSchema = z.object({
   permissions: AppPermissionsSchema,
 })
 
+export const GetDriveCapacityResponseMessageSchema = z.object({
+  type: z.literal("getDriveCapacityResponse"),
+  requestId: z.string(),
+  /** Absent for a scratch drive, whose partitions wrap instead of filling */
+  capacity: DriveCapacitySchema.optional(),
+})
+
+export const FitProbabilityResponseMessageSchema = z.object({
+  type: z.literal("fitProbabilityResponse"),
+  requestId: z.string(),
+  probability: z.number().min(0).max(1),
+})
+
 export const RequestPermissionsResponseMessageSchema = z.object({
   type: z.literal("requestPermissionsResponse"),
   requestId: z.string(),
@@ -2037,6 +2110,8 @@ export const IframeToParentMessageSchema = z.discriminatedUnion("type", [
   GetPostageBatchResponseMessageSchema,
   GetDrivesResponseMessageSchema,
   GetPermissionsResponseMessageSchema,
+  FitProbabilityResponseMessageSchema,
+  GetDriveCapacityResponseMessageSchema,
   RequestPermissionsResponseMessageSchema,
 ])
 

@@ -44,9 +44,12 @@ import type {
   GetPostageBatchMessage,
   GetDrivesMessage,
   GetPermissionsMessage,
+  FitProbabilityMessage,
+  GetDriveCapacityMessage,
   PermissionName,
   RequestPermissionsMessage,
   Drive,
+  DriveCapacity,
   Permissions,
   CreateFeedManifestMessage,
   AppMetadata,
@@ -139,7 +142,23 @@ import {
   accountDeltaFromSnapshot,
   restoreLocalSessionFields,
 } from "./bus/account-delta"
-import { UtilizationAwareStamper } from "./utils/batch-utilization"
+import {
+  UtilizationAwareStamper,
+  loadUtilizationState,
+} from "./utils/batch-utilization"
+import {
+  chunksForBytes,
+  estimateDriveCapacity,
+  fitProbability,
+  headroomHistogram,
+} from "./utils/drive-capacity"
+import {
+  PUBLISHED_COUNTER_READ_TIMEOUT_MS,
+  readPublishedCounter,
+  type PublishedCounter,
+} from "./sync/published-counter"
+import { deviceHomePartition } from "./sync/partition-lock"
+import { withTimeout } from "./utils/promise"
 import { UtilizationStoreDB } from "./storage/utilization-store"
 import type { PartitionLeaseStateSnapshot } from "./sync/partition-lease"
 import { BatchWriteCoordinator } from "./sync/batch-write-coordinator"
@@ -404,6 +423,12 @@ export class SwarmIdProxy {
   /** Re-reads the head while a drive may be warming up, see `armWarmUpTimer`. */
   private warmUpTimer: ReturnType<typeof setTimeout> | undefined
   private destroyed = false
+  /**
+   * Other partitions' counters as last read, per batch and then per
+   * `<account>:<partition>`, so a capacity read skips the download while a
+   * partition is unchanged. A batch's entry goes with its write path.
+   */
+  private publishedCounters = new Map<string, Map<string, PublishedCounter>>()
   /** The primary drive's batch: where a write that names no drive goes. */
   private primaryBatchId: string | undefined
   private storagePartitioned: boolean = false
@@ -919,6 +944,7 @@ export class SwarmIdProxy {
     this.dropBufferedLanes(drive.batchId)
     drive.teardown()
     this.drives.delete(drive.batchId)
+    this.publishedCounters.delete(drive.batchId)
   }
 
   /**
@@ -1189,6 +1215,7 @@ export class SwarmIdProxy {
    */
   private teardownDrives(): void {
     for (const drive of [...this.drives.values()]) this.teardownDrive(drive)
+    this.publishedCounters.clear()
     this.primaryBatchId = undefined
     clearTimeout(this.expiryTimer)
     this.expiryTimer = undefined
@@ -2831,6 +2858,12 @@ export class SwarmIdProxy {
         break
       case "getPermissions":
         this.handleGetPermissions(message, event)
+        break
+      case "fitProbability":
+        await this.handleFitProbability(message, event)
+        break
+      case "getDriveCapacity":
+        await this.handleGetDriveCapacity(message, event)
         break
 
       case "createFeedManifest":
@@ -6433,6 +6466,206 @@ export class SwarmIdProxy {
     // After the answer, so a change this read turned up follows the drives
     // the dApp was just given rather than interleaving with them.
     this.adoptLifetimeReadings()
+  }
+
+  private async handleGetDriveCapacity(
+    message: GetDriveCapacityMessage,
+    event: MessageEvent,
+  ): Promise<void> {
+    try {
+      const stamp = this.grantedStampFor(message.batchID)
+      let capacity: DriveCapacity | undefined
+      // A scratch drive's partitions wrap instead of filling
+      if (!isScratchDrive(stamp)) {
+        const read = await this.partitionCounters(stamp, "all")
+        capacity = estimateDriveCapacity(
+          read.partitions,
+          stamp.depth,
+          read.writePartition,
+          { partitionCount: read.partitionCount },
+        )
+      }
+      this.postMessage(event, {
+        type: "getDriveCapacityResponse",
+        requestId: message.requestId,
+        capacity,
+      })
+    } catch (error) {
+      this.sendErrorToParent(
+        event,
+        message.requestId,
+        error,
+        "Drive capacity failed",
+      )
+    }
+  }
+
+  private async handleFitProbability(
+    message: FitProbabilityMessage,
+    event: MessageEvent,
+  ): Promise<void> {
+    try {
+      const stamp = this.grantedStampFor(message.batchID)
+      let probability = 1
+      // A scratch drive's partitions wrap instead of filling: everything fits
+      if (!isScratchDrive(stamp)) {
+        const read = await this.partitionCounters(stamp, "write")
+        const [{ dataCounters }] = read.partitions
+        probability = fitProbability(
+          headroomHistogram(dataCounters, stamp.depth, read.partitionCount),
+          chunksForBytes(message.bytes, message.encrypt ?? true),
+        )
+      }
+      this.postMessage(event, {
+        type: "fitProbabilityResponse",
+        requestId: message.requestId,
+        probability,
+      })
+    } catch (error) {
+      this.sendErrorToParent(
+        event,
+        message.requestId,
+        error,
+        "Fit probability failed",
+      )
+    }
+  }
+
+  /** The drive a capacity call names, or the primary; refuses one not granted */
+  private grantedStampFor(batchId: string | undefined): PostageStamp {
+    if (!this.authenticated || !this.appSecret) {
+      throw new SwarmIdError(
+        "not-authenticated",
+        "Not authenticated. Please login first.",
+      )
+    }
+    const { primary, granted } = this.lookupDrivesForApp()
+    if (batchId === undefined) {
+      if (primary) return primary
+      throw new SwarmIdError(
+        "upload-unavailable",
+        "The account has no drive for this app.",
+        { reason: "no-stamp" },
+      )
+    }
+    const stamp = granted.find(
+      (candidate) => candidate.batchID.toHex() === batchId,
+    )
+    if (stamp) return stamp
+    throw new SwarmIdError(
+      "drive-not-granted",
+      "This app has not been granted that drive in Swarm ID.",
+    )
+  }
+
+  /**
+   * Per-bucket counters of a drive's partitions, and which one this device
+   * writes to: the one it holds, or else its home partition, the one the lease
+   * claims first. The held partition is read live, the others as last
+   * published. `"write"` reads only the write partition; `"all"` adds every
+   * other partition whose counter could be read. Throws when the write
+   * partition's cannot be.
+   */
+  private async partitionCounters(
+    stamp: PostageStamp,
+    which: "all" | "write",
+  ): Promise<{
+    partitionCount: number
+    writePartition: number
+    partitions: { partition: number; dataCounters: Uint32Array }[]
+  }> {
+    const account = await this.lookupAccountForApp()
+    if (!account) {
+      throw new SwarmIdError(
+        "not-authenticated",
+        "Not authenticated. Please login first.",
+      )
+    }
+    const { partitionCount, encryptionKey, accountId } = account
+    const batchId = stamp.batchID.toHex()
+    const drive = this.drives.get(batchId)
+    // A stamper still being built would otherwise read as none
+    await drive?.ready
+    const stamper = this.drives.get(batchId)?.stamper
+
+    // A single-partition account publishes no partition state: its counter
+    // is the stamper's, or the one this context last stored, so a context
+    // that never wrote to the drive reads it as empty
+    if (partitionCount === 1) {
+      if (!this.utilizationStore) {
+        this.utilizationStore = new UtilizationStoreDB()
+      }
+      const dataCounters =
+        stamper?.getUtilizationState().dataCounters ??
+        (
+          await loadUtilizationState(stamp.batchID, stamp.depth, {
+            cache: this.utilizationStore,
+          })
+        ).dataCounters
+      return {
+        partitionCount,
+        writePartition: 0,
+        partitions: [{ partition: 0, dataCounters }],
+      }
+    }
+
+    const held = stamper?.currentPartition
+    const writePartition =
+      held ?? deviceHomePartition(this.requireDeviceId(), partitionCount)
+    const backupSigner = new PrivateKey(
+      deriveSecretSync(uint8ArrayToHex(encryptionKey), BACKUP_KEY_LABEL),
+    )
+    const known = this.publishedCounters.get(batchId) ?? new Map()
+    this.publishedCounters.set(batchId, known)
+    const read = async (
+      partition: number,
+    ): Promise<Uint32Array | undefined> => {
+      if (stamper && partition === held) {
+        return stamper.getUtilizationState().dataCounters
+      }
+      const key = `${accountId}:${partition}`
+      const published = await withTimeout(
+        readPublishedCounter(
+          {
+            bee: this.nodeBee,
+            backupSigner,
+            swarmEncryptionKey: encryptionKey,
+            batchId: stamp.batchID,
+            batchDepth: stamp.depth,
+            partition,
+          },
+          known.get(key),
+        ),
+        PUBLISHED_COUNTER_READ_TIMEOUT_MS,
+        "Reading how full the drive is timed out.",
+      )
+      if (published) known.set(key, published)
+      return published?.dataCounters
+    }
+
+    const partitions = await Promise.all(
+      Array.from({ length: partitionCount }, async (_unused, partition) => {
+        if (partition === writePartition) {
+          const dataCounters = await read(partition)
+          if (!dataCounters) {
+            throw new SwarmIdError(
+              "network",
+              "Could not read how full the drive is.",
+            )
+          }
+          return { partition, dataCounters }
+        }
+        if (which === "write") return undefined
+        // The other partitions only fill in the breakdown
+        const dataCounters = await read(partition).catch(() => undefined)
+        return dataCounters ? { partition, dataCounters } : undefined
+      }),
+    )
+    return {
+      partitionCount,
+      writePartition,
+      partitions: partitions.filter((entry) => entry !== undefined),
+    }
   }
 
   private handleGetPermissions(
