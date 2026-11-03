@@ -174,6 +174,10 @@
 <td><code dir="auto">stamp-not-usable</code></td>
 <td>The stamp resolved and is not expired, but its stored record says the node does not have the batch or cannot use it. Opening the drive in the identity site refreshes the record from the chain. Falls back to the gateway the same way.</td>
 </tr>
+<tr>
+<td><code dir="auto">stamp-warming-up</code></td>
+<td>The stamp resolved, but its batch is younger than the ten blocks (under a minute on Gnosis) Bee itself waits before stamping with a new batch, so that the storer nodes have it too. The session re-reads the chain until they have passed and <code dir="auto">onConnectionChange</code> fires then. Falls back to the gateway the same way.</td>
+</tr>
 </tbody>
 </table>
 <p>The reason is <code dir="auto">undefined</code> while the session is unauthenticated, and while <code dir="auto">canUpload</code> is <code dir="auto">true</code>.</p>
