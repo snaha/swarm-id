@@ -1,10 +1,6 @@
 // Copyright 2026 The Swarm Authors. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { Reference } from "@ethersphere/bee-js"
-import { makeContentAddressedChunk, type ContentAddressedChunk } from "../chunk"
-import type { ChunkReference } from "./types"
-
 // Constants
 export const CHUNK_SIZE = 4096
 export const PLAIN_REFS_PER_CHUNK = 128 // 4096 / 32 = 128 plain (unencrypted) refs per intermediate chunk
@@ -24,65 +20,4 @@ export function splitDataIntoChunks(data: Uint8Array): Uint8Array[] {
     chunks.push(data.slice(i, Math.min(i + CHUNK_SIZE, data.length)))
   }
   return chunks
-}
-
-/**
- * Build merkle tree from chunk references
- * Returns root reference (32 bytes)
- */
-export async function buildMerkleTree(
-  chunkRefs: ChunkReference[],
-  onIntermediateChunk: (chunk: ContentAddressedChunk) => Promise<void>,
-): Promise<Reference> {
-  // Single chunk - return direct reference
-  if (chunkRefs.length === 1) {
-    return new Reference(chunkRefs[0].address)
-  }
-
-  // Build intermediate level
-  const intermediateRefs: ChunkReference[] = []
-
-  for (let i = 0; i < chunkRefs.length; i += PLAIN_REFS_PER_CHUNK) {
-    const refs = chunkRefs.slice(
-      i,
-      Math.min(i + PLAIN_REFS_PER_CHUNK, chunkRefs.length),
-    )
-
-    // Pass through single-ref batches without wrapping in an intermediate
-    // (Bee's "carrier chunk" rule). A ghost intermediate with span ≤ 4096
-    // would be misidentified as a leaf by the download path's span-based
-    // leaf check.
-    if (refs.length === 1) {
-      intermediateRefs.push(refs[0])
-      continue
-    }
-
-    // Build payload with 32-byte references
-    const payload = new Uint8Array(refs.length * 32)
-    refs.forEach((ref, idx) => {
-      payload.set(ref.address, idx * 32)
-    })
-
-    // An intermediate chunk's span is the total data length covered by its
-    // children, not the length of its references payload.
-    const totalSpan = refs.reduce((sum, ref) => sum + (ref.span ?? 0n), 0n)
-
-    // Create intermediate chunk
-    const chunk = makeContentAddressedChunk(payload, totalSpan)
-    intermediateRefs.push({
-      address: chunk.address.toUint8Array(),
-      span: totalSpan,
-    })
-
-    // Upload intermediate chunk
-    await onIntermediateChunk(chunk)
-  }
-
-  // Recursively build tree if needed
-  if (intermediateRefs.length > 1) {
-    return buildMerkleTree(intermediateRefs, onIntermediateChunk)
-  }
-
-  // Return root reference
-  return new Reference(intermediateRefs[0].address)
 }
