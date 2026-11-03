@@ -1070,6 +1070,8 @@ describe("SwarmIdProxy partitioned write enablement", () => {
             dataSharing: false,
           })),
         }))
+        // Waited on, not timed, as below.
+        await vi.waitFor(() => expect(announced()).toBe(before + 1))
         await flushBus()
         expect(announced()).toBe(before + 1)
         expect(drivesAnnounced()).toBe(drivesBefore)
