@@ -9,6 +9,12 @@ on:
       - main
   workflow_dispatch:
 
+# One deploy at a time. DigitalOcean builds only an app's newest pending
+# deployment, so an overlapping run waits on one that never starts and times out.
+concurrency:
+  group: deploy-do
+  cancel-in-progress: false
+
 jobs:
   deploy:
     runs-on: ubuntu-latest
