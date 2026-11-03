@@ -318,8 +318,11 @@ test('an expired drive offers no extend or resize, only removal', async ({ page 
   await expect(page.getByRole('button', { name: 'Extend lifespan' })).toBeVisible()
 
   // Age it past expiry (#545): an expired batch can be neither topped up nor
-  // diluted, so both edits go away and removal is all that is left.
+  // diluted, so both edits go away and removal is all that is left. The batch
+  // is still funded on the chain, and the site re-reads its drives on load
+  // (#903), so the chain is cut off first or it would put the lifetime back.
   await expireStoredDrives(page)
+  await seedNoChain(page)
   await page.reload()
   await page.getByRole('tab', { name: 'Storage' }).click()
   await expect(page.getByText('Drive expired')).toBeVisible()
