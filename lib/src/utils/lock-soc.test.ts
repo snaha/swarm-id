@@ -63,4 +63,12 @@ describe("partition lock identity", () => {
       (address[0] << 8) | address[1],
     )
   })
+
+  // A changed address strands every lock already on the network, so the
+  // derivation is pinned to bytes rather than only to itself.
+  it("derives the SOC address keccak256(identifier ‖ owner)", () => {
+    expect(hex(lockSocAddress(BATCH_X, 2, OWNER))).toBe(
+      "5faffdfb66e8f0c2a2d1422ee355859344c849d7f3aa56aa7a263420069c2aad",
+    )
+  })
 })

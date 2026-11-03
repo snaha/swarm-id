@@ -24,6 +24,7 @@ import {
   UNENCRYPTED_REF_SIZE,
 } from "../chunk"
 import { Binary } from "cafe-utility"
+import { makeSOCAddress } from "@ethersphere/core-sdk"
 import { ENCRYPTED_REFS_PER_CHUNK, PLAIN_REFS_PER_CHUNK } from "./chunking"
 import type { UploadProgress } from "./types"
 import type { SingleOwnerChunk } from "../types"
@@ -51,14 +52,6 @@ function readSpan(spanBytes: Uint8Array): number {
   return Number(view.getBigUint64(0, true))
 }
 
-function makeSocAddress(identifier: Identifier, owner: EthAddress): Reference {
-  return new Reference(
-    Binary.keccak256(
-      Binary.concatBytes(identifier.toUint8Array(), owner.toUint8Array()),
-    ),
-  )
-}
-
 function makeSingleOwnerChunkFromData(
   data: Uint8Array,
   address: Reference,
@@ -79,7 +72,7 @@ function makeSingleOwnerChunkFromData(
     throw new Error("SOC owner mismatch")
   }
 
-  const socAddress = makeSocAddress(identifier, recoveredOwner)
+  const socAddress = makeSOCAddress(identifier, recoveredOwner)
   if (!Binary.equals(address.toUint8Array(), socAddress.toUint8Array())) {
     throw new Error("SOC data does not match given address")
   }
@@ -446,7 +439,7 @@ export async function downloadSOC(
 ): Promise<SingleOwnerChunk> {
   const ownerAddress = new EthAddress(owner)
   const id = new Identifier(identifier)
-  const socAddress = makeSocAddress(id, ownerAddress)
+  const socAddress = makeSOCAddress(id, ownerAddress)
 
   const data = await bee.chunk.download(
     socAddress.toHex(),
@@ -466,7 +459,7 @@ export async function downloadEncryptedSOC(
 ): Promise<SingleOwnerChunk> {
   const ownerAddress = new EthAddress(owner)
   const id = new Identifier(identifier)
-  const socAddress = makeSocAddress(id, ownerAddress)
+  const socAddress = makeSOCAddress(id, ownerAddress)
   const keyBytes =
     typeof encryptionKey === "string"
       ? hexToUint8Array(encryptionKey)
