@@ -932,6 +932,68 @@ describe("SwarmIdProxy subsidised-mode selection", () => {
         expect(answer.stampedChunks).toBeGreaterThan(1)
         expect(answer.stampedChunks).toBe(fetchSpy.mock.calls.length)
       })
+
+      // Every write handler, not only the two above: one that dropped its
+      // counter would report 0, telling the dApp the write cost nothing.
+      const ID = "11".repeat(32)
+      const REF = "22".repeat(32)
+      const WRITES: [string, Record<string, unknown>][] = [
+        ["uploadFile", { data: new Uint8Array(16), options: {} }],
+        [
+          "uploadFiles",
+          {
+            files: [{ path: "a.txt", data: new Uint8Array(16) }],
+            options: {},
+          },
+        ],
+        ["uploadChunk", { data: new Uint8Array(16), options: {} }],
+        [
+          "socUpload",
+          { identifier: ID, data: new Uint8Array(16), options: {} },
+        ],
+        [
+          "socRawUpload",
+          { identifier: ID, data: new Uint8Array(16), options: {} },
+        ],
+        [
+          "seqFeedUploadPayload",
+          { topic: ID, data: new Uint8Array(16), index: 0, options: {} },
+        ],
+        [
+          "seqFeedUploadRawPayload",
+          { topic: ID, data: new Uint8Array(16), index: 0, options: {} },
+        ],
+        [
+          "seqFeedUploadReference",
+          { topic: ID, reference: REF, index: 0, options: {} },
+        ],
+        ["createFeedManifest", { topic: ID, uploadOptions: {} }],
+        [
+          "gsocSend",
+          {
+            signer: "33".repeat(32),
+            identifier: ID,
+            data: new Uint8Array(16),
+            options: {},
+          },
+        ],
+        ["epochFeedUploadReference", { topic: ID, at: 1, reference: REF }],
+      ]
+      it.each(WRITES)("on %s", async (type, fields) => {
+        await identify(GATEWAY_URL)
+        setAccountState({})
+        const fetchSpy = gatewayAccepts()
+        await send({ type, requestId: "w1", ...fields })
+        const answer = await response(`${type}Response`)
+        expect(answer.type).toBe(`${type}Response`)
+        // Chunk and SOC POSTs only: a tag is not a chunk.
+        const posts = fetchSpy.mock.calls.filter(
+          ([url, init]) =>
+            init?.method === "POST" && /\/(chunks|soc\/)/.test(String(url)),
+        ).length
+        expect(posts).toBeGreaterThan(0)
+        expect(answer.stampedChunks).toBe(posts)
+      })
     })
 
     it("routes to the gateway in subsidised mode", async () => {

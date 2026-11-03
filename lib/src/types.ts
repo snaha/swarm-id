@@ -269,8 +269,9 @@ export interface ActUploadOptions extends UploadOptions {
  * How many chunks a write sent (#932): one per stamp the proxy signed in
  * stamper mode, one per chunk the gateway accepted in subsidised mode, so a
  * dApp can show what a save cost against what it estimated. The partition
- * lease's own lock and intent chunks are not counted. Optional on the wire:
- * an identity site older than the field sends none.
+ * lease's own chunks (lock, intent, and the state publish after each write)
+ * are not counted: they re-use reserved slots and spend no capacity.
+ * Optional on the wire: an identity site older than the field sends none.
  */
 const StampedChunksSchema = z.number().int().min(0).optional()
 

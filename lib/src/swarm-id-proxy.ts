@@ -2479,8 +2479,8 @@ export class SwarmIdProxy {
    * state — the proxy no longer owns any of that.
    *
    * `targetOptions.counter`, when given, counts the chunks the write sends
-   * (#932): the lease's own lock and intent chunks go out through the
-   * coordinator, not the target, and are not counted.
+   * (#932): the lease's own lock, intent and state-publish chunks go out
+   * through the coordinator, not the target, and are not counted.
    *
    * A write that names its drive (`batchId`) goes to that drive's write path,
    * built on first use, and never falls back to the gateway: the app asked
@@ -2523,6 +2523,25 @@ export class SwarmIdProxy {
       )
     }
     return coordinator.withWrite(operation, targetOptions)
+  }
+
+  /**
+   * {@link withModeAwareWriteLock} for a write that reports its cost (#932).
+   * The counter is made here and returned with the result, so a handler has
+   * no counter it could forget to wire and then report as zero.
+   */
+  private async withCountedWrite<T>(
+    targetOptions: { useWorkers?: boolean; workerCount?: number } | undefined,
+    operation: (target: UploadTarget) => Promise<T>,
+    batchId?: string,
+  ): Promise<{ result: T; stampedChunks: number }> {
+    const counter: ChunkCounter = { chunks: 0 }
+    const result = await this.withModeAwareWriteLock(
+      { ...targetOptions, counter },
+      operation,
+      batchId,
+    )
+    return { result, stampedChunks: counter.chunks }
   }
 
   /**
@@ -4447,30 +4466,30 @@ export class SwarmIdProxy {
       )
 
       // Execute upload with mode-aware locking
-      const counter: ChunkCounter = { chunks: 0 }
-      const uploadResult = await this.withModeAwareWriteLock(
-        { useWorkers, workerCount, counter },
-        async (target) => {
-          const result = await uploadData(target, data, {
-            encryptionKey: options?.encrypt ? true : undefined,
-            pin: options?.pin,
-            deferred: options?.deferred,
-            tag: options?.tag,
-            webSocket: useWebSocket ? { concurrency } : undefined,
-            httpConcurrency: concurrency,
-            onProgress,
-            requestOptions,
-          })
-          return result
-        },
-        batchID,
-      )
+      const { result: uploadResult, stampedChunks } =
+        await this.withCountedWrite(
+          { useWorkers, workerCount },
+          async (target) => {
+            const result = await uploadData(target, data, {
+              encryptionKey: options?.encrypt ? true : undefined,
+              pin: options?.pin,
+              deferred: options?.deferred,
+              tag: options?.tag,
+              webSocket: useWebSocket ? { concurrency } : undefined,
+              httpConcurrency: concurrency,
+              onProgress,
+              requestOptions,
+            })
+            return result
+          },
+          batchID,
+        )
 
       // Send response
       this.postMessage(event, {
         type: "uploadDataResponse",
         requestId,
-        stampedChunks: counter.chunks,
+        stampedChunks,
         reference: uploadResult.reference,
         tagUid: uploadResult.tagUid,
       })
@@ -4538,62 +4557,64 @@ export class SwarmIdProxy {
       const uploadTag = options?.tag ?? (await tryCreateTag(this.bee))
 
       // Execute upload with mode-aware locking
-      const counter: ChunkCounter = { chunks: 0 }
-      const manifestResult = await this.withModeAwareWriteLock(
-        { useWorkers, workerCount, counter },
-        async (target) => {
-          // Step 1: Upload file content — encrypted by default, like the
-          // manifest below (the rule is `manifestEncryption`)
-          const encryption = manifestEncryption(options)
+      const { result: manifestResult, stampedChunks } =
+        await this.withCountedWrite(
+          { useWorkers, workerCount },
+          async (target) => {
+            // Step 1: Upload file content — encrypted by default, like the
+            // manifest below (the rule is `manifestEncryption`)
+            const encryption = manifestEncryption(options)
 
-          const contentUpload = await uploadData(target, data, {
-            encryptionKey: encryption.content ? true : undefined,
-            pin: options?.pin,
-            deferred: options?.deferred,
-            tag: uploadTag,
-            webSocket: useWebSocket ? { concurrency } : undefined,
-            httpConcurrency: concurrency,
-            onProgress,
-            requestOptions,
-          })
+            const contentUpload = await uploadData(target, data, {
+              encryptionKey: encryption.content ? true : undefined,
+              pin: options?.pin,
+              deferred: options?.deferred,
+              tag: uploadTag,
+              webSocket: useWebSocket ? { concurrency } : undefined,
+              httpConcurrency: concurrency,
+              onProgress,
+              requestOptions,
+            })
 
-          // Step 2: Build manifest
-          const manifest = new MantarayNode()
-          const contentReferenceBytes = hexToUint8Array(contentUpload.reference)
+            // Step 2: Build manifest
+            const manifest = new MantarayNode()
+            const contentReferenceBytes = hexToUint8Array(
+              contentUpload.reference,
+            )
 
-          manifest.addFork(fileName, contentReferenceBytes, {
-            "Content-Type": "application/octet-stream",
-            Filename: fileName,
-          })
-          manifest.addFork("/", NULL_ADDRESS, {
-            "website-index-document": fileName,
-          })
+            manifest.addFork(fileName, contentReferenceBytes, {
+              "Content-Type": "application/octet-stream",
+              Filename: fileName,
+            })
+            manifest.addFork("/", NULL_ADDRESS, {
+              "website-index-document": fileName,
+            })
 
-          // Step 3: Upload manifest tree
-          const result = await saveMantarayTree(
-            manifest,
-            async (chunkData, isRoot) => {
-              await uploadChunk(target, chunkData, {
-                pin: options?.pin,
-                deferred: options?.deferred,
-                tag: uploadTag,
-                requestOptions,
-              })
-              return { tagUid: isRoot ? uploadTag : undefined }
-            },
-            { encrypt: encryption.manifest },
-          )
+            // Step 3: Upload manifest tree
+            const result = await saveMantarayTree(
+              manifest,
+              async (chunkData, isRoot) => {
+                await uploadChunk(target, chunkData, {
+                  pin: options?.pin,
+                  deferred: options?.deferred,
+                  tag: uploadTag,
+                  requestOptions,
+                })
+                return { tagUid: isRoot ? uploadTag : undefined }
+              },
+              { encrypt: encryption.manifest },
+            )
 
-          return result
-        },
-        batchID,
-      )
+            return result
+          },
+          batchID,
+        )
 
       // Send response
       this.postMessage(event, {
         type: "uploadFileResponse",
         requestId,
-        stampedChunks: counter.chunks,
+        stampedChunks,
         reference: manifestResult.rootReference,
         tagUid: manifestResult.tagUid,
       })
@@ -4695,9 +4716,8 @@ export class SwarmIdProxy {
       )
       const tag = options?.tag ?? (await tryCreateTag(this.bee))
 
-      const counter: ChunkCounter = { chunks: 0 }
-      const result = await this.withModeAwareWriteLock(
-        { useWorkers, workerCount, counter },
+      const { result, stampedChunks } = await this.withCountedWrite(
+        { useWorkers, workerCount },
         (target) =>
           uploadCollection(target, files, {
             ...options,
@@ -4711,7 +4731,7 @@ export class SwarmIdProxy {
       this.postMessage(event, {
         type: "uploadFilesResponse",
         requestId,
-        stampedChunks: counter.chunks,
+        stampedChunks,
         reference: result.reference,
         tagUid: result.tagUid,
       })
@@ -4755,9 +4775,8 @@ export class SwarmIdProxy {
       const chunk = makeContentAddressedChunk(data)
 
       // Execute upload with mode-aware locking
-      const counter: ChunkCounter = { chunks: 0 }
-      await this.withModeAwareWriteLock(
-        { counter },
+      const { stampedChunks } = await this.withCountedWrite(
+        undefined,
         async (target) => {
           await uploadChunk(target, chunk.data, {
             pin: options?.pin,
@@ -4772,7 +4791,7 @@ export class SwarmIdProxy {
       this.postMessage(event, {
         type: "uploadChunkResponse",
         requestId,
-        stampedChunks: counter.chunks,
+        stampedChunks,
         reference: chunk.address.toHex(),
       })
     } catch (error) {
@@ -4837,9 +4856,8 @@ export class SwarmIdProxy {
       const signerKey = new PrivateKey(signer)
       const id = new Identifier(identifier)
 
-      const counter: ChunkCounter = { chunks: 0 }
-      const result = await this.withModeAwareWriteLock(
-        { counter },
+      const { result, stampedChunks } = await this.withCountedWrite(
+        undefined,
         async (target) => {
           return await uploadSOC(target, signerKey, id, data, {
             pin: options?.pin,
@@ -4853,7 +4871,7 @@ export class SwarmIdProxy {
       this.postMessage(event, {
         type: "gsocSendResponse",
         requestId,
-        stampedChunks: counter.chunks,
+        stampedChunks,
         reference: uint8ArrayToHex(result.socAddress),
         tagUid: result.tagUid,
       })
@@ -4880,9 +4898,8 @@ export class SwarmIdProxy {
       const signerKeyObj = new PrivateKey(signerKey)
       const id = new Identifier(identifier)
 
-      const counter: ChunkCounter = { chunks: 0 }
-      const result = await this.withModeAwareWriteLock(
-        { counter },
+      const { result, stampedChunks } = await this.withCountedWrite(
+        undefined,
         async (target) => {
           return await uploadSOC(target, signerKeyObj, id, data, {
             encryptionKey: options?.encrypt !== false ? true : undefined,
@@ -4897,7 +4914,7 @@ export class SwarmIdProxy {
       this.postMessage(event, {
         type: "socUploadResponse",
         requestId,
-        stampedChunks: counter.chunks,
+        stampedChunks,
         reference: uint8ArrayToHex(result.socAddress),
         tagUid: result.tagUid,
         encryptionKey: result.encryptionKey
@@ -4924,9 +4941,8 @@ export class SwarmIdProxy {
       const signerKeyObj = new PrivateKey(signerKey)
       const id = new Identifier(identifier)
 
-      const counter: ChunkCounter = { chunks: 0 }
-      const result = await this.withModeAwareWriteLock(
-        { counter },
+      const { result, stampedChunks } = await this.withCountedWrite(
+        undefined,
         async (target) => {
           return await uploadSOC(target, signerKeyObj, id, data, {
             pin: options?.pin,
@@ -4940,7 +4956,7 @@ export class SwarmIdProxy {
       this.postMessage(event, {
         type: "socRawUploadResponse",
         requestId,
-        stampedChunks: counter.chunks,
+        stampedChunks,
         reference: uint8ArrayToHex(result.socAddress),
         tagUid: result.tagUid,
         encryptionKey: undefined,
@@ -5307,22 +5323,22 @@ export class SwarmIdProxy {
       })
 
       // Use mode-aware write lock for the upload operation
-      const counter: ChunkCounter = { chunks: 0 }
-      const updateResult = await this.withModeAwareWriteLock(
-        { counter },
-        async (target) => {
-          const result = await updater.update(
-            atValue,
-            referenceBytes,
-            target,
-            epochEncryptionKey,
-            epochHints,
-          )
+      const { result: updateResult, stampedChunks } =
+        await this.withCountedWrite(
+          undefined,
+          async (target) => {
+            const result = await updater.update(
+              atValue,
+              referenceBytes,
+              target,
+              epochEncryptionKey,
+              epochHints,
+            )
 
-          return result
-        },
-        batchID,
-      )
+            return result
+          },
+          batchID,
+        )
 
       // Verify upload with read-back
       const readBackFinder = createAsyncEpochFinder({
@@ -5339,7 +5355,7 @@ export class SwarmIdProxy {
       this.postMessage(event, {
         type: "epochFeedUploadReferenceResponse",
         requestId,
-        stampedChunks: counter.chunks,
+        stampedChunks,
         socAddress: uint8ArrayToHex(updateResult.socAddress),
         encryptionKey: encryptionKey ? encryptionKey : undefined,
         epoch: {
@@ -5803,9 +5819,8 @@ export class SwarmIdProxy {
       const identifier = new Identifier(identifierBytes)
 
       // Upload SOC with optional encryption (enabled by default)
-      const counter: ChunkCounter = { chunks: 0 }
-      const result = await this.withModeAwareWriteLock(
-        { counter },
+      const { result, stampedChunks } = await this.withCountedWrite(
+        undefined,
         async (target) => {
           return await uploadSOC(target, signerKeyObj, identifier, payload, {
             encryptionKey: options?.encrypt !== false ? true : undefined,
@@ -5820,7 +5835,7 @@ export class SwarmIdProxy {
       this.postMessage(event, {
         type: "seqFeedUploadPayloadResponse",
         requestId,
-        stampedChunks: counter.chunks,
+        stampedChunks,
         reference: uint8ArrayToHex(result.socAddress),
         feedIndex: resolvedIndex.toString(),
         owner: ownerAddress.toHex(),
@@ -5899,9 +5914,8 @@ export class SwarmIdProxy {
       const identifier = new Identifier(identifierBytes)
 
       // Upload SOC - use encryption if key provided, otherwise plain SOC
-      const counter: ChunkCounter = { chunks: 0 }
-      const result = await this.withModeAwareWriteLock(
-        { counter },
+      const { result, stampedChunks } = await this.withCountedWrite(
+        undefined,
         async (target) => {
           return await uploadSOC(target, signerKeyObj, identifier, payload, {
             encryptionKey: encryptionKey
@@ -5918,7 +5932,7 @@ export class SwarmIdProxy {
       this.postMessage(event, {
         type: "seqFeedUploadRawPayloadResponse",
         requestId,
-        stampedChunks: counter.chunks,
+        stampedChunks,
         reference: uint8ArrayToHex(result.socAddress),
         feedIndex: resolvedIndex.toString(),
         owner: ownerAddress.toHex(),
@@ -5999,9 +6013,8 @@ export class SwarmIdProxy {
       const identifier = new Identifier(identifierBytes)
 
       // uploadReference always uses encryption with auto-generated key
-      const counter: ChunkCounter = { chunks: 0 }
-      const result = await this.withModeAwareWriteLock(
-        { counter },
+      const { result, stampedChunks } = await this.withCountedWrite(
+        undefined,
         async (target) => {
           return await uploadSOC(target, signerKeyObj, identifier, payload, {
             encryptionKey: true,
@@ -6016,7 +6029,7 @@ export class SwarmIdProxy {
       this.postMessage(event, {
         type: "seqFeedUploadReferenceResponse",
         requestId,
-        stampedChunks: counter.chunks,
+        stampedChunks,
         reference: uint8ArrayToHex(result.socAddress),
         feedIndex: resolvedIndex.toString(),
         owner: ownerAddress.toHex(),
@@ -6131,9 +6144,11 @@ export class SwarmIdProxy {
       }
       const beeCompatible = options?.beeCompatible === true
 
-      const counter: ChunkCounter = { chunks: 0 }
-      const { actResult, contentUpload } = await this.withModeAwareWriteLock(
-        { useWorkers: true, counter },
+      const {
+        result: { actResult, contentUpload },
+        stampedChunks,
+      } = await this.withCountedWrite(
+        { useWorkers: true },
         async (target) => {
           // Step 1: Upload raw content data (encrypted by default for 64-byte reference)
           const contentUploadResult = await uploadData(target, data, {
@@ -6200,7 +6215,7 @@ export class SwarmIdProxy {
       this.postMessage(event, {
         type: "actUploadDataResponse",
         requestId,
-        stampedChunks: counter.chunks,
+        stampedChunks,
         encryptedReference: actResult.encryptedReference,
         historyReference: actResult.historyReference,
         granteeListReference: actResult.granteeListReference,
@@ -6309,9 +6324,8 @@ export class SwarmIdProxy {
       )
 
       // Add grantees to ACT
-      const counter: ChunkCounter = { chunks: 0 }
-      const result = await this.withModeAwareWriteLock(
-        { useWorkers: true, counter },
+      const { result, stampedChunks } = await this.withCountedWrite(
+        { useWorkers: true },
         async (target) => {
           return await addGranteesToAct(
             target,
@@ -6329,7 +6343,7 @@ export class SwarmIdProxy {
       this.postMessage(event, {
         type: "actAddGranteesResponse",
         requestId,
-        stampedChunks: counter.chunks,
+        stampedChunks,
         historyReference: result.historyReference,
         granteeListReference: result.granteeListReference,
         actReference: result.actReference,
@@ -6363,9 +6377,8 @@ export class SwarmIdProxy {
       )
 
       // Revoke grantees from ACT (drops their entries; reference unchanged, #496)
-      const counter: ChunkCounter = { chunks: 0 }
-      const result = await this.withModeAwareWriteLock(
-        { useWorkers: true, counter },
+      const { result, stampedChunks } = await this.withCountedWrite(
+        { useWorkers: true },
         async (target) => {
           return await revokeGranteesFromAct(
             target,
@@ -6384,7 +6397,7 @@ export class SwarmIdProxy {
       this.postMessage(event, {
         type: "actRevokeGranteesResponse",
         requestId,
-        stampedChunks: counter.chunks,
+        stampedChunks,
         encryptedReference: result.encryptedReference,
         historyReference: result.historyReference,
         granteeListReference: result.granteeListReference,
@@ -6590,9 +6603,8 @@ export class SwarmIdProxy {
       const batchID = uploadOptions?.batchID
       this.ensureCanUpload(batchID)
 
-      const counter: ChunkCounter = { chunks: 0 }
-      const result = await this.withModeAwareWriteLock(
-        { counter },
+      const { result, stampedChunks } = await this.withCountedWrite(
+        undefined,
         async (target) => {
           return await createFeedManifestDirect(
             target,
@@ -6611,7 +6623,7 @@ export class SwarmIdProxy {
       this.postMessage(event, {
         type: "createFeedManifestResponse",
         requestId: message.requestId,
-        stampedChunks: counter.chunks,
+        stampedChunks,
         reference: result.reference,
       })
     } catch (error) {
