@@ -386,19 +386,20 @@ export async function preflightResize(
   return { ...preflight, alreadyResized: preflight.batch.depth >= newDepth }
 }
 
+/** What the chain says of a drive, in the fields its record keeps */
+export type ChainReading = Required<
+  Pick<PostageStamp, 'depth' | 'amount' | 'exists' | 'usable'>
+> & { batchTTL: number | undefined }
+
 /**
- * Patch the stamp record from chain truth (depth, live per-chunk balance, the
- * TTL it implies, and whether the batch exists and is usable — the readiness
- * rule refuses a record that says otherwise, so a stale `false` must clear
- * here). Called after every confirmed transaction and on dialog open, so an
- * interrupted flow reconciles instead of trusting local state. Returns false
- * when the chain could not answer (record left untouched).
+ * Read a drive from chain truth: depth, live per-chunk balance, the TTL it
+ * implies, and whether the batch exists and is usable. `undefined` when the
+ * chain could not answer or does not know the batch.
  */
-export async function reconcileStampFromChain(
-  account: Account,
-  stamp: PostageStamp,
+export async function readStampFromChain(
+  stamp: Pick<PostageStamp, 'batchID'>,
   client?: MultichainClient,
-): Promise<boolean> {
+): Promise<ChainReading | undefined> {
   const chain = client ?? (await postageChain())
   try {
     const [batch, constraints] = await Promise.all([
@@ -406,22 +407,42 @@ export async function reconcileStampFromChain(
       chain.getPostageWriteConstraints(),
     ])
     if (!batch) {
-      return false
+      return undefined
     }
     const remaining = await chain.getRemainingBalance(batchIdHex(stamp))
     const batchTTL = ttlSecondsFor(remaining, constraints.lastPrice)
-    account.updateStamp(stamp.batchID, {
+    return {
       depth: batch.depth,
       amount: remaining,
       batchTTL,
       // The same reading `fetchExistingBatchFromChain` stores on attach.
       exists: true,
       usable: batchTTL === undefined || batchTTL > 0,
-    })
-    return true
+    }
   } catch {
+    return undefined
+  }
+}
+
+/**
+ * Patch the stamp record from chain truth (`readStampFromChain`; the
+ * readiness rule refuses a record that says the batch is missing or unusable,
+ * so a stale `false` must clear here). Called after every confirmed
+ * transaction and on dialog open, so an interrupted flow reconciles instead of
+ * trusting local state. Returns false when the chain could not answer (record
+ * left untouched).
+ */
+export async function reconcileStampFromChain(
+  account: Account,
+  stamp: PostageStamp,
+  client?: MultichainClient,
+): Promise<boolean> {
+  const reading = await readStampFromChain(stamp, client)
+  if (!reading) {
     return false
   }
+  account.updateStamp(stamp.batchID, reading)
+  return true
 }
 
 /**

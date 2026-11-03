@@ -1,0 +1,144 @@
+// Copyright 2026 The Swarm Authors. All rights reserved.
+// SPDX-License-Identifier: Apache-2.0
+import { BatchId, PrivateKey } from '@ethersphere/bee-js'
+import type { PostageStamp } from '@snaha/swarm-id/internal'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+
+import {
+  REREAD_MAX_MS,
+  REREAD_MIN_MS,
+  differsFromRecord,
+  nextRereadMs,
+  watchDriveLifetimes,
+} from '$lib/drive-lifetime-watch'
+import type { ChainReading } from '$lib/payment/postage-onchain'
+
+const NOW = 1_700_000_000_000
+const HOUR_S = 3600
+const DAY_S = 24 * HOUR_S
+const MS = 1000
+
+function drive(batchHex: string, batchTTL: number | undefined, measuredAt = NOW): PostageStamp {
+  return {
+    batchID: new BatchId(batchHex),
+    signerKey: new PrivateKey('11'.repeat(32)),
+    utilization: 0,
+    usable: true,
+    exists: true,
+    depth: 20,
+    amount: 1n,
+    bucketDepth: 16,
+    blockNumber: 1,
+    immutableFlag: false,
+    createdAt: measuredAt,
+    batchTTL,
+  }
+}
+
+function reading(stamp: PostageStamp, batchTTL: number | undefined): ChainReading {
+  return { depth: stamp.depth, amount: 2n, exists: true, usable: true, batchTTL }
+}
+
+describe('nextRereadMs', () => {
+  it('re-reads halfway to the nearest expiry, within a minute and six hours', () => {
+    expect(nextRereadMs([drive('aa'.repeat(32), 2 * HOUR_S)], NOW)).toBe(HOUR_S * MS)
+    expect(nextRereadMs([drive('aa'.repeat(32), 30 * DAY_S)], NOW)).toBe(REREAD_MAX_MS)
+    // Ninety seconds left: never later than the expiry itself
+    expect(nextRereadMs([drive('aa'.repeat(32), 90)], NOW)).toBe(REREAD_MIN_MS)
+    expect(nextRereadMs([drive('aa'.repeat(32), 30)], NOW)).toBe(30 * MS)
+  })
+
+  it('times the drive nearest its expiry, and falls back to the cap', () => {
+    const near = drive('aa'.repeat(32), 4 * HOUR_S)
+    const far = drive('bb'.repeat(32), 30 * DAY_S)
+    expect(nextRereadMs([far, near], NOW)).toBe(2 * HOUR_S * MS)
+    // Unmeasured or already run out: nothing to time but the cap
+    expect(nextRereadMs([drive('cc'.repeat(32), undefined)], NOW)).toBe(REREAD_MAX_MS)
+    expect(nextRereadMs([drive('cc'.repeat(32), 10, NOW - 60 * MS)], NOW)).toBe(REREAD_MAX_MS)
+    expect(nextRereadMs([], NOW)).toBe(REREAD_MAX_MS)
+  })
+})
+
+describe('differsFromRecord', () => {
+  const stamp = drive('aa'.repeat(32), 30 * DAY_S)
+
+  it('lets a small drift in the lifetime pass, as price noise', () => {
+    expect(differsFromRecord(stamp, reading(stamp, 30 * DAY_S - 60), NOW)).toBe(false)
+  })
+
+  it('writes back a lifetime that moved: a top-up, or a price change', () => {
+    expect(differsFromRecord(stamp, reading(stamp, 40 * DAY_S), NOW)).toBe(true)
+    expect(differsFromRecord(stamp, reading(stamp, 20 * DAY_S), NOW)).toBe(true)
+  })
+
+  it('writes back a resize, a batch gone, and a first measurement', () => {
+    expect(differsFromRecord(stamp, { ...reading(stamp, 30 * DAY_S), depth: 22 }, NOW)).toBe(true)
+    expect(differsFromRecord(stamp, { ...reading(stamp, 0), usable: false }, NOW)).toBe(true)
+    const unmeasured = drive('bb'.repeat(32), undefined)
+    expect(differsFromRecord(unmeasured, reading(unmeasured, DAY_S), NOW)).toBe(true)
+  })
+})
+
+describe('watchDriveLifetimes', () => {
+  beforeEach(() => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] })
+    vi.setSystemTime(NOW)
+  })
+  afterEach(() => vi.useRealTimers())
+
+  function account(stamps: PostageStamp[]) {
+    return { stamps, updateStamp: vi.fn() }
+  }
+
+  it('reads every drive at once, and writes back only one that drifted', async () => {
+    const steady = drive('aa'.repeat(32), 30 * DAY_S)
+    const toppedUp = drive('bb'.repeat(32), 30 * DAY_S)
+    const target = account([steady, toppedUp])
+    const read = vi.fn(async (stamp: PostageStamp) =>
+      reading(stamp, stamp === toppedUp ? 60 * DAY_S : 30 * DAY_S),
+    )
+    const stop = watchDriveLifetimes(() => target, read)
+    await vi.advanceTimersByTimeAsync(0)
+    expect(read).toHaveBeenCalledTimes(2)
+    expect(target.updateStamp).toHaveBeenCalledTimes(1)
+    expect(target.updateStamp.mock.calls[0][0]).toBe(toppedUp.batchID)
+    stop()
+  })
+
+  it('reads again on the schedule, and stops when told', async () => {
+    const target = account([drive('aa'.repeat(32), 2 * HOUR_S)])
+    const read = vi.fn(async (stamp: PostageStamp) => reading(stamp, 2 * HOUR_S))
+    const stop = watchDriveLifetimes(() => target, read)
+    await vi.advanceTimersByTimeAsync(0)
+    expect(read).toHaveBeenCalledTimes(1)
+    await vi.advanceTimersByTimeAsync(HOUR_S * MS)
+    expect(read).toHaveBeenCalledTimes(2)
+    stop()
+    await vi.advanceTimersByTimeAsync(REREAD_MAX_MS)
+    expect(read).toHaveBeenCalledTimes(2)
+  })
+
+  it('keeps its schedule through a read that throws', async () => {
+    const target = account([drive('aa'.repeat(32), 2 * HOUR_S)])
+    const read = vi.fn(async () => {
+      throw new Error('no RPC configured')
+    })
+    const stop = watchDriveLifetimes(() => target, read)
+    await vi.advanceTimersByTimeAsync(0)
+    await vi.advanceTimersByTimeAsync(HOUR_S * MS)
+    expect(read).toHaveBeenCalledTimes(2)
+    expect(target.updateStamp).not.toHaveBeenCalled()
+    stop()
+  })
+
+  it('leaves the record alone when the chain cannot answer', async () => {
+    const target = account([drive('aa'.repeat(32), 30 * DAY_S)])
+    const stop = watchDriveLifetimes(
+      () => target,
+      async () => undefined,
+    )
+    await vi.advanceTimersByTimeAsync(0)
+    expect(target.updateStamp).not.toHaveBeenCalled()
+    stop()
+  })
+})
