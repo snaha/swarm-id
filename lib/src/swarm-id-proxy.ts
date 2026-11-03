@@ -6700,7 +6700,6 @@ export class SwarmIdProxy {
             backupSigner,
             swarmEncryptionKey: encryptionKey,
             batchId: stamp.batchID,
-            batchDepth: stamp.depth,
             partition,
           },
           known.get(key),
