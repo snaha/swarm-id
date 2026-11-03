@@ -40,7 +40,7 @@
   // An app with no drive list, or full drive access, writes to whatever the
   // default is when it names no drive.
   const followers = $derived(
-    account.connectedApps.filter((app) => app.drives === undefined || app.drives === 'all'),
+    account.activeApps.filter((app) => app.drives === undefined || app.drives === 'all'),
   )
   const confirmed = $derived(typed.trim().toLowerCase() === CONFIRM_PHRASE)
 
@@ -58,7 +58,7 @@
     and so does every app below whenever it saves without picking a drive.
   </p>
   <div
-    role="alert"
+    role="note"
     class="border-destructive/50 bg-destructive/10 flex flex-col gap-2 rounded-lg border p-3 text-sm"
   >
     <p class="font-medium">Nothing is copied to the new drive.</p>
