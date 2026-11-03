@@ -311,13 +311,13 @@ acquire and resumes from exactly that counter, so a hand-off never re-uses a slo
 <p>A write is reported complete only after the partition state that covers its slots is
 published. An upload that was still in flight when a holder disappeared was therefore never
 acknowledged, and the next holder may safely overwrite its slots.</p>
-<div class="expressive-code"><figure class="frame not-content"><figcaption class="header"></figcaption><pre data-language="text"><code><div class="ec-line"><div class="code"><span style="--0:#d6deeb;--1:#403f53">topic = keccak256( utf8("swarm-id-partition-state-v1") ‖ batchId ‖ uint32_be(partition) )</span></div></div><div class="ec-line"><div class="code"><span style="--0:#d6deeb;--1:#403f53">owner = backupSigner address</span></div></div></code></pre><div class="copy"><div aria-live="polite"></div><button title="Copy to clipboard" data-copied="Copied!" data-code="topic = keccak256( utf8(&quot;swarm-id-partition-state-v1&quot;) ‖ batchId ‖ uint32_be(partition) )owner = backupSigner address"><div></div></button></div></figure></div>
-<p>The counter is not a single blob. It is split into the same <code dir="auto">numUtilizationChunks</code> counter
-chunks, each uploaded with a <strong>random</strong> encryption key to the partition’s reserved slot,
-yielding a 64-byte <strong>encrypted reference</strong> (<code dir="auto">address ‖ key</code>). A single <strong>reference chunk</strong>
-concatenates those references (<code dir="auto">N · 64 ≤ 4096</code> bytes, one chunk even at <code dir="auto">N = 64</code>). A taking
-over device follows <strong>pointer → reference chunk → leaves</strong>, decrypting each from its
-embedded key.</p>
+<div class="expressive-code"><figure class="frame not-content"><figcaption class="header"></figcaption><pre data-language="text"><code><div class="ec-line"><div class="code"><span style="--0:#d6deeb;--1:#403f53">topic = keccak256( utf8("swarm-id-partition-state-v2") ‖ batchId ‖ uint32_be(partition) )</span></div></div><div class="ec-line"><div class="code"><span style="--0:#d6deeb;--1:#403f53">owner = backupSigner address</span></div></div></code></pre><div class="copy"><div aria-live="polite"></div><button title="Copy to clipboard" data-copied="Copied!" data-code="topic = keccak256( utf8(&quot;swarm-id-partition-state-v2&quot;) ‖ batchId ‖ uint32_be(partition) )owner = backupSigner address"><div></div></button></div></figure></div>
+<p>The counter is not a single blob. It is packed into <strong>leaves</strong> under a <strong>frame</strong> (see
+<a href="#wire-format-byte-layout">Wire format</a> below), each leaf uploaded with a <strong>random</strong>
+encryption key to the partition’s reserved slot, yielding a 64-byte <strong>encrypted reference</strong>
+(<code dir="auto">address ‖ key</code>). A single <strong>reference chunk</strong> carries the frame, the exceptions and those
+references (<code dir="auto">7 + 8·E + 64·L</code> bytes, one chunk at the width cap). A taking-over device follows
+<strong>pointer → reference chunk → leaves</strong>, decrypting each from its embedded key.</p>
 <div class="sl-heading-wrapper level-h3"><h3 id="the-state-pointer">The state pointer</h3><a class="sl-anchor-link" href="#the-state-pointer"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 1 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 0 0-1.42-1.42m8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 1 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 0 0 0 1.42 1 1 0 0 0 1.42 0l3.88-3.89a4.49 4.49 0 0 0 0-6.33M8.83 15.17a1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.92-4.92a1 1 0 1 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42"></path></svg></span><span class="sr-only" data-pagefind-ignore>Section titled “The state pointer”</span></a></div>
 <p>The reference chunk’s address is published in a <strong>state-pointer SOC</strong> whose identifier
 rotates every epoch:</p>
@@ -446,11 +446,8 @@ leaf’s exact bytes.</p>
 <p>The previous publish’s frame is kept while it still fits the counter, so leaf boundaries
 hold and only the leaves a write touched are re-uploaded. A frame that no longer fits (or
 the once-per-epoch full re-pin) packs under the canonical frame and publishes every
-non-zero leaf.</p>
-<p>Given the previous publish’s references and the counter it published, only the chunks whose
-bytes changed are uploaded again; unchanged chunks keep their reference. A typical upload
-changes one or two chunks, not all 32. On acquire the lease seeds this baseline from the
-resumed state, so even the first publish of a session is incremental.</p>
+non-zero leaf. On acquire the lease seeds this baseline from the resumed state, so even the
+first publish of a session is incremental.</p>
 <div class="sl-heading-wrapper level-h3"><h3 id="read-semantics">Read semantics</h3><a class="sl-anchor-link" href="#read-semantics"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 1 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 0 0-1.42-1.42m8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 1 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 0 0 0 1.42 1 1 0 0 0 1.42 0l3.88-3.89a4.49 4.49 0 0 0 0-6.33M8.83 15.17a1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.92-4.92a1 1 0 1 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42"></path></svg></span><span class="sr-only" data-pagefind-ignore>Section titled “Read semantics”</span></a></div>
 <p>Reads short-circuit on a cached “synced reference”: if the pointer still names the reference
 a device last synced with, it skips the downloads and reuses its local counter.</p>
