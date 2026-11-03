@@ -7,6 +7,7 @@ import { describe, expect, it } from 'vitest'
 import {
   askedPatch,
   customised,
+  drivesTakenAway,
   editRows,
   grantAfterEdit,
   grantAfterRequest,
@@ -132,6 +133,33 @@ describe('an edit', () => {
   it('falls back to the account default when "all" is unticked', () => {
     expect(grantAfterEdit('all', [], true, A)).toBe('all')
     expect(grantAfterEdit('all', [], false, A)).toBeUndefined()
+  })
+
+  // What a change of drives costs the app, so it is confirmed first (#925).
+  describe('the drives it takes away', () => {
+    const batches = (list: PostageStamp[]) => list.map((stamp) => stamp.batchID.toHex())
+
+    it('names a drive set to None, or swapped for another', () => {
+      expect(
+        batches(drivesTakenAway([new BatchId(A), new BatchId(S)], [new BatchId(A)], drives, A)),
+      ).toEqual([S])
+      expect(batches(drivesTakenAway([new BatchId(A)], [new BatchId(B)], drives, A))).toEqual([A])
+    })
+
+    it('counts no grant as the default, and "all" as every drive', () => {
+      // Tracking the default, then pinned to another drive
+      expect(batches(drivesTakenAway(undefined, [new BatchId(B)], drives, A))).toEqual([A])
+      // Unticking "all" leaves only the default
+      expect(batches(drivesTakenAway('all', undefined, drives, A))).toEqual([B, S])
+    })
+
+    it('takes nothing away by adding a drive, or by pinning the default it tracked', () => {
+      expect(
+        drivesTakenAway([new BatchId(A)], [new BatchId(A), new BatchId(S)], drives, A),
+      ).toEqual([])
+      expect(drivesTakenAway(undefined, [new BatchId(A)], drives, A)).toEqual([])
+      expect(drivesTakenAway([new BatchId(A)], 'all', drives, A)).toEqual([])
+    })
   })
 })
 

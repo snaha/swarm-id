@@ -185,6 +185,30 @@ export function grantAfterEdit(
   return rows.filter((row) => row.chosen !== '').map((row) => toBatchId(row.chosen))
 }
 
+/**
+ * The drives an app can write to under `before` and no longer can under
+ * `after` (#925): no grant means the account default, `"all"` every drive.
+ * A drive this device does not know is left out, as there is nothing to name.
+ */
+export function drivesTakenAway(
+  before: Grant,
+  after: Grant,
+  drives: PostageStamp[],
+  defaultBatchHex: string | undefined,
+): PostageStamp[] {
+  const writable = (grant: Grant): Set<string> => {
+    if (grant === 'all') return new Set(drives.map((drive) => drive.batchID.toHex()))
+    if (grant === undefined) return new Set(defaultBatchHex ? [defaultBatchHex] : [])
+    return new Set(grant.map((batch) => batch.toHex()))
+  }
+  const kept = writable(after)
+  const lost = writable(before)
+  return drives.filter((drive) => {
+    const hex = drive.batchID.toHex()
+    return lost.has(hex) && !kept.has(hex)
+  })
+}
+
 /** Whether two grants name the same drives in the same order. */
 export function sameGrant(a: Grant, b: Grant): boolean {
   if (a === undefined || b === undefined || a === 'all' || b === 'all') return a === b

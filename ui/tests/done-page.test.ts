@@ -446,7 +446,16 @@ test('an app asks for a scratch drive later, and the Apps tab edits what it hold
   // Two drive rows; the third combobox is "Keep app connected for".
   await expect(page.getByRole('combobox')).toHaveCount(3)
   await expect(page.getByText('Scratch drive', { exact: true })).toBeVisible()
+  // Taking a drive away is confirmed by typing a phrase (#925); until then
+  // the grant stands.
   await page.getByRole('combobox').nth(1).selectOption('')
+  const confirmDialog = page.getByRole('dialog')
+  await expect(confirmDialog.getByText('Nothing is copied or moved.')).toBeVisible()
+  const confirmButton = confirmDialog.getByRole('button', { name: 'Change drives' })
+  await expect(confirmButton).toBeDisabled()
+  expect(await grantOf(page)).toEqual(granted)
+  await confirmDialog.getByRole('textbox', { name: /to confirm/ }).fill('change drives')
+  await confirmButton.click()
   await expect(page.getByText('Permissions saved')).toBeVisible()
   expect(await grantOf(page)).toEqual([(granted as string[])[0]])
 })

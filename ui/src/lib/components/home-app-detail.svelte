@@ -22,11 +22,13 @@
   import {
     type ConnectedApp,
     type PermissionName,
+    type PostageStamp,
     appSessionDuration,
     effectivePermissions,
     sharingDefault,
   } from '@snaha/swarm-id/internal'
 
+  import AppDrivesDialog from '$lib/components/app-drives-dialog.svelte'
   import DrivePickerRows from '$lib/components/drive-picker-rows.svelte'
   import { Button } from '$lib/components/ui/button'
   import { Select } from '$lib/components/ui/select'
@@ -34,9 +36,11 @@
   import { type PickerRow, kindOf } from '$lib/drive-request'
   import { CONNECTION_DAYS_OPTIONS, daysToMs, msToDays } from '$lib/duration'
   import {
+    type Grant,
     PERMISSION_NAMES,
     SWITCH_COPY,
     askedPatch,
+    drivesTakenAway,
     editRows,
     grantAfterEdit,
     pinned,
@@ -72,17 +76,39 @@
   // Re-derived from the grant after each save; the picker edits the rows in place.
   let rows: PickerRow[] = $derived(editRows(app.drives, drives, defaultBatchHex))
 
-  function saveDrives() {
-    const grant = grantAfterEdit(app.drives, rows, app.drives === 'all', defaultBatchHex)
-    if (sameGrant(grant, app.drives)) return
+  // An edit that takes drives away waits for the user to confirm it (#925)
+  let pending = $state<{ grant: Grant; takenAway: PostageStamp[]; undo: () => void } | undefined>(
+    undefined,
+  )
+
+  function applyDrives(grant: Grant) {
     account.setAppPermissions(app.appUrl, { drives: grant })
     toastStore.show('Permissions saved')
   }
 
-  function setAll(ticked: boolean) {
-    if (ticked) return
-    account.setAppPermissions(app.appUrl, { drives: undefined })
-    toastStore.show('Permissions saved')
+  /** Apply `grant` at once, or ask first when it takes drives away; `undo` puts the control back */
+  function proposeDrives(grant: Grant, undo: () => void) {
+    const takenAway = drivesTakenAway(app.drives, grant, drives, defaultBatchHex)
+    if (takenAway.length === 0) {
+      applyDrives(grant)
+      return
+    }
+    pending = { grant, takenAway, undo }
+  }
+
+  function saveDrives() {
+    const grant = grantAfterEdit(app.drives, rows, app.drives === 'all', defaultBatchHex)
+    if (sameGrant(grant, app.drives)) return
+    proposeDrives(grant, () => {
+      rows = editRows(app.drives, drives, defaultBatchHex)
+    })
+  }
+
+  function setAll(checkbox: HTMLInputElement) {
+    if (checkbox.checked) return
+    proposeDrives(undefined, () => {
+      checkbox.checked = true
+    })
   }
 
   // The popup's rule: write access is hidden while data sharing is off, so
@@ -130,7 +156,7 @@
           type="checkbox"
           checked
           class="mt-0.5 size-4 shrink-0"
-          onchange={(event) => setAll(event.currentTarget.checked)}
+          onchange={(event) => setAll(event.currentTarget)}
         />
         <span class="flex flex-col gap-1">
           <span class="font-medium">Grant this app full drive access</span>
@@ -207,3 +233,18 @@
     </Button>
   </div>
 </div>
+
+{#if pending}
+  <AppDrivesDialog
+    appName={app.appName}
+    takenAway={pending.takenAway}
+    onConfirm={() => {
+      if (pending) applyDrives(pending.grant)
+      pending = undefined
+    }}
+    onCancel={() => {
+      pending?.undo()
+      pending = undefined
+    }}
+  />
+{/if}
