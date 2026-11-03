@@ -5,7 +5,6 @@ import type { PostageStamp } from '@snaha/swarm-id/internal'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import {
-  BATCH_GONE_GRACE_MS,
   REREAD_MAX_MS,
   REREAD_MIN_MS,
   differsFromRecord,
@@ -41,8 +40,6 @@ function reading(stamp: PostageStamp, batchTTL?: number): ChainReading {
   return { depth: stamp.depth, amount: 2n, exists: true, usable: true, batchTTL }
 }
 
-const GONE: ChainReading = { exists: false, usable: false, batchTTL: 0 }
-
 describe('nextRereadMs', () => {
   it('re-reads halfway to the nearest expiry, within a minute and six hours', () => {
     expect(nextRereadMs([drive('aa'.repeat(32), 2 * HOUR_S)], NOW)).toBe(HOUR_S * MS)
@@ -75,10 +72,9 @@ describe('differsFromRecord', () => {
     expect(differsFromRecord(stamp, reading(stamp, 20 * DAY_S), NOW)).toBe(true)
   })
 
-  it('writes back a resize, a batch gone, and a first measurement', () => {
+  it('writes back a resize, a batch run out, and a first measurement', () => {
     expect(differsFromRecord(stamp, { ...reading(stamp, 30 * DAY_S), depth: 22 }, NOW)).toBe(true)
     expect(differsFromRecord(stamp, { ...reading(stamp, 0), usable: false }, NOW)).toBe(true)
-    expect(differsFromRecord(stamp, GONE, NOW)).toBe(true)
     const unmeasured = drive('bb'.repeat(32), undefined)
     expect(differsFromRecord(unmeasured, reading(unmeasured, DAY_S), NOW)).toBe(true)
   })
@@ -145,23 +141,6 @@ describe('watchDriveLifetimes', () => {
     const stop = watchDriveLifetimes(() => target, read)
     await vi.advanceTimersByTimeAsync(0)
     expect(target.updateStamp).not.toHaveBeenCalled()
-    stop()
-  })
-
-  it('marks a batch gone, but not one bought moments ago, and stops reading it', async () => {
-    const old = drive('aa'.repeat(32), 30 * DAY_S, NOW - BATCH_GONE_GRACE_MS - MS)
-    const fresh = drive('bb'.repeat(32), 30 * DAY_S)
-    const target = account([old, fresh])
-    const read = reader(() => GONE)
-    const stop = watchDriveLifetimes(() => target, read)
-    await vi.advanceTimersByTimeAsync(0)
-    expect(target.updateStamp).toHaveBeenCalledTimes(1)
-    expect(target.updateStamp.mock.calls[0]).toEqual([old.batchID, GONE])
-
-    // Gone is final: the next pass reads only what the record says exists
-    target.stamps = [{ ...old, exists: false }, fresh]
-    await vi.advanceTimersByTimeAsync(REREAD_MAX_MS)
-    expect(read.mock.calls[1][0]).toEqual([fresh])
     stop()
   })
 

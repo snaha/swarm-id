@@ -40,7 +40,7 @@ describe('confirmTopUp', () => {
 })
 
 describe('readStampsFromChain', () => {
-  const GONE = { batchID: new BatchId('cd'.repeat(32)) }
+  const UNSEEN = { batchID: new BatchId('cd'.repeat(32)) }
 
   /** A chain that knows only STAMP, at depth 20, with this price */
   function chain(lastPrice: bigint) {
@@ -55,12 +55,14 @@ describe('readStampsFromChain', () => {
     return { client, getPostageWriteConstraints }
   }
 
-  it('reads the price once, and tells a batch gone from a live one', async () => {
+  it('reads the price once, and gives no answer for a batch the chain does not show', async () => {
     const { client, getPostageWriteConstraints } = chain(1n)
-    const [live, gone] = await readStampsFromChain([STAMP, GONE], client)
+    const [live, unseen] = await readStampsFromChain([STAMP, UNSEEN], client)
     expect(live).toMatchObject({ exists: true, usable: true, depth: 20 })
     expect(live?.batchTTL).toBeGreaterThan(0)
-    expect(gone).toEqual({ exists: false, usable: false, batchTTL: 0 })
+    // No answer, not "gone": a lagging RPC or a mismatched chain config must
+    // not mark a drive gone on every device
+    expect(unseen).toBeUndefined()
     expect(getPostageWriteConstraints).toHaveBeenCalledTimes(1)
   })
 
@@ -86,7 +88,7 @@ describe('readStampsFromChain', () => {
 
   it('does not reconcile a record to a batch the chain does not show yet', async () => {
     const account = { updateStamp: vi.fn() } as unknown as Account
-    const stamp = GONE as Parameters<typeof reconcileStampFromChain>[1]
+    const stamp = UNSEEN as Parameters<typeof reconcileStampFromChain>[1]
     await expect(reconcileStampFromChain(account, stamp, chain(1n).client)).resolves.toBe(false)
     expect(account.updateStamp).not.toHaveBeenCalled()
   })

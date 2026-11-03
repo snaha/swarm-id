@@ -34,13 +34,6 @@ export const REREAD_MAX_MS = 6 * 60 * 60 * MS_PER_SECOND
 const LIFETIME_TOLERANCE_RATIO = 0.02
 const LIFETIME_TOLERANCE_MIN_SECONDS = 10 * 60
 
-/**
- * A drive this young that the chain does not know is an RPC that has not
- * caught up with its purchase, not a batch gone: marking it gone would make a
- * new drive unusable until the next read.
- */
-export const BATCH_GONE_GRACE_MS = 10 * 60 * MS_PER_SECOND
-
 /** When to read the drives again, from the nearest stored expiry */
 export function nextRereadMs(stamps: PostageStamp[], now: number): number {
   let untilExpiry = Infinity
@@ -64,7 +57,7 @@ export function differsFromRecord(
   reading: ChainReading,
   now: number,
 ): boolean {
-  if (reading.depth !== undefined && reading.depth !== stamp.depth) return true
+  if (reading.depth !== stamp.depth) return true
   if (reading.exists !== stamp.exists || reading.usable !== stamp.usable) return true
   // No price to measure by: nothing to compare, and nothing to erase
   if (reading.batchTTL === undefined) return false
@@ -81,21 +74,18 @@ type WatchedAccount = Pick<Account, 'stamps' | 'updateStamp'>
 
 /**
  * Read every live drive of `account()` now, then on the schedule, writing
- * back the readings that differ. A drive the chain no longer has is final, so
- * after the first pass it is not read again. Returns a stop function.
+ * back the readings that differ. Returns a stop function.
  */
 export function watchDriveLifetimes(
   account: () => WatchedAccount | undefined,
   read: (stamps: PostageStamp[]) => Promise<(ChainReading | undefined)[]> = readStampsFromChain,
 ): () => void {
   let stopped = false
-  let first = true
   let timer: ReturnType<typeof setTimeout> | undefined
 
   async function pass(): Promise<void> {
     const startedAt = Date.now()
-    const stamps = (account()?.stamps ?? []).filter((stamp) => first || stamp.exists)
-    first = false
+    const stamps = account()?.stamps ?? []
     // A read that throws (no chain client) is no answer, as a failed one is
     const readings = await read(stamps).catch(() => stamps.map(() => undefined))
     readings.forEach((reading, index) => {
@@ -108,7 +98,6 @@ export function watchDriveLifetimes(
       // from a reading at least as new as this one, which may predate its
       // transaction
       if ((current.updatedAt ?? current.createdAt) > startedAt) return
-      if (!reading.exists && startedAt - current.createdAt < BATCH_GONE_GRACE_MS) return
       const now = Date.now()
       if (differsFromRecord(current, reading, now)) {
         target.updateStamp(current.batchID, stampPatchFor(current, reading, now))
