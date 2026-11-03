@@ -364,7 +364,16 @@ that feeds the rival set. The beacon is a correctness mechanism; the heartbeat i
   state. Accepted because the lib is bundled into the centrally-deployed UI apps — every
   device loads the current build fresh, so the exposure is one already-open tab spanning a
   deploy, and the data at risk overlaps the unclean-crash slots already accepted above. A
-  future wire-format change must bump the topic domain (`…-v2`) instead of reusing v1.
+  future wire-format change must bump the topic domain instead of reusing it.
+- **v1 partition state is not read (#463).** The SBU1 leaf format publishes under
+  `swarm-id-partition-state-v2` and never reads the v1 topic. A device keeps its own used
+  slots across the switch only through its local cache rows, which it converts in one
+  IndexedDB transaction. Any device without them for a partition (another browser, cleared
+  storage, or a takeover of a lane written under v1) finds no v2 state, resumes that lane
+  from zero, and re-issues its slots, overwriting the chunks written under v1. Accepted while
+  the project is pre-production: there is no user data to keep, and the test data on such a
+  lane is lost. This is wider than the stale-tab window above, which bounded the exposure to
+  one open tab.
 
 ## Key constants (in `lib/src/utils/batch-utilization.ts` unless noted)
 

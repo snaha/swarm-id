@@ -302,16 +302,16 @@ published. An upload that was still in flight when a holder disappeared was ther
 acknowledged, and the next holder may safely overwrite its slots.
 
 ```text
-topic = keccak256( utf8("swarm-id-partition-state-v1") ‖ batchId ‖ uint32_be(partition) )
+topic = keccak256( utf8("swarm-id-partition-state-v2") ‖ batchId ‖ uint32_be(partition) )
 owner = backupSigner address
 ```
 
-The counter is not a single blob. It is split into the same `numUtilizationChunks` counter
-chunks, each uploaded with a **random** encryption key to the partition's reserved slot,
-yielding a 64-byte **encrypted reference** (`address ‖ key`). A single **reference chunk**
-concatenates those references (`N · 64 ≤ 4096` bytes, one chunk even at `N = 64`). A taking
-over device follows **pointer → reference chunk → leaves**, decrypting each from its
-embedded key.
+The counter is not a single blob. It is packed into **leaves** under a **frame** (see
+[Wire format](#wire-format-byte-layout) below), each leaf uploaded with a **random**
+encryption key to the partition's reserved slot, yielding a 64-byte **encrypted reference**
+(`address ‖ key`). A single **reference chunk** carries the frame, the exceptions and those
+references (`7 + 8·E + 64·L` bytes, one chunk at the width cap). A taking-over device follows
+**pointer → reference chunk → leaves**, decrypting each from its embedded key.
 
 ### The state pointer
 
@@ -395,12 +395,8 @@ leaf's exact bytes.
 The previous publish's frame is kept while it still fits the counter, so leaf boundaries
 hold and only the leaves a write touched are re-uploaded. A frame that no longer fits (or
 the once-per-epoch full re-pin) packs under the canonical frame and publishes every
-non-zero leaf.
-
-Given the previous publish's references and the counter it published, only the chunks whose
-bytes changed are uploaded again; unchanged chunks keep their reference. A typical upload
-changes one or two chunks, not all 32. On acquire the lease seeds this baseline from the
-resumed state, so even the first publish of a session is incremental.
+non-zero leaf. On acquire the lease seeds this baseline from the resumed state, so even the
+first publish of a session is incremental.
 
 ### Read semantics
 
