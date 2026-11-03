@@ -1119,6 +1119,45 @@ describe("SwarmIdClient request seam", () => {
     void upload.catch(() => {})
   })
 
+  // What a write cost reaches the dApp with its result (#932).
+  it("returns the chunks a write sent", async () => {
+    const upload = client.uploadData(new Uint8Array([1]))
+    deliver({
+      type: "uploadDataResponse",
+      requestId: lastPostedMessage().requestId,
+      reference: "ab".repeat(32),
+      stampedChunks: 3,
+    })
+    await expect(upload).resolves.toMatchObject({ stampedChunks: 3 })
+  })
+
+  it("sums an epoch update's two writes, and leaves a part it was not told unknown", async () => {
+    const writer = client.makeEpochFeedWriter({ topic: "12".repeat(32) })
+    const update = async (feedChunks: number | undefined) => {
+      const result = writer.uploadPayload(new Uint8Array([1]))
+      deliver({
+        type: "uploadDataResponse",
+        requestId: lastPostedMessage().requestId,
+        reference: "ab".repeat(32),
+        stampedChunks: 2,
+      })
+      await vi.waitFor(() =>
+        expect(lastPostedMessage().type).toBe("epochFeedUploadReference"),
+      )
+      deliver({
+        type: "epochFeedUploadReferenceResponse",
+        requestId: lastPostedMessage().requestId,
+        socAddress: "cd".repeat(32),
+        epoch: { start: "0", level: 32 },
+        timestamp: "1",
+        stampedChunks: feedChunks,
+      })
+      return result
+    }
+    expect(await update(1)).toMatchObject({ stampedChunks: 3 })
+    expect((await update(undefined)).stampedChunks).toBeUndefined()
+  })
+
   // The raw updates name a drive the same way, and go to it, SOC and all.
   const RAW_DRIVE = "cd".repeat(32)
   const RAW_DRIVE_OPTIONS = [

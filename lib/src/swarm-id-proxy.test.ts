@@ -859,6 +859,143 @@ describe("SwarmIdProxy subsidised-mode selection", () => {
   // and a term one of them misses reports `subsidised, canUpload: true` for a
   // session whose uploads then take the user-stamp branch and fail there.
   describe("where the upload actually goes", () => {
+    // What a write cost reaches the dApp with its result (#932). Through the
+    // gateway, which returns no tag a dApp could read the count from.
+    describe("reports the chunks a write sent", () => {
+      const CHUNK_PAYLOAD_SIZE = 4096
+      /** Four leaves under one intermediate chunk. */
+      const MULTI_CHUNK_SIZE = CHUNK_PAYLOAD_SIZE * 3 + 1
+
+      const gatewayAccepts = () =>
+        vi
+          .spyOn(globalThis, "fetch")
+          .mockImplementation(
+            async () =>
+              new Response(JSON.stringify({ reference: "ab".repeat(32) })),
+          )
+
+      const send = (data: Record<string, unknown>) =>
+        messageListener({
+          data,
+          origin: PARENT_ORIGIN,
+          source: parentWindow,
+        } as unknown as MessageEvent)
+
+      const response = async (type: string) => {
+        await vi.waitFor(() =>
+          expect(
+            parentWindow.postMessage.mock.calls.some(
+              ([message]) =>
+                message?.type === type || message?.type === "error",
+            ),
+          ).toBe(true),
+        )
+        return parentWindow.postMessage.mock.calls
+          .map(([message]) => message)
+          .find(
+            (message) => message?.type === type || message?.type === "error",
+          )
+      }
+
+      it("on uploadData", async () => {
+        await identify(GATEWAY_URL)
+        setAccountState({})
+        const fetchSpy = gatewayAccepts()
+        await send({
+          type: "uploadData",
+          requestId: "u1",
+          data: new Uint8Array(MULTI_CHUNK_SIZE),
+          options: {},
+        })
+        const answer = await response("uploadDataResponse")
+        expect(answer).toMatchObject({
+          type: "uploadDataResponse",
+          stampedChunks: 5,
+        })
+        expect(answer.stampedChunks).toBe(fetchSpy.mock.calls.length)
+      })
+
+      it("on an ACT upload, its history and grantee list included", async () => {
+        await identify(GATEWAY_URL)
+        setAccountState({})
+        const fetchSpy = gatewayAccepts()
+        await send({
+          type: "actUploadData",
+          requestId: "a1",
+          data: new Uint8Array(16),
+          grantees: [],
+          options: {},
+        })
+        const answer = await response("actUploadDataResponse")
+        expect(answer.type).toBe("actUploadDataResponse")
+        // The content chunk and the ACT's own: more than the content alone.
+        expect(answer.stampedChunks).toBeGreaterThan(1)
+        expect(answer.stampedChunks).toBe(fetchSpy.mock.calls.length)
+      })
+
+      // Every write handler, not only the two above: one that dropped its
+      // counter would report 0, telling the dApp the write cost nothing.
+      const ID = "11".repeat(32)
+      const REF = "22".repeat(32)
+      const WRITES: [string, Record<string, unknown>][] = [
+        ["uploadFile", { data: new Uint8Array(16), options: {} }],
+        [
+          "uploadFiles",
+          {
+            files: [{ path: "a.txt", data: new Uint8Array(16) }],
+            options: {},
+          },
+        ],
+        ["uploadChunk", { data: new Uint8Array(16), options: {} }],
+        [
+          "socUpload",
+          { identifier: ID, data: new Uint8Array(16), options: {} },
+        ],
+        [
+          "socRawUpload",
+          { identifier: ID, data: new Uint8Array(16), options: {} },
+        ],
+        [
+          "seqFeedUploadPayload",
+          { topic: ID, data: new Uint8Array(16), index: 0, options: {} },
+        ],
+        [
+          "seqFeedUploadRawPayload",
+          { topic: ID, data: new Uint8Array(16), index: 0, options: {} },
+        ],
+        [
+          "seqFeedUploadReference",
+          { topic: ID, reference: REF, index: 0, options: {} },
+        ],
+        ["createFeedManifest", { topic: ID, uploadOptions: {} }],
+        [
+          "gsocSend",
+          {
+            signer: "33".repeat(32),
+            identifier: ID,
+            data: new Uint8Array(16),
+            options: {},
+          },
+        ],
+        ["epochFeedUploadReference", { topic: ID, at: 1, reference: REF }],
+      ]
+      it.each(WRITES)("on %s", async (type, fields) => {
+        await identify(GATEWAY_URL)
+        setAccountState({})
+        const fetchSpy = gatewayAccepts()
+        await send({ type, requestId: "w1", ...fields })
+        const answer = await response(`${type}Response`)
+        expect(answer.type).toBe(`${type}Response`)
+        // Chunk and SOC POSTs only: a tag is not a chunk.
+        const posts = fetchSpy.mock.calls.filter(
+          ([url, init]) =>
+            init?.method === "POST" && /\/(chunks|soc\/)/.test(String(url)),
+        ).length
+        expect(posts).toBeGreaterThan(0)
+        expect(answer.stampedChunks).toBe(posts)
+      })
+    })
+
     it("routes to the gateway in subsidised mode", async () => {
       await identify(GATEWAY_URL)
       setAccountState({})

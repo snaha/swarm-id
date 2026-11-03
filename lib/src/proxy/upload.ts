@@ -79,6 +79,15 @@ export class SocUploadError extends Error {
 // ============================================================================
 
 /**
+ * The chunks one write has sent so far (#932): one per stamp in stamper mode,
+ * one per chunk the gateway accepted in subsidised mode. The proxy puts a
+ * fresh one on the target of each request and reports it with the result.
+ */
+export interface ChunkCounter {
+  chunks: number
+}
+
+/**
  * Upload target: stamper-based (user has postage batch) or subsidised gateway
  */
 export type UploadTarget =
@@ -87,10 +96,12 @@ export type UploadTarget =
       bee: Bee
       stamper: Stamper
       workerPool?: StampWorkerPool
+      counter?: ChunkCounter
     }
   | {
       mode: "subsidised"
       gatewayUrl: string
+      counter?: ChunkCounter
     }
 
 /**
@@ -214,11 +225,17 @@ type StampChunkFn = (address: Uint8Array) => Promise<EnvelopeWithBatchId>
 function makeStampFn(
   stamper: Stamper,
   workerPool?: StampWorkerPool,
+  counter?: ChunkCounter,
 ): StampChunkFn {
-  if (workerPool) {
-    return (address) => workerPool.stampChunkData(address)
+  const stamp: StampChunkFn = workerPool
+    ? (address) => workerPool.stampChunkData(address)
+    : (address) => Promise.resolve(stamper.stamp(address))
+  if (!counter) return stamp
+  return async (address) => {
+    const envelope = await stamp(address)
+    counter.chunks++
+    return envelope
   }
-  return (address) => Promise.resolve(stamper.stamp(address))
 }
 
 // ============================================================================
@@ -306,6 +323,7 @@ async function uploadChunkViaSubsidisedGatewayInternal(
   gatewayUrl: string,
   chunkData: Uint8Array,
   options?: { deferred?: boolean },
+  counter?: ChunkCounter,
 ): Promise<{ reference: string }> {
   const url = `${normalizeUrl(gatewayUrl)}/chunks`
 
@@ -337,6 +355,7 @@ async function uploadChunkViaSubsidisedGatewayInternal(
   }
 
   const result = await response.json()
+  if (counter) counter.chunks++
   return { reference: result.reference }
 }
 
@@ -627,6 +646,7 @@ async function uploadDataPlain(
         target.gatewayUrl,
         chunk.data,
         uploadOptions,
+        target.counter,
       )
       processedChunks++
       reportProgress()
@@ -643,6 +663,7 @@ async function uploadDataPlain(
           target.gatewayUrl,
           chunk.data,
           uploadOptions,
+          target.counter,
         )
         totalChunks++
         processedChunks++
@@ -661,7 +682,7 @@ async function uploadDataPlain(
       deferred: options?.deferred ?? false,
     }
 
-    const stamp = makeStampFn(stamper, workerPool)
+    const stamp = makeStampFn(stamper, workerPool, target.counter)
 
     // Upload leaf chunks
     for (const chunk of chunks) {
@@ -745,6 +766,7 @@ async function uploadDataEncrypted(
         target.gatewayUrl,
         chunk.data,
         uploadOptions,
+        target.counter,
       )
       onChunkUploaded(chunk.address)
     }
@@ -757,6 +779,7 @@ async function uploadDataEncrypted(
           target.gatewayUrl,
           chunkData,
           uploadOptions,
+          target.counter,
         )
         const address = await calculateChunkAddress(chunkData)
         uploadedChunkAddresses.push(address.toUint8Array())
@@ -782,7 +805,7 @@ async function uploadDataEncrypted(
       tag,
       deferred: options?.deferred ?? false,
     }
-    const stamp = makeStampFn(stamper, workerPool)
+    const stamp = makeStampFn(stamper, workerPool, target.counter)
 
     // Open WebSocket stream if requested
     let wsStream: ChunkUploadStream | undefined
@@ -954,6 +977,7 @@ export async function uploadSOC(
         errorText,
       )
     }
+    if (target.counter) target.counter.chunks++
 
     return {
       socAddress: socAddressBytes,
@@ -965,6 +989,7 @@ export async function uploadSOC(
     const tag = options?.tag ?? (await tryCreateTag(bee))
 
     const envelope = stamper.stamp(socAddressBytes)
+    if (target.counter) target.counter.chunks++
 
     const stampHex = convertEnvelopeToMarshaledStamp(envelope).toHex()
     const url = `${bee.url}/soc/${owner.toHex()}/${identifier.toHex()}?sig=${signature.toHex()}`
@@ -1024,11 +1049,12 @@ export async function uploadChunk(
       target.gatewayUrl,
       chunkData,
       { deferred: options?.deferred },
+      target.counter,
     )
   } else {
     const { bee, stamper } = target
     const address = await calculateChunkAddress(chunkData)
-    const stamp = makeStampFn(stamper)
+    const stamp = makeStampFn(stamper, undefined, target.counter)
 
     await uploadStampedChunkViaHttp(
       bee,
