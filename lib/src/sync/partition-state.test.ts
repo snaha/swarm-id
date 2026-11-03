@@ -115,6 +115,7 @@ afterEach(() => {
 async function makeBoundStamper(): Promise<UtilizationAwareStamper> {
   const cache = {
     getAllChunks: async () => [],
+    convertBatch: async () => [],
     putChunk: async () => undefined,
   } as unknown as Parameters<typeof UtilizationAwareStamper.create>[3]
   const stamper = await UtilizationAwareStamper.create(
@@ -140,7 +141,9 @@ async function makeBoundStamper(): Promise<UtilizationAwareStamper> {
  */
 function leafyCounter(): Uint32Array {
   const localCounter = new Uint32Array(NUM_BUCKETS)
-  for (let b = 0; b < 200; b++) localCounter[b * 50] = 1
+  // Delta 2 packs at width 2 (4 leaves) with every non-zero bucket in leaf 0;
+  // delta 1 would fit width 1, whose 2 leaves leave a single zero one
+  for (let b = 0; b < 200; b++) localCounter[b * 50] = 2
   return localCounter
 }
 

@@ -32,7 +32,10 @@ import {
 } from "../chunk"
 import { stamp as stampAtSlot } from "@ethersphere/core-sdk"
 import { Binary } from "cafe-utility"
-import type { UtilizationStoreDB } from "../storage/utilization-store"
+import type {
+  ChunkCacheEntry,
+  UtilizationStoreDB,
+} from "../storage/utilization-store"
 import { uploadChunk, type UploadTarget } from "../proxy/upload"
 import { tryCreateTag } from "./tag"
 import { lockSocAddress } from "./lock-soc"
@@ -298,6 +301,45 @@ export function mergeChunk(
  * Merge a row written before the fixed layout on a regular drive at depth ≤
  * `LEGACY_UINT16_MAX_DEPTH`: little-endian uint16 counters, 2,048 per chunk.
  */
+/**
+ * A batch's cache rows in the fixed layout (#463), or `undefined` when every
+ * row already is. Rows without the format marker were serialized at the
+ * batch's depth of the time: uint16 below depth 32 on a regular drive,
+ * uint32 otherwise. Each row is read by its own marker, so a batch that holds
+ * both is read right whichever rows were converted.
+ */
+export function convertLegacyCacheRows(
+  batchId: string,
+  rows: ChunkCacheEntry[],
+  depth: number,
+  scratch: boolean,
+): ChunkCacheEntry[] | undefined {
+  if (rows.every((row) => row.format === CACHE_ROW_FORMAT)) return undefined
+  const legacyUint16 = !scratch && depth <= LEGACY_UINT16_MAX_DEPTH
+  const dataCounters = new Uint32Array(NUM_BUCKETS)
+  // Legacy rows first: a converted row of the same index wins over them
+  const ordered = [
+    ...rows.filter((row) => row.format !== CACHE_ROW_FORMAT),
+    ...rows.filter((row) => row.format === CACHE_ROW_FORMAT),
+  ]
+  for (const row of ordered) {
+    if (row.format !== CACHE_ROW_FORMAT && legacyUint16) {
+      mergeLegacyUint16Chunk(dataCounters, row.chunkIndex, row.data)
+    } else if (row.chunkIndex < NUM_UTILIZATION_CHUNKS) {
+      mergeChunk(dataCounters, row.chunkIndex, row.data)
+    }
+  }
+  return Array.from({ length: NUM_UTILIZATION_CHUNKS }, (_unused, i) => ({
+    batchId,
+    chunkIndex: i,
+    data: extractChunk(dataCounters, i),
+    contentHash: "",
+    nonce: 0,
+    format: CACHE_ROW_FORMAT,
+    lastAccess: Date.now(),
+  }))
+}
+
 function mergeLegacyUint16Chunk(
   dataCounters: Uint32Array,
   chunkIndex: number,
@@ -1302,7 +1344,7 @@ export class UtilizationAwareStamper implements Stamper, SlotAssigner {
       batchId,
       lastSync: existing?.lastSync ?? Date.now(),
       chunkCount: existing?.chunkCount ?? 0,
-      syncedReferences: existing?.syncedReferences,
+      stateReferences: existing?.stateReferences,
       stateChunkBuckets: {
         ...(existing?.stateChunkBuckets ?? {}),
         [partition]: buckets,
@@ -1515,44 +1557,21 @@ export class UtilizationAwareStamper implements Stamper, SlotAssigner {
     // Initialize utilization state (always, since owner is now required)
     const utilizationState = initializeBatchUtilization(batchId, depth)
 
-    // Try to load utilization state from cache
+    // Try to load utilization state from cache. Rows written before the fixed
+    // layout (#463) are converted in the same transaction that reads them, so
+    // the conversion cannot be left half done or run twice on stale rows.
     try {
       const batchIdHex = batchId.toHex()
-      const cachedChunks = await cache.getAllChunks(batchIdHex)
-      // Rows without the format marker predate the fixed layout (#463) and
-      // were serialized at the batch's depth of the time. Read them under
-      // that rule and rewrite the batch in the fixed layout, once.
-      const legacy = cachedChunks.some(
-        (cached) => cached.format !== CACHE_ROW_FORMAT,
+      const cachedChunks = await cache.convertBatch(batchIdHex, (rows) =>
+        convertLegacyCacheRows(batchIdHex, rows, depth, scratch),
       )
-      const legacyUint16 =
-        legacy && !scratch && depth <= LEGACY_UINT16_MAX_DEPTH
       for (const cached of cachedChunks) {
-        if (legacyUint16) {
-          mergeLegacyUint16Chunk(
-            utilizationState.dataCounters,
-            cached.chunkIndex,
-            cached.data,
-          )
-        } else if (cached.chunkIndex < NUM_UTILIZATION_CHUNKS) {
+        if (cached.chunkIndex < NUM_UTILIZATION_CHUNKS) {
           mergeChunk(
             utilizationState.dataCounters,
             cached.chunkIndex,
             cached.data,
           )
-        }
-      }
-      if (legacy) {
-        for (let i = 0; i < NUM_UTILIZATION_CHUNKS; i++) {
-          await cache.putChunk({
-            batchId: batchIdHex,
-            chunkIndex: i,
-            data: extractChunk(utilizationState.dataCounters, i),
-            contentHash: "",
-            nonce: 0,
-            format: CACHE_ROW_FORMAT,
-            lastAccess: Date.now(),
-          })
         }
       }
     } catch (error) {
@@ -1873,7 +1892,7 @@ export class UtilizationAwareStamper implements Stamper, SlotAssigner {
    */
   async getSyncedReference(partition: number): Promise<string | undefined> {
     const meta = await this.cache.getMetadata(this.batchId.toHex())
-    return meta?.syncedReferences?.[partition]
+    return meta?.stateReferences?.[partition]
   }
 
   /**
@@ -1891,8 +1910,8 @@ export class UtilizationAwareStamper implements Stamper, SlotAssigner {
       batchId,
       lastSync: existing?.lastSync ?? Date.now(),
       chunkCount: existing?.chunkCount ?? 0,
-      syncedReferences: {
-        ...(existing?.syncedReferences ?? {}),
+      stateReferences: {
+        ...(existing?.stateReferences ?? {}),
         [partition]: referenceHex,
       },
       stateChunkBuckets: existing?.stateChunkBuckets,

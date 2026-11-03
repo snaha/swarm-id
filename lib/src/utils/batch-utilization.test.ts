@@ -285,6 +285,7 @@ describe("UtilizationAwareStamper partition awareness", () => {
   function makeEmptyCache(): UtilizationStoreDB {
     return {
       getAllChunks: async () => [],
+      convertBatch: async () => [],
       putChunk: async () => undefined,
     } as unknown as UtilizationStoreDB
   }
@@ -1210,6 +1211,21 @@ describe("UtilizationAwareStamper synced reference", () => {
         for (const entry of store.values()) entries.push(entry)
         return entries.sort((a, b) => a.chunkIndex - b.chunkIndex)
       },
+      convertBatch: async (
+        batchId: string,
+        convert: (rows: ChunkCacheEntry[]) => ChunkCacheEntry[] | undefined,
+      ) => {
+        const rows = [...store.values()]
+          .filter((entry) => entry.batchId === batchId)
+          .sort((a, b) => a.chunkIndex - b.chunkIndex)
+        const replacement = convert(rows)
+        if (!replacement) return rows
+        for (const row of rows) store.delete(`${batchId}:${row.chunkIndex}`)
+        for (const row of replacement) {
+          store.set(`${batchId}:${row.chunkIndex}`, { ...row })
+        }
+        return replacement
+      },
       putChunk: async (entry: ChunkCacheEntry) => {
         store.set(`${entry.batchId}:${entry.chunkIndex}`, { ...entry })
       },
@@ -1234,6 +1250,21 @@ describe("UtilizationAwareStamper synced reference", () => {
       TEST_ENC_KEY_LM,
     )
   }
+
+  // A reference stored before v2 names a v1 reference chunk, which no v2
+  // reader can parse; adopted as the v2 heartbeat target, it would leave the
+  // partition unreadable to every other device's takeover (#918 review).
+  it("ignores a synced reference stored before the v2 partition state", async () => {
+    const cache = makeRecordingCache()
+    await cache.putMetadata({
+      batchId: TEST_BATCH_ID.toHex(),
+      lastSync: 0,
+      chunkCount: 0,
+      syncedReferences: { 0: "v1-reference" },
+    } as BatchMetadata)
+    const stamper = await makeStamper(cache)
+    expect(await stamper.getSyncedReference(0)).toBeUndefined()
+  })
 
   it("getSyncedReference round-trips through setSyncedReference (per partition, merge-preserving)", async () => {
     const cache = makeRecordingCache()
@@ -1314,9 +1345,22 @@ describe("UtilizationAwareStamper cache rows (#463)", () => {
   function makeRecordingCache(seed: ChunkCacheEntry[] = []) {
     const rows = new Map<number, ChunkCacheEntry>()
     for (const row of seed) rows.set(row.chunkIndex, { ...row })
+    const sorted = () =>
+      [...rows.values()].sort((a, b) => a.chunkIndex - b.chunkIndex)
     const cache = {
-      getAllChunks: async () =>
-        [...rows.values()].sort((a, b) => a.chunkIndex - b.chunkIndex),
+      getAllChunks: async () => sorted(),
+      // All or nothing, as the IndexedDB transaction is
+      convertBatch: async (
+        _batchId: string,
+        convert: (rows: ChunkCacheEntry[]) => ChunkCacheEntry[] | undefined,
+      ) => {
+        const replacement = convert(sorted())
+        if (replacement) {
+          rows.clear()
+          for (const row of replacement) rows.set(row.chunkIndex, { ...row })
+        }
+        return sorted()
+      },
       putChunk: async (entry: ChunkCacheEntry) => {
         rows.set(entry.chunkIndex, { ...entry })
       },
@@ -1468,6 +1512,7 @@ describe("hasBucketCapacity (partition-aware, #416)", () => {
 describe("updateAfterWrite capacity guard (#416)", () => {
   const cache = {
     getAllChunks: async () => [],
+    convertBatch: async () => [],
     putChunk: async () => undefined,
   } as unknown as UtilizationStoreDB
 
