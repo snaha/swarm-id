@@ -189,31 +189,42 @@ export function grantAfterEdit(
  * The drives an app can write to under `grant`, as batch hexes: no grant
  * means the account default (the one the lib resolves, so pass the explicit
  * default, not a fallback), `"all"` every drive on this device. A listed
- * drive this device does not know yet is included.
+ * drive this device does not know yet is included; a deleted one is not, so
+ * pass the stamps with their tombstones.
  */
 export function writableBatches(
   grant: Grant,
-  drives: PostageStamp[],
+  stamps: PostageStamp[],
   defaultBatchHex: string | undefined,
 ): string[] {
-  if (grant === 'all') return drives.map((drive) => drive.batchID.toHex())
-  if (grant === undefined) return defaultBatchHex ? [defaultBatchHex] : []
-  return grant.map((batch) => batch.toHex())
+  const deleted = new Set(
+    stamps.filter((stamp) => stamp.deletedAt !== undefined).map((stamp) => stamp.batchID.toHex()),
+  )
+  const hexes =
+    grant === 'all'
+      ? stamps.map((stamp) => stamp.batchID.toHex())
+      : grant === undefined
+        ? defaultBatchHex
+          ? [defaultBatchHex]
+          : []
+        : grant.map((batch) => batch.toHex())
+  return hexes.filter((hex) => !deleted.has(hex))
 }
 
 /**
  * The drives an app can write to under `before` and no longer can under
  * `after` (#925), as batch hexes. A drive this device does not know yet is
- * named too: losing it unseen is the case most worth a warning.
+ * named too: losing it unseen is the case most worth a warning. A deleted
+ * one is not: there is nothing left on it to lose.
  */
 export function drivesTakenAway(
   before: Grant,
   after: Grant,
-  drives: PostageStamp[],
+  stamps: PostageStamp[],
   defaultBatchHex: string | undefined,
 ): string[] {
-  const kept = new Set(writableBatches(after, drives, defaultBatchHex))
-  return writableBatches(before, drives, defaultBatchHex).filter((hex) => !kept.has(hex))
+  const kept = new Set(writableBatches(after, stamps, defaultBatchHex))
+  return writableBatches(before, stamps, defaultBatchHex).filter((hex) => !kept.has(hex))
 }
 
 /** Whether two grants name the same drives in the same order. */

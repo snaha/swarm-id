@@ -25,11 +25,13 @@
     takenAway: string[]
     /** Whether the app can still save anywhere after the edit */
     keepsAny: boolean
+    /** Whether the app is left fewer drives, so this page cannot give them back */
+    shrinks: boolean
     onConfirm: () => void
     onCancel: () => void
   }
 
-  let { appName, takenAway, keepsAny, onConfirm, onCancel }: Props = $props()
+  let { appName, takenAway, keepsAny, shrinks, onConfirm, onCancel }: Props = $props()
 
   let typed = $state('')
   const confirmed = $derived(typed.trim().toLowerCase() === CONFIRM_PHRASE)
@@ -59,7 +61,7 @@
     <p>
       What {appName} already saved stays where it is.
       {#if keepsAny}
-        What it saves from now on goes to the drives it keeps.
+        What it saves from now on goes to the drives it is left with.
       {:else}
         It will have no drive left, so it cannot save anything until you give it one.
       {/if}
@@ -67,14 +69,15 @@
       may stop working as expected.
     </p>
     <p>
-      {#if one}
-        Do not remove that drive, or let it expire, while you still need what is on it: that data is
-        lost with it.
-      {:else}
-        Do not remove those drives, or let them expire, while you still need what is on them: that
-        data is lost with them.
-      {/if}
+      Do not remove {one ? 'that drive' : 'those drives'}, or let {one ? 'it' : 'them'} expire, while
+      you still need what is on {one ? 'it' : 'them'}: that data is lost with {one ? 'it' : 'them'}.
     </p>
+    {#if shrinks}
+      <p>
+        You cannot give {one ? 'it' : 'them'} back from here: {appName} has to ask for
+        {one ? 'it' : 'them'} again.
+      </p>
+    {/if}
   </div>
   <div class="flex flex-col gap-1">
     <label for="confirm-app-drives" class="text-sm">

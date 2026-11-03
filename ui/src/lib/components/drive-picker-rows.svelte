@@ -22,7 +22,8 @@
     rows: PickerRow[]
     /** What an empty optional row says: "Please select drive" on a request, "None" on an edit. */
     emptyLabel: string
-    onchange?: () => void
+    /** After a row changes; `added` is the drive just created for it through "Add new drive…" */
+    onchange?: (added?: string) => void
   }
 
   let { account, rows = $bindable(), emptyLabel, onchange }: Props = $props()
@@ -77,7 +78,7 @@
     const added = drives.find((drive) => !batchesBeforeAdd.has(drive.batchID.toHex()))
     if (addingFor !== undefined && added) {
       rows[addingFor].chosen = added.batchID.toHex()
-      onchange?.()
+      onchange?.(added.batchID.toHex())
     }
   }
 </script>

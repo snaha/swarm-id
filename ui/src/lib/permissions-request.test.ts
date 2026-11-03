@@ -17,6 +17,7 @@ import {
   requestRows,
   switchesToAsk,
   unknownDriveLabel,
+  writableBatches,
 } from '$lib/permissions-request'
 
 const A = 'aa'.repeat(32)
@@ -158,6 +159,16 @@ describe('an edit', () => {
       expect(
         drivesTakenAway([new BatchId(A), new BatchId(unknown)], [new BatchId(A)], drives, A),
       ).toEqual([unknown])
+    })
+
+    it('takes nothing away by dropping a deleted drive, and keeps nothing on one', () => {
+      const deleted = { ...drive(S), deletedAt: 1 }
+      const stamps = [...drives, deleted]
+      expect(
+        drivesTakenAway([new BatchId(A), new BatchId(S)], [new BatchId(A)], stamps, A),
+      ).toEqual([])
+      expect(drivesTakenAway('all', undefined, stamps, A)).toEqual([B])
+      expect(writableBatches([new BatchId(S)], stamps, A)).toEqual([])
     })
 
     it('takes nothing away by adding a drive, or by pinning the default it tracked', () => {
