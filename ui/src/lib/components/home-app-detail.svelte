@@ -22,7 +22,6 @@
   import {
     type ConnectedApp,
     type PermissionName,
-    type PostageStamp,
     appSessionDuration,
     effectivePermissions,
     sharingDefault,
@@ -34,6 +33,7 @@
   import { Select } from '$lib/components/ui/select'
   import { Switch } from '$lib/components/ui/switch'
   import { type PickerRow, kindOf } from '$lib/drive-request'
+  import { driveDisplayName } from '$lib/drives'
   import { CONNECTION_DAYS_OPTIONS, daysToMs, msToDays } from '$lib/duration'
   import {
     type Grant,
@@ -45,6 +45,8 @@
     grantAfterEdit,
     pinned,
     sameGrant,
+    unknownDriveLabel,
+    writableBatches,
   } from '$lib/permissions-request'
   import { toastStore } from '$lib/stores/toast.svelte'
   import type { Account } from '$lib/types'
@@ -76,10 +78,22 @@
   // Re-derived from the grant after each save; the picker edits the rows in place.
   let rows: PickerRow[] = $derived(editRows(app.drives, drives, defaultBatchHex))
 
-  // An edit that takes drives away waits for the user to confirm it (#925)
-  let pending = $state<{ grant: Grant; takenAway: PostageStamp[]; undo: () => void } | undefined>(
-    undefined,
-  )
+  // What a grant with no list resolves to in the lib: the explicit default
+  // only, never the picker's first-regular-drive fallback.
+  const explicitDefaultHex = $derived(account.defaultPostageStampBatchID?.toHex())
+
+  // An edit that takes drives away waits for the user to confirm it (#925).
+  // `before` is the grant it was proposed against, so a change that lands
+  // meanwhile (another device, the permissions popup) is not overwritten.
+  let pending = $state<
+    | { before: Grant; grant: Grant; takenAway: string[]; keepsAny: boolean; undo: () => void }
+    | undefined
+  >(undefined)
+
+  function nameOf(hex: string): string {
+    const drive = drives.find((candidate) => candidate.batchID.toHex() === hex)
+    return drive ? driveDisplayName(drive) : unknownDriveLabel(hex)
+  }
 
   function applyDrives(grant: Grant) {
     account.setAppPermissions(app.appUrl, { drives: grant })
@@ -88,12 +102,29 @@
 
   /** Apply `grant` at once, or ask first when it takes drives away; `undo` puts the control back */
   function proposeDrives(grant: Grant, undo: () => void) {
-    const takenAway = drivesTakenAway(app.drives, grant, drives, defaultBatchHex)
+    const takenAway = drivesTakenAway(app.drives, grant, drives, explicitDefaultHex)
     if (takenAway.length === 0) {
       applyDrives(grant)
       return
     }
-    pending = { grant, takenAway, undo }
+    pending = {
+      before: app.drives,
+      grant,
+      takenAway: takenAway.map(nameOf),
+      keepsAny: writableBatches(grant, drives, explicitDefaultHex).length > 0,
+      undo,
+    }
+  }
+
+  function confirmPending() {
+    if (!pending) return
+    if (sameGrant(pending.before, app.drives)) {
+      applyDrives(pending.grant)
+    } else {
+      pending.undo()
+      toastStore.show("This app's drives changed meanwhile; nothing was saved")
+    }
+    pending = undefined
   }
 
   function saveDrives() {
@@ -238,10 +269,8 @@
   <AppDrivesDialog
     appName={app.appName}
     takenAway={pending.takenAway}
-    onConfirm={() => {
-      if (pending) applyDrives(pending.grant)
-      pending = undefined
-    }}
+    keepsAny={pending.keepsAny}
+    onConfirm={confirmPending}
     onCancel={() => {
       pending?.undo()
       pending = undefined

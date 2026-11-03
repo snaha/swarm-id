@@ -186,27 +186,34 @@ export function grantAfterEdit(
 }
 
 /**
+ * The drives an app can write to under `grant`, as batch hexes: no grant
+ * means the account default (the one the lib resolves, so pass the explicit
+ * default, not a fallback), `"all"` every drive on this device. A listed
+ * drive this device does not know yet is included.
+ */
+export function writableBatches(
+  grant: Grant,
+  drives: PostageStamp[],
+  defaultBatchHex: string | undefined,
+): string[] {
+  if (grant === 'all') return drives.map((drive) => drive.batchID.toHex())
+  if (grant === undefined) return defaultBatchHex ? [defaultBatchHex] : []
+  return grant.map((batch) => batch.toHex())
+}
+
+/**
  * The drives an app can write to under `before` and no longer can under
- * `after` (#925): no grant means the account default, `"all"` every drive.
- * A drive this device does not know is left out, as there is nothing to name.
+ * `after` (#925), as batch hexes. A drive this device does not know yet is
+ * named too: losing it unseen is the case most worth a warning.
  */
 export function drivesTakenAway(
   before: Grant,
   after: Grant,
   drives: PostageStamp[],
   defaultBatchHex: string | undefined,
-): PostageStamp[] {
-  const writable = (grant: Grant): Set<string> => {
-    if (grant === 'all') return new Set(drives.map((drive) => drive.batchID.toHex()))
-    if (grant === undefined) return new Set(defaultBatchHex ? [defaultBatchHex] : [])
-    return new Set(grant.map((batch) => batch.toHex()))
-  }
-  const kept = writable(after)
-  const lost = writable(before)
-  return drives.filter((drive) => {
-    const hex = drive.batchID.toHex()
-    return lost.has(hex) && !kept.has(hex)
-  })
+): string[] {
+  const kept = new Set(writableBatches(after, drives, defaultBatchHex))
+  return writableBatches(before, drives, defaultBatchHex).filter((hex) => !kept.has(hex))
 }
 
 /** Whether two grants name the same drives in the same order. */

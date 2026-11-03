@@ -12,25 +12,24 @@
   would take every reference stored on a drive, which nothing records.
 -->
 <script lang="ts">
-  import type { PostageStamp } from '@snaha/swarm-id/internal'
-
   import { Button } from '$lib/components/ui/button'
   import { Dialog } from '$lib/components/ui/dialog'
   import { Input } from '$lib/components/ui/input'
-  import { driveDisplayName } from '$lib/drives'
 
   /** What the user types to confirm, as for the default drive */
   const CONFIRM_PHRASE = 'change drives'
 
   interface Props {
     appName: string
-    /** The drives the edit takes away, from `drivesTakenAway` */
-    takenAway: PostageStamp[]
+    /** The names of the drives the edit takes away (`drivesTakenAway`) */
+    takenAway: string[]
+    /** Whether the app can still save anywhere after the edit */
+    keepsAny: boolean
     onConfirm: () => void
     onCancel: () => void
   }
 
-  let { appName, takenAway, onConfirm, onCancel }: Props = $props()
+  let { appName, takenAway, keepsAny, onConfirm, onCancel }: Props = $props()
 
   let typed = $state('')
   const confirmed = $derived(typed.trim().toLowerCase() === CONFIRM_PHRASE)
@@ -47,20 +46,25 @@
       <span class="font-medium">{appName}</span> will no longer be able to save to:
     </p>
     <ul class="list-inside list-disc">
-      {#each takenAway as drive (drive.batchID.toHex())}
-        <li class="truncate font-medium">{driveDisplayName(drive)}</li>
+      {#each takenAway as name, index (index)}
+        <li class="truncate font-medium">{name}</li>
       {/each}
     </ul>
   </div>
   <div
-    role="alert"
+    role="note"
     class="border-destructive/50 bg-destructive/10 flex flex-col gap-2 rounded-lg border p-3 text-sm"
   >
     <p class="font-medium">Nothing is copied or moved.</p>
     <p>
-      What {appName} already saved stays where it is, and what it saves from now on goes to the drives
-      it keeps, if any. An app that keeps its files on one drive, such as a file manager, may not find
-      them afterwards or may stop working as expected.
+      What {appName} already saved stays where it is.
+      {#if keepsAny}
+        What it saves from now on goes to the drives it keeps.
+      {:else}
+        It will have no drive left, so it cannot save anything until you give it one.
+      {/if}
+      An app that keeps its files on one drive, such as a file manager, may not find them afterwards or
+      may stop working as expected.
     </p>
     <p>
       {#if one}

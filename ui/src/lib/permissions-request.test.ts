@@ -137,20 +137,27 @@ describe('an edit', () => {
 
   // What a change of drives costs the app, so it is confirmed first (#925).
   describe('the drives it takes away', () => {
-    const batches = (list: PostageStamp[]) => list.map((stamp) => stamp.batchID.toHex())
-
     it('names a drive set to None, or swapped for another', () => {
       expect(
-        batches(drivesTakenAway([new BatchId(A), new BatchId(S)], [new BatchId(A)], drives, A)),
+        drivesTakenAway([new BatchId(A), new BatchId(S)], [new BatchId(A)], drives, A),
       ).toEqual([S])
-      expect(batches(drivesTakenAway([new BatchId(A)], [new BatchId(B)], drives, A))).toEqual([A])
+      expect(drivesTakenAway([new BatchId(A)], [new BatchId(B)], drives, A)).toEqual([A])
     })
 
     it('counts no grant as the default, and "all" as every drive', () => {
       // Tracking the default, then pinned to another drive
-      expect(batches(drivesTakenAway(undefined, [new BatchId(B)], drives, A))).toEqual([A])
+      expect(drivesTakenAway(undefined, [new BatchId(B)], drives, A)).toEqual([A])
       // Unticking "all" leaves only the default
-      expect(batches(drivesTakenAway('all', undefined, drives, A))).toEqual([B, S])
+      expect(drivesTakenAway('all', undefined, drives, A)).toEqual([B, S])
+      // With no default set, an app with no grant had no drive to lose
+      expect(drivesTakenAway(undefined, [new BatchId(B)], drives, undefined)).toEqual([])
+    })
+
+    it('names a drive this device does not know yet', () => {
+      const unknown = 'dd'.repeat(32)
+      expect(
+        drivesTakenAway([new BatchId(A), new BatchId(unknown)], [new BatchId(A)], drives, A),
+      ).toEqual([unknown])
     })
 
     it('takes nothing away by adding a drive, or by pinning the default it tracked', () => {
