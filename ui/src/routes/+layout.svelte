@@ -81,14 +81,25 @@
     }
   })
 
+  /** A window opened for a dApp's connect or permissions flow, decided by the
+   *  page it opened on: it lives for one grant, and its navigations stay in it. */
+  const POPUP_ROUTES = ['/connect', '/permissions']
+  const isPopup = POPUP_ROUTES.some((route) => page.route.id?.startsWith(route))
+
+  // A boolean, so the watcher restarts on sign-in or sign-out and not on every
+  // write to the account, its own included.
+  const currentSignedIn = $derived(signedInRecord(sessionStore.currentAccountId) !== undefined)
+
   // Re-read the current account's drives from the chain while the site is
   // open (#903), so the expiry warnings follow the chain rather than the last
   // measurement. Only top-level: the same shell renders the dApp's /proxy
   // iframe, which keeps its own readings (#957), and a framed page renders
-  // nothing. One tab per account reads, so N tabs publish a change once.
+  // nothing. Not in a connect or permissions popup, where a read and a publish
+  // would land mid-grant. One tab per account reads, so N tabs publish a
+  // change once.
   $effect(() => {
     const accountId = sessionStore.currentAccountId
-    if (!accountId || window.top !== window) return
+    if (!accountId || !currentSignedIn || isPopup || window.top !== window) return
     return untrack(() =>
       inOneTab(`swarm-id-drive-lifetime-${accountId}`, () =>
         watchDriveLifetimes(() =>

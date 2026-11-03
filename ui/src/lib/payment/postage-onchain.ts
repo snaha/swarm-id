@@ -15,7 +15,7 @@
  */
 import type { PrivateKey } from '@ethersphere/bee-js'
 import { TimeoutError, withTimeout } from '@snaha/swarm-id'
-import { type PostageStamp, sleep } from '@snaha/swarm-id/internal'
+import { type PostageStamp, remainingLifespanSeconds, sleep } from '@snaha/swarm-id/internal'
 import {
   MultichainClient,
   type PostageBatch,
@@ -445,6 +445,22 @@ export async function readStampsFromChain(
   )
 }
 
+/**
+ * The `updateStamp` patch for a reading. `updateStamp` stamps `updatedAt`,
+ * which is also when the stored `batchTTL` was measured, so a reading with no
+ * lifetime carries the stored one re-anchored to now: leaving it out would
+ * restart its clock and hand the drive back the time since its measurement.
+ */
+export function stampPatchFor(
+  record: PostageStamp,
+  reading: ChainReading,
+  now = Date.now(),
+): ChainReading {
+  return reading.batchTTL === undefined
+    ? { ...reading, batchTTL: remainingLifespanSeconds(record, now) }
+    : reading
+}
+
 /** `readStampsFromChain` for one drive */
 export async function readStampFromChain(
   stamp: Pick<PostageStamp, 'batchID'>,
@@ -472,7 +488,8 @@ export async function reconcileStampFromChain(
   if (!reading?.exists) {
     return false
   }
-  account.updateStamp(stamp.batchID, reading)
+  const record = account.stamps.find((s) => s.batchID.equals(stamp.batchID)) ?? stamp
+  account.updateStamp(stamp.batchID, stampPatchFor(record, reading))
   return true
 }
 

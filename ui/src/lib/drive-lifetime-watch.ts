@@ -17,7 +17,7 @@
  */
 import { type PostageStamp, remainingLifespanSeconds } from '@snaha/swarm-id/internal'
 
-import { type ChainReading, readStampsFromChain } from '$lib/payment/postage-onchain'
+import { type ChainReading, readStampsFromChain, stampPatchFor } from '$lib/payment/postage-onchain'
 import type { Account } from '$lib/types'
 
 const MS_PER_SECOND = 1000
@@ -109,8 +109,9 @@ export function watchDriveLifetimes(
       // transaction
       if ((current.updatedAt ?? current.createdAt) > startedAt) return
       if (!reading.exists && startedAt - current.createdAt < BATCH_GONE_GRACE_MS) return
-      if (differsFromRecord(current, reading, Date.now())) {
-        target.updateStamp(current.batchID, reading)
+      const now = Date.now()
+      if (differsFromRecord(current, reading, now)) {
+        target.updateStamp(current.batchID, stampPatchFor(current, reading, now))
       }
     })
     if (stopped) return

@@ -118,6 +118,21 @@ describe('watchDriveLifetimes', () => {
     stop()
   })
 
+  it('re-anchors the stored lifetime when a reading without a price is written', async () => {
+    // Measured a day ago: 29 days left now. `updateStamp` restarts the clock,
+    // so the patch must carry 29 days, not leave the stored 30 to restart
+    const resized = drive('aa'.repeat(32), 30 * DAY_S, NOW - DAY_S * MS)
+    const target = account([resized])
+    const stop = watchDriveLifetimes(
+      () => target,
+      reader((stamp) => ({ ...reading(stamp), depth: 22 })),
+    )
+    await vi.advanceTimersByTimeAsync(0)
+    expect(target.updateStamp).toHaveBeenCalledTimes(1)
+    expect(target.updateStamp.mock.calls[0][1]).toMatchObject({ depth: 22, batchTTL: 29 * DAY_S })
+    stop()
+  })
+
   it('drops a reading when the record was written while it was read', async () => {
     const before = drive('aa'.repeat(32), 30 * DAY_S)
     const target = account([before])
