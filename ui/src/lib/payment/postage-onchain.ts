@@ -387,41 +387,71 @@ export async function preflightResize(
 }
 
 /** What the chain says of a drive, in the fields its record keeps */
-export type ChainReading = Required<
-  Pick<PostageStamp, 'depth' | 'amount' | 'exists' | 'usable'>
-> & { batchTTL: number | undefined }
+export interface ChainReading {
+  exists: boolean
+  usable: boolean
+  /** Absent for a batch the chain no longer has */
+  depth?: number
+  amount?: bigint
+  /**
+   * Absent when the chain has no price to divide by: a reading without a
+   * lifetime then leaves the stored one alone rather than erase it
+   */
+  batchTTL?: number
+}
+
+/** What the chain says of a batch it no longer has: expired and reaped */
+const BATCH_GONE: ChainReading = { exists: false, usable: false, batchTTL: 0 }
 
 /**
- * Read a drive from chain truth: depth, live per-chunk balance, the TTL it
- * implies, and whether the batch exists and is usable. `undefined` when the
- * chain could not answer or does not know the batch.
+ * Read drives from chain truth: depth, live per-chunk balance, the TTL it
+ * implies, and whether the batch exists and is usable. The price is read
+ * once for all of them. A batch the chain does not know reads as gone
+ * (`exists: false`); `undefined` is a drive whose read failed.
  */
+export async function readStampsFromChain(
+  stamps: Pick<PostageStamp, 'batchID'>[],
+  client?: MultichainClient,
+): Promise<(ChainReading | undefined)[]> {
+  if (stamps.length === 0) {
+    return []
+  }
+  const chain = client ?? (await postageChain())
+  const constraints = chain.getPostageWriteConstraints()
+  return Promise.all(
+    stamps.map(async (stamp): Promise<ChainReading | undefined> => {
+      try {
+        const [batch, { lastPrice }] = await Promise.all([
+          chain.getPostageBatch(batchIdHex(stamp)),
+          constraints,
+        ])
+        if (!batch) {
+          return BATCH_GONE
+        }
+        const remaining = await chain.getRemainingBalance(batchIdHex(stamp))
+        const batchTTL = ttlSecondsFor(remaining, lastPrice)
+        return {
+          depth: batch.depth,
+          amount: remaining,
+          ...(batchTTL === undefined ? {} : { batchTTL }),
+          // The same reading `fetchExistingBatchFromChain` stores on attach.
+          exists: true,
+          usable: batchTTL === undefined || batchTTL > 0,
+        }
+      } catch {
+        return undefined
+      }
+    }),
+  )
+}
+
+/** `readStampsFromChain` for one drive */
 export async function readStampFromChain(
   stamp: Pick<PostageStamp, 'batchID'>,
   client?: MultichainClient,
 ): Promise<ChainReading | undefined> {
-  const chain = client ?? (await postageChain())
-  try {
-    const [batch, constraints] = await Promise.all([
-      chain.getPostageBatch(batchIdHex(stamp)),
-      chain.getPostageWriteConstraints(),
-    ])
-    if (!batch) {
-      return undefined
-    }
-    const remaining = await chain.getRemainingBalance(batchIdHex(stamp))
-    const batchTTL = ttlSecondsFor(remaining, constraints.lastPrice)
-    return {
-      depth: batch.depth,
-      amount: remaining,
-      batchTTL,
-      // The same reading `fetchExistingBatchFromChain` stores on attach.
-      exists: true,
-      usable: batchTTL === undefined || batchTTL > 0,
-    }
-  } catch {
-    return undefined
-  }
+  const [reading] = await readStampsFromChain([stamp], client)
+  return reading
 }
 
 /**
@@ -430,7 +460,8 @@ export async function readStampFromChain(
  * so a stale `false` must clear here). Called after every confirmed
  * transaction and on dialog open, so an interrupted flow reconciles instead of
  * trusting local state. Returns false when the chain could not answer (record
- * left untouched).
+ * left untouched). A batch the chain does not know counts as no answer here:
+ * right after a confirmed transaction that is an RPC behind, not a batch gone.
  */
 export async function reconcileStampFromChain(
   account: Account,
@@ -438,7 +469,7 @@ export async function reconcileStampFromChain(
   client?: MultichainClient,
 ): Promise<boolean> {
   const reading = await readStampFromChain(stamp, client)
-  if (!reading) {
+  if (!reading?.exists) {
     return false
   }
   account.updateStamp(stamp.batchID, reading)

@@ -16,7 +16,7 @@
   // data — #389 can relocate it out of `$lib/dev`; not worth the churn here.
   import { foldCurrentAccount, startFoldInterval } from '$lib/dev/account-refresh'
   import { triggerSync } from '$lib/dev/sync-hooks'
-  import { watchDriveLifetimes } from '$lib/drive-lifetime-watch'
+  import { inOneTab, watchDriveLifetimes } from '$lib/drive-lifetime-watch'
   import { accountBusStore } from '$lib/stores/account-bus'
   import { accountsStore, setAccountsSyncHook } from '$lib/stores/accounts.svelte'
   import { sessionStore } from '$lib/stores/session.svelte'
@@ -83,15 +83,17 @@
 
   // Re-read the current account's drives from the chain while the site is
   // open (#903), so the expiry warnings follow the chain rather than the last
-  // measurement. Only on the site's own pages: the same shell renders the
-  // dApp's /proxy iframe, which keeps its own readings (#957).
+  // measurement. Only top-level: the same shell renders the dApp's /proxy
+  // iframe, which keeps its own readings (#957), and a framed page renders
+  // nothing. One tab per account reads, so N tabs publish a change once.
   $effect(() => {
     const accountId = sessionStore.currentAccountId
-    const topLevel = untrack(() => page.route.id !== PROXY_ROUTE) && window.top === window
-    if (!accountId || !topLevel) return
+    if (!accountId || window.top !== window) return
     return untrack(() =>
-      watchDriveLifetimes(() =>
-        signedInRecord(accountId) ? accountsStore.get(accountId) : undefined,
+      inOneTab(`swarm-id-drive-lifetime-${accountId}`, () =>
+        watchDriveLifetimes(() =>
+          signedInRecord(accountId) ? accountsStore.get(accountId) : undefined,
+        ),
       ),
     )
   })
