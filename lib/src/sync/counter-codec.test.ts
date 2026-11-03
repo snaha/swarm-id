@@ -84,6 +84,32 @@ describe("counter-codec — SBU1 golden vector", () => {
 const SPEC_LARGE_ROOT_HEX =
   "5342553142424242424242424242424242424242424242424242424242424242424242421d100006000000000000000100000000007cb19900000064000e000d000200001234000013880000cbe500002000000000690000007d00000091000000880000007a000000760000006e00000079000000810000006c0000007d000000910000007a0000006b9c8de349a3c4b573d45db35c3585fcbe2e2c20d999ee2a5ead8c1600b5a5428a645b990e3f426220eda38496a262f6968b8a4d42f7becb602c51576f19112fe9fb1f9017218e72abf21947cb3290726dd5129c47e50562a22dfcaa64340dd76d5bb4cba42453e6cb20f8c1c0892bf2bf4873bd3b4850787f171952b662346708660c94f587fa4516af6eb9b083513f245d9bd9fc0559f48356021e51892201fb197b58a495d1305292904a61906b02e37e68101e3657b4e2ff9661d705a004c36ebbe152c039d8887c067cc8fa86636c62afc5f21cd8ca1afc4f546e77882de86c3e8248ce84ffd4c440f28c638007df05e9ea75a713a308e7ba48e6066903c88e6e5e60e48477ca6202b2333d5c06968f67baae3c03105bbb4a7a8491b04ce6f5c8fc3151cdfbc3136e8f0adac485df7ae4d866e1cce1cd1aa0d1cbbf33f19bf28b0420c19fcadaf197e1eaff36f8151ec107d59ad4e6d3a4cf1492a77828991d9c30151c90772df348891a627fa9a5046919dba774e2a388819e9e11aba2c68724aa66f7e98c8ec09b71685da6a49cf173a390ac1662a9e120712062d20fb8"
 
+// SBU1 §4 lists a bucket "when its delta does not fit `w` bits": a delta of
+// exactly `2^w − 1` fits, and stays in-band with an all-ones field.
+describe("counter-codec — a delta at the top of its width", () => {
+  /** `100 + (b mod 4)`: a quarter of the buckets sit at delta 3 = 2^2 − 1 */
+  function boundaryCounters(): Uint32Array {
+    return Uint32Array.from(
+      { length: NUM_BUCKETS },
+      (_unused, b) => 100 + (b % 4),
+    )
+  }
+
+  it("stays in-band, so the frame is the spec's width", () => {
+    const counters = boundaryCounters()
+    expect(chooseFrame(counters)).toEqual({ base: 100, width: 2 })
+    expect(leafCount(2)).toBe(4)
+    const encoded = encodeCounters(counters, { base: 100, width: 2 })
+    expect(encoded.exceptions).toEqual([])
+  })
+
+  it("decodes back to the same table", () => {
+    const counters = boundaryCounters()
+    const encoded = encodeCounters(counters, chooseFrame(counters))
+    expect(Array.from(decodeCounters(encoded))).toEqual(Array.from(counters))
+  })
+})
+
 describe("counter-codec — SBU1 §12 root vector", () => {
   const SPEC_BATCH_ID = new Uint8Array(32).fill(0x42)
   const SPEC_OWNER = new Uint8Array(20).fill(0x11)

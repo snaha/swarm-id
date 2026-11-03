@@ -31,8 +31,13 @@ export const MAX_EXCEPTIONS = 128
 /**
  * Widest delta we encode. SBU1 allows 32; our reference chunk must hold the
  * frame, 128 exceptions and a 64-byte encrypted reference per leaf in one
- * chunk, which 47 leaves (width 23) is the most of. A per-bucket spread above
- * 2^23 − 1 would need it — about 2^39 chunks through one lane.
+ * chunk, which 47 leaves (width 23) is the most of. So a table encodes only
+ * while at most 128 buckets sit more than 2^23 − 1 above the smallest
+ * counter. A regular drive's lane bounds its counters well below that. A
+ * scratch drive's counter keeps counting past its lane (#862), so 129 buckets
+ * each rewritten about 8.4 million times more than the rest make every publish
+ * of that partition throw, and with it every upload, which is acknowledged
+ * only after its publish. Remote, but a limit uint32 counters did not have.
  */
 export const MAX_DELTA_WIDTH = 23
 
@@ -113,12 +118,14 @@ function exceptionsFor(
   frame: CounterFrame,
 ): CounterException[] | undefined {
   const { base, width } = frame
-  const threshold = width === 0 ? 0 : exceptionThreshold(width)
+  // The largest delta `width` bits hold; SBU1 §4 lists a bucket only when its
+  // delta does not fit, so one at exactly this value stays in-band
+  const largest = width === 0 ? 0 : exceptionThreshold(width)
   const exceptions: CounterException[] = []
   for (let bucket = 0; bucket < NUM_BUCKETS; bucket++) {
     const count = counters[bucket]
     if (count < base) return undefined
-    if (count - base >= threshold && (width > 0 || count > base)) {
+    if (count - base > largest) {
       if (exceptions.length === MAX_EXCEPTIONS) return undefined
       exceptions.push({ bucket, count })
     }

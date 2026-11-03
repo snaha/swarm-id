@@ -785,6 +785,7 @@ describe("BatchWriteCoordinator — teardown safety", () => {
       20,
       {
         getAllChunks: async () => [],
+        convertBatch: async () => [],
         putChunk: async () => undefined,
       } as unknown as UtilizationStoreDB,
       new EthAddress("00".repeat(20)),

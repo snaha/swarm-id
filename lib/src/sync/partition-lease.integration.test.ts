@@ -102,19 +102,20 @@ const GUARD_MS = 50 // small for tests; production default is 2000
 
 /**
  * A counter with more touched buckets than the exception list holds, so it
- * packs into leaves rather than exceptions alone: 200 buckets at 1 in the
+ * packs into leaves rather than exceptions alone: 200 buckets at 2 in the
  * first `LEAFY_BUCKETS_PER_LEAF` buckets, which the canonical frame
  * (`LEAFY_FRAME`) spreads over `LEAFY_LEAVES` leaves — the first real, the
- * rest all-zero sentinels. `extra` puts more buckets at 1 wherever a test
- * wants another real leaf.
+ * rest all-zero sentinels. At 2, not 1: delta 1 fits width 1, whose two
+ * leaves leave a single sentinel. `extra` puts more buckets at 2 wherever a
+ * test wants another real leaf.
  */
 const LEAFY_FRAME = { base: 0, width: 2 }
 const LEAFY_LEAVES = 4
 const LEAFY_BUCKETS_PER_LEAF = 16384
 function leafyCounter(extra: number[] = []): Uint32Array {
   const counter = new Uint32Array(NUM_BUCKETS)
-  for (let b = 0; b < 200; b++) counter[b * 50] = 1
-  for (const bucket of extra) counter[bucket] = 1
+  for (let b = 0; b < 200; b++) counter[b * 50] = 2
+  for (const bucket of extra) counter[bucket] = 2
   return counter
 }
 
@@ -597,6 +598,7 @@ describe("intent / occupancy / state-pointer SOC slot race (regression)", () => 
     const SIGNER_KEY = "11".repeat(32)
     const cache = {
       getAllChunks: async () => [],
+      convertBatch: async () => [],
       putChunk: async () => undefined,
     } as unknown as Parameters<typeof UtilizationAwareStamper.create>[3]
     const stamper = await UtilizationAwareStamper.create(
@@ -1784,6 +1786,7 @@ describe("PartitionLease.release — after the coordinator's teardown", () => {
     let metadata: unknown
     const cache = {
       getAllChunks: async () => [],
+      convertBatch: async () => [],
       putChunk: async () => undefined,
       getMetadata: async () => metadata,
       putMetadata: async (next: unknown) => {
@@ -1893,10 +1896,11 @@ describe("writePartitionState — incremental", () => {
     expect(first.frame).toEqual(LEAFY_FRAME)
     expect(first.references).toHaveLength(LEAFY_LEAVES)
 
-    // Change two buckets that fall in two distinct leaves, within the width.
+    // Change two buckets that fall in two distinct leaves, within the width
+    // (3 = 2^2 − 1, the largest delta width 2 holds in-band).
     const next = first.publishedCounter.slice()
-    next[100] = 2
-    next[20_000] = 2
+    next[100] = 3
+    next[20_000] = 3
     const changed = new Set([
       Math.floor(100 / LEAFY_BUCKETS_PER_LEAF),
       Math.floor(20_000 / LEAFY_BUCKETS_PER_LEAF),
@@ -1967,11 +1971,11 @@ describe("writePartitionState — incremental", () => {
   it("retains the acked ref when the seed counter is ahead (unacked write); reader resumes at the acked floor", async () => {
     const stamper = createMockStamper()
 
-    // 1. The last ACKED publish: bucket 100 at counter 1, in leaf 0 of a
+    // 1. The last ACKED publish: bucket 100 at counter 2, in leaf 0 of a
     //    leafy table; leaf 1 (where NEW_BUCKET lives) is still a sentinel.
     const AHEAD_BUCKET = 100
     const NEW_BUCKET = 20_000
-    const ACKED_VALUE = 1
+    const ACKED_VALUE = 2
     const acked = leafyCounter()
     expect(acked[AHEAD_BUCKET]).toBe(ACKED_VALUE)
     const ackedPublish = await partitionState.writePartitionState({
@@ -1985,14 +1989,14 @@ describe("writePartitionState — incremental", () => {
     })
 
     // 2. Seed as claimPartition's cache-hit branch would AFTER a failed publish:
-    //    refs describe the acked counter (100 -> 5) but the baseline counter is
-    //    AHEAD (100 -> 2), the unacked write that never reached Swarm.
+    //    refs describe the acked counter (100 -> 2) but the baseline counter is
+    //    AHEAD (100 -> 3), the unacked write that never reached Swarm.
     const seededCounter = ackedPublish.publishedCounter.slice()
     seededCounter[AHEAD_BUCKET] = ACKED_VALUE + 1 // 2, unacked
 
     // 3. First incremental publish: a NEW upload touches a DIFFERENT leaf, so
     //    the leaf holding AHEAD_BUCKET is unchanged vs the ahead baseline and
-    //    its ref is retained (the acked-floor ref, describing 1 — not 2).
+    //    its ref is retained (the acked-floor ref, describing 2 — not 3).
     const current = seededCounter.slice()
     current[NEW_BUCKET] = 1
     const aheadChunk = Math.floor(AHEAD_BUCKET / LEAFY_BUCKETS_PER_LEAF)
