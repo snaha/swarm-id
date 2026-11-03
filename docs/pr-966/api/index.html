@@ -879,7 +879,7 @@
 <tr>
 <td><code dir="auto">stampedChunks</code></td>
 <td><code dir="auto">number | undefined</code></td>
-<td>Chunks this write sent: one per stamp in <code dir="auto">user-stamp</code> mode, one per chunk the gateway accepted in <code dir="auto">subsidised</code> mode. Compare it with an estimate to show what a save cost. The partition lease’s own lock and intent chunks are not counted. Absent from an identity site older than the field</td>
+<td>Chunks this write sent: one per stamp in <code dir="auto">user-stamp</code> mode, one per chunk the gateway accepted in <code dir="auto">subsidised</code> mode. Compare it with an estimate to show what a save cost. The partition lease’s own chunks (lock, intent, and the state publish after each write) are not counted: they re-use reserved slots and spend no capacity. Absent from an identity site older than the field</td>
 </tr>
 </tbody>
 </table>
