@@ -4354,7 +4354,8 @@ export class SwarmIdProxy {
 
   /**
    * Open the authentication popup window.
-   * Returns true if popup was opened, false if parent origin is not set.
+   * Returns true if popup was opened, false if parent origin is not set or
+   * the popup was blocked.
    */
   private openAuthPopup(options?: { popupMode?: "popup" | "window" }): boolean {
     if (!this.parentOrigin) {
@@ -4389,8 +4390,6 @@ export class SwarmIdProxy {
     // Check if popup was blocked (common on mobile Safari)
     if (!popup) {
       console.warn("[Proxy] Popup was blocked or failed to open")
-      this.isConnecting = false
-      this.showAuthButton()
       return false
     }
 
@@ -4441,8 +4440,10 @@ export class SwarmIdProxy {
       document.head.appendChild(style)
     }
 
-    // Open auth popup
-    this.openAuthPopup()
+    if (!this.openAuthPopup()) {
+      this.isConnecting = false
+      this.showAuthButton()
+    }
   }
 
   /**

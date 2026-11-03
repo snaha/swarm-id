@@ -459,6 +459,10 @@ describe("SwarmIdProxy auth button", () => {
     parentOrigin: string | undefined
     showAuthButton: () => void
     openAuthPopup: () => boolean
+    handleConnect: (
+      message: { type: "connect"; requestId: string },
+      event: MessageEvent,
+    ) => void
     clearAuthData: () => void
     sendToParent: (message: unknown) => void
   }
@@ -511,6 +515,10 @@ describe("SwarmIdProxy auth button", () => {
       appendChild: (button: FakeButton) => buttons.push(button),
     }
     internal.authButtonContainer = container
+  })
+
+  afterEach(() => {
+    vi.useRealTimers()
   })
 
   const show = (state: { authenticated: boolean; authLoading: boolean }) => {
@@ -621,6 +629,60 @@ describe("SwarmIdProxy auth button", () => {
     expect(buttons).toHaveLength(2)
     expect(buttons[1].textContent).toBe("🔐 Login with Swarm ID")
     expect(buttons[1].disabled).toBe(false)
+  })
+
+  // A click before `parentIdentify` lands, or after it was rejected, has no
+  // origin to open the popup for, and must not strand the button either.
+  it("puts the connect button back when there is no parent origin", () => {
+    vi.spyOn(console, "error").mockImplementation(() => {})
+    vi.stubGlobal("window", { ...window, open: vi.fn() })
+    show({ authenticated: false, authLoading: false }).click()
+
+    expect(window.open).not.toHaveBeenCalled()
+    expect(internal.isConnecting).toBe(false)
+    expect(buttons).toHaveLength(2)
+    expect(buttons[1].textContent).toBe("🔐 Login with Swarm ID")
+    expect(buttons[1].disabled).toBe(false)
+  })
+
+  // A `connect` message whose popup is blocked answers `success: false`; it
+  // must not cut short a click whose popup is still open.
+  it("keeps a click spinning when a connect message's popup is blocked", () => {
+    vi.useFakeTimers()
+    vi.spyOn(console, "warn").mockImplementation(() => {})
+    const store = new Map<string, string>()
+    vi.stubGlobal("localStorage", {
+      getItem: (key: string) => store.get(key) ?? null,
+      setItem: (key: string, value: string) => store.set(key, value),
+      removeItem: (key: string) => store.delete(key),
+    })
+    const open = vi
+      .fn()
+      .mockReturnValueOnce({ closed: false })
+      .mockReturnValueOnce(undefined)
+    vi.stubGlobal("window", {
+      ...window,
+      location: { origin: "https://id.example.com", pathname: "/proxy" },
+      open,
+    })
+    internal.parentOrigin = "https://app.example.com"
+    const button = show({ authenticated: false, authLoading: false })
+    button.click()
+
+    const source = { postMessage: vi.fn() }
+    internal.handleConnect({ type: "connect", requestId: "r1" }, {
+      source,
+      origin: "https://app.example.com",
+    } as unknown as MessageEvent)
+
+    expect(open).toHaveBeenCalledTimes(2)
+    expect(source.postMessage).toHaveBeenCalledWith(
+      { type: "connectResponse", requestId: "r1", success: false },
+      { targetOrigin: "https://app.example.com" },
+    )
+    expect(internal.isConnecting).toBe(true)
+    expect(buttons).toHaveLength(1)
+    expect(button.disabled).toBe(true)
   })
 
   it("adds the spinner style only once", () => {
