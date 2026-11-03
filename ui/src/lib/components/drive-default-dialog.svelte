@@ -89,7 +89,7 @@
   {/if}
   <div class="flex flex-col gap-1">
     <label for="confirm-default-drive" class="text-sm">
-      Type <span class="font-mono font-medium">{CONFIRM_PHRASE}</span> to confirm
+      Type <code class="bg-muted rounded px-1 py-0.5 font-medium">{CONFIRM_PHRASE}</code> to confirm
     </label>
     <Input
       id="confirm-default-drive"
