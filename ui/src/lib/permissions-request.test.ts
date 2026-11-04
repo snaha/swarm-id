@@ -11,6 +11,8 @@ import {
   editRows,
   grantAfterEdit,
   grantAfterRequest,
+  grantAfterRowEdit,
+  grantToConfirm,
   grantableOnRequest,
   parsePermissionsHash,
   pinned,
@@ -178,6 +180,30 @@ describe('an edit', () => {
       expect(drivesTakenAway(undefined, [new BatchId(A)], drives, A)).toEqual([])
       expect(drivesTakenAway([new BatchId(A)], 'all', drives, A)).toEqual([])
     })
+  })
+
+  it('adds a drive made through "Add new drive…" rather than replacing the row\'s', () => {
+    // The picker has already put the new drive in the row it was made from.
+    const rows = editRows([new BatchId(A)], drives, A)
+    rows[0].chosen = B
+    expect(hex(grantAfterRowEdit([new BatchId(A)], rows, A, A, B))).toEqual([A, B])
+    expect(hex(grantAfterRowEdit(undefined, editRows(undefined, drives, A), A, A, B))).toEqual([
+      A,
+      B,
+    ])
+    // A plain edit still replaces it
+    expect(hex(grantAfterRowEdit([new BatchId(A)], rows, A, A))).toEqual([B])
+  })
+
+  it('saves nothing on a confirm when the grant moved while the dialog was open', () => {
+    const proposed = [new BatchId(A)]
+    expect(
+      grantToConfirm([new BatchId(A), new BatchId(S)], [new BatchId(A), new BatchId(S)], proposed),
+    ).toBe(proposed)
+    expect(grantToConfirm([new BatchId(A), new BatchId(S)], [new BatchId(B)], proposed)).toBe(
+      'stale',
+    )
+    expect(grantToConfirm('all', undefined, proposed)).toBe('stale')
   })
 })
 

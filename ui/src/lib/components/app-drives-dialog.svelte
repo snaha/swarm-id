@@ -12,9 +12,9 @@
   would take every reference stored on a drive, which nothing records.
 -->
 <script lang="ts">
+  import ConfirmPhraseField from '$lib/components/confirm-phrase-field.svelte'
   import { Button } from '$lib/components/ui/button'
   import { Dialog } from '$lib/components/ui/dialog'
-  import { Input } from '$lib/components/ui/input'
 
   /** What the user types to confirm, as for the default drive */
   const CONFIRM_PHRASE = 'change drives'
@@ -33,8 +33,7 @@
 
   let { appName, takenAway, keepsAny, shrinks, onConfirm, onCancel }: Props = $props()
 
-  let typed = $state('')
-  const confirmed = $derived(typed.trim().toLowerCase() === CONFIRM_PHRASE)
+  let confirmed = $state(false)
   const one = $derived(takenAway.length === 1)
 
   function confirm() {
@@ -79,21 +78,12 @@
       </p>
     {/if}
   </div>
-  <div class="flex flex-col gap-1">
-    <label for="confirm-app-drives" class="text-sm">
-      Type <code class="bg-muted rounded px-1 py-0.5 font-medium">{CONFIRM_PHRASE}</code> to confirm
-    </label>
-    <Input
-      id="confirm-app-drives"
-      bind:value={typed}
-      autocomplete="off"
-      spellcheck={false}
-      data-autofocus
-      onkeydown={(event) => {
-        if (event.key === 'Enter') confirm()
-      }}
-    />
-  </div>
+  <ConfirmPhraseField
+    id="confirm-app-drives"
+    phrase={CONFIRM_PHRASE}
+    bind:confirmed
+    onsubmit={confirm}
+  />
   <div class="flex w-full flex-col gap-2">
     <Button variant="destructive" class="w-full" disabled={!confirmed} onclick={confirm}>
       Change drives

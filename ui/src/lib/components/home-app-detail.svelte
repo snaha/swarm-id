@@ -43,8 +43,8 @@
     askedPatch,
     drivesTakenAway,
     editRows,
-    grantAfterEdit,
-    grantAfterRequest,
+    grantAfterRowEdit,
+    grantToConfirm,
     pinned,
     sameGrant,
     unknownDriveLabel,
@@ -136,22 +136,17 @@
 
   function confirmPending() {
     if (!pending) return
-    if (sameGrant(pending.before, app.drives)) {
-      applyDrives(pending.grant)
-    } else {
+    const grant = grantToConfirm(pending.before, app.drives, pending.grant)
+    if (grant === 'stale') {
       toastStore.show("This app's drives changed meanwhile; nothing was saved")
+    } else {
+      applyDrives(grant)
     }
     pending = undefined
   }
 
-  // A drive made through a row's "Add new drive…" joins the grant rather
-  // than replacing that row's drive: the user bought it for this app, and
-  // was not asking to take the other away.
   function saveDrives(added?: string) {
-    const grant =
-      added === undefined
-        ? grantAfterEdit(app.drives, rows, app.drives === 'all', defaultBatchHex)
-        : grantAfterRequest(app.drives, explicitDefaultHex, [added])
+    const grant = grantAfterRowEdit(app.drives, rows, defaultBatchHex, explicitDefaultHex, added)
     if (sameGrant(grant, app.drives)) return
     proposeDrives(grant)
   }

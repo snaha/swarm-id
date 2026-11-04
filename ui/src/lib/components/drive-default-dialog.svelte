@@ -14,9 +14,9 @@
   import Star from '@lucide/svelte/icons/star'
   import type { PostageStamp } from '@snaha/swarm-id/internal'
 
+  import ConfirmPhraseField from '$lib/components/confirm-phrase-field.svelte'
   import { Button } from '$lib/components/ui/button'
   import { Dialog } from '$lib/components/ui/dialog'
-  import { Input } from '$lib/components/ui/input'
   import { driveDisplayName } from '$lib/drives'
   import type { Account } from '$lib/types'
 
@@ -32,8 +32,6 @@
 
   let { account, drive, onClose, onChanged }: Props = $props()
 
-  let typed = $state('')
-
   const current = $derived(
     account.stamps.find((stamp) => account.defaultPostageStampBatchID?.equals(stamp.batchID)),
   )
@@ -42,7 +40,7 @@
   const followers = $derived(
     account.activeApps.filter((app) => app.drives === undefined || app.drives === 'all'),
   )
-  const confirmed = $derived(typed.trim().toLowerCase() === CONFIRM_PHRASE)
+  let confirmed = $state(false)
 
   function setDefault() {
     if (!confirmed) return
@@ -87,21 +85,12 @@
       </ul>
     </div>
   {/if}
-  <div class="flex flex-col gap-1">
-    <label for="confirm-default-drive" class="text-sm">
-      Type <code class="bg-muted rounded px-1 py-0.5 font-medium">{CONFIRM_PHRASE}</code> to confirm
-    </label>
-    <Input
-      id="confirm-default-drive"
-      bind:value={typed}
-      autocomplete="off"
-      spellcheck={false}
-      data-autofocus
-      onkeydown={(event) => {
-        if (event.key === 'Enter') setDefault()
-      }}
-    />
-  </div>
+  <ConfirmPhraseField
+    id="confirm-default-drive"
+    phrase={CONFIRM_PHRASE}
+    bind:confirmed
+    onsubmit={setDefault}
+  />
   <div class="flex w-full flex-col gap-2">
     <Button variant="destructive" class="w-full" disabled={!confirmed} onclick={setDefault}>
       <Star />

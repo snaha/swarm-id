@@ -233,6 +233,33 @@ export function sameGrant(a: Grant, b: Grant): boolean {
   return a.length === b.length && a.every((batch, i) => batch.equals(b[i]))
 }
 
+/**
+ * The grant an Apps-tab drive row edit proposes. A drive made through a
+ * row's "Add new drive…" (`added`) joins the grant rather than replacing
+ * that row's drive: the user bought it for this app, and was not asking to
+ * take the other away.
+ */
+export function grantAfterRowEdit(
+  current: Grant,
+  rows: PickerRow[],
+  defaultBatchHex: string | undefined,
+  explicitDefaultHex: string | undefined,
+  added?: string,
+): Grant {
+  return added === undefined
+    ? grantAfterEdit(current, rows, current === 'all', defaultBatchHex)
+    : grantAfterRequest(current, explicitDefaultHex, [added])
+}
+
+/**
+ * What a confirmed edit saves: its grant, or nothing when the app's grant
+ * moved while the dialog was open (another device, the permissions popup),
+ * so that change is not overwritten.
+ */
+export function grantToConfirm(before: Grant, now: Grant, proposed: Grant): Grant | 'stale' {
+  return sameGrant(before, now) ? proposed : 'stale'
+}
+
 function toBatchId(hex: string): BatchId {
   return new BatchId(hex)
 }
