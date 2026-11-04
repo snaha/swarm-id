@@ -72,6 +72,39 @@ export function remainingLifespanSeconds(
 }
 
 /**
+ * How often a drive's lifetime is re-read from the chain (#927): halfway to
+ * its stored expiry — no sooner than a minute, no later than six hours — and
+ * at the expiry itself when that comes first.
+ * The oracle moves the price by at most ±0.08 % a round (≈12.7 min), about
+ * ±9.5 % a day compounded, so six hours bounds the drift at about 2.4 %, and
+ * the halving tightens the reads as the expiry nears.
+ */
+export const REMEASURE_MIN_MS = 60 * MS_PER_SECOND
+export const REMEASURE_MAX_MS = 6 * 60 * 60 * MS_PER_SECOND
+
+/**
+ * When to re-read the drives next, from the nearest stored expiry. An
+ * unmeasured drive, or one already run out, is still re-read at the cap.
+ */
+export function nextRemeasureMs(
+  stamps: StampLifetimeFields[],
+  now = Date.now(),
+): number {
+  let untilExpiry = Infinity
+  for (const stamp of stamps) {
+    const left = remainingLifespanSeconds(stamp, now)
+    if (left !== undefined && left > 0) {
+      untilExpiry = Math.min(untilExpiry, left * MS_PER_SECOND)
+    }
+  }
+  const halfway = Math.min(
+    Math.max(untilExpiry / 2, REMEASURE_MIN_MS),
+    REMEASURE_MAX_MS,
+  )
+  return Math.min(untilExpiry, halfway)
+}
+
+/**
  * Whether the stored lifetime has run out. An unknown lifetime is not
  * expired: refusing to stamp on missing data would turn every legacy record
  * read-only.

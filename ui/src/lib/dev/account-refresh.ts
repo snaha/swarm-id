@@ -33,44 +33,55 @@ const FOLD_COOLDOWN_KEY_PREFIX = 'swarm-id-account-folded-at-'
 const foldCooldownKey = (accountId: string) => `${FOLD_COOLDOWN_KEY_PREFIX}${accountId}`
 
 // Per-tab, per-account guard so overlapping triggers (interval + account switch)
-// don't stack — keyed so an A→B switch while A's fold runs still folds B.
-const inFlight = new Set<string>()
+// don't stack — keyed so an A→B switch while A's fold runs still folds B. A
+// second trigger awaits the running fold rather than returning before it ends.
+const inFlight = new Map<string, Promise<boolean>>()
 
 /**
  * Fold one account. `force` bypasses the cross-tab cooldown (page load /
- * account switch); the periodic tick passes `false` so it coalesces.
+ * account switch); the periodic tick passes `false` so it coalesces. Resolves
+ * `false` when the fold failed, `true` when it ran or was coalesced away
+ * because another tab folded within the window.
  */
-async function foldAccount(accountId: string, force: boolean): Promise<void> {
-  if (inFlight.has(accountId)) {
-    return
+function foldAccount(accountId: string, force: boolean): Promise<boolean> {
+  const running = inFlight.get(accountId)
+  if (running) {
+    return running
   }
-  inFlight.add(accountId)
-  try {
-    await runCoalescedAcrossTabs({
-      lockName: FOLD_LOCK_NAME,
-      cooldownKey: foldCooldownKey(accountId),
-      cooldownMs: FOLD_INTERVAL_MS,
-      graceMs: FOLD_GRACE_MS,
-      force,
-      task: async () => {
-        const result = await refreshAccountFromSwarm(accountId)
-        if (!result.ok && result.kind === 'error') {
-          console.warn(`[account-fold] ${accountId} failed:`, result.error)
-        }
-      },
-    })
-  } finally {
-    inFlight.delete(accountId)
-  }
+  const fold = runFold(accountId, force).finally(() => inFlight.delete(accountId))
+  inFlight.set(accountId, fold)
+  return fold
 }
 
-/** Fold the currently-active account (page load / account switch). */
-export async function foldCurrentAccount(force: boolean): Promise<void> {
+async function runFold(accountId: string, force: boolean): Promise<boolean> {
+  let ok = true
+  await runCoalescedAcrossTabs({
+    lockName: FOLD_LOCK_NAME,
+    cooldownKey: foldCooldownKey(accountId),
+    cooldownMs: FOLD_INTERVAL_MS,
+    graceMs: FOLD_GRACE_MS,
+    force,
+    task: async () => {
+      const result = await refreshAccountFromSwarm(accountId)
+      if (!result.ok && result.kind === 'error') {
+        ok = false
+        console.warn(`[account-fold] ${accountId} failed:`, result.error)
+      }
+    },
+  })
+  return ok
+}
+
+/**
+ * Fold the currently-active account (page load / account switch). Resolves
+ * whether the fold succeeded, as `foldAccount` does.
+ */
+export async function foldCurrentAccount(force: boolean): Promise<boolean> {
   const accountId = sessionStore.currentAccountId
   if (!accountId) {
-    return
+    return false
   }
-  await foldAccount(accountId, force)
+  return foldAccount(accountId, force)
 }
 
 /**

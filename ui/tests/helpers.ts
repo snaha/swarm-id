@@ -245,6 +245,24 @@ export function seedLocalChain(page: Page | BrowserContext, rpcUrl: string = CHA
   )
 }
 
+/**
+ * Hold the drive-lifetime watcher's Web Lock (#903) from the page's first
+ * script, as another tab reading the drives would, so the site does not
+ * re-read them from the chain on load. For a test that rolls a record back and
+ * means some other path to reconcile it. The lock name is the one
+ * `+layout.svelte` passes to `inOneTab`.
+ */
+export function holdDriveLifetimeLock(page: Page) {
+  return page.addInitScript(() => {
+    const accountId = localStorage.getItem('swarm-id-current-account-v2')
+    if (!accountId) return
+    void navigator.locks.request(
+      `swarm-id-drive-lifetime-${accountId}`,
+      () => new Promise(() => {}),
+    )
+  })
+}
+
 export function seedNoChain(page: Page) {
   return page.addInitScript(() => {
     localStorage.setItem(

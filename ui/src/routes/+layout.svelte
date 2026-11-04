@@ -16,6 +16,8 @@
   // data — #389 can relocate it out of `$lib/dev`; not worth the churn here.
   import { foldCurrentAccount, startFoldInterval } from '$lib/dev/account-refresh'
   import { triggerSync } from '$lib/dev/sync-hooks'
+  import { inOneTab, watchDriveLifetimes } from '$lib/drive-lifetime-watch'
+  import ROUTES from '$lib/routes'
   import { accountBusStore } from '$lib/stores/account-bus'
   import { accountsStore, setAccountsSyncHook } from '$lib/stores/accounts.svelte'
   import { sessionStore } from '$lib/stores/session.svelte'
@@ -80,15 +82,57 @@
     }
   })
 
+  /** A window opened for a dApp's connect or permissions flow, decided by the
+   *  page it opened on: it lives for one grant, and its navigations stay in it. */
+  const POPUP_ROUTES = [ROUTES.CONNECT, ROUTES.PERMISSIONS]
+  const isPopup = POPUP_ROUTES.some((route) => page.route.id?.startsWith(route))
+
+  // The account whose page-load fold has succeeded in this tab. The watcher
+  // waits for it: a read that lands before the fold would write a drive this
+  // device has not yet learned was removed, and its newer `updatedAt` would
+  // beat the tombstone on every device. A failed fold leaves it unset, so the
+  // watcher waits for the next load or account switch.
+  let foldedAccountId = $state<string | undefined>()
+
+  // A boolean, so the watcher restarts on sign-in or sign-out and not on every
+  // write to the account, its own included.
+  const currentSignedIn = $derived(signedInRecord(sessionStore.currentAccountId) !== undefined)
+
+  // Re-read the current account's drives from the chain while the site is
+  // open (#903), so the expiry warnings follow the chain rather than the last
+  // measurement. Only top-level: the same shell renders the dApp's /proxy
+  // iframe, which keeps its own readings (#957), and a framed page renders
+  // nothing. Not in a connect or permissions popup, where a read and a publish
+  // would land mid-grant. One tab per account reads, so N tabs publish a
+  // change once.
+  $effect(() => {
+    const accountId = sessionStore.currentAccountId
+    if (!accountId || !currentSignedIn || isPopup || window.top !== window) return
+    if (foldedAccountId !== accountId) return
+    return untrack(() =>
+      inOneTab(`swarm-id-drive-lifetime-${accountId}`, () =>
+        watchDriveLifetimes(() =>
+          signedInRecord(accountId) ? accountsStore.get(accountId) : undefined,
+        ),
+      ),
+    )
+  })
+
   // Force a fold whenever the active account is set or switched — the page-load
   // ("reload to force") and account-switch triggers. Reads ONLY the id (which
   // applyRefreshed never changes); `untrack` keeps the fold's accountsStore reads
   // out of this effect's dependencies, avoiding an $effect re-fire loop.
   $effect(() => {
-    if (!sessionStore.currentAccountId) {
+    const accountId = sessionStore.currentAccountId
+    if (!accountId) {
       return
     }
-    untrack(() => void foldCurrentAccount(true))
+    untrack(
+      () =>
+        void foldCurrentAccount(true).then((ok) => {
+          if (ok && sessionStore.currentAccountId === accountId) foldedAccountId = accountId
+        }),
+    )
   })
 </script>
 

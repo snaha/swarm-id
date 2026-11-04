@@ -76,6 +76,16 @@ function storedDrives(page: import('@playwright/test').Page) {
   })
 }
 
+/** Every stored drive's TTL snapshot, read back through localStorage. */
+function storedTTLs(page: import('@playwright/test').Page) {
+  return page.evaluate(() => {
+    const doc = JSON.parse(localStorage.getItem('swarm-id-accounts') ?? '{}') as {
+      data?: { postageStamps?: { batchTTL?: number }[] }[]
+    }
+    return (doc.data?.[0]?.postageStamps ?? []).map((stamp) => stamp.batchTTL ?? 0)
+  })
+}
+
 /** Ages every stored drive past its expiry (a TTL snapshot of zero seconds). */
 async function expireStoredDrives(page: import('@playwright/test').Page) {
   await page.evaluate(() => {
@@ -317,9 +327,28 @@ test('an expired drive offers no extend or resize, only removal', async ({ page 
   await expect(page.getByRole('button', { name: 'Increase size' })).toBeVisible()
   await expect(page.getByRole('button', { name: 'Extend lifespan' })).toBeVisible()
 
-  // Age it past expiry (#545): an expired batch can be neither topped up nor
-  // diluted, so both edits go away and removal is all that is left.
+  // The site re-reads its drives from the chain once the load fold settles
+  // (#903): a record aged to zero comes back with the chain's lifetime. CI runs
+  // no Bee, so its 404 stands in for an account that has published nothing yet.
+  await page.route('http://localhost:1633/**', (route) =>
+    route.request().method() === 'GET'
+      ? route.fulfill({ status: 404, json: { code: 404, message: 'Not Found' } })
+      : route.abort('connectionrefused'),
+  )
   await expireStoredDrives(page)
+  await page.reload()
+  await expect
+    .poll(async () => (await storedTTLs(page))[0], { timeout: DRIVE_SETTLE_TIMEOUT_MS })
+    .toBeGreaterThan(0)
+  await page.getByRole('tab', { name: 'Storage' }).click()
+  await expect(page.getByText('Drive expired')).toHaveCount(0)
+
+  // Age it past expiry (#545): an expired batch can be neither topped up nor
+  // diluted, so both edits go away and removal is all that is left. The batch
+  // is still funded on the chain, so the chain is cut off first or the re-read
+  // would put the lifetime back.
+  await expireStoredDrives(page)
+  await seedNoChain(page)
   await page.reload()
   await page.getByRole('tab', { name: 'Storage' }).click()
   await expect(page.getByText('Drive expired')).toBeVisible()

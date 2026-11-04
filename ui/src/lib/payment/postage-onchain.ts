@@ -15,7 +15,7 @@
  */
 import type { PrivateKey } from '@ethersphere/bee-js'
 import { TimeoutError, withTimeout } from '@snaha/swarm-id'
-import { type PostageStamp, sleep } from '@snaha/swarm-id/internal'
+import { type PostageStamp, remainingLifespanSeconds, sleep } from '@snaha/swarm-id/internal'
 import {
   MultichainClient,
   type PostageBatch,
@@ -386,42 +386,109 @@ export async function preflightResize(
   return { ...preflight, alreadyResized: preflight.batch.depth >= newDepth }
 }
 
+/** What the chain says of a drive, in the fields its record keeps */
+export interface ChainReading {
+  exists: boolean
+  usable: boolean
+  depth: number
+  amount: bigint
+  /**
+   * Absent when the chain has no price to divide by: a reading without a
+   * lifetime then leaves the stored one alone rather than erase it
+   */
+  batchTTL?: number
+}
+
 /**
- * Patch the stamp record from chain truth (depth, live per-chunk balance, the
- * TTL it implies, and whether the batch exists and is usable — the readiness
- * rule refuses a record that says otherwise, so a stale `false` must clear
- * here). Called after every confirmed transaction and on dialog open, so an
- * interrupted flow reconciles instead of trusting local state. Returns false
- * when the chain could not answer (record left untouched).
+ * Read drives from chain truth: depth, live per-chunk balance, the TTL it
+ * implies, and whether the batch exists and is usable. The price is read
+ * once for all of them. `undefined` is a drive the chain did not answer
+ * for: its read failed, or the chain does not show the batch. The latter is
+ * no answer either: right after a purchase it is an RPC behind, and a chain
+ * config that does not match where the batch lives would otherwise mark every
+ * drive gone.
+ */
+export async function readStampsFromChain(
+  stamps: Pick<PostageStamp, 'batchID'>[],
+  client?: MultichainClient,
+): Promise<(ChainReading | undefined)[]> {
+  if (stamps.length === 0) {
+    return []
+  }
+  const chain = client ?? (await postageChain())
+  const constraints = chain.getPostageWriteConstraints()
+  return Promise.all(
+    stamps.map(async (stamp): Promise<ChainReading | undefined> => {
+      try {
+        const [batch, { lastPrice }] = await Promise.all([
+          chain.getPostageBatch(batchIdHex(stamp)),
+          constraints,
+        ])
+        if (!batch) {
+          return undefined
+        }
+        const remaining = await chain.getRemainingBalance(batchIdHex(stamp))
+        const batchTTL = ttlSecondsFor(remaining, lastPrice)
+        return {
+          depth: batch.depth,
+          amount: remaining,
+          ...(batchTTL === undefined ? {} : { batchTTL }),
+          // The same reading `fetchExistingBatchFromChain` stores on attach.
+          exists: true,
+          usable: batchTTL === undefined || batchTTL > 0,
+        }
+      } catch {
+        return undefined
+      }
+    }),
+  )
+}
+
+/**
+ * The `updateStamp` patch for a reading. `updateStamp` stamps `updatedAt`,
+ * which is also when the stored `batchTTL` was measured, so a reading with no
+ * lifetime carries the stored one re-anchored to now: leaving it out would
+ * restart its clock and hand the drive back the time since its measurement.
+ */
+export function stampPatchFor(
+  record: PostageStamp,
+  reading: ChainReading,
+  now = Date.now(),
+): ChainReading {
+  return reading.batchTTL === undefined
+    ? { ...reading, batchTTL: remainingLifespanSeconds(record, now) }
+    : reading
+}
+
+/** `readStampsFromChain` for one drive */
+export async function readStampFromChain(
+  stamp: Pick<PostageStamp, 'batchID'>,
+  client?: MultichainClient,
+): Promise<ChainReading | undefined> {
+  const [reading] = await readStampsFromChain([stamp], client)
+  return reading
+}
+
+/**
+ * Patch the stamp record from chain truth (`readStampFromChain`; the
+ * readiness rule refuses a record that says the batch is missing or unusable,
+ * so a stale `false` must clear here). Called after every confirmed
+ * transaction and on dialog open, so an interrupted flow reconciles instead of
+ * trusting local state. Returns false when the chain could not answer (record
+ * left untouched).
  */
 export async function reconcileStampFromChain(
   account: Account,
   stamp: PostageStamp,
   client?: MultichainClient,
 ): Promise<boolean> {
-  const chain = client ?? (await postageChain())
-  try {
-    const [batch, constraints] = await Promise.all([
-      chain.getPostageBatch(batchIdHex(stamp)),
-      chain.getPostageWriteConstraints(),
-    ])
-    if (!batch) {
-      return false
-    }
-    const remaining = await chain.getRemainingBalance(batchIdHex(stamp))
-    const batchTTL = ttlSecondsFor(remaining, constraints.lastPrice)
-    account.updateStamp(stamp.batchID, {
-      depth: batch.depth,
-      amount: remaining,
-      batchTTL,
-      // The same reading `fetchExistingBatchFromChain` stores on attach.
-      exists: true,
-      usable: batchTTL === undefined || batchTTL > 0,
-    })
-    return true
-  } catch {
+  const reading = await readStampFromChain(stamp, client)
+  if (!reading) {
     return false
   }
+  const record = account.stamps.find((s) => s.batchID.equals(stamp.batchID)) ?? stamp
+  account.updateStamp(stamp.batchID, stampPatchFor(record, reading))
+  return true
 }
 
 /**

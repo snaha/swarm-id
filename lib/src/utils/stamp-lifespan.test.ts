@@ -5,7 +5,10 @@ import { describe, it, expect } from "vitest"
 import {
   stampRefusal,
   isStampExpired,
+  nextRemeasureMs,
   remainingLifespanSeconds,
+  REMEASURE_MAX_MS,
+  REMEASURE_MIN_MS,
   sameStampLifetime,
 } from "./stamp-lifespan"
 
@@ -95,5 +98,35 @@ describe("sameStampLifetime notices a usability flip", () => {
     expect(sameStampLifetime(a, { ...a, usable: true })).toBe(false)
     expect(sameStampLifetime(a, { ...a, exists: false })).toBe(false)
     expect(sameStampLifetime(a, { ...a })).toBe(true)
+  })
+})
+
+describe("nextRemeasureMs", () => {
+  const HOUR_S = 3600
+  const DAY_S = 24 * HOUR_S
+  const MS = 1000
+  const drive = (batchTTL: number | undefined, createdAt = NOW) => ({
+    batchTTL,
+    createdAt,
+  })
+
+  it("re-reads halfway to the nearest expiry, within a minute and six hours", () => {
+    expect(nextRemeasureMs([drive(2 * HOUR_S)], NOW)).toBe(HOUR_S * MS)
+    expect(nextRemeasureMs([drive(30 * DAY_S)], NOW)).toBe(REMEASURE_MAX_MS)
+    // Ninety seconds left: never later than the expiry itself
+    expect(nextRemeasureMs([drive(90)], NOW)).toBe(REMEASURE_MIN_MS)
+    expect(nextRemeasureMs([drive(30)], NOW)).toBe(30 * MS)
+  })
+
+  it("times the drive nearest its expiry, and falls back to the cap", () => {
+    expect(nextRemeasureMs([drive(30 * DAY_S), drive(4 * HOUR_S)], NOW)).toBe(
+      2 * HOUR_S * MS,
+    )
+    // Unmeasured or already run out: nothing to time but the cap
+    expect(nextRemeasureMs([drive(undefined)], NOW)).toBe(REMEASURE_MAX_MS)
+    expect(nextRemeasureMs([drive(10, NOW - 60 * MS)], NOW)).toBe(
+      REMEASURE_MAX_MS,
+    )
+    expect(nextRemeasureMs([], NOW)).toBe(REMEASURE_MAX_MS)
   })
 })

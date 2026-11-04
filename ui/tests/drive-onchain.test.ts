@@ -23,6 +23,7 @@ import {
   createAccountWithOnChainDrive,
   storedDrive,
 } from './drive-onchain-setup'
+import { holdDriveLifetimeLock } from './helpers'
 
 test.describe.configure({ mode: 'serial' })
 
@@ -103,6 +104,10 @@ test('an interrupted resize resumes from chain truth without paying twice', asyn
     }
     localStorage.setItem('swarm-id-accounts', JSON.stringify(doc))
   })
+  // The site re-reads its drives on load (#903) and would put the record right
+  // before the dialog opens; hold its lock so the dialog's reconcile is what
+  // this tests.
+  await holdDriveLifetimeLock(page)
   await page.reload()
   await page.getByRole('tab', { name: 'Storage' }).click()
   await page.getByRole('button', { name: 'Expand drive' }).click()
