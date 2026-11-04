@@ -1,17 +1,10 @@
 // Copyright 2026 The Swarm Authors. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 import { BatchId, PrivateKey } from '@ethersphere/bee-js'
-import type { PostageStamp } from '@snaha/swarm-id/internal'
+import { type PostageStamp, REMEASURE_MAX_MS } from '@snaha/swarm-id/internal'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
-import {
-  REREAD_MAX_MS,
-  REREAD_MIN_MS,
-  differsFromRecord,
-  inOneTab,
-  nextRereadMs,
-  watchDriveLifetimes,
-} from '$lib/drive-lifetime-watch'
+import { differsFromRecord, inOneTab, watchDriveLifetimes } from '$lib/drive-lifetime-watch'
 import type { ChainReading } from '$lib/payment/postage-onchain'
 
 const NOW = 1_700_000_000_000
@@ -40,26 +33,6 @@ function reading(stamp: PostageStamp, batchTTL?: number): ChainReading {
   return { depth: stamp.depth, amount: 2n, exists: true, usable: true, batchTTL }
 }
 
-describe('nextRereadMs', () => {
-  it('re-reads halfway to the nearest expiry, within a minute and six hours', () => {
-    expect(nextRereadMs([drive('aa'.repeat(32), 2 * HOUR_S)], NOW)).toBe(HOUR_S * MS)
-    expect(nextRereadMs([drive('aa'.repeat(32), 30 * DAY_S)], NOW)).toBe(REREAD_MAX_MS)
-    // Ninety seconds left: never later than the expiry itself
-    expect(nextRereadMs([drive('aa'.repeat(32), 90)], NOW)).toBe(REREAD_MIN_MS)
-    expect(nextRereadMs([drive('aa'.repeat(32), 30)], NOW)).toBe(30 * MS)
-  })
-
-  it('times the drive nearest its expiry, and falls back to the cap', () => {
-    const near = drive('aa'.repeat(32), 4 * HOUR_S)
-    const far = drive('bb'.repeat(32), 30 * DAY_S)
-    expect(nextRereadMs([far, near], NOW)).toBe(2 * HOUR_S * MS)
-    // Unmeasured or already run out: nothing to time but the cap
-    expect(nextRereadMs([drive('cc'.repeat(32), undefined)], NOW)).toBe(REREAD_MAX_MS)
-    expect(nextRereadMs([drive('cc'.repeat(32), 10, NOW - 60 * MS)], NOW)).toBe(REREAD_MAX_MS)
-    expect(nextRereadMs([], NOW)).toBe(REREAD_MAX_MS)
-  })
-})
-
 describe('differsFromRecord', () => {
   const stamp = drive('aa'.repeat(32), 30 * DAY_S)
 
@@ -77,6 +50,21 @@ describe('differsFromRecord', () => {
     expect(differsFromRecord(stamp, { ...reading(stamp, 0), usable: false }, NOW)).toBe(true)
     const unmeasured = drive('bb'.repeat(32), undefined)
     expect(differsFromRecord(unmeasured, reading(unmeasured, DAY_S), NOW)).toBe(true)
+  })
+
+  it('holds the tolerance at 2% of the reading, and never under ten minutes', () => {
+    // 6 h on 30 days is under 2% (14.4 h): noise
+    expect(differsFromRecord(stamp, reading(stamp, 30 * DAY_S - 6 * HOUR_S), NOW)).toBe(false)
+    // 3% is over it: a price move
+    expect(differsFromRecord(stamp, reading(stamp, 30 * DAY_S * 0.97), NOW)).toBe(true)
+    // 9 min on 2 h is over 2% but under the ten-minute floor
+    const short = drive('cc'.repeat(32), 2 * HOUR_S)
+    expect(differsFromRecord(short, reading(short, 2 * HOUR_S - 9 * 60), NOW)).toBe(false)
+  })
+
+  it('reads a record that has run out as zero, not as how long ago', () => {
+    const runOut = drive('dd'.repeat(32), HOUR_S, NOW - DAY_S * MS)
+    expect(differsFromRecord(runOut, reading(runOut, 0), NOW)).toBe(false)
   })
 
   it('never erases a stored lifetime for a reading without one (no price)', () => {
@@ -144,6 +132,34 @@ describe('watchDriveLifetimes', () => {
     stop()
   })
 
+  it('drops a reading when a peer whose clock is behind ours wrote meanwhile', async () => {
+    const before = drive('aa'.repeat(32), 30 * DAY_S, NOW - DAY_S * MS)
+    const target = account([before])
+    // The peer's clock is 3 s behind: its top-up lands stamped before our read began
+    const read = vi.fn(async (stamps: PostageStamp[]) => {
+      vi.setSystemTime(NOW + MS)
+      target.stamps = [{ ...before, batchTTL: 60 * DAY_S, updatedAt: NOW - 2 * MS }]
+      return stamps.map((stamp) => reading(stamp, 29 * DAY_S))
+    })
+    const stop = watchDriveLifetimes(() => target, read)
+    await vi.advanceTimersByTimeAsync(0)
+    expect(target.updateStamp).not.toHaveBeenCalled()
+    stop()
+  })
+
+  it('drops a reading with a lower depth than the record, as older than it', async () => {
+    const resized = { ...drive('aa'.repeat(32), 30 * DAY_S), depth: 21 }
+    const target = account([resized])
+    // A lagging RPC answers with the depth before the resize, and its lifetime
+    const stop = watchDriveLifetimes(
+      () => target,
+      reader((stamp) => ({ ...reading(stamp, 60 * DAY_S), depth: 20 })),
+    )
+    await vi.advanceTimersByTimeAsync(0)
+    expect(target.updateStamp).not.toHaveBeenCalled()
+    stop()
+  })
+
   it('reads again on the schedule, and stops when told', async () => {
     const target = account([drive('aa'.repeat(32), 2 * HOUR_S)])
     const read = reader((stamp) => reading(stamp, 2 * HOUR_S))
@@ -153,7 +169,7 @@ describe('watchDriveLifetimes', () => {
     await vi.advanceTimersByTimeAsync(HOUR_S * MS)
     expect(read).toHaveBeenCalledTimes(2)
     stop()
-    await vi.advanceTimersByTimeAsync(REREAD_MAX_MS)
+    await vi.advanceTimersByTimeAsync(REMEASURE_MAX_MS)
     expect(read).toHaveBeenCalledTimes(2)
   })
 

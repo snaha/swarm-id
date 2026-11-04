@@ -158,7 +158,11 @@ export {
 
 export { sleep, withIdleTimeout } from "./utils/promise"
 
-export { remainingLifespanSeconds } from "./utils/stamp-lifespan"
+export {
+  nextRemeasureMs,
+  REMEASURE_MAX_MS,
+  remainingLifespanSeconds,
+} from "./utils/stamp-lifespan"
 
 export {
   createAccountsStorageManager,

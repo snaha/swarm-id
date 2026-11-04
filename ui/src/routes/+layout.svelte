@@ -17,6 +17,7 @@
   import { foldCurrentAccount, startFoldInterval } from '$lib/dev/account-refresh'
   import { triggerSync } from '$lib/dev/sync-hooks'
   import { inOneTab, watchDriveLifetimes } from '$lib/drive-lifetime-watch'
+  import ROUTES from '$lib/routes'
   import { accountBusStore } from '$lib/stores/account-bus'
   import { accountsStore, setAccountsSyncHook } from '$lib/stores/accounts.svelte'
   import { sessionStore } from '$lib/stores/session.svelte'
@@ -83,8 +84,15 @@
 
   /** A window opened for a dApp's connect or permissions flow, decided by the
    *  page it opened on: it lives for one grant, and its navigations stay in it. */
-  const POPUP_ROUTES = ['/connect', '/permissions']
+  const POPUP_ROUTES = [ROUTES.CONNECT, ROUTES.PERMISSIONS]
   const isPopup = POPUP_ROUTES.some((route) => page.route.id?.startsWith(route))
+
+  // The account whose page-load fold has succeeded in this tab. The watcher
+  // waits for it: a read that lands before the fold would write a drive this
+  // device has not yet learned was removed, and its newer `updatedAt` would
+  // beat the tombstone on every device. A failed fold leaves it unset, so the
+  // watcher waits for the next load or account switch.
+  let foldedAccountId = $state<string | undefined>()
 
   // A boolean, so the watcher restarts on sign-in or sign-out and not on every
   // write to the account, its own included.
@@ -100,6 +108,7 @@
   $effect(() => {
     const accountId = sessionStore.currentAccountId
     if (!accountId || !currentSignedIn || isPopup || window.top !== window) return
+    if (foldedAccountId !== accountId) return
     return untrack(() =>
       inOneTab(`swarm-id-drive-lifetime-${accountId}`, () =>
         watchDriveLifetimes(() =>
@@ -114,10 +123,16 @@
   // applyRefreshed never changes); `untrack` keeps the fold's accountsStore reads
   // out of this effect's dependencies, avoiding an $effect re-fire loop.
   $effect(() => {
-    if (!sessionStore.currentAccountId) {
+    const accountId = sessionStore.currentAccountId
+    if (!accountId) {
       return
     }
-    untrack(() => void foldCurrentAccount(true))
+    untrack(
+      () =>
+        void foldCurrentAccount(true).then((ok) => {
+          if (ok && sessionStore.currentAccountId === accountId) foldedAccountId = accountId
+        }),
+    )
   })
 </script>
 

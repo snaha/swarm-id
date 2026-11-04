@@ -121,7 +121,8 @@ import {
   stampsReachableByApp,
 } from "./utils/postage-stamp-association"
 import {
-  remainingLifespanSeconds,
+  nextRemeasureMs,
+  REMEASURE_MIN_MS,
   sameStampLifetime,
   stampRefusal,
   type StampLifetimeFields,
@@ -277,16 +278,6 @@ const DEFAULT_ACT_FILENAME = "index.bin"
 const DEFAULT_ACT_CONTENT_TYPE = "application/octet-stream"
 const SEQUENTIAL_INDEX_LOOKUP_TIMEOUT_MS = 2000
 const MS_PER_SECOND = 1000
-/**
- * How often a drive's lifetime is re-read from the chain (#927): halfway to
- * its stored expiry — no sooner than a minute, no later than six hours — and
- * at the expiry itself when that comes first.
- * The oracle moves the price by at most ±0.08 % a round (≈12.7 min), about
- * ±9.5 % a day compounded, so six hours bounds the drift at about 2.4 %, and
- * the halving tightens the reads as the expiry nears.
- */
-const REMEASURE_MIN_MS = 60 * MS_PER_SECOND
-const REMEASURE_MAX_MS = 6 * 60 * 60 * MS_PER_SECOND
 /**
  * A drive whose record is younger than this may still be warming up (#924):
  * Bee stamps with a batch ten blocks after it was minted, under a minute on
@@ -972,23 +963,11 @@ export class SwarmIdProxy {
       this.expiryTimer = undefined
       return
     }
-    const [next] = granted
-      .map((stamp) =>
-        remainingLifespanSeconds(
-          this.lifetimeOf(stamp.batchID.toHex(), stamp),
-          now,
-        ),
-      )
-      .filter((left): left is number => left !== undefined && left > 0)
-      .sort((a, b) => a - b)
-    // An unmeasured drive, or one already run out, is still re-read at the cap.
-    const untilExpiry = next === undefined ? Infinity : next * MS_PER_SECOND
-    const untilRemeasure = Math.min(
-      Math.max(untilExpiry / 2, REMEASURE_MIN_MS),
-      REMEASURE_MAX_MS,
-    )
     this.armWarmUpTimer(granted, now)
-    const delay = Math.min(untilExpiry, untilRemeasure)
+    const delay = nextRemeasureMs(
+      granted.map((stamp) => this.lifetimeOf(stamp.batchID.toHex(), stamp)),
+      now,
+    )
     // Keep an earlier tick already pending: an early one only re-reads, and
     // re-arming from now on every `getPostageBatch()` would keep pushing a
     // halfway re-read of the other drives back.
