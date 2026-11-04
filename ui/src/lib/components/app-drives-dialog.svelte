@@ -12,8 +12,7 @@
   would take every reference stored on a drive, which nothing records.
 -->
 <script lang="ts">
-  import ConfirmPhraseField from '$lib/components/confirm-phrase-field.svelte'
-  import { Button } from '$lib/components/ui/button'
+  import ConfirmPhrase from '$lib/components/confirm-phrase.svelte'
   import { Dialog } from '$lib/components/ui/dialog'
 
   /** What the user types to confirm, as for the default drive */
@@ -33,12 +32,7 @@
 
   let { appName, takenAway, keepsAny, shrinks, onConfirm, onCancel }: Props = $props()
 
-  let confirmed = $state(false)
   const one = $derived(takenAway.length === 1)
-
-  function confirm() {
-    if (confirmed) onConfirm()
-  }
 </script>
 
 <Dialog onclose={onCancel} title="Change this app's drives">
@@ -78,16 +72,12 @@
       </p>
     {/if}
   </div>
-  <ConfirmPhraseField
+  <ConfirmPhrase
     id="confirm-app-drives"
     phrase={CONFIRM_PHRASE}
-    bind:confirmed
-    onsubmit={confirm}
-  />
-  <div class="flex w-full flex-col gap-2">
-    <Button variant="destructive" class="w-full" disabled={!confirmed} onclick={confirm}>
-      Change drives
-    </Button>
-    <Button variant="outline" class="w-full" onclick={onCancel}>Cancel</Button>
-  </div>
+    onconfirm={onConfirm}
+    oncancel={onCancel}
+  >
+    Change drives
+  </ConfirmPhrase>
 </Dialog>

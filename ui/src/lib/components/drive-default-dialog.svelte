@@ -14,8 +14,7 @@
   import Star from '@lucide/svelte/icons/star'
   import type { PostageStamp } from '@snaha/swarm-id/internal'
 
-  import ConfirmPhraseField from '$lib/components/confirm-phrase-field.svelte'
-  import { Button } from '$lib/components/ui/button'
+  import ConfirmPhrase from '$lib/components/confirm-phrase.svelte'
   import { Dialog } from '$lib/components/ui/dialog'
   import { driveDisplayName } from '$lib/drives'
   import type { Account } from '$lib/types'
@@ -40,10 +39,8 @@
   const followers = $derived(
     account.activeApps.filter((app) => app.drives === undefined || app.drives === 'all'),
   )
-  let confirmed = $state(false)
 
   function setDefault() {
-    if (!confirmed) return
     account.setDefaultStamp(drive.batchID)
     onChanged?.('Default drive updated')
     onClose()
@@ -85,17 +82,13 @@
       </ul>
     </div>
   {/if}
-  <ConfirmPhraseField
+  <ConfirmPhrase
     id="confirm-default-drive"
     phrase={CONFIRM_PHRASE}
-    bind:confirmed
-    onsubmit={setDefault}
-  />
-  <div class="flex w-full flex-col gap-2">
-    <Button variant="destructive" class="w-full" disabled={!confirmed} onclick={setDefault}>
-      <Star />
-      Set as default
-    </Button>
-    <Button variant="outline" class="w-full" onclick={onClose}>Cancel</Button>
-  </div>
+    onconfirm={setDefault}
+    oncancel={onClose}
+  >
+    <Star />
+    Set as default
+  </ConfirmPhrase>
 </Dialog>
