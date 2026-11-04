@@ -7,15 +7,19 @@ import { describe, expect, it } from 'vitest'
 import {
   askedPatch,
   customised,
+  drivesTakenAway,
   editRows,
   grantAfterEdit,
   grantAfterRequest,
+  grantAfterRowEdit,
+  grantToConfirm,
   grantableOnRequest,
   parsePermissionsHash,
   pinned,
   requestRows,
   switchesToAsk,
   unknownDriveLabel,
+  writableBatches,
 } from '$lib/permissions-request'
 
 const A = 'aa'.repeat(32)
@@ -132,6 +136,74 @@ describe('an edit', () => {
   it('falls back to the account default when "all" is unticked', () => {
     expect(grantAfterEdit('all', [], true, A)).toBe('all')
     expect(grantAfterEdit('all', [], false, A)).toBeUndefined()
+  })
+
+  // What a change of drives costs the app, so it is confirmed first (#925).
+  describe('the drives it takes away', () => {
+    it('names a drive set to None, or swapped for another', () => {
+      expect(
+        drivesTakenAway([new BatchId(A), new BatchId(S)], [new BatchId(A)], drives, A),
+      ).toEqual([S])
+      expect(drivesTakenAway([new BatchId(A)], [new BatchId(B)], drives, A)).toEqual([A])
+    })
+
+    it('counts no grant as the default, and "all" as every drive', () => {
+      // Tracking the default, then pinned to another drive
+      expect(drivesTakenAway(undefined, [new BatchId(B)], drives, A)).toEqual([A])
+      // Unticking "all" leaves only the default
+      expect(drivesTakenAway('all', undefined, drives, A)).toEqual([B, S])
+      // With no default set, an app with no grant had no drive to lose
+      expect(drivesTakenAway(undefined, [new BatchId(B)], drives, undefined)).toEqual([])
+    })
+
+    it('names a drive this device does not know yet', () => {
+      const unknown = 'dd'.repeat(32)
+      expect(
+        drivesTakenAway([new BatchId(A), new BatchId(unknown)], [new BatchId(A)], drives, A),
+      ).toEqual([unknown])
+    })
+
+    it('takes nothing away by dropping a deleted drive, and keeps nothing on one', () => {
+      const deleted = { ...drive(S), deletedAt: 1 }
+      const stamps = [...drives, deleted]
+      expect(
+        drivesTakenAway([new BatchId(A), new BatchId(S)], [new BatchId(A)], stamps, A),
+      ).toEqual([])
+      expect(drivesTakenAway('all', undefined, stamps, A)).toEqual([B])
+      expect(writableBatches([new BatchId(S)], stamps, A)).toEqual([])
+    })
+
+    it('takes nothing away by adding a drive, or by pinning the default it tracked', () => {
+      expect(
+        drivesTakenAway([new BatchId(A)], [new BatchId(A), new BatchId(S)], drives, A),
+      ).toEqual([])
+      expect(drivesTakenAway(undefined, [new BatchId(A)], drives, A)).toEqual([])
+      expect(drivesTakenAway([new BatchId(A)], 'all', drives, A)).toEqual([])
+    })
+  })
+
+  it('adds a drive made through "Add new drive…" rather than replacing the row\'s', () => {
+    // The picker has already put the new drive in the row it was made from.
+    const rows = editRows([new BatchId(A)], drives, A)
+    rows[0].chosen = B
+    expect(hex(grantAfterRowEdit([new BatchId(A)], rows, A, A, B))).toEqual([A, B])
+    expect(hex(grantAfterRowEdit(undefined, editRows(undefined, drives, A), A, A, B))).toEqual([
+      A,
+      B,
+    ])
+    // A plain edit still replaces it
+    expect(hex(grantAfterRowEdit([new BatchId(A)], rows, A, A))).toEqual([B])
+  })
+
+  it('saves nothing on a confirm when the grant moved while the dialog was open', () => {
+    const proposed = [new BatchId(A)]
+    expect(
+      grantToConfirm([new BatchId(A), new BatchId(S)], [new BatchId(A), new BatchId(S)], proposed),
+    ).toBe(proposed)
+    expect(grantToConfirm([new BatchId(A), new BatchId(S)], [new BatchId(B)], proposed)).toBe(
+      'stale',
+    )
+    expect(grantToConfirm('all', undefined, proposed)).toBe('stale')
   })
 })
 

@@ -185,10 +185,79 @@ export function grantAfterEdit(
   return rows.filter((row) => row.chosen !== '').map((row) => toBatchId(row.chosen))
 }
 
+/**
+ * The drives an app can write to under `grant`, as batch hexes: no grant
+ * means the account default (the one the lib resolves, so pass the explicit
+ * default, not a fallback), `"all"` every drive on this device. A listed
+ * drive this device does not know yet is included; a deleted one is not, so
+ * pass the stamps with their tombstones.
+ */
+export function writableBatches(
+  grant: Grant,
+  stamps: PostageStamp[],
+  defaultBatchHex: string | undefined,
+): string[] {
+  const deleted = new Set(
+    stamps.filter((stamp) => stamp.deletedAt !== undefined).map((stamp) => stamp.batchID.toHex()),
+  )
+  const hexes =
+    grant === 'all'
+      ? stamps.map((stamp) => stamp.batchID.toHex())
+      : grant === undefined
+        ? defaultBatchHex
+          ? [defaultBatchHex]
+          : []
+        : grant.map((batch) => batch.toHex())
+  return hexes.filter((hex) => !deleted.has(hex))
+}
+
+/**
+ * The drives an app can write to under `before` and no longer can under
+ * `after` (#925), as batch hexes. A drive this device does not know yet is
+ * named too: losing it unseen is the case most worth a warning. A deleted
+ * one is not: there is nothing left on it to lose.
+ */
+export function drivesTakenAway(
+  before: Grant,
+  after: Grant,
+  stamps: PostageStamp[],
+  defaultBatchHex: string | undefined,
+): string[] {
+  const kept = new Set(writableBatches(after, stamps, defaultBatchHex))
+  return writableBatches(before, stamps, defaultBatchHex).filter((hex) => !kept.has(hex))
+}
+
 /** Whether two grants name the same drives in the same order. */
 export function sameGrant(a: Grant, b: Grant): boolean {
   if (a === undefined || b === undefined || a === 'all' || b === 'all') return a === b
   return a.length === b.length && a.every((batch, i) => batch.equals(b[i]))
+}
+
+/**
+ * The grant an Apps-tab drive row edit proposes. A drive made through a
+ * row's "Add new drive…" (`added`) joins the grant rather than replacing
+ * that row's drive: the user bought it for this app, and was not asking to
+ * take the other away.
+ */
+export function grantAfterRowEdit(
+  current: Grant,
+  rows: PickerRow[],
+  defaultBatchHex: string | undefined,
+  explicitDefaultHex: string | undefined,
+  added?: string,
+): Grant {
+  return added === undefined
+    ? grantAfterEdit(current, rows, current === 'all', defaultBatchHex)
+    : grantAfterRequest(current, explicitDefaultHex, [added])
+}
+
+/**
+ * What a confirmed edit saves: its grant, or nothing when the app's grant
+ * moved while the dialog was open (another device, the permissions popup),
+ * so that change is not overwritten.
+ */
+export function grantToConfirm(before: Grant, now: Grant, proposed: Grant): Grant | 'stale' {
+  return sameGrant(before, now) ? proposed : 'stale'
 }
 
 function toBatchId(hex: string): BatchId {

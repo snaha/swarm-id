@@ -5,7 +5,8 @@
 <!--
   One app of the Apps tab (SwarmID-MVP, APPS, Frame 154): what it holds, each
   control applying as it is changed — a drive row (a drive set to "None" is
-  taken away, unticking "all" falls back to the account default), the sharing
+  taken away, unticking "all" falls back to the account default; either
+  waits for a typed confirmation when it takes a drive away, #925), the sharing
   switches (moving one pins it for this app, even to the value the account
   default has; "Use account default" unpins it, #885) — and the two ways out,
   Disconnect and Revoke access. Every control grants on the spot; like every
@@ -27,20 +28,27 @@
     sharingDefault,
   } from '@snaha/swarm-id/internal'
 
+  import AppDrivesDialog from '$lib/components/app-drives-dialog.svelte'
   import DrivePickerRows from '$lib/components/drive-picker-rows.svelte'
   import { Button } from '$lib/components/ui/button'
   import { Select } from '$lib/components/ui/select'
   import { Switch } from '$lib/components/ui/switch'
   import { type PickerRow, kindOf } from '$lib/drive-request'
+  import { driveDisplayName } from '$lib/drives'
   import { CONNECTION_DAYS_OPTIONS, daysToMs, msToDays } from '$lib/duration'
   import {
+    type Grant,
     PERMISSION_NAMES,
     SWITCH_COPY,
     askedPatch,
+    drivesTakenAway,
     editRows,
-    grantAfterEdit,
+    grantAfterRowEdit,
+    grantToConfirm,
     pinned,
     sameGrant,
+    unknownDriveLabel,
+    writableBatches,
   } from '$lib/permissions-request'
   import { toastStore } from '$lib/stores/toast.svelte'
   import type { Account } from '$lib/types'
@@ -69,20 +77,78 @@
   // A pin equal to the default is a pin, as with the switches.
   const customDuration = $derived(app.sessionDuration !== undefined)
 
-  // Re-derived from the grant after each save; the picker edits the rows in place.
-  let rows: PickerRow[] = $derived(editRows(app.drives, drives, defaultBatchHex))
+  // What a grant with no list resolves to in the lib: the explicit default
+  // only, never the picker's first-regular-drive fallback.
+  const explicitDefaultHex = $derived(account.defaultPostageStampBatchID?.toHex())
 
-  function saveDrives() {
-    const grant = grantAfterEdit(app.drives, rows, app.drives === 'all', defaultBatchHex)
-    if (sameGrant(grant, app.drives)) return
+  // An edit that takes drives away waits for the user to confirm it (#925).
+  // `before` is the grant it was proposed against, so a change that lands
+  // meanwhile (another device, the permissions popup) is not overwritten;
+  // `rows` is the edit, shown while it waits so a sync cannot reset it.
+  let pending = $state<
+    | {
+        before: Grant
+        grant: Grant
+        rows: PickerRow[]
+        takenAway: string[]
+        keepsAny: boolean
+        shrinks: boolean
+      }
+    | undefined
+  >(undefined)
+
+  // Re-derived from the grant after each save, or a cancel; the picker edits
+  // the rows in place.
+  let rows: PickerRow[] = $derived(pending?.rows ?? editRows(app.drives, drives, defaultBatchHex))
+
+  function nameOf(hex: string): string {
+    const drive = drives.find((candidate) => candidate.batchID.toHex() === hex)
+    return drive ? driveDisplayName(drive) : unknownDriveLabel(hex)
+  }
+
+  function applyDrives(grant: Grant) {
     account.setAppPermissions(app.appUrl, { drives: grant })
     toastStore.show('Permissions saved')
   }
 
-  function setAll(ticked: boolean) {
-    if (ticked) return
-    account.setAppPermissions(app.appUrl, { drives: undefined })
-    toastStore.show('Permissions saved')
+  /** Apply `grant` at once, or ask first when it takes drives away */
+  function proposeDrives(grant: Grant) {
+    // Tombstones included, so dropping a deleted drive is not asked about.
+    const stamps = account.postageStamps
+    const takenAway = drivesTakenAway(app.drives, grant, stamps, explicitDefaultHex)
+    if (takenAway.length === 0) {
+      applyDrives(grant)
+      return
+    }
+    pending = {
+      before: app.drives,
+      grant,
+      rows: rows.map((row) => ({ ...row })),
+      takenAway: takenAway.map(nameOf),
+      keepsAny: writableBatches(grant, stamps, explicitDefaultHex).length > 0,
+      // A swap leaves as many rows, so the drive can be picked again here;
+      // only an edit that leaves fewer cannot be undone from this page.
+      shrinks:
+        writableBatches(grant, stamps, explicitDefaultHex).length <
+        writableBatches(app.drives, stamps, explicitDefaultHex).length,
+    }
+  }
+
+  function confirmPending() {
+    if (!pending) return
+    const grant = grantToConfirm(pending.before, app.drives, pending.grant)
+    if (grant === 'stale') {
+      toastStore.show("This app's drives changed meanwhile; nothing was saved")
+    } else {
+      applyDrives(grant)
+    }
+    pending = undefined
+  }
+
+  function saveDrives(added?: string) {
+    const grant = grantAfterRowEdit(app.drives, rows, defaultBatchHex, explicitDefaultHex, added)
+    if (sameGrant(grant, app.drives)) return
+    proposeDrives(grant)
   }
 
   // The popup's rule: write access is hidden while data sharing is off, so
@@ -128,9 +194,11 @@
       <label class="flex w-full items-start gap-2 text-sm">
         <input
           type="checkbox"
-          checked
+          checked={pending === undefined}
           class="mt-0.5 size-4 shrink-0"
-          onchange={(event) => setAll(event.currentTarget.checked)}
+          onchange={(event) => {
+            if (!event.currentTarget.checked) proposeDrives(undefined)
+          }}
         />
         <span class="flex flex-col gap-1">
           <span class="font-medium">Grant this app full drive access</span>
@@ -207,3 +275,14 @@
     </Button>
   </div>
 </div>
+
+{#if pending}
+  <AppDrivesDialog
+    appName={app.appName}
+    takenAway={pending.takenAway}
+    keepsAny={pending.keepsAny}
+    shrinks={pending.shrinks}
+    onConfirm={confirmPending}
+    onCancel={() => (pending = undefined)}
+  />
+{/if}
