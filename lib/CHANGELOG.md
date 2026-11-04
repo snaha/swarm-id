@@ -1,5 +1,42 @@
 # Changelog
 
+## [0.8.0](https://github.com/snaha/swarm-id/compare/v0.7.0...v0.8.0) (2026-11-04)
+
+
+### ⚠ BREAKING CHANGES
+
+* **lib:** let a write name its drive, and list the app's drives ([#877](https://github.com/snaha/swarm-id/issues/877))
+
+### Features
+
+* data sharing and write access switches, account-wide and per app ([#891](https://github.com/snaha/swarm-id/issues/891)) ([cec2fe2](https://github.com/snaha/swarm-id/commit/cec2fe2fb1d67a8f6ea5683fdbeecc1d71955a1a))
+* grant apps drives, and give each drive a kind ([#864](https://github.com/snaha/swarm-id/issues/864)) ([c6cc3ba](https://github.com/snaha/swarm-id/commit/c6cc3ba85aa7193fa2435944895f1843711961b6))
+* let an app ask for drives at connect, and pick them on the connect screen ([#880](https://github.com/snaha/swarm-id/issues/880)) ([0a8864e](https://github.com/snaha/swarm-id/commit/0a8864ea7fe9e0623d9a9f8581545ade0b337bf2))
+* let an app ask for more drives later, and edit what an app holds ([#883](https://github.com/snaha/swarm-id/issues/883)) ([a061707](https://github.com/snaha/swarm-id/commit/a06170759456332e254322590b3b276d78cb339a))
+* **lib:** give each granted drive its own write path in the proxy ([#869](https://github.com/snaha/swarm-id/issues/869)) ([4740ed3](https://github.com/snaha/swarm-id/commit/4740ed3461fc36799d700415da32804f49e93410))
+* **lib:** hold a new drive back for the blocks Bee waits before stamping with it ([#959](https://github.com/snaha/swarm-id/issues/959)) ([b1cac15](https://github.com/snaha/swarm-id/commit/b1cac159994f9955ed352aa70a483903487f9a01))
+* **lib:** let a write name its drive, and list the app's drives ([#877](https://github.com/snaha/swarm-id/issues/877)) ([6eb7e76](https://github.com/snaha/swarm-id/commit/6eb7e76c447583cadf070b10531898677e9513dc))
+* **lib:** report each drive's capacity and whether a save fits ([#960](https://github.com/snaha/swarm-id/issues/960)) ([eed8f4f](https://github.com/snaha/swarm-id/commit/eed8f4f96d83f3a724d83960b35d9dc62dd6b739))
+* **lib:** report each drive's lane, and test two devices writing two drives ([#895](https://github.com/snaha/swarm-id/issues/895)) ([94d8038](https://github.com/snaha/swarm-id/commit/94d80386559a844ead6329221dce613f7071e6fe))
+* **lib:** report how many chunks each write sent ([#966](https://github.com/snaha/swarm-id/issues/966)) ([75a5967](https://github.com/snaha/swarm-id/commit/75a596759f491b8567e3268f2646a431443ef7c7))
+* **lib:** tell the dApp when its drives change ([#934](https://github.com/snaha/swarm-id/issues/934)) ([2d80029](https://github.com/snaha/swarm-id/commit/2d80029ec691f06549b97254fec5942a6553b454))
+* scratch drives, whose full lanes wrap onto their oldest slot ([#881](https://github.com/snaha/swarm-id/issues/881)) ([dab3d45](https://github.com/snaha/swarm-id/commit/dab3d4556d8825c6f65d7d39a2c6d37c02b54baf))
+* **ui:** alert each expired drive on the home page ([#901](https://github.com/snaha/swarm-id/issues/901)) ([0096b82](https://github.com/snaha/swarm-id/commit/0096b822e3ce9ccb8dc2077a4207a9c7567ecd28))
+* **ui:** re-read the drives from the chain while the site is open ([#972](https://github.com/snaha/swarm-id/issues/972)) ([3950e2e](https://github.com/snaha/swarm-id/commit/3950e2ea14d5544a8df69524500c9f75661212a7))
+
+
+### Bug Fixes
+
+* **lib:** a client request that fails to post or gets the wrong answer settles cleanly ([#952](https://github.com/snaha/swarm-id/issues/952)) ([7f95733](https://github.com/snaha/swarm-id/commit/7f95733f55b2a991769e53617db562314fbe1864))
+* **lib:** a connect click without a parent origin puts the button back ([#961](https://github.com/snaha/swarm-id/issues/961)) ([0c502b1](https://github.com/snaha/swarm-id/commit/0c502b15306af8e06c1617ab20f685d5fb808da6))
+* **lib:** a sign-out drops the pending publish reason with its timer ([#953](https://github.com/snaha/swarm-id/issues/953)) ([b70ee7a](https://github.com/snaha/swarm-id/commit/b70ee7a70a7184acd8d2aade4e5d3cf002c0eb53))
+* **lib:** epoch finders reject an entry not signed by the feed owner ([#949](https://github.com/snaha/swarm-id/issues/949)) ([13e9771](https://github.com/snaha/swarm-id/commit/13e97715ee045c11ed582978e46b0a9568e549be))
+* **lib:** follow the chain's reading of a drive's lifetime ([#957](https://github.com/snaha/swarm-id/issues/957)) ([b93170f](https://github.com/snaha/swarm-id/commit/b93170f908daff7b5596d046b34c678efcd6685a))
+* **lib:** raw epoch feed uploads go to the drive they name ([#950](https://github.com/snaha/swarm-id/issues/950)) ([4ba9bd9](https://github.com/snaha/swarm-id/commit/4ba9bd973c87005dc2f33e4784a54ee53dc84937))
+* **lib:** report a skipped roster append as a partial publish, and retry it ([#921](https://github.com/snaha/swarm-id/issues/921)) ([3547c4b](https://github.com/snaha/swarm-id/commit/3547c4b8fa7a76faf9ac9b522aa0d94705e1d4fa))
+* **lib:** the sequential feed writer's reads forward lookupTimeoutMs ([#951](https://github.com/snaha/swarm-id/issues/951)) ([a509522](https://github.com/snaha/swarm-id/commit/a509522b3df8e6c59cd609760d18c8cf6c6248f5))
+* log the restore check's read failure as one line, not a stack ([#912](https://github.com/snaha/swarm-id/issues/912)) ([5a493d2](https://github.com/snaha/swarm-id/commit/5a493d2f9bcc160d36089c56ad0324af74d975ef))
+
 ## [0.7.0](https://github.com/snaha/swarm-id/compare/v0.6.0...v0.7.0) (2026-10-09)
 
 
