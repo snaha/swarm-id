@@ -5,8 +5,8 @@
  * IndexedDB Cache for Batch Utilization Chunks
  *
  * Provides fast local caching of 4KB utilization chunks to avoid
- * repeated Swarm downloads. Each chunk is 4096 bytes containing either
- * 2048 uint16 or 1024 uint32 bucket counters, depending on batch depth.
+ * repeated Swarm downloads. Each chunk is 4096 bytes holding 1024 uint32
+ * bucket counters, whatever the batch depth.
  */
 
 // ============================================================================
@@ -20,7 +20,7 @@ export interface ChunkCacheEntry {
   /** Batch ID (hex string) */
   batchId: string
 
-  /** Chunk index within the depth-dependent layout */
+  /** Chunk index within the fixed cache layout */
   chunkIndex: number
 
   /** Serialized chunk data (4KB) */
@@ -43,6 +43,13 @@ export interface ChunkCacheEntry {
    */
   nonce: number
 
+  /**
+   * `CACHE_ROW_FORMAT` on every row the fixed layout writes. A row without it
+   * predates #463 and is still at its batch's depth-of-the-time layout; the
+   * stamper converts such a batch on load rather than the store dropping it.
+   */
+  format?: number
+
   /** Last access timestamp (for eviction) */
   lastAccess: number
 }
@@ -55,12 +62,17 @@ export interface BatchMetadata {
   lastSync: number
   chunkCount: number
   /**
-   * Per-partition "synced reference": the partition-state feed reference
+   * Per-partition "synced reference": the partition-state reference chunk
    * (hex) this device's local counter was last in sync with. On a cold
-   * acquire, if the feed still points here the counter-chunk download is
+   * acquire, if the state pointer still names it the leaf downloads are
    * skipped and the local counter reused. Keyed by partition index.
+   *
+   * Named apart from the `syncedReferences` a pre-v2 build stored: those name
+   * v1 reference chunks no v2 reader can parse, and one adopted as the v2
+   * heartbeat target would leave the partition unreadable to other devices'
+   * takeovers. Not reading them costs one full read on the next acquire.
    */
-  syncedReferences?: Record<number, string>
+  stateReferences?: Record<number, string>
   /**
    * Per-partition buckets occupied by the LATEST published partition-state
    * chunks (counter chunks + reference chunk). Those chunks overstamp the
@@ -237,6 +249,54 @@ export class UtilizationStoreDB {
       request.onerror = () => {
         reject(new Error(`Failed to get all chunks: ${request.error}`))
       }
+    })
+  }
+
+  /**
+   * Read a batch's rows and, when `convert` returns replacements, swap them in
+   * within the same readwrite transaction (#463). IndexedDB commits all of it
+   * or none, and serializes overlapping readwrite transactions, so a closed
+   * tab leaves the old rows whole and a second tab converting at the same
+   * time sees either the old rows or the converted ones, never a mix.
+   *
+   * @returns The batch's rows as they stand once the transaction commits
+   *          (sorted by chunkIndex)
+   */
+  async convertBatch(
+    batchId: string,
+    convert: (rows: ChunkCacheEntry[]) => ChunkCacheEntry[] | undefined,
+  ): Promise<ChunkCacheEntry[]> {
+    await this.open()
+
+    return new Promise((resolve, reject) => {
+      const transaction = this.db!.transaction([CHUNKS_STORE], "readwrite")
+      const store = transaction.objectStore(CHUNKS_STORE)
+      let result: ChunkCacheEntry[] = []
+      const request = store.index("batchId").getAll(batchId)
+      request.onsuccess = () => {
+        const rows = (request.result as ChunkCacheEntry[]).sort(
+          (a, b) => a.chunkIndex - b.chunkIndex,
+        )
+        result = rows
+        let replacement: ChunkCacheEntry[] | undefined
+        try {
+          replacement = convert(rows)
+          if (!replacement) return
+          for (const row of rows) store.delete([batchId, row.chunkIndex])
+          for (const row of replacement) store.put(row)
+        } catch (error) {
+          // Abort rather than commit the writes issued so far
+          transaction.abort()
+          reject(error)
+          return
+        }
+        result = [...replacement].sort((a, b) => a.chunkIndex - b.chunkIndex)
+      }
+      transaction.oncomplete = () => resolve(result)
+      transaction.onabort = () =>
+        reject(new Error(`Batch conversion aborted: ${transaction.error}`))
+      transaction.onerror = () =>
+        reject(new Error(`Batch conversion failed: ${transaction.error}`))
     })
   }
 

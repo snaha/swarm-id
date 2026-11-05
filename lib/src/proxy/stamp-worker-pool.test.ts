@@ -322,6 +322,7 @@ describe("StampWorkerPool over a partition-bound UtilizationAwareStamper", () =>
     vi.stubGlobal("Worker", FakeWorker)
     const cache = {
       getAllChunks: async () => [],
+      convertBatch: async () => [],
       putChunk: async () => undefined,
     } as unknown as Parameters<typeof UtilizationAwareStamper.create>[3]
     stamper = await UtilizationAwareStamper.create(
@@ -452,6 +453,7 @@ describe("uploadData through a StampWorkerPool", () => {
   it("stamps every chunk in the stamper's lane and leaves them for flush()", async () => {
     const cache = {
       getAllChunks: async () => [],
+      convertBatch: async () => [],
       putChunk: async () => undefined,
     } as unknown as Parameters<typeof UtilizationAwareStamper.create>[3]
     const stamper = await UtilizationAwareStamper.create(

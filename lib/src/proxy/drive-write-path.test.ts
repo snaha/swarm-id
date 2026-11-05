@@ -11,11 +11,16 @@ vi.mock("./stamp-worker-pool", () => ({
   StampWorkerPool: { create: vi.fn() },
 }))
 
+const DEPTH = 20
+
 describe("DriveWritePath", () => {
   const attached = (): DriveWritePath => {
-    const drive = new DriveWritePath("aa".repeat(32), "22".repeat(32), {
-      createdAt: Date.now(),
-    })
+    const drive = new DriveWritePath(
+      "aa".repeat(32),
+      "22".repeat(32),
+      { createdAt: Date.now() },
+      DEPTH,
+    )
     drive.attach(
       { mock: "stamper" } as unknown as UtilizationAwareStamper,
       "fingerprint",

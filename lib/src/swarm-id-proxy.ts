@@ -872,6 +872,7 @@ export class SwarmIdProxy {
         const unchanged =
           stamp !== undefined &&
           stamp.signerKey.toHex() === drive.signerKey &&
+          stamp.depth === drive.depth &&
           fingerprint === drive.accountFingerprint &&
           sameStampLifetime(stamp, drive.lifetime)
         if (!unchanged) this.teardownDrive(drive)
@@ -892,6 +893,7 @@ export class SwarmIdProxy {
       stamp.batchID.toHex(),
       stamp.signerKey.toHex(),
       stamp,
+      stamp.depth,
     )
     this.drives.set(drive.batchId, drive)
     drive.ready = this.initializeStamper(
@@ -6663,7 +6665,6 @@ export class SwarmIdProxy {
             backupSigner,
             swarmEncryptionKey: encryptionKey,
             batchId: stamp.batchID,
-            batchDepth: stamp.depth,
             partition,
           },
           known.get(key),
