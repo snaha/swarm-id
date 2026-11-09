@@ -3,11 +3,6 @@
 
 import type { BatchId } from "@ethersphere/bee-js"
 import type { ConnectedApp, PostageStamp, SignedInAccount } from "../schemas"
-import {
-  UINT16_COUNTER_MAX_DEPTH,
-  legacyLayoutDepth,
-} from "../sync/legacy-counter-codec"
-import type { PartitionStateFormat } from "../sync/partition-state-format"
 
 type AppGrant = Pick<ConnectedApp, "drives">
 type AccountDefault = Pick<SignedInAccount, "defaultPostageStampBatchID">
@@ -15,40 +10,6 @@ type AccountDefault = Pick<SignedInAccount, "defaultPostageStampBatchID">
 /** A scratch drive's slots are reused as a ring; a regular drive's never are. */
 export function isScratchDrive(stamp: Pick<PostageStamp, "kind">): boolean {
   return stamp.kind === "scratch"
-}
-
-type FormatFields = Pick<PostageStamp, "kind" | "depth" | "stateFormat">
-
-/**
- * The wire format of a drive's partition state (#463), fixed when the drive
- * was created and read from the synced record, so every device agrees. A
- * marked drive packs SBU1 leaves; an unmarked one predates the marker and
- * stays on the fixed-width layout its depth picks (`legacy-counter-codec.ts`).
- */
-export function partitionStateFormat(
-  stamp: FormatFields,
-): PartitionStateFormat {
-  if (stamp.stateFormat === "sbu1") return { kind: "sbu1" }
-  return {
-    kind: "legacy",
-    layoutDepth: legacyLayoutDepth(stamp.depth, isScratchDrive(stamp)),
-  }
-}
-
-/**
- * The deepest a drive may be diluted to, or `undefined` when nothing caps it.
- * A legacy regular drive below depth 32 stops at `UINT16_COUNTER_MAX_DEPTH`:
- * past it the fixed-width layout under its published counters would change
- * (#463). A legacy scratch drive is uint32 at every depth, an SBU1 drive
- * carries no depth on the wire, and a legacy drive already past the line has
- * crossed nothing.
- */
-export function diluteDepthCeiling(stamp: FormatFields): number | undefined {
-  const format = partitionStateFormat(stamp)
-  return format.kind === "legacy" &&
-    format.layoutDepth <= UINT16_COUNTER_MAX_DEPTH
-    ? UINT16_COUNTER_MAX_DEPTH
-    : undefined
 }
 
 /**

@@ -2,7 +2,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, it, expect, vi } from "vitest"
-import { SBU1_PARTITION_STATE } from "./partition-state"
 import { BatchId, EthAddress, PrivateKey } from "@ethersphere/bee-js"
 
 type MockLease = ReturnType<typeof makeLease>
@@ -206,7 +205,6 @@ function makeDeps(
     accountId: "acct-1",
     backupSigner: {} as BatchWriteCoordinatorDeps["backupSigner"],
     swarmEncryptionKey: new Uint8Array(32),
-    stateFormat: SBU1_PARTITION_STATE,
     partitionCount: 4,
     mode: "persistent",
     ...overrides,

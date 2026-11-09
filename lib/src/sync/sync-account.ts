@@ -43,7 +43,6 @@ import {
   BatchWriteCoordinator,
   PartitionContendedError,
 } from "./batch-write-coordinator"
-import { partitionStateFormat } from "../utils/postage-stamp-association"
 import { accountStateToDeviceView, publishDeviceState } from "./device-state"
 import { rosterRetryDelayMs } from "./device-roster"
 import { getOrCreateDeviceId, detectDeviceName } from "../utils/device-id"
@@ -348,7 +347,6 @@ export function createSyncAccount(
       bee,
       batchId: defaultStamp.batchID.toHex(),
       stamper,
-      stateFormat: partitionStateFormat(defaultStamp),
       deviceId: getOrCreateDeviceId(),
       accountId,
       // Read fresh so the presence/intent rounds see the current device

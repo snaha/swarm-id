@@ -304,8 +304,7 @@ acknowledged, and the next holder may safely overwrite its slots.
 ```text
 topic = keccak256( utf8(domain) ‖ batchId ‖ uint32_be(partition) )
 owner = backupSigner address
-domain = "swarm-id-partition-state-v2"   SBU1 leaves (drives created with stateFormat "sbu1")
-         "swarm-id-partition-state-v1"   fixed-width chunks (drives created before it)
+domain = "swarm-id-partition-state-v2"
 ```
 
 The counter is not a single blob. It is packed into **leaves** under a **frame** (see
@@ -314,14 +313,6 @@ encryption key to the partition's reserved slot, yielding a 64-byte **encrypted 
 (`address ‖ key`). A single **reference chunk** carries the frame, the exceptions and those
 references (`7 + 8·E + 64·L` bytes, one chunk at the width cap). A taking-over device follows
 **pointer → reference chunk → leaves**, decrypting each from its embedded key.
-
-Which format a batch uses is fixed when its drive is created and recorded on the synced
-stamp record (`stateFormat`), so every device reads and writes the one layout the batch has
-always used. A drive from before the field existed stays on the legacy layout: uint16
-counters in 32 chunks up to depth 31, uint32 in 64 above (a scratch drive is uint32 at every
-depth), the reference chunk their 64-byte references alone. Growing such a drive past depth
-31 would change that layout under its published chunks, so the resize dialog does not offer
-it; the drive grows within its width or is replaced by a new one.
 
 ### The state pointer
 
@@ -348,8 +339,8 @@ counter.
 ### Wire format (byte layout)
 
 The format is **binary** and is versioned by the topic domain; there is no in-blob version
-byte. A new version publishes under its own topic and never collides with older readers,
-which is how the legacy fixed-width layout (`v1`) and the SBU1 layout (`v2`) coexist.
+byte. A new version publishes under its own topic and never collides with older readers:
+`v1` was a fixed-width uint16/uint32 layout, left unread where it is.
 
 The counter table is packed with the leaf encoding of Nectar's **SBU1** usage snapshot
 ([`docs/spec/sbu1.md`](https://github.com/nxm-rs/nectar/blob/main/docs/spec/sbu1.md) §4
@@ -365,8 +356,8 @@ narrowest width that fits.
 
 The width follows the _spread_ of the counters, not the batch depth, so a dilute changes
 no published byte. Lane counters are Poisson over the buckets, so the spread grows with
-the square root of the fill and a real drive packs into far fewer chunks than a fixed
-width would take (32 at uint16, 64 at uint32):
+the square root of the fill and a real drive packs into far fewer chunks than the fixed
+width before it took (32 at uint16, 64 at uint32):
 
 | Data written by one lane | `w` | Leaves |
 | ------------------------ | --- | ------ |
@@ -396,7 +387,7 @@ zeros and the reader treats it as a zero leaf.
 MSB-first, the trailing padding bits zero.
 
 The decoded result is always a `Uint32Array(65536)`. `writePartitionState` validates its
-input against `PartitionStateSchemaV1`; `readPartitionState` validates the reference chunk
+input against `PartitionCountersSchema`; `readPartitionState` validates the reference chunk
 against the frame it names, each leaf's length and padding, the exception list, and the
 reassembled counter before returning. There is no checksum: each reference binds its
 leaf's exact bytes.

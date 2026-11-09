@@ -32,10 +32,11 @@ import {
   serializeUint32Array,
 } from "./batch-utilization"
 import { EthAddress, PrivateKey } from "@ethersphere/bee-js"
-import type {
-  BatchMetadata,
-  ChunkCacheEntry,
-  UtilizationStoreDB,
+import {
+  UtilizationStoreUnavailableError,
+  type BatchMetadata,
+  type ChunkCacheEntry,
+  type UtilizationStoreDB,
 } from "../storage/utilization-store"
 import { lockSocAddress } from "./lock-soc"
 import { deriveSecret, BACKUP_KEY_LABEL } from "./key-derivation"
@@ -1215,8 +1216,44 @@ describe("UtilizationAwareStamper synced reference", () => {
       getChunk: async (batchId: string, chunkIndex: number) =>
         store.get(`${batchId}:${chunkIndex}`),
       getMetadata: async (batchId: string) => metaStore.get(batchId),
-      putMetadata: async (metadata: BatchMetadata) => {
-        metaStore.set(metadata.batchId, { ...metadata })
+      updateMetadata: async (
+        batchId: string,
+        patch: (existing: BatchMetadata | undefined) => Partial<BatchMetadata>,
+      ) => {
+        const existing = metaStore.get(batchId)
+        metaStore.set(batchId, {
+          lastSync: 0,
+          chunkCount: 0,
+          ...existing,
+          ...patch(existing),
+          batchId,
+        })
+      },
+    } as unknown as UtilizationStoreDB
+  }
+
+  /**
+   * A store whose every call lands a macrotask later, so two writers in
+   * flight interleave the way two IndexedDB transactions can. Its patch is
+   * still atomic: read and write in one tick, as the real store's one
+   * `readwrite` transaction is.
+   */
+  function makeYieldingCache(): UtilizationStoreDB {
+    const later = () => new Promise<void>((resolve) => setTimeout(resolve, 0))
+    let meta: BatchMetadata | undefined
+    return {
+      getAllChunks: async () => [],
+      putChunk: async () => undefined,
+      getMetadata: async () => {
+        await later()
+        return meta
+      },
+      updateMetadata: async (
+        batchId: string,
+        patch: (existing: BatchMetadata | undefined) => Partial<BatchMetadata>,
+      ) => {
+        await later()
+        meta = { lastSync: 0, chunkCount: 0, ...meta, ...patch(meta), batchId }
       },
     } as unknown as UtilizationStoreDB
   }
@@ -1250,13 +1287,13 @@ describe("UtilizationAwareStamper synced reference", () => {
     expect(await stamper.getSyncedReference(0)).toBeUndefined()
 
     bind(stamper, 0)
-    await stamper.flush()
     await stamper.setSyncedReference(0, "ref-zero")
+    await stamper.flush()
     expect(await stamper.getSyncedReference(0)).toBe("ref-zero")
 
     bind(stamper, 1)
-    await stamper.flush()
     await stamper.setSyncedReference(1, "ref-one")
+    await stamper.flush()
     expect(await stamper.getSyncedReference(1)).toBe("ref-one")
     expect(await stamper.getSyncedReference(0)).toBeUndefined()
 
@@ -1270,24 +1307,25 @@ describe("UtilizationAwareStamper synced reference", () => {
     const cache = makeRecordingCache()
     const stamper = await makeStamper(cache)
     bind(stamper, 0)
-    await stamper.flush()
     await stamper.setSyncedReference(0, "ref-zero")
+    await stamper.flush()
     // Lane switch: the publish lands (ack-after-publish) and the tab dies
-    // before the flush that would rewrite the rows for lane 1
+    // before the flush that would rewrite the rows for lane 1. The rows still
+    // hold lane 0's counter at "ref-zero", so that stays a resume point
     bind(stamper, 1)
     await stamper.setSyncedReference(1, "ref-one")
 
     const reloaded = await makeStamper(cache)
     expect(await reloaded.getSyncedReference(1)).toBeUndefined()
-    expect(await reloaded.getSyncedReference(0)).toBeUndefined()
+    expect(await reloaded.getSyncedReference(0)).toBe("ref-zero")
   })
 
   it("a flush that dies midway through a lane change certifies neither lane", async () => {
     const cache = makeRecordingCache()
     const stamper = await makeStamper(cache)
     bind(stamper, 0)
-    await stamper.flush()
     await stamper.setSyncedReference(0, "ref-zero")
+    await stamper.flush()
 
     bind(stamper, 1)
     await stamper.setSyncedReference(1, "ref-one")
@@ -1342,8 +1380,8 @@ describe("UtilizationAwareStamper synced reference", () => {
     // (both live in the same metadata record). The reference certifies the
     // rows for lane 0 once a flush has written them for it.
     bind(stamper, 0)
-    await stamper.flush()
     await stamper.setSyncedReference(0, "ref-zero")
+    await stamper.flush()
 
     const reloaded = await makeStamper(cache)
     reloaded.bindPartition({
@@ -1355,6 +1393,53 @@ describe("UtilizationAwareStamper synced reference", () => {
     // Partition 1's set does not leak into partition 0's saves.
     expect(reloaded.getProtectedBuckets().has(22)).toBe(false)
     expect(await reloaded.getSyncedReference(0)).toBe("ref-zero")
+  })
+
+  // Every upload publishes, then acks, then flushes. A reference recorded at
+  // the publish would vouch for rows one write behind the counter it names:
+  // a tab dying before the flush resumes from them and re-issues that
+  // write's slots. So the flush that writes the rows commits the reference.
+  it("commits a reference at the flush that writes the rows it describes, never before", async () => {
+    const cache = makeRecordingCache()
+    const stamper = await makeStamper(cache)
+    bind(stamper, 0)
+    await stamper.setSyncedReference(0, "ref-a")
+    await stamper.flush()
+    expect(await stamper.getSyncedReference(0)).toBe("ref-a")
+
+    // A write and its publish land; the tab dies before the flush
+    stamper.stamp(makeAddressInBucket(7, 1))
+    await stamper.setSyncedReference(0, "ref-b")
+    const died = await makeStamper(cache)
+    expect(await died.getSyncedReference(0)).toBe("ref-a")
+
+    await stamper.flush()
+    const reloaded = await makeStamper(cache)
+    expect(await reloaded.getSyncedReference(0)).toBe("ref-b")
+    expect(reloaded.getUtilizationState().dataCounters[7]).toBe(1)
+  })
+
+  it("commits a publish's reference even when the publish wrote no new slot", async () => {
+    // A release or a full re-pin publishes the counter the rows already hold
+    const cache = makeRecordingCache()
+    const stamper = await makeStamper(cache)
+    bind(stamper, 0)
+    await stamper.flush()
+    await stamper.setSyncedReference(0, "ref-a")
+    await stamper.flush()
+    expect(await (await makeStamper(cache)).getSyncedReference(0)).toBe("ref-a")
+  })
+
+  it("keeps every field when two metadata writers are in flight at once", async () => {
+    const cache = makeYieldingCache()
+    const stamper = await makeStamper(cache)
+    await Promise.all([
+      stamper.setProtectedStateBuckets(0, [11]),
+      stamper.setProtectedStateBuckets(1, [22]),
+    ])
+    expect(
+      (await cache.getMetadata(TEST_BATCH_ID.toHex()))?.stateChunkBuckets,
+    ).toEqual({ 0: [11], 1: [22] })
   })
 })
 
@@ -1376,7 +1461,7 @@ describe("UtilizationAwareStamper cache rows (#463)", () => {
         rows.set(entry.chunkIndex, { ...entry })
       },
       getMetadata: async () => undefined,
-      putMetadata: async () => undefined,
+      updateMetadata: async () => undefined,
     } as unknown as UtilizationStoreDB
     return { cache, rows }
   }
@@ -1428,6 +1513,61 @@ describe("UtilizationAwareStamper cache rows (#463)", () => {
     expect(counters).toEqual(stamper.getUtilizationState().dataCounters)
   })
 
+  it("a bind to a counter the rows do not hold rewrites every row, lane switch or not", async () => {
+    const { cache } = makeRecordingCache()
+    const stamper = await create(cache, 24)
+    stamper.bindPartition({
+      partition: 0,
+      partitionCount: PARTITION_COUNT,
+      localCounter: new Uint32Array(NUM_BUCKETS),
+    })
+    stamper.stamp(makeAddressInBucket(0x4321, 1))
+    await stamper.flush()
+
+    // Another device held lane 0 meanwhile and wrote bucket 7 five times; the
+    // counter resumed from its publish is ahead of the rows there
+    const resumed = stamper.buildLeaseLocalCounter()
+    resumed[7] = 5
+    stamper.bindPartition({
+      partition: 0,
+      partitionCount: PARTITION_COUNT,
+      localCounter: resumed,
+    })
+    await stamper.flush()
+
+    const counters = (await create(cache, 24)).getUtilizationState()
+      .dataCounters
+    expect(counters[7]).toBe(5)
+    expect(counters[0x4321]).toBe(1)
+  })
+
+  it("a bind to the counter the rows already hold writes nothing", async () => {
+    // The adopt fast path and an unchanged resume bind the stamper's own table
+    const { cache } = makeRecordingCache()
+    const stamper = await create(cache, 24)
+    stamper.bindPartition({
+      partition: 0,
+      partitionCount: PARTITION_COUNT,
+      localCounter: new Uint32Array(NUM_BUCKETS),
+    })
+    stamper.stamp(makeAddressInBucket(0x4321, 1))
+    await stamper.flush()
+
+    let writes = 0
+    const putChunk = cache.putChunk.bind(cache)
+    cache.putChunk = async (entry) => {
+      writes++
+      await putChunk(entry)
+    }
+    stamper.bindPartition({
+      partition: 0,
+      partitionCount: PARTITION_COUNT,
+      localCounter: stamper.buildLeaseLocalCounter(),
+    })
+    await stamper.flush()
+    expect(writes).toBe(0)
+  })
+
   it("rows flushed at one depth load unchanged at another: a dilute changes no cached byte", async () => {
     const { cache } = makeRecordingCache()
     const before = await create(cache, 24)
@@ -1448,6 +1588,18 @@ describe("UtilizationAwareStamper cache rows (#463)", () => {
     expect(after.getUtilizationState().dataCounters).toEqual(
       before.getUtilizationState().dataCounters,
     )
+  })
+
+  it("starts fresh when the store itself is unavailable: no rows can exist there", async () => {
+    const cache = {
+      getAllChunks: async () => {
+        throw new UtilizationStoreUnavailableError("IndexedDB disabled")
+      },
+    } as unknown as UtilizationStoreDB
+    const stamper = await create(cache, 24)
+    expect(
+      stamper.getUtilizationState().dataCounters.every((c) => c === 0),
+    ).toBe(true)
   })
 
   it("refuses to start from zero when the cache cannot be read", async () => {

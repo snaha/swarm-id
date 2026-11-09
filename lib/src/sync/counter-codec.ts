@@ -251,7 +251,22 @@ export function decodeCounters(encoded: EncodedCounters): Uint32Array {
       throw new Error(`counter-codec: leaf ${leaf} has non-zero padding bits`)
     }
   }
-  // Overlay after unpacking: an exception's field is ignored (SBU1 §4).
-  for (const { bucket, count } of exceptions) counters[bucket] = count
+  // Overlay after unpacking. An exception's field is all ones and its count
+  // is absolute, at or above the base (SBU1 §4); anything else is a leaf set
+  // the exception list does not describe.
+  const allOnes = width === 0 ? 0 : base + exceptionThreshold(width)
+  for (const { bucket, count } of exceptions) {
+    if (width > 0 && counters[bucket] !== allOnes) {
+      throw new Error(
+        `counter-codec: exception bucket ${bucket} has an in-band field`,
+      )
+    }
+    if (count < base) {
+      throw new Error(
+        `counter-codec: exception bucket ${bucket} counts ${count}, below base ${base}`,
+      )
+    }
+    counters[bucket] = count
+  }
   return counters
 }

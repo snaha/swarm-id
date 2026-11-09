@@ -118,7 +118,6 @@ import {
 import { createFeedManifestDirect } from "./proxy/feed-manifest"
 import {
   isScratchDrive,
-  partitionStateFormat,
   resolveStampForApp,
   stampsReachableByApp,
 } from "./utils/postage-stamp-association"
@@ -2312,7 +2311,6 @@ export class SwarmIdProxy {
       batchId,
       stamper,
       deviceId: this.requireDeviceId(),
-      stateFormat: partitionStateFormat(stamp),
       knownDeviceIds: () =>
         this.knownDeviceIdsForAccount(accountInfo.accountId),
       // Pull the latest device registry before a fresh acquire so a peer that
@@ -6700,7 +6698,6 @@ export class SwarmIdProxy {
             swarmEncryptionKey: encryptionKey,
             batchId: stamp.batchID,
             partition,
-            format: partitionStateFormat(stamp),
           },
           known.get(key),
         ),

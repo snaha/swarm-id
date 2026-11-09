@@ -316,6 +316,27 @@ describe("counter-codec — decoder validation", () => {
     expect(() => decodeCounters(e)).toThrow(/padding/)
   })
 
+  it("rejects an exception whose packed field is not all ones", () => {
+    const e = encoded()
+    // Bucket 0x1234 is in leaf 0 at bit 6 · 0x1234; clear its field
+    const bit = 6 * 0x1234
+    for (let i = 0; i < 6; i++) {
+      const at = bit + i
+      e.leaves[0][at >> 3] &= ~(1 << (7 - (at & 7)))
+    }
+    expect(() => decodeCounters(e)).toThrow(/exception/)
+  })
+
+  it("rejects an exception count below the base", () => {
+    const e = encoded()
+    expect(() =>
+      decodeCounters({
+        ...e,
+        exceptions: [{ bucket: 0x1234, count: 99 }, e.exceptions[1]],
+      }),
+    ).toThrow(/base/)
+  })
+
   it("rejects exceptions out of order or out of range", () => {
     const e = encoded()
     expect(() =>

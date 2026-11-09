@@ -213,12 +213,6 @@ export const PostageStampSchemaV1 = z.object({
   // is marked, the way only a deleted one carries `deletedAt`, so a regular
   // drive has one encoding and no `kind === "regular"` check can miss it.
   kind: z.literal("scratch").optional(),
-  // The wire format of the drive's partition state, fixed when the drive is
-  // created (#463): a marked drive packs SBU1 leaves; an unmarked one was
-  // created before the marker and keeps the fixed-width layout its depth
-  // picks, which every device reads and writes until the drive is removed.
-  // Absent → legacy, the way only a scratch drive carries `kind`.
-  stateFormat: z.literal("sbu1").optional(),
   // Rename clock. The name merges on its own last-writer-wins clock, separate
   // from the node-state clock below: a rename made over a stale copy must not
   // carry old batch fields past a concurrent dilute/top-up, nor resurrect a

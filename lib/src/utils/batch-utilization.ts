@@ -32,9 +32,10 @@ import {
 } from "../chunk"
 import { stamp as stampAtSlot } from "@ethersphere/core-sdk"
 import { Binary } from "cafe-utility"
-import type {
-  BatchMetadata,
-  UtilizationStoreDB,
+import {
+  UtilizationStoreUnavailableError,
+  type BatchMetadata,
+  type UtilizationStoreDB,
 } from "../storage/utilization-store"
 import { uploadChunk, type UploadTarget } from "../proxy/upload"
 import { tryCreateTag } from "./tag"
@@ -123,10 +124,10 @@ const COUNTER_BYTES_UINT32 = 4
 /**
  * The fixed layout counters are cached in: a uint32 per bucket, 1,024 buckets
  * per CHUNK_SIZE-byte chunk, 64 chunks for the table — whatever the batch
- * depth or the batch's wire format. The IndexedDB cache and the dev-only
- * utilisation upload use it; the partition-state publish packs the counters
- * separately (`sync/counter-codec.ts`, `sync/legacy-counter-codec.ts`). The
- * cache does not depend on depth, so a dilute changes no cached byte (#463).
+ * depth. The IndexedDB cache and the dev-only utilisation upload use it; the
+ * partition-state publish packs the counters separately
+ * (`sync/counter-codec.ts`). The cache does not depend on depth, so a dilute
+ * changes no cached byte (#463).
  */
 export const BUCKETS_PER_CHUNK = CHUNK_SIZE / COUNTER_BYTES_UINT32
 export const NUM_UTILIZATION_CHUNKS = NUM_BUCKETS / BUCKETS_PER_CHUNK
@@ -1162,11 +1163,21 @@ export class UtilizationAwareStamper implements Stamper, SlotAssigner {
 
   /**
    * The lane the cache rows describe (`BatchMetadata.rowsPartition`), and
-   * whether `bindPartition` has since moved the counter table to another lane,
-   * so the next `flush` rewrites every row rather than the written ones.
+   * whether `bindPartition` has since replaced the counter table with one the
+   * rows do not hold, so the next `flush` rewrites every row rather than the
+   * written ones.
    */
   private rowsPartition: number | undefined
   private rowsStale = false
+  /**
+   * The partition-state reference the lease last read or published for the
+   * bound lane, waiting for the flush that writes the rows it describes
+   * (`BatchMetadata.stateReference`). Recording it at the publish would
+   * certify rows one write behind the counter it names.
+   */
+  private pendingReference:
+    | { partition: number; referenceHex: string }
+    | undefined
 
   readonly signer: PrivateKey
   readonly batchId: BatchId
@@ -1272,25 +1283,11 @@ export class UtilizationAwareStamper implements Stamper, SlotAssigner {
     }))
   }
 
-  /**
-   * Merge what `patch` returns into this batch's metadata record. The record
-   * is one object with several per-partition fields and more than one
-   * writer; a writer that rebuilds it field by field drops whichever field
-   * it does not know about, so every writer goes through here and names only
-   * what it changes.
-   */
-  private async patchMetadata(
+  /** `UtilizationStoreDB.updateMetadata` for this batch: one atomic patch. */
+  private patchMetadata(
     patch: (existing: BatchMetadata | undefined) => Partial<BatchMetadata>,
   ): Promise<void> {
-    const batchId = this.batchId.toHex()
-    const existing = await this.cache.getMetadata(batchId)
-    await this.cache.putMetadata({
-      lastSync: Date.now(),
-      chunkCount: 0,
-      ...existing,
-      ...patch(existing),
-      batchId,
-    })
+    return this.cache.updateMetadata(this.batchId.toHex(), patch)
   }
 
   /**
@@ -1313,12 +1310,23 @@ export class UtilizationAwareStamper implements Stamper, SlotAssigner {
     this.partitionCountValue = opts.partitionCount
     // The seeded per-partition counter (`j`, resumed high-water for Cases
     // B/D) becomes the single counter of record for this held partition.
-    this.utilizationState.dataCounters = opts.localCounter
-    // The rows describe the lane they were last flushed for; this table is
-    // another lane's until the next flush rewrites every row (see `flush`)
-    if (this.rowsPartition !== opts.partition) {
+    // The rows describe the table they were last flushed for, lane and
+    // counters both; a table they do not hold — another lane's, or this
+    // lane's resumed from a publish the rows are behind — makes every row
+    // stale until the next flush rewrites them (see `flush`). The adopt fast
+    // path and an unchanged resume bind a copy of the rows' own table, and
+    // rewrite nothing.
+    if (
+      this.rowsPartition !== opts.partition ||
+      !sameCounters(opts.localCounter, this.utilizationState.dataCounters)
+    ) {
       this.rowsStale = true
       this.dirty = true
+    }
+    this.utilizationState.dataCounters = opts.localCounter
+    // A reference recorded for another lane names a counter this table is not
+    if (this.pendingReference?.partition !== opts.partition) {
+      this.pendingReference = undefined
     }
     this.leaseStale = false
     // Presumed valid until the coordinator pushes the real `leasedUntil` (it
@@ -1507,8 +1515,18 @@ export class UtilizationAwareStamper implements Stamper, SlotAssigner {
     // Load the counters from the cache. A cache that cannot be read fails the
     // stamper rather than starting it from zero: a zero counter over rows that
     // exist flushes zero-based rows over them on the first write and re-issues
-    // every slot they record.
-    const cachedChunks = await cache.getAllChunks(batchId.toHex())
+    // every slot they record. A store that cannot be opened at all holds no
+    // rows, so the stamper starts fresh, as it did before the cache existed.
+    const cachedChunks = await cache
+      .getAllChunks(batchId.toHex())
+      .catch((error: unknown) => {
+        if (!(error instanceof UtilizationStoreUnavailableError)) throw error
+        console.warn(
+          "[UtilizationAwareStamper] Utilization store unavailable; starting with fresh counters:",
+          error,
+        )
+        return []
+      })
     for (const cached of cachedChunks) {
       if (cached.chunkIndex < NUM_UTILIZATION_CHUNKS) {
         mergeChunk(
@@ -1701,6 +1719,10 @@ export class UtilizationAwareStamper implements Stamper, SlotAssigner {
    */
   async flush(): Promise<void> {
     if (!this.dirty) {
+      // The rows already hold the table, so a reference the lease recorded
+      // for it (a release or a full re-pin publishes without a new slot) is
+      // committed here, with nothing to write first.
+      await this.commitPendingReference(false)
       return
     }
 
@@ -1783,11 +1805,14 @@ export class UtilizationAwareStamper implements Stamper, SlotAssigner {
       // Update lastSync timestamp
       this.utilizationState.lastSync = Date.now()
 
-      if (this.rowsStale) {
+      // The rows now hold the table: certify them for the lane, and with the
+      // reference that names this counter, in one patch.
+      const certifyLane = this.rowsStale
+      if (certifyLane) {
         this.rowsPartition = this.partition
-        await this.patchMetadata(() => ({ rowsPartition: this.partition }))
         this.rowsStale = false
       }
+      await this.commitPendingReference(certifyLane)
     } catch (error) {
       console.error(
         `[UtilizationAwareStamper] Failed to flush to cache:`,
@@ -1843,12 +1868,34 @@ export class UtilizationAwareStamper implements Stamper, SlotAssigner {
   }
 
   /**
+   * Write the pending reference (when one is for the bound lane) and, after
+   * a rewrite of every row (`certifyLane`), the lane the rows now describe to
+   * the metadata record in one patch — after the rows they certify. Nothing
+   * to write when neither changed.
+   */
+  private async commitPendingReference(certifyLane: boolean): Promise<void> {
+    const pending = this.pendingReference
+    const stateReference =
+      pending !== undefined && pending.partition === this.partition
+        ? pending
+        : undefined
+    if (stateReference === undefined && !certifyLane) return
+    const rowsPartition = this.rowsPartition
+    await this.patchMetadata((existing) => ({
+      rowsPartition,
+      stateReference: stateReference ?? existing?.stateReference,
+    }))
+    if (stateReference !== undefined) this.pendingReference = undefined
+  }
+
+  /**
    * The partition-state reference this device's cache rows are in sync with,
-   * when they describe `partition`: the last publish named it for that lane
-   * AND the last flush wrote the rows for that lane. Used by the acquire path
-   * to skip re-downloading unchanged leaves, and by the adopt fast path as
-   * proof that the rows are the lane's counter. Undefined after a lane switch
-   * until both have happened, and after a flush that died midway.
+   * when they describe `partition`: the rows were flushed for that lane, and
+   * the counter they hold is the one the reference names. Used by the acquire
+   * path to skip re-downloading unchanged leaves, and by the adopt fast path
+   * as proof that the rows are the lane's counter. Undefined after a lane
+   * switch or a resume until the flush that follows, after a publish until
+   * its flush, and after a flush that died midway.
    */
   async getSyncedReference(partition: number): Promise<string | undefined> {
     const meta = await this.cache.getMetadata(this.batchId.toHex())
@@ -1859,18 +1906,16 @@ export class UtilizationAwareStamper implements Stamper, SlotAssigner {
   }
 
   /**
-   * Record the partition-state feed reference this device's local counter is
-   * now in sync with (after a download or a publish). Replaces the one
-   * reference kept — see `BatchMetadata.stateReference` — and merges into the
-   * existing batch metadata so the other fields are preserved.
+   * Record the partition-state feed reference the counter of `partition` is
+   * now in sync with (after a download or a publish). Held in memory until
+   * the next `flush`, which writes the rows the reference describes and
+   * commits it with them — see `BatchMetadata.stateReference`.
    */
   async setSyncedReference(
     partition: number,
     referenceHex: string,
   ): Promise<void> {
-    await this.patchMetadata(() => ({
-      stateReference: { partition, referenceHex },
-    }))
+    this.pendingReference = { partition, referenceHex }
   }
 
   /**
@@ -1887,4 +1932,11 @@ export class UtilizationAwareStamper implements Stamper, SlotAssigner {
       value: this.utilizationState.dataCounters[index],
     }))
   }
+}
+
+/** Whether two counter tables hold the same counters. */
+function sameCounters(a: Uint32Array, b: Uint32Array): boolean {
+  if (a.length !== b.length) return false
+  for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) return false
+  return true
 }

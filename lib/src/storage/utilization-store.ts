@@ -97,6 +97,18 @@ const CHUNKS_STORE = "chunks"
 const METADATA_STORE = "metadata"
 
 /**
+ * The store could not be opened at all: IndexedDB is missing or refused the
+ * database. No rows can exist behind this error, so a stamper may start from
+ * zero; any other error means rows may exist and were not read.
+ */
+export class UtilizationStoreUnavailableError extends Error {
+  constructor(message: string) {
+    super(message)
+    this.name = "UtilizationStoreUnavailableError"
+  }
+}
+
+/**
  * Manages IndexedDB cache for batch utilization chunks
  */
 export class UtilizationStoreDB {
@@ -109,10 +121,18 @@ export class UtilizationStoreDB {
     if (this.db) return
 
     return new Promise((resolve, reject) => {
+      if (typeof indexedDB === "undefined") {
+        reject(new UtilizationStoreUnavailableError("IndexedDB is unavailable"))
+        return
+      }
       const request = indexedDB.open(DB_NAME, DB_VERSION)
 
       request.onerror = () => {
-        reject(new Error(`Failed to open IndexedDB: ${request.error}`))
+        reject(
+          new UtilizationStoreUnavailableError(
+            `Failed to open IndexedDB: ${request.error}`,
+          ),
+        )
       }
 
       // Fires when an upgrade is held up by another open connection (e.g.
@@ -336,20 +356,42 @@ export class UtilizationStoreDB {
   }
 
   /**
-   * Update batch metadata
-   * @param metadata - Metadata to store
+   * Merge what `patch` returns into a batch's metadata record, in one
+   * `readwrite` transaction. The record is one object with several fields
+   * and more than one writer; a read-then-put in two transactions lets a
+   * concurrent writer put back the field this one just changed, so every
+   * writer goes through here and names only what it changes.
    */
-  async putMetadata(metadata: BatchMetadata): Promise<void> {
+  async updateMetadata(
+    batchId: string,
+    patch: (existing: BatchMetadata | undefined) => Partial<BatchMetadata>,
+  ): Promise<void> {
     await this.open()
 
     return new Promise((resolve, reject) => {
       const transaction = this.db!.transaction([METADATA_STORE], "readwrite")
       const store = transaction.objectStore(METADATA_STORE)
-      const request = store.put(metadata)
-
-      request.onsuccess = () => resolve()
-      request.onerror = () => {
-        reject(new Error(`Failed to put metadata: ${request.error}`))
+      const read = store.get(batchId)
+      read.onerror = () => {
+        reject(new Error(`Failed to get metadata: ${read.error}`))
+      }
+      read.onsuccess = () => {
+        const existing = read.result as BatchMetadata | undefined
+        const write = store.put({
+          lastSync: Date.now(),
+          chunkCount: 0,
+          ...existing,
+          ...patch(existing),
+          batchId,
+        })
+        write.onerror = () => {
+          reject(new Error(`Failed to put metadata: ${write.error}`))
+        }
+      }
+      transaction.oncomplete = () => resolve()
+      // A `patch` that throws inside the read callback aborts the transaction
+      transaction.onabort = transaction.onerror = () => {
+        reject(new Error(`Failed to update metadata: ${transaction.error}`))
       }
     })
   }

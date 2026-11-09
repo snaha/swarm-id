@@ -15,10 +15,7 @@
  * slot (never a data slot), and a single "reference chunk" carries the frame,
  * the exceptions, and the leaves' 64-byte encrypted references (address‖key).
  * The frame rides with the data, so a reader needs no batch depth and a dilute
- * changes no published byte (#463). A batch created before SBU1 keeps its
- * fixed-width layout instead (`legacy-counter-codec.ts`, `PartitionStateFormat`):
- * the leaves are its depth-sized chunks and the reference chunk is their
- * references alone, under the `v1` topic domain.
+ * changes no published byte (#463).
  *
  * The address of the latest reference chunk is published as a **rotating
  * per-epoch state-pointer SOC** (`writeStatePointer`/`readStatePointer`): the
@@ -30,7 +27,7 @@
  * Mirrors the occupancy beacon (`partition-intent.ts`). See
  * docs/Postage-Batch-Partitioning.md (§8 cross-device handoff).
  *
- * Topic = keccak256(domain ‖ batchId ‖ uint32(partition)), the domain per format
+ * Topic = keccak256("swarm-id-partition-state-v2" ‖ batchId ‖ uint32(partition))
  * Owner = backup signer (`deriveSecret(swarmEncryptionKey, BACKUP_KEY_LABEL)`)
  */
 
@@ -55,7 +52,6 @@ import { uploadChunk, uploadSOC, type UploadTarget } from "../proxy/upload"
 import { TimeoutError, withTimeout } from "../utils/promise"
 import { makeEncryptedContentAddressedChunk } from "../chunk"
 import {
-  CHUNK_SIZE,
   LEASE_TTL_MS,
   NUM_BUCKETS,
   UtilizationAwareStamper,
@@ -74,15 +70,6 @@ import {
   leafCount,
 } from "./counter-codec"
 import { lockSocBucket } from "../utils/lock-soc"
-import {
-  extractLegacyChunk,
-  legacyChunkLayout,
-  mergeLegacyChunk,
-} from "./legacy-counter-codec"
-import {
-  type PartitionStateFormat,
-  SBU1_PARTITION_STATE,
-} from "./partition-state-format"
 import {
   INTENT_EPOCH_MS,
   intentEpochBucket,
@@ -105,17 +92,12 @@ const ENCRYPTED_REFERENCE_BYTES = 64
  */
 const ZERO_CHUNK_REF = new Uint8Array(ENCRYPTED_REFERENCE_BYTES)
 
-export { SBU1_PARTITION_STATE, type PartitionStateFormat }
-
 /**
- * Domain-separation tags for partition-state-feed topics, one per wire format
- * (#463): a batch publishes and reads under the one its record fixes, so
- * neither reader ever meets the other's chunks.
+ * Domain-separation tag for partition-state-feed topics. `v1` was the
+ * fixed-width uint16/uint32 layout; its chunks stay under their own topic,
+ * where nothing looks any more (#463).
  */
-const TOPIC_DOMAIN: Record<PartitionStateFormat["kind"], string> = {
-  legacy: "swarm-id-partition-state-v1",
-  sbu1: "swarm-id-partition-state-v2",
-}
+const PARTITION_STATE_TOPIC_DOMAIN = "swarm-id-partition-state-v2"
 
 /**
  * Reference-chunk header: width u8 ‖ base u32 ‖ exception count u16,
@@ -133,27 +115,14 @@ const REFERENCE_EXCEPTIONS_OFFSET = 5
 const EXCEPTION_ENTRY_BYTES = 8
 
 interface ReferenceChunk {
-  /** The SBU1 frame; a legacy batch's chunks carry none. */
-  frame?: CounterFrame
+  frame: CounterFrame
   exceptions: CounterException[]
   /** One per leaf; `ZERO_CHUNK_REF` for a leaf that was never uploaded. */
   references: Uint8Array[]
 }
 
-/**
- * A legacy batch's reference chunk is the references alone, one per
- * depth-sized counter chunk (`legacyChunkLayout`), the way every pre-SBU1
- * build wrote and reads it.
- */
-function encodeReferenceChunk(
-  format: PartitionStateFormat,
-  chunk: ReferenceChunk,
-): Uint8Array {
+function encodeReferenceChunk(chunk: ReferenceChunk): Uint8Array {
   const { frame, exceptions, references } = chunk
-  if (format.kind === "legacy") return Binary.concatBytes(...references)
-  if (frame === undefined) {
-    throw new Error("an SBU1 reference chunk needs a frame")
-  }
   const out = new Uint8Array(
     REFERENCE_HEADER_BYTES +
       EXCEPTION_ENTRY_BYTES * exceptions.length +
@@ -176,29 +145,8 @@ function encodeReferenceChunk(
   return out
 }
 
-/** Throws on a reference chunk its format does not describe. */
-function parseReferenceChunk(
-  bytes: Uint8Array,
-  format: PartitionStateFormat,
-): ReferenceChunk {
-  if (format.kind === "legacy") {
-    const { numUtilizationChunks } = legacyChunkLayout(format.layoutDepth)
-    const expectedLength = numUtilizationChunks * ENCRYPTED_REFERENCE_BYTES
-    if (bytes.length !== expectedLength) {
-      throw new Error(
-        `reference chunk has ${bytes.length} bytes, expected ${expectedLength} (${numUtilizationChunks} × ${ENCRYPTED_REFERENCE_BYTES})`,
-      )
-    }
-    return {
-      exceptions: [],
-      references: Array.from({ length: numUtilizationChunks }, (_, i) =>
-        bytes.slice(
-          i * ENCRYPTED_REFERENCE_BYTES,
-          (i + 1) * ENCRYPTED_REFERENCE_BYTES,
-        ),
-      ),
-    }
-  }
+/** Throws on a reference chunk its own header does not describe. */
+function parseReferenceChunk(bytes: Uint8Array): ReferenceChunk {
   if (bytes.length < REFERENCE_HEADER_BYTES) {
     throw new Error(`reference chunk has ${bytes.length} bytes, no header`)
   }
@@ -243,60 +191,6 @@ function parseReferenceChunk(
 /** Bytes to encode `partition` as big-endian uint32. */
 const UINT32_BYTES = 4
 
-/** Byte length of leaf `leaf` under `format`; a legacy chunk is always full. */
-function leafLength(
-  format: PartitionStateFormat,
-  frame: CounterFrame | undefined,
-  leaf: number,
-): number {
-  if (format.kind === "legacy") return CHUNK_SIZE
-  if (frame === undefined) throw new Error("an SBU1 state needs a frame")
-  return leafByteLength(frame.width, leaf)
-}
-
-/** The leaves (and SBU1 exceptions) `counters` publish as under `format`. */
-function packLeaves(
-  format: PartitionStateFormat,
-  counters: Uint32Array,
-  frame: CounterFrame | undefined,
-): { leaves: Uint8Array[]; exceptions: CounterException[] } {
-  if (format.kind === "legacy") {
-    const { numUtilizationChunks } = legacyChunkLayout(format.layoutDepth)
-    return {
-      leaves: Array.from({ length: numUtilizationChunks }, (_, i) =>
-        extractLegacyChunk(counters, i, format.layoutDepth),
-      ),
-      exceptions: [],
-    }
-  }
-  if (frame === undefined) throw new Error("an SBU1 publish needs a frame")
-  const { leaves, exceptions } = encodeCounters(counters, frame)
-  return { leaves, exceptions }
-}
-
-/** The counter table a reference chunk and its leaves describe under `format`. */
-function unpackLeaves(
-  format: PartitionStateFormat,
-  chunk: ReferenceChunk,
-  leaves: Uint8Array[],
-): Uint32Array {
-  if (format.kind === "legacy") {
-    const counters = new Uint32Array(NUM_BUCKETS)
-    leaves.forEach((leaf, i) =>
-      mergeLegacyChunk(counters, i, leaf, format.layoutDepth),
-    )
-    return counters
-  }
-  if (chunk.frame === undefined) {
-    throw new Error("an SBU1 reference chunk needs a frame")
-  }
-  return decodeCounters({
-    frame: chunk.frame,
-    exceptions: chunk.exceptions,
-    leaves,
-  })
-}
-
 /**
  * Schema for the *decoded* partition state: the per-bucket counter
  * reconstructed from the binary wire format (reference chunk → leaves, see
@@ -327,13 +221,12 @@ export type PartitionState = z.infer<typeof PartitionCountersSchema>
 export function makePartitionStateTopic(
   batchId: BatchId,
   partition: number,
-  format: PartitionStateFormat,
 ): Topic {
   const partitionBytes = new Uint8Array(UINT32_BYTES)
   new DataView(partitionBytes.buffer).setUint32(0, partition, false)
   const hash = Binary.keccak256(
     Binary.concatBytes(
-      new TextEncoder().encode(TOPIC_DOMAIN[format.kind]),
+      new TextEncoder().encode(PARTITION_STATE_TOPIC_DOMAIN),
       batchId.toUint8Array(),
       partitionBytes,
     ),
@@ -435,13 +328,8 @@ export async function writeStatePointer(opts: {
   partition: number
   referenceHex: string
   nowMs: number
-  format: PartitionStateFormat
 }): Promise<void> {
-  const topic = makePartitionStateTopic(
-    opts.batchId,
-    opts.partition,
-    opts.format,
-  )
+  const topic = makePartitionStateTopic(opts.batchId, opts.partition)
   const epochBucket = statePointerEpochBucket(opts.nowMs)
   const identifier = makeStatePointerIdentifier(topic, epochBucket)
   const owner = opts.backupSigner.publicKey().address()
@@ -484,9 +372,8 @@ export function statePointerAddress(
   partition: number,
   owner: EthAddress,
   nowMs: number,
-  format: PartitionStateFormat,
 ): Uint8Array {
-  const topic = makePartitionStateTopic(batchId, partition, format)
+  const topic = makePartitionStateTopic(batchId, partition)
   const identifier = makeStatePointerIdentifier(
     topic,
     statePointerEpochBucket(nowMs),
@@ -524,13 +411,8 @@ export async function readStatePointer(opts: {
   partition: number
   nowMs: number
   holderLeasedUntilMs?: number
-  format: PartitionStateFormat
 }): Promise<StatePointerLookup> {
-  const topic = makePartitionStateTopic(
-    opts.batchId,
-    opts.partition,
-    opts.format,
-  )
+  const topic = makePartitionStateTopic(opts.batchId, opts.partition)
   const buckets = new Set<number>()
   const cur = statePointerEpochBucket(opts.nowMs)
   buckets.add(cur)
@@ -663,8 +545,6 @@ export async function readPartitionState(
      * unchanged. When provided, the pointer lookup is skipped.
      */
     prefetchedPointer?: StatePointerLookup
-    /** The batch's wire format (#463), from its record. */
-    format: PartitionStateFormat
   },
   knownReferenceHex?: string,
 ): Promise<{
@@ -707,7 +587,6 @@ export async function readPartitionState(
     partition,
     holderLeasedUntilMs,
     lockUnreadable,
-    format,
     nowMs = Date.now(),
   } = opts
 
@@ -725,7 +604,6 @@ export async function readPartitionState(
       partition,
       nowMs,
       holderLeasedUntilMs,
-      format,
     }))
 
   if (!pointer) {
@@ -795,11 +673,9 @@ export async function readPartitionState(
   // than a full re-publish. Best-effort: on failure omit them (the first publish
   // then falls back to the sparse-full path).
   if (knownReferenceHex !== undefined && referenceHex === knownReferenceHex) {
-    const referenceChunk = await downloadReferenceChunk(
-      bee,
-      refBytes,
-      format,
-    ).catch(() => undefined)
+    const referenceChunk = await downloadReferenceChunk(bee, refBytes).catch(
+      () => undefined,
+    )
     return {
       referenceHex,
       unchanged: true,
@@ -833,7 +709,7 @@ export async function readPartitionState(
   let references: Uint8Array[] = []
   let frame: CounterFrame | undefined
   try {
-    const referenceChunk = await downloadReferenceChunk(bee, refBytes, format)
+    const referenceChunk = await downloadReferenceChunk(bee, refBytes)
     references = referenceChunk.references
     frame = referenceChunk.frame
     // Fire all leaf downloads in one round — every address is already in hand
@@ -842,7 +718,7 @@ export async function readPartitionState(
     // the publish path uses). All-zero sentinel refs are leaves that were
     // never written: they stay zero, no download (sparse publish).
     const leaves = references.map(
-      (_, i) => new Uint8Array(leafLength(format, frame, i)),
+      (_, i) => new Uint8Array(leafByteLength(referenceChunk.frame.width, i)),
     )
     const chunkReads = await Promise.all(
       references.map((ref, i) =>
@@ -858,7 +734,7 @@ export async function readPartitionState(
       leaves[read.i] = read.data
       stateBuckets.push(toBucket(read.ref.slice(0, 32)))
     }
-    localCounter.set(unpackLeaves(format, referenceChunk, leaves))
+    localCounter.set(decodeCounters({ ...referenceChunk, leaves }))
     PartitionCountersSchema.parse({ counters: localCounter })
   } catch (err) {
     console.warn(
@@ -893,11 +769,9 @@ export async function readPartitionState(
 async function downloadReferenceChunk(
   bee: Bee,
   refBytes: Uint8Array,
-  format: PartitionStateFormat,
 ): Promise<ReferenceChunk> {
   return parseReferenceChunk(
     await downloadDataWithChunkAPI(bee, new Reference(refBytes).toHex()),
-    format,
   )
 }
 
@@ -939,8 +813,6 @@ export async function writePartitionState(opts: {
   previousCounter?: Uint32Array
   /** The frame the previous publish packed with; kept while it still fits. */
   previousFrame?: CounterFrame
-  /** The batch's wire format (#463), from its record. */
-  format: PartitionStateFormat
   /**
    * This device's id. When provided, the publish also avoids the buckets of
    * this device's current/previous-epoch intent beacons (the refresh tick
@@ -972,11 +844,8 @@ export async function writePartitionState(opts: {
   references: Uint8Array[]
   /** Snapshot of the counter this publish wrote (pass as `previousCounter` next). */
   publishedCounter: Uint32Array
-  /**
-   * The frame this publish packed with (pass as `previousFrame` next);
-   * undefined for a legacy batch, whose layout is fixed by its depth.
-   */
-  frame?: CounterFrame
+  /** The frame this publish packed with (pass as `previousFrame` next). */
+  frame: CounterFrame
 }> {
   const {
     bee,
@@ -989,31 +858,26 @@ export async function writePartitionState(opts: {
     previousReferences,
     previousCounter,
     previousFrame,
-    format,
     deviceId,
     nowMs = Date.now(),
   } = opts
 
   PartitionCountersSchema.parse({ counters: localCounter })
 
-  // Incremental only when we have the previous publish's full ref set and the
-  // counter it published — and, for SBU1, the frame it packed with, still
-  // fitting (a counter only grows, so a base at or below the old minimum stays
-  // valid; only an outgrown width or too many exceptions reject it). Keeping
-  // the frame keeps every leaf's boundaries and bytes, so the per-leaf diff
-  // below finds only the leaves a data write touched. Otherwise pack under the
-  // canonical frame for this counter and publish in full. A legacy batch's
-  // layout is fixed by its depth, so its previous publish always compares.
-  const previous = previousPublish(format, localCounter, {
+  // Incremental only when we have the previous publish's full ref set, the
+  // counter it published and the frame it packed with, still fitting (a
+  // counter only grows, so a base at or below the old minimum stays valid;
+  // only an outgrown width or too many exceptions reject it). Keeping the
+  // frame keeps every leaf's boundaries and bytes, so the per-leaf diff below
+  // finds only the leaves a data write touched. Otherwise pack under the
+  // canonical frame for this counter and publish in full.
+  const previous = previousPublish(localCounter, {
     previousReferences,
     previousCounter,
     previousFrame,
   })
-  const frame =
-    format.kind === "sbu1"
-      ? (previous?.frame ?? chooseFrame(localCounter))
-      : undefined
-  const encoded = packLeaves(format, localCounter, frame)
+  const frame = previous?.frame ?? chooseFrame(localCounter)
+  const encoded = encodeCounters(localCounter, frame)
   const numLeaves = encoded.leaves.length
   const target: UploadTarget = { mode: "stamper", bee, stamper }
   const owner = backupSigner.publicKey().address()
@@ -1065,7 +929,7 @@ export async function writePartitionState(opts: {
   //    under a kept frame — a leaf never returns to zero — so a real-ref leaf
   //    stays real and only never-written leaves are sentinels.
   const previousLeaves = previous
-    ? packLeaves(format, previous.counter, frame).leaves
+    ? encodeCounters(previous.counter, frame).leaves
     : undefined
   const uploadIndices = previousLeaves
     ? allIndices.filter(
@@ -1127,7 +991,7 @@ export async function writePartitionState(opts: {
   const now = nowMs
   for (const ptrMs of [now, now - STATE_POINTER_EPOCH_MS]) {
     claimedBuckets.add(
-      toBucket(statePointerAddress(batchId, partition, owner, ptrMs, format)),
+      toBucket(statePointerAddress(batchId, partition, owner, ptrMs)),
     )
   }
   const epoch = intentEpochBucket(now)
@@ -1161,7 +1025,7 @@ export async function writePartitionState(opts: {
   // (a seed counter ahead of its acked refs after an unacked write — the
   // SAFETY INVARIANT in `PartitionLease.claimPartition`), and only Swarm
   // holds those bytes, so no sum stated here could be the reader's.
-  const referenceChunk = encodeReferenceChunk(format, {
+  const referenceChunk = encodeReferenceChunk({
     frame,
     exceptions: encoded.exceptions,
     references,
@@ -1227,7 +1091,6 @@ export async function writePartitionState(opts: {
     partition,
     referenceHex,
     nowMs: now,
-    format,
   })
 
   // Diagnostic (visible in the browser console): how many chunks this publish
@@ -1236,7 +1099,7 @@ export async function writePartitionState(opts: {
   // sparse/incremental (~a few writes) or a full publish, and its gateway cost.
   console.debug(
     `[partition-state] publish p=${partition} incremental=${incremental} ` +
-      `leaves=${prepared.length}/${numLeaves} width=${frame?.width ?? "fixed"} ` +
+      `leaves=${prepared.length}/${numLeaves} width=${frame.width} ` +
       `writes=${prepared.length + 2} durationMs=${Date.now() - publishStart}`,
   )
 
@@ -1260,11 +1123,10 @@ export async function writePartitionState(opts: {
 
 /**
  * The previous publish to diff against, when it is still comparable: the full
- * reference set of this format's leaf count, the counter it published, and
- * for SBU1 the frame it packed with while it still fits `localCounter`.
+ * reference set of its frame's leaf count, the counter it published, and the
+ * frame it packed with while it still fits `localCounter`.
  */
 function previousPublish(
-  format: PartitionStateFormat,
   localCounter: Uint32Array,
   prev: {
     previousReferences?: Uint8Array[]
@@ -1272,17 +1134,11 @@ function previousPublish(
     previousFrame?: CounterFrame
   },
 ):
-  | { references: Uint8Array[]; counter: Uint32Array; frame?: CounterFrame }
+  | { references: Uint8Array[]; counter: Uint32Array; frame: CounterFrame }
   | undefined {
   const { previousReferences, previousCounter, previousFrame } = prev
   if (previousReferences === undefined || previousCounter === undefined) {
     return undefined
-  }
-  if (format.kind === "legacy") {
-    const { numUtilizationChunks } = legacyChunkLayout(format.layoutDepth)
-    return previousReferences.length === numUtilizationChunks
-      ? { references: previousReferences, counter: previousCounter }
-      : undefined
   }
   return previousFrame !== undefined &&
     previousReferences.length === leafCount(previousFrame.width) &&

@@ -114,10 +114,7 @@ An entry of `postageStamps` is `PostageStampSchemaV1`: `batchID` (64 hex charact
 `signerKey` (the private key that owns the batch, 64 bare hex characters), `createdAt` (epoch
 milliseconds), and the batch as the chain reports it: `depth`, `bucketDepth`, `amount` (a decimal
 string, since it does not fit a JSON number), `blockNumber`, `immutableFlag`, `exists`, `usable`,
-`utilization` (`0` for a fresh batch) and optionally `batchTTL`. A drive created by the UI also
-carries `stateFormat: "sbu1"`, the wire format of its partition state; a record without it is
-read as a drive from before that format and keeps the older fixed-width layout for good, so a
-host writing new records should set it.
+`utilization` (`0` for a fresh batch) and optionally `batchTTL`.
 
 The signer key has to be the batch's on-chain owner: the UI's **Use existing batch** import
 checks that before attaching a batch, and refuses one the supplied key does not own

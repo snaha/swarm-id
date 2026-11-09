@@ -69,7 +69,6 @@ import {
   type PartitionIntentPayload,
 } from "./partition-intent"
 import type { CounterFrame } from "./counter-codec"
-import type { PartitionStateFormat } from "./partition-state-format"
 import {
   readPartitionState,
   readStatePointer,
@@ -270,12 +269,6 @@ export class PartitionLease {
        * data uploads.
        */
       stamper?: Stamper
-      /**
-       * The batch's partition-state wire format (#463), from its record
-       * (`partitionStateFormat`). Needed with the stamper, by the same write
-       * paths; a reader has no use for it.
-       */
-      stateFormat?: PartitionStateFormat
       /** Override for tests; defaults to `() => Date.now()`. */
       now?: () => number
       /** Override for tests; defaults to PARTITION_LOCK_GUARD_MS. */
@@ -311,8 +304,8 @@ export class PartitionLease {
   /**
    * Build a `PartitionLease` whose `backupSigner` is derived from the
    * account's `swarmEncryptionKey` (same derivation as the partition-state
-   * and partition-lock feeds). Pass `stamper` and `stateFormat` for the write
-   * path; omit them for a read-only lease (UI display).
+   * and partition-lock feeds). Pass `stamper` for the write path; omit it for
+   * a read-only lease (UI display).
    */
   static async fromSwarmEncryptionKey(opts: {
     bee: Bee
@@ -320,7 +313,6 @@ export class PartitionLease {
     swarmEncryptionKey: Uint8Array
     batchId: BatchId
     stamper?: Stamper
-    stateFormat?: PartitionStateFormat
     now?: () => number
     guardMs?: number
     wait?: (ms: number) => Promise<void>
@@ -773,7 +765,7 @@ export class PartitionLease {
     partition: number,
     nowMs: number,
   ): Promise<StatePointerLookup | undefined> {
-    const { batchId, format } = this.requireWriteContext()
+    const { batchId } = this.opts
     try {
       return await readStatePointer({
         bee: this.opts.bee,
@@ -782,7 +774,6 @@ export class PartitionLease {
         batchId,
         partition,
         nowMs,
-        format,
       })
     } catch {
       return undefined
@@ -812,7 +803,7 @@ export class PartitionLease {
     soloClean: boolean
   }): Promise<AcquireResult> {
     const { partition, partitionCount, freshClaim } = args
-    const { stamper, batchId, format } = this.requireWriteContext()
+    const { stamper, batchId } = this.requireWriteContext()
 
     // Cache-aware seed: pass the reference our local counter is already in
     // sync with. If the feed still points there, `readPartitionState` skips
@@ -828,7 +819,6 @@ export class PartitionLease {
         swarmEncryptionKey: this.opts.swarmEncryptionKey,
         batchId,
         partition,
-        format,
         // Locate the pointer of a partition that's been free for a while at the
         // gone holder's last-heartbeat bucket (its `leasedUntil`), so a takeover
         // resumes at the right counter however long ago the holder stopped. A live
@@ -1399,7 +1389,7 @@ export class PartitionLease {
     localCounter: Uint32Array,
     opts?: { forceFull?: boolean },
   ): Promise<void> {
-    const { stamper, batchId, format } = this.requireWriteContext()
+    const { stamper, batchId } = this.requireWriteContext()
     // Force a FULL (non-incremental) publish once per epoch: incremental
     // publishes leave unchanged chunks pinned across epochs, where a later
     // epoch's rotating pointer/beacon SOC (same reserved slot) can evict one and
@@ -1427,7 +1417,6 @@ export class PartitionLease {
       previousReferences: forceFullRepin ? undefined : this.publishedReferences,
       previousCounter: forceFullRepin ? undefined : this.publishedCounter,
       previousFrame: forceFullRepin ? undefined : this.publishedFrame,
-      format,
       // Lets the publish also avoid this device's intent-beacon buckets (the
       // refresh tick re-writes them off-lock at the same reserved slot).
       deviceId: this.opts.deviceId,
@@ -1508,7 +1497,6 @@ export class PartitionLease {
       partition: this.self.partition,
       referenceHex: this.lastReferenceHex,
       nowMs: this.now(),
-      format: this.requireWriteContext().format,
     })
   }
 
@@ -1534,7 +1522,7 @@ export class PartitionLease {
   private retainedChunksCollideThisEpoch(partition: number): boolean {
     if (this.publishedReferences === undefined) return false
     const owner = this.opts.backupSigner.publicKey().address()
-    const { batchId, format } = this.requireWriteContext()
+    const { batchId } = this.requireWriteContext()
     // `this.now()` — one clock for the whole rendezvous path (#385): the beacon/
     // heartbeat writes this guards, the publish it triggers (`writePartitionState`
     // via `nowMs`), and the reader all derive their buckets from this same clock.
@@ -1543,7 +1531,7 @@ export class PartitionLease {
     // This device's own reserved-slot writers for the current epoch.
     const fixed = new Set<number>([
       lockSocBucket(batchId, partition, owner),
-      toBucket(statePointerAddress(batchId, partition, owner, nowMs, format)),
+      toBucket(statePointerAddress(batchId, partition, owner, nowMs)),
       toBucket(partitionOccupancyAddress(batchId, partition, epoch, owner)),
       toBucket(
         intentSocAddress(batchId, partition, this.opts.deviceId, epoch, owner),
@@ -1637,21 +1625,13 @@ export class PartitionLease {
    * Assert the write context (stamper + batch) is present. Throws on a
    * read-only instance — acquire / refresh / release require it.
    */
-  private requireWriteContext(): {
-    stamper: Stamper
-    batchId: BatchId
-    format: PartitionStateFormat
-  } {
-    if (!this.opts.stamper || !this.opts.stateFormat) {
+  private requireWriteContext(): { stamper: Stamper; batchId: BatchId } {
+    if (!this.opts.stamper) {
       throw new Error(
-        "PartitionLease: write operation requires a stamper and the batch's state format (read-only instance)",
+        "PartitionLease: write operation requires a stamper (read-only instance)",
       )
     }
-    return {
-      stamper: this.opts.stamper,
-      batchId: this.opts.batchId,
-      format: this.opts.stateFormat,
-    }
+    return { stamper: this.opts.stamper, batchId: this.opts.batchId }
   }
 
   private now(): number {

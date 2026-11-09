@@ -364,41 +364,6 @@ describe('runExtend', () => {
 })
 
 describe('runResize', () => {
-  it('refuses to grow a legacy regular drive past depth 31: its published counter layout would change (#463)', async () => {
-    const account = makeAccount([stampRecord({ depth: 24 })])
-    await expect(
-      runResize({
-        account,
-        drive: account.stamps[0],
-        newDepth: 32,
-        keepLifespan: true,
-        requestFunding,
-      }),
-    ).rejects.toThrow(/31/)
-    expect(onchain.preflightResize).not.toHaveBeenCalled()
-  })
-
-  it('grows a marked drive past depth 31: SBU1 leaves carry no depth', async () => {
-    const account = makeAccount([
-      stampRecord({ depth: 24, amount: 1000n, batchTTL: 100 * DAY, stateFormat: 'sbu1' }),
-    ])
-    onchain.preflightResize.mockResolvedValue({
-      batch: { depth: 32 },
-      constraints: CONSTRAINTS,
-      remaining: REMAINING,
-      alreadyResized: true,
-    })
-    onchain.reconcileStampFromChain.mockResolvedValue(false)
-    await runResize({
-      account,
-      drive: account.stamps[0],
-      newDepth: 32,
-      keepLifespan: true,
-      requestFunding,
-    })
-    expect(account.stamps[0].depth).toBe(32)
-  })
-
   it('records chain truth when the increase already landed and the reconcile fails', async () => {
     const account = makeAccount([stampRecord({ depth: 20, amount: 1000n, batchTTL: 100 * DAY })])
     onchain.preflightResize.mockResolvedValue({

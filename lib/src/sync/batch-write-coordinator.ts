@@ -49,7 +49,6 @@ import { abortedError } from "../errors"
 import { withBatchWriteLock } from "../utils/batch-write-lock"
 import { withTimeout } from "../utils/promise"
 import { PartitionLease } from "./partition-lease"
-import type { PartitionStateFormat } from "./partition-state-format"
 import type {
   LeaseRefreshOutcome,
   PartitionLeaseStateSnapshot,
@@ -129,11 +128,6 @@ export interface BatchWriteCoordinatorDeps {
   stamper: UtilizationAwareStamper
   /** This device's identity, captured once by the caller. */
   deviceId: string
-  /**
-   * The batch's partition-state wire format (#463), fixed by its record: a
-   * legacy batch keeps its fixed-width chunks, a newer one packs SBU1 leaves.
-   */
-  stateFormat: PartitionStateFormat
   /**
    * Current known device IDs for this account (from the synced device
    * registry). Read fresh per acquire so it reflects late-announced devices.
@@ -585,7 +579,6 @@ export class BatchWriteCoordinator {
         batchId: new BatchId(this.deps.batchId),
         swarmEncryptionKey,
         stamper,
-        stateFormat: this.deps.stateFormat,
         knownDeviceIds: this.deps.knownDeviceIds,
         intentReadTimeoutMs: this.deps.intentReadTimeoutMs,
         intentGuardWindowMs: this.deps.intentGuardWindowMs,
@@ -596,14 +589,15 @@ export class BatchWriteCoordinator {
       if (cached) lease.hydrate(cached)
 
       // Re-adopt fast path: a still-valid cached lease (e.g. after a reload
-      // within the TTL) is re-established from local state alone — no lock-SOC
-      // scan/write, so it survives transient Bee 500s. The refresh tick then
-      // reconciles with Swarm and demotes only on a confirmed foreign holder.
-      // The adopt binds the stamper's own table as the lane's counter, so the
-      // rows must be certified for that lane: `getSyncedReference` is defined
-      // only while the last publish AND the last flush both name it (#463). A
-      // lane held without a publish yet, or rows a dying tab left half
-      // rewritten for another lane, take the cold acquire below instead. The
+      // within the TTL) whose cache rows are certified for the lane is
+      // re-established from local state alone — no lock-SOC scan/write, so it
+      // survives transient Bee 500s. The refresh tick then reconciles with
+      // Swarm and demotes only on a confirmed foreign holder. The adopt binds
+      // the stamper's own table as the lane's counter, so the rows must be
+      // certified for that lane: `getSyncedReference` is defined only once a
+      // flush has written the rows for the counter a publish or read named
+      // (#463). A lane held without a publish yet, or rows a dying tab left
+      // half rewritten, take the cold acquire below instead. The
       // reference also seeds the heartbeat's resume-pointer target: the cold
       // `claimPartition` path seeds that from the state it reads on acquire;
       // the adopt path skips `claimPartition`, so without it an adopted-but-idle
