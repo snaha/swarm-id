@@ -103,7 +103,7 @@ Chain-backed suites are NOT in `check:all` — they need a chain running. `pnpm 
 - **No magic numbers** — use SCREAMING_SNAKE_CASE constants (0, 1, -1, 2 excepted)
 - **Omit file extensions** in imports
 - **kebab-case** for all file and directory names
-- **Comments, test titles and `AGENTS.md` describe the present**: no change history ("used to", "previously", "the old X"). An issue or PR number is a fine pointer to the context. The longer reasoning goes in `docs/decisions.md` or the commit message.
+- **Comments and test titles describe the present**: no change history ("used to", "previously", "the old X"). An issue or PR number is a fine pointer to the context. The longer reasoning goes in `docs/decisions.md` or the commit message.
 - **Conventional commits**: `feat:`, `fix:`, `docs:`, etc.
 - **TypeScript execution**: Use `pnpx tsx` (not `npx ts-node`)
 - **Monorepo version pinning**: toolchain versions are pinned across the monorepo (eslint 10,
