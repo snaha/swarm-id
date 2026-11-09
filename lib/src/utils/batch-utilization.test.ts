@@ -1253,17 +1253,25 @@ describe("UtilizationAwareStamper synced reference", () => {
 
   // A reference stored before v2 names a v1 reference chunk, which no v2
   // reader can parse; adopted as the v2 heartbeat target, it would leave the
-  // partition unreadable to every other device's takeover (#918 review).
-  it("ignores a synced reference stored before the v2 partition state", async () => {
+  // partition unreadable to every other device's takeover (#918 review). It
+  // still marks the lane as one this device wrote, until a v2 publish of it.
+  it("reads a synced reference stored before v2 as a lane marker, never as a reference", async () => {
     const cache = makeRecordingCache()
     await cache.putMetadata({
       batchId: TEST_BATCH_ID.toHex(),
       lastSync: 0,
       chunkCount: 0,
-      syncedReferences: { 0: "v1-reference" },
-    } as BatchMetadata)
+      syncedReferences: { 0: "v1-reference", 1: "v1-reference" },
+    })
     const stamper = await makeStamper(cache)
     expect(await stamper.getSyncedReference(0)).toBeUndefined()
+    expect(await stamper.wroteLaneBeforeV2(0)).toBe(true)
+    expect(await stamper.wroteLaneBeforeV2(2)).toBe(false)
+
+    await stamper.setSyncedReference(0, "v2-reference")
+    expect(await stamper.getSyncedReference(0)).toBe("v2-reference")
+    expect(await stamper.wroteLaneBeforeV2(0)).toBe(false)
+    expect(await stamper.wroteLaneBeforeV2(1)).toBe(true)
   })
 
   it("getSyncedReference round-trips through setSyncedReference (per partition, merge-preserving)", async () => {

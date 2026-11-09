@@ -66,13 +66,17 @@ export interface BatchMetadata {
    * (hex) this device's local counter was last in sync with. On a cold
    * acquire, if the state pointer still names it the leaf downloads are
    * skipped and the local counter reused. Keyed by partition index.
-   *
-   * Named apart from the `syncedReferences` a pre-v2 build stored: those name
-   * v1 reference chunks no v2 reader can parse, and one adopted as the v2
-   * heartbeat target would leave the partition unreadable to other devices'
-   * takeovers. Not reading them costs one full read on the next acquire.
    */
   stateReferences?: Record<number, string>
+  /**
+   * What a pre-v2 build stored in place of `stateReferences` (#463): v1
+   * reference chunks no v2 reader can parse, so never a heartbeat target — one
+   * adopted as such would leave the partition `readFailed` to every other
+   * device's takeover. An entry still says this device wrote the lane, so a
+   * cold claim that finds no v2 state resumes from the converted cache rows
+   * rather than from zero. The first v2 publish of a partition drops its entry.
+   */
+  syncedReferences?: Record<number, string>
   /**
    * Per-partition buckets occupied by the LATEST published partition-state
    * chunks (counter chunks + reference chunk). Those chunks overstamp the

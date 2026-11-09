@@ -368,7 +368,9 @@ that feeds the rival set. The beacon is a correctness mechanism; the heartbeat i
 - **v1 partition state is not read (#463).** The SBU1 leaf format publishes under
   `swarm-id-partition-state-v2` and never reads the v1 topic. A device keeps its own used
   slots across the switch only through its local cache rows, which it converts in one
-  IndexedDB transaction. Any device without them for a partition (another browser, cleared
+  IndexedDB transaction; its pre-v2 synced reference marks the lane as its own, so the first
+  claim resumes from those rows, but is never the heartbeat target, since no v2 reader can
+  parse the v1 chunk it names. Any device without them for a partition (another browser, cleared
   storage, or a takeover of a lane written under v1) finds no v2 state, resumes that lane
   from zero, and re-issues its slots, overwriting the chunks written under v1. Accepted while
   the project is pre-production: there is no user data to keep, and the test data on such a

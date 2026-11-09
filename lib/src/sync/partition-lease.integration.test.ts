@@ -41,7 +41,9 @@ vi.mock("./partition-state", async (importOriginal) => {
     },
   }
 })
+import { IDBFactory } from "fake-indexeddb"
 import { PartitionLease } from "./partition-lease"
+import { UtilizationStoreDB } from "../storage/utilization-store"
 import * as partitionState from "./partition-state"
 import * as downloadData from "../proxy/download-data"
 import {
@@ -2853,5 +2855,72 @@ describe("PartitionLease.refresh — occupancy displacement vs a PRUNED peer", (
     ).toBe(0)
     // No foreign beacon written; acquire + refresh only publish DEVICE_A's own.
     expect(await lease.refresh()).toBe("held")
+  })
+})
+
+describe("PartitionLease.acquire — a lane this device wrote before v2", () => {
+  // A pre-v2 build left two things behind for a partition it held: legacy
+  // cache rows (converted on load, #463) and a `syncedReferences` entry naming
+  // a v1 reference chunk no v2 reader can parse. Neither v2 pointer nor v2
+  // state exists yet. The claim must resume from the converted rows — the only
+  // record of the slots this device used — and must not heartbeat the v1 chunk,
+  // which would leave the partition `readFailed` for every other device.
+  const BUCKET = 0x0123
+  const USED = 5
+  const V1_REFERENCE = "aa".repeat(64)
+
+  async function stamperWithLegacyLane(): Promise<UtilizationAwareStamper> {
+    globalThis.indexedDB = new IDBFactory()
+    const cache = new UtilizationStoreDB()
+    // Depth 24, regular drive: little-endian uint16, 2,048 counters per row
+    const row = new Uint8Array(4096)
+    new DataView(row.buffer).setUint16((BUCKET % 2048) * 2, USED, true)
+    await cache.putChunk({
+      batchId: TEST_BATCH_ID.toHex(),
+      chunkIndex: Math.floor(BUCKET / 2048),
+      data: row,
+      contentHash: "old",
+      nonce: 0,
+      lastAccess: 0,
+    })
+    await cache.putMetadata({
+      batchId: TEST_BATCH_ID.toHex(),
+      lastSync: 0,
+      chunkCount: 0,
+      syncedReferences: { 0: V1_REFERENCE },
+    })
+    return UtilizationAwareStamper.create(
+      "11".repeat(32),
+      TEST_BATCH_ID,
+      TEST_BATCH_DEPTH,
+      cache,
+      OWNER,
+      TEST_ENC_KEY,
+    )
+  }
+
+  it("resumes from the converted cache rows, not from zero", async () => {
+    const stamper = await stamperWithLegacyLane()
+    expect(stamper.getUtilizationState().dataCounters[BUCKET]).toBe(USED)
+
+    const lease = new PartitionLease({
+      bee: bee,
+      deviceId: DEVICE_A,
+      batchId: TEST_BATCH_ID,
+      swarmEncryptionKey: TEST_ENC_KEY,
+      backupSigner: BACKUP_SIGNER,
+      stamper: stamper as unknown as Stamper,
+      guardMs: GUARD_MS,
+      intentGuardWindowMs: 0,
+    })
+    const acquired = await lease.acquire({ partitionCount: PARTITION_COUNT })
+    expect(acquired.partition).toBe(0)
+    expect(acquired.localCounter[BUCKET]).toBe(USED)
+
+    // The v1 reference is not a resume point anyone can read: no heartbeat
+    // until this holder's first publish produces a v2 reference.
+    const pointerSpy = vi.spyOn(partitionState, "writeStatePointer")
+    await lease.heartbeatStatePointer()
+    expect(pointerSpy).not.toHaveBeenCalled()
   })
 })

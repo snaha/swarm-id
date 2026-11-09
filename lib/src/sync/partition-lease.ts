@@ -808,10 +808,17 @@ export class PartitionLease {
     // Cache-aware seed: pass the reference our local counter is already in
     // sync with. If the feed still points there, `readPartitionState` skips
     // the reference + counter-chunk downloads and we reuse the local counter.
-    const knownReference =
+    // A pre-v2 build's synced reference is the other case: it names a v1 chunk
+    // no v2 reader can parse, so it is never passed on as the resume point to
+    // heartbeat (#463). It still says this device wrote the lane, and its
+    // converted cache rows are the only record of the slots it used.
+    const [knownReference, wroteLaneBeforeV2] =
       stamper instanceof UtilizationAwareStamper
-        ? await stamper.getSyncedReference(partition)
-        : undefined
+        ? await Promise.all([
+            stamper.getSyncedReference(partition),
+            stamper.wroteLaneBeforeV2(partition),
+          ])
+        : [undefined, false]
     const stateResult = await readPartitionState(
       {
         bee: this.opts.bee,
@@ -860,8 +867,16 @@ export class PartitionLease {
       }
     }
 
+    // Resume from this device's own counter when the pointer still names what
+    // it last synced, or when the lane was written before v2 and has no v2
+    // state yet (a clean no-pointer scan, `referenceHex` undefined). In the
+    // second case `lastReferenceHex` stays undefined below, so the heartbeat
+    // is a no-op until the first publish produces a v2 reference.
+    const resumeFromLocal =
+      stateResult.unchanged ||
+      (wroteLaneBeforeV2 && stateResult.referenceHex === undefined)
     const localCounter =
-      stateResult.unchanged && stamper instanceof UtilizationAwareStamper
+      resumeFromLocal && stamper instanceof UtilizationAwareStamper
         ? stamper.buildLeaseLocalCounter()
         : (stateResult.localCounter ?? new Uint32Array(NUM_BUCKETS))
 

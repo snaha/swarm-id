@@ -298,15 +298,12 @@ export function mergeChunk(
 }
 
 /**
- * Merge a row written before the fixed layout on a regular drive at depth ≤
- * `LEGACY_UINT16_MAX_DEPTH`: little-endian uint16 counters, 2,048 per chunk.
- */
-/**
  * A batch's cache rows in the fixed layout (#463), or `undefined` when every
  * row already is. Rows without the format marker were serialized at the
  * batch's depth of the time: uint16 below depth 32 on a regular drive,
- * uint32 otherwise. Each row is read by its own marker, so a batch that holds
- * both is read right whichever rows were converted.
+ * uint32 otherwise. A batch is converted whole in one transaction
+ * (`UtilizationStoreDB.convertBatch`), so its rows are all one or all the
+ * other, and the batch's rule decodes every row.
  */
 export function convertLegacyCacheRows(
   batchId: string,
@@ -317,13 +314,8 @@ export function convertLegacyCacheRows(
   if (rows.every((row) => row.format === CACHE_ROW_FORMAT)) return undefined
   const legacyUint16 = !scratch && depth <= LEGACY_UINT16_MAX_DEPTH
   const dataCounters = new Uint32Array(NUM_BUCKETS)
-  // Legacy rows first: a converted row of the same index wins over them
-  const ordered = [
-    ...rows.filter((row) => row.format !== CACHE_ROW_FORMAT),
-    ...rows.filter((row) => row.format === CACHE_ROW_FORMAT),
-  ]
-  for (const row of ordered) {
-    if (row.format !== CACHE_ROW_FORMAT && legacyUint16) {
+  for (const row of rows) {
+    if (legacyUint16) {
       mergeLegacyUint16Chunk(dataCounters, row.chunkIndex, row.data)
     } else if (row.chunkIndex < NUM_UTILIZATION_CHUNKS) {
       mergeChunk(dataCounters, row.chunkIndex, row.data)
@@ -340,6 +332,10 @@ export function convertLegacyCacheRows(
   }))
 }
 
+/**
+ * Merge a row written before the fixed layout on a regular drive at depth ≤
+ * `LEGACY_UINT16_MAX_DEPTH`: little-endian uint16 counters, 2,048 per chunk.
+ */
 function mergeLegacyUint16Chunk(
   dataCounters: Uint32Array,
   chunkIndex: number,
@@ -1896,6 +1892,17 @@ export class UtilizationAwareStamper implements Stamper, SlotAssigner {
   }
 
   /**
+   * Whether a pre-v2 build synced `partition` on this device
+   * (`BatchMetadata.syncedReferences`). Its reference is unreadable to v2, but
+   * the converted cache rows still hold the slots this device used, so a cold
+   * claim that finds no v2 state resumes from them rather than from zero.
+   */
+  async wroteLaneBeforeV2(partition: number): Promise<boolean> {
+    const meta = await this.cache.getMetadata(this.batchId.toHex())
+    return meta?.syncedReferences?.[partition] !== undefined
+  }
+
+  /**
    * Record the partition-state feed reference this device's local counter is
    * now in sync with (after a download or a publish). Merges into the existing
    * batch metadata so other fields / partitions are preserved.
@@ -1906,6 +1913,9 @@ export class UtilizationAwareStamper implements Stamper, SlotAssigner {
   ): Promise<void> {
     const batchId = this.batchId.toHex()
     const existing = await this.cache.getMetadata(batchId)
+    // A v2 reference for the partition supersedes the pre-v2 marker
+    const { [partition]: _superseded, ...syncedReferences } =
+      existing?.syncedReferences ?? {}
     await this.cache.putMetadata({
       batchId,
       lastSync: existing?.lastSync ?? Date.now(),
@@ -1914,6 +1924,7 @@ export class UtilizationAwareStamper implements Stamper, SlotAssigner {
         ...(existing?.stateReferences ?? {}),
         [partition]: referenceHex,
       },
+      syncedReferences,
       stateChunkBuckets: existing?.stateChunkBuckets,
     })
   }
