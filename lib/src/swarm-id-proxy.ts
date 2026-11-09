@@ -386,7 +386,7 @@ export class SwarmIdProxy {
    * delegates all writes to these coordinators via `withModeAwareWriteLock`.
    */
   private drives = new Map<string, DriveWritePath>()
-  /** The parent's requests being handled, for `abortRequest` to stop (#929). */
+  /** The parent's requests being handled, for `abortRequest` to stop. */
   private inFlightRequests = new Map<string, AbortController>()
   /**
    * The drives `connectionInfoChanged` last went out with (see `driveState`).
@@ -2512,8 +2512,8 @@ export class SwarmIdProxy {
     uncounted: (target: UploadTarget) => Promise<T>,
     batchId?: string,
   ): Promise<T> {
-    // Every chunk the write sends lands on the request's counter (#932) and
-    // stops with its signal (#929).
+    // Every chunk the write sends lands on the request's counter and
+    // stops with its signal.
     const { counter, signal } = targetOptions ?? {}
     if (signal?.aborted) throw abortedError(signal)
     const operation = (target: UploadTarget) =>
@@ -2550,7 +2550,7 @@ export class SwarmIdProxy {
    * {@link withModeAwareWriteLock} for a write that reports its cost (#932).
    * The counter is made here and returned with the result, so a handler has
    * no counter it could forget to wire and then report as zero. `signal` is
-   * required for the same reason: a write must not outlive its abort (#929).
+   * required for the same reason: a write must not outlive its abort.
    */
   private async withCountedWrite<T>(
     targetOptions: {

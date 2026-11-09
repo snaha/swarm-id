@@ -290,7 +290,7 @@ type Internals = {
     | undefined
 }
 
-describe("BatchWriteCoordinator.withWrite — aborted while queued (#929)", () => {
+describe("BatchWriteCoordinator.withWrite — aborted while queued", () => {
   it("stops at the lock: no lease, no worker pool, no write", async () => {
     const lease = makeLease({
       acquireResult: {

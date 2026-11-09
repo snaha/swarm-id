@@ -89,7 +89,7 @@ export interface ChunkCounter {
 
 /**
  * Upload target: stamper-based (user has postage batch) or subsidised gateway.
- * `signal` is the request's abort (#929): the proxy puts it here beside the
+ * `signal` is the request's abort: the proxy puts it here beside the
  * counter, so every write through the target stops with it.
  */
 export type UploadTarget =

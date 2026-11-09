@@ -1173,7 +1173,7 @@ describe("SwarmIdProxy subsidised-mode selection", () => {
     },
   )
 
-  describe("abortRequest (#929)", () => {
+  describe("abortRequest", () => {
     /** Several leaves, so a stopped upload shows as chunks never sent. */
     const MULTI_CHUNK_SIZE = 4096 * 3 + 1
 

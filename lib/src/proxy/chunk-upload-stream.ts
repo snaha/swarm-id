@@ -27,7 +27,7 @@ interface PendingAck {
 export interface ChunkUploadStreamOptions {
   tag?: number
   concurrency?: number
-  /** Ends the stream at once, without waiting for the acks still due (#929) */
+  /** Ends the stream at once, without waiting for the acks still due */
   signal?: AbortSignal
 }
 

@@ -199,7 +199,7 @@ export interface UploadOptions {
 }
 
 /**
- * `signal` stops the call and rejects it with `aborted` (#929). It cannot
+ * `signal` stops the call and rejects it with `aborted`. It cannot
  * cross the bridge, so the wire schema has no such field: the client sends
  * `abortRequest` in its place.
  */
@@ -1498,7 +1498,7 @@ export const ConnectMessageSchema = z.object({
 })
 
 /**
- * Stop the request `requestId` names (#929). Gets no answer: the client has
+ * Stop the request `requestId` names. Gets no answer: the client has
  * already rejected that request with `aborted`.
  */
 export const AbortRequestMessageSchema = z.object({

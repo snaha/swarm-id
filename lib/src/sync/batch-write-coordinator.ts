@@ -115,7 +115,7 @@ export interface WithWriteOptions {
   workerCount?: number
   /** Override the mode default: persistent → "block", oneshot → "skip". */
   wait?: "block" | "skip"
-  /** A write aborted while it queued for the lock stops there (#929). */
+  /** A write aborted while it queued for the lock stops there. */
   signal?: AbortSignal
 }
 

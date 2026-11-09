@@ -714,7 +714,7 @@ describe("SwarmIdClient request seam", () => {
     })
   })
 
-  describe("requestOptions.signal (#929)", () => {
+  describe("requestOptions.signal", () => {
     const REFERENCE = "a".repeat(64)
     const TIMEOUT_MS = 5000
     const SHORT_TIMEOUT_MS = 1

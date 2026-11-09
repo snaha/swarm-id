@@ -79,7 +79,7 @@ export class SwarmIdError extends Error {
   }
 }
 
-/** The rejection of a call whose `signal` aborted (#929) */
+/** The rejection of a call whose `signal` aborted */
 export function abortedError(signal: AbortSignal): SwarmIdError {
   return new SwarmIdError("aborted", "Request aborted", {
     cause: signal.reason,

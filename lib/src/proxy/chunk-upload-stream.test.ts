@@ -55,7 +55,7 @@ afterEach(() => {
 
 describe("ChunkUploadStream", () => {
   it(
-    "rejects what awaits an ack at the abort and closes the socket (#929)",
+    "rejects what awaits an ack at the abort and closes the socket",
     async () => {
       const controller = new AbortController()
       const stream = new ChunkUploadStream(BEE_URL, {
@@ -96,7 +96,7 @@ describe("ChunkUploadStream", () => {
 
 describe("a WebSocket upload", () => {
   it(
-    "rejects at the abort without waiting for the acks (#929)",
+    "rejects at the abort without waiting for the acks",
     async () => {
       const controller = new AbortController()
       const upload = uploadData(

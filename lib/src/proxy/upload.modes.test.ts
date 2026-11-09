@@ -118,7 +118,7 @@ describe("stamper uploads keep swarm-pin", () => {
   })
 })
 
-describe("an aborted signal stops the write (#929)", () => {
+describe("an aborted signal stops the write", () => {
   const CHUNK_PAYLOAD_SIZE = 4096
   const THREE_LEAVES = CHUNK_PAYLOAD_SIZE * 3
 

@@ -315,7 +315,7 @@ describe("fetchBatchDetails", () => {
     )
   })
 
-  it("sends the call's headers and abort signal (#929)", async () => {
+  it("sends the call's headers and abort signal", async () => {
     fetchSpy.mockResolvedValue(mockResponse({ batchTTL: 123 }))
     const headers = { "x-test": "1" }
     const { signal } = new AbortController()

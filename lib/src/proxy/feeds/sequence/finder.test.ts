@@ -102,7 +102,7 @@ describe("SyncSequentialFinder — retry-then-conclude (anti-clobber)", () => {
   })
 
   // A free slot is what the next write takes, so an abort must not read as one.
-  it("rejects when the lookup aborts, rather than reporting a free slot (#929)", async () => {
+  it("rejects when the lookup aborts, rather than reporting a free slot", async () => {
     const topic = Topic.fromString("seq-d")
     const controller = new AbortController()
     let reads = 0

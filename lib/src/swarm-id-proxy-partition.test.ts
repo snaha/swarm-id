@@ -2261,7 +2261,7 @@ describe("SwarmIdProxy partitioned write enablement", () => {
       })
 
       it.each(["getDrives", "getPostageBatch"])(
-        "%s reads Bee with the call's headers and abort signal (#929)",
+        "%s reads Bee with the call's headers and abort signal",
         async (type) => {
           nextStamper()
           await connectWithTwoDrives([stampOf(BATCH_ID_HEX)])
