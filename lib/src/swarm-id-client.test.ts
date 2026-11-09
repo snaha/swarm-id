@@ -10,6 +10,7 @@ import {
   IframeToParentMessageSchema,
   type ConnectionInfo,
   type IframeToParentMessage,
+  type RequestOptions,
 } from "./types"
 import { generatedAvatar } from "./utils/avatar"
 import { TimeoutError } from "./utils/promise"
@@ -710,6 +711,128 @@ describe("SwarmIdClient request seam", () => {
       status: 404,
       beeMessage: "chunk not found",
       url: "http://bee.example/chunks/aa",
+    })
+  })
+
+  describe("requestOptions.signal (#929)", () => {
+    const REFERENCE = "a".repeat(64)
+    const TIMEOUT_MS = 5000
+    const SHORT_TIMEOUT_MS = 1
+
+    it("keeps the signal off the wire and the other options on it", async () => {
+      const controller = new AbortController()
+      const promise = client.downloadData(REFERENCE, undefined, {
+        signal: controller.signal,
+        timeout: TIMEOUT_MS,
+      })
+
+      expect(lastPostedMessage().requestOptions).toEqual({
+        timeout: TIMEOUT_MS,
+      })
+      expect(() => structuredClone(lastPostedMessage())).not.toThrow()
+
+      controller.abort()
+      await rejectionOf(promise)
+    })
+
+    it("rejects with aborted at once and names the request to the proxy", async () => {
+      const controller = new AbortController()
+      const promise = client.downloadData(REFERENCE, undefined, {
+        signal: controller.signal,
+      })
+      const { requestId } = lastPostedMessage()
+      const reason = new Error("left the folder")
+
+      controller.abort(reason)
+
+      const error = await rejectionOf(promise)
+      expect(error).toBeInstanceOf(SwarmIdError)
+      expect(error).toMatchObject({ code: "aborted", cause: reason })
+      expect(lastPostedMessage()).toEqual({ type: "abortRequest", requestId })
+      expect(internals(client).pendingRequests.size).toBe(0)
+    })
+
+    it("posts nothing for a signal that has already aborted", async () => {
+      const error = await rejectionOf(
+        client.downloadData(REFERENCE, undefined, {
+          signal: AbortSignal.abort(),
+        }),
+      )
+
+      expect(error).toMatchObject({ code: "aborted" })
+      expect(postMessage).not.toHaveBeenCalled()
+    })
+
+    it("stays aborted when the answer arrives afterwards", async () => {
+      const controller = new AbortController()
+      const promise = client.downloadData(REFERENCE, undefined, {
+        signal: controller.signal,
+      })
+      const { requestId } = lastPostedMessage()
+
+      controller.abort()
+      deliver({
+        type: "downloadDataResponse",
+        requestId,
+        data: new Uint8Array(1),
+      })
+
+      expect(await rejectionOf(promise)).toMatchObject({ code: "aborted" })
+    })
+
+    it("says nothing to the proxy once the request was answered", async () => {
+      const controller = new AbortController()
+      const promise = client.downloadData(REFERENCE, undefined, {
+        signal: controller.signal,
+      })
+      deliver({
+        type: "downloadDataResponse",
+        requestId: lastPostedMessage().requestId,
+        data: new Uint8Array(1),
+      })
+      await promise
+
+      controller.abort()
+
+      expect(postMessage).toHaveBeenCalledTimes(1)
+    })
+
+    it("says nothing to the proxy once the request timed out", async () => {
+      const controller = new AbortController()
+      const error = await rejectionOf(
+        client.downloadData(REFERENCE, undefined, {
+          signal: controller.signal,
+          timeout: SHORT_TIMEOUT_MS,
+        }),
+      )
+      expect(error).toMatchObject({ code: "timeout" })
+
+      controller.abort()
+
+      expect(postMessage).toHaveBeenCalledTimes(1)
+    })
+
+    it.each([
+      {
+        name: "getDrives",
+        call: (options: RequestOptions) => client.getDrives(options),
+        answer: { type: "getDrivesResponse", drives: [] },
+      },
+      {
+        name: "getPostageBatch",
+        call: (options: RequestOptions) => client.getPostageBatch(options),
+        answer: { type: "getPostageBatchResponse" },
+      },
+    ])("$name takes request options", async ({ call, answer }) => {
+      const controller = new AbortController()
+      const headers = { "x-test": "1" }
+      const promise = call({ headers, signal: controller.signal })
+
+      const posted = lastPostedMessage()
+      expect(posted.requestOptions).toEqual({ headers })
+
+      deliver({ ...answer, requestId: posted.requestId })
+      await promise
     })
   })
 

@@ -449,6 +449,12 @@ Gets the app's **primary drive**: the one a write goes to when it names none. Th
 
 Returns information about the postage stamp behind it, including batch ID, utilization, depth, and TTL.
 
+**Parameters:**
+
+| Parameter        | Type             | Required | Description                                                                                                                                                                   |
+| ---------------- | ---------------- | -------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `requestOptions` | `RequestOptions` | No       | Request configuration. `timeout` bounds the call, `headers` go to the Bee node's `/stamps` read, and `signal` stops the call: the promise rejects at once with code `aborted` |
+
 **Returns:** `Promise<PostageBatch | undefined>` - The postage batch info, or `undefined` if none is configured
 
 | Property             | Type                                          | Description                                                                                                                                                                                                                                                                                                      |
@@ -497,6 +503,12 @@ Lists every drive the app was granted in Swarm ID. Each entry carries the fields
 | `kind`      | `'regular' \| 'scratch'` | A scratch drive overwrites its oldest data once full; its contents carry no warranty                                                                                                                                                                                                                                                                                                      |
 | `primary`   | `boolean`                | The drive a write goes to when it names none: the account default for an `'all'` grant, otherwise the first granted regular drive. A scratch drive is never primary                                                                                                                                                                                                                       |
 | `partition` | `number \| undefined`    | The write partition this session holds on the drive, as `connectionInfo.partition` reports it for the primary: `undefined` while it holds none: until the drive's write path is built (at connect for the primary, on the first write that names it for any other), and after an idle release or a disconnect. Every lease change fires `onConnectionChange`, so re-read the drives there |
+
+**Parameters:**
+
+| Parameter        | Type             | Required | Description                                                                                                                                                                   |
+| ---------------- | ---------------- | -------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `requestOptions` | `RequestOptions` | No       | Request configuration. `timeout` bounds the call, `headers` go to the Bee node's `/stamps` read, and `signal` stops the call: the promise rejects at once with code `aborted` |
 
 **Returns:** `Promise<Drive[]>` — empty when the app was granted no drive
 
@@ -726,6 +738,7 @@ The data is uploaded using the authenticated user's postage stamp. Progress can 
 | `requestOptions.timeout`        | `number`                 | No       | Request timeout in milliseconds for this call. Replaces the client's default (30 s) for the whole upload — the round trip through the iframe as well as the Bee request; a file of a few MB over a testnet or the public gateway needs more, here or in `new SwarmIdClient({ timeout })` |
 | `requestOptions.headers`        | `Record<string, string>` | No       | Custom headers                                                                                                                                                                                                                                                                           |
 | `requestOptions.endlesslyRetry` | `boolean`                | No       | Whether to retry endlessly                                                                                                                                                                                                                                                               |
+| `requestOptions.signal`         | `AbortSignal`            | No       | Stops the call: the promise rejects at once with code `aborted`, and the proxy aborts its Bee requests and stops stamping                                                                                                                                                                |
 
 **Returns:** `Promise<UploadResult>`
 
@@ -776,6 +789,7 @@ Downloads raw binary data from the Swarm network: the counterpart of [`uploadDat
 | `requestOptions.timeout`        | `number`                 | No       | Request timeout in milliseconds for this call. Replaces the client's default (30 s) for the whole round trip, not only the Bee request |
 | `requestOptions.headers`        | `Record<string, string>` | No       | Custom headers                                                                                                                         |
 | `requestOptions.endlesslyRetry` | `boolean`                | No       | Whether to retry endlessly                                                                                                             |
+| `requestOptions.signal`         | `AbortSignal`            | No       | Stops the call: the promise rejects at once with code `aborted`, and the proxy aborts its Bee requests and stops stamping              |
 
 **Returns:** `Promise<Uint8Array>` - The downloaded data
 
@@ -818,6 +832,7 @@ Content and manifest are encrypted by default, so the reference is 128 hex chara
 | `requestOptions.timeout`        | `number`                 | No       | Request timeout in milliseconds for this call. Replaces the client's default (30 s) for the whole upload — the round trip through the iframe as well as the Bee request; a file of a few MB over a testnet or the public gateway needs more, here or in `new SwarmIdClient({ timeout })` |
 | `requestOptions.headers`        | `Record<string, string>` | No       | Custom headers                                                                                                                                                                                                                                                                           |
 | `requestOptions.endlesslyRetry` | `boolean`                | No       | Whether to retry endlessly                                                                                                                                                                                                                                                               |
+| `requestOptions.signal`         | `AbortSignal`            | No       | Stops the call: the promise rejects at once with code `aborted`, and the proxy aborts its Bee requests and stops stamping                                                                                                                                                                |
 
 **Returns:** `Promise<UploadResult>` - Contains `reference` and optional `tagUid`
 
@@ -859,6 +874,7 @@ Returns both the file data and its original filename (if available). For manifes
 | `requestOptions.timeout`        | `number`                 | No       | Request timeout in milliseconds for this call. Replaces the client's default (30 s) for the whole round trip, not only the Bee request |
 | `requestOptions.headers`        | `Record<string, string>` | No       | Custom headers                                                                                                                         |
 | `requestOptions.endlesslyRetry` | `boolean`                | No       | Whether to retry endlessly                                                                                                             |
+| `requestOptions.signal`         | `AbortSignal`            | No       | Stops the call: the promise rejects at once with code `aborted`, and the proxy aborts its Bee requests and stops stamping              |
 
 **Returns:** `Promise<FileData>`
 
@@ -997,6 +1013,7 @@ Chunks are the fundamental unit of storage in Swarm (4KB each). This method is u
 | `requestOptions.timeout`        | `number`                 | No       | Request timeout in milliseconds for this call. Replaces the client's default (30 s) for the whole round trip, not only the Bee request |
 | `requestOptions.headers`        | `Record<string, string>` | No       | Custom headers                                                                                                                         |
 | `requestOptions.endlesslyRetry` | `boolean`                | No       | Whether to retry endlessly                                                                                                             |
+| `requestOptions.signal`         | `AbortSignal`            | No       | Stops the call: the promise rejects at once with code `aborted`, and the proxy aborts its Bee requests and stops stamping              |
 
 **Returns:** `Promise<UploadResult>` - Contains the `reference` of the uploaded chunk
 
@@ -1033,6 +1050,7 @@ Retrieves a chunk by its reference hash. This method is useful for low-level ope
 | `requestOptions.timeout`        | `number`                 | No       | Request timeout in milliseconds for this call. Replaces the client's default (30 s) for the whole round trip, not only the Bee request |
 | `requestOptions.headers`        | `Record<string, string>` | No       | Custom headers                                                                                                                         |
 | `requestOptions.endlesslyRetry` | `boolean`                | No       | Whether to retry endlessly                                                                                                             |
+| `requestOptions.signal`         | `AbortSignal`            | No       | Stops the call: the promise rejects at once with code `aborted`, and the proxy aborts its Bee requests and stops stamping              |
 
 **Returns:** `Promise<Uint8Array>` - The chunk data
 
@@ -1068,6 +1086,7 @@ Creates an SOC reader bound to the given owner address.
 | `requestOptions.timeout`        | `number`                 | No       | Request timeout in milliseconds for this call. Replaces the client's default (30 s) for the whole round trip, not only the Bee request |
 | `requestOptions.headers`        | `Record<string, string>` | No       | Custom headers                                                                                                                         |
 | `requestOptions.endlesslyRetry` | `boolean`                | No       | Whether to retry endlessly                                                                                                             |
+| `requestOptions.signal`         | `AbortSignal`            | No       | Stops the call: the promise rejects at once with code `aborted`, and the proxy aborts its Bee requests and stops stamping              |
 
 **Returns:** `SOCReader`
 
@@ -1107,6 +1126,7 @@ Creates an SOC writer for uploading and downloading SOCs. If `signer` is omitted
 | `requestOptions.timeout`        | `number`                 | No       | Request timeout in milliseconds for this call. Replaces the client's default (30 s) for the whole round trip, not only the Bee request |
 | `requestOptions.headers`        | `Record<string, string>` | No       | Custom headers                                                                                                                         |
 | `requestOptions.endlesslyRetry` | `boolean`                | No       | Whether to retry endlessly                                                                                                             |
+| `requestOptions.signal`         | `AbortSignal`            | No       | Stops the call: the promise rejects at once with code `aborted`, and the proxy aborts its Bee requests and stops stamping              |
 
 **Returns:** `SOCWriter`
 
@@ -1189,6 +1209,7 @@ Creates a feed reader bound to a topic and optional owner.
 | `requestOptions.timeout`        | `number`                 | No       | Request timeout in milliseconds for this call. Replaces the client's default (30 s) for the whole round trip, not only the Bee request |
 | `requestOptions.headers`        | `Record<string, string>` | No       | Custom headers                                                                                                                         |
 | `requestOptions.endlesslyRetry` | `boolean`                | No       | Whether to retry endlessly                                                                                                             |
+| `requestOptions.signal`         | `AbortSignal`            | No       | Stops the call: the promise rejects at once with code `aborted`, and the proxy aborts its Bee requests and stops stamping              |
 
 **Returns:** `FeedReader`
 
@@ -1250,6 +1271,7 @@ Creates a feed writer for updating and reading a topic. If `signer` is omitted, 
 | `requestOptions.timeout`        | `number`                 | No       | Request timeout in milliseconds for this call. Replaces the client's default (30 s) for the whole round trip, not only the Bee request |
 | `requestOptions.headers`        | `Record<string, string>` | No       | Custom headers                                                                                                                         |
 | `requestOptions.endlesslyRetry` | `boolean`                | No       | Whether to retry endlessly                                                                                                             |
+| `requestOptions.signal`         | `AbortSignal`            | No       | Stops the call: the promise rejects at once with code `aborted`, and the proxy aborts its Bee requests and stops stamping              |
 
 **Returns:** `FeedWriter`
 
@@ -1504,6 +1526,7 @@ Use the signer obtained from `gsocMine()` to send messages that will be routed t
 | `requestOptions.timeout`        | `number`                 | No       | Request timeout in milliseconds for this call. Replaces the client's default (30 s) for the whole round trip, not only the Bee request |
 | `requestOptions.headers`        | `Record<string, string>` | No       | Custom headers                                                                                                                         |
 | `requestOptions.endlesslyRetry` | `boolean`                | No       | Whether to retry endlessly                                                                                                             |
+| `requestOptions.signal`         | `AbortSignal`            | No       | Stops the call: the promise rejects at once with code `aborted`, and the proxy aborts its Bee requests and stops stamping              |
 
 **Returns:** `Promise<UploadResult>` - Contains the `reference` of the uploaded chunk
 
@@ -1568,6 +1591,7 @@ The data is encrypted using ACT (Access Control Tries) and can only be downloade
 | `requestOptions.timeout`        | `number`                 | No       | Request timeout in milliseconds for this call. Replaces the client's default (30 s) for the whole round trip, not only the Bee request |
 | `requestOptions.headers`        | `Record<string, string>` | No       | Custom headers                                                                                                                         |
 | `requestOptions.endlesslyRetry` | `boolean`                | No       | Whether to retry endlessly                                                                                                             |
+| `requestOptions.signal`         | `AbortSignal`            | No       | Stops the call: the promise rejects at once with code `aborted`, and the proxy aborts its Bee requests and stops stamping              |
 
 **Returns:** `Promise<ActUploadResult>`
 
@@ -1632,6 +1656,7 @@ The user must have access (their public key must be in the grantee list) to decr
 | `requestOptions.timeout`        | `number`                 | No       | Request timeout in milliseconds for this call. Replaces the client's default (30 s) for the whole round trip, not only the Bee request |
 | `requestOptions.headers`        | `Record<string, string>` | No       | Custom headers                                                                                                                         |
 | `requestOptions.endlesslyRetry` | `boolean`                | No       | Whether to retry endlessly                                                                                                             |
+| `requestOptions.signal`         | `AbortSignal`            | No       | Stops the call: the promise rejects at once with code `aborted`, and the proxy aborts its Bee requests and stops stamping              |
 
 **Returns:** `Promise<Uint8Array>` - The decrypted data
 
@@ -1669,6 +1694,7 @@ This method adds new public keys to the ACT's access list. The encrypted referen
 | `requestOptions.timeout`        | `number`                 | No       | Request timeout in milliseconds for this call. Replaces the client's default (30 s) for the whole round trip, not only the Bee request |
 | `requestOptions.headers`        | `Record<string, string>` | No       | Custom headers                                                                                                                         |
 | `requestOptions.endlesslyRetry` | `boolean`                | No       | Whether to retry endlessly                                                                                                             |
+| `requestOptions.signal`         | `AbortSignal`            | No       | Stops the call: the promise rejects at once with code `aborted`, and the proxy aborts its Bee requests and stops stamping              |
 
 **Returns:** `Promise<ActAddGranteesResult>`
 
@@ -1729,6 +1755,7 @@ under a new ACT.
 | `requestOptions.timeout`        | `number`                 | No       | Request timeout in milliseconds for this call. Replaces the client's default (30 s) for the whole round trip, not only the Bee request |
 | `requestOptions.headers`        | `Record<string, string>` | No       | Custom headers                                                                                                                         |
 | `requestOptions.endlesslyRetry` | `boolean`                | No       | Whether to retry endlessly                                                                                                             |
+| `requestOptions.signal`         | `AbortSignal`            | No       | Stops the call: the promise rejects at once with code `aborted`, and the proxy aborts its Bee requests and stops stamping              |
 
 **Returns:** `Promise<ActRevokeGranteesResult>`
 
@@ -1777,6 +1804,7 @@ Retrieves the list of current grantees for an ACT.
 | `requestOptions.timeout`        | `number`                 | No       | Request timeout in milliseconds for this call. Replaces the client's default (30 s) for the whole round trip, not only the Bee request |
 | `requestOptions.headers`        | `Record<string, string>` | No       | Custom headers                                                                                                                         |
 | `requestOptions.endlesslyRetry` | `boolean`                | No       | Whether to retry endlessly                                                                                                             |
+| `requestOptions.signal`         | `AbortSignal`            | No       | Stops the call: the promise rejects at once with code `aborted`, and the proxy aborts its Bee requests and stops stamping              |
 
 **Returns:** `Promise<string[]>` - Array of compressed public keys (66 hex chars each)
 
@@ -1834,6 +1862,7 @@ try {
 | `bee-rejected`        | Bee or the gateway answered with a non-2xx status. A `404` on `/bzz` and on a chunk mean different things; `url` — the request's path, never the node's host — says which                                              | `status`, `beeMessage`, `url` |
 | `network`             | The request never got a response: DNS, a refused connection, or a CORS preflight the gateway rejected                                                                                                                  |                               |
 | `timeout`             | A deadline ran out: the proxy's on a Bee request, or the client's on the whole round trip (`requestOptions.timeout`)                                                                                                   |                               |
+| `aborted`             | The call's `requestOptions.signal` aborted. Chunks already sent stay on the network and keep the stamps they used                                                                                                      |                               |
 | `invalid-request`     | The message or an argument failed validation                                                                                                                                                                           |                               |
 | `invalid-state`       | The client cannot take the call in its current state: `initialize()` has not resolved, was already called, or `destroy()` ran. A call, or an `initialize()`, still pending when `destroy()` runs rejects with this too |                               |
 | `init-failed`         | The proxy iframe did not come up: it failed to load, the proxy refused the origin, or it did not answer within `initializationTimeout`; `initialize()` rejects with this                                               |                               |

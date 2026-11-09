@@ -118,6 +118,105 @@ describe("stamper uploads keep swarm-pin", () => {
   })
 })
 
+describe("an aborted signal stops the write (#929)", () => {
+  const CHUNK_PAYLOAD_SIZE = 4096
+  const THREE_LEAVES = CHUNK_PAYLOAD_SIZE * 3
+
+  function spiedStamper(): {
+    target: UploadTarget
+    stamp: ReturnType<typeof vi.fn>
+  } {
+    const stamper = createMockStamper()
+    const stamp = vi.fn(stamper.stamp.bind(stamper))
+    stamper.stamp = stamp
+    return { target: { mode: "stamper", bee: new MockBee(), stamper }, stamp }
+  }
+
+  const rejectionOf = (work: Promise<unknown>) =>
+    work.then(
+      () => {
+        throw new Error("expected a rejection, but it resolved")
+      },
+      (error: unknown) => error,
+    )
+
+  it.each([
+    { kind: "plain", encryptionKey: undefined },
+    { kind: "encrypted", encryptionKey: true as const },
+  ])("stamps nothing for $kind data", async ({ encryptionKey }) => {
+    const { target, stamp } = spiedStamper()
+
+    const error = await rejectionOf(
+      uploadData(target, new Uint8Array(THREE_LEAVES), {
+        encryptionKey,
+        requestOptions: { signal: AbortSignal.abort() },
+      }),
+    )
+
+    expect(error).toMatchObject({ code: "aborted" })
+    expect(stamp).not.toHaveBeenCalled()
+  })
+
+  it("stops stamping at the abort, part way through", async () => {
+    const { target, stamp } = spiedStamper()
+    const controller = new AbortController()
+
+    const error = await rejectionOf(
+      uploadData(target, new Uint8Array(THREE_LEAVES), {
+        onProgress: () => controller.abort(),
+        requestOptions: { signal: controller.signal },
+      }),
+    )
+
+    expect(error).toMatchObject({ code: "aborted" })
+    expect(stamp).toHaveBeenCalledTimes(1)
+  })
+
+  it("stamps no SOC", async () => {
+    const fetchMock = stubFetch()
+    const { target, stamp } = spiedStamper()
+
+    const error = await rejectionOf(
+      uploadSOC(target, signer, identifier, new Uint8Array(16), {
+        tag: TAG_UID,
+        requestOptions: { signal: AbortSignal.abort() },
+      }),
+    )
+
+    expect(error).toMatchObject({ code: "aborted" })
+    expect(stamp).not.toHaveBeenCalled()
+    expect(fetchMock).not.toHaveBeenCalled()
+  })
+
+  it.each([
+    {
+      write: "chunk",
+      run: (requestOptions: { signal: AbortSignal }) =>
+        uploadChunk(TARGET, new Uint8Array(16), { requestOptions }),
+    },
+    {
+      write: "data",
+      run: (requestOptions: { signal: AbortSignal }) =>
+        uploadData(TARGET, new Uint8Array(16), { requestOptions }),
+    },
+    {
+      write: "SOC",
+      run: (requestOptions: { signal: AbortSignal }) =>
+        uploadSOC(TARGET, signer, identifier, new Uint8Array(16), {
+          requestOptions,
+        }),
+    },
+  ])("hands the gateway's $write fetch the signal", async ({ run }) => {
+    const fetchMock = stubFetch()
+    const { signal } = new AbortController()
+
+    await run({ signal })
+
+    const [, init] = fetchMock.mock.calls[0] as [string, RequestInit]
+    expect(init.signal).toBe(signal)
+  })
+})
+
 /**
  * Stamper mode honours `deferred` (#780 adjacent): a dev-mode Bee serves only
  * deferred uploads, and the documented remedy is to set the flag from

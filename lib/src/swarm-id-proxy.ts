@@ -6,6 +6,7 @@ import { toWireError } from "./proxy/errors"
 import type {
   ParentToIframeMessage,
   ParentIdentifyMessage,
+  RequestOptions,
   IframeToParentMessage,
   ButtonConfig,
   UploadDataMessage,
@@ -380,6 +381,8 @@ export class SwarmIdProxy {
    * delegates all writes to these coordinators via `withModeAwareWriteLock`.
    */
   private drives = new Map<string, DriveWritePath>()
+  /** The parent's requests being handled, for `abortRequest` to stop (#929). */
+  private inFlightRequests = new Map<string, AbortController>()
   /**
    * The drives `connectionInfoChanged` last went out with (see `driveState`).
    * Starts unset, not empty, so the first emit carries `drivesChanged` for
@@ -2640,11 +2643,28 @@ export class SwarmIdProxy {
         return
       }
 
+      if (message.type === "abortRequest") {
+        this.inFlightRequests.get(message.requestId)?.abort()
+        return
+      }
+
+      const controller = new AbortController()
+      this.inFlightRequests.set(message.requestId, controller)
+      // Laid onto `requestOptions` here, past the schema, because that is what
+      // every handler already hands to Bee and to the upload code.
+      const requestOptions: RequestOptions = {
+        ...(message as { requestOptions?: RequestOptions }).requestOptions,
+        signal: controller.signal,
+      }
+      const abortable = { ...message, requestOptions } as ParentToIframeMessage
+
       try {
-        await this.handleParentMessage(message, event)
+        await this.handleParentMessage(abortable, event)
       } catch (error) {
         console.error("[Proxy] Error handling parent message:", error)
         this.sendErrorToParent(event, message.requestId, error, "Unknown error")
+      } finally {
+        this.inFlightRequests.delete(message.requestId)
       }
     })
   }
@@ -2730,6 +2750,7 @@ export class SwarmIdProxy {
   ): Promise<void> {
     switch (message.type) {
       case "parentIdentify":
+      case "abortRequest":
         // Already handled above
         break
 
@@ -6468,7 +6489,9 @@ export class SwarmIdProxy {
     this.postMessage(event, {
       type: "getPostageBatchResponse",
       requestId: message.requestId,
-      postageBatch: stamp ? await this.describeStamp(stamp) : undefined,
+      postageBatch: stamp
+        ? await this.describeStamp(stamp, message.requestOptions)
+        : undefined,
     })
     this.adoptLifetimeReadings()
   }
@@ -6482,7 +6505,7 @@ export class SwarmIdProxy {
     const drives = await Promise.all(
       granted.map(
         async (stamp): Promise<Drive> => ({
-          ...(await this.describeStamp(stamp)),
+          ...(await this.describeStamp(stamp, message.requestOptions)),
           kind: stamp.kind ?? "regular",
           primary: stamp.batchID.toHex() === primary?.batchID.toHex(),
           partition: this.drives.get(stamp.batchID.toHex())?.coordinator
@@ -6726,7 +6749,10 @@ export class SwarmIdProxy {
   }
 
   /** A stored stamp as the dApp sees it: live `usable`/`exists` and TTL, no signer key. */
-  private async describeStamp(stamp: PostageStamp): Promise<PostageBatch> {
+  private async describeStamp(
+    stamp: PostageStamp,
+    requestOptions?: RequestOptions,
+  ): Promise<PostageBatch> {
     // The stored stamp's `usable`/`exists` are a snapshot from assignment time
     // and can be stale (e.g. a batch assigned during its ~30s warm-up stays
     // `usable: false` in storage forever), so read live batch details from the
@@ -6734,6 +6760,7 @@ export class SwarmIdProxy {
     const details = await fetchBatchDetails(
       this.beeApiUrl,
       stamp.batchID.toHex(),
+      { headers: requestOptions?.headers, signal: requestOptions?.signal },
     )
 
     // Resolve TTL from live chain state: the PostageStamp contract first
@@ -6748,7 +6775,7 @@ export class SwarmIdProxy {
     let lifetime:
       | { batchTTL: number; source: BatchTTLSource; measuredAt: number }
       | undefined = await this.measureLifetime(stamp)
-    if (lifetime === undefined) {
+    if (lifetime === undefined && !requestOptions?.signal?.aborted) {
       try {
         const pricePerGBPerMonth = await fetchSwarmPrice()
         lifetime = {

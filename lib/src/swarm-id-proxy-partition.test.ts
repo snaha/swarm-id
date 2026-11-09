@@ -125,6 +125,7 @@ vi.mock("./utils/ttl", async (importActual) => ({
     throw new Error("offline")
   }),
 }))
+import { fetchBatchDetails } from "./utils/ttl"
 import {
   fetchAuthoritativeBatchTTL,
   fetchBlockNumber,
@@ -2258,6 +2259,27 @@ describe("SwarmIdProxy partitioned write enablement", () => {
           })),
         ).toEqual([{ batchId: BATCH_ID_HEX, partition: 1 }])
       })
+
+      it.each(["getDrives", "getPostageBatch"])(
+        "%s reads Bee with the call's headers and abort signal (#929)",
+        async (type) => {
+          nextStamper()
+          await connectWithTwoDrives([stampOf(BATCH_ID_HEX)])
+          const headers = { "x-test": "1" }
+          vi.mocked(fetchBatchDetails).mockClear()
+
+          await ask({ type, requestOptions: { headers } })
+
+          expect(fetchBatchDetails).toHaveBeenCalledWith(
+            expect.any(String),
+            BATCH_ID_HEX,
+            expect.objectContaining({
+              headers,
+              signal: expect.any(AbortSignal),
+            }),
+          )
+        },
+      )
 
       it("keeps getDrives off Swarm", async () => {
         nextStamper()

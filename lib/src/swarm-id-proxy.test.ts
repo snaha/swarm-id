@@ -36,6 +36,7 @@ type ProxyInternals = {
   readonly drive?: DriveWritePath
   drives: Map<string, DriveWritePath>
   primaryBatchId?: string
+  inFlightRequests: Map<string, AbortController>
   buildConnectionInfo: () => {
     canUpload: boolean
     uploadMode: string
@@ -1175,6 +1176,89 @@ describe("SwarmIdProxy subsidised-mode selection", () => {
       })
     },
   )
+
+  describe("abortRequest (#929)", () => {
+    /** Several leaves, so a stopped upload shows as chunks never sent. */
+    const MULTI_CHUNK_SIZE = 4096 * 3 + 1
+
+    const send = (data: Record<string, unknown>) =>
+      messageListener({
+        data,
+        origin: PARENT_ORIGIN,
+        source: parentWindow,
+      } as unknown as MessageEvent)
+
+    const upload = (requestId: string) =>
+      send({
+        type: "uploadData",
+        requestId,
+        data: new Uint8Array(MULTI_CHUNK_SIZE),
+        options: {},
+      })
+
+    const gatewayHangsUntilAborted = () =>
+      vi.spyOn(globalThis, "fetch").mockImplementation(
+        (_url, init) =>
+          new Promise<Response>((_resolve, reject) => {
+            init?.signal?.addEventListener("abort", () =>
+              reject(new DOMException("Aborted", "AbortError")),
+            )
+          }),
+      )
+
+    it("aborts the Bee request in flight and sends no further chunk", async () => {
+      await identify(GATEWAY_URL)
+      setAccountState({})
+      const fetchSpy = gatewayHangsUntilAborted()
+      const handled = upload("u1")
+      await vi.waitFor(() => expect(fetchSpy).toHaveBeenCalledTimes(1))
+
+      await send({ type: "abortRequest", requestId: "u1" })
+      await handled
+
+      expect(fetchSpy).toHaveBeenCalledTimes(1)
+    })
+
+    it("leaves every other request running", async () => {
+      await identify(GATEWAY_URL)
+      setAccountState({})
+      const fetchSpy = gatewayHangsUntilAborted()
+      const first = upload("u1")
+      const second = upload("u2")
+      await vi.waitFor(() => expect(fetchSpy).toHaveBeenCalledTimes(2))
+      const signals = fetchSpy.mock.calls.map(([, init]) => init?.signal)
+
+      await send({ type: "abortRequest", requestId: "u1" })
+      await first
+
+      expect(signals.map((signal) => signal?.aborted)).toEqual([true, false])
+
+      await send({ type: "abortRequest", requestId: "u2" })
+      await second
+    })
+
+    it("ignores a request it does not know", async () => {
+      await identify(GATEWAY_URL)
+      parentWindow.postMessage.mockClear()
+
+      await send({ type: "abortRequest", requestId: "unknown" })
+
+      expect(parentWindow.postMessage).not.toHaveBeenCalled()
+    })
+
+    it("forgets a request once it is handled", async () => {
+      await identify(GATEWAY_URL)
+      setAccountState({})
+      vi.spyOn(globalThis, "fetch").mockImplementation(
+        async () =>
+          new Response(JSON.stringify({ reference: "ab".repeat(32) })),
+      )
+
+      await upload("u1")
+
+      expect(internals(proxy).inFlightRequests.size).toBe(0)
+    })
+  })
 
   describe("a custom Bee node drops the dApp's gateway", () => {
     it("drops it at parentIdentify when the node is already custom", async () => {

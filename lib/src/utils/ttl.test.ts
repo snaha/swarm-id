@@ -202,6 +202,7 @@ describe("fetchBatchTTL", () => {
     expect(ttl).toBe(86400)
     expect(fetchSpy).toHaveBeenCalledWith(
       `https://bee.example.com/stamps/${BATCH_ID}`,
+      undefined,
     )
   })
 
@@ -212,6 +213,7 @@ describe("fetchBatchTTL", () => {
 
     expect(fetchSpy).toHaveBeenCalledWith(
       `https://bee.example.com/stamps/${BATCH_ID}`,
+      undefined,
     )
   })
 
@@ -298,6 +300,7 @@ describe("fetchBatchDetails", () => {
     expect(details).toEqual({ batchTTL: 86400, usable: true, exists: true })
     expect(fetchSpy).toHaveBeenCalledWith(
       `https://bee.example.com/stamps/${BATCH_ID}`,
+      undefined,
     )
   })
 
@@ -308,6 +311,23 @@ describe("fetchBatchDetails", () => {
 
     expect(fetchSpy).toHaveBeenCalledWith(
       `https://bee.example.com/stamps/${BATCH_ID}`,
+      undefined,
+    )
+  })
+
+  it("sends the call's headers and abort signal (#929)", async () => {
+    fetchSpy.mockResolvedValue(mockResponse({ batchTTL: 123 }))
+    const headers = { "x-test": "1" }
+    const { signal } = new AbortController()
+
+    await fetchBatchDetails("https://bee.example.com", BATCH_ID, {
+      headers,
+      signal,
+    })
+
+    expect(fetchSpy).toHaveBeenCalledWith(
+      `https://bee.example.com/stamps/${BATCH_ID}`,
+      { headers, signal },
     )
   })
 

@@ -223,16 +223,18 @@ export interface BatchDetails {
  *
  * @param beeUrl - Bee node URL
  * @param batchId - Hex-encoded batch ID (without `0x` prefix)
+ * @param init - The call's headers and abort signal
  * @returns Batch details, or `undefined` if the Bee node does not know about
  *          this batch or the request fails.
  */
 export async function fetchBatchDetails(
   beeUrl: string,
   batchId: string,
+  init?: Pick<RequestInit, "headers" | "signal">,
 ): Promise<BatchDetails | undefined> {
   try {
     const base = beeUrl.replace(/\/$/, "")
-    const response = await fetch(`${base}/stamps/${batchId}`)
+    const response = await fetch(`${base}/stamps/${batchId}`, init)
     if (!response.ok) {
       return undefined
     }
