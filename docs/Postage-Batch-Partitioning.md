@@ -372,10 +372,13 @@ that feeds the rival set. The beacon is a correctness mechanism; the heartbeat i
   claim resumes from those rows, but is never the heartbeat target, since no v2 reader can
   parse the v1 chunk it names. Any device without them for a partition (another browser, cleared
   storage, or a takeover of a lane written under v1) finds no v2 state, resumes that lane
-  from zero, and re-issues its slots, overwriting the chunks written under v1. Accepted while
-  the project is pre-production: there is no user data to keep, and the test data on such a
-  lane is lost. This is wider than the stale-tab window above, which bounded the exposure to
-  one open tab.
+  from zero, and re-issues its slots, overwriting the chunks written under v1. The conversion
+  decodes the rows by the drive's depth _now_, since nothing recorded the depth they were
+  written at: a regular drive diluted across depth 31 → 32 between its last pre-v2 write and
+  its first v2 load has its uint16 rows read as uint32, so that device, too, resumes the upper
+  half of its buckets from zero. Accepted while the project is pre-production: there is no
+  user data to keep, and the test data on such a lane is lost. This is wider than the
+  stale-tab window above, which bounded the exposure to one open tab.
 
 ## Key constants (in `lib/src/utils/batch-utilization.ts` unless noted)
 

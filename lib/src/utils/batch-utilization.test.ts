@@ -1491,6 +1491,59 @@ describe("UtilizationAwareStamper cache rows (#463)", () => {
       )
     }
   })
+
+  it("decodes each row by its own marker when a batch holds both layouts, and keeps the higher counter", async () => {
+    // A tab still on the pre-#463 build flushed a legacy row after this
+    // build converted the batch: legacy uint16 row 0 covers buckets 0..2047,
+    // the fixed-layout row 1 covers 1024..2047. Both are high-water marks of
+    // the same lane, so where they overlap the higher one is the resume point.
+    const legacyRow = new Uint8Array(CHUNK_SIZE)
+    const legacyView = new DataView(legacyRow.buffer)
+    legacyView.setUint16(5 * 2, 7, true)
+    legacyView.setUint16(1030 * 2, 4, true)
+    const fixedCounters = new Uint32Array(BUCKETS_PER_CHUNK)
+    fixedCounters[1030 - 1024] = 1
+    fixedCounters[1500 - 1024] = 3
+    const { cache, rows } = makeRecordingCache([
+      {
+        batchId: BATCH_HEX,
+        chunkIndex: 0,
+        data: legacyRow,
+        contentHash: "old",
+        nonce: 0,
+        lastAccess: 0,
+      },
+      {
+        batchId: BATCH_HEX,
+        chunkIndex: 1,
+        data: serializeUint32Array(fixedCounters),
+        contentHash: "new",
+        nonce: 0,
+        format: CACHE_ROW_FORMAT,
+        lastAccess: 0,
+      },
+    ])
+    const counters = (await create(cache, 24)).getUtilizationState()
+      .dataCounters
+    expect(counters[5]).toBe(7)
+    expect(counters[1030]).toBe(4)
+    expect(counters[1500]).toBe(3)
+    expect(rows.size).toBe(NUM_UTILIZATION_CHUNKS)
+    expect([...rows.values()].every((r) => r.format === CACHE_ROW_FORMAT)).toBe(
+      true,
+    )
+  })
+
+  it("refuses to start from zero when the cache cannot be read", async () => {
+    // A zero counter over rows that exist would flush zero-based rows over
+    // them on the first write and re-issue every slot they record.
+    const cache = {
+      convertBatch: async () => {
+        throw new Error("IndexedDB blocked")
+      },
+    } as unknown as UtilizationStoreDB
+    await expect(create(cache, 24)).rejects.toThrow("IndexedDB blocked")
+  })
 })
 
 describe("hasBucketCapacity (partition-aware, #416)", () => {

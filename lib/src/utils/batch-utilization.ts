@@ -33,6 +33,7 @@ import {
 import { stamp as stampAtSlot } from "@ethersphere/core-sdk"
 import { Binary } from "cafe-utility"
 import type {
+  BatchMetadata,
   ChunkCacheEntry,
   UtilizationStoreDB,
 } from "../storage/utilization-store"
@@ -301,9 +302,18 @@ export function mergeChunk(
  * A batch's cache rows in the fixed layout (#463), or `undefined` when every
  * row already is. Rows without the format marker were serialized at the
  * batch's depth of the time: uint16 below depth 32 on a regular drive,
- * uint32 otherwise. A batch is converted whole in one transaction
- * (`UtilizationStoreDB.convertBatch`), so its rows are all one or all the
- * other, and the batch's rule decodes every row.
+ * uint32 otherwise. Each row is decoded by its own marker: the conversion
+ * is one transaction (`UtilizationStoreDB.convertBatch`), but a tab still on
+ * the older build can flush a legacy row beside converted ones, and a legacy
+ * row's buckets overlap a fixed-layout row's. Both are high-water marks of
+ * the same lane, so the higher counter is the resume point wherever they
+ * overlap: lower would re-issue a slot one of them records as used.
+ *
+ * The legacy rule is the drive's depth *now*: a regular drive diluted across
+ * depth 31 → 32 after its last pre-#463 write reads its uint16 rows as
+ * uint32, so that device, too, resumes the upper half of its buckets from
+ * zero. Nothing recorded the write-time depth; accepted as pre-production
+ * test data with the rest of the v1 state (docs/Postage-Batch-Partitioning.md).
  */
 export function convertLegacyCacheRows(
   batchId: string,
@@ -313,14 +323,20 @@ export function convertLegacyCacheRows(
 ): ChunkCacheEntry[] | undefined {
   if (rows.every((row) => row.format === CACHE_ROW_FORMAT)) return undefined
   const legacyUint16 = !scratch && depth <= LEGACY_UINT16_MAX_DEPTH
-  const dataCounters = new Uint32Array(NUM_BUCKETS)
+  const legacy = new Uint32Array(NUM_BUCKETS)
+  const fixed = new Uint32Array(NUM_BUCKETS)
   for (const row of rows) {
-    if (legacyUint16) {
-      mergeLegacyUint16Chunk(dataCounters, row.chunkIndex, row.data)
+    if (row.format === CACHE_ROW_FORMAT) {
+      mergeChunk(fixed, row.chunkIndex, row.data)
+    } else if (legacyUint16) {
+      mergeLegacyUint16Chunk(legacy, row.chunkIndex, row.data)
     } else if (row.chunkIndex < NUM_UTILIZATION_CHUNKS) {
-      mergeChunk(dataCounters, row.chunkIndex, row.data)
+      mergeChunk(legacy, row.chunkIndex, row.data)
     }
   }
+  const dataCounters = legacy.map((count, bucket) =>
+    Math.max(count, fixed[bucket]),
+  )
   return Array.from({ length: NUM_UTILIZATION_CHUNKS }, (_unused, i) => ({
     batchId,
     chunkIndex: i,
@@ -1334,17 +1350,32 @@ export class UtilizationAwareStamper implements Stamper, SlotAssigner {
     buckets: number[],
   ): Promise<void> {
     this.protectedStateBuckets.set(partition, new Set(buckets))
-    const batchId = this.batchId.toHex()
-    const existing = await this.cache.getMetadata(batchId)
-    await this.cache.putMetadata({
-      batchId,
-      lastSync: existing?.lastSync ?? Date.now(),
-      chunkCount: existing?.chunkCount ?? 0,
-      stateReferences: existing?.stateReferences,
+    await this.patchMetadata((existing) => ({
       stateChunkBuckets: {
         ...(existing?.stateChunkBuckets ?? {}),
         [partition]: buckets,
       },
+    }))
+  }
+
+  /**
+   * Merge what `patch` returns into this batch's metadata record. The record
+   * is one object with several per-partition fields and more than one
+   * writer; a writer that rebuilds it field by field drops whichever field
+   * it does not know about (#463's pre-v2 marker was lost that way), so
+   * every writer goes through here and names only what it changes.
+   */
+  private async patchMetadata(
+    patch: (existing: BatchMetadata | undefined) => Partial<BatchMetadata>,
+  ): Promise<void> {
+    const batchId = this.batchId.toHex()
+    const existing = await this.cache.getMetadata(batchId)
+    await this.cache.putMetadata({
+      lastSync: Date.now(),
+      chunkCount: 0,
+      ...existing,
+      ...patch(existing),
+      batchId,
     })
   }
 
@@ -1553,28 +1584,24 @@ export class UtilizationAwareStamper implements Stamper, SlotAssigner {
     // Initialize utilization state (always, since owner is now required)
     const utilizationState = initializeBatchUtilization(batchId, depth)
 
-    // Try to load utilization state from cache. Rows written before the fixed
-    // layout (#463) are converted in the same transaction that reads them, so
-    // the conversion cannot be left half done or run twice on stale rows.
-    try {
-      const batchIdHex = batchId.toHex()
-      const cachedChunks = await cache.convertBatch(batchIdHex, (rows) =>
-        convertLegacyCacheRows(batchIdHex, rows, depth, scratch),
-      )
-      for (const cached of cachedChunks) {
-        if (cached.chunkIndex < NUM_UTILIZATION_CHUNKS) {
-          mergeChunk(
-            utilizationState.dataCounters,
-            cached.chunkIndex,
-            cached.data,
-          )
-        }
+    // Load the counters from the cache. Rows written before the fixed layout
+    // (#463) are converted in the same transaction that reads them, so the
+    // conversion cannot be left half done or run twice on stale rows. A cache
+    // that cannot be read or converted fails the stamper rather than starting
+    // it from zero: a zero counter over rows that exist flushes zero-based rows
+    // over them on the first write and re-issues every slot they record.
+    const batchIdHex = batchId.toHex()
+    const cachedChunks = await cache.convertBatch(batchIdHex, (rows) =>
+      convertLegacyCacheRows(batchIdHex, rows, depth, scratch),
+    )
+    for (const cached of cachedChunks) {
+      if (cached.chunkIndex < NUM_UTILIZATION_CHUNKS) {
+        mergeChunk(
+          utilizationState.dataCounters,
+          cached.chunkIndex,
+          cached.data,
+        )
       }
-    } catch (error) {
-      console.warn(
-        `[UtilizationAwareStamper] Failed to load state from cache, starting with fresh state:`,
-        error,
-      )
     }
 
     const instance = new UtilizationAwareStamper(
@@ -1911,21 +1938,17 @@ export class UtilizationAwareStamper implements Stamper, SlotAssigner {
     partition: number,
     referenceHex: string,
   ): Promise<void> {
-    const batchId = this.batchId.toHex()
-    const existing = await this.cache.getMetadata(batchId)
-    // A v2 reference for the partition supersedes the pre-v2 marker
-    const { [partition]: _superseded, ...syncedReferences } =
-      existing?.syncedReferences ?? {}
-    await this.cache.putMetadata({
-      batchId,
-      lastSync: existing?.lastSync ?? Date.now(),
-      chunkCount: existing?.chunkCount ?? 0,
-      stateReferences: {
-        ...(existing?.stateReferences ?? {}),
-        [partition]: referenceHex,
-      },
-      syncedReferences,
-      stateChunkBuckets: existing?.stateChunkBuckets,
+    await this.patchMetadata((existing) => {
+      // A v2 reference for the partition supersedes the pre-v2 marker
+      const { [partition]: _superseded, ...syncedReferences } =
+        existing?.syncedReferences ?? {}
+      return {
+        stateReferences: {
+          ...(existing?.stateReferences ?? {}),
+          [partition]: referenceHex,
+        },
+        syncedReferences,
+      }
     })
   }
 

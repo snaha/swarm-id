@@ -2887,7 +2887,8 @@ describe("PartitionLease.acquire — a lane this device wrote before v2", () => 
       batchId: TEST_BATCH_ID.toHex(),
       lastSync: 0,
       chunkCount: 0,
-      syncedReferences: { 0: V1_REFERENCE },
+      // Two lanes held at different times under v1, one marker each
+      syncedReferences: { 0: V1_REFERENCE, 1: V1_REFERENCE },
     })
     return UtilizationAwareStamper.create(
       "11".repeat(32),
@@ -2922,5 +2923,37 @@ describe("PartitionLease.acquire — a lane this device wrote before v2", () => 
     const pointerSpy = vi.spyOn(partitionState, "writeStatePointer")
     await lease.heartbeatStatePointer()
     expect(pointerSpy).not.toHaveBeenCalled()
+  })
+
+  it("keeps the marker of a lane it has not claimed yet past the first publish of another", async () => {
+    const stamper = await stamperWithLegacyLane()
+    const lease = new PartitionLease({
+      bee: bee,
+      deviceId: DEVICE_A,
+      batchId: TEST_BATCH_ID,
+      swarmEncryptionKey: TEST_ENC_KEY,
+      backupSigner: BACKUP_SIGNER,
+      stamper: stamper as unknown as Stamper,
+      guardMs: GUARD_MS,
+      intentGuardWindowMs: 0,
+    })
+    const acquired = await lease.acquire({ partitionCount: PARTITION_COUNT })
+    expect(acquired.partition).toBe(0)
+    stamper.bindPartition({
+      partition: 0,
+      partitionCount: PARTITION_COUNT,
+      localCounter: acquired.localCounter,
+    })
+
+    // The first v2 publish writes the synced reference AND the protected
+    // state buckets — two writers of one metadata record
+    await lease.publishState(acquired.localCounter)
+
+    // Partition 0 now has a v2 reference, so its marker is superseded…
+    expect(await stamper.wroteLaneBeforeV2(0)).toBe(false)
+    expect(await stamper.getSyncedReference(0)).toBeDefined()
+    // …and partition 1, not yet claimed under v2, keeps its marker, or its
+    // next cold claim would resume from zero over the slots this device used.
+    expect(await stamper.wroteLaneBeforeV2(1)).toBe(true)
   })
 })
