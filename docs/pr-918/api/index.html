@@ -570,6 +570,25 @@
 <div class="sl-heading-wrapper level-h3"><h3 id="getpostagebatch"><code dir="auto">getPostageBatch()</code></h3><a class="sl-anchor-link" href="#getpostagebatch"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 1 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 0 0-1.42-1.42m8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 1 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 0 0 0 1.42 1 1 0 0 0 1.42 0l3.88-3.89a4.49 4.49 0 0 0 0-6.33M8.83 15.17a1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.92-4.92a1 1 0 1 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42"></path></svg></span><span class="sr-only" data-pagefind-ignore>Section titled “getPostageBatch()”</span></a></div>
 <p>Gets the app’s <strong>primary drive</strong>: the one a write goes to when it names none. The app’s other drives, if it was granted any, are listed by <a href="#getdrives"><code dir="auto">getDrives()</code></a>.</p>
 <p>Returns information about the postage stamp behind it, including batch ID, utilization, depth, and TTL.</p>
+<p><strong>Parameters:</strong></p>
+<table>
+<thead>
+<tr>
+<th>Parameter</th>
+<th>Type</th>
+<th>Required</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code dir="auto">requestOptions</code></td>
+<td><code dir="auto">RequestOptions</code></td>
+<td>No</td>
+<td>Request configuration. <code dir="auto">timeout</code> bounds the call, <code dir="auto">headers</code> go to the Bee node’s <code dir="auto">/stamps</code> read, and <code dir="auto">signal</code> stops the call: the promise rejects at once with code <code dir="auto">aborted</code></td>
+</tr>
+</tbody>
+</table>
 <p><strong>Returns:</strong> <code dir="auto">Promise&lt;PostageBatch | undefined&gt;</code> - The postage batch info, or <code dir="auto">undefined</code> if none is configured</p>
 <table>
 <thead>
@@ -680,6 +699,25 @@
 <td><code dir="auto">partition</code></td>
 <td><code dir="auto">number | undefined</code></td>
 <td>The write partition this session holds on the drive, as <code dir="auto">connectionInfo.partition</code> reports it for the primary: <code dir="auto">undefined</code> while it holds none: until the drive’s write path is built (at connect for the primary, on the first write that names it for any other), and after an idle release or a disconnect. Every lease change fires <code dir="auto">onConnectionChange</code>, so re-read the drives there</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Parameters:</strong></p>
+<table>
+<thead>
+<tr>
+<th>Parameter</th>
+<th>Type</th>
+<th>Required</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code dir="auto">requestOptions</code></td>
+<td><code dir="auto">RequestOptions</code></td>
+<td>No</td>
+<td>Request configuration. <code dir="auto">timeout</code> bounds the call, <code dir="auto">headers</code> go to the Bee node’s <code dir="auto">/stamps</code> read, and <code dir="auto">signal</code> stops the call: the promise rejects at once with code <code dir="auto">aborted</code></td>
 </tr>
 </tbody>
 </table>
@@ -936,6 +974,12 @@
 <td>No</td>
 <td>Whether to retry endlessly</td>
 </tr>
+<tr>
+<td><code dir="auto">requestOptions.signal</code></td>
+<td><code dir="auto">AbortSignal</code></td>
+<td>No</td>
+<td>Stops the call: the promise rejects at once with code <code dir="auto">aborted</code>, and the proxy aborts its Bee requests and stops stamping</td>
+</tr>
 </tbody>
 </table>
 <p><strong>Returns:</strong> <code dir="auto">Promise&lt;UploadResult&gt;</code></p>
@@ -1059,6 +1103,12 @@
 <td>No</td>
 <td>Whether to retry endlessly</td>
 </tr>
+<tr>
+<td><code dir="auto">requestOptions.signal</code></td>
+<td><code dir="auto">AbortSignal</code></td>
+<td>No</td>
+<td>Stops the call: the promise rejects at once with code <code dir="auto">aborted</code>, and the proxy aborts its Bee requests</td>
+</tr>
 </tbody>
 </table>
 <p><strong>Returns:</strong> <code dir="auto">Promise&lt;Uint8Array&gt;</code> - The downloaded data</p>
@@ -1141,6 +1191,12 @@
 <td>No</td>
 <td>Whether to retry endlessly</td>
 </tr>
+<tr>
+<td><code dir="auto">requestOptions.signal</code></td>
+<td><code dir="auto">AbortSignal</code></td>
+<td>No</td>
+<td>Stops the call: the promise rejects at once with code <code dir="auto">aborted</code>, and the proxy aborts its Bee requests and stops stamping</td>
+</tr>
 </tbody>
 </table>
 <p><strong>Returns:</strong> <code dir="auto">Promise&lt;UploadResult&gt;</code> - Contains <code dir="auto">reference</code> and optional <code dir="auto">tagUid</code></p>
@@ -1209,6 +1265,12 @@
 <td><code dir="auto">boolean</code></td>
 <td>No</td>
 <td>Whether to retry endlessly</td>
+</tr>
+<tr>
+<td><code dir="auto">requestOptions.signal</code></td>
+<td><code dir="auto">AbortSignal</code></td>
+<td>No</td>
+<td>Stops the call: the promise rejects at once with code <code dir="auto">aborted</code>, and the proxy aborts its Bee requests</td>
 </tr>
 </tbody>
 </table>
@@ -1466,6 +1528,12 @@
 <td>No</td>
 <td>Whether to retry endlessly</td>
 </tr>
+<tr>
+<td><code dir="auto">requestOptions.signal</code></td>
+<td><code dir="auto">AbortSignal</code></td>
+<td>No</td>
+<td>Stops the call: the promise rejects at once with code <code dir="auto">aborted</code>, and the proxy aborts its Bee requests and stops stamping</td>
+</tr>
 </tbody>
 </table>
 <p><strong>Returns:</strong> <code dir="auto">Promise&lt;UploadResult&gt;</code> - Contains the <code dir="auto">reference</code> of the uploaded chunk</p>
@@ -1528,6 +1596,12 @@
 <td>No</td>
 <td>Whether to retry endlessly</td>
 </tr>
+<tr>
+<td><code dir="auto">requestOptions.signal</code></td>
+<td><code dir="auto">AbortSignal</code></td>
+<td>No</td>
+<td>Stops the call: the promise rejects at once with code <code dir="auto">aborted</code>, and the proxy aborts its Bee requests</td>
+</tr>
 </tbody>
 </table>
 <p><strong>Returns:</strong> <code dir="auto">Promise&lt;Uint8Array&gt;</code> - The chunk data</p>
@@ -1584,6 +1658,12 @@
 <td><code dir="auto">boolean</code></td>
 <td>No</td>
 <td>Whether to retry endlessly</td>
+</tr>
+<tr>
+<td><code dir="auto">requestOptions.signal</code></td>
+<td><code dir="auto">AbortSignal</code></td>
+<td>No</td>
+<td>Stops the call: the promise rejects at once with code <code dir="auto">aborted</code>, and the proxy aborts its Bee requests</td>
 </tr>
 </tbody>
 </table>
@@ -1660,6 +1740,12 @@
 <td><code dir="auto">boolean</code></td>
 <td>No</td>
 <td>Whether to retry endlessly</td>
+</tr>
+<tr>
+<td><code dir="auto">requestOptions.signal</code></td>
+<td><code dir="auto">AbortSignal</code></td>
+<td>No</td>
+<td>Stops the call: the promise rejects at once with code <code dir="auto">aborted</code>, and the proxy aborts its Bee requests and stops stamping</td>
 </tr>
 </tbody>
 </table>
@@ -1876,6 +1962,12 @@
 <td>No</td>
 <td>Whether to retry endlessly</td>
 </tr>
+<tr>
+<td><code dir="auto">requestOptions.signal</code></td>
+<td><code dir="auto">AbortSignal</code></td>
+<td>No</td>
+<td>Stops the call: the promise rejects at once with code <code dir="auto">aborted</code>. The proxy’s epoch lookup still runs to its end</td>
+</tr>
 </tbody>
 </table>
 <p><strong>Returns:</strong> <code dir="auto">FeedReader</code></p>
@@ -2041,6 +2133,12 @@
 <td><code dir="auto">boolean</code></td>
 <td>No</td>
 <td>Whether to retry endlessly</td>
+</tr>
+<tr>
+<td><code dir="auto">requestOptions.signal</code></td>
+<td><code dir="auto">AbortSignal</code></td>
+<td>No</td>
+<td>Stops the call: the promise rejects at once with code <code dir="auto">aborted</code>, and the proxy stops stamping. Its epoch lookup still runs to its end</td>
 </tr>
 </tbody>
 </table>
@@ -2477,6 +2575,12 @@
 <td>No</td>
 <td>Custom headers</td>
 </tr>
+<tr>
+<td><code dir="auto">requestOptions.signal</code></td>
+<td><code dir="auto">AbortSignal</code></td>
+<td>No</td>
+<td>Stops the call: the promise rejects at once with code <code dir="auto">aborted</code>, and the proxy stops stamping</td>
+</tr>
 </tbody>
 </table>
 <aside aria-label="Caution" class="starlight-aside starlight-aside--caution"><p class="starlight-aside__title" aria-hidden="true"><svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor" class="starlight-aside__icon"><path d="M12 16a1 1 0 1 0 0 2 1 1 0 0 0 0-2Zm10.67 1.47-8.05-14a3 3 0 0 0-5.24 0l-8 14A3 3 0 0 0 3.94 22h16.12a3 3 0 0 0 2.61-4.53Zm-1.73 2a1 1 0 0 1-.88.51H3.94a1 1 0 0 1-.88-.51 1 1 0 0 1 0-1l8-14a1 1 0 0 1 1.78 0l8.05 14a1 1 0 0 1 .05 1.02v-.02ZM12 8a1 1 0 0 0-1 1v4a1 1 0 0 0 2 0V9a1 1 0 0 0-1-1Z"/></svg>Caution</p><div class="starlight-aside__content"><p>Epoch feed manifests cannot be resolved via the <code dir="auto">/bzz</code> endpoint. Only use <code dir="auto">"Sequence"</code> type for feed manifests you want accessible via URL.</p></div></aside>
@@ -2601,6 +2705,12 @@
 <td>No</td>
 <td>Whether to retry endlessly</td>
 </tr>
+<tr>
+<td><code dir="auto">requestOptions.signal</code></td>
+<td><code dir="auto">AbortSignal</code></td>
+<td>No</td>
+<td>Stops the call: the promise rejects at once with code <code dir="auto">aborted</code>, and the proxy aborts its Bee requests and stops stamping</td>
+</tr>
 </tbody>
 </table>
 <p><strong>Returns:</strong> <code dir="auto">Promise&lt;UploadResult&gt;</code> - Contains the <code dir="auto">reference</code> of the uploaded chunk</p>
@@ -2710,6 +2820,12 @@
 <td><code dir="auto">boolean</code></td>
 <td>No</td>
 <td>Whether to retry endlessly</td>
+</tr>
+<tr>
+<td><code dir="auto">requestOptions.signal</code></td>
+<td><code dir="auto">AbortSignal</code></td>
+<td>No</td>
+<td>Stops the call: the promise rejects at once with code <code dir="auto">aborted</code>, and the proxy aborts its Bee requests and stops stamping</td>
 </tr>
 </tbody>
 </table>
@@ -2835,6 +2951,12 @@
 <td>No</td>
 <td>Whether to retry endlessly</td>
 </tr>
+<tr>
+<td><code dir="auto">requestOptions.signal</code></td>
+<td><code dir="auto">AbortSignal</code></td>
+<td>No</td>
+<td>Stops the call: the promise rejects at once with code <code dir="auto">aborted</code>, and the proxy aborts its Bee requests</td>
+</tr>
 </tbody>
 </table>
 <p><strong>Returns:</strong> <code dir="auto">Promise&lt;Uint8Array&gt;</code> - The decrypted data</p>
@@ -2897,6 +3019,12 @@
 <td><code dir="auto">boolean</code></td>
 <td>No</td>
 <td>Whether to retry endlessly</td>
+</tr>
+<tr>
+<td><code dir="auto">requestOptions.signal</code></td>
+<td><code dir="auto">AbortSignal</code></td>
+<td>No</td>
+<td>Stops the call: the promise rejects at once with code <code dir="auto">aborted</code>, and the proxy aborts its Bee requests and stops stamping</td>
 </tr>
 </tbody>
 </table>
@@ -3004,6 +3132,12 @@ under a new ACT.</p></div></aside>
 <td>No</td>
 <td>Whether to retry endlessly</td>
 </tr>
+<tr>
+<td><code dir="auto">requestOptions.signal</code></td>
+<td><code dir="auto">AbortSignal</code></td>
+<td>No</td>
+<td>Stops the call: the promise rejects at once with code <code dir="auto">aborted</code>, and the proxy aborts its Bee requests and stops stamping</td>
+</tr>
 </tbody>
 </table>
 <p><strong>Returns:</strong> <code dir="auto">Promise&lt;ActRevokeGranteesResult&gt;</code></p>
@@ -3098,6 +3232,12 @@ under a new ACT.</p></div></aside>
 <td>No</td>
 <td>Whether to retry endlessly</td>
 </tr>
+<tr>
+<td><code dir="auto">requestOptions.signal</code></td>
+<td><code dir="auto">AbortSignal</code></td>
+<td>No</td>
+<td>Stops the call: the promise rejects at once with code <code dir="auto">aborted</code>, and the proxy aborts its Bee requests</td>
+</tr>
 </tbody>
 </table>
 <p><strong>Returns:</strong> <code dir="auto">Promise&lt;string[]&gt;</code> - Array of compressed public keys (66 hex chars each)</p>
@@ -3166,6 +3306,11 @@ under a new ACT.</p></div></aside>
 <tr>
 <td><code dir="auto">timeout</code></td>
 <td>A deadline ran out: the proxy’s on a Bee request, or the client’s on the whole round trip (<code dir="auto">requestOptions.timeout</code>)</td>
+<td></td>
+</tr>
+<tr>
+<td><code dir="auto">aborted</code></td>
+<td>The call’s <code dir="auto">requestOptions.signal</code> aborted. Chunks already sent stay on the network and keep the stamps they used</td>
 <td></td>
 </tr>
 <tr>
