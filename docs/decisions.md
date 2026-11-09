@@ -7,6 +7,28 @@ present and may point at an issue or PR; the reasons live here.
 
 A PR that makes or changes a decision adds the entry in the same PR.
 
+## 2026-11-09 Dependency versions are exact
+
+**Context.** Dependencies were pinned once (#18); caret ranges crept back through
+feature PRs, 35 of them, including `@ethersphere/bee-js: ^13.0.0` in four
+packages. `@ethersphere/bee-js@13.3.0`, published 2026-11-09 with a malicious
+`postinstall`, sits inside that range; only the lockfile, resolved to 13.0.0,
+kept it out.
+
+**Decision.** Every `package.json` names an exact version, `savePrefix: ''`
+makes `pnpm add` write one, and a bump is a reviewed edit plus `pnpm install`.
+pnpm's release-age gate stays at its default of one day; a release that must
+ship younger than that is named in `minimumReleaseAgeExclude` in the same PR,
+since a local override does not survive CI's frozen install. (#982)
+
+**Why.** A range lets the registry decide what a fresh resolution installs,
+and a compromised release is pulled within hours of the first report, after
+the installs it was aimed at. An exact version makes the diff the place where
+an upgrade is seen; the age gate covers the window a pin cannot, a fresh
+release pinned on purpose. Three days was considered for the gate, to span a
+weekend; the default was kept because a takedown takes hours, not days, and
+the exclude list already carries the deliberate exceptions.
+
 ## 2026-09-21 Stamper-mode uploads honour the caller's `deferred`
 
 **Context.** Every data and chunk upload in stamper mode forced
