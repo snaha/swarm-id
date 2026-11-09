@@ -11,6 +11,10 @@ packages:
 autoInstallPeers: false
 engineStrict: true
 
+# Every dependency is pinned to an exact version (AGENTS.md, "Dependency versions"): `pnpm add`
+# writes `1.2.3`, never `^1.2.3`, so a compromised release cannot slip in through a range.
+savePrefix: ''
+
 allowBuilds:
   '@tailwindcss/oxide': true
   esbuild: true

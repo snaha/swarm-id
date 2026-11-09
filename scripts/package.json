@@ -6,9 +6,9 @@
     "bus-handover-latency": "tsx bus-handover-latency.ts"
   },
   "dependencies": {
-    "@ethersphere/bee-js": "^13.0.0"
+    "@ethersphere/bee-js": "13.1.0"
   },
   "devDependencies": {
-    "tsx": "^4.20.0"
+    "tsx": "4.23.13"
   }
 }
