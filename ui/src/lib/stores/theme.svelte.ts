@@ -4,9 +4,6 @@
 /** User-selectable appearance preference. "auto" follows the OS setting. */
 export type ThemePreference = 'auto' | 'light' | 'dark'
 
-// Not the old 'swarm-ui-theme' key: earlier deployments auto-persisted the
-// OS-resolved theme there on every first visit, so its value can't be told
-// apart from an explicit user choice. A fresh key starts everyone on 'auto'.
 const STORAGE_KEY = 'swarm-id-theme'
 const DARK_QUERY = '(prefers-color-scheme: dark)'
 

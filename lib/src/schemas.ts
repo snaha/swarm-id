@@ -100,9 +100,9 @@ export const DeviceSchemaV1 = z.object({
   name: z.string().optional(),
   // Rename clock, on the same pattern as a stamp's `nameUpdatedAt`. The name
   // merges on its own last-writer-wins clock because the record clock below
-  // cannot rank a rename at all: correcting a label — the partition naming of
-  // #570 — moves neither `lastSignedInAt` nor `removedAt`, so a corrected row
-  // tied with every stale copy of itself and lost the tie, forever (#663).
+  // cannot rank a rename at all: correcting a label moves neither
+  // `lastSignedInAt` nor `removedAt`, so a corrected row would tie with every
+  // stale copy of itself and lose the tie, forever.
   // Optional: a row nobody has renamed since it was created has none, and a
   // name born WITH the record needs no clock — it already outranks every stale
   // copy on `lastSignedInAt`.
@@ -114,7 +114,7 @@ export const DeviceSchemaV1 = z.object({
   //
   // "Sign-in" means a user unlocking the account — a device REPUBLISHING itself
   // without the tombstone. A background poll is not one, and reading it as one
-  // is what made every removal undo itself on the next round (#611).
+  // is what made every removal undo itself on the next round.
   removedAt: z.number().optional(),
 })
 
@@ -124,7 +124,7 @@ export const DeviceSchemaV1 = z.object({
 
 /**
  * Per-account settings, on the account's `settingsAt` clock. The two sharing
- * switches (#885) are the account-wide defaults every app follows unless it
+ * switches are the account-wide defaults every app follows unless it
  * is pinned otherwise (`ConnectedAppSchemaV1`); absent means on. Each rides
  * its own clock on top (`SETTINGS_CLOCKS`, `permissions.ts`): `settingsAt`
  * ranks the object whole, so a session-length change made on a stale copy
@@ -145,8 +145,7 @@ export const AccountSettingsSchemaV1 = z.object({
 /**
  * Connected App Schema V1.
  *
- * Account-owned: keyed by `appUrl` within its owning account (the `identityId`
- * pointer was removed when the identity tier was collapsed into the account).
+ * Account-owned: keyed by `appUrl` within its owning account.
  */
 export const ConnectedAppSchemaV1 = z.object({
   appUrl: z.string(),
@@ -156,12 +155,12 @@ export const ConnectedAppSchemaV1 = z.object({
   appDescription: z.string().optional(),
   connectedUntil: z.number().optional(),
   appSecret: z.string().optional(),
-  // The drives this app may write to (#862). Absent → the account default
+  // The drives this app may write to. Absent → the account default
   // (`account.defaultPostageStampBatchID`), followed wherever it moves.
   // `"all"` → every drive the account has, including ones added later. A
   // list → exactly those drives; an empty one opts the app out of drives.
   drives: z.union([z.literal("all"), z.array(StoredBatchId)]).optional(),
-  // The app's own say on the account-wide sharing key (#885): reading with it
+  // The app's own say on the account-wide sharing key: reading with it
   // (`dataSharing`) and publishing or managing with it (`writeAccess`). Absent
   // → the account's `settings` decide; present → pinned, whatever the account
   // default becomes. `effectivePermissions` (`permissions.ts`) folds the two.
@@ -179,7 +178,7 @@ export const ConnectedAppSchemaV1 = z.object({
   // `permissions.ts`), because a grant edit says nothing about whether the app
   // is still connected. Ranking the whole entry on a clock this bumped let a
   // drive picked on a stale copy outrank a revoke made elsewhere and take the
-  // tombstone with it (#681). Membership merges on the markers below instead.
+  // tombstone with it. Membership merges on the markers below instead.
   drivesAt: z.number().optional(),
   // Tombstone marker. A revoked app is kept in the snapshot (so the removal
   // propagates to other devices) but hidden from the UI and invalid for auth.
@@ -208,7 +207,7 @@ export const PostageStampSchemaV1 = z.object({
   // naming existed — and those bought outside the app — have none, and callers
   // fall back to a batch-ID-derived label.
   name: z.string().optional(),
-  // Fixed when the drive is created (#862). A scratch drive reuses its slots
+  // Fixed when the drive is created. A scratch drive reuses its slots
   // as a ring, overwriting its oldest data; a regular one never does, so the
   // two cannot be mixed on one batch. Absent → regular: only a scratch drive
   // is marked, the way only a deleted one carries `deletedAt`, so a regular
@@ -235,7 +234,7 @@ export const PostageStampSchemaV1 = z.object({
   // Optional because a stamp that has never been edited has no edit clock:
   // `addStamp` sets `createdAt` alone, so the merge's `updatedAt ?? 0` is the
   // ordinary case for a fresh add, not a shim for records written before the
-  // field existed (#662). Without the clock an edited copy would tie with a
+  // field existed. Without the clock an edited copy would tie with a
   // stale remote copy and the edit would never propagate across devices.
   updatedAt: z.number().optional(),
   // Tombstone marker. A deleted stamp is kept in the snapshot (so the removal
@@ -298,10 +297,8 @@ export const LocalVaultSchemaV1 = z.object({
  * Synced Account Schema V1
  *
  * The single, unified account model. There is exactly one kind of account: a
- * BIP-39 seed account. What used to be distinct `type`s (passkey / ethereum /
- * agent) were really just different ways of protecting the seed — now expressed
- * uniformly by the device-local vault (`LocalVaultSchemaV1`). No `type`
- * discriminant remains.
+ * BIP-39 seed account. The ways of protecting the seed are expressed uniformly by
+ * the device-local vault (`LocalVaultSchemaV1`), so there is no `type` discriminant.
  *
  * This is the portable projection of the account — every field that may travel
  * off the device, and nothing device-local. Backup files serialize/parse it
@@ -325,15 +322,14 @@ export const SyncedAccountSchemaV1 = z.object({
   createdAt: z.number(),
   derivationKey: z.string().length(64), // derived key for deterministic sub-key generation (64-char hex)
   // App-facing public key (compressed secp256k1). Surfaced to dApps as the
-  // identity public key in ConnectionInfo. Was previously on the identity.
+  // identity public key in ConnectionInfo.
   publicKey: CompressedPublicKeySchema,
   defaultPostageStampBatchID: StoredBatchId.optional(),
   devices: z.array(DeviceSchemaV1).default([]),
-  // Account-owned nested collections (replace the old flat identities/apps/
-  // stamps stores joined by accountId/identityId pointers).
+  // Account-owned nested collections.
   connectedApps: z.array(ConnectedAppSchemaV1).default([]),
   postageStamps: z.array(PostageStampSchemaV1).default([]),
-  // Per-account settings (was identity.settings).
+  // Per-account settings.
   settings: AccountSettingsSchemaV1.optional(),
   // Per-field LWW clocks for the scalar account fields, so a concurrent change to
   // a *different* scalar on another device is not dropped wholesale, and a peer's

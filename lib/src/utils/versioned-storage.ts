@@ -49,7 +49,7 @@ export type Serializer<T> = (data: T) => Record<string, unknown>
  * by a writer for a change peers must not hear about: one it folded from a
  * peer (a bus delta, a Swarm fold), a volatile field nobody else needs, or a
  * device-local sign-out. Another instance in the same window must not publish
- * that write to the room (#707). Absent for a write from another window,
+ * that write to the room. Absent for a write from another window,
  * whose origin the `storage` event cannot carry.
  */
 export interface StorageChange {

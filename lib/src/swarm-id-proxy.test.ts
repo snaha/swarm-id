@@ -66,7 +66,7 @@ const ATTACKER_ORIGIN = "https://evil.example.com"
 
 type MessageListener = (event: MessageEvent) => Promise<void>
 
-describe("SwarmIdProxy parentIdentify security (#410)", () => {
+describe("SwarmIdProxy parentIdentify security", () => {
   let parentWindow: { postMessage: ReturnType<typeof vi.fn> }
   let attackerWindow: { postMessage: ReturnType<typeof vi.fn> }
   let messageListener: MessageListener
@@ -167,7 +167,7 @@ describe("SwarmIdProxy parentIdentify security (#410)", () => {
   })
 })
 
-describe("SwarmIdProxy initialization failure (#420)", () => {
+describe("SwarmIdProxy initialization failure", () => {
   let parentWindow: { postMessage: ReturnType<typeof vi.fn> }
   let messageListener: MessageListener
   let proxy: SwarmIdProxy
@@ -222,7 +222,7 @@ describe("SwarmIdProxy initialization failure (#420)", () => {
   })
 })
 
-describe("SwarmIdProxy deriveAppSecret (#520)", () => {
+describe("SwarmIdProxy deriveAppSecret", () => {
   // 32-byte hex key — appSecret is raw private-key material in hex.
   const APP_SECRET_HEX = "11".repeat(32)
   let proxy: SwarmIdProxy
@@ -291,8 +291,7 @@ describe("SwarmIdProxy deriveAppSecret (#520)", () => {
   })
 
   // `effectivePermissions(undefined, undefined)` is on/on: without a session
-  // that would tell an app it may read and write with a key it does not hold
-  // (#885).
+  // that would tell an app it may read and write with a key it does not hold.
   it("errors on getPermissions when not authenticated instead of answering on/on", () => {
     internals(proxy).handleGetPermissions(
       { type: "getPermissions", requestId: "r2" },
@@ -306,7 +305,7 @@ describe("SwarmIdProxy deriveAppSecret (#520)", () => {
   })
 })
 
-describe("SwarmIdProxy honours a Bee URL change mid-session (#515)", () => {
+describe("SwarmIdProxy honours a Bee URL change mid-session", () => {
   const NEW_BEE_URL = "https://custom-node.example.com/"
   let storageListeners: Array<(event: StorageEvent) => void>
   let store: Map<string, string>
@@ -368,8 +367,8 @@ describe("SwarmIdProxy honours a Bee URL change mid-session (#515)", () => {
 })
 
 // The button is painted INSIDE the cross-origin iframe, so `buttonConfig` is
-// the only channel the embedding page has for styling it (#779).
-describe("SwarmIdProxy auth button typography (#779)", () => {
+// the only channel the embedding page has for styling it.
+describe("SwarmIdProxy auth button typography", () => {
   type ButtonInternals = {
     buttonConfig: ButtonConfig | undefined
     authButtonContainer: unknown
@@ -921,7 +920,7 @@ describe("SwarmIdProxy subsidised-mode selection", () => {
   // and a term one of them misses reports `subsidised, canUpload: true` for a
   // session whose uploads then take the user-stamp branch and fail there.
   describe("where the upload actually goes", () => {
-    // What a write cost reaches the dApp with its result (#932). Through the
+    // What a write cost reaches the dApp with its result. Through the
     // gateway, which returns no tag a dApp could read the count from.
     describe("reports the chunks a write sent", () => {
       const CHUNK_PAYLOAD_SIZE = 4096

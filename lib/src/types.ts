@@ -45,8 +45,7 @@ export type {
 // ============================================================================
 
 // Storage keys for versioned storage managers. The account is the single nested
-// document of record (it owns its connected apps and postage stamps inline), so
-// there are no longer separate identity/app/stamp collection keys.
+// document of record: it owns its connected apps and postage stamps inline.
 export const STORAGE_KEY_ACCOUNTS = "swarm-id-accounts"
 export const STORAGE_KEY_NETWORK_SETTINGS = "swarm-id-network-settings"
 export const STORAGE_CHALLENGE_KEY = "swarm-storage-challenge"
@@ -54,7 +53,7 @@ export const STORAGE_KEY_LEASE_CACHE_PREFIX = "swarm-id-lease-v2"
 
 /**
  * Key PREFIX for the handed-over session a PARTITIONED proxy keeps, so a reload
- * does not log the user out of the dApp (#635). The key itself is per dApp
+ * does not log the user out of the dApp. The key itself is per dApp
  * origin — see {@link partitionSessionStorageKey}, which is what every reader
  * and writer calls.
  *
@@ -77,13 +76,13 @@ export const STORAGE_KEY_PARTITION_SESSION = "swarm-id-partition-session"
  * partition without a Swarm round-trip. The proxy is the sole writer.
  *
  * The batch is in the key because the lease is: a lane is one partition of one
- * batch (#589), and an account has two coordinators whenever a dApp carries a
+ * batch, and an account has two coordinators whenever a dApp carries a
  * per-app stamp override. Under one key per account they shared a slot and
  * overwrote each other — safe, since `PartitionLease.hydrate` refuses a
  * snapshot whose `batchId` differs, but a hint that stops hinting exactly when
  * there are two writers to hint for is no hint. The `batchId` inside the record
  * stays as the second line of that pair of braces, as `parentOrigin` does in
- * the partitioned session (#671).
+ * the partitioned session.
  */
 export function leaseCacheStorageKey(
   accountId: string,
@@ -100,7 +99,7 @@ export function leaseCacheStorageKey(
  * `app2.foo.com`, or two localhost ports, share it. Under one fixed name the
  * second dApp to connect overwrote the first one's session, and the first came
  * back to a record belonging to somebody else, read it as "no session", and
- * needed the popup again — both of them, on every reload (#671). The origin
+ * needed the popup again — both of them, on every reload. The origin
  * belongs in the key, as it already does in the stamper's.
  */
 export function partitionSessionStorageKey(parentOrigin: string): string {
@@ -114,7 +113,7 @@ export function partitionSessionStorageKey(parentOrigin: string): string {
 /**
  * The drive a write names, as a dApp may spell it: `0x`-prefixed or uppercase
  * hex is taken, and the proxy sees bare lowercase — how `getDrives()` reports
- * it and how the grant is keyed (#862).
+ * it and how the grant is keyed.
  */
 export const DriveTargetSchema = z
   .preprocess(
@@ -178,10 +177,10 @@ export interface UploadOptions {
   /**
    * The drive to write to, by batch id, from `getDrives()`. Without it the
    * write goes to the app's primary drive. A drive the app was not granted
-   * rejects with `drive-not-granted` (#862).
+   * rejects with `drive-not-granted`.
    */
   batchID?: string
-  /** Pin on the user's own node. Ignored on a subsidised gateway (#752). */
+  /** Pin on the user's own node. Ignored on a subsidised gateway. */
   pin?: boolean
   encrypt?: boolean
   encryptManifest?: boolean
@@ -202,7 +201,7 @@ export type RequestOptions = z.infer<typeof RequestOptionsSchema>
 export type DownloadOptions = z.infer<typeof DownloadOptionsSchema>
 
 /**
- * Options for `uploadFiles` (#750). Content is encrypted unless `encrypt` is
+ * Options for `uploadFiles`. Content is encrypted unless `encrypt` is
  * `false`; the manifest — and so the root reference — is encrypted unless
  * `encrypt` or `encryptManifest` is `false`. `onProgress` counts files.
  */
@@ -266,7 +265,7 @@ export interface ActUploadOptions extends UploadOptions {
 // ============================================================================
 
 /**
- * How many chunks a write sent (#932): one per stamp the proxy signed in
+ * How many chunks a write sent: one per stamp the proxy signed in
  * stamper mode, one per chunk the gateway accepted in subsidised mode, so a
  * dApp can show what a save cost against what it estimated. The partition
  * lease's own chunks (lock, intent, and the state publish after each write)
@@ -278,7 +277,7 @@ const StampedChunksSchema = z.number().int().min(0).optional()
 export const UploadResultSchema = z.object({
   reference: ReferenceSchema,
   tagUid: z.number().optional(),
-  /** Chunks this write sent, see `StampedChunksSchema` (#932) */
+  /** Chunks this write sent, see `StampedChunksSchema` */
   stampedChunks: StampedChunksSchema,
 })
 
@@ -324,7 +323,7 @@ export const PostageBatchSchema = z.object({
    * PostageStamp contract (`chain`) or the Bee node (`bee`) on every call, or
    * failing both an estimate from the batch's purchase amount and the current
    * price (`estimate`), which knows nothing of top-ups, dilutes or price moves
-   * since. `batchTTLSource` says which (#927).
+   * since. `batchTTLSource` says which.
    */
   batchTTL: z.number().optional(),
   batchTTLSource: BatchTTLSourceSchema.optional(),
@@ -342,7 +341,7 @@ export const DriveKindSchema = z.enum(["regular", "scratch"])
 export type DriveKind = z.infer<typeof DriveKindSchema>
 
 /**
- * One partition's share of a drive (#772, #334). `sizeBytes` and `leftBytes`
+ * One partition's share of a drive (#334). `sizeBytes` and `leftBytes`
  * are payload bytes of encrypted saves; plain ones fit under 1% more
  */
 export const PartitionCapacitySchema = z.object({
@@ -365,7 +364,7 @@ export const PartitionCapacitySchema = z.object({
 export type PartitionCapacity = z.infer<typeof PartitionCapacitySchema>
 
 /**
- * How much a drive holds and has left for this device (#772, #334): the
+ * How much a drive holds and has left for this device (#334): the
  * figures of the partition it writes to, the one it holds or else the one it
  * would claim first. One save goes into one partition, so another's room is
  * not this device's. `partitions` lists every partition whose counter could
@@ -376,11 +375,11 @@ export const DriveCapacitySchema = PartitionCapacitySchema.extend({
 })
 export type DriveCapacity = z.infer<typeof DriveCapacitySchema>
 
-/** One drive the app was granted (#862), as `getDrives()` reports it */
+/** One drive the app was granted, as `getDrives()` reports it */
 export const DriveSchema = PostageBatchSchema.extend({
   // An identity site newer than this client may report a kind it does not
   // know. Read it as scratch, the kind that promises nothing, rather than
-  // failing the whole response and every drive in it (as #811 did for codes).
+  // failing the whole response and every drive in it.
   kind: DriveKindSchema.catch("scratch"),
   /**
    * The drive an untargeted write goes to: the account default for an
@@ -388,7 +387,7 @@ export const DriveSchema = PostageBatchSchema.extend({
    */
   primary: z.boolean(),
   /**
-   * The write partition this session holds on the drive (#882): the lane its
+   * The write partition this session holds on the drive: the lane its
    * uploads land on, or `undefined` while it holds none: until the drive's
    * write path is built (at connect for the primary, on the first write that
    * names it for any other), and after an idle release or a disconnect. Each
@@ -409,7 +408,7 @@ export type FitOptions = Pick<UploadOptions, "batchID" | "encrypt">
 const DRIVE_DESCRIPTION_MAX_LENGTH = 120
 const DRIVE_REQUEST_MAX_ROWS = 8
 
-/** One drive an app asks for at connect (#862), shown as a row of the picker */
+/** One drive an app asks for at connect, shown as a row of the picker */
 export const DriveRequirementSchema = z.object({
   kind: DriveKindSchema,
   /** Helper text under the row, e.g. "Used to store your messages" */
@@ -433,24 +432,24 @@ export type DriveRequest = z.infer<typeof DriveRequestSchema>
 
 /**
  * What an app asks the user for: at connect (`ClientOptions.permissions`)
- * and, later, from a live session (#711). Drives are the first permission;
+ * and, later, from a live session. Drives are the first permission;
  * others join as fields here, so one message and one screen carry them all.
  */
 export const PermissionsSchema = z.object({
   drives: DriveRequestSchema.optional(),
-  /** Ask to read what was shared with the account-wide sharing key (#885) */
+  /** Ask to read what was shared with the account-wide sharing key */
   dataSharing: z.literal(true).optional(),
   /** Ask to publish and manage ACTs with that key; implies `dataSharing` */
   writeAccess: z.literal(true).optional(),
 })
 export type Permissions = z.infer<typeof PermissionsSchema>
 
-/** The two sharing switches, as the account and its apps store them (#885) */
+/** The two sharing switches, as the account and its apps store them */
 export const PermissionNameSchema = z.enum(["dataSharing", "writeAccess"])
 export type PermissionName = z.infer<typeof PermissionNameSchema>
 
 /**
- * What the app holds of the account-wide sharing key right now (#885): its
+ * What the app holds of the account-wide sharing key right now: its
  * own pinned values, else the account defaults, else on. `writeAccess` is
  * never on without `dataSharing`.
  */
@@ -580,7 +579,7 @@ export interface EpochFeedUploadOptions {
   /** Unix timestamp (seconds). */
   at?: bigint | number | string
   /**
-   * The drive the update goes to, payload and SOC both (#862). Without it,
+   * The drive the update goes to, payload and SOC both. Without it,
    * `uploadOptions.batchID`, then the primary drive.
    */
   batchID?: string
@@ -614,7 +613,7 @@ export interface EpochFeedDownloadReferenceResult {
 }
 
 export interface EpochFeedUploadResult {
-  /** Chunks this write sent (#932); absent from an identity site older than the field */
+  /** Chunks this write sent; absent from an identity site older than the field */
   stampedChunks?: number
   /** SOC address for the feed update. */
   socAddress: Reference
@@ -768,7 +767,7 @@ export interface SequentialFeedReferenceResult {
  * Result from sequential feed upload.
  */
 export interface SequentialFeedUploadResult {
-  /** Chunks this write sent (#932); absent from an identity site older than the field */
+  /** Chunks this write sent; absent from an identity site older than the field */
   stampedChunks?: number
   /** SOC address of the feed update. */
   reference: string
@@ -871,21 +870,21 @@ export type UploadMode = z.infer<typeof UploadModeSchema>
  * - `stamper-failed` — the stamp resolved and the stamper still did not build.
  *   `initializeStamper` logs and returns rather than throwing, so without this
  *   the symptom is indistinguishable from having no stamp at all.
- * - `stamp-expired` — the stamp resolved, but its stored lifetime has run out
- *   (#745). The stamper builds from the record regardless, so without this the
+ * - `stamp-expired` — the stamp resolved, but its stored lifetime has run out.
+ *   The stamper builds from the record regardless, so without this the
  *   session claimed `user-stamp` and the first refused write surfaced as
  *   partition contention.
  * - `stamp-not-usable` — the stamp resolved and is not expired, but its
  *   stored record says the node does not have the batch (`exists: false`) or
  *   cannot use it (`usable: false`). Opening the drive in the identity UI
- *   refreshes the record from the chain (#765).
+ *   refreshes the record from the chain.
  */
 export const UploadUnavailableReasonSchema = z.enum([
   "no-stamp",
   "stamper-failed",
   "stamp-expired",
   "stamp-not-usable",
-  /** The batch is younger than the ten blocks Bee waits before stamping with one (#924) */
+  /** The batch is younger than the ten blocks Bee waits before stamping with one */
   "stamp-warming-up",
 ])
 
@@ -921,10 +920,10 @@ export const ConnectionIdentitySchema = z.object({
   address: AddressSchema,
   publicKey: CompressedPublicKeySchema.optional(),
   /**
-   * The account-wide ACT key (#519): grant to this to share with the person
+   * The account-wide ACT key: grant to this to share with the person
    * across every app they use, rather than with one app origin (`appKey`).
    * Every app the account connects can read what is granted to it — while the
-   * user allows it: absent when this app's data sharing is off (#885), so an
+   * user allows it: absent when this app's data sharing is off, so an
    * app never advertises a key it cannot read with.
    */
   sharingPublicKey: CompressedPublicKeySchema.optional(),
@@ -947,7 +946,7 @@ export const ConnectionInfoSchema = z.object({
   /**
    * Whether the browser gave this proxy iframe its own partitioned store
    * (Safari ITP, strict privacy settings). Reported for UI messaging only —
-   * since #277 the connect popup hands the stamps and signer keys over
+   * the connect popup hands the stamps and signer keys over
    * directly, so partitioning does not decide whether uploads work.
    */
   storagePartitioned: z.boolean().optional(),
@@ -961,7 +960,7 @@ export const ConnectionInfoSchema = z.object({
    * drive), `"stamper-failed"` is ours — the stamp resolved and the write path
    * still would not build.
    *
-   * Reporting it is what made the real-Safari run (#584) readable: an account
+   * Reporting it is what made the real-Safari run readable: an account
    * with no drive had been reported as a failed `window.opener` handover,
    * which is a claim about ITP rather than about the account.
    */
@@ -979,7 +978,7 @@ export const ConnectionInfoSchema = z.object({
    * Exposed because whether it CHANGES is a real signal: a partitioned iframe
    * (Safari ITP) keeps it in partitioned storage, so an id that differs across
    * loads means that storage was evicted and every session is joining the
-   * roster as a new device (#584, #570). Not a secret — a random uuid the
+   * roster as a new device. Not a secret — a random uuid the
    * embedding page already shares a browser with.
    */
   deviceId: z.string().optional(),
@@ -992,7 +991,7 @@ export const ConnectionInfoSchema = z.object({
     })
     .optional(),
   /**
-   * What this app may do with the account-wide sharing key (#885). Changes
+   * What this app may do with the account-wide sharing key. Changes
    * when the user flips a switch in Swarm ID, like a drive change does;
    * absent without a session.
    */
@@ -1115,7 +1114,7 @@ export const DownloadDataMessageSchema = z.object({
 })
 
 // Derive a stable, app-scoped secret HMAC(appSecret, label) inside the iframe.
-// The raw appSecret never crosses to the parent; only the derived bytes do (#520).
+// The raw appSecret never crosses to the parent; only the derived bytes do.
 export const DeriveAppSecretMessageSchema = z.object({
   type: z.literal("deriveAppSecret"),
   requestId: z.string(),
@@ -1468,7 +1467,7 @@ export const FitProbabilityMessageSchema = z.object({
 })
 
 /**
- * Ask the user for more (#711): the proxy opens the permissions popup and
+ * Ask the user for more: the proxy opens the permissions popup and
  * answers once it closes, or at once with `opened: false` when the browser
  * blocked it, so the client can open it from the parent instead.
  */
@@ -1621,7 +1620,7 @@ export const ProxyReadyMessageSchema = z.object({
   parentOrigin: z.string(),
   /**
    * Whether the iframe can read the trusted domain's first-party store, which
-   * decides which transport `connect()` can use (#613). Optional so an older
+   * decides which transport `connect()` can use. Optional so an older
    * deployed proxy stays wire-compatible; absent reads as "not proven shared",
    * and the client delegates, which works in both modes.
    */
@@ -1722,7 +1721,7 @@ export const UploadProgressMessageSchema = z.object({
 })
 
 /**
- * Why a request failed, as a dApp can branch on it (#761). `error.message`
+ * Why a request failed, as a dApp can branch on it. `error.message`
  * carries the text as before; the code is the stable part.
  *
  * - `not-authenticated` — no session for this origin
@@ -1731,7 +1730,7 @@ export const UploadProgressMessageSchema = z.object({
  * - `drive-not-granted` — the write names a drive this app was not granted
  * - `permission-denied` — the call needs the account-wide sharing key and the
  *   user has not allowed this app to use it that way; `permission` names the
- *   switch (#885). Ask with `requestPermissions()`, or check `getPermissions()`
+ *   switch. Ask with `requestPermissions()`, or check `getPermissions()`
  *   first
  * - `partition-contended` — every partition of the batch is held by other
  *   devices and none yielded in time
@@ -1775,7 +1774,7 @@ export type SwarmIdErrorCode = z.infer<typeof SwarmIdErrorCodeSchema>
 export const WireErrorSchema = z.object({
   error: z.string(),
   // Degrade, never drop: the client ships in dApps and meets whatever the
-  // trusted domain runs (#662). A newer proxy's code or reason must land as
+  // trusted domain runs. A newer proxy's code or reason must land as
   // `internal` / no reason with the message intact, not as a message the
   // schema rejects and a request that never settles.
   code: SwarmIdErrorCodeSchema.catch("internal"),
@@ -1795,7 +1794,7 @@ export const ErrorMessageSchema = WireErrorSchema.extend({
 export const ConnectionInfoChangedMessageSchema = z.object({
   type: z.literal("connectionInfoChanged"),
   /**
-   * The app's drives changed with this one (#933): one joined or left the
+   * The app's drives changed with this one: one joined or left the
    * grant, the primary moved, a lane moved, a drive ran out. Set on the first
    * snapshot too. Carried on the message a client already knows rather than
    * sent as one of its own, so a client older than the flag drops the key
@@ -1812,8 +1811,8 @@ export const ConnectionInfoChangedMessageSchema = z.object({
    * `connectionInfoChanged` it cannot parse, and if that is the first one
    * after `proxyReady`, `initialize()` rejects on its timeout — so one
    * unrecognised enum member would stop the dApp starting at all. Reachable
-   * through deploy-cache skew alone: a proxy from the #616–#642 window still
-   * emits the `"download-only"` this lib removed.
+   * through deploy-cache skew alone: an older proxy can emit a value this lib
+   * does not know.
    */
   uploadUnavailableReason:
     UploadUnavailableReasonSchema.optional().catch(undefined),
@@ -2300,14 +2299,14 @@ export const AuthDataSchema = z.object({
 export type AuthData = z.infer<typeof AuthDataSchema>
 
 /**
- * A partitioned session at rest (#635), under
+ * A partitioned session at rest, under
  * {@link partitionSessionStorageKey}.
  *
  * It holds the payload the connect popup handed over — plus the deadline the
  * session was given. In full, what is now at rest for the life of the session:
  *
  * - the **app secret**, this origin's own credential;
- * - the **narrowed stamp projection** — #578 limits it to the stamps this app
+ * - the **narrowed stamp projection** — limited to the stamps this app
  *   can spend, signer keys included;
  * - the account's **`derivationKey`**, which `serializeSyncedAccount` carries.
  *   This one is NOT app-narrowed: it derives the bus topic and envelope keys
@@ -2334,7 +2333,7 @@ export const PartitionSessionSchemaV1 = z.object({
 export type PartitionSession = z.infer<typeof PartitionSessionSchemaV1>
 
 /**
- * The permissions popup's hand-off to a partitioned iframe (#711): the account
+ * The permissions popup's hand-off to a partitioned iframe: the account
  * with the new grant, as the account bus would carry it. The proxy folds it
  * like any delta and narrows it back to the grant; it is not a sign-in, so
  * it touches neither the secret nor the session.
@@ -2379,7 +2378,7 @@ export interface ClientOptions {
    */
   onConnectionChange?: (info: ConnectionInfo) => void
   /**
-   * Invoked when the app's drives change (#933): one joins or leaves the
+   * Invoked when the app's drives change: one joins or leaves the
    * grant, the primary moves, a lane moves, a drive runs out (written to or
    * not). Fires once when the client initialises, connected or not, and then
    * on every such change, after `onConnectionChange` for the same event, so
@@ -2392,10 +2391,10 @@ export interface ClientOptions {
   buttonConfig?: ButtonConfig
   containerId?: string // ID of container element to place iframe in (optional)
   /**
-   * What the app asks the user for on the connect screen (#862): `drives` is
+   * What the app asks the user for on the connect screen: `drives` is
    * `"all"`, or one row per drive. Without it the app writes to the account
-   * default. `dataSharing` / `writeAccess` ask for the sharing switches
-   * (#885): the connect screen shows the ones not already on for the user
+   * default. `dataSharing` / `writeAccess` ask for the sharing switches:
+   * the connect screen shows the ones not already on for the user
    * to turn on; the app can ask again later with `requestPermissions()`.
    */
   permissions?: Permissions

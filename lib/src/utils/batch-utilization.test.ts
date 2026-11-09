@@ -277,7 +277,7 @@ describe("per-bucket reservation constants", () => {
   })
 })
 
-describe("MIN_USABLE_BATCH_DEPTH (#538, #566)", () => {
+describe("MIN_USABLE_BATCH_DEPTH", () => {
   it("is the smallest depth whose partition lane is worth buying", () => {
     expect(
       partitionCapacity(MIN_USABLE_BATCH_DEPTH, PARTITION_COUNT),
@@ -490,7 +490,7 @@ describe("UtilizationAwareStamper partition awareness", () => {
     expect(env.slot).toBe(0)
   })
 
-  // A scratch drive (#862): the lane is a ring. Past its capacity the next
+  // A scratch drive: the lane is a ring. Past its capacity the next
   // stamp lands on the lane's oldest slot, and the counter keeps counting.
   it("wraps a scratch drive's full lane onto its oldest slot, the counter still rising", async () => {
     const DEPTH = 20
@@ -851,7 +851,7 @@ describe("UtilizationAwareStamper partition awareness", () => {
   })
 
   it("the lease fence reads the injected clock (deterministic, no Date.now)", async () => {
-    // #385: the fence uses the stamper's injected clock — the SAME clock a test
+    // The fence uses the stamper's injected clock — the SAME clock a test
     // gives the lease (whose `leasedUntil` feeds `leaseValidUntil`). Drive it by
     // hand: no real time, no `Date.now` mock; advancing the clock across the
     // deadline flips the fence deterministically.
@@ -1413,7 +1413,7 @@ describe("UtilizationAwareStamper synced reference", () => {
   })
 })
 
-describe("hasBucketCapacity (partition-aware, #416)", () => {
+describe("hasBucketCapacity (partition-aware)", () => {
   // dataCounters hold the per-partition `j`, so capacity is the partition's
   // lane (partitionCapacity), NOT the raw slots-per-bucket.
   const DEPTH = 24 // 2^(24-16)=256 slots/bucket → partitionCapacity(2)=127
@@ -1437,7 +1437,7 @@ describe("hasBucketCapacity (partition-aware, #416)", () => {
   })
 })
 
-describe("updateAfterWrite capacity guard (#416)", () => {
+describe("updateAfterWrite capacity guard", () => {
   const cache = {
     getAllChunks: async () => [],
     putChunk: async () => undefined,

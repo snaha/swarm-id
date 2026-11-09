@@ -140,10 +140,8 @@ describe("AccountBus over BroadcastChannelTransport", () => {
     }
   })
 
-  // The channel used to be one origin-wide constant, so every co-resident
-  // account's contexts shared it. Harmless while the only traffic was
-  // batch-scoped counters; not once `account-delta` rides the bus, since that
-  // payload carries `postageStamps[].signerKey`.
+  // The channel is per account: co-resident accounts must not share one, because
+  // an `account-delta` payload carries `postageStamps[].signerKey`.
   it("does not deliver between contexts of different accounts", async () => {
     const mine = await deriveBusContext("11".repeat(32))
     const theirs = await deriveBusContext("22".repeat(32))

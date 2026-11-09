@@ -46,7 +46,7 @@ export class AsyncEpochFinder implements EpochFinder {
   ): Promise<Uint8Array | undefined> {
     // Fast path: exact timestamp updates are written at level-0 and should be
     // retrievable without traversing potentially poisoned ancestors. It runs
-    // CONCURRENTLY with the traversal (#400): on a "latest as of now" read
+    // CONCURRENTLY with the traversal: on a "latest as of now" read
     // (every account fold) the exact probe virtually never hits, and awaiting
     // it first serialised a full absent-chunk timeout before the traversal even
     // started. Both are awaited — not raced — because an exact hit must win

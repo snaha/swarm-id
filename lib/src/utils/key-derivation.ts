@@ -23,7 +23,7 @@ export const SWARM_ENCRYPTION_LABEL = "swarm-encryption"
 export const POSTAGE_SIGNER_LABEL = "postage-signer"
 /** Swarm encryption key → the backup signer that owns every feed */
 export const BACKUP_KEY_LABEL = "backup-key"
-/** Derivation key → the account-wide ACT sharing key (#519) */
+/** Derivation key → the account-wide ACT sharing key */
 export const ACT_SHARING_LABEL = "act-sharing"
 
 /**
@@ -74,7 +74,7 @@ export function deriveSecretSync(parentKey: string, label: string): string {
  *
  * The three steps — HMAC to a fresh secret, hex to bytes, import as AES-GCM —
  * are one pipeline. Non-extractable and encrypt/decrypt only, which is the
- * part worth stating once (#590). The bus envelope (`deriveBusContext`) is the
+ * part worth stating once. The bus envelope (`deriveBusContext`) is the
  * live caller; the `.swarmid` file key is the identity UI's, derived by HKDF
  * from the recovery-phrase entropy, and never comes through here.
  */
@@ -144,7 +144,7 @@ export function derivePostageSignerKeySync(derivationKey: string): string {
 }
 
 /**
- * The account-wide ACT key (#519): what other people grant access to when they
+ * The account-wide ACT key: what other people grant access to when they
  * mean the person rather than one of their apps. Derived from the derivation
  * key, so every app origin and every device of the account arrives at the same
  * key — and the master key still never leaves the identity UI. Its public half

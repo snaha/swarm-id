@@ -412,7 +412,7 @@ describe("createSyncAccount", () => {
     )
   })
 
-  it("reports a partial publish when the roster append was skipped, and retries it (#920)", async () => {
+  it("reports a partial publish when the roster append was skipped, and retries it", async () => {
     // The gateway 500s during the cold roster scan → ensureInRoster cannot
     // confirm membership and skips the append. The publish must say so, and a
     // retry must run on its own: nothing else re-runs the append until the user

@@ -1,7 +1,7 @@
 // Copyright 2026 The Swarm Authors. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 /**
- * Verdicts for the real-Safari smoke test (#584).
+ * Verdicts for the real-Safari smoke test.
  *
  * Questions only a real device answers, none of which can be read off a console
  * — Safari on iOS has no inspector without a Mac and a cable — so the page has
@@ -220,7 +220,7 @@ function writerPath(input: CheckInput): CheckResult {
 /**
  * Whether the partitioned storage holding the device id survived. A NEW id on a
  * later load means it was evicted, and every session joins the device roster as
- * a new device (#570) — the growth problem this test exists to measure.
+ * a new device — the growth problem this test exists to measure.
  */
 function storagePersistence(input: CheckInput): CheckResult {
   const current = input.connection?.deviceId

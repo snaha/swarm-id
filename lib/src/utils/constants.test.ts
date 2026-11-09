@@ -4,7 +4,7 @@
 import { describe, expect, it } from "vitest"
 import { DEFAULT_SESSION_DURATION, appSessionDuration } from "./constants"
 
-// The app's own session length (#885) over the account's over the default:
+// The app's own session length over the account's over the default:
 // one rule for the connect popup and a partitioned proxy alike.
 describe("appSessionDuration", () => {
   it("prefers the app's own length, then the account's, then the default", () => {

@@ -39,7 +39,7 @@ export interface ChunkCacheEntry {
    * derived key (and therefore the same `contentHash`) across saves.
    *
    * Required: every row is written by a bundle that sets it, and an upgrade
-   * drops the stores rather than carrying rows forward (#662).
+   * drops the stores rather than carrying rows forward.
    */
   nonce: number
 
@@ -81,7 +81,7 @@ const DB_NAME = "swarm-utilization-store"
 /**
  * Bumped whenever a stored row's shape changes, because an upgrade DROPS the
  * stores rather than migrating them: this is a cache of utilisation counters
- * that re-derives itself on next use, and 0.x owes no migration (#661).
+ * that re-derives itself on next use, and 0.x owes no migration.
  */
 const DB_VERSION = 4
 const CHUNKS_STORE = "chunks"

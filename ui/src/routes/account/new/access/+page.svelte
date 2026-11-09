@@ -96,7 +96,7 @@
     // key) while the entropy is in hand — the same chain the proxy/sync use.
     const masterKey = strip0x(wallet.privateKey)
     // The derivation gives Cancel a window — a superseded attempt must not
-    // create the account or navigate (#423); the guard throws it out.
+    // create the account or navigate; the guard throws it out.
     const [derivationKey, encryptedSeed] = await attempt.guard(
       Promise.all([deriveAccountDerivationKey(masterKey), encryptSeed(wallet.entropy, key)]),
     )
@@ -132,7 +132,7 @@
     const flow = draft.flow
 
     // Came from a dApp connect popup — the done page runs the handshake once
-    // the drives are settled (#862), so hand it the unlocked account.
+    // the drives are settled, so hand it the unlocked account.
     const request = connectStore.request
     if (request) {
       connectStore.setPending({

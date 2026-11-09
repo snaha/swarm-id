@@ -4,7 +4,7 @@
 -->
 
 <!--
-  The typed-phrase guard of a destructive dialog (#958, #925): the user types
+  The typed-phrase guard of a destructive dialog (#958): the user types
   `phrase` before the confirm button (its content is `children`) does
   anything. A fixed phrase, as what it guards (a drive name) can be blank or
   long.

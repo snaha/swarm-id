@@ -129,7 +129,7 @@ export interface PurchaseOptions {
   lifespanSeconds: number
   /** What to call the drive. */
   name: string
-  /** A scratch drive (#862); absent for a regular one. */
+  /** A scratch drive; absent for a regular one. */
   kind?: 'scratch'
   requestFunding: RequestFunding
   beforeSpend?: BeforeSpend
@@ -253,7 +253,7 @@ function projectedStamp(record: PurchaseRecord): NewStamp {
     bucketDepth: BUCKET_DEPTH,
     amount: record.amountPerChunk,
     // Not knowable without the read-back. `0` means unknown: the proxy then
-    // holds the fresh drive back by time from when it was recorded (#924).
+    // holds the fresh drive back by time from when it was recorded.
     blockNumber: 0,
     immutableFlag: false,
     utilization: 0,
@@ -434,7 +434,7 @@ export async function runResize(options: ResizeOptions): Promise<void> {
       // With a top-up behind it the drive is intact but longer-lived, and a
       // retry re-prices against that and charges again — which is what
       // `SizeIncreasePendingError` says, in a neutral tone, because nothing was
-      // lost (#392; docs/Drive-Payment-Flow.md, "Resize partial failure"). With no top-up — a resize that lets the lifespan
+      // lost (docs/Drive-Payment-Flow.md, "Resize partial failure"). With no top-up — a resize that lets the lifespan
       // shorten — nothing was paid and nothing grew, so saying so would tell
       // the user their money went somewhere it did not.
       if (plan.topUpAmount === 0n) {

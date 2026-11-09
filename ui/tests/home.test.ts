@@ -20,7 +20,7 @@ test('fresh profile lands on the product page and can reach the account chooser'
   await expect(page.getByRole('link', { name: 'I already have an account' })).toBeVisible()
 })
 
-// #840: the home tabs are linkable — `#<tab>[/<target>…]` opens the tab, and
+// The home tabs are linkable — `#<tab>[/<target>…]` opens the tab, and
 // the target within it; picking a tab writes the hash back.
 test('the URL hash selects a tab and opens what it names', async ({ page }) => {
   await page.goto('/?signin')
@@ -41,7 +41,7 @@ test('the URL hash selects a tab and opens what it names', async ({ page }) => {
     await expect(page.getByText('Sharing public key')).toBeVisible()
   }
 
-  // #848: the drive management card is linkable too, shows the postage batch
+  // The drive management card is linkable too, shows the postage batch
   // signer, and a collapsed card hides a revealed private key again.
   await page.goto('/#account/keys/drive-management')
   await expect(page.getByText('Postage batch signer address')).toBeVisible()
@@ -95,7 +95,7 @@ test('the URL hash selects a tab and opens what it names', async ({ page }) => {
   await expect(page.getByRole('tab', { name: 'Storage' })).toHaveAttribute('aria-selected', 'true')
 })
 
-// Frame 157 (#892). Chain-free: the two expired drives are written straight
+// Frame 157. Chain-free: the two expired drives are written straight
 // into the stored account, the default one among them.
 test('expired drives are alerted on every tab until dismissed', async ({ page }) => {
   await seedNoChain(page)

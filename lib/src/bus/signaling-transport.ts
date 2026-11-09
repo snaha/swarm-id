@@ -100,7 +100,7 @@ export class SignalingTransport implements BusTransport {
 
   /**
    * Settles once every publish so far has been encrypted and handed to its
-   * socket or data channel — what a page about to close waits for (#711).
+   * socket or data channel — what a page about to close waits for.
    * Not a delivery receipt: nothing here says a peer has read it.
    */
   settled(): Promise<void> {
@@ -168,7 +168,7 @@ export class SignalingTransport implements BusTransport {
     // The topic travels in the first frame, not the query string: query strings
     // are recorded by every ingress and proxy access log as a matter of course,
     // and the topic IS the room capability — anything reading those logs can
-    // join (#577). Payload confidentiality is unaffected either way (topic and
+    // join. Payload confidentiality is unaffected either way (topic and
     // envelope key come from separate HMAC contexts); what a topic buys is
     // membership: presence, traffic patterns, ciphertext to keep, and a
     // position to inject from.
@@ -239,7 +239,7 @@ export class SignalingTransport implements BusTransport {
     for (const [peerId, peer] of this.peers) {
       // Per peer, and never fatal to the rest of the fan-out: a `send` that
       // throws (SCTP size limit, a channel torn down between the readyState
-      // read and the call) used to escape this loop and starve every peer
+      // read and the call) must not escape this loop and starve every peer
       // after it — for a teardown `lease-released` that costs the waiter its
       // whole poll interval. A failed channel falls through to the relay.
       if (peer.dataChannel?.readyState === "open") {
@@ -389,8 +389,7 @@ export class SignalingTransport implements BusTransport {
       }
       if (signal.kind === "answer") {
         // An answer for no connection describes nothing, so it must not mark
-        // the queue as flushable either — the optional chain used to make this
-        // a no-op that still set the flag.
+        // the queue as flushable either.
         const connection = peer.connection
         if (!connection) return
         await connection.setRemoteDescription({

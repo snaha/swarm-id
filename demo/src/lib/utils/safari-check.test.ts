@@ -1,7 +1,7 @@
 // Copyright 2026 The Swarm Authors. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 /**
- * The verdicts are the deliverable of #584: the device they run on has no
+ * The verdicts are the deliverable: the device they run on has no
  * console (Safari on iOS needs a Mac and a cable), so a wrong verdict is not
  * something the tester can go behind and check.
  */
@@ -150,7 +150,7 @@ describe('runChecks', () => {
     expect(verdictOf(results, 'persistence')).toBe('pass')
   })
 
-  // The finding #570 is waiting on: a new id means the partitioned storage was
+  // A new id means the partitioned storage was
   // evicted and the roster gained another device.
   it('fails persistence when the device id changed', () => {
     const results = runChecks({

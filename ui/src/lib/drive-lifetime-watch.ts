@@ -2,8 +2,8 @@
 // SPDX-License-Identifier: Apache-2.0
 /**
  * Re-read the signed-in account's drives from the chain while the identity
- * site is open (#903), on the schedule the dApp proxy uses for its own
- * lifetime readings (#957): halfway to the nearest stored expiry, no sooner
+ * site is open, on the schedule the dApp proxy uses for its own
+ * lifetime readings: halfway to the nearest stored expiry, no sooner
  * than a minute and no later than six hours, and at the expiry itself when
  * that comes first.
  *

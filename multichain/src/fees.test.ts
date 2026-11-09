@@ -1,7 +1,7 @@
 // Copyright 2026 The Swarm Authors. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 /**
- * The fee fields of a bundled EIP-7702 transaction (#618), and a legacy write's
+ * The fee fields of a bundled EIP-7702 transaction, and a legacy write's
  * `gasPrice`.
  *
  * The failure these exist for: a purchase on Gnosis mainnet was signed with

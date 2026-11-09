@@ -70,10 +70,9 @@
   import DeviceList from './device-list.svelte'
   import StatusDot from './status-dot.svelte'
 
-  // The Swarm publish hook is now installed app-wide in the root layout
-  // (`+layout.svelte`), so /dev no longer manages it — a local install +
-  // unmount cleanup here would toggle publishing off for the whole app on
-  // navigating away.
+  // The Swarm publish hook is installed app-wide in the root layout
+  // (`+layout.svelte`); a local install + unmount cleanup here would toggle
+  // publishing off for the whole app on navigating away.
 
   // Every live (non-tombstoned) stamp across all accounts — the account owns its
   // stamps now, and a removed stamp lingers as a `deletedAt` tombstone so its
@@ -89,10 +88,10 @@
   )
   let storedStampMessage = $state('')
 
-  // Delete a single stored stamp (dev cleanup — replaces the old hand-edit of
-  // localStorage). `removeStamp` tombstones the stamp (`deletedAt`) and lets the
-  // deletion sync: `mergePostageStamps` keeps the tombstone (#337), so a peer's
-  // fold no longer resurrects it.
+  // Delete a single stored stamp (dev cleanup).
+  // `removeStamp` tombstones the stamp (`deletedAt`) and lets the
+  // deletion sync: `mergePostageStamps` keeps the tombstone, so a peer's
+  // fold cannot resurrect it.
   function deleteStoredStamp(accountId: EthAddress, batchID: BatchId) {
     accountsStore.getAccount(accountId)?.removeStamp(batchID)
     storedStampMessage = `🗑️ Removed ${batchID.toHex().slice(0, 12)}…`
@@ -189,7 +188,7 @@
   /**
    * Which endpoint switch is the live one. "Use local" spends up to ~5s
    * probing, and nobody is obliged to wait for it: picking production
-   * meanwhile — the natural move when the locals are plainly down — used to be
+   * meanwhile — the natural move when the locals are plainly down — must not be
    * silently undone when those probes finally landed. Each switch supersedes
    * the one before it, which is all this needs; the attempt guard in
    * `$lib/attempt` is for cancellable ceremonies, not a two-line token.
@@ -441,7 +440,7 @@
     // A balance is only meaningful as "this address, on this chain", so both
     // are pinned for the read and re-checked after it. The endpoint half is not
     // pedantry: switching chains leaves the previous one's read in flight, and
-    // it used to win — mainnet figures under the "Local dev chain" banner.
+    // it must not win with mainnet figures under the "Local dev chain" banner.
     const rpcUrl = networkSettingsStore.gnosisRpcUrl
     const wallet = connectedWallet
     // Untracked because this runs from an $effect: reading `funds` normally

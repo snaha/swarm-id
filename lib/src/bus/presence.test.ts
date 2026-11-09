@@ -28,7 +28,7 @@ describe("PresenceTracker", () => {
 
   // The room tells us when a socket goes (`peer-left`), which is the only
   // departure signal that survives a tab being closed — a leave published on
-  // unload never finishes encrypting (#572).
+  // unload never finishes encrypting.
   it("forgets a device when the peer it was heard from leaves", () => {
     const presence = new PresenceTracker()
     presence.observe("a", 1000, "peer-1")

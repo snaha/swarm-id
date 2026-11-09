@@ -34,8 +34,8 @@ import {
 } from "./env"
 
 // A fixed account birth date and a genuine rename clock 5s after it. Both are
-// well below any wall-clock `Date.now()`, so the old fresh-timestamp fallback
-// would have buried the rename.
+// well below any wall-clock `Date.now()`, so a fresh-timestamp fallback would
+// bury the rename.
 const CREATED_AT = 1_700_000_000_000
 const RENAME_AT = CREATED_AT + 5_000
 
@@ -62,7 +62,7 @@ describe.skipIf(!liveEnv.configured)(
         accountName,
         defaultPostageStampBatchID: undefined,
         accountNameAt,
-        // #377/#381 made accountPublicKey required on the device-state feed;
+        // accountPublicKey is required on the device-state feed;
         // without it the published snapshot fails read validation and the fold
         // reads no views. `accountStateToDeviceView` sources it from here.
         publicKey: TEST_ACCOUNT_PUBLIC_KEY,

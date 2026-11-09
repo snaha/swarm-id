@@ -3,11 +3,10 @@
 /**
  * The SwarmID tab's account bus (docs/Account-Bus.md, `account-delta`).
  *
- * This tab is where a revoke happens, and until now nothing told the dApp
- * proxies about it: a partitioned iframe cannot see shared storage, so a
- * revoked Safari session kept its hydrated account view — every stamp's signer
- * key — until the page closed. The proxy learned to consume `account-delta`;
- * this is the publisher.
+ * This tab is where a revoke happens, and a partitioned iframe cannot see
+ * shared storage: without a message, a revoked Safari session would keep its
+ * hydrated account view — every stamp's signer key — until the page closed.
+ * This is the `account-delta` publisher.
  *
  * **Signaling transport only.** The contexts a `BroadcastChannel` would reach —
  * other SwarmID tabs, an unpartitioned iframe on this origin — already converge
@@ -116,7 +115,7 @@ async function attach(account: SyncedAccount, forGeneration: number): Promise<vo
   // below must be scoped to the join it was attached for, not to whatever this
   // tab has selected by the time a message lands.
   const joinedAccountId = account.id.toHex()
-  // The receive half (#608). A peer's delta is folded into shared storage
+  // The receive half. A peer's delta is folded into shared storage
   // here, which is the only way a change made on another device reaches this
   // device's UNpartitioned contexts — they read storage, and no storage event
   // crosses a device boundary. `applyAccountDelta` commits with `skipSync`, so
@@ -192,7 +191,7 @@ export const accountBusStore = {
   },
 
   /**
-   * Publish `account` from a page about to close (#711). The debounce would
+   * Publish `account` from a page about to close. The debounce would
    * die with the window, a page that just opened is still joining, and the
    * room has no mailbox — so wait for the join and for a peer to be in the
    * room, publish at once, wait for the send to reach the socket, and give

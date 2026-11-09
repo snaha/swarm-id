@@ -1,7 +1,7 @@
 // Copyright 2026 The Swarm Authors. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 /**
- * The account bus, end to end (#569, docs/Account-Bus.md).
+ * The account bus, end to end (docs/Account-Bus.md).
  *
  * Everything here needs the proxy iframe's storage genuinely partitioned, which
  * is what makes the bus the ONLY channel between it and the identity tab:
@@ -92,9 +92,9 @@ async function createAccountWithDrive(page: Page) {
  * Connect an existing account to the demo through the proxy's own iframe
  * button, and leave the partitioned session live.
  *
- * Since #635 the session survives a reload — it is kept in the partition's own
+ * The session survives a reload — it is kept in the partition's own
  * store until it is disconnected or its 30 days are up — so navigating the demo
- * afterwards no longer ends it.
+ * afterwards does not end it.
  */
 async function connectPartitioned(page: Page, path: string) {
   await page.goto(`${demoOrigin}${path}`)
@@ -141,7 +141,7 @@ test('the proxy iframe is in its own storage partition', async ({ page }) => {
   await expectProxyPartitioned(page)
 })
 
-// The situation the first real-Safari run (#584) actually hit: a partitioned
+// The situation the first real-Safari run actually hit: a partitioned
 // session whose account has no drive. The handover landed — that is what
 // `storagePartitioned` means, and the proxy sets it in one place — while the
 // writer path was never exercised. The harness reported the second as a failure
@@ -164,9 +164,8 @@ test('a partitioned session with no drive reports the handover, not a failure', 
   await expect(page.getByText('❌')).toHaveCount(0)
 })
 
-// #613: the transport used to be picked by user agent, so a partitioned
-// Chromium was put on the storage-event path — which cannot reach it — while
-// only WebKit got the handover. Every test above reaches the popup through the
+// The transport is picked by storage mode, not user agent: a partitioned
+// Chromium cannot be reached on the storage-event path. Every test above reaches the popup through the
 // PROXY's own button (`openProxyConnectPopup`), which always delegated; this one
 // goes through the demo's own Connect button, i.e. `client.connect()`, the API a
 // dApp with its own button uses. It fails on the UA gate by construction.
@@ -185,9 +184,8 @@ test('client.connect() authenticates a partitioned session', async ({ page }) =>
   await expect(page.getByRole('heading', { name: 'Identity' })).toBeVisible({ timeout: 15000 })
 })
 
-// #635: the handed-over session used to live in memory only, so every page
-// load re-ran the connect popup — on Safari, where partitioned is the ordinary
-// mode, that made a plain reload a logout. Found on the device run for #584.
+// The handed-over session is persisted: on Safari, where partitioned is the
+// ordinary mode, a plain reload must not be a logout.
 test('a partitioned session survives a reload', async ({ page }) => {
   await page.goto(`${demoOrigin}/account`)
   await expectProxyPartitioned(page)
@@ -228,11 +226,10 @@ test('the bus carries an app removal to a partitioned session', async ({ page })
 
   const idPage = await openIdentityTab(page, 'account')
 
-  // A rename DOES reach the session: since #610 the fold merges the metadata
+  // A rename DOES reach the session: the fold merges the metadata
   // scalars on their own per-field clocks, not just the collections, so
   // `identity.name` follows a rename made on another device with no reconnect
-  // and no reload. (It did not before — this suite asserted the old behaviour
-  // and #610 flipped the line, which is what it was there for.)
+  // and no reload.
   await idPage.getByRole('button', { name: /^Identity/ }).click()
   await idPage.getByRole('textbox').fill(RENAMED)
   await idPage.getByRole('textbox').press('Enter')
@@ -254,7 +251,7 @@ test('the bus carries an app removal to a partitioned session', async ({ page })
   })
 })
 
-// #608: the SwarmID tab now CONSUMES deltas as well as publishing them, which
+// The SwarmID tab now CONSUMES deltas as well as publishing them, which
 // is the only way a change made on another device reaches a device's
 // unpartitioned contexts — they read shared storage, and no storage event
 // crosses a device boundary.
@@ -274,7 +271,7 @@ test('a change on one device reaches another device’s stored account', async (
   await completeCreateFlow(page)
   await page.getByRole('button', { name: 'Stay local for now' }).click()
   // Through the proxy's own button, which reaches the popup in either storage
-  // mode — this test is about the bus, not about the transport (#613).
+  // mode — this test is about the bus, not about the transport.
   const demo = await page.context().newPage()
   await connectPartitioned(demo, '/')
   await demo.close()
@@ -335,7 +332,7 @@ test('a partitioned session uploads with its own stamp and reads it back', async
 
   await waitForBatchIngestion(page)
 
-  // #584's hand-run harness, driven here: it reaches its own verdicts on
+  // The Safari check's hand-run harness, driven here: it reaches its own verdicts on
   // screen, which is exactly the assertion surface this needs.
   await connectPartitioned(page, '/safari-check')
 
@@ -349,7 +346,7 @@ test('a partitioned session uploads with its own stamp and reads it back', async
   })
 })
 
-// --- Multi-drive on the Safari path (#862) ---------------------------------
+// --- Multi-drive on the Safari path ---------------------------------
 //
 // Steps 5 and 6 each change what a partitioned session is handed, and on
 // Safari that is the ordinary session. These run the same flows as
@@ -365,7 +362,7 @@ async function requestOnConnect(page: Page, preset: string) {
   await page.evaluate((value) => localStorage.setItem('swarm-id-demo-drive-request', value), preset)
 }
 
-// #880: the picker runs before the handover, so a partitioned session is
+// The picker runs before the handover, so a partitioned session is
 // handed what the user granted.
 test('a partitioned session is handed the drives granted on the connect screen', async ({
   page,
@@ -394,7 +391,7 @@ test('a partitioned session is handed the drives granted on the connect screen',
   await expect(writeTo(page).locator('option')).toHaveCount(3, { timeout: 15000 })
 })
 
-// #883: the iframe opens the permissions popup, so the popup hands the new
+// The iframe opens the permissions popup, so the popup hands the new
 // grant straight back through `window.opener` — the path Safari takes.
 test('requestDrives() hands a partitioned session the drive it was granted', async ({ page }) => {
   test.skip(!chainUp, 'requires a local chain: a scratch drive is bought in the popup')
@@ -489,7 +486,7 @@ test('requestDrives() reaches a partitioned session over the bus when its popup 
   })
 })
 
-// #885 on the Safari path: the sharing switches reach a partitioned session
+// On the Safari path, the sharing switches reach a partitioned session
 // the three ways a drive does — handed over by the popup the iframe opened,
 // pinned with the connect handover, and over the bus when the popup is blocked.
 // Chain-free: no drive is involved.

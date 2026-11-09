@@ -12,7 +12,7 @@ import { stampWorkerDev } from '../lib/dev/vite-stamp-worker.js'
 export default defineConfig(({ command }) => ({
   plugins: [tailwindcss(), sveltekit(), stampWorkerDev()],
   resolve: {
-    // Dev consumes the lib SOURCE for reliable HMR (#347); `vite build`
+    // Dev consumes the lib SOURCE for reliable HMR; `vite build`
     // resolves the published dist bundle via package exports as before.
     alias:
       command === 'serve'

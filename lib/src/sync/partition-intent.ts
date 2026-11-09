@@ -178,7 +178,7 @@ export function intentSocAddress(
 }
 
 /** Build the deviceId-INDEPENDENT occupancy identifier for (batch, partition,
- *  epoch). Batch-scoped for the same reason the lock is (#589): a beacon on
+ *  epoch). Batch-scoped for the same reason the lock is: a beacon on
  *  lane p of batch X says nothing about lane p of batch Y. */
 export function makePartitionOccupancyIdentifier(
   batchId: BatchId,

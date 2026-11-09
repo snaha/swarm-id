@@ -4,8 +4,7 @@
 /**
  * Read entry point for Phase 3a: reconstruct account state from Swarm by
  * scanning the append-only device roster (discovery) and folding every device's
- * latest state feed. Replaces the single shared-snapshot fetch used by restore
- * / refresh / the proxy.
+ * latest state feed. Used by restore, refresh and the proxy.
  */
 
 import { Bee, EthAddress, PrivateKey } from "@ethersphere/bee-js"

@@ -224,7 +224,7 @@ describe('ownerFunds', () => {
     expect(bzz).toHaveBeenCalledWith(OWNER)
   })
 
-  // Prefixing a string cannot fail, so the wrong number of nibbles used to
+  // Prefixing a string cannot fail, so the wrong number of nibbles would
   // travel to the chain and come back as zero — which reads on the page as a
   // funded account that has spent everything, not as a typo.
   it.each([

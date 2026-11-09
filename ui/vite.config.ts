@@ -73,7 +73,7 @@ function stubDevOnlyModules(): Plugin {
 export default defineConfig(({ command }) => ({
   plugins: [tailwindcss(), sveltekit(), stampWorkerDev(), stubDevOnlyModules()],
   resolve: {
-    // Dev consumes the lib SOURCE for reliable HMR (#347); `vite build`
+    // Dev consumes the lib SOURCE for reliable HMR; `vite build`
     // resolves the published dist bundle via package exports as before.
     alias:
       command === 'serve'

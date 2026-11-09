@@ -279,7 +279,7 @@ const DEFAULT_ACT_CONTENT_TYPE = "application/octet-stream"
 const SEQUENTIAL_INDEX_LOOKUP_TIMEOUT_MS = 2000
 const MS_PER_SECOND = 1000
 /**
- * A drive whose record is younger than this may still be warming up (#924):
+ * A drive whose record is younger than this may still be warming up:
  * Bee stamps with a batch ten blocks after it was minted, under a minute on
  * Gnosis, so the chain head is read only for records this fresh. Older ones
  * are past the threshold whatever the head says.
@@ -360,7 +360,7 @@ function deltaFoldView(snapshot: AccountStateSnapshot): DeviceStateSnapshot {
  *
  * Responsibilities:
  * - Receive app-specific secrets from auth popup
- * - Keep a partitioned session in this partition's own localStorage (#635)
+ * - Keep a partitioned session in this partition's own localStorage
  * - Proxy Bee API calls from parent dApp
  * - Augment requests with authentication
  * - Return responses to parent dApp
@@ -372,8 +372,8 @@ export class SwarmIdProxy {
   private authLoading: boolean = true // Start in loading state
   private appSecret: string | undefined
   /**
-   * The write path of each granted drive this session writes to, by batch id
-   * (#862): its stamp, and the stamper and coordinator built from it. The
+   * The write path of each granted drive this session writes to, by batch id:
+   * its stamp, and the stamper and coordinator built from it. The
    * primary's is built when the session resolves it; any other's on its first
    * write (`writePathFor`), since each costs a lane. An entry goes as a unit
    * when its stamp changes or leaves the grant (`reconcileDrives`). The proxy
@@ -386,12 +386,12 @@ export class SwarmIdProxy {
    * an app with no drives too.
    */
   private lastDriveState: string | undefined
-  /** Armed for the earliest expiry among the granted drives (#793), see `armExpiryTimer`. */
+  /** Armed for the earliest expiry among the granted drives, see `armExpiryTimer`. */
   private expiryTimer: ReturnType<typeof setTimeout> | undefined
   /** When the pending `expiryTimer` fires, so a re-arm keeps the earlier of two. */
   private expiryDueAt = 0
   /**
-   * What the chain last said about each granted drive's lifetime (#927), by
+   * What the chain last said about each granted drive's lifetime, by
    * batch id: a remaining-seconds reading, when it was taken, and the
    * measurement instant of the record it was taken over. Laid over the stored
    * record for as long as that record stands (`lifetimeOf`), so the refusal,
@@ -403,7 +403,7 @@ export class SwarmIdProxy {
     { batchTTL: number; measuredAt: number; recordMeasuredAt: number }
   >()
   /**
-   * The chain head last read for the warm-up rule (#924), and when a read
+   * The chain head last read for the warm-up rule, and when a read
    * was last attempted, so a failing RPC is retried at the re-measure floor
    * rather than on every reconcile.
    */
@@ -426,7 +426,7 @@ export class SwarmIdProxy {
   private storagePartitioned: boolean = false
   private pendingChallenge: string | undefined
   /**
-   * The permissions popups this session opened (#711), by challenge: only
+   * The permissions popups this session opened, by challenge: only
    * their hand-off is folded, once, and only from that window. An entry
    * goes when its popup closes.
    */
@@ -435,7 +435,7 @@ export class SwarmIdProxy {
    * Hydrated account view for the storage-partitioning fallback: the synced
    * projection handed over by the connect popup (`AuthData.account`), held in
    * memory only — the stored-account schema requires a vault. What survives a
-   * reload is the handover itself, under its own key (#635), which this view
+   * reload is the handover itself, under its own key, which this view
    * is then rebuilt from. When set, the proxy is a
    * first-class writer despite the partition (docs/Account-Bus.md, phase 3).
    */
@@ -488,7 +488,7 @@ export class SwarmIdProxy {
   private buttonConfig: ButtonConfig | undefined
   private popupMode: "popup" | "window" = "window"
   private appMetadata: AppMetadata | undefined
-  /** What the dApp asks for, carried to the connect popup (#862). */
+  /** What the dApp asks for, carried to the connect popup. */
   private permissionsRequest: Permissions | undefined
   /**
    * The last Bee client built, with the URL it was asked for. Keyed on that
@@ -548,12 +548,12 @@ export class SwarmIdProxy {
   /**
    * Debounce timer + in-flight guard for proxy-side account-state publishing.
    * The proxy publishes the account snapshot to the shared sync feed when it
-   * first acquires a partition (so the device announces itself — see #336
-   * motivation #4) and when account state changes while a lease is held.
+   * first acquires a partition (so the device announces itself) and when account
+   * state changes while a lease is held.
    */
   private publishTimer: ReturnType<typeof setTimeout> | undefined
   // Re-arms the announce publish after a partial one (roster append skipped
-  // on an inconclusive scan, #920); attempt drives the backoff.
+  // on an inconclusive scan); attempt drives the backoff.
   private rosterRetryTimer: ReturnType<typeof setTimeout> | undefined
   private rosterRetryAttempt = 0
   private publishInFlight: boolean = false
@@ -642,7 +642,7 @@ export class SwarmIdProxy {
     // The user can change the Bee node URL at runtime via the trusted UI's
     // network-settings dialog. That localStorage write fires a `storage` event
     // in this same-origin dApp iframe — repoint the Bee client so the newly
-    // configured node is in effect before the next write (#515). The
+    // configured node is in effect before the next write. The
     // network-settings manager has no `subscribe`, so listen for the raw event.
     if (typeof window !== "undefined") {
       const onNetworkSettingsChange = (event: StorageEvent): void => {
@@ -653,7 +653,7 @@ export class SwarmIdProxy {
         // and the store this event points at is the PARTITION's, which holds
         // none. Re-reading it loads `undefined` and falls through to the public
         // gateway and the default RPC, moving a user on a local or custom Bee
-        // node onto neither (#580). A settings change made in the first-party
+        // node onto neither. A settings change made in the first-party
         // tab does not reach such a session at all — it is picked up at the
         // next connect (docs/Account-Bus.md, Known gaps).
         if (this.partitionAccount) {
@@ -740,7 +740,7 @@ export class SwarmIdProxy {
    * sharing this window (the identity UI runs inside the proxy iframe too)
    * makes those beside the proxy, and they reconcile the way a bus delta does,
    * without a publish: republishing a fold stamped a fresh clock on every hop
-   * and kept two devices publishing at each other every few seconds (#707).
+   * and kept two devices publishing at each other every few seconds.
    */
   private async handleAccountStorageChange(
     source: "storage" | "bus" = "storage",
@@ -903,7 +903,7 @@ export class SwarmIdProxy {
   }
 
   /**
-   * The write path for `batchId`, built on the first write to it (#862).
+   * The write path for `batchId`, built on the first write to it.
    * Refuses a drive the app was not granted.
    */
   private async writePathFor(batchId: string): Promise<DriveWritePath> {
@@ -942,7 +942,7 @@ export class SwarmIdProxy {
   /**
    * One timer for the earliest expiry among the granted drives, built or not,
    * so the flip to `stamp-expired` reaches the dApp at the stored expiry
-   * rather than on the next unrelated event (#793, #933). Re-armed as drives
+   * rather than on the next unrelated event. Re-armed as drives
    * come and go (`reconcileDrives`), cleared with them (`teardownDrives`), and
    * re-armed from its own tick.
    *
@@ -950,7 +950,7 @@ export class SwarmIdProxy {
    * comes earlier than the expiry — halfway there, within
    * `REMEASURE_MIN_MS`..`REMEASURE_MAX_MS`, or at the expiry itself when that
    * is sooner — and every tick re-reads the chain
-   * before it trusts the record (#927): a price rise is caught early, and a
+   * before it trusts the record: a price rise is caught early, and a
    * price fall or a top-up made elsewhere does not refuse a drive the chain
    * still funds. A hidden tab's timers are throttled, so "at" means within
    * about a minute.
@@ -983,7 +983,7 @@ export class SwarmIdProxy {
   }
 
   /**
-   * A timer of its own for a drive that may be warming up (#924), set for
+   * A timer of its own for a drive that may be warming up, set for
    * the moment its countdown should clear: then the head is re-read, or for
    * a record with no block nothing is read, and the readings adopted. A
    * read that says the chain is slower re-arms for what is left; one that
@@ -1044,8 +1044,8 @@ export class SwarmIdProxy {
   }
 
   /**
-   * Blocks the batch still has to wait before Bee would stamp with it
-   * (#924); `0` for a record too old to be warming up. A record with no
+   * Blocks the batch still has to wait before Bee would stamp with it;
+   * `0` for a record too old to be warming up. A record with no
    * block (a purchase whose read-back failed records `0`) counts its blocks
    * from when it was written. Otherwise from the head, advanced by the
    * clock since it was read. With no head yet: the full wait while the
@@ -1116,7 +1116,7 @@ export class SwarmIdProxy {
   }
 
   /**
-   * One authoritative read of a drive's remaining lifetime (#927): the
+   * One authoritative read of a drive's remaining lifetime: the
    * PostageStamp contract, then the Bee node. A reading is kept in
    * `liveLifetimes`; a failed read keeps whatever was known.
    */
@@ -1173,7 +1173,7 @@ export class SwarmIdProxy {
 
   /**
    * Expiry and the record's own verdict first (`stampRefusal`), then the
-   * warm-up rule (#924): a batch younger than the blocks Bee waits for is
+   * warm-up rule: a batch younger than the blocks Bee waits for is
    * refused as `stamp-warming-up` until the tick sees them pass.
    */
   private refusalOfStamp(
@@ -1293,7 +1293,7 @@ export class SwarmIdProxy {
         // Our challenge, so this IS the handover this attempt was waiting for
         // — refused for naming an origin that is not our parent, which an
         // origin-normalisation drift is the realistic way to reach. The
-        // spinner would hang exactly as it did on the schema gate (#587).
+        // spinner would hang exactly as it did on the schema gate.
         this.endRefusedConnect()
         return
       }
@@ -1325,12 +1325,12 @@ export class SwarmIdProxy {
 
       // A handover IS the genuine sign-in for a partition device: the user
       // clicked connect and unlocked the account in the popup. That, and not a
-      // background poll, is what lifts a tombstone (#337 via #611).
+      // background poll, is what lifts a tombstone.
       // Deliberately not on `restorePartitionSession` — a reload is not a
       // sign-in, and treating it as one is how the removal stopped sticking.
       this.reactivateThisDevice()
 
-      // Keep it, so a reload does not log the user out of the dApp (#635).
+      // Keep it, so a reload does not log the user out of the dApp.
       // On Safari the partitioned path is the ordinary one, and re-running the
       // popup per page load is not a session — the deadline below is.
       this.savePartitionSession(message.data)
@@ -1456,7 +1456,7 @@ export class SwarmIdProxy {
    * The stored session for THIS parent, if it is still within its deadline.
    *
    * The key is per dApp origin, because the partition is not: it is scoped to
-   * the top-level SITE, so same-site dApps share this store (#671). The
+   * the top-level SITE, so same-site dApps share this store. The
    * `parentOrigin` check below is now the belt to that pair of braces rather
    * than the only thing keeping two dApps apart. An expired or malformed
    * record is removed on the way past: it will never become valid again.
@@ -1518,7 +1518,7 @@ export class SwarmIdProxy {
       // is not, and this clock is what every reader compares a Disconnect
       // against (`restoreLocalSessionFields`, `verifyRestoredSession`).
       // Restamping it on a reload made a disconnect made while the tab was
-      // closed read as stale, and the session came back undead (#670).
+      // closed read as stale, and the session came back undead.
       lastConnectedAt: connectedAt,
       // The deadline IS this context's to issue, which is why it is `now`-based
       // while the line above is not: `savePartitionSession` reads it straight
@@ -1816,8 +1816,8 @@ export class SwarmIdProxy {
    * The `lease-claim` goes out FIRST. Releasing is two stamped Swarm writes
    * (`yieldIdleLease` → `lease.release()`), which is orders of magnitude
    * longer than a rank step, so announcing only on completion would reach the
-   * other holders long after every one of them had begun releasing too — #576
-   * with extra steps. A claim is cheap to send and is what the rank step
+   * other holders long after every one of them had begun releasing too.
+   * A claim is cheap to send and is what the rank step
    * actually budgets for.
    */
   private answerLeaseRequest(
@@ -1980,9 +1980,9 @@ export class SwarmIdProxy {
         }
         case "lease-request": {
           // Routed by batch as well as account: a lane is one partition of ONE
-          // batch (#589), so a waiter on another batch contends with nothing
+          // batch, so a waiter on another batch contends with nothing
           // that drive holds, and yielding it would drop a lease that helps
-          // neither of us. Each drive answers for its own (#862).
+          // neither of us. Each drive answers for its own.
           const coordinator = this.drives.get(message.batchId)?.coordinator
           if (
             !coordinator ||
@@ -2073,7 +2073,7 @@ export class SwarmIdProxy {
    *
    * This is the only push channel a partitioned iframe has: it cannot see
    * shared storage, so without this a revoke reaches it only when the page
-   * closes — and since #547 that session is a full writer holding every stamp's
+   * closes — and that session is a full writer holding every stamp's
    * signer key (docs/Account-Bus.md, `account-delta`).
    *
    * Durable truth is unchanged. An unpartitioned session still owns its state
@@ -2104,7 +2104,7 @@ export class SwarmIdProxy {
     // would only diverge the two — it reconciles from storage below instead.
     // (A cross-device revoke still reaches an unpartitioned session — the
     // SwarmID tab folds the same delta into shared storage, and the storage
-    // event carries it here; #608, docs/Account-Bus.md.)
+    // event carries it here; docs/Account-Bus.md.)
     const { account } = connection
     if (this.partitionAccount) {
       // The shared fold, not a second set of rules: `foldAccount` merges the
@@ -2148,7 +2148,7 @@ export class SwarmIdProxy {
         connectedApps,
         // Narrowed back down after the fold: the publisher is an unpartitioned
         // context and sends the whole collection, so keeping what it sends
-        // would undo the narrowed handover (#578) on the first delta. The fold
+        // would undo the narrowed handover on the first delta. The fold
         // still runs, because the session must hear about ITS stamp — a
         // rotated signer key, a tombstone — and LWW is what tells it.
         //
@@ -2165,8 +2165,7 @@ export class SwarmIdProxy {
           foldedAccount.postageStamps,
         ),
       }
-      // The stored session goes with it, or the next reload undoes this fold
-      // (#636 review).
+      // The stored session goes with it, or the next reload undoes this fold.
       this.refreshStoredPartitionAccount()
     }
 
@@ -2239,7 +2238,7 @@ export class SwarmIdProxy {
     const { signerKey, batchId } = drive
     // `loadAuthData` calls this off the reconcile queue, so a storage event's
     // `refreshStampFromStorage` can clear or rebind the stamp under any await
-    // below (#804). Every rebind is a new `DriveWritePath`, a re-resolve of the
+    // below. Every rebind is a new `DriveWritePath`, a re-resolve of the
     // SAME stamp included — a storage event during the first init finds no
     // fingerprint yet and resolves again — so an init whose drive is no longer
     // the session's has been superseded, and leaves the session to the init
@@ -2297,8 +2296,8 @@ export class SwarmIdProxy {
     // The callbacks below outlive this narrowing, and the batch they name has
     // to be the one the coordinator serves, on both counts: its lease cache is
     // keyed on it, so a snapshot filed under a batch we have since moved off
-    // hints at a lane nobody holds (#684), and a lease message naming that
-    // batch answers nobody (#589). `batchId` is the capture from the top.
+    // hints at a lane nobody holds, and a lease message naming that
+    // batch answers nobody. `batchId` is the capture from the top.
     const coordinator = new BatchWriteCoordinator({
       bee: this.nodeBee,
       batchId,
@@ -2332,7 +2331,7 @@ export class SwarmIdProxy {
         this.writeLeaseCache(accountInfo.accountId, batchId, snap ?? null),
       // Bound to this drive, not read at call time: a coordinator torn down
       // mid-write still runs these, and must not flush, or sign with, the
-      // drive the session holds by then (#862).
+      // drive the session holds by then.
       flushStamperState: () => this.saveStamperStateIfNeeded(drive),
       getWorkerPool: (count) => drive.getOrCreateWorkerPool(count),
       onLeaseChange: () => this.emitConnectionInfoIfChanged(),
@@ -2387,9 +2386,9 @@ export class SwarmIdProxy {
    * This device's identity, captured once. Lazily initialised here as a
    * fallback; the auth entry points set it eagerly. Reused for every lease
    * operation so acquire / refresh / validate never disagree about who we
-   * are (which previously caused false "reclaimed by another device").
+   * are (disagreement reads as a false "reclaimed by another device").
    */
-  /** Drop a pending roster-append retry (#920) and its backoff, so the next
+  /** Drop a pending roster-append retry and its backoff, so the next
    *  session on this proxy starts over at the base delay. */
   private clearRosterRetry(): void {
     if (this.rosterRetryTimer !== undefined) {
@@ -2482,15 +2481,15 @@ export class SwarmIdProxy {
    * there is no local stamp state to protect and we run unlocked. In user-stamp
    * mode the write goes through the {@link BatchWriteCoordinator}, which takes
    * the cross-tab write lock, ensures a held partition, and flushes stamper
-   * state — the proxy no longer owns any of that.
+   * state; the proxy owns none of that.
    *
-   * `targetOptions.counter`, when given, counts the chunks the write sends
-   * (#932): the lease's own lock, intent and state-publish chunks go out
+   * `targetOptions.counter`, when given, counts the chunks the write sends:
+   * the lease's own lock, intent and state-publish chunks go out
    * through the coordinator, not the target, and are not counted.
    *
    * A write that names its drive (`batchId`) goes to that drive's write path,
    * built on first use, and never falls back to the gateway: the app asked
-   * for that drive (#862).
+   * for that drive.
    */
   private async withModeAwareWriteLock<T>(
     targetOptions:
@@ -2499,7 +2498,7 @@ export class SwarmIdProxy {
     uncounted: (target: UploadTarget) => Promise<T>,
     batchId?: string,
   ): Promise<T> {
-    // Every chunk the write sends lands on the request's counter (#932).
+    // Every chunk the write sends lands on the request's counter.
     const counter = targetOptions?.counter
     const operation = (target: UploadTarget) =>
       uncounted(counter ? { ...target, counter } : target)
@@ -2532,7 +2531,7 @@ export class SwarmIdProxy {
   }
 
   /**
-   * {@link withModeAwareWriteLock} for a write that reports its cost (#932).
+   * {@link withModeAwareWriteLock} for a write that reports its cost.
    * The counter is made here and returned with the result, so a handler has
    * no counter it could forget to wire and then report as zero.
    */
@@ -2569,7 +2568,7 @@ export class SwarmIdProxy {
 
       // Handle parent identification (must come first). Only the embedding
       // parent window may identify itself — any co-embedded iframe can obtain
-      // our WindowProxy and race the real parent otherwise (#410).
+      // our WindowProxy and race the real parent otherwise.
       if (type === "parentIdentify") {
         if (event.source !== window.parent) {
           console.warn("[Proxy] Rejected parentIdentify from non-parent window")
@@ -2611,9 +2610,7 @@ export class SwarmIdProxy {
           // Say what actually happened. Falling through from here reaches the
           // parent-origin check below, which rejects this message as coming
           // from an "unauthorized origin" — it came from the right one and
-          // failed the schema (#587). That was a rare diagnostic while any
-          // payload shape produced SOME session; now that the projection is
-          // required, a refused handover is the ordinary way a version-skewed
+          // failed the schema. A refused handover is the ordinary way a version-skewed
           // identity deployment fails, and it must not read as an origin bug.
           console.warn(`[Proxy] Invalid ${type} payload:`, popupResult.error)
           if (type === "setSecret") this.endRefusedConnect()
@@ -2709,7 +2706,7 @@ export class SwarmIdProxy {
       type: "proxyReady",
       authenticated: this.authenticated,
       parentOrigin: this.parentOrigin,
-      // Which auth transport can reach this iframe (#613). Read here rather
+      // Which auth transport can reach this iframe. Read here rather
       // than at construction because the parent is only known now, and the
       // client needs it before its first `connect()` — an await between the
       // user's click and `window.open` is what loses the gesture.
@@ -2918,7 +2915,7 @@ export class SwarmIdProxy {
     }
 
     // No shared storage to read: either nobody has connected, or this iframe is
-    // partitioned. A session kept from a previous load answers that (#635) —
+    // partitioned. A session kept from a previous load answers that —
     // the same 30-day deadline the unpartitioned branch above enforces out of
     // shared storage, enforced here out of this partition's own.
     const session = this.readPartitionSession()
@@ -2937,8 +2934,8 @@ export class SwarmIdProxy {
    * Through the same `hydratePartitionAccount`, so there is one function that
    * builds a partitioned session rather than two that drift.
    *
-   * The deadline cannot see a revoke made while the tab was closed — the
-   * re-handshake used to be what caught that. So the session comes up now and
+   * The deadline cannot see a revoke made while the tab was closed, so the
+   * session comes up at once and
    * is checked against the account's own Swarm state in the background
    * (`verifyRestoredSession`), which is the posture the unpartitioned path
    * already has: trust local storage first, learn of a remote revoke after.
@@ -2982,8 +2979,7 @@ export class SwarmIdProxy {
    * Read the account's PUBLISHED state once, on restore, and end the session if
    * this origin's connection has ended since. A check, not a fold — the view
    * keeps what was handed over, and any other change (a rotated signer key, a
-   * moved default stamp) is adopted from the bus at the next live overlap, as
-   * it was before #635.
+   * moved default stamp) is adopted from the bus at the next live overlap.
    *
    * Ended means what it means everywhere else: the entry is gone, `revokedAt`
    * (Remove), or a `disconnectedAt` newer than the connection this session came
@@ -2991,7 +2987,7 @@ export class SwarmIdProxy {
    * `appSecret`/`connectedUntil`, so the entry is the only place it can be
    * said — and testing only the Remove marker let a Disconnect made while the
    * tab was closed come back still connected and still able to upload, for the
-   * rest of the session's 30 days (#667). The comparison is `connectedAt`, the
+   * rest of the session's 30 days. The comparison is `connectedAt`, the
    * same guard `restoreLocalSessionFields` uses live: a disconnect older than
    * our connection was answered by that connection.
    *
@@ -3039,7 +3035,7 @@ export class SwarmIdProxy {
     } catch (error) {
       // Fail open, as above — an unreachable gateway says nothing. The routine
       // inconclusive read logs its message alone: the error object prints its
-      // whole stack, which reads as a crash (#911). Anything else is not
+      // whole stack, which reads as a crash. Anything else is not
       // routine, and keeps the object so the stack says where.
       if (error instanceof RosterScanInconclusiveError) {
         console.warn(
@@ -3055,7 +3051,7 @@ export class SwarmIdProxy {
   /**
    * The connected app's drives, from shared storage or the partitioned
    * session's account view: its primary (`resolveStampForApp`), and every
-   * live drive its grant names — the ones it may write to (#862).
+   * live drive its grant names — the ones it may write to.
    */
   private lookupDrivesForApp(): {
     primary: PostageStamp | undefined
@@ -3068,7 +3064,7 @@ export class SwarmIdProxy {
       if (!connection) return none
       const { account, app } = connection
 
-      // The app's primary drive (#862): the account default for no grant or
+      // The app's primary drive: the account default for no grant or
       // `"all"`, the first granted regular drive for a list. Never a drive the
       // app was not granted.
       return {
@@ -3230,11 +3226,9 @@ export class SwarmIdProxy {
         this.announcedDeviceName(),
       )
       // Persist when anything the rival set reads actually moved — a peer
-      // appearing, a refreshed sign-in, a tombstone — not merely when the list
-      // got longer, which discarded the timestamp-only merges `activeDeviceIds`
-      // prunes on (#586). A poll no longer stamps our own entry (#652), so a
-      // quiet round compares equal and the cross-tab storage-event churn the
-      // length check was really for does not come back.
+      // appearing, a refreshed sign-in, a tombstone — including the timestamp-only
+      // merges `activeDeviceIds` prunes on. A poll does not stamp our own entry, so
+      // a quiet round compares equal and causes no cross-tab storage-event churn.
       if (
         deviceRegistryChanged(
           account.devices,
@@ -3467,10 +3461,9 @@ export class SwarmIdProxy {
         }).catch(() => [])
         const rosterEntry = rosterDevices.find((d) => d.deviceId === deviceId)
         if (rosterEntry?.removedAt) {
-          // A tombstoned self is NOT "not yet announced". Reading it that way
-          // republished us without the tombstone, which resurrected the device
-          // on every peer — the roster half of #611, and the half that
-          // propagates. A removal or an expiry is news to obey, not a gap to
+          // A tombstoned self is NOT "not yet announced". Reading it that way would
+          // republish us without the tombstone and resurrect the device on every peer.
+          // A removal or an expiry is news to obey, not a gap to
           // fill: stand down, and let a genuine sign-in put us back
           // (`reactivateThisDevice`).
           //
@@ -3532,7 +3525,7 @@ export class SwarmIdProxy {
         }),
       )
       if (published.status === "partial") {
-        // The roster append was skipped (#920). Re-run the announce path with
+        // The roster append was skipped. Re-run the announce path with
         // backoff: it re-reads the roster and appends once the scan is clean.
         //
         // Only while this session still holds a partition: the guard at the
@@ -3554,7 +3547,7 @@ export class SwarmIdProxy {
       }
       this.rosterRetryAttempt = 0
       // `ui/tests/three-devices.test.ts` counts this line to tell a busy
-      // holder from an idle one (#707); reword it there too.
+      // holder from an idle one; reword it there too.
       console.info(
         `[Proxy] Published device state for ${snapshot.accountId} (partition ${coordinator.currentPartition})`,
       )
@@ -3566,11 +3559,11 @@ export class SwarmIdProxy {
   }
 
   /**
-   * Lift this device's own `removedAt` on a genuine sign-in — #337's rule, at
-   * the one seam that can tell a user unlocking their account from a timer.
+   * Lift this device's own `removedAt` on a genuine sign-in, at the one seam
+   * that can tell a user unlocking their account from a timer.
    *
    * `mergeDevices` used to do this on every refresh, which meant no removal and
-   * no expiry ever stuck (#611). Here it happens once, on a fresh `setSecret`
+   * no expiry ever stuck. Here it happens once, on a fresh `setSecret`
    * handover, and the next publish re-announces us with the tombstone gone —
    * `ensureInRoster` appends when the removed-state differs, so the roster
    * carries the reactivation to peers without any extra write of our own.
@@ -3585,7 +3578,7 @@ export class SwarmIdProxy {
    * shared account document behind the identity UI's back. The identity UI has
    * no reactivation seam of its own, and needs none — nothing writes a device
    * tombstone today, and a device that stops beating on the bus is ignored at
-   * read rather than tombstoned (#655). If manual removal is ever built, its
+   * read rather than tombstoned. If manual removal is ever built, its
    * seam has to do what this one does, both halves included.
    */
   private reactivateThisDevice(): void {
@@ -3610,7 +3603,7 @@ export class SwarmIdProxy {
    * The name this context announces itself under in the device registry.
    *
    * A PARTITIONED proxy keeps its own `swarm-id-device-id` in the partition, so
-   * it is a per-dApp device and says which dApp (#570). An UNPARTITIONED one
+   * it is a per-dApp device and says which dApp. An UNPARTITIONED one
    * reads the trusted domain's first-party store and therefore shares the
    * device id with the identity UI — it is the same device, and naming it after
    * whichever dApp happened to embed it would be wrong.
@@ -3718,7 +3711,7 @@ export class SwarmIdProxy {
 
     // The session ends here whichever way it ended — disconnect, revoke, or an
     // expiry the reconcile noticed — so the stored copy goes with it, or the
-    // next load would bring it back (#635).
+    // next load would bring it back.
     this.clearPartitionSession()
 
     // Clear stamper state from localStorage
@@ -3728,12 +3721,8 @@ export class SwarmIdProxy {
     // Invalidate matching connected-app entries in the nested account documents
     // so a refresh does not reconnect: `connectedUntil: undefined` is what
     // `isConnectionValid` gates on, and `disconnectedAt` is how the end travels
-    // — the marker membership merges on (#681). This used to write
-    // `lastConnectedAt: 0` instead, a sentinel nothing ever read and a claim
-    // ("never connected") that was not true; under the membership clock a zero
-    // is simply the value that loses every merge, so the entry's old timestamp
-    // came back on the next fold and a dApp-initiated Disconnect never reached
-    // a peer the way the identity UI's does.
+    // — the marker membership merges on. A `lastConnectedAt: 0` sentinel would
+    // lose every merge, and the Disconnect would never reach a peer.
     try {
       const manager = createAccountsStorageManager()
       const accounts = manager.load()
@@ -3789,7 +3778,7 @@ export class SwarmIdProxy {
    * Send error message to parent
    */
   /**
-   * Answer a request with what went wrong, as a dApp can branch on it (#761):
+   * Answer a request with what went wrong, as a dApp can branch on it:
    * the caught value is classified by `toWireError`; `fallback` is the
    * message for a throw that was not an `Error`.
    */
@@ -3835,7 +3824,7 @@ export class SwarmIdProxy {
   /**
    * Refuse a drive here, before its write coordinator: its first stamped
    * write is the lease claim, and a refused claim reads as partition
-   * contention (#745).
+   * contention.
    */
   private refuseDrive(drive: DriveWritePath): void {
     const refusal = this.refusalOf(drive)
@@ -3994,7 +3983,7 @@ export class SwarmIdProxy {
             name: account.name,
             address: account.id.toHex(),
             publicKey: account.publicKey,
-            // Not advertised while the app may not read with it (#885).
+            // Not advertised while the app may not read with it.
             ...(permissions.dataSharing && { sharingPublicKey }),
             postageSignerAddress,
             avatar: generatedAvatar(account.id.toHex()),
@@ -4068,11 +4057,11 @@ export class SwarmIdProxy {
   }
 
   /**
-   * The app's drives as one comparable string (#933): the primary, each
+   * The app's drives as one comparable string: the primary, each
    * granted drive with its refusal, and each built write path's lane. A
    * change here re-sends `connectionInfoChanged` even when the info itself is
    * the same, so the dApp re-reads `getDrives()` rather than learning of a
-   * drive gone from the grant, moved (#882) or run out (#793) from a failing
+   * drive gone from the grant, moved or run out from a failing
    * write. The refusal is read off every granted drive, not only the built
    * ones: a drive the app never wrote to expires all the same.
    */
@@ -4104,7 +4093,7 @@ export class SwarmIdProxy {
     const drives = this.driveState()
     // A change to the drives alone, a lease moving on a non-primary drive or
     // a drive leaving the grant, changes nothing in the info itself; it is
-    // still sent, so the dApp re-reads `getDrives()` (#882, #933).
+    // still sent, so the dApp re-reads `getDrives()`.
     if (
       connectionInfoEqual(this.lastConnectionInfo, info) &&
       drives === this.lastDriveState
@@ -4262,7 +4251,7 @@ export class SwarmIdProxy {
   }
 
   /**
-   * Open the permissions popup for this session's account (#711) and answer
+   * Open the permissions popup for this session's account and answer
    * once it is closed. The popup writes the grant to shared storage, which
    * reaches an unpartitioned session as a storage event; a partitioned one
    * is handed it as `grantUpdated`, which is why the iframe opens it.
@@ -4704,7 +4693,7 @@ export class SwarmIdProxy {
     }
   }
 
-  /** A folder as one manifest (#750); the Swarm-specific part is `uploadCollection`. */
+  /** A folder as one manifest; the Swarm-specific part is `uploadCollection`. */
   private async handleUploadFiles(
     message: UploadFilesMessage,
     event: MessageEvent,
@@ -5104,7 +5093,7 @@ export class SwarmIdProxy {
    * Derive a stable, app-scoped secret HMAC(appSecret, label) for the connected
    * app. `appSecret` is genuinely secret (unlike the recoverable appKey public
    * key) and never leaves the iframe — only the derived bytes are returned, so
-   * the app can seed an unguessable feed topic without exposing metadata (#520).
+   * the app can seed an unguessable feed topic without exposing metadata.
    */
   private async handleDeriveAppSecret(
     message: DeriveAppSecretMessage,
@@ -6066,7 +6055,7 @@ export class SwarmIdProxy {
   // ============================================================================
 
   /**
-   * The account-wide ACT key (#519), or undefined when the session carries no
+   * The account-wide ACT key, or undefined when the session carries no
    * account to derive it from.
    */
   private sharingSecret(): Uint8Array | undefined {
@@ -6074,13 +6063,13 @@ export class SwarmIdProxy {
     return derivationKey ? deriveSharingKey(derivationKey).secret : undefined
   }
 
-  /** What this session may do with the sharing key right now (#885). */
+  /** What this session may do with the sharing key right now. */
   private sessionPermissions() {
     const connection = this.findConnectionForParent()
     return effectivePermissions(connection?.app, connection?.account.settings)
   }
 
-  /** The rejection for a sharing-key use the user has not allowed (#885). */
+  /** The rejection for a sharing-key use the user has not allowed. */
   private permissionDenied(permission: PermissionName): SwarmIdError {
     return new SwarmIdError(
       "permission-denied",
@@ -6095,7 +6084,7 @@ export class SwarmIdProxy {
    * The keys this session may read or manage ACT data with: the origin-bound
    * app key, then the account-wide sharing key. The ACT module picks the one
    * a share names. The sharing key is always offered, denied when the switch
-   * `permission` is off (#885): the ACT module then fails the call with
+   * `permission` is off: the ACT module then fails the call with
    * `permission-denied` exactly when that key is the one the share names,
    * which neither key alone could tell.
    */
@@ -6141,7 +6130,7 @@ export class SwarmIdProxy {
       )
 
       // The app key publishes unless the dApp asked for the identity-level
-      // key, which the user may have switched off for this app (#885)
+      // key, which the user may have switched off for this app
       if (
         options?.publisher === "identity" &&
         !this.sessionPermissions().writeAccess
@@ -6389,7 +6378,7 @@ export class SwarmIdProxy {
         parseCompressedPublicKey(hex),
       )
 
-      // Revoke grantees from ACT (drops their entries; reference unchanged, #496)
+      // Revoke grantees from ACT (drops their entries; reference unchanged)
       const { result, stampedChunks } = await this.withCountedWrite(
         { useWorkers: true },
         async (target) => {
@@ -6473,7 +6462,7 @@ export class SwarmIdProxy {
     this.adoptLifetimeReadings()
   }
 
-  /** Every drive the app was granted, the primary marked (#862). */
+  /** Every drive the app was granted, the primary marked. */
   private async handleGetDrives(
     message: GetDrivesMessage,
     event: MessageEvent,
@@ -6742,7 +6731,7 @@ export class SwarmIdProxy {
     // only when neither authoritative source can answer (e.g. RPC unreachable
     // and a public gateway that does not track the batch).
     // The reading is kept, so the refusal and the expiry timer follow what the
-    // dApp is told (#927); the caller adopts it once the answer is out. The
+    // dApp is told; the caller adopts it once the answer is out. The
     // dApp is also told where the figure came from and when, so it can show
     // an estimate as one and age the rest.
     let lifetime:
@@ -6765,7 +6754,7 @@ export class SwarmIdProxy {
       batchID: stamp.batchID.toHex(),
       utilization: stamp.utilization,
       // Bee's own answer when it serves `/stamps`; otherwise the stored
-      // verdict, held back while the batch is warming up (#924).
+      // verdict, held back while the batch is warming up.
       usable:
         details?.usable ??
         (stamp.usable && this.blocksUntilUsable(stamp) === 0),

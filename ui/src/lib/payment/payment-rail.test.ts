@@ -167,8 +167,8 @@ describe('isUnrecognizedChainError', () => {
   })
 
   /**
-   * The message fallback used to be a bare `4902` and `not.*added`, which
-   * matched those patterns anywhere in the string — a chain id like 49020, a
+   * A bare `4902` and `not.*added` as the message fallback would
+   * match those patterns anywhere in the string — a chain id like 49020, a
    * gas figure, an address fragment, or any unrelated "not ... added"
    * pairing. None of those are a wallet saying it doesn't know the chain, and
    * answering them with wallet_addEthereumChain is an unrequested prompt.

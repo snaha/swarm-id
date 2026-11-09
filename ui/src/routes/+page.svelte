@@ -119,7 +119,7 @@
 
   // ponytail: dismissals live in this device's localStorage, so another device
   // shows the alert again; a synced `expiryNoticedAt` on the drive record if
-  // that matters (#892).
+  // that matters.
   const DISMISSED_ALERTS_KEY = 'swarm-id-dismissed-drive-alerts'
   interface DismissedAlerts {
     /** Batch IDs (hex) of expired drives whose alert was closed. */

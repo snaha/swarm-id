@@ -4,7 +4,7 @@
 -->
 <!--
   The drive rows of a grant, one select each, with "Add new drive…" opening
-  the Add drive dialog for that row (#711, #885). Shared by the permissions
+  the Add drive dialog for that row. Shared by the permissions
   popup and the app's own page; the rows are the caller's (`PickerRow[]`),
   this only renders and edits them.
 -->

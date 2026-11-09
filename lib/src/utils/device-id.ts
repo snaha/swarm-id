@@ -29,7 +29,7 @@ export function getOrCreateDeviceId(): string {
  *
  * Upserts the current device: creates the entry if absent, otherwise leaves it
  * as it is apart from the name. A `deviceName` we are given REPLACES the stored
- * one, so a caller that learns a better label — the partition naming of #570 —
+ * one, so a caller that learns a better label
  * corrects the row already in the registry instead of only the next one
  * created. A caller with nothing to say passes nothing and the stored label
  * stands: the name must not be blanked by a context that does not know it.
@@ -37,21 +37,20 @@ export function getOrCreateDeviceId(): string {
  * A replacement carries `nameUpdatedAt`, the name's own merge clock, without
  * which the correction never left this device: `mergeDevicesList` ranks records
  * on sign-in recency, a rename moves none of it, and a tie favours the local
- * copy — so every other context kept its stale label forever (#663). Only an
+ * copy — so every other context kept its stale label forever. Only an
  * ACTUAL change stamps it. Both callers are polls, and a clock that moved every
  * time a caller passed the name it already stored would make every quiet round
- * a byte change to persist, which is the churn #652 removed.
+ * a byte change to persist.
  *
  * Touches neither `removedAt` nor `lastSignedInAt` on an existing entry. Both
  * callers are refresh paths — the proxy's throttled roster poll and the UI's
  * periodic fold — and a poll is not a sign-in: clearing our own tombstone here
- * undid every removal on the next round (#611), and stamping `lastSignedInAt`
- * here (#652) made every fold a byte change to persist, which a proxy holding
- * a partition answered with a bus delta and a stamped feed write. #337's "a
- * genuine sign-in re-activates a device removed elsewhere" still holds; it
- * lives at the sign-in seam instead (`reactivateThisDevice`, the only one there
- * is), which is the only place that can tell a user unlocking their account
- * from a timer firing.
+ * would undo every removal on the next round, and stamping `lastSignedInAt`
+ * here would make every fold a byte change to persist, which a proxy holding
+ * a partition answers with a bus delta and a stamped feed write. Re-activating
+ * a device removed elsewhere lives at the sign-in seam (`reactivateThisDevice`,
+ * the only one there is), the only place that can tell a user unlocking their
+ * account from a timer firing.
  * Liveness is not this field's job either — the bus carries it.
  */
 export function mergeDevices(
@@ -152,7 +151,7 @@ export function detectDeviceName(): string {
  * a partition is one (top-level site, iframe origin) pair — so two tabs of one
  * dApp are one device, while two different dApps on the same browser are two.
  * `detectDeviceName()` alone therefore hands a Safari user with three connected
- * dApps three indistinguishable "Safari on Mac" rows (#570). The dApp host is
+ * dApps three indistinguishable "Safari on Mac" rows. The dApp host is
  * what tells them apart, and the port comes with it: locally the dApps differ
  * by port alone.
  *
@@ -176,7 +175,7 @@ export function detectDeviceName(): string {
  * `withBatchWriteLock`, a Web Lock scoped to the store they share. Giving them
  * a row each would spend two of a finite `partitionCount` on writers that are
  * already serialised. Where per-origin state really is per-origin, the storage
- * key says so: the stored session (#671), and the stamper's.
+ * key says so: the stored session, and the stamper's.
  *
  * What the alternation costs: nothing on the refresh itself. A partitioned
  * proxy keeps the merged registry in memory, and the refresh that produces it
@@ -203,18 +202,16 @@ export function partitionDeviceName(appOrigin: string): string {
 /**
  * Whether a merged device registry is worth persisting over the stored one.
  *
- * The old test was "did the list get LONGER", which threw away every merge that
- * only refreshed a peer's `lastSignedInAt` or set a `removedAt` tombstone — and
- * those are exactly the fields `activeDeviceIds` prunes the rival set on. A peer
- * the roster shows as live could therefore age out of the stored copy, drop out
- * of the rival set, and never get an intent read: the dual-acquire the registry
- * refresh exists to prevent (#586).
+ * Not merely "did the list get longer": a merge that only refreshes a peer's
+ * `lastSignedInAt` or sets a `removedAt` tombstone moves exactly the fields
+ * `activeDeviceIds` prunes the rival set on. Discarding it would let a peer the
+ * roster shows as live age out of the stored copy, drop out of the rival set,
+ * and never get an intent read: the dual-acquire the registry refresh exists
+ * to prevent.
  *
- * Every field counts, our own included. `mergeDevices` no longer stamps our
- * `lastSignedInAt` on a poll (#652), so when it moves it is a genuine sign-in
- * (a reactivation) and worth a save. Until then this excluded it, because
- * counting a stamp that moved on every call meant a save and a storage event in
- * every other tab, every poll round.
+ * Every field counts, our own included. `mergeDevices` does not stamp our
+ * `lastSignedInAt` on a poll, so when it moves it is a genuine sign-in (a
+ * reactivation) and worth a save.
  */
 export function deviceRegistryChanged(
   stored: Device[],

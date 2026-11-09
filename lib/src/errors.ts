@@ -12,7 +12,7 @@ import type {
 export interface SwarmIdErrorDetails {
   /** With `upload-unavailable`: why the session refuses to stamp */
   reason?: UploadUnavailableReason
-  /** With `permission-denied`: the switch the user has to turn on (#885) */
+  /** With `permission-denied`: the switch the user has to turn on */
   permission?: PermissionName
   /** With `bee-rejected`: the HTTP status Bee or the gateway answered */
   status?: number
@@ -24,7 +24,7 @@ export interface SwarmIdErrorDetails {
 }
 
 /**
- * Every rejection a `SwarmIdClient` call produces (#761). `message` is the
+ * Every rejection a `SwarmIdClient` call produces. `message` is the
  * text a caller always got; `code` is the stable part to branch on, and the
  * details are set for the codes that have them.
  *

@@ -344,7 +344,7 @@ async function openPaymentAndConnect(
   // settle: the payment screens opening IS the state under test.
   await addDrive(page, { settle: false })
 
-  // 1. The screens open on the method chosen up front (#629), so assert the
+  // 1. The screens open on the method chosen up front, so assert the
   //    choice carried rather than making it again — picking it twice would hide
   //    an `initialMethod` that stopped reaching here. The connect prompt behind
   //    it is proof the rail resolved rather than falling through to the faucet.

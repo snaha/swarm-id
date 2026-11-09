@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Integration test (#302): exercise the library's real Swarm operations
+ * Integration test: exercise the library's real Swarm operations
  * against a live local Bee node started with `@snaha/bee-compose`.
  *
  * Run with:

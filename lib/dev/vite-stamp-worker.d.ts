@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Vite plugin serving `virtual:stamp-worker-code` in dev (see #347).
+ * Vite plugin serving `virtual:stamp-worker-code` in dev.
  * Typed structurally so the lib needs no `vite` dependency; the shape is
  * assignable to Vite's `Plugin`.
  */

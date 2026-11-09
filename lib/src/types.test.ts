@@ -12,7 +12,7 @@ import {
 
 const REFERENCE = "a".repeat(64)
 
-describe("DownloadOptionsSchema (#420)", () => {
+describe("DownloadOptionsSchema", () => {
   it("accepts plain non-ACT options", () => {
     const options = { timeoutMs: 5000 }
 
@@ -45,7 +45,7 @@ describe("DownloadOptionsSchema (#420)", () => {
   })
 })
 
-describe("download messages with plain options (#420)", () => {
+describe("download messages with plain options", () => {
   const messages = [
     { type: "downloadData", requestId: "r1", reference: REFERENCE },
     { type: "downloadFile", requestId: "r2", reference: REFERENCE },
@@ -65,7 +65,7 @@ describe("download messages with plain options (#420)", () => {
   })
 })
 
-describe("connectionInfoChanged forward compatibility (#642)", () => {
+describe("connectionInfoChanged forward compatibility", () => {
   const MESSAGE = {
     type: "connectionInfoChanged" as const,
     canUpload: false,
@@ -73,7 +73,7 @@ describe("connectionInfoChanged forward compatibility (#642)", () => {
   }
 
   it("drops an unknown uploadUnavailableReason rather than the whole snapshot", () => {
-    // A proxy deployed between #616 and #642 still emits `"download-only"`.
+    // An older proxy can emit a value this lib does not know.
     // Hard-parsing the enum would fail the message, and the client drops a
     // message it cannot parse — if it is the first one after `proxyReady`,
     // `initialize()` then rejects on its timeout and the dApp never starts.
@@ -101,7 +101,7 @@ describe("connectionInfoChanged forward compatibility (#642)", () => {
   })
 })
 
-describe("connectionInfoChanged identity (#230)", () => {
+describe("connectionInfoChanged identity", () => {
   // Wire-valid shapes: bare hex, no 0x prefix.
   const IDENTITY = {
     id: "4".repeat(40),
@@ -128,7 +128,7 @@ describe("connectionInfoChanged identity (#230)", () => {
     ).not.toThrow()
   })
 
-  it("carries the sharing key, and still parses without it (#519)", () => {
+  it("carries the sharing key, and still parses without it", () => {
     const avatar = { source: "generated", url: "data:image/svg+xml,%3Csvg%3E" }
     const parsed = IframeToParentMessageSchema.parse({
       ...MESSAGE,
@@ -157,7 +157,7 @@ describe("connectionInfoChanged identity (#230)", () => {
   })
 })
 
-describe("ButtonConfigSchema typography (#779)", () => {
+describe("ButtonConfigSchema typography", () => {
   const TYPOGRAPHY = {
     fontFamily: "Inter, system-ui, sans-serif",
     fontSize: "18px",

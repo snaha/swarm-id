@@ -42,7 +42,7 @@ import {
 // Fixtures
 // ============================================================================
 
-/** The batch whose lanes these locks are about (#589). */
+/** The batch whose lanes these locks are about. */
 const TEST_BATCH_ID = new BatchId("ab".repeat(32))
 
 const DEVICE_A = "device-alpha-111"
@@ -1077,7 +1077,7 @@ describe("releasePartitionLock — generation fencing", () => {
     expect((await readLock())?.holderDeviceId).toBe(NO_HOLDER_DEVICE_ID)
   })
 
-  it("skips when our own NEWER claim is visible (successor re-acquired — #349)", async () => {
+  it("skips when our own NEWER claim is visible (successor re-acquired)", async () => {
     const successorGen = gen(NOW - 1_000, DEVICE_A)
     await seedLock({
       holderDeviceId: DEVICE_A,
@@ -1158,9 +1158,9 @@ describe("acquirePartitionLock — verify vs fenced sentinels", () => {
     await waitA.triggered
 
     // A stale generation-fenced release (of some EARLIER claim) lands while
-    // A is parked in its guard window. Under the old fresh-generation
-    // sentinel this read back as a HIGHER generation → false lost-race →
-    // spurious read-only. The fenced sentinel is older → A's claim stands.
+    // A is parked in its guard window. A fresh-generation sentinel would read back
+    // as a HIGHER generation → false lost-race → spurious read-only. The fenced
+    // sentinel is older → A's claim stands.
     await writePartitionLock({
       bee: bee,
       stamper,

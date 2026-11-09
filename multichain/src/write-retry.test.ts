@@ -1,11 +1,11 @@
 // Copyright 2026 The Swarm Authors. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 /**
- * The retry around a write, and the node answer that used to end it (#620).
+ * The retry around a write, and the node answer that must not end it.
  *
  * `AlreadyKnown` means the node HAS the transaction — a successful broadcast
- * reported as an error. It used to take the rethrow branch, so every resend of
- * a transaction that reached a mempool failed, the user's Try again included.
+ * reported as an error, so a resend of a transaction that reached a mempool
+ * must not fail.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import {

@@ -5,7 +5,7 @@
  * Two ways to end up with a manifest that will not load.
  *
  * The two save helpers hand their callback different things, and pairing one
- * with the other's uploader fails silently (#774): `saveMantarayTree` builds
+ * with the other's uploader fails silently: `saveMantarayTree` builds
  * the content-addressed chunk itself and records each node's address from
  * those bytes, so an uploader that treats its argument as a payload and wraps
  * it in a chunk of its own stores every node under an address the tree does
@@ -88,7 +88,7 @@ describe("saveMantarayTreeRecursively with a payload-wrapping uploader", () => {
 })
 
 describe("saveMantarayTree with a payload-wrapping uploader", () => {
-  it("stores every node under an address the tree does not record (#774)", async () => {
+  it("stores every node under an address the tree does not record", async () => {
     const { bee, target } = setup()
 
     // The callback wraps the finished chunk in a chunk of its own, the way

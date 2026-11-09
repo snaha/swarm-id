@@ -183,13 +183,13 @@ describe("SwarmIdClient connect()", () => {
     internals(client).storageShared = shared
   }
 
-  // The transport is a property of the iframe's STORAGE, not of the browser
-  // (#613). A partitioned iframe can only be reached by the popup it opened
+  // The transport is a property of the iframe's STORAGE, not of the browser.
+  // A partitioned iframe can only be reached by the popup it opened
   // itself, and no user agent tells you which mode you are in.
   describe("shared storage", () => {
     // The connect screen renders a row per requested drive, so the request
     // has to reach it on this path too — the proxy is not opening this one.
-    it("puts the permissions request on the popup URL (#862)", async () => {
+    it("puts the permissions request on the popup URL", async () => {
       client.destroy()
       client = new SwarmIdClient({
         iframeOrigin: "https://swarm-id.example.com",
@@ -212,7 +212,7 @@ describe("SwarmIdClient connect()", () => {
     /** Past the popup watch's Safari start delay and one poll. */
     const POPUP_WATCH_MS = 3000
 
-    // #711: the permissions popup opens the way connect's does, and the call
+    // The permissions popup opens the way connect's does, and the call
     // resolves with the drives the app holds once it closes — granted or not.
     it("opens the permissions page for the session's account and resolves with its drives", async () => {
       vi.useFakeTimers()
@@ -308,7 +308,7 @@ describe("SwarmIdClient connect()", () => {
       }
     })
 
-    // #885: a switch already on is not asked for again; a drive always is.
+    // A switch already on is not asked for again; a drive always is.
     it("skips the popup when every switch asked for is already on", async () => {
       vi.spyOn(internals(client), "ensureReady").mockImplementation(() => {})
       setStorageShared(true)
@@ -373,7 +373,7 @@ describe("SwarmIdClient connect()", () => {
         expect.stringContaining("https://swarm-id.example.com/connect#origin="),
         "_blank",
       )
-      // Even on WebKit: the user agent no longer decides this.
+      // Even on WebKit: the user agent does not decide this.
       expect(sendRequestSpy).not.toHaveBeenCalled()
     })
 
@@ -496,7 +496,7 @@ describe("SwarmIdClient connectionInfo", () => {
     internals(client).iframe = env.iframeElement
   })
 
-  // The drives' own event (#933): a dApp that cares about its drives alone
+  // The drives' own event: a dApp that cares about its drives alone
   // need not sift them out of every connection change.
   it("invokes onDrivesChange after onConnectionChange when the info carries the flag, else not", () => {
     const order: string[] = []
@@ -586,8 +586,8 @@ describe("SwarmIdClient connectionInfo", () => {
 
   // `uploadUnavailableReason` is `.catch(undefined)` on purpose: the client
   // DROPS a `connectionInfoChanged` it cannot parse, and dropping the first one
-  // after `proxyReady` leaves `initialize()` to time out. A proxy from the
-  // #616–#642 window still emits the `"download-only"` this lib removed, and
+  // after `proxyReady` leaves `initialize()` to time out. An older proxy
+  // can emit an enum value this lib does not know, and
   // deploy-cache skew alone is enough to pair it with a current client — so one
   // unrecognised member must degrade the field, not stop the dApp starting.
   it("keeps a snapshot whose uploadUnavailableReason this lib no longer knows", () => {
@@ -687,7 +687,7 @@ describe("SwarmIdClient request seam", () => {
     }
   })
 
-  // #761: a failure used to arrive as `new Error(message.error)`, the status
+  // A failure used to arrive as `new Error(message.error)`, the status
   // and Bee's message flattened into the string or dropped.
   it("rejects with a SwarmIdError carrying the wire's code, status and Bee message", async () => {
     const promise = client.downloadData("a".repeat(64))
@@ -713,7 +713,7 @@ describe("SwarmIdClient request seam", () => {
     })
   })
 
-  // #662: the client meets whatever the trusted domain runs. A newer proxy's
+  // The client meets whatever the trusted domain runs. A newer proxy's
   // code or reason lands as internal / no reason, message intact — never as a
   // dropped message and a request that settles 30 s later as timeout.
   it.each([
@@ -784,7 +784,7 @@ describe("SwarmIdClient request seam", () => {
     }
   })
 
-  it("downloadData sends plain non-ACT options (#420)", async () => {
+  it("downloadData sends plain non-ACT options", async () => {
     const reference = "a".repeat(64)
     const data = new Uint8Array([1, 2, 3])
 
@@ -803,10 +803,9 @@ describe("SwarmIdClient request seam", () => {
     await expect(promise).resolves.toEqual(data)
   })
 
-  // #775 review: `requestOptions.timeout` used to reach only the Bee request
-  // inside the iframe, while the client's own round-trip timer kept the
-  // constructor default — so a per-call value above 30 s still rejected at
-  // 30 s, with the same message the caller had just tried to escape.
+  // `requestOptions.timeout` bounds the client's round-trip timer as well as the
+  // Bee request inside the iframe, or a per-call value above the constructor
+  // default would still reject at that default.
   it("a per-call requestOptions.timeout bounds the whole round trip", async () => {
     const DEFAULT_CLIENT_TIMEOUT_MS = 30_000
     const PER_CALL_TIMEOUT_MS = 60_000
@@ -909,7 +908,7 @@ describe("SwarmIdClient request seam", () => {
     }
   })
 
-  // #750: the folder API takes what bee-js takes — a FileList, File[], or
+  // The folder API takes what bee-js takes — a FileList, File[], or
   // `{ path, file }` pairs — and ships `{ path, data, contentType }` so the
   // proxy builds the manifest. A File's own path comes from webkitdirectory.
   it("uploadFiles normalizes File[] and { path, file } pairs into one message", async () => {
@@ -1083,7 +1082,7 @@ describe("SwarmIdClient request seam", () => {
     expect(parsed).toMatchObject({ drives: [{ kind: "scratch" }] })
   })
 
-  it("carries the drive a write names (#862)", async () => {
+  it("carries the drive a write names", async () => {
     const batchID = "cd".repeat(32)
     void client.uploadData(new Uint8Array([1]), { batchID }).catch(() => {})
     expect(lastPostedMessage()).toMatchObject({
@@ -1119,7 +1118,7 @@ describe("SwarmIdClient request seam", () => {
     void upload.catch(() => {})
   })
 
-  // What a write cost reaches the dApp with its result (#932).
+  // What a write cost reaches the dApp with its result.
   it("returns the chunks a write sent", async () => {
     const upload = client.uploadData(new Uint8Array([1]))
     deliver({
@@ -1238,7 +1237,7 @@ describe("SwarmIdClient request seam", () => {
     await expect(promise).rejects.toThrow("Bee node unreachable")
   })
 
-  it("deriveAppSecret round-trips the label and returns the secret (#520)", async () => {
+  it("deriveAppSecret round-trips the label and returns the secret", async () => {
     const secret = new Uint8Array([9, 8, 7, 6])
 
     const promise = client.deriveAppSecret("topic-seed")
@@ -1254,7 +1253,7 @@ describe("SwarmIdClient request seam", () => {
     await expect(promise).resolves.toEqual(secret)
   })
 
-  it("deriveAppSecret rejects when the proxy is not authenticated (#520)", async () => {
+  it("deriveAppSecret rejects when the proxy is not authenticated", async () => {
     const promise = client.deriveAppSecret("topic-seed")
 
     const sent = lastPostedMessage()
@@ -1564,7 +1563,7 @@ describe("SwarmIdClient window message filtering", () => {
   })
 })
 
-describe("SwarmIdClient init-timeout timers (#421)", () => {
+describe("SwarmIdClient init-timeout timers", () => {
   // A distinctive value so the init timers are identifiable by delay.
   const INIT_TIMEOUT = 12345
 
@@ -2119,9 +2118,9 @@ describe("SwarmIdClient initialize() sequencing", () => {
 })
 
 // A server render (Next.js App Router, SvelteKit with SSR) reaches the
-// constructor with no `window`. It used to throw a bare `ReferenceError` from
-// inside `setupMessageListener` — in the published build, a stack into
-// minified code that named neither the package nor the fix (#778).
+// constructor with no `window`. A bare `ReferenceError` from inside
+// `setupMessageListener` would be, in the published build, a stack into
+// minified code that names neither the package nor the fix.
 describe("SwarmIdClient on a server", () => {
   it("says the package is browser-only and where to construct instead", () => {
     vi.unstubAllGlobals()

@@ -13,7 +13,7 @@ export function isScratchDrive(stamp: Pick<PostageStamp, "kind">): boolean {
 }
 
 /**
- * The batches an app's grant names (#862): the list it was given, or — for an
+ * The batches an app's grant names: the list it was given, or — for an
  * app with no grant — the account default, followed wherever it moves.
  * `"all"` names every batch the account has, including ones added later.
  */
@@ -37,7 +37,7 @@ function inGrant(
 }
 
 /**
- * The app's PRIMARY drive: where a write that names no drive goes (#862).
+ * The app's PRIMARY drive: where a write that names no drive goes.
  *
  * For an app with no grant, or one granted all drives, that is the account
  * default; for a list, its first granted regular drive. A scratch drive is
@@ -50,7 +50,7 @@ function inGrant(
  *
  * Deleted stamps (tombstones) are skipped. An EXPIRED stamp deliberately is
  * not: it can be renewed, and moving on would silently charge a drive the user
- * never picked for this app (#745).
+ * never picked for this app.
  *
  * Paired with `stampsReachableByApp` below, which decides what a partitioned
  * session may HOLD while this decides what it SPENDS — over the same grant,
@@ -74,7 +74,7 @@ export function resolveStampForApp(
  * The stamps a connected app's session can ever reach: the ones its grant
  * names, tombstones included.
  *
- * This is what a PARTITIONED session is handed and allowed to keep (#578). It
+ * This is what a PARTITIONED session is handed and allowed to keep. It
  * holds its account view in memory, in a context embedded by an arbitrary dApp
  * page, so the rest of the collection is signer keys it has no use for. Least
  * privilege rather than a broken boundary: an unpartitioned proxy reads the

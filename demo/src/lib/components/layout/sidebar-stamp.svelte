@@ -66,12 +66,12 @@
         {/each}
       </select>
     </label>
-    <!-- One lane per drive: each drive's lease is its own (#882). -->
+    <!-- One lane per drive: each drive's lease is its own. -->
     {#each clientStore.drives as drive (drive.batchID)}
       <div class="text-xs text-muted-foreground pl-6">
         Lane on {drive.batchID.slice(0, 8)}…: {drive.partition ?? 'Inactive'}
       </div>
-      <!-- A drive bought moments ago, until the network has seen its batch (#924). -->
+      <!-- A drive bought moments ago, until the network has seen its batch. -->
       {#if !drive.usable}
         <div class="text-xs text-muted-foreground pl-6">
           Setting up {drive.batchID.slice(0, 8)}…

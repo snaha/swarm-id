@@ -34,7 +34,7 @@ import type { AccountDeltaInput } from "./messages"
  * Stamp signer keys stay, and so does the whole collection: the publisher does
  * not know which app each receiver is embedded by, so it cannot narrow. The
  * narrowing happens on receive instead — `applyAccountDelta` keeps only the
- * stamps the folded pointers name (#578) — which bounds what a partitioned
+ * stamps the folded pointers name — which bounds what a partitioned
  * session HOLDS, not what reaches its room. Per-app deltas in a per-app room
  * would be the latter.
  */

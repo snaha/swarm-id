@@ -231,7 +231,7 @@ export async function publishDeviceState(opts: {
   encryptionKey: string
   view: DeviceStateView
   target: UploadTarget
-  /** Per-chunk utilisation hook (mirrors the old publish path). */
+  /** Per-chunk utilisation hook. */
   onChunksUploaded?: (chunkAddresses: Uint8Array[]) => Promise<void>
 }): Promise<SyncResult> {
   const written = await writeDeviceState({
@@ -333,7 +333,7 @@ export function foldAccount(
     postageStamps = mergePostageStamps(postageStamps, v.postageStamps)
     accountName = pickLatest(accountName, v.accountName)
     defaultBatch = pickLatest(defaultBatch, v.defaultPostageStampBatchID)
-    // The switches inside ride their own clocks (#885).
+    // The switches inside ride their own clocks.
     settings = mergeAccountSettings(settings, v.settings)
   }
 

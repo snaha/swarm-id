@@ -11,8 +11,7 @@
  * It delegates the read to the lib's `foldAccountFromSwarm`, which scans the
  * append-only device roster and folds every device's per-device state feed
  * (Phase 3a). Doing the read in the lib keeps the discovery + merge rules in
- * one place — the old hand-rolled reader pointed at the retired shared snapshot
- * feed and would simply find nothing now that publishing is per-device.
+ * one place.
  */
 import { Bee, EthAddress } from '@ethersphere/bee-js'
 import {

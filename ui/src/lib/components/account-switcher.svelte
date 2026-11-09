@@ -129,7 +129,7 @@
     </div>
   {/if}
 
-  <!-- Frame 159-8517: one action, a page offering create or sign in (#834). -->
+  <!-- Frame 159-8517: one action, a page offering create or sign in. -->
   <Button variant="ghost" size="sm" class="w-full" href={resolve(routes.ACCOUNT_ADD)}>
     <UserAddFill />
     Add another account

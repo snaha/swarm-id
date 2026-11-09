@@ -22,7 +22,7 @@ import {
 
 /**
  * Gate used to park `PartitionLease.release()` between its publish and its
- * sentinel write — exactly the window of the #349 race (a detached release
+ * sentinel write — exactly the window of the race (a detached release
  * outliving a same-device re-acquire). When `block` is unset the mock is a
  * pure passthrough, so every other test is unaffected.
  */
@@ -221,8 +221,7 @@ describe("readPartitionState / writePartitionState round-trip", () => {
 
     expect(result.unchanged).toBe(false)
     // The reader reconstructs the exact published counter. No compensation: the
-    // state pointer is a reserved-slot SOC, so it consumes no data slot (unlike
-    // the old data-slot epoch feed entry).
+    // state pointer is a reserved-slot SOC, so it consumes no data slot.
     expect(result.localCounter).toEqual(localCounter)
   })
 
@@ -545,7 +544,7 @@ describe("readPartitionState / writePartitionState round-trip", () => {
     // `leasedUntil` then advanced ~2 epochs further — the last couple of
     // best-effort heartbeats were dropped (flaky gateway), or the lease TTL is
     // wider than one pointer epoch. The pointer is NOT in the {leasedUntil,
-    // leasedUntil-1} window the old reader probed.
+    // leasedUntil-1} window.
     const T0 = Date.now() - 5 * 60_000
     vi.spyOn(Date, "now").mockReturnValue(T0)
     await partitionState.writePartitionState({
@@ -561,7 +560,7 @@ describe("readPartitionState / writePartitionState round-trip", () => {
     vi.restoreAllMocks()
 
     const leasedUntil = T0 + 2 * STATE_EPOCH_MS + 1_000
-    // The pointer's bucket is ≥2 below the leasedUntil bucket — outside the old
+    // The pointer's bucket is ≥2 below the leasedUntil bucket — outside a
     // ±1 window, inside the full-TTL span the reader must scan.
     expect(
       partitionState.statePointerEpochBucket(leasedUntil) -
@@ -679,7 +678,7 @@ describe("PartitionLease.acquire — seeds the incremental first publish", () =>
     // STATE_POINTER_EPOCH boundary under parallel-worker CPU contention, forcing
     // the first publish full and flaking the incremental assertion. The setup
     // write must anchor to the SAME clock so its rotating pointer lands in the
-    // bucket the lease reads (#385).
+    // bucket the lease reads.
     const clock = 30_000 * 1000
 
     // A prior holder published multi-chunk state (non-zero buckets across three
@@ -746,7 +745,7 @@ describe("PartitionLease.acquire — seeds the incremental first publish", () =>
     const EPOCH_MS = 30_000
 
     // Drive a fake clock aligned to an epoch boundary. The prior-holder setup
-    // write must anchor to the SAME clock the lease reads with (#385), else its
+    // write must anchor to the SAME clock the lease reads with, else its
     // rotating pointer lands in a different bucket and acquire can't resume it.
     let clock = EPOCH_MS * 1000 // start of epoch 1000
 
@@ -904,10 +903,10 @@ describe("PartitionLease.acquire — seeds the incremental first publish", () =>
       //
       // The retained chunk's bucket is random (its encryption key is), so the
       // scan is a geometric draw with mean 65536: it stops at the first hit, and
-      // the bound only matters when it misses. The old bound of 400 000 missed
-      // once in ~450 runs (#796); a million misses once in ~4 million. A full
+      // the bound only matters when it misses. A bound of 400 000 misses once in
+      // ~450 runs; a million misses once in ~4 million. A full
       // scan measured 7.5–16 µs per epoch idle, and this test inflates ~3× under
-      // the parallel suite (#686), so the suite's 30 s timeout would cut a long
+      // the parallel suite, so the suite's 30 s timeout would cut a long
       // scan short of the bound: the `timeout` on this test is what lets the
       // bound decide, and the miss message print.
       const SCAN_EPOCHS = 1_000_000
@@ -2081,7 +2080,7 @@ describe("PartitionLease.publishState — commit without release", () => {
     await lease.publishState(counter)
 
     // A taking-over device resumes at EXACTLY this counter. It reads at the same
-    // clock the lease published at (#385) — the rendezvous is clock-anchored.
+    // clock the lease published at — the rendezvous is clock-anchored.
     const read = await partitionState.readPartitionState({
       bee: bee,
       owner: OWNER,
@@ -2232,7 +2231,7 @@ describe("PartitionLease.release", () => {
   })
 })
 
-describe("PartitionLease.release — generation fencing (#349)", () => {
+describe("PartitionLease.release — generation fencing", () => {
   function readLock(partition: number) {
     return readPartitionLock({
       bee: bee,
@@ -2752,7 +2751,7 @@ describe("PartitionLease.acquire — holder presence beacons (gateway holder-exi
     expect(await lease.refresh()).toBe("held")
   })
 
-  it("refresh keeps the earlier claimant's lease across an ADVANCING clock (issue #413)", async () => {
+  it("refresh keeps the earlier claimant's lease across an ADVANCING clock", async () => {
     // The frozen-clock test above passes even with the bug because a re-minted
     // generation lands on the SAME timestamp. Under a real advancing clock, a
     // refresh that re-mints its generation stamps a LATER timestamp than the

@@ -18,7 +18,7 @@
  * (derived from each account's `derivationKey`), so the SOC address still
  * differs per account without accountId in the hash. The batch IS in there:
  * keying on the partition alone made lane p of batch X and lane p of batch Y
- * one address, so two coordinators sharing no slot took turns anyway (#589).
+ * one address, so two coordinators sharing no slot took turns anyway.
  * See `makePartitionLockIdentifier` in `../utils/lock-soc`.
  *
  * Protocol (acquire / takeover / refresh):
@@ -351,7 +351,7 @@ export async function acquirePartitionLock(opts: {
     return { outcome: "acquired", payload: ourPayload }
   }
   // Our own claim, read back at our generation — or an OLDER frozen-cache copy
-  // of it. Refresh now REUSES the claim's generation (issue #413), so a stale
+  // of it. Refresh now REUSES the claim's generation, so a stale
   // gateway read of a prior tick compares EQUAL, not older; keying on `< 0`
   // alone would let it through with a stale `leasedUntil`, silently stalling
   // the lease (the holder believes it holds while peers see it expire and take
@@ -374,7 +374,7 @@ export async function acquirePartitionLock(opts: {
  * and Bee replaces a same-address SOC whenever the new chunk's postage
  * stamp timestamp is newer, so the stale sentinel would deterministically
  * clobber the successor's claim and peers would treat the partition as free
- * while the successor still believes it holds it (issue #349).
+ * while the successor still believes it holds it.
  *
  * Skip rules (never write a sentinel over a claim that is not the one being
  * released):
@@ -385,7 +385,7 @@ export async function acquirePartitionLock(opts: {
  * - a foreign claim, live or expired — never clobber a peer; an expired
  *   claim already reads as takeable.
  * - our own claim with a NEWER generation — a successor re-acquired while
- *   this release was publishing (#349), or a release-overlapping refresh.
+ *   this release was publishing, or a release-overlapping refresh.
  * - our own claim at a non-newer generation writes (`<=`, not `==`): a
  *   stale read returning an older refresh of the same holdership must not
  *   suppress the release.
@@ -393,7 +393,7 @@ export async function acquirePartitionLock(opts: {
  *   generation-fenced, so readers and successors can order it correctly).
  *
  * Residual (documented, accepted): a skip decision is only as fresh as the
- * pre-write read. The same-device #349 race reads through the same Bee node
+ * pre-write read. The same-device race reads through the same Bee node
  * (read-your-writes holds), so the fence is dependable there; cross-node
  * staleness falls back to the displacement/TTL machinery.
  */

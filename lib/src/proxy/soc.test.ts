@@ -261,7 +261,7 @@ describe("SOC upload signature validation", () => {
       const expectedSignature = signer.sign(toSign)
 
       // The captured signature should match what we'd sign over the sent body
-      // This is the EXACT bug that was introduced: if signature covers different
+      // If the signature covers a different
       // address than the body sent, Bee node rejects with "invalid chunk"
       expect(captured!.signature).toBe(expectedSignature.toHex())
     })
@@ -317,9 +317,7 @@ describe("SOC upload signature validation", () => {
 
   describe("regression: signature/data mismatch bug", () => {
     /**
-     * This is the exact regression test for the bug that was introduced.
-     *
-     * The bug was:
+     * The failure this guards against:
      * 1. Create unencrypted CAC: address = hash(unencrypted_span + unencrypted_payload)
      * 2. Sign: signature = sign(hash(identifier + address))  [signs UNENCRYPTED address]
      * 3. Encrypt payload and send: body = span + encrypted_payload [sends ENCRYPTED data]

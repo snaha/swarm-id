@@ -38,9 +38,9 @@ const DEFAULT_BEE_URL = "https://api.gateway.ethswarm.org/"
 const KEY_BYTES = 32
 
 /**
- * Stand-in account public key for the now-REQUIRED `DeviceStateView`/
- * `DeviceStateSnapshotSchemaV1.accountPublicKey` field (#377/#381 made it
- * mandatory). The read schema only requires a string, and the fold just needs it
+ * Stand-in account public key for the required `DeviceStateView`/
+ * `DeviceStateSnapshotSchemaV1.accountPublicKey` field.
+ * The read schema only requires a string, and the fold just needs it
  * present + consistent across an account's device feeds — these throwaway test
  * accounts never validate its curve identity — so one shared compressed-pubkey-
  * shaped constant suffices. Without it, every published snapshot fails read
@@ -87,7 +87,7 @@ export const liveEnv = {
   beeUrl: str("BEE_URL") ?? DEFAULT_BEE_URL,
   /** A second node or gateway, independent of `BEE_URL`, that reads only:
    *  what the network serves once the uploader's own copy is out of the
-   *  picture (`scratch-eviction.test.ts`, #884). Optional; that suite skips
+   *  picture (`scratch-eviction.test.ts`). Optional; that suite skips
    *  without it. */
   readBeeUrl: str("READ_BEE_URL"),
   batchIdHex: str("BATCH_ID"),

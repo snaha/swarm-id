@@ -183,7 +183,7 @@ describe('accountBusStore', () => {
     deriveGate.value = undefined
   })
 
-  // #711: a permissions popup closes right after saving. The debounce would
+  // A permissions popup closes right after saving. The debounce would
   // die with it, and the room keeps nothing for a peer not yet in it.
   it('publishes before a page closes, once a peer is in the room, and once', async () => {
     const account = makeAccount()
@@ -275,9 +275,9 @@ describe('accountBusStore', () => {
   })
 
   // The debounce holds ONE pending account. A commit for another account
-  // landing in the same window used to overwrite it, and the publish-time guard
-  // then dropped the intruder — losing the joined account's delta rather than
-  // ignoring the other one's. A revoke is what goes missing.
+  // landing in the same window must not overwrite it: the publish-time guard
+  // would drop the intruder and lose the joined account's delta, and a revoke is
+  // what goes missing.
   it('keeps the joined account pending when another account commits in the same window', async () => {
     const account = makeAccount()
     accountBusStore.join(account)
@@ -337,7 +337,7 @@ describe('accountBusStore', () => {
   // A build with no bus server (GitHub Pages, plain `pnpm dev`) has no
   // cross-partition channel to reach at all — publishing must be a quiet no-op,
   // not a crash on every account mutation.
-  // #608: the tab publishes AND consumes. A peer's delta has to reach the fold
+  // The tab publishes AND consumes. A peer's delta has to reach the fold
   // — this is the wiring that did not exist while the store was publish-only.
   it('folds a delta a peer publishes into the room', async () => {
     accountBusStore.join(makeAccount())
@@ -396,7 +396,7 @@ describe('accountBusStore', () => {
 
   // A closed tab announces nothing of its own (why, in `PresenceTracker`'s
   // header). The room reports it instead, and the device goes with the socket
-  // it was heard on rather than waiting out PRESENCE_MAX_AGE_MS (#572).
+  // it was heard on rather than waiting out PRESENCE_MAX_AGE_MS.
   it('drops a peer when the room says its socket left', async () => {
     accountBusStore.join(makeAccount())
     await settle()

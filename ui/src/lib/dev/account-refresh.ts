@@ -88,7 +88,7 @@ export async function foldCurrentAccount(force: boolean): Promise<boolean> {
  * Fold EVERY local account, cooldown-respecting. The periodic tick uses this
  * rather than the current account so a proxy iframe (where the dApp-connected
  * account need not be the session-current one — or any current is set at all)
- * still converges on peer changes (#338).
+ * still converges on peer changes.
  */
 async function foldAllAccounts(): Promise<void> {
   // Signed-out accounts kept no derivationKey — nothing to derive feeds from.

@@ -34,7 +34,7 @@
   let connectionDays = $derived(String(msToDays(appSessionDuration(account.settings))))
   // Revoked tombstones stay in the record for sync; only show live entries.
   const activeApps = $derived(account.activeApps)
-  // The account-wide sharing switches (#885), on unless turned off here;
+  // The account-wide sharing switches, on unless turned off here;
   // write access is shown once data sharing is on, as on the app's own page.
   const dataSharing = $derived(sharingDefault(account.settings, 'dataSharing'))
   const writeAccess = $derived(sharingDefault(account.settings, 'writeAccess'))

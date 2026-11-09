@@ -23,7 +23,7 @@
  * this class is the lifecycle layer above `PartitionLease`. See
  * `docs/BatchWriteCoordinator.md`.
  *
- * ## Displacement-during-upload race (issue #336)
+ * ## Displacement-during-upload race
  *
  * `refreshTick` runs on a bare `setInterval`, NOT under the write lock, so it
  * can detect that a peer took our partition while an upload is mid-`stamp()`.
@@ -192,7 +192,7 @@ export const PEER_YIELD_MIN_IDLE_MS = 3000
 /**
  * A `lease-released` reaches a waiter over the bus well before the released
  * slot's sentinel write is readable from its node, so the scan it wakes often
- * still reads the old holder (#724). Rather than sleep out a poll interval on
+ * still reads the old holder. Rather than sleep out a poll interval on
  * that — or re-ask, which draws a fresh request id nobody can stand down
  * against, so a second holder yields for the same waiter — the wait re-scans
  * this many times at this interval, asking nobody.
@@ -214,7 +214,7 @@ type SlotWaitState = {
    *  from before the release. */
   maybeFree: boolean
   /** Short re-scans still owed to the announced release: its sentinel write
-   *  may take a few seconds to become readable from this node (#724), and
+   *  may take a few seconds to become readable from this node, and
    *  asking again in the meantime only makes another holder yield. */
   rescansLeft: number
   /** Whether an announcement has already bought its window. Every round past
@@ -306,7 +306,7 @@ export class BatchWriteCoordinator {
   }
 
   /** The batch this coordinator's lease lives on — lanes are per (batch,
-   *  partition), so the proxy routes bus lease messages by both (#589). */
+   *  partition), so the proxy routes bus lease messages by both. */
   get batchId(): string {
     return this.deps.batchId
   }
@@ -421,7 +421,7 @@ export class BatchWriteCoordinator {
     if (lease) {
       const localCounter = stamper.getLocalCounter()
       if (localCounter !== undefined) {
-        // Serialize the detached release under the batch write lock (#349):
+        // Serialize the detached release under the batch write lock:
         // a successor coordinator's acquire (`startLease`/`withWrite` →
         // `lockAndFlush`) queues on the same origin-wide Web Lock, so the
         // release's publish + sentinel fully complete BEFORE the successor
@@ -765,7 +765,7 @@ export class BatchWriteCoordinator {
         // the sentinel is on its way, not yet readable here. Look again
         // shortly, and ask nobody — a repeat ask is a fresh request id, and
         // the holder that already yielded cannot stand the others down
-        // against it (#724).
+        // against it.
         state.rescansLeft--
         await this.sleepUntilWoken(state, ANNOUNCED_RESCAN_INTERVAL_MS)
       } else {
@@ -868,7 +868,7 @@ export class BatchWriteCoordinator {
     // (pre-fencing) sentinel converging late, or a frozen-cache view of one.
     // Re-assert the claim NOW instead of waiting for the next refresh tick,
     // so peers stop reading the partition as free before this upload runs.
-    // NOTE: this is defence in depth, not the primary #349 fix — the
+    // NOTE: this is defence in depth, not the primary fence against a stale release — the
     // freshness throttle above usually skips this check in the seconds right
     // after a re-acquire; the teardown-release lock serialization closes
     // that window.

@@ -139,6 +139,7 @@ Chain-backed suites are NOT in `check:all` — they need a chain running. `pnpm 
 - Omit the issue number from branch names and titles
 - When a PR resolves an issue, reference it with a closing keyword (e.g. `Closes #53`) so GitHub closes the issue automatically on merge
 - Keep a **linear history**: rebase onto `main` to update a branch or resolve a conflict — never merge `main` into the branch. Rebasing a branch that is already pushed ends in `git push --force-with-lease`.
+- `docs/decisions.md` is the decision log: why something is the way it is, newest first, append only. A PR that makes or changes a decision adds its entry in the same PR.
 
 ## Deployment
 

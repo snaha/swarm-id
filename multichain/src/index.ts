@@ -83,7 +83,7 @@ export type {
 export { buildExactInputSwapData } from "./sushi"
 export type { SwapInput } from "./sushi"
 // Exported so a caller can tell "already broadcast, may still settle" from a
-// failure, and refuse to charge again on that basis (#620).
+// failure, and refuse to charge again on that basis.
 export { TransactionAlreadyKnownError } from "./write-retry"
 
 /**

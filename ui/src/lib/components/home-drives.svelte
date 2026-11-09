@@ -351,7 +351,7 @@
                   </Button>
                 {/snippet}
 
-                <!-- The account never syncs to a scratch drive (#862). -->
+                <!-- The account never syncs to a scratch drive. -->
                 {#if !isDefault && !isScratchDrive(drive)}
                   <DropdownMenuItem onclick={() => setDefault(drive)}>
                     <Star class="size-4 shrink-0" />

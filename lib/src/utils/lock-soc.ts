@@ -27,7 +27,7 @@ const PARTITION_LOCK_DOMAIN = "swarm-id-partition-lock-v1"
  * lock on the partition alone made lane p of batch X and lane p of batch Y one
  * chunk address, so two coordinators that share no slot took turns anyway —
  * and per-app stamp overrides put two live coordinators on two batches without
- * any multi-batch feature (#589).
+ * any multi-batch feature.
  */
 export function makePartitionLockIdentifier(
   batchId: BatchId,

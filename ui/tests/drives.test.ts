@@ -15,7 +15,7 @@
  * method — an unreachable chain for the built-in engine, and the /dev mock's
  * error outcome for the widget, which settles on mainnet and can be reached
  * here no other way — and the two about choosing, which check that the question
- * is put whatever the owner address holds (#619) and that the seam's own screen
+ * is put whatever the owner address holds and that the seam's own screen
  * opens on the answer.
  */
 import { expect, test } from '@playwright/test'
@@ -152,7 +152,7 @@ test('drive management: add, rename, set default, remove', async ({ page }) => {
   await expect(newCard).toBeVisible({ timeout: DRIVE_SETTLE_TIMEOUT_MS })
   await newCard.getByRole('button', { name: 'Expand drive' }).click()
   await expandedCard.getByRole('button', { name: 'Drive actions' }).click()
-  // #837: the batch ID is one click away, and the explorer link carries it bare.
+  // The batch ID is one click away, and the explorer link carries it bare.
   const explorer = page.getByRole('menuitem', { name: 'View in batch explorer' })
   await expect(explorer).toHaveAttribute(
     'href',
@@ -198,10 +198,9 @@ test('drive management: add, rename, set default, remove', async ({ page }) => {
   expect(afterRemove.default).toBe(afterRemove.live[0].batchID)
 })
 
-// #619: the funding seam used to be the only place the method could be chosen,
-// and it is raised only when the owner address is short — so an account holding
-// funds from an earlier attempt was committed to the built-in engine, with the
-// widget reachable from nowhere. The chooser now precedes the balance read.
+// The funding seam is raised only when the owner address is short, so the
+// method chooser precedes the balance read: an account holding funds from an
+// earlier attempt is still asked.
 test('a funded account is still asked which payment method to use', async ({ page }) => {
   test.setTimeout(CHAIN_TEST_TIMEOUT_MS)
   await createLocalAccount(page)
@@ -275,7 +274,7 @@ test('a failed mock purchase surfaces the error and adds nothing', async ({ page
   expect(drives.live).toHaveLength(0)
 })
 
-// The chooser answering up front (#619) took the payment screens out of the buy
+// The chooser answering up front took the payment screens out of the buy
 // flow's only e2e path, leaving the seam, `initialMethod` and the in-dialog
 // widget fallback uncovered. This walks the whole built-in leg an unfunded
 // account takes.
@@ -327,8 +326,8 @@ test('an expired drive offers no extend or resize, only removal', async ({ page 
   await expect(page.getByRole('button', { name: 'Increase size' })).toBeVisible()
   await expect(page.getByRole('button', { name: 'Extend lifespan' })).toBeVisible()
 
-  // The site re-reads its drives from the chain once the load fold settles
-  // (#903): a record aged to zero comes back with the chain's lifetime. CI runs
+  // The site re-reads its drives from the chain once the load fold settles:
+  // a record aged to zero comes back with the chain's lifetime. CI runs
   // no Bee, so its 404 stands in for an account that has published nothing yet.
   await page.route('http://localhost:1633/**', (route) =>
     route.request().method() === 'GET'
@@ -343,7 +342,7 @@ test('an expired drive offers no extend or resize, only removal', async ({ page 
   await page.getByRole('tab', { name: 'Storage' }).click()
   await expect(page.getByText('Drive expired')).toHaveCount(0)
 
-  // Age it past expiry (#545): an expired batch can be neither topped up nor
+  // Age it past expiry: an expired batch can be neither topped up nor
   // diluted, so both edits go away and removal is all that is left. The batch
   // is still funded on the chain, so the chain is cut off first or the re-read
   // would put the lifetime back.

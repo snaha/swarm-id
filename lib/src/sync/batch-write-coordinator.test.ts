@@ -504,7 +504,7 @@ describe("BatchWriteCoordinator — acquire does not block on the device-registr
     })
     const stamper = makeStamper([])
     // A refresh that never settles — modelling the slow gateway roster fold.
-    // If `acquire` awaited it (the old bug), `withWrite` would hang to the 45s
+    // If `acquire` awaited it, `withWrite` would hang to the 45s
     // cap; non-blocking, the acquire binds the partition immediately.
     let settleRefresh!: () => void
     const refreshKnownDeviceIds = vi.fn(
@@ -719,7 +719,7 @@ describe("BatchWriteCoordinator — teardown safety", () => {
     expect(calls).toEqual(["invalidate", "unbind"])
   })
 
-  it("runs the teardown release under the batch write lock (#349)", async () => {
+  it("runs the teardown release under the batch write lock", async () => {
     const calls: string[] = []
     const stamper = makeStamper(calls)
     const lease = makeLease({ partition: 1 })
@@ -926,7 +926,7 @@ describe("BatchWriteCoordinator — idle-yield under the write lock", () => {
       isReadOnly: false,
     })
     // The timer yield answers no request, so a waiter learns of it only from
-    // this announcement (#590).
+    // this announcement.
     expect(onLeaseReleased).toHaveBeenCalledWith(0, undefined)
   })
 
@@ -1797,7 +1797,7 @@ describe("BatchWriteCoordinator — bus-accelerated leases (docs/Account-Bus.md)
 
   // The answer to a request lands over the bus well before the released
   // slot's sentinel write is readable, so the round it wakes often reads the
-  // OLD holder and ends read-only again (#724). Sleeping out the poll interval
+  // OLD holder and ends read-only again. Sleeping out the poll interval
   // on that is the 17 s outlier; re-asking is worse — a fresh request id that
   // nobody can stand down against, so a second holder yields too.
   it("re-scans a stale read after an announced release without asking again", async () => {

@@ -137,7 +137,7 @@ describe('persist read-merge-write (two-tab race)', () => {
 
 // The proxy inside the proxy iframe subscribes beside this store and publishes
 // what it is told about — unless the write says peers must not hear of it.
-// A regression in this plumb reintroduces the echo of #707 silently.
+// A regression in this plumb reintroduces the publish echo between devices silently.
 describe('persist tells the same-window proxy which writes not to republish', () => {
   function detailOfLastWrite(): { noRepublish?: boolean } {
     const spy = vi.mocked(window.dispatchEvent)
@@ -336,7 +336,7 @@ describe('Account.setAppPermissions — drives', () => {
 
   // On its own clock, not the entry's: the grant says nothing about whether
   // the app is still connected, and ranking the entry by it discarded a revoke
-  // made on another device (#681).
+  // made on another device.
   it('grants the app drives and stamps the grant clock', () => {
     const account = accountWithApp()
     account.setAppPermissions(APP_URL, { drives: [new BatchId(BATCH_HEX)] })
@@ -388,8 +388,8 @@ describe('Account.setAppPermissions — drives', () => {
 })
 
 // The account syncs to its default drive, and a scratch drive overwrites its
-// oldest data, so the default is always a regular drive (#862).
-// #885: the sharing switches, pinned per app on the grant's clock, or set
+// oldest data, so the default is always a regular drive.
+// The sharing switches, pinned per app on the grant's clock, or set
 // account-wide on the settings clock.
 describe('Account sharing switches', () => {
   const APP_URL = 'https://app.example.com'

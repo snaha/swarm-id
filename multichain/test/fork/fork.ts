@@ -7,7 +7,7 @@
  *
  * Start it with `pnpm dev:chain:detach` from the repo root, or point
  * FORK_RPC_URL at :9545 to run against the Bee cluster's copy — either is fine
- * now that nothing here rewinds the chain.
+ * since nothing here rewinds the chain.
  */
 
 import { jsonRpcCall, jsonRpcCallOrUndefined } from "../../src/json-rpc"

@@ -1,7 +1,7 @@
 // Copyright 2026 The Swarm Authors. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 /**
- * The connect screen's drive picker, as data (#862): one row per drive the
+ * The connect screen's drive picker, as data: one row per drive the
  * app asked for, regular rows first, then scratch. The page renders rows;
  * this decides what each row starts with, may pick, and amounts to.
  */
@@ -56,7 +56,7 @@ function requestedRows(request: DriveRequirement[]): PickerRow[] {
  * — the account default when it is free — so the common case needs no click.
  * An optional row is left as it is, and never blocks. Returns `rows` itself
  * when nothing was filled, so a caller re-running this as drives arrive from
- * another tab (#879) can tell a change from none.
+ * another tab can tell a change from none.
  */
 export function fillRequiredRows(
   rows: PickerRow[],

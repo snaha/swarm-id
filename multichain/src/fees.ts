@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 /**
  * What a write offers to pay: a bundled EIP-7702 transaction's fee fields
- * (#618), and a legacy write's `gasPrice`.
+ * and a legacy write's `gasPrice`.
  *
  * Split out and pure because it is the part worth testing: the bundled path is
  * the only one in this package that prices itself in EIP-1559 fields. Every

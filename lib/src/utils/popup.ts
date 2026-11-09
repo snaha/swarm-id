@@ -9,7 +9,7 @@ const POPUP_WATCH_DELAY_MS = 2000
 const POPUP_CLOSED_POLL_MS = 500
 /**
  * How long the permissions popup may stay open before its request is
- * answered anyway: the user is choosing drives, maybe buying one (#711).
+ * answered anyway: the user is choosing drives, maybe buying one.
  */
 export const PERMISSIONS_POPUP_MAX_MS = 10 * 60_000
 

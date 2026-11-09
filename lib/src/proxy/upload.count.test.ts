@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Every chunk an upload sends is counted on the target's counter (#932), so
+ * Every chunk an upload sends is counted on the target's counter, so
  * the proxy can tell the dApp what a write cost. The count is checked against
  * what actually left: the chunks handed to Bee in stamper mode, the requests
  * the gateway saw in subsidised mode.

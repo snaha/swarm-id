@@ -243,8 +243,8 @@ describe("readRoster — a timed-out read is not end-of-feed", () => {
   })
 
   it("does not truncate the tail when a later window's only device times out once", async () => {
-    // Window 0 (0..15) full + index 16 present-but-slow in window 1. The old
-    // behaviour read window 1 as all-empty and dropped dev-16.
+    // Window 0 (0..15) full + index 16 present-but-slow in window 1, which must
+    // not read as all-empty and drop dev-16.
     const present = new Set<number>()
     for (let i = 0; i <= 15; i++) present.add(i)
     const { bee } = fakeBeeWithSlow({ present, slowOnce: 16 })
@@ -367,7 +367,7 @@ describe("readRoster / ensureInRoster — inconclusive is not empty", () => {
       target: { mode: "stamper" } as never,
     })
     expect(downloadChunk).not.toHaveBeenCalled()
-    // The skip must be reportable (#920): the caller retries later instead of
+    // The skip must be reportable: the caller retries later instead of
     // calling the publish a success and leaving the roster empty.
     expect(confirmed).toBe(false)
   })
@@ -380,15 +380,15 @@ describe("readRoster / ensureInRoster — inconclusive is not empty", () => {
 })
 
 /**
- * #457 — on a small cluster, Bee's `/chunks` answers an ABSENT chunk with a
+ * On a small cluster, Bee's `/chunks` answers an ABSENT chunk with a
  * persistent 500 ("read chunk failed"), never 404, so the `/chunks`-based SOC
  * read alone can never confirm an empty slot. `readRosterEntry` must then ask
  * `GET /soc/{owner}/{id}` (raw fetch — bee-js has no GET wrapper), whose
  * authoritative JSON 404 confirms absence. Only that validated 404 may stop the
  * scan; a route-missing 404 (the public gateway's plain-text "Not Found"), any
- * other status, or a network failure stays inconclusive (#438 fencing).
+ * other status, or a network failure stays inconclusive.
  */
-describe("readRoster — /soc absence probe on an inconclusive /chunks read (#457)", () => {
+describe("readRoster — /soc absence probe on an inconclusive /chunks read", () => {
   const BEE_URL = "http://bee.test"
 
   // Factories (a Response body is single-use; the retry round re-fetches).
@@ -480,9 +480,8 @@ describe("readRoster — /soc absence probe on an inconclusive /chunks read (#45
   })
 
   it("confirms an empty roster via /soc 404s: returns [] instead of throwing", async () => {
-    // The #457 deadlock: fresh account, every /chunks probe 500s. The /soc
-    // probe's JSON 404 confirms every slot empty → [] (today: inconclusive →
-    // RosterScanInconclusiveError → bootstrap never happens).
+    // A fresh account where every /chunks probe 500s. The /soc probe's JSON 404
+    // confirms every slot empty → [], so bootstrap can proceed.
     const { bee } = fakeSmallClusterBee({})
     await expect(
       readRoster({ bee: bee as never, accountId: ACCOUNT_ID, owner: OWNER }),
@@ -591,7 +590,7 @@ describe("readRoster — /soc absence probe on an inconclusive /chunks read (#45
   })
 })
 
-describe("readRoster — known-length memo (#400)", () => {
+describe("readRoster — known-length memo", () => {
   const scan = (present: Set<number>, probed?: number[]) =>
     readRoster({
       bee: fakeBee(present, probed) as never,

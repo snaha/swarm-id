@@ -74,7 +74,7 @@ describe("resolveStampForApp", () => {
 
   // Deliberate: expiry does not repoint spending. A tombstone is gone for
   // good, so it is skipped; an expired drive can be renewed, and silently
-  // charging another drive is not what the user chose for this app (#745).
+  // charging another drive is not what the user chose for this app.
   it("does not move past an expired drive", () => {
     const expired = createPostageStamp({
       batchID: appBatch,
@@ -90,7 +90,7 @@ describe("resolveStampForApp", () => {
   })
 
   // Every write to a scratch drive names it, so it never takes an untargeted
-  // one (#862).
+  // one.
   it("never resolves a scratch drive", () => {
     const result = resolveStampForApp(
       { drives: [scratchBatch] },
@@ -115,9 +115,8 @@ describe("resolveStampForApp", () => {
   })
 })
 
-// A partitioned session is handed its account view by the connect popup, and
-// before #578 that view carried EVERY stamp with its signer key — in a context
-// embedded by an arbitrary dApp page. It holds what its grant names (#578).
+// A partitioned session is handed its account view by the connect popup, in a
+// context embedded by an arbitrary dApp page. It holds only what its grant names.
 describe("stampsReachableByApp", () => {
   it("keeps only the drives a list names", () => {
     const result = stampsReachableByApp(

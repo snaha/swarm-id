@@ -167,7 +167,7 @@ describe("SignalingTransport — relay path", () => {
   })
 })
 
-// The two halves of #572's departure signal, and the only thing that makes it
+// The two halves of the departure signal, and the only thing that makes it
 // usable is that they name the peer the SAME way: attribution says which peer a
 // beat came from, `peer-left` says that peer is gone. If the ids differed,
 // `PresenceTracker.forgetPeer` would silently never match.
@@ -285,7 +285,7 @@ class FakeDataChannel {
  * setRemoteDescription(offer) and fires ondatachannel, after which both ends
  * are open.
  *
- * ICE is modelled only as far as its ORDERING constraint, which is what #574
+ * ICE is modelled only as far as its ORDERING constraint, which is what this
  * is about: `addIceCandidate` before a remote description exists rejects, the
  * way a real `RTCPeerConnection` throws `InvalidStateError`. `gate` holds
  * `setRemoteDescription` open so a test can land an `ice` signal in the window
@@ -382,8 +382,7 @@ function fakeRtcFactory(): RTCPeerConnection {
 }
 
 // The topic is the room capability, and a query string is recorded by every
-// ingress and proxy access log there is. It goes in the first frame instead
-// (#577).
+// ingress and proxy access log there is. It goes in the first frame instead.
 describe("SignalingTransport — joining a room", () => {
   it("keeps the room topic out of the URL", async () => {
     const urls: string[] = []
@@ -415,10 +414,9 @@ describe("SignalingTransport — joining a room", () => {
 })
 
 describe("SignalingTransport — WebRTC upgrade", () => {
-  // A `send` that throws for one peer used to escape the fan-out loop and
-  // starve every peer after it. For a teardown `lease-released` that costs the
-  // waiter its whole poll interval — so the peer falls back to the relay and
-  // the others are unaffected.
+  // A `send` that throws for one peer must not starve every peer after it: for
+  // a teardown `lease-released` that costs the waiter its whole poll interval.
+  // The peer falls back to the relay and the others are unaffected.
   it("relays past a peer whose data channel send throws", async () => {
     const sender = makeTransport({ createPeerConnection: fakeRtcFactory })
     const receiver = makeTransport({ createPeerConnection: fakeRtcFactory })
@@ -456,7 +454,7 @@ describe("SignalingTransport — WebRTC upgrade", () => {
   // awaiting `setRemoteDescription`. A real connection rejects that, and the
   // candidate was gone — there was no queue to replay it from. The pair still
   // "works" (it falls back to the server relay), which is what made this a
-  // silent downgrade rather than a visible failure (#574).
+  // silent downgrade rather than a visible failure.
   describe("ICE candidates racing the remote description", () => {
     type Internals = {
       peers: Map<string, { connection?: FakePeerConnection }>

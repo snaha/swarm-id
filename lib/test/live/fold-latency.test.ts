@@ -2,9 +2,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Fold-latency benchmark for #400: measures what `foldAccountFromSwarm` costs
+ * Fold-latency benchmark: measures what `foldAccountFromSwarm` costs
  * against a real gateway for a small (2-device) account — wall-clock time AND
- * Bee read count per fold — the product's page-load / recurring (#389) fold.
+ * Bee read count per fold — the product's page-load / recurring fold.
  *
  * Publishes a steady-state 2-device account, then runs 10 sequential folds and
  * prints a per-fold table + summary stats. Asserts only convergence (both
@@ -44,8 +44,7 @@ const FOLD_RUNS = 10
  * bee-js 13 puts both behind namespaces, so the proxy intercepts the namespace
  * property and hands back an object inheriting from it with the read method
  * overridden — the namespaces are class instances, so a spread copy would
- * lose their other methods. Trapping the old flat method names would count
- * nothing: they no longer exist on `Bee`.
+ * lose their other methods.
  */
 function withReadCounter(bee: Bee): { bee: Bee; counter: { reads: number } } {
   const counter = { reads: 0 }
@@ -82,7 +81,7 @@ function withReadCounter(bee: Bee): { bee: Bee; counter: { reads: number } } {
   return { bee: proxied, counter }
 }
 
-describe.skipIf(!liveEnv.configured)("live — fold latency (#400)", () => {
+describe.skipIf(!liveEnv.configured)("live — fold latency", () => {
   let ctx: LiveContext
   let keys: Awaited<ReturnType<typeof deriveAgentKeys>>
   let DEVICE_A: string

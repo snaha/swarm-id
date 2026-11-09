@@ -31,7 +31,7 @@ export const DEFAULT_SESSION_DURATION = 30 * DAY
  * (`ui/src/lib/connect-handshake.ts`), and a partitioned proxy recomputes the
  * same deadline when it hydrates (`hydratePartitionAccount`). Two copies of
  * `?? DEFAULT_SESSION_DURATION` is one copy that goes stale when the rule
- * gains a clamp or a floor (#590).
+ * gains a clamp or a floor.
  */
 export function appSessionDuration(
   settings?: { appSessionDuration?: number },

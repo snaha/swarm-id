@@ -4,7 +4,7 @@ import { expect, test } from '@playwright/test'
 
 import { PASSWORD, completeCreateFlow, goToApp, openConnectPopup, seedNoChain } from './helpers'
 
-// The permissions page grants with no unlock (#711), so it refuses to render
+// The permissions page grants with no unlock, so it refuses to render
 // inside another site's frame: a framed "Save permissions" is a clickjacking
 // target. Chain-free: the refusal comes before any account is looked up.
 const PERMISSIONS_URL =
@@ -18,7 +18,7 @@ test('the permissions page refuses to render inside a frame', async ({ page }) =
   await expect(framed.getByRole('button', { name: 'Save permissions' })).toHaveCount(0)
 })
 
-// The Apps tab's app page grants on the spot too (#885), and is deep-linkable
+// The Apps tab's app page grants on the spot too, and is deep-linkable
 // as `/#apps/<origin>`, so the home route refuses the same way.
 test('the home page refuses to render inside a frame', async ({ page }) => {
   await page.setContent(
@@ -30,8 +30,8 @@ test('the home page refuses to render inside a frame', async ({ page }) => {
   await expect(framed.getByRole('tab', { name: 'Apps' })).toHaveCount(0)
 })
 
-// The connect popup grants drives on approval, so it refuses the same way
-// (#896). Chain-free, like the one above.
+// The connect popup grants drives on approval, so it refuses the same way.
+// Chain-free, like the one above.
 test('the connect page refuses to render inside a frame', async ({ page }) => {
   await page.setContent(
     '<iframe src="http://localhost:5500/connect#origin=https%3A%2F%2Fapp.example" width="600" height="600"></iframe>',
@@ -61,7 +61,7 @@ test('the permissions page renders at top level', async ({ page }) => {
   await expect(page.getByText('This account is not on this device.')).toBeVisible()
 })
 
-// #885: the sharing switches. Account-wide on the Apps tab, pinned per app on
+// The sharing switches. Account-wide on the Apps tab, pinned per app on
 // the Permissions page, asked for by the app with `requestPermissions()`.
 // Chain-free: no drive is involved, and a local account connects without one.
 const DEMO_URL = 'http://localhost:3500'

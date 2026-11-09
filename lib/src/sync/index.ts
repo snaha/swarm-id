@@ -10,7 +10,7 @@ export {
 } from "../utils/key-derivation"
 
 // Snapshot merge primitives (shared by the publish and refresh paths so the
-// rules can't drift — #337).
+// rules can't drift).
 export {
   mergeSnapshotWithRemote,
   mergeConnectedApps,

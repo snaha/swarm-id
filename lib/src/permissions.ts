@@ -17,7 +17,7 @@ export function sharingDefault(
 }
 
 /**
- * What an app may do with the account-wide sharing key (#885): its own
+ * What an app may do with the account-wide sharing key: its own
  * pinned values, else the account defaults, else on. Write access never
  * outlives data sharing — the switch is only shown once data sharing is on.
  * One function for the proxy (which enforces it) and the identity UI (which
@@ -44,7 +44,7 @@ export function effectivePermissions(
  */
 export type FieldClocks = Readonly<Record<string, string>>
 
-/** What an app holds: the drives (#862), the two switches and its session length (#885). */
+/** What an app holds: the drives, the two switches and its session length. */
 export const GRANT_CLOCKS: FieldClocks = {
   drives: "drivesAt",
   dataSharing: "dataSharingAt",

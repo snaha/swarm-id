@@ -36,17 +36,17 @@ export interface BuildAuthUrlOptions {
    * storage is partitioned.
    */
   challenge?: string
-  /** What the app asks for; the connect screen renders a row per drive (#862). */
+  /** What the app asks for; the connect screen renders a row per drive. */
   permissions?: Permissions
   /**
-   * Opens the permissions page instead of connect (#711), for this account:
+   * Opens the permissions page instead of connect, for this account:
    * the one the app's session is with.
    */
   permissionsFor?: string
   /**
    * The app's session is partitioned but this popup was not opened by its
    * iframe, so nothing can hand it the grant except the account bus: the
-   * page waits for the delta to go out before it closes (#711).
+   * page waits for the delta to go out before it closes.
    */
   handOverViaBus?: boolean
 }

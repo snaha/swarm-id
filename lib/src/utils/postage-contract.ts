@@ -10,7 +10,7 @@
  * require the node to know about the batch. A stamp added manually (or owned
  * by a different node) has no entry in `GET /stamps/{id}`, so the Bee-node TTL
  * path falls back to a constant-price approximation that drifts as the chain
- * price moves (see issue #344). Querying the contract avoids that entirely.
+ * price moves. Querying the contract avoids that entirely.
  *
  * The contract exposes the per-chunk normalised balance accounting used by the
  * storage-incentives system:
@@ -54,7 +54,7 @@ function isLocalRpcUrl(rpcUrl: string): boolean {
  * contract — `eth_call` returns empty, the batch looks unknown, and callers
  * silently fall back to a bogus price estimate. Tying the address to the RPC
  * network stops the two from drifting apart, which is what produced wildly wrong
- * estimated expiry dates when a dev build read a mainnet batch (#344).
+ * estimated expiry dates when a dev build read a mainnet batch.
  */
 export function resolvePostageStampContractAddress(
   rpcUrl: string,
@@ -372,7 +372,7 @@ export async function fetchAuthoritativeBatchTTL(
 
 /**
  * How many blocks a client-signed stamp waits after its batch's block, from
- * the RPC head (#924). What actually refuses an early stamp is a node's
+ * the RPC head. What actually refuses an early stamp is a node's
  * batch store, which trails the tip by `tailSize = 4` blocks
  * (`pkg/postage/listener`). Bee's own issuers wait `blockThreshold = 10`
  * (`IssuerUsable` in `pkg/postage/service.go`) counted from that lagging

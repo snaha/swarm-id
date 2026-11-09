@@ -66,7 +66,7 @@ const LeaseRequestIdSchema = z.string().regex(/^[0-9a-f]{8}$/)
  * ignore it. Repeats are harmless (yield-if-idle is a guarded no-op).
  *
  * `batchId` scopes the ask, because the lock it is a fast path for is scoped
- * that way: lanes are per (batch, partition) since #589, so a holder on batch X
+ * that way: lanes are per (batch, partition), so a holder on batch X
  * and a waiter on batch Y contend for nothing. Answering across batches would
  * drop a lease for a waiter it cannot help — the bus must not be broader than
  * the lock it front-runs, any more than it may be narrower.
@@ -91,7 +91,8 @@ export const LeaseRequestMessageSchema = z.object({
  * BEFORE the release starts, because the release itself is two stamped Swarm
  * writes — an order of magnitude longer than the rank step — so a signal sent
  * after it would reach the other holders only once they had all begun yielding
- * too, which is #576 again. Holders further down the order stand down on this;
+ * too, and every idle holder would yield for one waiter. Holders further down
+ * the order stand down on this;
  * the waiter ignores it (no slot is free yet).
  */
 export const LeaseClaimMessageSchema = z.object({

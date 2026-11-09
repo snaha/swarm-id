@@ -289,7 +289,7 @@ export function createSyncAccount(
     }
   }
 
-  // Pending roster-append retries per account (#920), see the partial branch.
+  // Pending roster-append retries per account, see the partial branch.
   const rosterRetries = new Map<
     string,
     { attempt: number; timer: ReturnType<typeof setTimeout> }
@@ -425,7 +425,7 @@ export function createSyncAccount(
         )
       }
       if (result.status === "partial") {
-        // The roster append was skipped on an inconclusive scan (#920). Nothing
+        // The roster append was skipped on an inconclusive scan. Nothing
         // else re-runs it until the user edits the account, so retry here with
         // backoff; a mutation-triggered sync in between supersedes the timer.
         const attempt = rosterRetries.get(accountId)?.attempt ?? 0

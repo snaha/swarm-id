@@ -10,8 +10,7 @@
  * intermediate-chunk layout the upload path produces — in particular the
  * single-ref-tail case `buildEncryptedMerkleTree` passes through instead of
  * wrapping in a leaf-spanned "ghost intermediate" (see `upload.ts`). The
- * existing SOC round-trips only cover single chunks, so multi-level trees
- * were previously untested.
+ * SOC round-trips only cover single chunks; this covers multi-level trees.
  *
  * In-memory only: `MockBee` persists every uploaded chunk by its address and
  * serves it back, so a stamper-mode upload needs no network / fetch mock.

@@ -85,7 +85,7 @@ describe("Encryption class", () => {
       )
     })
 
-    it("should pad with random bytes unrelated to the keystream (#409)", () => {
+    it("should pad with random bytes unrelated to the keystream", () => {
       const key = generateRandomKey()
       const data = new Uint8Array([1, 2, 3, 4, 5, 6, 7, 8])
       const padding = 4096

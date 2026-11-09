@@ -168,7 +168,7 @@ describe.skipIf(!liveEnv.configured)(
         coordinator.currentPartition,
         "a partition was acquired (not read-only)",
       ).not.toBeUndefined()
-      // Regression guard: acquire must not crawl back toward the old 45s
+      // Regression guard: acquire must not crawl back toward a 45s
       // feed-walk / lock-blocked stall.
       expect(acquireMs).toBeLessThan(45_000)
 

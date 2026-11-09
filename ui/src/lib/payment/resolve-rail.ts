@@ -94,11 +94,9 @@ export function combineRails(rails: PaymentRail[]): PaymentRail {
  *   chain is up.** Without one there is still the direct path, which needs
  *   nothing but the chain the app is already talking to.
  * - **An endpoint we could not identify gets no bridged rail at all.** "Not
- *   proven mainnet" is not the same answer as "proven dev": a blipped probe
- *   against a real Gnosis endpoint used to be handed the local rail, which
- *   takes a deposit on a chain the destination has never heard of and then
- *   waits out its two-minute delivery timeout blaming a solver that was never
- *   involved. Nothing offered is the honest answer.
+ *   proven mainnet" is not the same answer as "proven dev": the local rail would
+ *   take a deposit on a chain the destination has never heard of. Nothing
+ *   offered is the honest answer.
  *
  * @returns the rail to pay through, or undefined when there is none — which is
  *   an error at the funding seam, not a licence to conjure the money.

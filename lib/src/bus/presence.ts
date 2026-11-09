@@ -13,7 +13,7 @@
  * A clean departure does not wait for the window. The signaling server sends
  * `peer-left` when a socket closes — including one its own reaper terminated,
  * so a crash and a dropped network count too — and `forgetPeer` drops the
- * device that socket carried (#572). Ageing is the backstop for what that
+ * device that socket carried. Ageing is the backstop for what that
  * cannot see: a peer the server has not yet reaped, and a device heard only
  * over the local transport. A leave message of our own is not an option — a
  * publish encrypts before it sends, and a page being torn down never gets
@@ -56,7 +56,7 @@ export class PresenceTracker {
   /**
    * Note a beat. `peerId` is the transport's own name for whoever sent it —
    * present on the signaling transport, absent on the local one, which has no
-   * peers. It is what lets a departure be attributed to a device (#572).
+   * peers. It is what lets a departure be attributed to a device.
    */
   observe(deviceId: string, nowMs: number, peerId?: string): void {
     const entry = this.seen.get(deviceId) ?? { at: nowMs, peers: new Set() }

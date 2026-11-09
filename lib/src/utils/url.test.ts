@@ -82,7 +82,7 @@ describe("buildAuthUrl", () => {
     )
   })
 
-  it("carries the permissions request as JSON (#862)", () => {
+  it("carries the permissions request as JSON", () => {
     const url = buildAuthUrl(
       "https://swarm-id.example.com",
       "https://myapp.example.com",
@@ -95,7 +95,7 @@ describe("buildAuthUrl", () => {
     })
   })
 
-  // #711: a request for more opens the permissions page for the session's
+  // A request for more opens the permissions page for the session's
   // account; a parent-opened popup for a partitioned session is marked so.
   it("opens the permissions page for an account, marked for the bus when the page opened it", () => {
     const url = buildAuthUrl(

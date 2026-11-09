@@ -6,9 +6,9 @@
   One app of the Apps tab (SwarmID-MVP, APPS, Frame 154): what it holds, each
   control applying as it is changed — a drive row (a drive set to "None" is
   taken away, unticking "all" falls back to the account default; either
-  waits for a typed confirmation when it takes a drive away, #925), the sharing
+  waits for a typed confirmation when it takes a drive away), the sharing
   switches (moving one pins it for this app, even to the value the account
-  default has; "Use account default" unpins it, #885) — and the two ways out,
+  default has; "Use account default" unpins it) — and the two ways out,
   Disconnect and Revoke access. Every control grants on the spot; like every
   route but `/proxy`, it refuses to render framed (`routes/+layout.svelte`).
   "Keep app connected for" is the app's own session length, applied at its
@@ -81,7 +81,7 @@
   // only, never the picker's first-regular-drive fallback.
   const explicitDefaultHex = $derived(account.defaultPostageStampBatchID?.toHex())
 
-  // An edit that takes drives away waits for the user to confirm it (#925).
+  // An edit that takes drives away waits for the user to confirm it.
   // `before` is the grant it was proposed against, so a change that lands
   // meanwhile (another device, the permissions popup) is not overwritten;
   // `rows` is the edit, shown while it waits so a sync cannot reset it.

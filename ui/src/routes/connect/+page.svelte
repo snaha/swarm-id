@@ -46,7 +46,7 @@
 
   // Accounts that have used this app before, most recently used first. A
   // lapsed session still counts as "previously used" — it is NOT the account
-  // being signed out (#445), so these rows carry no badge; the section title
+  // being signed out, so these rows carry no badge; the section title
   // says it. `activeApps` (not the raw collection): a REMOVED app leaves a
   // revoked tombstone behind for sync, which must not resurrect the account
   // here. A signed-out account keeps no connected apps at all, so it always
@@ -88,7 +88,7 @@
   }
 
   /** Shared tail of both ceremonies: hand the unlocked account to the done
-   * page, which runs the handshake once the drives are settled (#862). */
+   * page, which runs the handshake once the drives are settled. */
   async function finishConnect(account: Account, entropy: Uint8Array) {
     if (!request) {
       return
