@@ -27,12 +27,12 @@ describe("UtilizationStoreDB metadata", () => {
   it("creates the record on the first patch and merges the next into it", async () => {
     await store.updateMetadata(BATCH, () => ({ rowsPartition: 1 }))
     await store.updateMetadata(BATCH, () => ({
-      stateReference: { partition: 1, referenceHex: "ref" },
+      stateReference: { partition: 1, referenceHex: "ref", exact: true },
     }))
     expect(await store.getMetadata(BATCH)).toEqual({
       batchId: BATCH,
       rowsPartition: 1,
-      stateReference: { partition: 1, referenceHex: "ref" },
+      stateReference: { partition: 1, referenceHex: "ref", exact: true },
     })
   })
 

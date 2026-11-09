@@ -104,9 +104,7 @@ const PARTITION_STATE_TOPIC_DOMAIN = "swarm-id-partition-state-v2"
  * big-endian; then the exceptions (bucket u32 ‖ count u32) and one 64-byte
  * encrypted reference per leaf. `MAX_DELTA_WIDTH` keeps the whole of it within
  * one chunk at `MAX_EXCEPTIONS`. No checksum: each reference binds its leaf's
- * exact bytes (content address + key), and the SBU1 counter sum could not be
- * stated here anyway — a retained leaf describes an earlier counter than the
- * one being published (see the sum note in `writePartitionState`).
+ * exact bytes (content address + key).
  */
 const REFERENCE_HEADER_BYTES = 7
 const REFERENCE_WIDTH_OFFSET = 0
@@ -792,7 +790,12 @@ async function downloadReferenceChunk(
  * retained refs for the rest. The previous frame is kept while it still fits
  * the counter, so leaf boundaries hold; a small upload then changes a leaf or
  * two plus the reference chunk. Omit them (release, or the first publish of a
- * session) for a full publish under the canonical frame.
+ * session) for a full publish under the canonical frame. `previousCounter`
+ * must be EXACTLY the counter `previousReferences` encode: a retained leaf
+ * goes out under a frame and exception list computed from `localCounter`, and
+ * one that encodes any other counter is a leaf the reference chunk does not
+ * describe — the reader rejects the state (see the baseline note in
+ * `PartitionLease.claimPartition`).
  *
  * PARALLEL: every chunk address is content-derived, so all PUTs (counter chunks
  * + reference chunk + state-pointer SOC) are computed first and fired in a
@@ -893,7 +896,7 @@ export async function writePartitionState(opts: {
 
   // KEYSTONE tripwire (fail loud, never silent slot reuse). The counter is a
   // monotonic per-bucket high-water, so any publish is always >= the one the last
-  // publish recorded (see the SAFETY INVARIANT note in `PartitionLease.claimPartition`).
+  // publish recorded (see the baseline note in `PartitionLease.claimPartition`).
   // A regression means the stamper's counter/synced-ref persistence broke its
   // invariant. On the INCREMENTAL path it is actively dangerous — an unchanged-
   // looking chunk retains a ref ABOVE the live counter and a takeover resumes PAST
@@ -1020,11 +1023,7 @@ export async function writePartitionState(opts: {
   })
 
   // The reference chunk: frame, exceptions, and every ref (sentinels
-  // included) — within one chunk by `MAX_DELTA_WIDTH`. It carries no counter
-  // sum: a retained ref may describe an earlier counter than `localCounter`
-  // (a seed counter ahead of its acked refs after an unacked write — the
-  // SAFETY INVARIANT in `PartitionLease.claimPartition`), and only Swarm
-  // holds those bytes, so no sum stated here could be the reader's.
+  // included) — within one chunk by `MAX_DELTA_WIDTH`.
   const referenceChunk = encodeReferenceChunk({
     frame,
     exceptions: encoded.exceptions,

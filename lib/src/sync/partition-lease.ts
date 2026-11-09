@@ -813,13 +813,14 @@ export class PartitionLease {
     const { partition, partitionCount, freshClaim } = args
     const { stamper, batchId } = this.requireWriteContext()
 
-    // Cache-aware seed: pass the reference our local counter is already in
-    // sync with. If the feed still points there, `readPartitionState` skips
-    // the reference + counter-chunk downloads and we reuse the local counter.
-    const knownReference =
+    // Cache-aware seed: pass the reference our local counter is at or past.
+    // If the feed still points there, `readPartitionState` skips the leaf
+    // downloads and we reuse the local counter.
+    const certification =
       stamper instanceof UtilizationAwareStamper
-        ? await stamper.getSyncedReference(partition)
+        ? await stamper.getRowsCertification(partition)
         : undefined
+    const knownReference = certification?.referenceHex
     const stateResult = await readPartitionState(
       {
         bee: this.opts.bee,
@@ -988,30 +989,32 @@ export class PartitionLease {
     // recovered no refs (fresh account / cache-miss), these stay undefined and
     // the first publish falls back to the sparse-full path.
     //
-    // SAFETY INVARIANT (why a divergent seed is safe). On the cache-hit
-    // (`unchanged`) branch `publishedReferences` describes the last *acked*
-    // counter (the synced reference, advanced only on a successful publish/read)
-    // while `publishedCounter` = `buildLeaseLocalCounter()`, which can be AHEAD
-    // if a prior publish FAILED after the local counter advanced (withWrite's
-    // `finally` still flushes the bumped counter). Counters are monotonic, so
-    // `publishedCounter >= synced-ref counter` always — the refs never describe a
-    // value ABOVE the counter. On the first incremental publish an unchanged
-    // (ahead) chunk therefore RETAINS a ref describing the acked floor, and a
-    // takeover resumes at ≤ the acked high-water: it only ever reissues *unacked*
-    // (content-addressed → safe) slots, never an acked one. The dangerous
-    // direction — a ref reporting above the counter, which could resume PAST an
-    // acked slot into reuse — cannot occur. See the "divergent seed" regression
-    // test in partition-lease.integration.test.ts.
+    // The baseline must be EXACT: `publishedCounter` is the counter
+    // `publishedReferences` encode, leaf for leaf. An incremental publish
+    // retains every leaf the diff against it finds unchanged, under a
+    // reference chunk whose frame and exception list are computed from the
+    // live counter — so a retained leaf that encodes anything else is a leaf
+    // the reference chunk does not describe, and no reader can decode the
+    // state (#463). A full read is exact by construction. A cache hit is
+    // exact only when the rows hold precisely the counter the reference
+    // names: an upload whose publish FAILED still flushes its stamps
+    // (withWrite's `finally`), leaving the rows ahead of the acked leaves.
+    // Resuming from those rows is right — it keeps the unacked slots unissued
+    // — but there is then no baseline to diff against, and the first publish
+    // goes out in full.
     //
-    // KEYSTONE (the one upstream fact this rests on): the stamper keeps its local
-    // per-partition counter monotonic and >= its synced-reference counter. Every
-    // guarantee above collapses if a future change to stamper-state persistence
-    // lets the local counter fall BELOW the synced ref. `writePartitionState`'s
-    // incremental path carries a cheap monotonicity tripwire that fails the
-    // publish loudly (rather than silently retaining a ref above the counter) if
-    // that invariant is ever broken — see the assert there.
-    this.publishedReferences = stateResult.references
-    this.publishedFrame = stateResult.frame
+    // KEYSTONE (the one upstream fact this rests on): the stamper keeps its
+    // local per-partition counter monotonic and >= its synced-reference
+    // counter, and calls its rows exact only when they equal it
+    // (`UtilizationAwareStamper.getRowsCertification`). `writePartitionState`
+    // carries a cheap monotonicity tripwire that fails the publish loudly if
+    // the counter ever falls below the baseline — see the assert there.
+    const exactBaseline =
+      !stateResult.unchanged || certification?.exact === true
+    this.publishedReferences = exactBaseline
+      ? stateResult.references
+      : undefined
+    this.publishedFrame = exactBaseline ? stateResult.frame : undefined
     this.publishedCounter = localCounter.slice()
     // Mark this epoch as already full-pinned so the FIRST publish of the session
     // stays incremental against the resumed refs (the cheap-first-publish win).
@@ -1452,7 +1455,7 @@ export class PartitionLease {
    * heartbeats the inherited resume pointer forward, so it ages out of the
    * takeover lookup span (resume-from-zero → re-issue acked slots). The caller
    * passes the partition's persisted synced reference
-   * (`UtilizationAwareStamper.getSyncedReference`); `undefined` (fresh partition)
+   * (`UtilizationAwareStamper.getRowsCertification`); `undefined` (fresh partition)
    * keeps the heartbeat a no-op.
    */
   seedReferenceHex(referenceHex: string | undefined): void {

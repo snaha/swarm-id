@@ -406,7 +406,11 @@ Reads short-circuit on a cached "synced reference": if the pointer still names t
 a device last synced with, it skips the downloads and reuses its local counter. A device keeps
 one such reference, for the lane its cached counter rows describe: the rows hold a single
 lane's counter, so a lane switch rewrites every row before the new lane is certified, and a
-reference never vouches for rows written for another lane.
+reference never vouches for rows written for another lane. Nor for rows another tab wrote: a
+tab that finds them changed since its own last flush reloads them before resuming, and rewrites
+them all on its next flush. The first publish after such a resume is incremental only when the
+rows hold exactly the counter the reference names; after an upload whose publish failed they
+are ahead of it, and that publish goes out in full.
 
 When the pointer exists but the reference chunk or any counter chunk cannot be read, or fails
 the checks above, the read reports failure without caching the bad reference, and the device

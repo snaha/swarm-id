@@ -600,16 +600,18 @@ export class BatchWriteCoordinator {
       // re-established from local state alone — no lock-SOC scan/write, so it
       // survives transient Bee 500s. The refresh tick then reconciles with
       // Swarm and demotes only on a confirmed foreign holder. The adopt binds
-      // the stamper's own table as the lane's counter, so the rows must be
-      // certified for the lease's LAST publish: `getSyncedReference` names
-      // the publish whose counter a flush wrote the rows for (#463), and the
-      // cached lease names the publish the lease last read or made (written
-      // before every ack). The two differ when that flush never landed — a
-      // tab dying between publish and flush, an IndexedDB failure — and the
-      // rows then sit below the pointer's counter; a lane held without a
-      // publish yet has neither. Both take the cold acquire below instead,
-      // which downloads the pointer's state when the rows' reference is not
-      // it. The reference also seeds the heartbeat's resume-pointer target: the cold
+      // the stamper's own table as the lane's counter, so that table must be
+      // the rows, and the rows must describe the lane as of the lease's LAST
+      // publish. `getRowsCertification` answers both: it reloads the table
+      // when another tab wrote the rows since, and names the publish whose
+      // counter a flush wrote them for (#463); the cached lease names the
+      // publish the lease last read or made (written before every ack). The
+      // two differ when that flush never landed — a tab dying between publish
+      // and flush, an IndexedDB failure — and the rows then sit below the
+      // pointer's counter, so the cold acquire below downloads its state. A
+      // lane claimed from zero and not yet published has no reference on
+      // either side: nothing the rows could be behind, so it adopts too.
+      // The reference also seeds the heartbeat's resume-pointer target: the cold
       // `claimPartition` path seeds that from the state it reads on acquire;
       // the adopt path skips `claimPartition`, so without it an adopted-but-idle
       // holder never heartbeats the inherited pointer forward and it ages out
@@ -617,15 +619,16 @@ export class BatchWriteCoordinator {
       // holder's acked slots). Read BEFORE the synchronous commit below so no
       // await splits the bind, then re-check the epoch as the cold path does.
       const cachedPartition = cached?.self?.partition
-      const seededReferenceHex =
+      const certification =
         cachedPartition === undefined
           ? undefined
           : await stamper
-              .getSyncedReference(cachedPartition)
+              .getRowsCertification(cachedPartition)
               .catch(() => undefined)
       if (this.leaseEpoch !== epoch || this.disposed) return
+      const seededReferenceHex = certification?.referenceHex
       const adopted =
-        seededReferenceHex !== undefined &&
+        certification !== undefined &&
         seededReferenceHex === cached?.referenceHex
           ? lease.adoptIfLive()
           : undefined

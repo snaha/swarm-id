@@ -59,8 +59,10 @@ export interface BatchMetadata {
    * and the local counter reused. One, not one per partition: the rows hold a
    * single lane's counter (`bindPartition` replaces the table), so a reference
    * certifies them for that lane only, and only while `rowsPartition` agrees.
+   * `exact` while the rows hold precisely the counter the reference names;
+   * false once data rows were flushed past it with no publish to name them.
    */
-  stateReference?: { partition: number; referenceHex: string }
+  stateReference?: { partition: number; referenceHex: string; exact: boolean }
   /**
    * The lane the cache rows describe. Cleared before a flush that rewrites
    * them for another lane and set again after it, so a tab that dies midway
@@ -68,6 +70,12 @@ export interface BatchMetadata {
    * a table mixing two lanes. Undefined until the first flush after a bind.
    */
   rowsPartition?: number
+  /**
+   * Bumped by every flush that writes rows. The rows are shared by every tab
+   * of the storage partition; a stamper whose last-seen generation is not this
+   * one knows another tab wrote them since.
+   */
+  rowsGeneration?: number
   /**
    * Per-partition buckets occupied by the LATEST published partition-state
    * chunks (counter chunks + reference chunk). Those chunks overstamp the
