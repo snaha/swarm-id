@@ -1534,6 +1534,48 @@ describe("UtilizationAwareStamper cache rows (#463)", () => {
     )
   })
 
+  it("loses the converted row a legacy row replaced: the marker decode avoids garbage, not loss", async () => {
+    // Rows share the key (batchId, chunkIndex). The old tab's legacy uint16
+    // row 1 (buckets 2048..4095) replaced converted row 1 (buckets 1024..2047),
+    // whose buckets lie in legacy row 0 — which the old tab did not flush. The
+    // other converted rows survive and the overlap keeps the higher counter;
+    // the replaced row's buckets are gone, and that is the known ceiling.
+    const legacyRow = new Uint8Array(CHUNK_SIZE)
+    new DataView(legacyRow.buffer).setUint16((2100 - 2048) * 2, 2, true)
+    const fixedRow = (bucket: number, count: number) => {
+      const counters = new Uint32Array(BUCKETS_PER_CHUNK)
+      counters[bucket % BUCKETS_PER_CHUNK] = count
+      return serializeUint32Array(counters)
+    }
+    const fixed = (chunkIndex: number, data: Uint8Array) => ({
+      batchId: BATCH_HEX,
+      chunkIndex,
+      data,
+      contentHash: "new",
+      nonce: 0,
+      format: CACHE_ROW_FORMAT,
+      lastAccess: 0,
+    })
+    const { cache } = makeRecordingCache([
+      fixed(0, fixedRow(5, 7)),
+      {
+        batchId: BATCH_HEX,
+        chunkIndex: 1,
+        data: legacyRow,
+        contentHash: "old",
+        nonce: 0,
+        lastAccess: 0,
+      },
+      fixed(2, fixedRow(2100, 6)),
+    ])
+    const counters = (await create(cache, 24)).getUtilizationState()
+      .dataCounters
+    expect(counters[5]).toBe(7)
+    expect(counters[2100]).toBe(6)
+    // Bucket 1500 sat in the converted row 1 the legacy row replaced
+    expect(counters[1500]).toBe(0)
+  })
+
   it("refuses to start from zero when the cache cannot be read", async () => {
     // A zero counter over rows that exist would flush zero-based rows over
     // them on the first write and re-issue every slot they record.

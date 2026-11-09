@@ -304,10 +304,19 @@ export function mergeChunk(
  * batch's depth of the time: uint16 below depth 32 on a regular drive,
  * uint32 otherwise. Each row is decoded by its own marker: the conversion
  * is one transaction (`UtilizationStoreDB.convertBatch`), but a tab still on
- * the older build can flush a legacy row beside converted ones, and a legacy
- * row's buckets overlap a fixed-layout row's. Both are high-water marks of
- * the same lane, so the higher counter is the resume point wherever they
- * overlap: lower would re-issue a slot one of them records as used.
+ * the older build can flush a legacy row beside converted ones. Decoding
+ * that row by the batch's rule would read it as garbage — a uint16 row read
+ * as uint32 puts counters past `maxSlot`, and the bucket reads as full for
+ * good. Where the two layouts overlap, the higher counter is kept, since
+ * both are high-water marks of the same lane.
+ *
+ * That guards against garbage, not against loss. Rows share the key
+ * `(batchId, chunkIndex)`, so the old tab's legacy row `k` replaces
+ * converted row `k`, whose buckets lie in legacy row `floor(k / 2)` — a row
+ * the old tab flushed only if it was dirty. For `k ≥ 1` those 1,024 buckets
+ * come back as zero. The window is a deploy with two builds in one browser,
+ * where the old tab also publishes v1 state this build cannot read, so the
+ * lane is already lossy; closing the old tab ends it.
  *
  * The legacy rule is the drive's depth *now*: a regular drive diluted across
  * depth 31 → 32 after its last pre-#463 write reads its uint16 rows as
@@ -1617,7 +1626,7 @@ export class UtilizationAwareStamper implements Stamper, SlotAssigner {
 
     // Restore the protected partition-state buckets so saves keep avoiding
     // the published resume point across reloads. Tolerates minimal caches
-    // (tests stub only getAllChunks/putChunk).
+    // (tests stub only convertBatch/putChunk).
     try {
       const meta = await cache.getMetadata?.(batchId.toHex())
       for (const [p, buckets] of Object.entries(

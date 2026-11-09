@@ -29,13 +29,14 @@ import { postageStampsStore } from './postage-stamps.svelte'
 vi.mock('$app/environment', () => ({ browser: true }))
 
 // Node has no IndexedDB; stub the utilization cache the stamper opens at
-// construction so it starts from fresh counters (`create()` would otherwise
-// warn its way through a failed open). Everything else — the stamper itself
+// construction so it starts from fresh counters (`create()` refuses to start
+// over a cache it cannot read). Everything else — the stamper itself
 // included — stays real, since the depth assertions ride on it.
 vi.mock('@snaha/swarm-id/internal', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@snaha/swarm-id/internal')>()),
   UtilizationStoreDB: class {
     getAllChunks = async () => []
+    convertBatch = async () => []
     putChunk = async () => undefined
   },
 }))
