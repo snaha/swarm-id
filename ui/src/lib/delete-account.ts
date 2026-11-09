@@ -43,6 +43,8 @@ export interface DeleteAccountOptions {
   /** Throws once the caller has moved on; run before the first spend and the teardown. */
   checkpoint: () => void | Promise<void>
   onProgress?: (progress: DeletionProgress) => void
+  /** A drive was diluted. That cannot be undone, so it stands if the deletion then fails. */
+  onDrivesShortened?: () => void
 }
 
 /**
@@ -51,7 +53,15 @@ export interface DeleteAccountOptions {
  * diluted drive plans as `expires-soon`.
  */
 export async function deleteAccount(options: DeleteAccountOptions): Promise<DeletionResult> {
-  const { account, keep, requestFunding, undiluted = false, checkpoint, onProgress } = options
+  const {
+    account,
+    keep,
+    requestFunding,
+    undiluted = false,
+    checkpoint,
+    onProgress,
+    onDrivesShortened,
+  } = options
   // Derived up front: once the record is gone there is nothing to derive it from.
   const { signerKey } = await derivePostageSigner(account.derivationKey)
 
@@ -64,6 +74,9 @@ export async function deleteAccount(options: DeleteAccountOptions): Promise<Dele
       beforeSpend: checkpoint,
       onProgress,
     })
+    if (dilution.drives.some((drive) => drive.outcome === 'diluted')) {
+      onDrivesShortened?.()
+    }
     if (dilution.status === 'failed') {
       throw new AggregateError(
         dilution.drives.flatMap((drive) => (drive.outcome === 'failed' ? [drive.error] : [])),

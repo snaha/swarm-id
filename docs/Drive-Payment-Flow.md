@@ -516,6 +516,10 @@ nothing twice.
 | a transaction failed                            | nothing is torn down: **Deletion failed**, Retry                                       |
 | the deletion could not be published             | the account stays, unmarked: **Deletion failed**, Retry                                |
 
+A dilution cannot be undone, so when one landed before the failure, **Deletion failed** says the
+drives were already shortened and will expire within a day or two. The account stays, but those
+drives do not come back if the user closes the screen instead of retrying.
+
 The signer key is derived before anything is torn down, since nothing is left to derive it from
 afterwards; with it the batches can still be diluted, topped up or left to run out from any wallet.
 What the teardown publishes, and when, is in docs/Account-State.md, "Account deletion".

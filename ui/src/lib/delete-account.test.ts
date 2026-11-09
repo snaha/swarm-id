@@ -319,6 +319,57 @@ describe('deleteAccount', () => {
     expect(sync.syncAccount).not.toHaveBeenCalled()
   })
 
+  describe('reporting shortened drives', () => {
+    const onDrivesShortened = vi.fn()
+    const diluted = { drive: {}, outcome: 'diluted', targetDepth: 24 }
+
+    beforeEach(() => onDrivesShortened.mockReset())
+
+    function run(account: ReturnType<typeof accountsStore.add>) {
+      return deleteAccount({
+        account,
+        keep: new Set(),
+        requestFunding,
+        checkpoint,
+        onDrivesShortened,
+      })
+    }
+
+    it('reports them when another dilution failed', async () => {
+      const account = accountsStore.add(record(true))
+      dilution.runDeleteDilution.mockResolvedValue({
+        status: 'failed',
+        drives: [diluted, { drive: {}, outcome: 'failed', error: new Error('reverted') }],
+      })
+
+      await expect(run(account)).rejects.toThrow()
+
+      expect(onDrivesShortened).toHaveBeenCalledOnce()
+    })
+
+    it('reports them when the publish failed afterwards', async () => {
+      const account = accountsStore.add(record(true))
+      dilution.runDeleteDilution.mockResolvedValue({ status: 'complete', drives: [diluted] })
+      sync.syncAccount.mockRejectedValue(new Error('feed unreachable'))
+
+      await expect(run(account)).rejects.toThrow()
+
+      expect(onDrivesShortened).toHaveBeenCalledOnce()
+    })
+
+    it('stays silent when no dilution landed', async () => {
+      const account = accountsStore.add(record(true))
+      dilution.runDeleteDilution.mockResolvedValue({
+        status: 'failed',
+        drives: [{ drive: {}, outcome: 'failed', error: new Error('reverted') }],
+      })
+
+      await expect(run(account)).rejects.toThrow()
+
+      expect(onDrivesShortened).not.toHaveBeenCalled()
+    })
+  })
+
   it('tears nothing down once the caller has moved on', async () => {
     const account = accountsStore.add(record(true))
     const superseded = new Error('superseded')

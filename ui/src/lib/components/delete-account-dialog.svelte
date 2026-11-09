@@ -77,6 +77,8 @@
   let keyShown = $state(false)
   /** The user declined the gas and chose to go on: a retry does not ask again. */
   let undiluted = false
+  /** Survives a retry, which finds those drives already diluted and sends nothing. */
+  let drivesShortened = $state(false)
   const attempts = createAttemptTracker()
   const funding = createFundingRequester(() => account)
 
@@ -159,6 +161,7 @@
         undiluted,
         checkpoint: () => attempt.guard(Promise.resolve()),
         onProgress: (next) => (progress = next),
+        onDrivesShortened: () => (drivesShortened = true),
       })
       if (!attempt.current) {
         return
@@ -237,7 +240,14 @@
       <TriangleAlert class="fill-destructive size-6 text-white" />
       <div class="text-sm">
         <p class="font-bold">Deletion failed</p>
-        <p>Your account could not be deleted. Please try again.</p>
+        {#if drivesShortened}
+          <p>
+            Your account could not be deleted, but some of its drives were already shortened and
+            will expire within a day or two. Please try again.
+          </p>
+        {:else}
+          <p>Your account could not be deleted. Please try again.</p>
+        {/if}
       </div>
     </div>
     <Button class="w-full" onclick={() => run()}>Retry</Button>
