@@ -49,6 +49,7 @@ import { abortedError } from "../errors"
 import { withBatchWriteLock } from "../utils/batch-write-lock"
 import { withTimeout } from "../utils/promise"
 import { PartitionLease } from "./partition-lease"
+import type { PartitionStateFormat } from "./partition-state-format"
 import type {
   LeaseRefreshOutcome,
   PartitionLeaseStateSnapshot,
@@ -128,6 +129,11 @@ export interface BatchWriteCoordinatorDeps {
   stamper: UtilizationAwareStamper
   /** This device's identity, captured once by the caller. */
   deviceId: string
+  /**
+   * The batch's partition-state wire format (#463), fixed by its record: a
+   * legacy batch keeps its fixed-width chunks, a newer one packs SBU1 leaves.
+   */
+  stateFormat: PartitionStateFormat
   /**
    * Current known device IDs for this account (from the synced device
    * registry). Read fresh per acquire so it reflects late-announced devices.
@@ -579,6 +585,7 @@ export class BatchWriteCoordinator {
         batchId: new BatchId(this.deps.batchId),
         swarmEncryptionKey,
         stamper,
+        stateFormat: this.deps.stateFormat,
         knownDeviceIds: this.deps.knownDeviceIds,
         intentReadTimeoutMs: this.deps.intentReadTimeoutMs,
         intentGuardWindowMs: this.deps.intentGuardWindowMs,
@@ -592,21 +599,29 @@ export class BatchWriteCoordinator {
       // within the TTL) is re-established from local state alone — no lock-SOC
       // scan/write, so it survives transient Bee 500s. The refresh tick then
       // reconciles with Swarm and demotes only on a confirmed foreign holder.
-      const adopted = lease.adoptIfLive()
+      // The adopt binds the stamper's own table as the lane's counter, so the
+      // rows must be certified for that lane: `getSyncedReference` is defined
+      // only while the last publish AND the last flush both name it (#463). A
+      // lane held without a publish yet, or rows a dying tab left half
+      // rewritten for another lane, take the cold acquire below instead. The
+      // reference also seeds the heartbeat's resume-pointer target: the cold
+      // `claimPartition` path seeds that from the state it reads on acquire;
+      // the adopt path skips `claimPartition`, so without it an adopted-but-idle
+      // holder never heartbeats the inherited pointer forward and it ages out
+      // of the takeover lookup span (resume-from-zero → re-issues a gone
+      // holder's acked slots). Read BEFORE the synchronous commit below so no
+      // await splits the bind, then re-check the epoch as the cold path does.
+      const cachedPartition = cached?.self?.partition
+      const seededReferenceHex =
+        cachedPartition === undefined
+          ? undefined
+          : await stamper
+              .getSyncedReference(cachedPartition)
+              .catch(() => undefined)
+      if (this.leaseEpoch !== epoch || this.disposed) return
+      const adopted =
+        seededReferenceHex === undefined ? undefined : lease.adoptIfLive()
       if (adopted !== undefined) {
-        // Seed the heartbeat's resume-pointer target from the persisted synced
-        // reference. The cold `claimPartition` path seeds this from the state it
-        // reads on acquire; the adopt fast path skips `claimPartition`, so
-        // without this an adopted-but-idle holder never heartbeats the inherited
-        // pointer forward and it ages out of the takeover lookup span
-        // (resume-from-zero → re-issues a gone holder's acked slots). Read it
-        // BEFORE the synchronous commit below so no await splits the bind, then
-        // re-check the epoch the same way the cold path does. Best-effort
-        // (undefined on a genuinely fresh partition → heartbeat stays a no-op).
-        const seededReferenceHex = await stamper
-          .getSyncedReference(adopted)
-          .catch(() => undefined)
-        if (this.leaseEpoch !== epoch || this.disposed) return
         // Diagnostic: this re-binds a CACHED lease with no Swarm scan and no
         // intent round. If two devices both adopt partition 0 from stale
         // caches, that's a dual-hold the intent round never gets to arbitrate.

@@ -16,7 +16,7 @@
  * detected and continued rather than repeated.
  */
 import { BatchId, type PrivateKey } from '@ethersphere/bee-js'
-import type { PostageStamp } from '@snaha/swarm-id/internal'
+import { type PostageStamp, diluteDepthCeiling } from '@snaha/swarm-id/internal'
 import type { MultichainClient } from '@swarm-id/multichain'
 
 import { strip0x } from '$lib/crypto/hex'
@@ -363,6 +363,15 @@ export class SizeIncreasePendingError extends Error {
  */
 export async function runResize(options: ResizeOptions): Promise<void> {
   const { account, drive, newDepth, keepLifespan, requestFunding, beforeSpend, onStep } = options
+  // A drive from before SBU1 publishes its counters in a layout its depth
+  // picks; growing it past depth 31 would change that layout under the chunks
+  // every device reads (#463). The dialog offers no such size; this guards it.
+  const ceiling = diluteDepthCeiling(drive)
+  if (ceiling !== undefined && newDepth > ceiling) {
+    throw new Error(
+      `This drive uses an older storage layout and cannot grow beyond depth ${ceiling}. Add a new drive for more space.`,
+    )
+  }
   const client = await postageChain()
   onStep?.('checking')
 

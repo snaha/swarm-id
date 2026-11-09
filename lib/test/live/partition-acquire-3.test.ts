@@ -21,6 +21,7 @@
 import { describe, it, expect, beforeAll } from "vitest"
 import { Stamper } from "@ethersphere/bee-js"
 import { PartitionLease } from "../../src/sync/partition-lease"
+import { SBU1_PARTITION_STATE } from "../../src/sync/partition-state"
 import { PARTITION_COUNT } from "../../src/utils/batch-utilization"
 import { hexToUint8Array } from "../../src/utils/hex"
 import {
@@ -59,6 +60,7 @@ describe.skipIf(!liveEnv.configured)(
         swarmEncryptionKey: hexToUint8Array(keys.encryptionKey),
         batchId: ctx.batchID,
         stamper: Stamper.fromBlank(ctx.signerKey, ctx.batchID, ctx.depth),
+        stateFormat: SBU1_PARTITION_STATE,
         // All three are known rivals → fresh claims run the intent round
         // (rotating addresses), the gateway-safe path for deconfliction.
         knownDeviceIds: () => allDevices,

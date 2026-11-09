@@ -451,7 +451,13 @@ export class Account {
    */
   addStamp(stamp: Omit<PostageStamp, 'createdAt' | 'deletedAt'>): PostageStamp {
     const now = Date.now()
-    const newStamp: PostageStamp = { ...stamp, createdAt: now }
+    // Every drive created from here on packs its partition state as SBU1
+    // leaves (#463); a record without the marker is a drive from before it.
+    const newStamp: PostageStamp = {
+      ...stamp,
+      stateFormat: stamp.stateFormat ?? 'sbu1',
+      createdAt: now,
+    }
     // Callers build stamps from raw Bee-node JSON. Validate the constructed
     // record BEFORE it enters the collection: one malformed field would make
     // this account's stored record unparseable, so the loader would skip the

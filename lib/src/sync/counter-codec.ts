@@ -41,12 +41,6 @@ export const MAX_EXCEPTIONS = 128
  */
 export const MAX_DELTA_WIDTH = 23
 
-/** What one leaf costs in the reference chunk, for the width choice. */
-const LEAF_REFERENCE_BYTES = 64
-
-/** What one exception costs in the reference chunk. */
-const EXCEPTION_BYTES = 8
-
 const BITS_PER_BYTE = 8
 
 export interface CounterFrame {
@@ -142,36 +136,27 @@ export function frameFits(counters: Uint32Array, frame: CounterFrame): boolean {
 }
 
 /**
- * The canonical frame (SBU1 §4): `base = min`, then the width whose packed
- * bits plus exception and reference bytes are fewest, ties to the narrower.
- *
- * One full pass over the table per candidate width, 24 in all; a histogram of
- * delta bit lengths would do it in one (#981). A full publish is once per epoch
- * and a kept frame skips this entirely, so the plain loop stays until a profile
- * says otherwise.
+ * The canonical frame (SBU1 §4): `base = min`, and the width whose packed
+ * bits plus 8 bytes per exception plus a digest per leaf are fewest, ties to
+ * the narrower. Under the exception cap that is the narrowest width that fits:
+ * one more bit costs 8,192 packed bytes and saves at most `MAX_EXCEPTIONS`
+ * exceptions (1,024 bytes), and the leaf count never falls as the width grows,
+ * so the cost rises with every bit past the first that fits. One pass over the
+ * table per width tried, stopping at the first fit; #981 has a one-pass
+ * histogram should a profile ever point here.
  */
 export function chooseFrame(counters: Uint32Array): CounterFrame {
   let base = counters[0]
   for (let bucket = 1; bucket < NUM_BUCKETS; bucket++) {
     if (counters[bucket] < base) base = counters[bucket]
   }
-  let best: { frame: CounterFrame; size: number } | undefined
   for (let width = 0; width <= MAX_DELTA_WIDTH; width++) {
     const frame = { base, width }
-    const exceptions = exceptionsFor(counters, frame)
-    if (exceptions === undefined) continue
-    const size =
-      Math.ceil((NUM_BUCKETS * width) / BITS_PER_BYTE) +
-      EXCEPTION_BYTES * exceptions.length +
-      LEAF_REFERENCE_BYTES * leafCount(width)
-    if (best === undefined || size < best.size) best = { frame, size }
+    if (exceptionsFor(counters, frame) !== undefined) return frame
   }
-  if (best === undefined) {
-    throw new Error(
-      `counter-codec: no width up to ${MAX_DELTA_WIDTH} holds this spread`,
-    )
-  }
-  return best.frame
+  throw new Error(
+    `counter-codec: no width up to ${MAX_DELTA_WIDTH} holds this spread`,
+  )
 }
 
 /** Encode `counters` under `frame`; throws when the frame does not fit. */

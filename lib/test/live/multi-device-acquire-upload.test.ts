@@ -29,6 +29,7 @@ import { randomBytes } from "node:crypto"
 import { describe, it, expect, beforeAll } from "vitest"
 import { Identifier, PrivateKey } from "@ethersphere/bee-js"
 import { BatchWriteCoordinator } from "../../src/sync/batch-write-coordinator"
+import { SBU1_PARTITION_STATE } from "../../src/sync/partition-state"
 import {
   UtilizationAwareStamper,
   PARTITION_COUNT,
@@ -89,6 +90,7 @@ describe.skipIf(!liveEnv.configured)(
         bee: ctx.bee,
         batchId: ctx.batchID.toHex(),
         stamper,
+        stateFormat: SBU1_PARTITION_STATE,
         deviceId: id,
         accountId: keys.accountId,
         // Both devices are known rivals → a fresh claim runs the intent round

@@ -481,6 +481,14 @@ describe('Account default drive', () => {
     exists: true,
   })
 
+  it('marks every drive it adds for the SBU1 partition state (#463)', () => {
+    // The format is fixed at creation: a record without the marker is a drive
+    // from before it existed and stays on the legacy layout for good.
+    const account = new Account(signedInRecord(), noCommit)
+    expect(account.addStamp(drive(REGULAR_HEX)).stateFormat).toBe('sbu1')
+    expect(account.addStamp(drive(SCRATCH_HEX, 'scratch')).stateFormat).toBe('sbu1')
+  })
+
   it('is the first regular drive added, not an earlier scratch one', () => {
     const account = new Account(signedInRecord(), noCommit)
     account.addStamp(drive(SCRATCH_HEX, 'scratch'))

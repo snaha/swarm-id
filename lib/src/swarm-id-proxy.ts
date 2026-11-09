@@ -118,6 +118,7 @@ import {
 import { createFeedManifestDirect } from "./proxy/feed-manifest"
 import {
   isScratchDrive,
+  partitionStateFormat,
   resolveStampForApp,
   stampsReachableByApp,
 } from "./utils/postage-stamp-association"
@@ -904,11 +905,7 @@ export class SwarmIdProxy {
       stamp.depth,
     )
     this.drives.set(drive.batchId, drive)
-    drive.ready = this.initializeStamper(
-      drive,
-      stamp.depth,
-      isScratchDrive(stamp),
-    )
+    drive.ready = this.initializeStamper(drive, stamp)
     return drive
   }
 
@@ -2243,10 +2240,11 @@ export class SwarmIdProxy {
    */
   private async initializeStamper(
     drive: DriveWritePath,
-    stampDepth: number,
-    scratch: boolean,
+    stamp: PostageStamp,
   ): Promise<void> {
     const { signerKey, batchId } = drive
+    const stampDepth = stamp.depth
+    const scratch = isScratchDrive(stamp)
     // `loadAuthData` calls this off the reconcile queue, so a storage event's
     // `refreshStampFromStorage` can clear or rebind the stamp under any await
     // below (#804). Every rebind is a new `DriveWritePath`, a re-resolve of the
@@ -2314,6 +2312,7 @@ export class SwarmIdProxy {
       batchId,
       stamper,
       deviceId: this.requireDeviceId(),
+      stateFormat: partitionStateFormat(stamp),
       knownDeviceIds: () =>
         this.knownDeviceIdsForAccount(accountInfo.accountId),
       // Pull the latest device registry before a fresh acquire so a peer that
@@ -6701,6 +6700,7 @@ export class SwarmIdProxy {
             swarmEncryptionKey: encryptionKey,
             batchId: stamp.batchID,
             partition,
+            format: partitionStateFormat(stamp),
           },
           known.get(key),
         ),

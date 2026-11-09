@@ -6,7 +6,7 @@
  *
  * Provides fast local caching of 4KB utilization chunks to avoid
  * repeated Swarm downloads. Each chunk is 4096 bytes holding 1024 uint32
- * bucket counters, whatever the batch depth.
+ * bucket counters, whatever the batch depth or the batch's wire format (#463).
  */
 
 // ============================================================================
@@ -43,13 +43,6 @@ export interface ChunkCacheEntry {
    */
   nonce: number
 
-  /**
-   * `CACHE_ROW_FORMAT` on every row the fixed layout writes. A row without it
-   * predates #463 and is still at its batch's depth-of-the-time layout; the
-   * stamper converts such a batch on load rather than the store dropping it.
-   */
-  format?: number
-
   /** Last access timestamp (for eviction) */
   lastAccess: number
 }
@@ -62,21 +55,21 @@ export interface BatchMetadata {
   lastSync: number
   chunkCount: number
   /**
-   * Per-partition "synced reference": the partition-state reference chunk
-   * (hex) this device's local counter was last in sync with. On a cold
-   * acquire, if the state pointer still names it the leaf downloads are
-   * skipped and the local counter reused. Keyed by partition index.
+   * The v2 partition-state reference chunk (hex) this device's cache rows were
+   * last in sync with, and the lane it belongs to. On a cold acquire of that
+   * lane, if the state pointer still names it the leaf downloads are skipped
+   * and the local counter reused. One, not one per partition: the rows hold a
+   * single lane's counter (`bindPartition` replaces the table), so a reference
+   * certifies them for that lane only, and only while `rowsPartition` agrees.
    */
-  stateReferences?: Record<number, string>
+  stateReference?: { partition: number; referenceHex: string }
   /**
-   * What a pre-v2 build stored in place of `stateReferences` (#463): v1
-   * reference chunks no v2 reader can parse, so never a heartbeat target — one
-   * adopted as such would leave the partition `readFailed` to every other
-   * device's takeover. An entry still says this device wrote the lane, so a
-   * cold claim that finds no v2 state resumes from the converted cache rows
-   * rather than from zero. The first v2 publish of a partition drops its entry.
+   * The lane the cache rows describe. Cleared before a flush that rewrites
+   * them for another lane and set again after it, so a tab that dies midway
+   * leaves rows no reference certifies — a cache miss on the next claim, never
+   * a table mixing two lanes. Undefined until the first flush after a bind.
    */
-  syncedReferences?: Record<number, string>
+  rowsPartition?: number
   /**
    * Per-partition buckets occupied by the LATEST published partition-state
    * chunks (counter chunks + reference chunk). Those chunks overstamp the
@@ -99,7 +92,7 @@ const DB_NAME = "swarm-utilization-store"
  * stores rather than migrating them: this is a cache of utilisation counters
  * that re-derives itself on next use, and 0.x owes no migration (#661).
  */
-const DB_VERSION = 4
+const DB_VERSION = 5
 const CHUNKS_STORE = "chunks"
 const METADATA_STORE = "metadata"
 
@@ -253,54 +246,6 @@ export class UtilizationStoreDB {
       request.onerror = () => {
         reject(new Error(`Failed to get all chunks: ${request.error}`))
       }
-    })
-  }
-
-  /**
-   * Read a batch's rows and, when `convert` returns replacements, swap them in
-   * within the same readwrite transaction (#463). IndexedDB commits all of it
-   * or none, and serializes overlapping readwrite transactions, so a closed
-   * tab leaves the old rows whole and a second tab converting at the same
-   * time sees either the old rows or the converted ones, never a mix.
-   *
-   * @returns The batch's rows as they stand once the transaction commits
-   *          (sorted by chunkIndex)
-   */
-  async convertBatch(
-    batchId: string,
-    convert: (rows: ChunkCacheEntry[]) => ChunkCacheEntry[] | undefined,
-  ): Promise<ChunkCacheEntry[]> {
-    await this.open()
-
-    return new Promise((resolve, reject) => {
-      const transaction = this.db!.transaction([CHUNKS_STORE], "readwrite")
-      const store = transaction.objectStore(CHUNKS_STORE)
-      let result: ChunkCacheEntry[] = []
-      const request = store.index("batchId").getAll(batchId)
-      request.onsuccess = () => {
-        const rows = (request.result as ChunkCacheEntry[]).sort(
-          (a, b) => a.chunkIndex - b.chunkIndex,
-        )
-        result = rows
-        let replacement: ChunkCacheEntry[] | undefined
-        try {
-          replacement = convert(rows)
-          if (!replacement) return
-          for (const row of rows) store.delete([batchId, row.chunkIndex])
-          for (const row of replacement) store.put(row)
-        } catch (error) {
-          // Abort rather than commit the writes issued so far
-          transaction.abort()
-          reject(error)
-          return
-        }
-        result = [...replacement].sort((a, b) => a.chunkIndex - b.chunkIndex)
-      }
-      transaction.oncomplete = () => resolve(result)
-      transaction.onabort = () =>
-        reject(new Error(`Batch conversion aborted: ${transaction.error}`))
-      transaction.onerror = () =>
-        reject(new Error(`Batch conversion failed: ${transaction.error}`))
     })
   }
 

@@ -302,8 +302,10 @@ published. An upload that was still in flight when a holder disappeared was ther
 acknowledged, and the next holder may safely overwrite its slots.
 
 ```text
-topic = keccak256( utf8("swarm-id-partition-state-v2") ‖ batchId ‖ uint32_be(partition) )
+topic = keccak256( utf8(domain) ‖ batchId ‖ uint32_be(partition) )
 owner = backupSigner address
+domain = "swarm-id-partition-state-v2"   SBU1 leaves (drives created with stateFormat "sbu1")
+         "swarm-id-partition-state-v1"   fixed-width chunks (drives created before it)
 ```
 
 The counter is not a single blob. It is packed into **leaves** under a **frame** (see
@@ -312,6 +314,14 @@ encryption key to the partition's reserved slot, yielding a 64-byte **encrypted 
 (`address ‖ key`). A single **reference chunk** carries the frame, the exceptions and those
 references (`7 + 8·E + 64·L` bytes, one chunk at the width cap). A taking-over device follows
 **pointer → reference chunk → leaves**, decrypting each from its embedded key.
+
+Which format a batch uses is fixed when its drive is created and recorded on the synced
+stamp record (`stateFormat`), so every device reads and writes the one layout the batch has
+always used. A drive from before the field existed stays on the legacy layout: uint16
+counters in 32 chunks up to depth 31, uint32 in 64 above (a scratch drive is uint32 at every
+depth), the reference chunk their 64-byte references alone. Growing such a drive past depth
+31 would change that layout under its published chunks, so the resize dialog does not offer
+it; the drive grows within its width or is replaced by a new one.
 
 ### The state pointer
 
@@ -337,9 +347,9 @@ counter.
 
 ### Wire format (byte layout)
 
-The format is **binary** and is versioned by the topic domain
-(`swarm-id-partition-state-v2`); there is no in-blob version byte. A new version publishes
-under its own topic and never collides with older readers.
+The format is **binary** and is versioned by the topic domain; there is no in-blob version
+byte. A new version publishes under its own topic and never collides with older readers,
+which is how the legacy fixed-width layout (`v1`) and the SBU1 layout (`v2`) coexist.
 
 The counter table is packed with the leaf encoding of Nectar's **SBU1** usage snapshot
 ([`docs/spec/sbu1.md`](https://github.com/nxm-rs/nectar/blob/main/docs/spec/sbu1.md) §4
@@ -350,7 +360,8 @@ whose delta does not fit is an **exception**: its field is all ones and its abso
 is listed in the reference chunk (at most 128). A leaf holds `floor(32768 / w)` buckets, so
 `L = ceil(65536 / floor(32768 / w))` leaves cover the table (none at `w = 0`), the last one
 short. The canonical encoder takes `base = min` and the width that minimizes the packed
-bits plus 8 bytes per exception plus 64 per leaf.
+bits plus 8 bytes per exception plus a digest per leaf — under the 128-exception cap, the
+narrowest width that fits.
 
 The width follows the _spread_ of the counters, not the batch depth, so a dilute changes
 no published byte. Lane counters are Poisson over the buckets, so the spread grows with
@@ -401,7 +412,10 @@ first publish of a session is incremental.
 ### Read semantics
 
 Reads short-circuit on a cached "synced reference": if the pointer still names the reference
-a device last synced with, it skips the downloads and reuses its local counter.
+a device last synced with, it skips the downloads and reuses its local counter. A device keeps
+one such reference, for the lane its cached counter rows describe: the rows hold a single
+lane's counter, so a lane switch rewrites every row before the new lane is certified, and a
+reference never vouches for rows written for another lane.
 
 When the pointer exists but the reference chunk or any counter chunk cannot be read, or fails
 the checks above, the read reports failure without caching the bad reference, and the device

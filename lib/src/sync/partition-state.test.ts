@@ -69,7 +69,13 @@ vi.mock("../proxy/upload", async (importOriginal) => {
   }
 })
 
-import { statePointerAddress, writePartitionState } from "./partition-state"
+import {
+  SBU1_PARTITION_STATE,
+  readPartitionState,
+  statePointerAddress,
+  writePartitionState,
+  type PartitionStateFormat,
+} from "./partition-state"
 import { uploadChunk, uploadSOC } from "../proxy/upload"
 import {
   intentEpochBucket,
@@ -115,7 +121,6 @@ afterEach(() => {
 async function makeBoundStamper(): Promise<UtilizationAwareStamper> {
   const cache = {
     getAllChunks: async () => [],
-    convertBatch: async () => [],
     putChunk: async () => undefined,
   } as unknown as Parameters<typeof UtilizationAwareStamper.create>[3]
   const stamper = await UtilizationAwareStamper.create(
@@ -155,6 +160,7 @@ async function publishOneChunk(
   const localCounter = leafyCounter()
   vi.spyOn(Date, "now").mockReturnValue(nowMs)
   const result = await writePartitionState({
+    format: SBU1_PARTITION_STATE,
     bee: bee,
     stamper,
     batchId: TEST_BATCH_ID,
@@ -176,7 +182,13 @@ describe("statePointerAddress", () => {
   it("derives the state-pointer SOC address", () => {
     expect(
       uint8ArrayToHex(
-        statePointerAddress(TEST_BATCH_ID, PARTITION, OWNER, POINTER_NOW_MS),
+        statePointerAddress(
+          TEST_BATCH_ID,
+          PARTITION,
+          OWNER,
+          POINTER_NOW_MS,
+          SBU1_PARTITION_STATE,
+        ),
       ),
     ).toBe("582b9c147fa33f51d6f3f25e6fd99d1a5f5d99e3a90d06770c35b06fcabb5471")
   })
@@ -187,7 +199,13 @@ describe("writePartitionState — reserved-slot bucket-collision avoidance", () 
     const now = 1_000_000_000_000
     const stamper = await makeBoundStamper()
     const pointerBucket = toBucket(
-      statePointerAddress(TEST_BATCH_ID, PARTITION, OWNER, now),
+      statePointerAddress(
+        TEST_BATCH_ID,
+        PARTITION,
+        OWNER,
+        now,
+        SBU1_PARTITION_STATE,
+      ),
     )
     // Guard: a false green if the target happened to already be claimed.
     expect(pointerBucket).not.toBe(
@@ -233,6 +251,7 @@ describe("writePartitionState — sparse sentinel refs are independent", () => {
     const localCounter = leafyCounter() // one real leaf → the rest are sentinels
 
     const { references } = await writePartitionState({
+      format: SBU1_PARTITION_STATE,
       bee: bee,
       stamper,
       batchId: TEST_BATCH_ID,
@@ -262,6 +281,7 @@ describe("writePartitionState — distinct-bucket invariant guard", () => {
     for (const b of [100, 3000, 5000, 7000]) localCounter[b] = 1
 
     const { stateBuckets } = await writePartitionState({
+      format: SBU1_PARTITION_STATE,
       bee: bee,
       stamper,
       batchId: TEST_BATCH_ID,
@@ -293,6 +313,7 @@ describe("writePartitionState — two-phase publish (pointer after chunks)", () 
 
     await expect(
       writePartitionState({
+        format: SBU1_PARTITION_STATE,
         bee: bee,
         stamper,
         batchId: TEST_BATCH_ID,
@@ -317,6 +338,7 @@ describe("writePartitionState — counter monotonicity tripwire", () => {
     const baseline = new Uint32Array(NUM_BUCKETS)
     baseline[1000] = 5
     const first = await writePartitionState({
+      format: SBU1_PARTITION_STATE,
       bee: bee,
       stamper,
       batchId: TEST_BATCH_ID,
@@ -334,6 +356,7 @@ describe("writePartitionState — counter monotonicity tripwire", () => {
     regressed[1000] = 4
     await expect(
       writePartitionState({
+        format: SBU1_PARTITION_STATE,
         bee: bee,
         stamper,
         batchId: TEST_BATCH_ID,
@@ -354,6 +377,7 @@ describe("writePartitionState — counter monotonicity tripwire", () => {
     const baseline = new Uint32Array(NUM_BUCKETS)
     baseline[1000] = 5
     const first = await writePartitionState({
+      format: SBU1_PARTITION_STATE,
       bee: bee,
       stamper,
       batchId: TEST_BATCH_ID,
@@ -372,6 +396,7 @@ describe("writePartitionState — counter monotonicity tripwire", () => {
     regressed[1000] = 4
     await expect(
       writePartitionState({
+        format: SBU1_PARTITION_STATE,
         bee: bee,
         stamper,
         batchId: TEST_BATCH_ID,
@@ -384,5 +409,98 @@ describe("writePartitionState — counter monotonicity tripwire", () => {
         previousCounter: first.publishedCounter,
       }),
     ).rejects.toThrow(/counter regressed/)
+  })
+})
+
+// A batch created before SBU1 keeps the wire layout it was created with
+// (#463): fixed-width counter chunks under the v1 topic. A new batch packs
+// SBU1 leaves under the v2 topic. Neither reader sees the other's state, so a
+// device on a stale record cannot misparse anything — it finds nothing.
+describe("partition-state formats — a legacy batch stays on its wire layout", () => {
+  const LEGACY: PartitionStateFormat = {
+    kind: "legacy",
+    layoutDepth: TEST_BATCH_DEPTH,
+  }
+  const POINTER_NOW_MS = 1_700_000_000_000
+
+  async function publish(
+    format: PartitionStateFormat,
+    localCounter: Uint32Array,
+  ) {
+    return writePartitionState({
+      bee: bee,
+      stamper: await makeBoundStamper(),
+      batchId: TEST_BATCH_ID,
+      partition: PARTITION,
+      localCounter,
+      backupSigner: BACKUP_SIGNER,
+      swarmEncryptionKey: TEST_ENC_KEY,
+      format,
+    })
+  }
+
+  function read(format: PartitionStateFormat) {
+    return readPartitionState({
+      bee: bee,
+      owner: OWNER,
+      swarmEncryptionKey: TEST_ENC_KEY,
+      batchId: TEST_BATCH_ID,
+      partition: PARTITION,
+      format,
+    })
+  }
+
+  it("publishes a legacy batch under the v1 topic domain, where every pre-SBU1 build looks", () => {
+    // The address a pre-SBU1 build derived for the same batch, partition, owner
+    // and instant — pinned so the domain string never drifts
+    expect(
+      uint8ArrayToHex(
+        statePointerAddress(
+          TEST_BATCH_ID,
+          PARTITION,
+          OWNER,
+          POINTER_NOW_MS,
+          LEGACY,
+        ),
+      ),
+    ).toBe("17461bbea226a1f86c59cc2c3eceb97ed6fabd35dc401152a34fb4e9c1caeb8d")
+  })
+
+  it("round-trips a legacy counter through 32 fixed uint16 chunks, with no frame", async () => {
+    const localCounter = new Uint32Array(NUM_BUCKETS)
+    localCounter[5] = 3
+    localCounter[40_000] = 7
+    const written = await publish(LEGACY, localCounter)
+    expect(written.references).toHaveLength(32)
+    expect(written.frame).toBeUndefined()
+
+    const back = await read(LEGACY)
+    expect(back.unchanged).toBe(false)
+    expect(back.localCounter).toEqual(localCounter)
+    expect(back.references).toHaveLength(32)
+    expect(back.frame).toBeUndefined()
+  })
+
+  it("takes 64 uint32 chunks for a legacy batch at depth 32", async () => {
+    const localCounter = new Uint32Array(NUM_BUCKETS)
+    localCounter[70] = 70_000
+    const format: PartitionStateFormat = { kind: "legacy", layoutDepth: 32 }
+    expect((await publish(format, localCounter)).references).toHaveLength(64)
+    expect((await read(format)).localCounter).toEqual(localCounter)
+  })
+
+  it("neither format reads the other's state", async () => {
+    const localCounter = new Uint32Array(NUM_BUCKETS)
+    localCounter[5] = 3
+    await publish(LEGACY, localCounter)
+    const asSbu1 = await read(SBU1_PARTITION_STATE)
+    expect(asSbu1.referenceHex).toBeUndefined()
+    expect(asSbu1.localCounter).toEqual(new Uint32Array(NUM_BUCKETS))
+
+    await publish(SBU1_PARTITION_STATE, localCounter)
+    expect((await read(SBU1_PARTITION_STATE)).localCounter).toEqual(
+      localCounter,
+    )
+    expect((await read(LEGACY)).localCounter).toEqual(localCounter)
   })
 })

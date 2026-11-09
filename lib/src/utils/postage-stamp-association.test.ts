@@ -4,6 +4,8 @@
 import { describe, it, expect } from "vitest"
 import { BatchId } from "@ethersphere/bee-js"
 import {
+  diluteDepthCeiling,
+  partitionStateFormat,
   resolveStampForApp,
   stampsReachableByApp,
 } from "./postage-stamp-association"
@@ -158,5 +160,61 @@ describe("stampsReachableByApp", () => {
     const result = stampsReachableByApp({}, withDefault, [deleted])
     expect(result).toHaveLength(1)
     expect(result[0].deletedAt).toBe(2_000_000)
+  })
+})
+
+// The partition-state wire format is fixed when the drive is created (#463):
+// a record with the marker packs SBU1 leaves, one without — every drive created
+// before the marker existed — stays on the fixed-width layout its depth picked,
+// so every device reads and writes the one format the batch has always used.
+describe("partitionStateFormat", () => {
+  it("is SBU1 for a drive created with the marker", () => {
+    expect(
+      partitionStateFormat(
+        createPostageStamp({ batchID: appBatch, stateFormat: "sbu1" }),
+      ),
+    ).toEqual({ kind: "sbu1" })
+  })
+
+  it("is the legacy layout at the drive's depth for a record without it", () => {
+    expect(
+      partitionStateFormat(
+        createPostageStamp({ batchID: appBatch, depth: 24 }),
+      ),
+    ).toEqual({ kind: "legacy", layoutDepth: 24 })
+    expect(
+      partitionStateFormat(
+        createPostageStamp({ batchID: appBatch, depth: 33 }),
+      ),
+    ).toEqual({ kind: "legacy", layoutDepth: 33 })
+  })
+
+  it("is the legacy uint32 layout for an unmarked scratch drive at any depth", () => {
+    expect(
+      partitionStateFormat(
+        createPostageStamp({ batchID: appBatch, kind: "scratch", depth: 24 }),
+      ),
+    ).toEqual({ kind: "legacy", layoutDepth: 32 })
+  })
+})
+
+describe("diluteDepthCeiling", () => {
+  it("caps a legacy regular drive below depth 32 at 31: past it the published layout would change", () => {
+    expect(diluteDepthCeiling(createPostageStamp({ depth: 24 }))).toBe(31)
+    expect(diluteDepthCeiling(createPostageStamp({ depth: 31 }))).toBe(31)
+  })
+
+  it("has none for an SBU1 drive, a scratch drive, or a legacy drive already past 31", () => {
+    expect(
+      diluteDepthCeiling(
+        createPostageStamp({ depth: 24, stateFormat: "sbu1" }),
+      ),
+    ).toBeUndefined()
+    expect(
+      diluteDepthCeiling(createPostageStamp({ depth: 24, kind: "scratch" })),
+    ).toBeUndefined()
+    expect(
+      diluteDepthCeiling(createPostageStamp({ depth: 32 })),
+    ).toBeUndefined()
   })
 })

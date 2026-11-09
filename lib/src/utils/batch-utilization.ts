@@ -34,7 +34,6 @@ import { stamp as stampAtSlot } from "@ethersphere/core-sdk"
 import { Binary } from "cafe-utility"
 import type {
   BatchMetadata,
-  ChunkCacheEntry,
   UtilizationStoreDB,
 } from "../storage/utilization-store"
 import { uploadChunk, type UploadTarget } from "../proxy/upload"
@@ -124,23 +123,13 @@ const COUNTER_BYTES_UINT32 = 4
 /**
  * The fixed layout counters are cached in: a uint32 per bucket, 1,024 buckets
  * per CHUNK_SIZE-byte chunk, 64 chunks for the table — whatever the batch
- * depth. The IndexedDB cache and the dev-only utilisation upload use it; the
- * partition-state publish packs the counters separately
- * (`sync/counter-codec.ts`). Neither depends on depth, so a dilute changes no
- * cached byte (#463).
+ * depth or the batch's wire format. The IndexedDB cache and the dev-only
+ * utilisation upload use it; the partition-state publish packs the counters
+ * separately (`sync/counter-codec.ts`, `sync/legacy-counter-codec.ts`). The
+ * cache does not depend on depth, so a dilute changes no cached byte (#463).
  */
 export const BUCKETS_PER_CHUNK = CHUNK_SIZE / COUNTER_BYTES_UINT32
 export const NUM_UTILIZATION_CHUNKS = NUM_BUCKETS / BUCKETS_PER_CHUNK
-
-/**
- * Marks a cache row written in the fixed layout. Rows without it predate #463
- * and were serialized at the batch's depth of the time: uint16 up to
- * `LEGACY_UINT16_MAX_DEPTH` on a regular drive, uint32 above it and on a
- * scratch drive. `UtilizationAwareStamper.create` converts them once.
- */
-export const CACHE_ROW_FORMAT = 1
-const LEGACY_UINT16_MAX_DEPTH = 31
-const LEGACY_COUNTER_BYTES_UINT16 = 2
 
 // ============================================================================
 // Types
@@ -296,93 +285,6 @@ export function mergeChunk(
     deserializeUint32Array(chunkData),
     chunkIndex * BUCKETS_PER_CHUNK,
   )
-}
-
-/**
- * A batch's cache rows in the fixed layout (#463), or `undefined` when every
- * row already is. Rows without the format marker were serialized at the
- * batch's depth of the time: uint16 below depth 32 on a regular drive,
- * uint32 otherwise. Each row is decoded by its own marker: the conversion
- * is one transaction (`UtilizationStoreDB.convertBatch`), but a tab still on
- * the older build can flush a legacy row beside converted ones. Decoding
- * that row by the batch's rule would read it as garbage — a uint16 row read
- * as uint32 puts counters past `maxSlot`, and the bucket reads as full for
- * good. Where the two layouts overlap, the higher counter is kept, since
- * both are high-water marks of the same lane.
- *
- * That guards against garbage, not against loss. Rows share the key
- * `(batchId, chunkIndex)`, so the old tab's legacy row `k` replaces
- * converted row `k`, whose buckets lie in legacy row `floor(k / 2)` — a row
- * the old tab flushed only if it was dirty. For `k ≥ 1` those 1,024 buckets
- * come back as zero. The window is a deploy with two builds in one browser,
- * where the old tab also publishes v1 state this build cannot read, so the
- * lane is already lossy; closing the old tab ends it.
- *
- * The legacy rule is the drive's depth *now*: a regular drive diluted across
- * depth 31 → 32 after its last pre-#463 write reads its uint16 rows as
- * uint32, so that device, too, resumes the upper half of its buckets from
- * zero. Nothing recorded the write-time depth; accepted as pre-production
- * test data with the rest of the v1 state (docs/Postage-Batch-Partitioning.md).
- */
-export function convertLegacyCacheRows(
-  batchId: string,
-  rows: ChunkCacheEntry[],
-  depth: number,
-  scratch: boolean,
-): ChunkCacheEntry[] | undefined {
-  if (rows.every((row) => row.format === CACHE_ROW_FORMAT)) return undefined
-  const legacyUint16 = !scratch && depth <= LEGACY_UINT16_MAX_DEPTH
-  const legacy = new Uint32Array(NUM_BUCKETS)
-  const fixed = new Uint32Array(NUM_BUCKETS)
-  for (const row of rows) {
-    if (row.format === CACHE_ROW_FORMAT) {
-      mergeChunk(fixed, row.chunkIndex, row.data)
-    } else if (legacyUint16) {
-      mergeLegacyUint16Chunk(legacy, row.chunkIndex, row.data)
-    } else if (row.chunkIndex < NUM_UTILIZATION_CHUNKS) {
-      mergeChunk(legacy, row.chunkIndex, row.data)
-    }
-  }
-  const dataCounters = legacy.map((count, bucket) =>
-    Math.max(count, fixed[bucket]),
-  )
-  return Array.from({ length: NUM_UTILIZATION_CHUNKS }, (_unused, i) => ({
-    batchId,
-    chunkIndex: i,
-    data: extractChunk(dataCounters, i),
-    contentHash: "",
-    nonce: 0,
-    format: CACHE_ROW_FORMAT,
-    lastAccess: Date.now(),
-  }))
-}
-
-/**
- * Merge a row written before the fixed layout on a regular drive at depth ≤
- * `LEGACY_UINT16_MAX_DEPTH`: little-endian uint16 counters, 2,048 per chunk.
- */
-function mergeLegacyUint16Chunk(
-  dataCounters: Uint32Array,
-  chunkIndex: number,
-  chunkData: Uint8Array,
-): void {
-  const perChunk = CHUNK_SIZE / LEGACY_COUNTER_BYTES_UINT16
-  if (chunkData.length !== CHUNK_SIZE || chunkIndex * perChunk >= NUM_BUCKETS) {
-    throw new Error(
-      `Invalid legacy chunk ${chunkIndex} (${chunkData.length} bytes)`,
-    )
-  }
-  const view = new DataView(
-    chunkData.buffer,
-    chunkData.byteOffset,
-    chunkData.byteLength,
-  )
-  for (let i = 0; i < perChunk; i++) {
-    dataCounters[chunkIndex * perChunk + i] = view.getUint16(
-      i * LEGACY_COUNTER_BYTES_UINT16,
-      true,
-    )
-  }
 }
 
 // ============================================================================
@@ -821,12 +723,8 @@ export async function loadUtilizationState(
 ): Promise<BatchUtilizationState> {
   const { cache } = options
 
-  // Step 1: Try loading from IndexedDB cache. A row without the format marker
-  // predates the fixed layout; `UtilizationAwareStamper.create` converts those,
-  // this dev-only path just treats them as absent.
-  const cachedChunks = (await cache.getAllChunks(batchId.toHex())).filter(
-    (cached) => cached.format === CACHE_ROW_FORMAT,
-  )
+  // Step 1: Try loading from IndexedDB cache
+  const cachedChunks = await cache.getAllChunks(batchId.toHex())
 
   // Step 2: If we have all chunks in cache, reconstruct state
   if (cachedChunks.length === NUM_UTILIZATION_CHUNKS) {
@@ -1006,7 +904,6 @@ export async function saveUtilizationState(
         data: chunkData,
         contentHash: cacReferenceHex,
         nonce: resolved.nonce,
-        format: CACHE_ROW_FORMAT,
         lastAccess: Date.now(),
       })
 
@@ -1263,6 +1160,14 @@ export class UtilizationAwareStamper implements Stamper, SlotAssigner {
    */
   private protectedStateBuckets = new Map<number, ReadonlySet<number>>()
 
+  /**
+   * The lane the cache rows describe (`BatchMetadata.rowsPartition`), and
+   * whether `bindPartition` has since moved the counter table to another lane,
+   * so the next `flush` rewrites every row rather than the written ones.
+   */
+  private rowsPartition: number | undefined
+  private rowsStale = false
+
   readonly signer: PrivateKey
   readonly batchId: BatchId
   readonly depth: number
@@ -1371,8 +1276,8 @@ export class UtilizationAwareStamper implements Stamper, SlotAssigner {
    * Merge what `patch` returns into this batch's metadata record. The record
    * is one object with several per-partition fields and more than one
    * writer; a writer that rebuilds it field by field drops whichever field
-   * it does not know about (#463's pre-v2 marker was lost that way), so
-   * every writer goes through here and names only what it changes.
+   * it does not know about, so every writer goes through here and names only
+   * what it changes.
    */
   private async patchMetadata(
     patch: (existing: BatchMetadata | undefined) => Partial<BatchMetadata>,
@@ -1409,6 +1314,12 @@ export class UtilizationAwareStamper implements Stamper, SlotAssigner {
     // The seeded per-partition counter (`j`, resumed high-water for Cases
     // B/D) becomes the single counter of record for this held partition.
     this.utilizationState.dataCounters = opts.localCounter
+    // The rows describe the lane they were last flushed for; this table is
+    // another lane's until the next flush rewrites every row (see `flush`)
+    if (this.rowsPartition !== opts.partition) {
+      this.rowsStale = true
+      this.dirty = true
+    }
     this.leaseStale = false
     // Presumed valid until the coordinator pushes the real `leasedUntil` (it
     // does so synchronously right after bind). Mirrors the `leaseStale` reset.
@@ -1593,16 +1504,11 @@ export class UtilizationAwareStamper implements Stamper, SlotAssigner {
     // Initialize utilization state (always, since owner is now required)
     const utilizationState = initializeBatchUtilization(batchId, depth)
 
-    // Load the counters from the cache. Rows written before the fixed layout
-    // (#463) are converted in the same transaction that reads them, so the
-    // conversion cannot be left half done or run twice on stale rows. A cache
-    // that cannot be read or converted fails the stamper rather than starting
-    // it from zero: a zero counter over rows that exist flushes zero-based rows
-    // over them on the first write and re-issues every slot they record.
-    const batchIdHex = batchId.toHex()
-    const cachedChunks = await cache.convertBatch(batchIdHex, (rows) =>
-      convertLegacyCacheRows(batchIdHex, rows, depth, scratch),
-    )
+    // Load the counters from the cache. A cache that cannot be read fails the
+    // stamper rather than starting it from zero: a zero counter over rows that
+    // exist flushes zero-based rows over them on the first write and re-issues
+    // every slot they record.
+    const cachedChunks = await cache.getAllChunks(batchId.toHex())
     for (const cached of cachedChunks) {
       if (cached.chunkIndex < NUM_UTILIZATION_CHUNKS) {
         mergeChunk(
@@ -1626,9 +1532,10 @@ export class UtilizationAwareStamper implements Stamper, SlotAssigner {
 
     // Restore the protected partition-state buckets so saves keep avoiding
     // the published resume point across reloads. Tolerates minimal caches
-    // (tests stub only convertBatch/putChunk).
+    // (tests stub only getAllChunks/putChunk).
     try {
       const meta = await cache.getMetadata?.(batchId.toHex())
+      instance.rowsPartition = meta?.rowsPartition
       for (const [p, buckets] of Object.entries(
         meta?.stateChunkBuckets ?? {},
       )) {
@@ -1804,6 +1711,12 @@ export class UtilizationAwareStamper implements Stamper, SlotAssigner {
       dirtyChunkIndexes.add(chunkIndex)
       this.utilizationState.chunks[chunkIndex].dirty = true
     }
+    // After a lane switch every row is stale, not only the written ones: the
+    // rows must describe one lane, or a cold start would resume from a table
+    // mixing two — the previous lane's counters wherever this one wrote nothing.
+    if (this.rowsStale) {
+      for (let i = 0; i < NUM_UTILIZATION_CHUNKS; i++) dirtyChunkIndexes.add(i)
+    }
 
     // Save dirty chunks to cache. We do not upload here, but we still record
     // the contentHash that an upload *would* assign — i.e. the BMT address of
@@ -1812,6 +1725,13 @@ export class UtilizationAwareStamper implements Stamper, SlotAssigner {
     // so storing anything else (or using a different key) would force a
     // redundant re-upload of every flushed chunk on the next sync.
     try {
+      // The rows are written one by one, so a lane change certifies no lane
+      // while it runs and the new one once it is done: a tab dying midway
+      // leaves rows nothing resumes from.
+      if (this.rowsStale) {
+        this.rowsPartition = undefined
+        await this.patchMetadata(() => ({ rowsPartition: undefined }))
+      }
       const claimedBuckets = claimedBucketsForCleanChunks(this.utilizationState)
       // Reserve each partition's lock-SOC bucket so utilisation-chunk key
       // search picks a different nonce. Otherwise a utilisation chunk could
@@ -1853,7 +1773,6 @@ export class UtilizationAwareStamper implements Stamper, SlotAssigner {
           data: chunkData,
           contentHash,
           nonce: resolved.nonce,
-          format: CACHE_ROW_FORMAT,
           lastAccess: Date.now(),
         })
         this.utilizationState.chunks[chunkIndex].contentHash = contentHash
@@ -1863,6 +1782,12 @@ export class UtilizationAwareStamper implements Stamper, SlotAssigner {
 
       // Update lastSync timestamp
       this.utilizationState.lastSync = Date.now()
+
+      if (this.rowsStale) {
+        this.rowsPartition = this.partition
+        await this.patchMetadata(() => ({ rowsPartition: this.partition }))
+        this.rowsStale = false
+      }
     } catch (error) {
       console.error(
         `[UtilizationAwareStamper] Failed to flush to cache:`,
@@ -1918,47 +1843,34 @@ export class UtilizationAwareStamper implements Stamper, SlotAssigner {
   }
 
   /**
-   * Read the cached "synced reference" for `partition` — the partition-state
-   * feed reference this device's local counter was last in sync with. Used by
-   * the acquire path to skip re-downloading unchanged counter chunks.
+   * The partition-state reference this device's cache rows are in sync with,
+   * when they describe `partition`: the last publish named it for that lane
+   * AND the last flush wrote the rows for that lane. Used by the acquire path
+   * to skip re-downloading unchanged leaves, and by the adopt fast path as
+   * proof that the rows are the lane's counter. Undefined after a lane switch
+   * until both have happened, and after a flush that died midway.
    */
   async getSyncedReference(partition: number): Promise<string | undefined> {
     const meta = await this.cache.getMetadata(this.batchId.toHex())
-    return meta?.stateReferences?.[partition]
-  }
-
-  /**
-   * Whether a pre-v2 build synced `partition` on this device
-   * (`BatchMetadata.syncedReferences`). Its reference is unreadable to v2, but
-   * the converted cache rows still hold the slots this device used, so a cold
-   * claim that finds no v2 state resumes from them rather than from zero.
-   */
-  async wroteLaneBeforeV2(partition: number): Promise<boolean> {
-    const meta = await this.cache.getMetadata(this.batchId.toHex())
-    return meta?.syncedReferences?.[partition] !== undefined
+    const synced = meta?.stateReference
+    return synced?.partition === partition && meta?.rowsPartition === partition
+      ? synced.referenceHex
+      : undefined
   }
 
   /**
    * Record the partition-state feed reference this device's local counter is
-   * now in sync with (after a download or a publish). Merges into the existing
-   * batch metadata so other fields / partitions are preserved.
+   * now in sync with (after a download or a publish). Replaces the one
+   * reference kept — see `BatchMetadata.stateReference` — and merges into the
+   * existing batch metadata so the other fields are preserved.
    */
   async setSyncedReference(
     partition: number,
     referenceHex: string,
   ): Promise<void> {
-    await this.patchMetadata((existing) => {
-      // A v2 reference for the partition supersedes the pre-v2 marker
-      const { [partition]: _superseded, ...syncedReferences } =
-        existing?.syncedReferences ?? {}
-      return {
-        stateReferences: {
-          ...(existing?.stateReferences ?? {}),
-          [partition]: referenceHex,
-        },
-        syncedReferences,
-      }
-    })
+    await this.patchMetadata(() => ({
+      stateReference: { partition, referenceHex },
+    }))
   }
 
   /**

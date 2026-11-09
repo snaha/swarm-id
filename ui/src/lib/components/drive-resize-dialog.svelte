@@ -8,7 +8,7 @@
 
   import ArrowRight from '@lucide/svelte/icons/arrow-right'
   import Info from '@lucide/svelte/icons/info'
-  import type { PostageStamp } from '@snaha/swarm-id/internal'
+  import { type PostageStamp, diluteDepthCeiling } from '@snaha/swarm-id/internal'
 
   import { createAttemptTracker } from '$lib/attempt'
   import DriveDialogStatus from '$lib/components/drive-dialog-status.svelte'
@@ -79,10 +79,14 @@
   // The current size is the default (empty-valued) option; only larger sizes are
   // offered — Bee can grow a batch (dilute) but not shrink it. An existing drive
   // below the usable floor can grow past it, never into another unusable size
-  // (#538, #566).
+  // (#538, #566). A drive from before SBU1 stops at depth 31: past it the
+  // layout of its published counters would change (#463).
+  const depthCeiling = $derived(diluteDepthCeiling(drive) ?? Infinity)
   const sizeOptions = $derived([
     { value: '', label: formatBytes(driveEffectiveBytes(currentDepth)) },
-    ...DRIVE_SIZE_BREAKPOINTS.filter(([depth]) => depth > currentDepth).map(([depth, bytes]) => ({
+    ...DRIVE_SIZE_BREAKPOINTS.filter(
+      ([depth]) => depth > currentDepth && depth <= depthCeiling,
+    ).map(([depth, bytes]) => ({
       value: String(depth),
       label: formatBytes(bytes),
     })),

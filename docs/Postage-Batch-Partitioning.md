@@ -119,11 +119,27 @@ Capacity is enforced per partition: a write is rejected when `j` would reach
 ## 5. Persistence of the counter
 
 The counter is a `Uint32Array(65536)` (one entry per bucket). Locally it is cached as 64
-fixed uint32 chunks (`NUM_UTILIZATION_CHUNKS`), whatever the depth. On the wire it is
-packed with the SBU1 leaf encoding (`sync/counter-codec.ts`, #463): a per-publish frame
-(base + bit width chosen from the counters' spread), deltas packed to that width, outliers
-listed as exceptions in the reference chunk — typically 8–20 leaves instead of a fixed 32
-or 64, and independent of the batch depth, so a dilute changes nothing published.
+fixed uint32 chunks (`NUM_UTILIZATION_CHUNKS`), whatever the depth or the batch's wire
+format. On the wire a batch uses the format its record fixed when the drive was created
+(`PostageStamp.stateFormat`, read through `partitionStateFormat`, #463):
+
+- **SBU1** (`stateFormat: "sbu1"`, every drive created since the marker exists): the SBU1
+  leaf encoding (`sync/counter-codec.ts`), a per-publish frame (base + bit width chosen from
+  the counters' spread), deltas packed to that width, outliers listed as exceptions in the
+  reference chunk — typically 8–20 leaves instead of a fixed 32 or 64, and independent of
+  the batch depth, so a dilute changes nothing published. Topic domain
+  `swarm-id-partition-state-v2`.
+- **Legacy** (no marker, every drive from before it): fixed-width counter chunks
+  (`sync/legacy-counter-codec.ts`), uint16 in 32 chunks up to depth 31, uint32 in 64 above
+  (a scratch drive is uint32 at every depth), the reference chunk their references alone.
+  Topic domain `swarm-id-partition-state-v1`. A dilute across depth 31 would change this
+  layout under the published chunks, so the UI refuses one (`diluteDepthCeiling`); such a
+  drive grows within its width or is replaced by a new one. The format may be deprecated once
+  no such drive is left.
+
+Every device reads and writes the one format the batch has always used, and neither reader
+looks at the other's topic, so a device on a stale record cannot misparse anything: it finds
+nothing. Below, "leaf" means an SBU1 leaf or a legacy chunk alike.
 
 Persistence rules:
 
@@ -255,7 +271,11 @@ overwrite a **new** holder's already-acked data. Chunks are content-addressed, s
 upload is a safe retry.
 
 A device that reloads within its own lease TTL skips the read entirely and re-derives its
-counter from local state (the re-adopt fast path).
+counter from local state (the re-adopt fast path) — provided its cache rows are certified for
+that lane: the device keeps one synced reference, for the lane the rows describe, and a lane
+switch rewrites every row (certifying no lane while it runs) before the new lane's first publish
+certifies them again. Rows a dying tab left half rewritten, or a lane held without a publish
+yet, take the cold read instead.
 
 ## 9. Release fencing (#349)
 
@@ -365,20 +385,15 @@ that feeds the rival set. The beacon is a correctness mechanism; the heartbeat i
   device loads the current build fresh, so the exposure is one already-open tab spanning a
   deploy, and the data at risk overlaps the unclean-crash slots already accepted above. A
   future wire-format change must bump the topic domain instead of reusing it.
-- **v1 partition state is not read (#463).** The SBU1 leaf format publishes under
-  `swarm-id-partition-state-v2` and never reads the v1 topic. A device keeps its own used
-  slots across the switch only through its local cache rows, which it converts in one
-  IndexedDB transaction; its pre-v2 synced reference marks the lane as its own, so the first
-  claim resumes from those rows, but is never the heartbeat target, since no v2 reader can
-  parse the v1 chunk it names. Any device without them for a partition (another browser, cleared
-  storage, or a takeover of a lane written under v1) finds no v2 state, resumes that lane
-  from zero, and re-issues its slots, overwriting the chunks written under v1. The conversion
-  decodes the rows by the drive's depth _now_, since nothing recorded the depth they were
-  written at: a regular drive diluted across depth 31 → 32 between its last pre-v2 write and
-  its first v2 load has its uint16 rows read as uint32, so that device, too, resumes the upper
-  half of its buckets from zero. Accepted while the project is pre-production: there is no
-  user data to keep, and the test data on such a lane is lost. This is wider than the
-  stale-tab window above, which bounded the exposure to one open tab.
+- **Two wire formats coexist (#463).** A drive created before the SBU1 format keeps its
+  fixed-width layout under the `v1` topic domain for good; a drive created since packs SBU1
+  leaves under `v2`. The format is a field of the synced stamp record, fixed at creation, so
+  every device agrees and nothing is ever converted on the wire. The IndexedDB counter cache
+  is one fixed uint32 layout for both; the upgrade that unified it dropped the stores
+  (`DB_VERSION`), and a legacy batch's next acquire re-read its published v1 state, which is
+  at least as fresh as the rows were since every upload publishes before it acks. A legacy
+  regular drive cannot be grown past depth 31, where its layout would change; a drive removed
+  and re-added gets a fresh, marked record and starts over, as it loses its `kind` too.
 
 ## Key constants (in `lib/src/utils/batch-utilization.ts` unless noted)
 

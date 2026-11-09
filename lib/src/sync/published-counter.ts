@@ -6,6 +6,7 @@ import { NUM_BUCKETS } from "../utils/batch-utilization"
 import { withTimeout } from "../utils/promise"
 import { readPartitionLock } from "./partition-lock"
 import { readPartitionState } from "./partition-state"
+import type { PartitionStateFormat } from "./partition-state-format"
 import { SYNC_READ_TIMEOUT_MS } from "./timing-constants"
 
 /**
@@ -37,10 +38,13 @@ export async function readPublishedCounter(
     swarmEncryptionKey: Uint8Array
     batchId: BatchId
     partition: number
+    /** The batch's wire format (#463), from its record. */
+    format: PartitionStateFormat
   },
   known?: PublishedCounter,
 ): Promise<PublishedCounter | undefined> {
-  const { bee, backupSigner, swarmEncryptionKey, batchId, partition } = opts
+  const { bee, backupSigner, swarmEncryptionKey, batchId, partition, format } =
+    opts
   let lockUnreadable = false
   const lock = await withTimeout(
     readPartitionLock({
@@ -65,6 +69,7 @@ export async function readPublishedCounter(
       partition,
       holderLeasedUntilMs: lock?.leasedUntil,
       lockUnreadable,
+      format,
     },
     known?.referenceHex,
   )

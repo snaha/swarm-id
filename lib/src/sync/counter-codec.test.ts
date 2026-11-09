@@ -247,6 +247,31 @@ describe("counter-codec — frames", () => {
     ).toThrow(/width/)
   })
 
+  it("is the narrowest width that fits: under the exception cap a wider width is never cheaper", () => {
+    // SBU1 §4 weighs packed bits against 8 bytes per exception and a digest
+    // per leaf. One more bit costs 8,192 packed bytes and can save at most
+    // 128 exceptions (1,024 bytes), so the cheapest width is the first that
+    // needs no more than MAX_EXCEPTIONS.
+    const tables = [goldenCounters(), new Uint32Array(NUM_BUCKETS)]
+    for (const mean of [1, 40, 3000]) {
+      const counters = new Uint32Array(NUM_BUCKETS)
+      for (let b = 0; b < NUM_BUCKETS; b++) {
+        counters[b] = Math.floor(
+          mean + ((b * 2654435761) % 1000) * (mean / 5000),
+        )
+      }
+      tables.push(counters)
+    }
+    for (const counters of tables) {
+      const { base, width } = chooseFrame(counters)
+      expect(base).toBe(Math.min(...counters))
+      expect(frameFits(counters, { base, width })).toBe(true)
+      if (width > 0) {
+        expect(frameFits(counters, { base, width: width - 1 })).toBe(false)
+      }
+    }
+  })
+
   it("round-trips a Poisson-like table at every width up to the cap", () => {
     for (const mean of [1, 40, 3000, 2 ** 20]) {
       const counters = new Uint32Array(NUM_BUCKETS)

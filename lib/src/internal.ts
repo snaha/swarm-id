@@ -152,7 +152,9 @@ export {
 } from "./utils/postage-contract"
 
 export {
+  diluteDepthCeiling,
   isScratchDrive,
+  partitionStateFormat,
   stampsReachableByApp,
 } from "./utils/postage-stamp-association"
 

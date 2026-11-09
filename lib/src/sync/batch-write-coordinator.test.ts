@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, it, expect, vi } from "vitest"
+import { SBU1_PARTITION_STATE } from "./partition-state"
 import { BatchId, EthAddress, PrivateKey } from "@ethersphere/bee-js"
 
 type MockLease = ReturnType<typeof makeLease>
@@ -205,6 +206,7 @@ function makeDeps(
     accountId: "acct-1",
     backupSigner: {} as BatchWriteCoordinatorDeps["backupSigner"],
     swarmEncryptionKey: new Uint8Array(32),
+    stateFormat: SBU1_PARTITION_STATE,
     partitionCount: 4,
     mode: "persistent",
     ...overrides,
@@ -828,7 +830,6 @@ describe("BatchWriteCoordinator — teardown safety", () => {
       20,
       {
         getAllChunks: async () => [],
-        convertBatch: async () => [],
         putChunk: async () => undefined,
       } as unknown as UtilizationStoreDB,
       new EthAddress("00".repeat(20)),
@@ -1074,6 +1075,7 @@ describe("BatchWriteCoordinator — adopt fast path seeds the heartbeat pointer"
     const coordinator = new BatchWriteCoordinator(
       makeDeps({
         stamper: stamper as unknown as BatchWriteCoordinatorDeps["stamper"],
+        readLeaseCache: () => cachedLease(2),
         mode: "oneshot", // no refresh timer to leak in the test
       }),
     )
@@ -1082,8 +1084,50 @@ describe("BatchWriteCoordinator — adopt fast path seeds the heartbeat pointer"
 
     expect(stamper.getSyncedReference).toHaveBeenCalledWith(2)
     expect(lease.seedReferenceHex).toHaveBeenCalledWith("deadbeef")
+    expect(lease.acquire).not.toHaveBeenCalled()
+  })
+
+  it("takes the cold acquire instead when the rows are not certified for the cached lane", async () => {
+    // The adopt binds the stamper's own table as the lane's counter. With no
+    // certified reference — a lane never published, or rows a dying tab left
+    // half rewritten for another lane (#463) — that table is not known to be
+    // the lane's, so the lease is re-established from Swarm.
+    const lease = makeLease({
+      acquireResult: { partition: 2, partitionCount: 4, isReadOnly: false },
+    })
+    lease.adoptIfLive = vi.fn(() => 2)
+    leaseController.lease = lease
+    const stamper = makeStamper([])
+    const coordinator = new BatchWriteCoordinator(
+      makeDeps({
+        stamper: stamper as unknown as BatchWriteCoordinatorDeps["stamper"],
+        readLeaseCache: () => cachedLease(2),
+        mode: "oneshot",
+      }),
+    )
+
+    await coordinator.withWrite(async () => "ok", { wait: "block" })
+
+    expect(stamper.getSyncedReference).toHaveBeenCalledWith(2)
+    expect(lease.adoptIfLive).not.toHaveBeenCalled()
+    expect(lease.acquire).toHaveBeenCalled()
+    expect(lease.seedReferenceHex).not.toHaveBeenCalled()
   })
 })
+
+/** The lease-cache snapshot a reload within the TTL hydrates from. */
+function cachedLease(partition: number) {
+  return {
+    deviceId: SELF,
+    batchId: BATCH_ID,
+    self: {
+      partition,
+      generation: { timestampMs: 1, tiebreaker: "self" },
+      acquiredAt: 1,
+      leasedUntil: Date.now() + 60_000,
+    },
+  }
+}
 
 describe("BatchWriteCoordinator — state-pointer heartbeat vs in-flight upload", () => {
   // The refresh tick runs OFF the write lock; `withWrite`'s publish (which also

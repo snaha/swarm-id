@@ -204,9 +204,6 @@ importers:
       eslint:
         specifier: 10.9.1
         version: 10.9.1(jiti@2.6.1)
-      fake-indexeddb:
-        specifier: ^6.2.7
-        version: 6.2.7
       prettier:
         specifier: 3.7.3
         version: 3.7.3
@@ -3070,6 +3067,7 @@ packages:
 
   axios-retry@4.5.0:
     resolution: {integrity: sha512-aR99oXhpEDGo0UuAlYcn2iGRds30k366Zfa05XWScR9QaQD4JYiP3/1Qt1u7YlefUOK+cn0CcwoL1oefavQUlQ==}
+    deprecated: axios-retry is no longer maintained. See https://github.com/softonic/axios-retry for alternatives.
     peerDependencies:
       axios: 1.21.0
 
@@ -3710,10 +3708,6 @@ packages:
 
   extend@3.0.2:
     resolution: {integrity: sha512-fjquC59cD7CyW6urNXK0FBufkZcoiGG80wTuPujX590cB5Ttln20E2UB4S/WARVqhXffZl2LNgS+gQdPIIim/g==}
-
-  fake-indexeddb@6.2.7:
-    resolution: {integrity: sha512-g0ghQ+BmU3CSZaHup5FigEAAtCmtNyxkrmID7OAeK2qONHghw1aQ2l2T1RxmfhP1H1tEXVRWArUTGVCk5832ww==}
-    engines: {node: '>=18'}
 
   fast-deep-equal@3.1.3:
     resolution: {integrity: sha512-f3qQ9oQy9j2AhBe/H9VC91wLmKBCCU/gDOnKNAYG5hswO7BLKj09Hc5HYNz9cGI++xlpDCIgDaitVs03ATR84Q==}
@@ -10064,8 +10058,6 @@ snapshots:
       type: 2.7.3
 
   extend@3.0.2: {}
-
-  fake-indexeddb@6.2.7: {}
 
   fast-deep-equal@3.1.3: {}
 

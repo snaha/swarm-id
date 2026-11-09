@@ -946,6 +946,13 @@ describe("SwarmIdProxy partitioned write enablement", () => {
       return stamper
     }
 
+    const coordinatorDepsFor = (batchId: string) =>
+      vi
+        .mocked(BatchWriteCoordinator)
+        .mock.calls.map(([deps]) => deps)
+        .filter((deps) => deps.batchId === batchId)
+        .at(-1)
+
     const coordinatorFor = (batchId: string): CoordinatorFake | undefined =>
       vi
         .mocked(BatchWriteCoordinator)
@@ -2526,6 +2533,31 @@ describe("SwarmIdProxy partitioned write enablement", () => {
           vi.mocked(UtilizationAwareStamper.create).mock.calls.at(-1)![2],
         ).toBe(builtAt + 1),
       )
+    })
+
+    // #463: the wire format of a drive's partition state is fixed by its
+    // record. One without the marker was created before SBU1 and stays on the
+    // fixed-width layout its depth picks; one with it packs SBU1 leaves.
+    it("builds an unmarked drive's write path on the legacy wire layout", async () => {
+      nextStamper()
+      await connectWithTwoDrives()
+      await vi.waitFor(() => expect(coordinatorFor(BATCH_ID_HEX)).toBeDefined())
+      expect(coordinatorDepsFor(BATCH_ID_HEX)?.stateFormat).toEqual({
+        kind: "legacy",
+        layoutDepth: 24,
+      })
+    })
+
+    it("builds a marked drive's write path on SBU1", async () => {
+      nextStamper()
+      await connectWithTwoDrives([
+        { ...stampOf(BATCH_ID_HEX), stateFormat: "sbu1" },
+        stampOf(SECOND_BATCH_ID_HEX),
+      ])
+      await vi.waitFor(() => expect(coordinatorFor(BATCH_ID_HEX)).toBeDefined())
+      expect(coordinatorDepsFor(BATCH_ID_HEX)?.stateFormat).toEqual({
+        kind: "sbu1",
+      })
     })
 
     it("routes a lease-request to the drive it names", async () => {

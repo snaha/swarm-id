@@ -37,7 +37,6 @@ const WRAP_TEST_TIMEOUT_MS = 120_000
 
 const emptyCache = {
   getAllChunks: async () => [],
-  convertBatch: async () => [],
   putChunk: async () => undefined,
 } as unknown as UtilizationStoreDB
 

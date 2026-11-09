@@ -7,7 +7,6 @@ import { Binary } from "cafe-utility"
 import { makeEncryptedContentAddressedChunk } from "../chunk"
 import {
   BUCKETS_PER_CHUNK,
-  CACHE_ROW_FORMAT,
   CHUNK_SIZE,
   DATA_COUNTER_START,
   NUM_BUCKETS,
@@ -285,7 +284,6 @@ describe("UtilizationAwareStamper partition awareness", () => {
   function makeEmptyCache(): UtilizationStoreDB {
     return {
       getAllChunks: async () => [],
-      convertBatch: async () => [],
       putChunk: async () => undefined,
     } as unknown as UtilizationStoreDB
   }
@@ -1211,21 +1209,6 @@ describe("UtilizationAwareStamper synced reference", () => {
         for (const entry of store.values()) entries.push(entry)
         return entries.sort((a, b) => a.chunkIndex - b.chunkIndex)
       },
-      convertBatch: async (
-        batchId: string,
-        convert: (rows: ChunkCacheEntry[]) => ChunkCacheEntry[] | undefined,
-      ) => {
-        const rows = [...store.values()]
-          .filter((entry) => entry.batchId === batchId)
-          .sort((a, b) => a.chunkIndex - b.chunkIndex)
-        const replacement = convert(rows)
-        if (!replacement) return rows
-        for (const row of rows) store.delete(`${batchId}:${row.chunkIndex}`)
-        for (const row of replacement) {
-          store.set(`${batchId}:${row.chunkIndex}`, { ...row })
-        }
-        return replacement
-      },
       putChunk: async (entry: ChunkCacheEntry) => {
         store.set(`${entry.batchId}:${entry.chunkIndex}`, { ...entry })
       },
@@ -1251,44 +1234,74 @@ describe("UtilizationAwareStamper synced reference", () => {
     )
   }
 
-  // A reference stored before v2 names a v1 reference chunk, which no v2
-  // reader can parse; adopted as the v2 heartbeat target, it would leave the
-  // partition unreadable to every other device's takeover (#918 review). It
-  // still marks the lane as one this device wrote, until a v2 publish of it.
-  it("reads a synced reference stored before v2 as a lane marker, never as a reference", async () => {
-    const cache = makeRecordingCache()
-    await cache.putMetadata({
-      batchId: TEST_BATCH_ID.toHex(),
-      lastSync: 0,
-      chunkCount: 0,
-      syncedReferences: { 0: "v1-reference", 1: "v1-reference" },
+  function bind(stamper: UtilizationAwareStamper, partition: number): void {
+    stamper.bindPartition({
+      partition,
+      partitionCount: PARTITION_COUNT,
+      localCounter: new Uint32Array(NUM_BUCKETS),
     })
+  }
+
+  // The cache rows hold one lane's counter — `bindPartition` replaces the
+  // table — so one synced reference certifies them, not one per partition.
+  it("keeps one lane's reference: a publish of another lane replaces it", async () => {
+    const cache = makeRecordingCache()
     const stamper = await makeStamper(cache)
     expect(await stamper.getSyncedReference(0)).toBeUndefined()
-    expect(await stamper.wroteLaneBeforeV2(0)).toBe(true)
-    expect(await stamper.wroteLaneBeforeV2(2)).toBe(false)
 
-    await stamper.setSyncedReference(0, "v2-reference")
-    expect(await stamper.getSyncedReference(0)).toBe("v2-reference")
-    expect(await stamper.wroteLaneBeforeV2(0)).toBe(false)
-    expect(await stamper.wroteLaneBeforeV2(1)).toBe(true)
+    bind(stamper, 0)
+    await stamper.flush()
+    await stamper.setSyncedReference(0, "ref-zero")
+    expect(await stamper.getSyncedReference(0)).toBe("ref-zero")
+
+    bind(stamper, 1)
+    await stamper.flush()
+    await stamper.setSyncedReference(1, "ref-one")
+    expect(await stamper.getSyncedReference(1)).toBe("ref-one")
+    expect(await stamper.getSyncedReference(0)).toBeUndefined()
+
+    // A cold start sees the same
+    const reloaded = await makeStamper(cache)
+    expect(await reloaded.getSyncedReference(1)).toBe("ref-one")
+    expect(await reloaded.getSyncedReference(0)).toBeUndefined()
   })
 
-  it("getSyncedReference round-trips through setSyncedReference (per partition, merge-preserving)", async () => {
+  it("certifies a reference only once the rows describe its lane: a publish no flush followed is not a resume point", async () => {
     const cache = makeRecordingCache()
     const stamper = await makeStamper(cache)
-
-    expect(await stamper.getSyncedReference(0)).toBeUndefined()
-
+    bind(stamper, 0)
+    await stamper.flush()
     await stamper.setSyncedReference(0, "ref-zero")
+    // Lane switch: the publish lands (ack-after-publish) and the tab dies
+    // before the flush that would rewrite the rows for lane 1
+    bind(stamper, 1)
     await stamper.setSyncedReference(1, "ref-one")
-    expect(await stamper.getSyncedReference(0)).toBe("ref-zero")
-    expect(await stamper.getSyncedReference(1)).toBe("ref-one")
 
-    // Overwriting one partition preserves the other.
-    await stamper.setSyncedReference(0, "ref-zero-v2")
-    expect(await stamper.getSyncedReference(0)).toBe("ref-zero-v2")
-    expect(await stamper.getSyncedReference(1)).toBe("ref-one")
+    const reloaded = await makeStamper(cache)
+    expect(await reloaded.getSyncedReference(1)).toBeUndefined()
+    expect(await reloaded.getSyncedReference(0)).toBeUndefined()
+  })
+
+  it("a flush that dies midway through a lane change certifies neither lane", async () => {
+    const cache = makeRecordingCache()
+    const stamper = await makeStamper(cache)
+    bind(stamper, 0)
+    await stamper.flush()
+    await stamper.setSyncedReference(0, "ref-zero")
+
+    bind(stamper, 1)
+    await stamper.setSyncedReference(1, "ref-one")
+    const putChunk = cache.putChunk.bind(cache)
+    let written = 0
+    cache.putChunk = async (entry) => {
+      if (++written === 3) throw new Error("tab closed")
+      await putChunk(entry)
+    }
+    await expect(stamper.flush()).rejects.toThrow("tab closed")
+
+    const reloaded = await makeStamper(cache)
+    expect(await reloaded.getSyncedReference(0)).toBeUndefined()
+    expect(await reloaded.getSyncedReference(1)).toBeUndefined()
   })
 
   it("persists protected state buckets and restores them on create", async () => {
@@ -1326,7 +1339,10 @@ describe("UtilizationAwareStamper synced reference", () => {
     await stamper.setProtectedStateBuckets(0, [11])
     await stamper.setProtectedStateBuckets(1, [22])
     // Persisting a synced reference must not drop the protected buckets
-    // (both live in the same metadata record).
+    // (both live in the same metadata record). The reference certifies the
+    // rows for lane 0 once a flush has written them for it.
+    bind(stamper, 0)
+    await stamper.flush()
     await stamper.setSyncedReference(0, "ref-zero")
 
     const reloaded = await makeStamper(cache)
@@ -1348,7 +1364,6 @@ describe("UtilizationAwareStamper cache rows (#463)", () => {
   ).toHex()
   const OWNER = new EthAddress("33".repeat(20))
   const ENC_KEY = new Uint8Array(32).fill(0x24)
-  const BATCH_HEX = TEST_BATCH_ID.toHex()
 
   function makeRecordingCache(seed: ChunkCacheEntry[] = []) {
     const rows = new Map<number, ChunkCacheEntry>()
@@ -1357,18 +1372,6 @@ describe("UtilizationAwareStamper cache rows (#463)", () => {
       [...rows.values()].sort((a, b) => a.chunkIndex - b.chunkIndex)
     const cache = {
       getAllChunks: async () => sorted(),
-      // All or nothing, as the IndexedDB transaction is
-      convertBatch: async (
-        _batchId: string,
-        convert: (rows: ChunkCacheEntry[]) => ChunkCacheEntry[] | undefined,
-      ) => {
-        const replacement = convert(sorted())
-        if (replacement) {
-          rows.clear()
-          for (const row of replacement) rows.set(row.chunkIndex, { ...row })
-        }
-        return sorted()
-      },
       putChunk: async (entry: ChunkCacheEntry) => {
         rows.set(entry.chunkIndex, { ...entry })
       },
@@ -1395,8 +1398,38 @@ describe("UtilizationAwareStamper cache rows (#463)", () => {
     )
   }
 
+  it("a lane switch rewrites every row, so a cold start reads the bound lane and never a mix", async () => {
+    const { cache } = makeRecordingCache()
+    const stamper = await create(cache, 24)
+    const laneZero = new Uint32Array(NUM_BUCKETS)
+    laneZero[0x4321] = 9
+    stamper.bindPartition({
+      partition: 0,
+      partitionCount: PARTITION_COUNT,
+      localCounter: laneZero,
+    })
+    stamper.stamp(makeAddressInBucket(0x4321, 1))
+    await stamper.flush()
+
+    // Lane 1 never touched bucket 0x4321: its row must not keep lane 0's 10
+    const laneOne = new Uint32Array(NUM_BUCKETS)
+    stamper.bindPartition({
+      partition: 1,
+      partitionCount: PARTITION_COUNT,
+      localCounter: laneOne,
+    })
+    stamper.stamp(makeAddressInBucket(7, 2))
+    await stamper.flush()
+
+    const counters = (await create(cache, 24)).getUtilizationState()
+      .dataCounters
+    expect(counters[7]).toBe(1)
+    expect(counters[0x4321]).toBe(0)
+    expect(counters).toEqual(stamper.getUtilizationState().dataCounters)
+  })
+
   it("rows flushed at one depth load unchanged at another: a dilute changes no cached byte", async () => {
-    const { cache, rows } = makeRecordingCache()
+    const { cache } = makeRecordingCache()
     const before = await create(cache, 24)
     before.bindPartition({
       partition: 0,
@@ -1408,9 +1441,6 @@ describe("UtilizationAwareStamper cache rows (#463)", () => {
     before.stamp(makeAddressInBucket(BUCKET, 2))
     before.stamp(makeAddressInBucket(NUM_BUCKETS - 1, 3))
     await before.flush()
-    expect([...rows.values()].every((r) => r.format === CACHE_ROW_FORMAT)).toBe(
-      true,
-    )
 
     const after = await create(cache, 32)
     expect(after.getUtilizationState().dataCounters[BUCKET]).toBe(2)
@@ -1420,167 +1450,11 @@ describe("UtilizationAwareStamper cache rows (#463)", () => {
     )
   })
 
-  it("converts rows written before the fixed layout (uint16 at depth ≤ 31) and marks them", async () => {
-    // 32 legacy rows of 2,048 little-endian uint16 counters, no format marker.
-    const LEGACY_PER_ROW = 2048
-    const legacy: ChunkCacheEntry[] = []
-    const expected = new Uint32Array(NUM_BUCKETS)
-    expected[5] = 7
-    expected[3000] = 9
-    expected[NUM_BUCKETS - 1] = 65535
-    for (let i = 0; i < NUM_BUCKETS / LEGACY_PER_ROW; i++) {
-      const data = new Uint8Array(CHUNK_SIZE)
-      const view = new DataView(data.buffer)
-      for (let j = 0; j < LEGACY_PER_ROW; j++) {
-        view.setUint16(j * 2, expected[i * LEGACY_PER_ROW + j], true)
-      }
-      legacy.push({
-        batchId: BATCH_HEX,
-        chunkIndex: i,
-        data,
-        contentHash: "old",
-        nonce: 3,
-        lastAccess: 0,
-      })
-    }
-    const { cache, rows } = makeRecordingCache(legacy)
-
-    const stamper = await create(cache, 24)
-    expect(stamper.getUtilizationState().dataCounters).toEqual(expected)
-
-    // Rewritten in the fixed layout: 64 marked rows of uint32 counters.
-    expect(rows.size).toBe(NUM_UTILIZATION_CHUNKS)
-    expect([...rows.values()].every((r) => r.format === CACHE_ROW_FORMAT)).toBe(
-      true,
-    )
-    expect(deserializeUint32Array(rows.get(0)!.data)[5]).toBe(7)
-    expect(deserializeUint32Array(rows.get(2)!.data)[3000 - 2048]).toBe(9)
-    expect(deserializeUint32Array(rows.get(63)!.data)[1023]).toBe(65535)
-
-    // And a second load reads the converted rows, not the legacy rule.
-    expect(
-      (await create(cache, 24)).getUtilizationState().dataCounters,
-    ).toEqual(expected)
-  })
-
-  it("keeps rows written before the fixed layout at uint32 (depth ≥ 32, or a scratch drive) and marks them", async () => {
-    for (const [depth, scratch] of [
-      [32, false],
-      [20, true],
-    ] as const) {
-      const expected = new Uint32Array(NUM_BUCKETS)
-      expected[1500] = 70_000
-      const { cache, rows } = makeRecordingCache([
-        {
-          batchId: BATCH_HEX,
-          chunkIndex: 1,
-          data: serializeUint32Array(expected.slice(1024, 2048)),
-          contentHash: "old",
-          nonce: 0,
-          lastAccess: 0,
-        },
-      ])
-      const stamper = await create(cache, depth, scratch)
-      expect(stamper.getUtilizationState().dataCounters).toEqual(expected)
-      expect(rows.size).toBe(NUM_UTILIZATION_CHUNKS)
-      expect(
-        [...rows.values()].every((r) => r.format === CACHE_ROW_FORMAT),
-      ).toBe(true)
-      expect(deserializeUint32Array(rows.get(1)!.data)[1500 - 1024]).toBe(
-        70_000,
-      )
-    }
-  })
-
-  it("decodes each row by its own marker when a batch holds both layouts, and keeps the higher counter", async () => {
-    // A tab still on the pre-#463 build flushed a legacy row after this
-    // build converted the batch: legacy uint16 row 0 covers buckets 0..2047,
-    // the fixed-layout row 1 covers 1024..2047. Both are high-water marks of
-    // the same lane, so where they overlap the higher one is the resume point.
-    const legacyRow = new Uint8Array(CHUNK_SIZE)
-    const legacyView = new DataView(legacyRow.buffer)
-    legacyView.setUint16(5 * 2, 7, true)
-    legacyView.setUint16(1030 * 2, 4, true)
-    const fixedCounters = new Uint32Array(BUCKETS_PER_CHUNK)
-    fixedCounters[1030 - 1024] = 1
-    fixedCounters[1500 - 1024] = 3
-    const { cache, rows } = makeRecordingCache([
-      {
-        batchId: BATCH_HEX,
-        chunkIndex: 0,
-        data: legacyRow,
-        contentHash: "old",
-        nonce: 0,
-        lastAccess: 0,
-      },
-      {
-        batchId: BATCH_HEX,
-        chunkIndex: 1,
-        data: serializeUint32Array(fixedCounters),
-        contentHash: "new",
-        nonce: 0,
-        format: CACHE_ROW_FORMAT,
-        lastAccess: 0,
-      },
-    ])
-    const counters = (await create(cache, 24)).getUtilizationState()
-      .dataCounters
-    expect(counters[5]).toBe(7)
-    expect(counters[1030]).toBe(4)
-    expect(counters[1500]).toBe(3)
-    expect(rows.size).toBe(NUM_UTILIZATION_CHUNKS)
-    expect([...rows.values()].every((r) => r.format === CACHE_ROW_FORMAT)).toBe(
-      true,
-    )
-  })
-
-  it("loses the converted row a legacy row replaced: the marker decode avoids garbage, not loss", async () => {
-    // Rows share the key (batchId, chunkIndex). The old tab's legacy uint16
-    // row 1 (buckets 2048..4095) replaced converted row 1 (buckets 1024..2047),
-    // whose buckets lie in legacy row 0 — which the old tab did not flush. The
-    // other converted rows survive and the overlap keeps the higher counter;
-    // the replaced row's buckets are gone, and that is the known ceiling.
-    const legacyRow = new Uint8Array(CHUNK_SIZE)
-    new DataView(legacyRow.buffer).setUint16((2100 - 2048) * 2, 2, true)
-    const fixedRow = (bucket: number, count: number) => {
-      const counters = new Uint32Array(BUCKETS_PER_CHUNK)
-      counters[bucket % BUCKETS_PER_CHUNK] = count
-      return serializeUint32Array(counters)
-    }
-    const fixed = (chunkIndex: number, data: Uint8Array) => ({
-      batchId: BATCH_HEX,
-      chunkIndex,
-      data,
-      contentHash: "new",
-      nonce: 0,
-      format: CACHE_ROW_FORMAT,
-      lastAccess: 0,
-    })
-    const { cache } = makeRecordingCache([
-      fixed(0, fixedRow(5, 7)),
-      {
-        batchId: BATCH_HEX,
-        chunkIndex: 1,
-        data: legacyRow,
-        contentHash: "old",
-        nonce: 0,
-        lastAccess: 0,
-      },
-      fixed(2, fixedRow(2100, 6)),
-    ])
-    const counters = (await create(cache, 24)).getUtilizationState()
-      .dataCounters
-    expect(counters[5]).toBe(7)
-    expect(counters[2100]).toBe(6)
-    // Bucket 1500 sat in the converted row 1 the legacy row replaced
-    expect(counters[1500]).toBe(0)
-  })
-
   it("refuses to start from zero when the cache cannot be read", async () => {
     // A zero counter over rows that exist would flush zero-based rows over
     // them on the first write and re-issue every slot they record.
     const cache = {
-      convertBatch: async () => {
+      getAllChunks: async () => {
         throw new Error("IndexedDB blocked")
       },
     } as unknown as UtilizationStoreDB
@@ -1615,7 +1489,6 @@ describe("hasBucketCapacity (partition-aware, #416)", () => {
 describe("updateAfterWrite capacity guard (#416)", () => {
   const cache = {
     getAllChunks: async () => [],
-    convertBatch: async () => [],
     putChunk: async () => undefined,
   } as unknown as UtilizationStoreDB
 

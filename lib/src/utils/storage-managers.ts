@@ -217,6 +217,7 @@ export function serializePostageStamp(
     name: stamp.name,
     nameUpdatedAt: stamp.nameUpdatedAt,
     kind: stamp.kind,
+    stateFormat: stamp.stateFormat,
     utilization: stamp.utilization,
     usable: stamp.usable,
     depth: stamp.depth,

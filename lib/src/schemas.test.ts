@@ -4,15 +4,43 @@
 import { describe, it, expect, expectTypeOf } from "vitest"
 import {
   LocalAccountSchemaV1,
+  PostageStampSchemaV1,
   isSignedOutAccount,
   type AccessMethod,
   type Account,
 } from "./schemas"
+import { serializePostageStamp } from "./utils/storage-managers"
 import {
   TEST_PUBLIC_KEY_HEX,
   createAccount,
+  createPostageStamp,
   createSignedOutAccount,
 } from "./test-fixtures"
+
+describe("PostageStampSchemaV1 stateFormat", () => {
+  // Fixed when the drive is created (#463): marked drives pack SBU1 leaves,
+  // unmarked ones — every drive from before the marker — keep the fixed-width
+  // layout. Only one value exists, so anything else is a record from a newer
+  // build this one cannot serve.
+  it("accepts the SBU1 marker and its absence, and nothing else", () => {
+    const record = serializePostageStamp(createPostageStamp({}))
+    expect(PostageStampSchemaV1.parse(record).stateFormat).toBeUndefined()
+    expect(
+      PostageStampSchemaV1.parse({ ...record, stateFormat: "sbu1" })
+        .stateFormat,
+    ).toBe("sbu1")
+    expect(
+      PostageStampSchemaV1.safeParse({ ...record, stateFormat: "v1" }).success,
+    ).toBe(false)
+  })
+
+  it("survives serialization: a marked drive stays marked across a reload and a sync", () => {
+    expect(
+      serializePostageStamp(createPostageStamp({ stateFormat: "sbu1" }))
+        .stateFormat,
+    ).toBe("sbu1")
+  })
+})
 
 describe("LocalAccountSchemaV1 encryptedSeed", () => {
   // A serialized (plain-string) account — the wire shape LocalAccountSchemaV1

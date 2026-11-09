@@ -12,7 +12,7 @@ import {
   mockFetch,
 } from "../proxy/feeds/epochs/test-utils"
 import { makeDeviceTiebreaker, writePartitionLock } from "./partition-lock"
-import { writePartitionState } from "./partition-state"
+import { SBU1_PARTITION_STATE, writePartitionState } from "./partition-state"
 import { readPublishedCounter } from "./published-counter"
 
 const BATCH_ID = new BatchId("ab".repeat(32))
@@ -37,6 +37,7 @@ afterEach(() => {
 const read = (known?: Parameters<typeof readPublishedCounter>[1]) =>
   readPublishedCounter(
     {
+      format: SBU1_PARTITION_STATE,
       bee,
       backupSigner: BACKUP_SIGNER,
       swarmEncryptionKey: ENCRYPTION_KEY,
@@ -48,6 +49,7 @@ const read = (known?: Parameters<typeof readPublishedCounter>[1]) =>
 
 async function publish(counter: Uint32Array): Promise<void> {
   await writePartitionState({
+    format: SBU1_PARTITION_STATE,
     bee,
     stamper: createMockStamper(),
     batchId: BATCH_ID,

@@ -41,10 +41,9 @@ vi.mock("./partition-state", async (importOriginal) => {
     },
   }
 })
-import { IDBFactory } from "fake-indexeddb"
 import { PartitionLease } from "./partition-lease"
-import { UtilizationStoreDB } from "../storage/utilization-store"
 import * as partitionState from "./partition-state"
+import { SBU1_PARTITION_STATE } from "./partition-state"
 import * as downloadData from "../proxy/download-data"
 import {
   acquirePartitionLock,
@@ -152,6 +151,7 @@ async function seedStatePointer(
   partition = 0,
 ): Promise<void> {
   await partitionState.writeStatePointer({
+    format: SBU1_PARTITION_STATE,
     bee: bee,
     stamper: createMockStamper(),
     backupSigner: BACKUP_SIGNER,
@@ -172,6 +172,7 @@ function makeLease(opts: {
   intentGuardWindowMs?: number
 }): PartitionLease {
   return new PartitionLease({
+    stateFormat: SBU1_PARTITION_STATE,
     bee: opts.bee,
     deviceId: opts.deviceId,
     batchId: TEST_BATCH_ID,
@@ -220,6 +221,7 @@ describe("readPartitionState / writePartitionState round-trip", () => {
 
     const stamper = createMockStamper()
     await partitionState.writePartitionState({
+      format: SBU1_PARTITION_STATE,
       bee: bee,
       stamper,
       batchId: TEST_BATCH_ID,
@@ -230,6 +232,7 @@ describe("readPartitionState / writePartitionState round-trip", () => {
     })
 
     const result = await partitionState.readPartitionState({
+      format: SBU1_PARTITION_STATE,
       bee: bee,
       owner: OWNER,
       swarmEncryptionKey: TEST_ENC_KEY,
@@ -247,6 +250,7 @@ describe("readPartitionState / writePartitionState round-trip", () => {
     const localCounter = new Uint32Array(NUM_BUCKETS)
     localCounter[42] = 3
     const written = await partitionState.writePartitionState({
+      format: SBU1_PARTITION_STATE,
       bee: bee,
       stamper: createMockStamper(),
       batchId: TEST_BATCH_ID,
@@ -268,6 +272,7 @@ describe("readPartitionState / writePartitionState round-trip", () => {
     // A taking-over device derives the same protection set from the
     // reference chunk it downloads.
     const read = await partitionState.readPartitionState({
+      format: SBU1_PARTITION_STATE,
       bee: bee,
       owner: OWNER,
       swarmEncryptionKey: TEST_ENC_KEY,
@@ -281,6 +286,7 @@ describe("readPartitionState / writePartitionState round-trip", () => {
     const localCounter = leafyCounter()
     const stamper = createMockStamper()
     const { referenceHex } = await partitionState.writePartitionState({
+      format: SBU1_PARTITION_STATE,
       bee: bee,
       stamper,
       batchId: TEST_BATCH_ID,
@@ -294,6 +300,7 @@ describe("readPartitionState / writePartitionState round-trip", () => {
     // all-zero leaf) and the frame — exactly what claimPartition seeds as the
     // publish baseline so the first publish is incremental.
     const full = await partitionState.readPartitionState({
+      format: SBU1_PARTITION_STATE,
       bee: bee,
       owner: OWNER,
       swarmEncryptionKey: TEST_ENC_KEY,
@@ -315,6 +322,7 @@ describe("readPartitionState / writePartitionState round-trip", () => {
     // reload's re-acquire can seed an incremental first publish too.
     const cached = await partitionState.readPartitionState(
       {
+        format: SBU1_PARTITION_STATE,
         bee: bee,
         owner: OWNER,
         swarmEncryptionKey: TEST_ENC_KEY,
@@ -334,6 +342,7 @@ describe("readPartitionState / writePartitionState round-trip", () => {
     const stamper = createMockStamper()
     const { referenceHex: writtenRef } =
       await partitionState.writePartitionState({
+        format: SBU1_PARTITION_STATE,
         bee: bee,
         stamper,
         batchId: TEST_BATCH_ID,
@@ -347,6 +356,7 @@ describe("readPartitionState / writePartitionState round-trip", () => {
 
     // No cached reference → full download.
     const full = await partitionState.readPartitionState({
+      format: SBU1_PARTITION_STATE,
       bee: bee,
       owner: OWNER,
       swarmEncryptionKey: TEST_ENC_KEY,
@@ -361,6 +371,7 @@ describe("readPartitionState / writePartitionState round-trip", () => {
     // Same reference cached → skip, reuse local counter, far fewer chunk reads.
     const cached = await partitionState.readPartitionState(
       {
+        format: SBU1_PARTITION_STATE,
         bee: bee,
         owner: OWNER,
         swarmEncryptionKey: TEST_ENC_KEY,
@@ -383,6 +394,7 @@ describe("readPartitionState / writePartitionState round-trip", () => {
     // zero-seed (that would re-issue every used slot); it reports readFailed.
     const danglingRef = Binary.uint8ArrayToHex(new Uint8Array(64).fill(0x99))
     await partitionState.writeStatePointer({
+      format: SBU1_PARTITION_STATE,
       bee: bee,
       stamper: createMockStamper(),
       backupSigner: BACKUP_SIGNER,
@@ -394,6 +406,7 @@ describe("readPartitionState / writePartitionState round-trip", () => {
     })
 
     const result = await partitionState.readPartitionState({
+      format: SBU1_PARTITION_STATE,
       bee: bee,
       owner: OWNER,
       swarmEncryptionKey: TEST_ENC_KEY,
@@ -410,6 +423,7 @@ describe("readPartitionState / writePartitionState round-trip", () => {
     const localCounter = new Uint32Array(NUM_BUCKETS)
     localCounter[100] = 5
     await partitionState.writePartitionState({
+      format: SBU1_PARTITION_STATE,
       bee: bee,
       stamper: createMockStamper(),
       batchId: TEST_BATCH_ID,
@@ -424,6 +438,7 @@ describe("readPartitionState / writePartitionState round-trip", () => {
     // chunks in order — so the LAST fetched address is a counter chunk.
     const getSpy = vi.spyOn(store, "get")
     const ok = await partitionState.readPartitionState({
+      format: SBU1_PARTITION_STATE,
       bee: bee,
       owner: OWNER,
       swarmEncryptionKey: TEST_ENC_KEY,
@@ -436,6 +451,7 @@ describe("readPartitionState / writePartitionState round-trip", () => {
 
     // One published chunk evicted/unreadable → the whole read fails safe.
     const result = await partitionState.readPartitionState({
+      format: SBU1_PARTITION_STATE,
       bee: bee,
       owner: OWNER,
       swarmEncryptionKey: TEST_ENC_KEY,
@@ -448,6 +464,7 @@ describe("readPartitionState / writePartitionState round-trip", () => {
 
   it("zero-seeds when no pointer exists and no prior holder is known", async () => {
     const result = await partitionState.readPartitionState({
+      format: SBU1_PARTITION_STATE,
       bee: bee,
       owner: OWNER,
       swarmEncryptionKey: TEST_ENC_KEY,
@@ -466,6 +483,7 @@ describe("readPartitionState / writePartitionState round-trip", () => {
     // holder's acked slots, so the read must degrade to `readFailed` instead —
     // the caller retries read-only rather than claiming-from-zero.
     const result = await partitionState.readPartitionState({
+      format: SBU1_PARTITION_STATE,
       bee: bee,
       owner: OWNER,
       swarmEncryptionKey: TEST_ENC_KEY,
@@ -482,6 +500,7 @@ describe("readPartitionState / writePartitionState round-trip", () => {
     // A genuinely fresh partition: the lock read returned cleanly absent
     // (lockUnreadable === false), so first-claim from zero must still proceed.
     const result = await partitionState.readPartitionState({
+      format: SBU1_PARTITION_STATE,
       bee: bee,
       owner: OWNER,
       swarmEncryptionKey: TEST_ENC_KEY,
@@ -503,6 +522,7 @@ describe("readPartitionState / writePartitionState round-trip", () => {
     const longAgo = Date.now() - 5 * 60_000
     vi.spyOn(Date, "now").mockReturnValue(longAgo)
     await partitionState.writePartitionState({
+      format: SBU1_PARTITION_STATE,
       bee: bee,
       stamper: createMockStamper(),
       batchId: TEST_BATCH_ID,
@@ -518,6 +538,7 @@ describe("readPartitionState / writePartitionState round-trip", () => {
       partitionState.statePointerEpochBucket(longAgo),
     )
     const missed = await partitionState.readPartitionState({
+      format: SBU1_PARTITION_STATE,
       bee: bee,
       owner: OWNER,
       swarmEncryptionKey: TEST_ENC_KEY,
@@ -529,6 +550,7 @@ describe("readPartitionState / writePartitionState round-trip", () => {
     // With the gone holder's leasedUntil (≈ publish time + lease TTL), the
     // reader computes the right bucket and resumes exactly.
     const found = await partitionState.readPartitionState({
+      format: SBU1_PARTITION_STATE,
       bee: bee,
       owner: OWNER,
       swarmEncryptionKey: TEST_ENC_KEY,
@@ -551,6 +573,7 @@ describe("readPartitionState / writePartitionState round-trip", () => {
     const T0 = Date.now() - 5 * 60_000
     vi.spyOn(Date, "now").mockReturnValue(T0)
     await partitionState.writePartitionState({
+      format: SBU1_PARTITION_STATE,
       bee: bee,
       stamper: createMockStamper(),
       batchId: TEST_BATCH_ID,
@@ -574,6 +597,7 @@ describe("readPartitionState / writePartitionState round-trip", () => {
     )
 
     const found = await partitionState.readPartitionState({
+      format: SBU1_PARTITION_STATE,
       bee: bee,
       owner: OWNER,
       swarmEncryptionKey: TEST_ENC_KEY,
@@ -599,7 +623,6 @@ describe("intent / occupancy / state-pointer SOC slot race (regression)", () => 
     const SIGNER_KEY = "11".repeat(32)
     const cache = {
       getAllChunks: async () => [],
-      convertBatch: async () => [],
       putChunk: async () => undefined,
     } as unknown as Parameters<typeof UtilizationAwareStamper.create>[3]
     const stamper = await UtilizationAwareStamper.create(
@@ -640,6 +663,7 @@ describe("intent / occupancy / state-pointer SOC slot race (regression)", () => 
     for (let i = 0; i < ROUNDS; i++) {
       flows.push(
         partitionState.writeStatePointer({
+          format: SBU1_PARTITION_STATE,
           ...common,
           batchId: TEST_BATCH_ID,
           referenceHex,
@@ -684,6 +708,7 @@ describe("PartitionLease.acquire — seeds the incremental first publish", () =>
     // A prior holder published multi-leaf state: real leaves 0, 1 and 2.
     const published = leafyCounter([20_000, 40_000])
     await partitionState.writePartitionState({
+      format: SBU1_PARTITION_STATE,
       bee: bee,
       stamper: createMockStamper(),
       batchId: TEST_BATCH_ID,
@@ -746,6 +771,7 @@ describe("PartitionLease.acquire — seeds the incremental first publish", () =>
 
     const published = leafyCounter([20_000]) // real leaves 0 and 1
     await partitionState.writePartitionState({
+      format: SBU1_PARTITION_STATE,
       bee: bee,
       stamper: createMockStamper(),
       batchId: TEST_BATCH_ID,
@@ -792,6 +818,7 @@ describe("PartitionLease.acquire — seeds the incremental first publish", () =>
     const published = new Uint32Array(NUM_BUCKETS)
     published[100] = 5
     await partitionState.writePartitionState({
+      format: SBU1_PARTITION_STATE,
       bee: bee,
       stamper: createMockStamper(),
       batchId: TEST_BATCH_ID,
@@ -877,6 +904,7 @@ describe("PartitionLease.acquire — seeds the incremental first publish", () =>
       const published = new Uint32Array(NUM_BUCKETS)
       published[1000] = 3
       const setup = await partitionState.writePartitionState({
+        format: SBU1_PARTITION_STATE,
         bee: bee,
         stamper: createMockStamper(),
         batchId: TEST_BATCH_ID,
@@ -910,6 +938,7 @@ describe("PartitionLease.acquire — seeds the incremental first publish", () =>
             0,
             OWNER,
             e * EPOCH_MS,
+            SBU1_PARTITION_STATE,
           ),
         )
         if (bucket === targetBucket) {
@@ -955,6 +984,7 @@ describe("PartitionLease.acquire — seeds the incremental first publish", () =>
     const published = new Uint32Array(NUM_BUCKETS)
     published[100] = 5
     await partitionState.writePartitionState({
+      format: SBU1_PARTITION_STATE,
       bee: bee,
       stamper: createMockStamper(),
       batchId: TEST_BATCH_ID,
@@ -1030,6 +1060,7 @@ describe("PartitionLease.acquire — unreadable partition state", () => {
     await seedStatePointer(Binary.uint8ArrayToHex(malformedRef))
 
     const result = await partitionState.readPartitionState({
+      format: SBU1_PARTITION_STATE,
       bee: bee,
       owner: OWNER,
       swarmEncryptionKey: TEST_ENC_KEY,
@@ -1070,6 +1101,7 @@ describe("PartitionLease.acquire — unreadable partition state", () => {
     await seedStatePointer(Binary.uint8ArrayToHex(referenceChunkRef))
 
     const result = await partitionState.readPartitionState({
+      format: SBU1_PARTITION_STATE,
       bee: bee,
       owner: OWNER,
       swarmEncryptionKey: TEST_ENC_KEY,
@@ -1093,6 +1125,7 @@ describe("PartitionLease.acquire — unreadable partition state", () => {
       .mockImplementation((() => new Promise(() => {})) as never)
     try {
       const result = await partitionState.readPartitionState({
+        format: SBU1_PARTITION_STATE,
         bee: bee,
         owner: OWNER,
         swarmEncryptionKey: TEST_ENC_KEY,
@@ -1118,6 +1151,7 @@ describe("PartitionLease.acquire — unreadable partition state", () => {
       .mockImplementation((() => new Promise(() => {})) as never)
     try {
       const result = await partitionState.readPartitionState({
+        format: SBU1_PARTITION_STATE,
         bee: bee,
         owner: OWNER,
         swarmEncryptionKey: TEST_ENC_KEY,
@@ -1138,6 +1172,7 @@ describe("PartitionLease.acquire — unreadable partition state", () => {
     const localCounter = new Uint32Array(NUM_BUCKETS)
     localCounter[42] = 7
     await partitionState.writePartitionState({
+      format: SBU1_PARTITION_STATE,
       bee: bee,
       stamper: createMockStamper(),
       batchId: TEST_BATCH_ID,
@@ -1158,6 +1193,7 @@ describe("PartitionLease.acquire — unreadable partition state", () => {
       .mockImplementationOnce((() => new Promise(() => {})) as never)
     try {
       const result = await partitionState.readPartitionState({
+        format: SBU1_PARTITION_STATE,
         bee: bee,
         owner: OWNER,
         swarmEncryptionKey: TEST_ENC_KEY,
@@ -1186,6 +1222,7 @@ describe("PartitionLease.acquire — unreadable partition state", () => {
     try {
       const result = await partitionState.readPartitionState(
         {
+          format: SBU1_PARTITION_STATE,
           bee: bee,
           owner: OWNER,
           swarmEncryptionKey: TEST_ENC_KEY,
@@ -1210,6 +1247,7 @@ describe("PartitionLease.acquire — unreadable partition state", () => {
     const knownRef = "aa".repeat(64)
     const result = await partitionState.readPartitionState(
       {
+        format: SBU1_PARTITION_STATE,
         bee: bee,
         owner: OWNER,
         swarmEncryptionKey: TEST_ENC_KEY,
@@ -1227,6 +1265,7 @@ describe("PartitionLease.acquire — unreadable partition state", () => {
   it("rejects publishing a counter with the wrong length", async () => {
     await expect(
       partitionState.writePartitionState({
+        format: SBU1_PARTITION_STATE,
         bee: bee,
         stamper: createMockStamper(),
         batchId: TEST_BATCH_ID,
@@ -1352,6 +1391,7 @@ describe("PartitionLease.acquire — fresh scan", () => {
     published[100] = 5
     const nowSpy = vi.spyOn(Date, "now").mockReturnValue(PAST)
     await partitionState.writePartitionState({
+      format: SBU1_PARTITION_STATE,
       bee: bee,
       stamper: createMockStamper(),
       batchId: TEST_BATCH_ID,
@@ -1721,6 +1761,7 @@ describe("PartitionLease.acquire — solo-clean guard skip", () => {
     knownDeviceIds?: () => string[]
   }): PartitionLease {
     return new PartitionLease({
+      stateFormat: SBU1_PARTITION_STATE,
       bee: bee,
       deviceId: opts.deviceId,
       batchId: TEST_BATCH_ID,
@@ -1787,7 +1828,6 @@ describe("PartitionLease.release — after the coordinator's teardown", () => {
     let metadata: unknown
     const cache = {
       getAllChunks: async () => [],
-      convertBatch: async () => [],
       putChunk: async () => undefined,
       getMetadata: async () => metadata,
       putMetadata: async (next: unknown) => {
@@ -1813,6 +1853,7 @@ describe("PartitionLease.release — after the coordinator's teardown", () => {
       intentGuardWindowMs: 0,
     }
     const lease = await PartitionLease.fromSwarmEncryptionKey({
+      stateFormat: SBU1_PARTITION_STATE,
       ...leaseOpts,
       stamper,
     })
@@ -1838,6 +1879,7 @@ describe("PartitionLease.release — after the coordinator's teardown", () => {
     expect(() => stamper.stamp(dataAddress)).toThrow(PartitionLeaseLostError)
     // A successor finds the partition released, and resumes the counter.
     const successor = await PartitionLease.fromSwarmEncryptionKey({
+      stateFormat: SBU1_PARTITION_STATE,
       ...leaseOpts,
       stamper: createMockStamper(),
     })
@@ -1886,6 +1928,7 @@ describe("writePartitionState — incremental", () => {
     // Real leaves 0, 1 and 2; leaf 3 a sentinel.
     const counter = leafyCounter([20_000, 40_000])
     const first = await partitionState.writePartitionState({
+      format: SBU1_PARTITION_STATE,
       bee: bee,
       stamper,
       batchId: TEST_BATCH_ID,
@@ -1909,6 +1952,7 @@ describe("writePartitionState — incremental", () => {
     expect(changed.size).toBe(2)
 
     const second = await partitionState.writePartitionState({
+      format: SBU1_PARTITION_STATE,
       bee: bee,
       stamper,
       batchId: TEST_BATCH_ID,
@@ -1935,6 +1979,7 @@ describe("writePartitionState — incremental", () => {
     // The taking-over device still reconstructs the FULL counter (changed +
     // retained).
     const read = await partitionState.readPartitionState({
+      format: SBU1_PARTITION_STATE,
       bee: bee,
       owner: OWNER,
       swarmEncryptionKey: TEST_ENC_KEY,
@@ -1949,6 +1994,7 @@ describe("writePartitionState — incremental", () => {
     const counter = leafyCounter()
     // previousCounter without previousReferences → NOT incremental.
     const res = await partitionState.writePartitionState({
+      format: SBU1_PARTITION_STATE,
       bee: bee,
       stamper,
       batchId: TEST_BATCH_ID,
@@ -1980,6 +2026,7 @@ describe("writePartitionState — incremental", () => {
     const acked = leafyCounter()
     expect(acked[AHEAD_BUCKET]).toBe(ACKED_VALUE)
     const ackedPublish = await partitionState.writePartitionState({
+      format: SBU1_PARTITION_STATE,
       bee: bee,
       stamper,
       batchId: TEST_BATCH_ID,
@@ -2005,6 +2052,7 @@ describe("writePartitionState — incremental", () => {
     expect(aheadChunk).not.toBe(newChunk)
 
     const incremental = await partitionState.writePartitionState({
+      format: SBU1_PARTITION_STATE,
       bee: bee,
       stamper,
       batchId: TEST_BATCH_ID,
@@ -2030,6 +2078,7 @@ describe("writePartitionState — incremental", () => {
     // A takeover reconstructs the ACKED floor for the ahead bucket (1), never the
     // unacked 2 — so it reissues only the unacked slot, never an acked one.
     const read = await partitionState.readPartitionState({
+      format: SBU1_PARTITION_STATE,
       bee: bee,
       owner: OWNER,
       swarmEncryptionKey: TEST_ENC_KEY,
@@ -2061,6 +2110,7 @@ describe("PartitionLease.publishState — commit without release", () => {
     // A taking-over device resumes at EXACTLY this counter. It reads at the same
     // clock the lease published at (#385) — the rendezvous is clock-anchored.
     const read = await partitionState.readPartitionState({
+      format: SBU1_PARTITION_STATE,
       bee: bee,
       owner: OWNER,
       swarmEncryptionKey: TEST_ENC_KEY,
@@ -2855,105 +2905,5 @@ describe("PartitionLease.refresh — occupancy displacement vs a PRUNED peer", (
     ).toBe(0)
     // No foreign beacon written; acquire + refresh only publish DEVICE_A's own.
     expect(await lease.refresh()).toBe("held")
-  })
-})
-
-describe("PartitionLease.acquire — a lane this device wrote before v2", () => {
-  // A pre-v2 build left two things behind for a partition it held: legacy
-  // cache rows (converted on load, #463) and a `syncedReferences` entry naming
-  // a v1 reference chunk no v2 reader can parse. Neither v2 pointer nor v2
-  // state exists yet. The claim must resume from the converted rows — the only
-  // record of the slots this device used — and must not heartbeat the v1 chunk,
-  // which would leave the partition `readFailed` for every other device.
-  const BUCKET = 0x0123
-  const USED = 5
-  const V1_REFERENCE = "aa".repeat(64)
-
-  async function stamperWithLegacyLane(): Promise<UtilizationAwareStamper> {
-    globalThis.indexedDB = new IDBFactory()
-    const cache = new UtilizationStoreDB()
-    // Depth 24, regular drive: little-endian uint16, 2,048 counters per row
-    const row = new Uint8Array(4096)
-    new DataView(row.buffer).setUint16((BUCKET % 2048) * 2, USED, true)
-    await cache.putChunk({
-      batchId: TEST_BATCH_ID.toHex(),
-      chunkIndex: Math.floor(BUCKET / 2048),
-      data: row,
-      contentHash: "old",
-      nonce: 0,
-      lastAccess: 0,
-    })
-    await cache.putMetadata({
-      batchId: TEST_BATCH_ID.toHex(),
-      lastSync: 0,
-      chunkCount: 0,
-      // Two lanes held at different times under v1, one marker each
-      syncedReferences: { 0: V1_REFERENCE, 1: V1_REFERENCE },
-    })
-    return UtilizationAwareStamper.create(
-      "11".repeat(32),
-      TEST_BATCH_ID,
-      TEST_BATCH_DEPTH,
-      cache,
-      OWNER,
-      TEST_ENC_KEY,
-    )
-  }
-
-  it("resumes from the converted cache rows, not from zero", async () => {
-    const stamper = await stamperWithLegacyLane()
-    expect(stamper.getUtilizationState().dataCounters[BUCKET]).toBe(USED)
-
-    const lease = new PartitionLease({
-      bee: bee,
-      deviceId: DEVICE_A,
-      batchId: TEST_BATCH_ID,
-      swarmEncryptionKey: TEST_ENC_KEY,
-      backupSigner: BACKUP_SIGNER,
-      stamper: stamper as unknown as Stamper,
-      guardMs: GUARD_MS,
-      intentGuardWindowMs: 0,
-    })
-    const acquired = await lease.acquire({ partitionCount: PARTITION_COUNT })
-    expect(acquired.partition).toBe(0)
-    expect(acquired.localCounter[BUCKET]).toBe(USED)
-
-    // The v1 reference is not a resume point anyone can read: no heartbeat
-    // until this holder's first publish produces a v2 reference.
-    const pointerSpy = vi.spyOn(partitionState, "writeStatePointer")
-    await lease.heartbeatStatePointer()
-    expect(pointerSpy).not.toHaveBeenCalled()
-  })
-
-  it("keeps the marker of a lane it has not claimed yet past the first publish of another", async () => {
-    const stamper = await stamperWithLegacyLane()
-    const lease = new PartitionLease({
-      bee: bee,
-      deviceId: DEVICE_A,
-      batchId: TEST_BATCH_ID,
-      swarmEncryptionKey: TEST_ENC_KEY,
-      backupSigner: BACKUP_SIGNER,
-      stamper: stamper as unknown as Stamper,
-      guardMs: GUARD_MS,
-      intentGuardWindowMs: 0,
-    })
-    const acquired = await lease.acquire({ partitionCount: PARTITION_COUNT })
-    expect(acquired.partition).toBe(0)
-    stamper.bindPartition({
-      partition: 0,
-      partitionCount: PARTITION_COUNT,
-      localCounter: acquired.localCounter,
-    })
-
-    // The first v2 publish writes the synced reference AND the protected
-    // state buckets — two writers of one metadata record
-    await lease.publishState(acquired.localCounter)
-
-    // Partition 0 now has a v2 reference, so its marker is superseded…
-    expect(await stamper.wroteLaneBeforeV2(0)).toBe(false)
-    expect(await stamper.getSyncedReference(0)).toBeDefined()
-    // …and partition 1, not yet claimed under v2, keeps its marker, or its
-    // next cold claim would resume from zero over the slots this device used.
-    expect(await stamper.wroteLaneBeforeV2(1)).toBe(true)
   })
 })

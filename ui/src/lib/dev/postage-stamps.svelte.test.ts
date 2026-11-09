@@ -36,7 +36,6 @@ vi.mock('@snaha/swarm-id/internal', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@snaha/swarm-id/internal')>()),
   UtilizationStoreDB: class {
     getAllChunks = async () => []
-    convertBatch = async () => []
     putChunk = async () => undefined
   },
 }))
