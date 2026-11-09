@@ -124,6 +124,16 @@ describe("device-state serialization", () => {
       at: 12,
     })
   })
+
+  it("reads a feed without the deletion marker as never deleted", () => {
+    const published = serializeDeviceState(ACCOUNT_ID, "dev-1", makeView())
+    delete published.deleted
+    const bytes = new TextEncoder().encode(JSON.stringify(published))
+    expect(deserializeDeviceState(bytes).deleted).toEqual({
+      value: false,
+      at: 0,
+    })
+  })
 })
 
 describe("accountStateToDeviceView — never-edited scalar clocks", () => {

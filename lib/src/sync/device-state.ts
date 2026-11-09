@@ -79,7 +79,8 @@ export const DeviceStateSnapshotSchemaV1 = z.object({
   // The account's own schema, not a mirror, so every settings field (the
   // sharing switches and their clocks included) reaches the feed.
   settings: ClockedSchema(AccountSettingsSchemaV1.optional()),
-  deleted: ClockedSchema(z.boolean()),
+  // A feed without it has never carried a deletion; clock 0 loses to any verdict.
+  deleted: ClockedSchema(z.boolean()).default({ value: false, at: 0 }),
   // Account-level immutables — carried on the robust per-device feed (not the
   // roster), so the fold reconstructs them without a shared doc. Identical
   // across devices.
