@@ -19,7 +19,7 @@ kept it out.
 makes `pnpm add` write one, and a bump is a reviewed edit plus `pnpm install`.
 pnpm's release-age gate stays at its default of one day; a release that must
 ship younger than that is named in `minimumReleaseAgeExclude` in the same PR,
-since a local override does not survive CI's frozen install. (#982)
+since a local override does not survive CI's frozen install. (#982, #984)
 
 **Why.** A range lets the registry decide what a fresh resolution installs,
 and a compromised release is pulled within hours of the first report, after
