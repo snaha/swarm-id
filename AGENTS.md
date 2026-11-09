@@ -104,6 +104,7 @@ Chain-backed suites are NOT in `check:all` — they need a chain running. `pnpm 
 - **No magic numbers** — use SCREAMING_SNAKE_CASE constants (0, 1, -1, 2 excepted)
 - **Omit file extensions** in imports
 - **kebab-case** for all file and directory names
+- **Comments and test titles describe the present**: no change history ("used to", "previously", "the old X") and no issue or PR numbers for finished work. A number stays only when it points at an open issue. The reasoning goes in `docs/decisions.md` or the commit message.
 - **Conventional commits**: `feat:`, `fix:`, `docs:`, etc.
 - **TypeScript execution**: Use `pnpx tsx` (not `npx ts-node`)
 - **Monorepo version pinning**: toolchain versions are pinned across the monorepo (eslint 10,
@@ -139,7 +140,7 @@ Chain-backed suites are NOT in `check:all` — they need a chain running. `pnpm 
 - Omit the issue number from branch names and titles
 - When a PR resolves an issue, reference it with a closing keyword (e.g. `Closes #53`) so GitHub closes the issue automatically on merge
 - Keep a **linear history**: rebase onto `main` to update a branch or resolve a conflict — never merge `main` into the branch. Rebasing a branch that is already pushed ends in `git push --force-with-lease`.
-- `docs/decisions.md` is the decision log: why something is the way it is, newest first, append only. A PR that makes or changes a decision adds its entry in the same PR.
+- `docs/decisions.md` is the decision log: why something is the way it is, newest first, append only. A PR that makes or changes a decision adds its entry in the same PR; the code and its docs say what, the log says why and since when.
 
 ## Deployment
 
