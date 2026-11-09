@@ -725,6 +725,46 @@ describe("SwarmIdProxy subsidised-mode selection", () => {
   const EXPIRED_TTL_SECONDS = 60
   const MEASURED_AGO_MS = 120_000
 
+  const ID = "11".repeat(32)
+  const REF = "22".repeat(32)
+  /** Every write handler but the ACT ones, with the fields it needs. */
+  const WRITES: [string, Record<string, unknown>][] = [
+    ["uploadFile", { data: new Uint8Array(16), options: {} }],
+    [
+      "uploadFiles",
+      {
+        files: [{ path: "a.txt", data: new Uint8Array(16) }],
+        options: {},
+      },
+    ],
+    ["uploadChunk", { data: new Uint8Array(16), options: {} }],
+    ["socUpload", { identifier: ID, data: new Uint8Array(16), options: {} }],
+    ["socRawUpload", { identifier: ID, data: new Uint8Array(16), options: {} }],
+    [
+      "seqFeedUploadPayload",
+      { topic: ID, data: new Uint8Array(16), index: 0, options: {} },
+    ],
+    [
+      "seqFeedUploadRawPayload",
+      { topic: ID, data: new Uint8Array(16), index: 0, options: {} },
+    ],
+    [
+      "seqFeedUploadReference",
+      { topic: ID, reference: REF, index: 0, options: {} },
+    ],
+    ["createFeedManifest", { topic: ID, uploadOptions: {} }],
+    [
+      "gsocSend",
+      {
+        signer: "33".repeat(32),
+        identifier: ID,
+        data: new Uint8Array(16),
+        options: {},
+      },
+    ],
+    ["epochFeedUploadReference", { topic: ID, at: 1, reference: REF }],
+  ]
+
   /**
    * The two stored records the session refuses to stamp with even once the
    * stamper has built from them — the refusal is read off the record.
@@ -998,50 +1038,6 @@ describe("SwarmIdProxy subsidised-mode selection", () => {
 
       // Every write handler, not only the two above: one that dropped its
       // counter would report 0, telling the dApp the write cost nothing.
-      const ID = "11".repeat(32)
-      const REF = "22".repeat(32)
-      const WRITES: [string, Record<string, unknown>][] = [
-        ["uploadFile", { data: new Uint8Array(16), options: {} }],
-        [
-          "uploadFiles",
-          {
-            files: [{ path: "a.txt", data: new Uint8Array(16) }],
-            options: {},
-          },
-        ],
-        ["uploadChunk", { data: new Uint8Array(16), options: {} }],
-        [
-          "socUpload",
-          { identifier: ID, data: new Uint8Array(16), options: {} },
-        ],
-        [
-          "socRawUpload",
-          { identifier: ID, data: new Uint8Array(16), options: {} },
-        ],
-        [
-          "seqFeedUploadPayload",
-          { topic: ID, data: new Uint8Array(16), index: 0, options: {} },
-        ],
-        [
-          "seqFeedUploadRawPayload",
-          { topic: ID, data: new Uint8Array(16), index: 0, options: {} },
-        ],
-        [
-          "seqFeedUploadReference",
-          { topic: ID, reference: REF, index: 0, options: {} },
-        ],
-        ["createFeedManifest", { topic: ID, uploadOptions: {} }],
-        [
-          "gsocSend",
-          {
-            signer: "33".repeat(32),
-            identifier: ID,
-            data: new Uint8Array(16),
-            options: {},
-          },
-        ],
-        ["epochFeedUploadReference", { topic: ID, at: 1, reference: REF }],
-      ]
       it.each(WRITES)("on %s", async (type, fields) => {
         await identify(GATEWAY_URL)
         setAccountState({})
@@ -1257,6 +1253,111 @@ describe("SwarmIdProxy subsidised-mode selection", () => {
       await upload("u1")
 
       expect(internals(proxy).inFlightRequests.size).toBe(0)
+    })
+
+    // As with the counter: a handler that left the signal behind would finish
+    // a write its caller has already seen rejected.
+    it.each<[string, Record<string, unknown>]>([
+      ...WRITES,
+      [
+        "actUploadData",
+        { data: new Uint8Array(16), grantees: [], options: {} },
+      ],
+    ])(
+      "%s sends every chunk with the request's signal",
+      async (type, fields) => {
+        await identify(GATEWAY_URL)
+        setAccountState({})
+        const sentWithIt: boolean[] = []
+        vi.spyOn(globalThis, "fetch").mockImplementation(async (url, init) => {
+          if (init?.method === "POST" && /\/(chunks|soc\/)/.test(String(url))) {
+            sentWithIt.push(
+              init.signal ===
+                internals(proxy).inFlightRequests.get("w1")?.signal,
+            )
+          }
+          return new Response(JSON.stringify({ reference: "ab".repeat(32) }))
+        })
+
+        await send({ type, requestId: "w1", ...fields })
+
+        expect(sentWithIt.length).toBeGreaterThan(0)
+        expect(sentWithIt).not.toContain(false)
+      },
+    )
+
+    describe("a sequential feed write aborted during its index lookup", () => {
+      const FEED_WRITES: [string, Record<string, unknown>][] = [
+        [
+          "seqFeedUploadPayload",
+          { topic: ID, data: new Uint8Array(16), options: {} },
+        ],
+        [
+          "seqFeedUploadRawPayload",
+          { topic: ID, data: new Uint8Array(16), options: {} },
+        ],
+        ["seqFeedUploadReference", { topic: ID, reference: REF, options: {} }],
+      ]
+
+      /** Index 0 exists; the read of index 1 hangs until the request aborts. */
+      function feedHangsAtSecondIndex() {
+        let reads = 0
+        const download = vi.fn(
+          (
+            _address: string,
+            _options: unknown,
+            { signal }: { signal: AbortSignal },
+          ) =>
+            new Promise<Uint8Array>((resolve, reject) => {
+              const refuse = () => reject(new Error("Request aborted"))
+              if (signal.aborted) return refuse()
+              reads++
+              if (reads === 1) return resolve(new Uint8Array(32))
+              signal.addEventListener("abort", refuse)
+            }),
+        )
+        Object.assign(internals(proxy).bee, { chunk: { download } })
+        return download
+      }
+
+      it.each(FEED_WRITES)("%s writes nothing", async (type, fields) => {
+        await identify(GATEWAY_URL)
+        setAccountState({})
+        const fetchSpy = vi
+          .spyOn(globalThis, "fetch")
+          .mockImplementation(
+            async () =>
+              new Response(JSON.stringify({ reference: "ab".repeat(32) })),
+          )
+        const download = feedHangsAtSecondIndex()
+        const handled = send({ type, requestId: "f1", ...fields })
+        await vi.waitFor(() => expect(download).toHaveBeenCalledTimes(2))
+
+        await send({ type: "abortRequest", requestId: "f1" })
+        await handled
+
+        expect(fetchSpy).not.toHaveBeenCalled()
+      })
+
+      it("does not queue for the write lock", async () => {
+        await identify()
+        setAccountState({
+          postageBatchId: BATCH_ID,
+          signerKey: SIGNER_KEY,
+          stamper: true,
+        })
+        const withWrite = vi.fn()
+        Object.assign(internals(proxy).drive!.coordinator!, { withWrite })
+        const download = feedHangsAtSecondIndex()
+        const [type, fields] = FEED_WRITES[0]
+        const handled = send({ type, requestId: "f1", ...fields })
+        await vi.waitFor(() => expect(download).toHaveBeenCalledTimes(2))
+
+        await send({ type: "abortRequest", requestId: "f1" })
+        await handled
+
+        expect(withWrite).not.toHaveBeenCalled()
+      })
     })
   })
 

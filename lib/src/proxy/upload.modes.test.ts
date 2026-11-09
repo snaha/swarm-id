@@ -122,14 +122,17 @@ describe("an aborted signal stops the write (#929)", () => {
   const CHUNK_PAYLOAD_SIZE = 4096
   const THREE_LEAVES = CHUNK_PAYLOAD_SIZE * 3
 
-  function spiedStamper(): {
+  function spiedStamper(signal: AbortSignal): {
     target: UploadTarget
     stamp: ReturnType<typeof vi.fn>
   } {
     const stamper = createMockStamper()
     const stamp = vi.fn(stamper.stamp.bind(stamper))
     stamper.stamp = stamp
-    return { target: { mode: "stamper", bee: new MockBee(), stamper }, stamp }
+    return {
+      target: { mode: "stamper", bee: new MockBee(), stamper, signal },
+      stamp,
+    }
   }
 
   const rejectionOf = (work: Promise<unknown>) =>
@@ -144,13 +147,10 @@ describe("an aborted signal stops the write (#929)", () => {
     { kind: "plain", encryptionKey: undefined },
     { kind: "encrypted", encryptionKey: true as const },
   ])("stamps nothing for $kind data", async ({ encryptionKey }) => {
-    const { target, stamp } = spiedStamper()
+    const { target, stamp } = spiedStamper(AbortSignal.abort())
 
     const error = await rejectionOf(
-      uploadData(target, new Uint8Array(THREE_LEAVES), {
-        encryptionKey,
-        requestOptions: { signal: AbortSignal.abort() },
-      }),
+      uploadData(target, new Uint8Array(THREE_LEAVES), { encryptionKey }),
     )
 
     expect(error).toMatchObject({ code: "aborted" })
@@ -158,13 +158,12 @@ describe("an aborted signal stops the write (#929)", () => {
   })
 
   it("stops stamping at the abort, part way through", async () => {
-    const { target, stamp } = spiedStamper()
     const controller = new AbortController()
+    const { target, stamp } = spiedStamper(controller.signal)
 
     const error = await rejectionOf(
       uploadData(target, new Uint8Array(THREE_LEAVES), {
         onProgress: () => controller.abort(),
-        requestOptions: { signal: controller.signal },
       }),
     )
 
@@ -174,12 +173,11 @@ describe("an aborted signal stops the write (#929)", () => {
 
   it("stamps no SOC", async () => {
     const fetchMock = stubFetch()
-    const { target, stamp } = spiedStamper()
+    const { target, stamp } = spiedStamper(AbortSignal.abort())
 
     const error = await rejectionOf(
       uploadSOC(target, signer, identifier, new Uint8Array(16), {
         tag: TAG_UID,
-        requestOptions: { signal: AbortSignal.abort() },
       }),
     )
 
@@ -191,29 +189,75 @@ describe("an aborted signal stops the write (#929)", () => {
   it.each([
     {
       write: "chunk",
-      run: (requestOptions: { signal: AbortSignal }) =>
-        uploadChunk(TARGET, new Uint8Array(16), { requestOptions }),
+      run: (target: UploadTarget) => uploadChunk(target, new Uint8Array(16)),
     },
     {
       write: "data",
-      run: (requestOptions: { signal: AbortSignal }) =>
-        uploadData(TARGET, new Uint8Array(16), { requestOptions }),
+      run: (target: UploadTarget) => uploadData(target, new Uint8Array(16)),
     },
     {
       write: "SOC",
-      run: (requestOptions: { signal: AbortSignal }) =>
-        uploadSOC(TARGET, signer, identifier, new Uint8Array(16), {
-          requestOptions,
-        }),
+      run: (target: UploadTarget) =>
+        uploadSOC(target, signer, identifier, new Uint8Array(16)),
     },
   ])("hands the gateway's $write fetch the signal", async ({ run }) => {
     const fetchMock = stubFetch()
     const { signal } = new AbortController()
 
-    await run({ signal })
+    await run({ ...TARGET, signal })
 
     const [, init] = fetchMock.mock.calls[0] as [string, RequestInit]
     expect(init.signal).toBe(signal)
+  })
+
+  it("hands the stamped SOC's fetch the signal", async () => {
+    const fetchMock = stubFetch()
+    const { signal } = new AbortController()
+
+    await uploadSOC(
+      spiedStamper(signal).target,
+      signer,
+      identifier,
+      new Uint8Array(16),
+      { tag: TAG_UID },
+    )
+
+    const [, init] = fetchMock.mock.calls[0] as [string, RequestInit]
+    expect(init.signal).toBe(signal)
+  })
+
+  it.each([
+    {
+      write: "chunk",
+      run: (target: UploadTarget, requestOptions: { timeout: number }) =>
+        uploadChunk(target, new Uint8Array(16), { requestOptions }),
+    },
+    {
+      write: "data",
+      run: (target: UploadTarget, requestOptions: { timeout: number }) =>
+        uploadData(target, new Uint8Array(16), { requestOptions }),
+    },
+    {
+      write: "encrypted data",
+      run: (target: UploadTarget, requestOptions: { timeout: number }) =>
+        uploadData(target, new Uint8Array(16), {
+          encryptionKey: true,
+          requestOptions,
+        }),
+    },
+  ])("adds the signal to the Bee options of a $write", async ({ run }) => {
+    const timeout = 1234
+    const bee = new MockBee()
+    const chunkUpload = vi.fn(bee.chunk.upload)
+    bee.chunk.upload = chunkUpload
+    const { signal } = new AbortController()
+
+    await run({ ...spiedStamper(signal).target, bee } as UploadTarget, {
+      timeout,
+    })
+
+    const [, , , requestOptions] = chunkUpload.mock.calls[0]
+    expect(requestOptions).toEqual({ timeout, signal })
   })
 })
 

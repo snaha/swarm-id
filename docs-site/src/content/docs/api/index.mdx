@@ -789,7 +789,7 @@ Downloads raw binary data from the Swarm network: the counterpart of [`uploadDat
 | `requestOptions.timeout`        | `number`                 | No       | Request timeout in milliseconds for this call. Replaces the client's default (30 s) for the whole round trip, not only the Bee request |
 | `requestOptions.headers`        | `Record<string, string>` | No       | Custom headers                                                                                                                         |
 | `requestOptions.endlesslyRetry` | `boolean`                | No       | Whether to retry endlessly                                                                                                             |
-| `requestOptions.signal`         | `AbortSignal`            | No       | Stops the call: the promise rejects at once with code `aborted`, and the proxy aborts its Bee requests and stops stamping              |
+| `requestOptions.signal`         | `AbortSignal`            | No       | Stops the call: the promise rejects at once with code `aborted`, and the proxy aborts its Bee requests                                 |
 
 **Returns:** `Promise<Uint8Array>` - The downloaded data
 
@@ -874,7 +874,7 @@ Returns both the file data and its original filename (if available). For manifes
 | `requestOptions.timeout`        | `number`                 | No       | Request timeout in milliseconds for this call. Replaces the client's default (30 s) for the whole round trip, not only the Bee request |
 | `requestOptions.headers`        | `Record<string, string>` | No       | Custom headers                                                                                                                         |
 | `requestOptions.endlesslyRetry` | `boolean`                | No       | Whether to retry endlessly                                                                                                             |
-| `requestOptions.signal`         | `AbortSignal`            | No       | Stops the call: the promise rejects at once with code `aborted`, and the proxy aborts its Bee requests and stops stamping              |
+| `requestOptions.signal`         | `AbortSignal`            | No       | Stops the call: the promise rejects at once with code `aborted`, and the proxy aborts its Bee requests                                 |
 
 **Returns:** `Promise<FileData>`
 
@@ -1050,7 +1050,7 @@ Retrieves a chunk by its reference hash. This method is useful for low-level ope
 | `requestOptions.timeout`        | `number`                 | No       | Request timeout in milliseconds for this call. Replaces the client's default (30 s) for the whole round trip, not only the Bee request |
 | `requestOptions.headers`        | `Record<string, string>` | No       | Custom headers                                                                                                                         |
 | `requestOptions.endlesslyRetry` | `boolean`                | No       | Whether to retry endlessly                                                                                                             |
-| `requestOptions.signal`         | `AbortSignal`            | No       | Stops the call: the promise rejects at once with code `aborted`, and the proxy aborts its Bee requests and stops stamping              |
+| `requestOptions.signal`         | `AbortSignal`            | No       | Stops the call: the promise rejects at once with code `aborted`, and the proxy aborts its Bee requests                                 |
 
 **Returns:** `Promise<Uint8Array>` - The chunk data
 
@@ -1086,7 +1086,7 @@ Creates an SOC reader bound to the given owner address.
 | `requestOptions.timeout`        | `number`                 | No       | Request timeout in milliseconds for this call. Replaces the client's default (30 s) for the whole round trip, not only the Bee request |
 | `requestOptions.headers`        | `Record<string, string>` | No       | Custom headers                                                                                                                         |
 | `requestOptions.endlesslyRetry` | `boolean`                | No       | Whether to retry endlessly                                                                                                             |
-| `requestOptions.signal`         | `AbortSignal`            | No       | Stops the call: the promise rejects at once with code `aborted`, and the proxy aborts its Bee requests and stops stamping              |
+| `requestOptions.signal`         | `AbortSignal`            | No       | Stops the call: the promise rejects at once with code `aborted`, and the proxy aborts its Bee requests                                 |
 
 **Returns:** `SOCReader`
 
@@ -1209,7 +1209,7 @@ Creates a feed reader bound to a topic and optional owner.
 | `requestOptions.timeout`        | `number`                 | No       | Request timeout in milliseconds for this call. Replaces the client's default (30 s) for the whole round trip, not only the Bee request |
 | `requestOptions.headers`        | `Record<string, string>` | No       | Custom headers                                                                                                                         |
 | `requestOptions.endlesslyRetry` | `boolean`                | No       | Whether to retry endlessly                                                                                                             |
-| `requestOptions.signal`         | `AbortSignal`            | No       | Stops the call: the promise rejects at once with code `aborted`, and the proxy aborts its Bee requests and stops stamping              |
+| `requestOptions.signal`         | `AbortSignal`            | No       | Stops the call: the promise rejects at once with code `aborted`. The proxy's epoch lookup still runs to its end                        |
 
 **Returns:** `FeedReader`
 
@@ -1271,7 +1271,7 @@ Creates a feed writer for updating and reading a topic. If `signer` is omitted, 
 | `requestOptions.timeout`        | `number`                 | No       | Request timeout in milliseconds for this call. Replaces the client's default (30 s) for the whole round trip, not only the Bee request |
 | `requestOptions.headers`        | `Record<string, string>` | No       | Custom headers                                                                                                                         |
 | `requestOptions.endlesslyRetry` | `boolean`                | No       | Whether to retry endlessly                                                                                                             |
-| `requestOptions.signal`         | `AbortSignal`            | No       | Stops the call: the promise rejects at once with code `aborted`, and the proxy aborts its Bee requests and stops stamping              |
+| `requestOptions.signal`         | `AbortSignal`            | No       | Stops the call: the promise rejects at once with code `aborted`, and the proxy stops stamping. Its epoch lookup still runs to its end  |
 
 **Returns:** `FeedWriter`
 
@@ -1436,6 +1436,7 @@ A feed manifest enables accessing the latest feed content via a URL path (e.g., 
 | `requestOptions`         | `RequestOptions`         | No       | Request configuration                                                                                                                  |
 | `requestOptions.timeout` | `number`                 | No       | Request timeout in milliseconds for this call. Replaces the client's default (30 s) for the whole round trip, not only the Bee request |
 | `requestOptions.headers` | `Record<string, string>` | No       | Custom headers                                                                                                                         |
+| `requestOptions.signal`  | `AbortSignal`            | No       | Stops the call: the promise rejects at once with code `aborted`, and the proxy stops stamping                                          |
 
 :::caution
 Epoch feed manifests cannot be resolved via the `/bzz` endpoint. Only use `"Sequence"` type for feed manifests you want accessible via URL.
@@ -1656,7 +1657,7 @@ The user must have access (their public key must be in the grantee list) to decr
 | `requestOptions.timeout`        | `number`                 | No       | Request timeout in milliseconds for this call. Replaces the client's default (30 s) for the whole round trip, not only the Bee request |
 | `requestOptions.headers`        | `Record<string, string>` | No       | Custom headers                                                                                                                         |
 | `requestOptions.endlesslyRetry` | `boolean`                | No       | Whether to retry endlessly                                                                                                             |
-| `requestOptions.signal`         | `AbortSignal`            | No       | Stops the call: the promise rejects at once with code `aborted`, and the proxy aborts its Bee requests and stops stamping              |
+| `requestOptions.signal`         | `AbortSignal`            | No       | Stops the call: the promise rejects at once with code `aborted`, and the proxy aborts its Bee requests                                 |
 
 **Returns:** `Promise<Uint8Array>` - The decrypted data
 
@@ -1804,7 +1805,7 @@ Retrieves the list of current grantees for an ACT.
 | `requestOptions.timeout`        | `number`                 | No       | Request timeout in milliseconds for this call. Replaces the client's default (30 s) for the whole round trip, not only the Bee request |
 | `requestOptions.headers`        | `Record<string, string>` | No       | Custom headers                                                                                                                         |
 | `requestOptions.endlesslyRetry` | `boolean`                | No       | Whether to retry endlessly                                                                                                             |
-| `requestOptions.signal`         | `AbortSignal`            | No       | Stops the call: the promise rejects at once with code `aborted`, and the proxy aborts its Bee requests and stops stamping              |
+| `requestOptions.signal`         | `AbortSignal`            | No       | Stops the call: the promise rejects at once with code `aborted`, and the proxy aborts its Bee requests                                 |
 
 **Returns:** `Promise<string[]>` - Array of compressed public keys (66 hex chars each)
 

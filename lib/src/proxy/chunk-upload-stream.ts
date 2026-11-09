@@ -12,6 +12,8 @@
  * guarantees FIFO ack matching.
  */
 
+import { abortedError } from "../errors"
+
 const WS_CHUNK_STREAM_PATH = "/chunks/stream"
 const WS_DEFAULT_CONCURRENCY = 32
 const WS_ACK_TIMEOUT_MS = 900_000 // 15 minutes, matching Bee's streamReadTimeout
@@ -25,6 +27,8 @@ interface PendingAck {
 export interface ChunkUploadStreamOptions {
   tag?: number
   concurrency?: number
+  /** Ends the stream at once, without waiting for the acks still due (#929) */
+  signal?: AbortSignal
 }
 
 export class ChunkUploadStream {
@@ -50,6 +54,10 @@ export class ChunkUploadStream {
    * Resolves when the connection is established.
    */
   open(): Promise<void> {
+    const signal = this.options?.signal
+    signal?.addEventListener("abort", () => this.fail(abortedError(signal)), {
+      once: true,
+    })
     return new Promise((resolve, reject) => {
       const wsUrl = this.buildWsUrl()
       this.ws = new WebSocket(wsUrl)
@@ -102,8 +110,9 @@ export class ChunkUploadStream {
     }
 
     return new Promise((resolve, reject) => {
+      // Acks match chunks by order, so one lost ack ends the whole stream.
       const timer = setTimeout(() => {
-        reject(new Error("WebSocket chunk ack timeout"))
+        this.fail(new Error("WebSocket chunk ack timeout"))
       }, WS_ACK_TIMEOUT_MS)
 
       this.pendingAcks.push({ resolve, reject, timer })
@@ -176,6 +185,14 @@ export class ChunkUploadStream {
         reject(error)
       }
     })
+  }
+
+  /** End the stream: the acks still due will never be waited for. */
+  private fail(error: Error): void {
+    this.closed = true
+    this.errorMessage = error.message
+    this.rejectAllPending(error)
+    this.ws?.close()
   }
 
   private rejectAllPending(error: Error): void {
