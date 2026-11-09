@@ -214,6 +214,23 @@ export type RequestOptions =
 export type DownloadOptions = z.infer<typeof DownloadOptionsSchema>
 
 /**
+ * What `uploadData` and `actUploadData` take. A `Blob` or `ReadableStream` is
+ * read piece by piece as the upload goes, so it is never held whole; plain
+ * bytes are copied across the iframe at once.
+ */
+export type UploadInput = Uint8Array | Blob | ReadableStream<Uint8Array>
+
+/**
+ * A download read as it arrives. Read `stream` to the end or cancel it: until
+ * then the proxy keeps the request open.
+ */
+export interface DataDownload {
+  stream: ReadableStream<Uint8Array>
+  /** The content's length in bytes */
+  size: number
+}
+
+/**
  * Options for `uploadFiles` (#750). Content is encrypted unless `encrypt` is
  * `false`; the manifest — and so the root reference — is encrypted unless
  * `encrypt` or `encryptManifest` is `false`. `onProgress` counts files.
@@ -1105,10 +1122,20 @@ export const DisconnectMessageSchema = z.object({
   requestId: z.string(),
 })
 
+/**
+ * In place of an upload's bytes: the proxy pulls them with `uploadSourcePull`,
+ * and each answer is an `uploadSourcePiece`. Pulled rather than transferred as
+ * a stream, which Safari cannot do.
+ */
+export const PulledSourceSchema = z.object({
+  pulled: z.literal(true),
+  size: z.number().int().nonnegative().optional(),
+})
+
 export const UploadDataMessageSchema = z.object({
   type: z.literal("uploadData"),
   requestId: z.string(),
-  data: z.instanceof(Uint8Array),
+  data: z.union([z.instanceof(Uint8Array), PulledSourceSchema]),
   options: UploadOptionsSchema,
   requestOptions: RequestOptionsSchema,
   enableProgress: z.boolean().optional(),
@@ -1124,6 +1151,27 @@ export const DownloadDataMessageSchema = z.object({
   reference: ReferenceSchema,
   options: DownloadOptionsSchema,
   requestOptions: RequestOptionsSchema,
+})
+
+export const DownloadDataStreamMessageSchema = z.object({
+  type: z.literal("downloadDataStream"),
+  requestId: z.string(),
+  reference: ReferenceSchema,
+  options: DownloadOptionsSchema,
+  requestOptions: RequestOptionsSchema,
+})
+
+/** One piece of a pulled upload. No `data` means the source has ended */
+export const UploadSourcePieceMessageSchema = z.object({
+  type: z.literal("uploadSourcePiece"),
+  requestId: z.string(),
+  data: z.instanceof(Uint8Array).optional(),
+})
+
+/** Asks for one more `downloadStreamPiece` */
+export const DownloadStreamPullMessageSchema = z.object({
+  type: z.literal("downloadStreamPull"),
+  requestId: z.string(),
 })
 
 // Derive a stable, app-scoped secret HMAC(appSecret, label) inside the iframe.
@@ -1407,7 +1455,7 @@ export const CreateFeedManifestMessageSchema = z.object({
 export const ActUploadDataMessageSchema = z.object({
   type: z.literal("actUploadData"),
   requestId: z.string(),
-  data: z.instanceof(Uint8Array),
+  data: z.union([z.instanceof(Uint8Array), PulledSourceSchema]),
   grantees: z.array(z.string()), // Compressed public keys (33 bytes = 66 hex chars)
   options: ActUploadOptionsSchema,
   requestOptions: RequestOptionsSchema,
@@ -1416,6 +1464,16 @@ export const ActUploadDataMessageSchema = z.object({
 
 export const ActDownloadDataMessageSchema = z.object({
   type: z.literal("actDownloadData"),
+  requestId: z.string(),
+  encryptedReference: ReferenceSchema,
+  historyReference: ReferenceSchema,
+  publisherPubKey: z.string(), // Compressed public key (33 bytes = 66 hex chars)
+  timestamp: z.number().optional(), // Optional: specific ACT version
+  requestOptions: RequestOptionsSchema,
+})
+
+export const ActDownloadDataStreamMessageSchema = z.object({
+  type: z.literal("actDownloadDataStream"),
   requestId: z.string(),
   encryptedReference: ReferenceSchema,
   historyReference: ReferenceSchema,
@@ -1512,10 +1570,13 @@ export const AbortRequestMessageSchema = z.object({
 export const ParentToIframeMessageSchema = z.discriminatedUnion("type", [
   ParentIdentifyMessageSchema,
   AbortRequestMessageSchema,
+  UploadSourcePieceMessageSchema,
+  DownloadStreamPullMessageSchema,
   CheckAuthMessageSchema,
   DisconnectMessageSchema,
   UploadDataMessageSchema,
   DownloadDataMessageSchema,
+  DownloadDataStreamMessageSchema,
   DeriveAppSecretMessageSchema,
   UploadFileMessageSchema,
   DownloadFileMessageSchema,
@@ -1545,6 +1606,7 @@ export const ParentToIframeMessageSchema = z.discriminatedUnion("type", [
   CreateFeedManifestMessageSchema,
   ActUploadDataMessageSchema,
   ActDownloadDataMessageSchema,
+  ActDownloadDataStreamMessageSchema,
   ActAddGranteesMessageSchema,
   ActRevokeGranteesMessageSchema,
   ActGetGranteesMessageSchema,
@@ -1562,6 +1624,10 @@ export type CheckAuthMessage = z.infer<typeof CheckAuthMessageSchema>
 export type DisconnectMessage = z.infer<typeof DisconnectMessageSchema>
 export type UploadDataMessage = z.infer<typeof UploadDataMessageSchema>
 export type DownloadDataMessage = z.infer<typeof DownloadDataMessageSchema>
+export type DownloadDataStreamMessage = z.infer<
+  typeof DownloadDataStreamMessageSchema
+>
+export type PulledSource = z.infer<typeof PulledSourceSchema>
 export type DeriveAppSecretMessage = z.infer<
   typeof DeriveAppSecretMessageSchema
 >
@@ -1614,6 +1680,9 @@ export type CreateFeedManifestMessage = z.infer<
 export type ActUploadDataMessage = z.infer<typeof ActUploadDataMessageSchema>
 export type ActDownloadDataMessage = z.infer<
   typeof ActDownloadDataMessageSchema
+>
+export type ActDownloadDataStreamMessage = z.infer<
+  typeof ActDownloadDataStreamMessageSchema
 >
 export type ActAddGranteesMessage = z.infer<typeof ActAddGranteesMessageSchema>
 export type ActRevokeGranteesMessage = z.infer<
@@ -1688,6 +1757,26 @@ export const DownloadDataResponseMessageSchema = z.object({
   type: z.literal("downloadDataResponse"),
   requestId: z.string(),
   data: z.instanceof(Uint8Array),
+})
+
+/** The content exists; its bytes follow as they are pulled */
+export const DownloadDataStreamResponseMessageSchema = z.object({
+  type: z.literal("downloadDataStreamResponse"),
+  requestId: z.string(),
+  size: z.number().int().nonnegative(),
+})
+
+/** Asks for one more `uploadSourcePiece` */
+export const UploadSourcePullMessageSchema = z.object({
+  type: z.literal("uploadSourcePull"),
+  requestId: z.string(),
+})
+
+/** One piece of a streaming download. No `data` means the content has ended */
+export const DownloadStreamPieceMessageSchema = z.object({
+  type: z.literal("downloadStreamPiece"),
+  requestId: z.string(),
+  data: z.instanceof(Uint8Array).optional(),
 })
 
 export const DeriveAppSecretResponseMessageSchema = z.object({
@@ -2050,6 +2139,12 @@ export const ActUploadDataResponseMessageSchema = z.object({
   tagUid: z.number().optional(),
 })
 
+export const ActDownloadDataStreamResponseMessageSchema = z.object({
+  type: z.literal("actDownloadDataStreamResponse"),
+  requestId: z.string(),
+  size: z.number().int().nonnegative(),
+})
+
 export const ActDownloadDataResponseMessageSchema = z.object({
   type: z.literal("actDownloadDataResponse"),
   requestId: z.string(),
@@ -2127,6 +2222,9 @@ export const IframeToParentMessageSchema = z.discriminatedUnion("type", [
   AuthSuccessMessageSchema,
   UploadDataResponseMessageSchema,
   DownloadDataResponseMessageSchema,
+  DownloadDataStreamResponseMessageSchema,
+  UploadSourcePullMessageSchema,
+  DownloadStreamPieceMessageSchema,
   DeriveAppSecretResponseMessageSchema,
   UploadFileResponseMessageSchema,
   DownloadFileResponseMessageSchema,
@@ -2160,6 +2258,7 @@ export const IframeToParentMessageSchema = z.discriminatedUnion("type", [
   CreateFeedManifestResponseMessageSchema,
   ActUploadDataResponseMessageSchema,
   ActDownloadDataResponseMessageSchema,
+  ActDownloadDataStreamResponseMessageSchema,
   ActAddGranteesResponseMessageSchema,
   ActRevokeGranteesResponseMessageSchema,
   ActGetGranteesResponseMessageSchema,
