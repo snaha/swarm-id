@@ -44,8 +44,8 @@ beforeEach(() => {
 
 /**
  * The signer's address must be the on-chain owner: Bee refuses any other
- * stamp, and the upload probe lets a timeout or 5xx through as "stampable".
- * The chain read is decisive.
+ * stamp, and the upload probe lets a timeout or 5xx through as "stampable"
+ * (#819). The chain read is decisive.
  */
 describe('fetchExistingBatchFromChain checks the owner', () => {
   it('accepts the batch when the signer owns it, whatever the case of the hex', async () => {
@@ -65,7 +65,7 @@ describe('fetchExistingBatchFromChain checks the owner', () => {
   })
 
   // A partition's lock and state chunks overstamp their slots, which an
-  // immutable batch refuses. Checked after ownership, so the owner's
+  // immutable batch refuses (#862). Checked after ownership, so the owner's
   // own immutable batch is told why it cannot be a drive.
   it('rejects an immutable batch, even one the signer owns', async () => {
     const owner = SIGNER.publicKey().address().toChecksum()

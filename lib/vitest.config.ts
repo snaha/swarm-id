@@ -14,7 +14,7 @@ export default defineConfig({
     // files in parallel worker processes, so what they cost is a function of
     // how oversubscribed the machine is.
     //
-    // Measured 2026-09-04, same tests on two machines — the spread
+    // Measured 2026-09-04 (#585), same tests on two machines — the spread
     // between the columns IS the finding, so read it as a range, not a number:
     //
     //                                             isolated  14-core  8-core M1
@@ -25,7 +25,7 @@ export default defineConfig({
     //   roundtrip       "50 sequential updates"      2.2s    11.1s      8.0s
     //
     // The loaded column is a developer machine at load average ~10 with 68
-    // other node processes. It puts
+    // other node processes — the kind of machine #585 was filed from. It puts
     // the heaviest test 1.25× under this budget, where the idle machine left
     // 2.7×. Neither is the machine that matters most: CI runs on a 2-vCPU
     // `ubuntu-latest` runner, which is UNMEASURED and slower than either.
@@ -42,7 +42,7 @@ export default defineConfig({
     // flake below ~20s, and the loaded column had already reached 24s.
     // And do not undercut it with a per-test `{ timeout }`: a 10 s cap on a
     // 2 s signing loop flaked under the full suite while every neighbour had
-    // 30 s. A test that needs a bound needs it above this one.
+    // 30 s (#585). A test that needs a bound needs it above this one.
     testTimeout: 30000,
     coverage: {
       provider: "v8",

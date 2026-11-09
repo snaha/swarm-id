@@ -427,7 +427,7 @@ export async function readPartitionState(
      * the rendezvous. The lease passes its own clock (`this.now()`, = `Date.now()`
      * in production) so the reader computes the same buckets the writer wrote at.
      * Defaults to `Date.now()` for bare callers. Injectable for deterministic /
-     * per-device-skew tests.
+     * per-device-skew tests (#385).
      */
     nowMs?: number
     /**
@@ -727,7 +727,7 @@ export async function writePartitionState(opts: {
   /**
    * Wall-clock ms the rotating pointer/beacon rendezvous addresses are anchored
    * to. The lease passes its own clock (`this.now()`, = `Date.now()` in
-   * production) so writer, reader, and the collision detector all agree;
+   * production) so writer, reader, and the collision detector all agree (#385);
    * the reader anchors to the same clock. Defaults to `Date.now()` for bare
    * callers (direct unit tests). Injectable so a test can drive rendezvous
    * deterministically / model per-device skew.
@@ -885,7 +885,7 @@ export async function writePartitionState(opts: {
   // IS `Date.now()`, so writer and reader still agree on wall-clock; threading it
   // (rather than reading `Date.now()` here) lets a test drive the rendezvous
   // deterministically and keeps this on the same clock as the caller's lease-
-  // validity + collision-detection logic.
+  // validity + collision-detection logic (#385).
   const now = nowMs
   for (const ptrMs of [now, now - STATE_POINTER_EPOCH_MS]) {
     claimedBuckets.add(
@@ -946,7 +946,7 @@ export async function writePartitionState(opts: {
     )
   }
 
-  // TWO-PHASE PUBLISH. Phase 1: the dirty counter chunks + the reference
+  // TWO-PHASE PUBLISH (#414). Phase 1: the dirty counter chunks + the reference
   // chunk. Phase 2 (only after ALL of phase 1 acks): the state-pointer SOC that
   // NAMES the reference chunk. The pointer must never become durable before the
   // chunks it references — with `deferred: false` a chunk PUT can fail while the

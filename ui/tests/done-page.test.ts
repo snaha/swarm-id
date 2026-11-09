@@ -127,7 +127,7 @@ test('connect flow shows the done screen variants and closes the popup', async (
 
   // Disconnect and reconnect: the lapsed connection lists the account under
   // "Previously used with this app" — with NO "Signed out" badge, since the
-  // account is still signed in. Reconnecting is NOT a first connect
+  // account is still signed in (#445). Reconnecting is NOT a first connect
   // and the drive question was settled, so the done screen is the plain
   // confirmation: no drive picker, no pitch.
   await page.goto(DEMO_URL)
@@ -188,7 +188,7 @@ test('connect flow shows the done screen variants and closes the popup', async (
   // Granted exactly the drive the user picked.
   expect(appDrive).toEqual([expect.stringMatching(/^[0-9a-f]{64}$/)])
 
-  // Storage warnings: mark one drive full → the home page shows the
+  // Storage warnings (#437): mark one drive full → the home page shows the
   // attention alert (any tab), and its link jumps to Storage.
   await page.evaluate(() => {
     const doc = JSON.parse(localStorage.getItem('swarm-id-accounts') ?? '{}') as {
@@ -205,7 +205,7 @@ test('connect flow shows the done screen variants and closes the popup', async (
 
   // The connect chooser shows the destructive drive action on the account row
   // instead of any badge, labelled with the drive's state — never "storage",
-  // which reads as a browser-storage permission step here. The drive
+  // which reads as a browser-storage permission step here (#768). The drive
   // was filled, not aged, so it is the "full" wording.
   // (Disconnect first — with a live session the demo has no Connect button.)
   await page.goto(DEMO_URL)
@@ -225,7 +225,7 @@ test('connect flow shows the done screen variants and closes the popup', async (
   await expect(popup.getByText(`Connect to ${APP_NAME}`)).toBeVisible()
 })
 
-// The app asks for drives, the done page shows a row per
+// Step 5 of #862: the app asks for drives, the done page shows a row per
 // requested drive, and "Go to app" commits the grant with the handshake.
 test('a drive request renders a row per drive and grants what was picked', async ({ page }) => {
   test.setTimeout(CHAIN_TEST_TIMEOUT_MS * 2)
@@ -284,7 +284,7 @@ test('a drive request renders a row per drive and grants what was picked', async
   expect(await grantOf(page)).toBe('all')
 })
 
-// A required row waits on a drive, and the drive is created in another
+// #879: a required row waits on a drive, and the drive is created in another
 // tab of the identity UI rather than through the popup's own dialog.
 test('a drive created in another tab fills the row waiting for it', async ({ page }) => {
   test.setTimeout(CHAIN_TEST_TIMEOUT_MS * 2)
@@ -338,7 +338,7 @@ test('a drive created in another tab fills the row waiting for it', async ({ pag
 
 // The Add drive dialog's drive belongs to the row it was opened for: the
 // refill that picks up another tab's drive must not hand it to a different
-// row first, granting one batch twice.
+// row first, granting one batch twice (#893).
 test("a drive added from a row's dialog fills that row only", async ({ page }) => {
   test.setTimeout(CHAIN_TEST_TIMEOUT_MS * 2)
   await seedLocalChain(page.context())
@@ -370,7 +370,7 @@ test("a drive added from a row's dialog fills that row only", async ({ page }) =
   await expect(popup.getByRole('button', { name: 'Go to app' })).toBeDisabled()
 })
 
-// Step 6: an app asks for more drives after connecting, and the user
+// Step 6 (#711): an app asks for more drives after connecting, and the user
 // edits what an app holds from the Apps tab.
 test('an app asks for a scratch drive later, and the Apps tab edits what it holds', async ({
   page,
@@ -446,7 +446,7 @@ test('an app asks for a scratch drive later, and the Apps tab edits what it hold
   // Two drive rows; the third combobox is "Keep app connected for".
   await expect(page.getByRole('combobox')).toHaveCount(3)
   await expect(page.getByText('Scratch drive', { exact: true })).toBeVisible()
-  // Taking a drive away is confirmed by typing a phrase; until then
+  // Taking a drive away is confirmed by typing a phrase (#925); until then
   // the grant stands. Cancel puts the row back on the drive it had.
   const scratchRow = page.getByRole('combobox').nth(1)
   const confirmDialog = page.getByRole('dialog')

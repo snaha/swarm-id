@@ -253,7 +253,7 @@ export class PartitionLease {
       /**
        * Which batch's lanes this lease is about. Required even for a reader:
        * every lock, intent and occupancy address is derived per (batch,
-       * partition), so "who holds partition p" has no answer
+       * partition) since #589, so "who holds partition p" has no answer
        * without naming the batch.
        */
       batchId: BatchId
@@ -834,7 +834,7 @@ export class PartitionLease {
         // If this partition's lock read was inconclusive (timed out), a
         // "no pointer found" result must fail safe rather than zero-seed.
         lockUnreadable: this.unreadableLocks.has(partition),
-        // Reader half of the rendezvous — this device's clock, captured
+        // Reader half of the rendezvous — this device's clock (#385), captured
         // once in `acquire` so the speculative pointer lookup and this read
         // computed identical buckets.
         nowMs: args.nowMs,
@@ -1100,7 +1100,7 @@ export class PartitionLease {
       wait: this.opts.wait,
       // Reuse the held claim's generation — it identifies the claim SESSION.
       // Re-minting a fresh generation each tick stamps a later timestamp than
-      // the rightful first claimant, inverting claim order.
+      // the rightful first claimant, inverting claim order (issue #413).
       generation: this.self.generation,
       now: () => this.now(),
       // A release closes the lease session; a refresh that overlaps it must
@@ -1328,7 +1328,7 @@ export class PartitionLease {
    * generation of the claim being released (captured BEFORE the slow
    * publish) and is skipped entirely when the lock no longer carries that
    * claim — a detached release outliving a same-device re-acquire must not
-   * clobber the successor's claim. No-op when no lease is held.
+   * clobber the successor's claim (#349). No-op when no lease is held.
    */
   async release(localCounter: Uint32Array): Promise<void> {
     if (!this.self) return
@@ -1421,7 +1421,7 @@ export class PartitionLease {
       // Lets the publish also avoid this device's intent-beacon buckets (the
       // refresh tick re-writes them off-lock at the same reserved slot).
       deviceId: this.opts.deviceId,
-      // Anchor the rendezvous addresses to this device's clock: same
+      // Anchor the rendezvous addresses to this device's clock (#385): same
       // clock as the collision detector and lease validity; `Date.now()` in prod.
       nowMs: this.now(),
     })
@@ -1507,7 +1507,7 @@ export class PartitionLease {
    * intent beacon, or the constant lock SOC. All land at `slot = partition`, so a
    * shared bucket means one overstamps (evicts) the other. Computed from
    * `this.now()`-derived addresses — the one rendezvous clock shared by
-   * `writePartitionState` (via `nowMs`) and the reader, = `Date.now()` in
+   * `writePartitionState` (via `nowMs`) and the reader (#385), = `Date.now()` in
    * production — so a heartbeat detects exactly the collision its own write would
    * cause.
    *
@@ -1523,7 +1523,7 @@ export class PartitionLease {
     if (this.publishedReferences === undefined) return false
     const owner = this.opts.backupSigner.publicKey().address()
     const { batchId } = this.requireWriteContext()
-    // `this.now()` — one clock for the whole rendezvous path: the beacon/
+    // `this.now()` — one clock for the whole rendezvous path (#385): the beacon/
     // heartbeat writes this guards, the publish it triggers (`writePartitionState`
     // via `nowMs`), and the reader all derive their buckets from this same clock.
     const nowMs = this.now()

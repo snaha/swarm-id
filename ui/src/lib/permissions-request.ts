@@ -1,9 +1,9 @@
 // Copyright 2026 The Swarm Authors. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 /**
- * The "Permissions for <app>" page as data: what a request or the
+ * The "Permissions for <app>" page as data (#711): what a request or the
  * Apps tab opens it with, the rows it shows, and the grant a save writes.
- * Drives, and the two sharing switches: the page reads `permissions`
+ * Drives, and the two sharing switches (#885): the page reads `permissions`
  * whole, so one route carries them all.
  */
 import { BatchId } from '@ethersphere/bee-js'
@@ -213,7 +213,7 @@ export function writableBatches(
 
 /**
  * The drives an app can write to under `before` and no longer can under
- * `after`, as batch hexes. A drive this device does not know yet is
+ * `after` (#925), as batch hexes. A drive this device does not know yet is
  * named too: losing it unseen is the case most worth a warning. A deleted
  * one is not: there is nothing left on it to lose.
  */
@@ -265,7 +265,7 @@ function toBatchId(hex: string): BatchId {
 }
 
 // ----------------------------------------------------------------------------
-// The sharing switches
+// The sharing switches (#885)
 // ----------------------------------------------------------------------------
 
 export const PERMISSION_NAMES: readonly PermissionName[] = ['dataSharing', 'writeAccess']
@@ -285,7 +285,7 @@ export const SWITCH_COPY: Record<PermissionName, { label: string; description: s
 /**
  * The switches a request asks for that are not in effect (`current`, from
  * `effectivePermissions`) — the ones the connect screen and the permissions
- * popup put the question for. Data sharing is asked whenever write
+ * popup put the question for (#885). Data sharing is asked whenever write
  * access is, since the latter implies it; write access is listed while data
  * sharing is off, shown disabled until the user turns data sharing on.
  */

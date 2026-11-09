@@ -26,9 +26,8 @@ rather than kept beside the new one. `0.x` says the same thing to anyone consumi
 
 ### Authentication
 
-There is exactly one kind of account: a BIP-39 seed account. What used to be distinct account
-types are now just ways of protecting that seed, held in the device-local vault
-(`LocalVaultSchemaV1`) as one of three **access methods**:
+There is exactly one kind of account: a BIP-39 seed account. The seed is protected in the
+device-local vault (`LocalVaultSchemaV1`) by one of three **access methods**:
 
 - **Passkey/WebAuthn**: browser-native credential
 - **Ethereum wallet**: a signature from an existing wallet
@@ -104,7 +103,7 @@ Chain-backed suites are NOT in `check:all` — they need a chain running. `pnpm 
 - **No magic numbers** — use SCREAMING_SNAKE_CASE constants (0, 1, -1, 2 excepted)
 - **Omit file extensions** in imports
 - **kebab-case** for all file and directory names
-- **Comments and test titles describe the present**: no change history ("used to", "previously", "the old X") and no issue or PR numbers for finished work. A number stays only when it points at an open issue. The reasoning goes in `docs/decisions.md` or the commit message.
+- **Comments, test titles and `AGENTS.md` describe the present**: no change history ("used to", "previously", "the old X"). An issue or PR number is a fine pointer to the context. The longer reasoning goes in `docs/decisions.md` or the commit message.
 - **Conventional commits**: `feat:`, `fix:`, `docs:`, etc.
 - **TypeScript execution**: Use `pnpx tsx` (not `npx ts-node`)
 - **Monorepo version pinning**: toolchain versions are pinned across the monorepo (eslint 10,

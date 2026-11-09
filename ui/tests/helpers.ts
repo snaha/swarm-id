@@ -102,7 +102,7 @@ export const ID_ORIGIN = 'http://localhost:5500'
  * `window.opener` then points at the dApp with nowhere for the handover to
  * post; the iframe's button always opens it itself, which is what sets the
  * partition challenge and makes `sendSecretToOpener` reach a proxy that cannot
- * read shared storage (docs/Account-Bus.md). Both routes are covered:
+ * read shared storage (#613, docs/Account-Bus.md). Both routes are covered:
  * this helper drives the iframe's button, and `bus-propagation.test.ts` drives
  * `client.connect()` under a real partition.
  */
@@ -246,7 +246,7 @@ export function seedLocalChain(page: Page | BrowserContext, rpcUrl: string = CHA
 }
 
 /**
- * Hold the drive-lifetime watcher's Web Lock from the page's first
+ * Hold the drive-lifetime watcher's Web Lock (#903) from the page's first
  * script, as another tab reading the drives would, so the site does not
  * re-read them from the chain on load. For a test that rolls a record back and
  * means some other path to reconcile it. The lock name is the one

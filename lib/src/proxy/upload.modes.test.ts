@@ -4,14 +4,14 @@
 /**
  * What each upload mode forwards to Bee.
  *
- * The subsidised path never sends `Swarm-Pin`: pinning means "keep
+ * The subsidised path never sends `Swarm-Pin` (#752): pinning means "keep
  * this on the local node", and the node is the dApp operator's, not the
  * user's — gateway-proxy strips the header by default, and the public
  * gateway's CORS preflight rejects it outright, as a bare "Failed to fetch".
  *
  * Stamper mode still sends it — the node is the user's own — so the positive
  * half is asserted too, or a header dropped from the wrong branch stays green.
- * Stamper mode also honours the caller's `deferred` on every data and chunk upload.
+ * Stamper mode also honours the caller's `deferred` on every data and chunk upload (#784).
  */
 
 import { describe, it, expect, vi, afterEach } from "vitest"
@@ -121,7 +121,7 @@ describe("stamper uploads keep swarm-pin", () => {
  * Stamper mode honours `deferred` (#780 adjacent): a dev-mode Bee serves only
  * deferred uploads, and the documented remedy is to set the flag from
  * `getNodeInfo()`. Forcing `deferred: false` would silently drop the caller's
- * `true` and the upload would time out anyway.
+ * `true` and the upload would time out anyway (#298).
  */
 describe("stamper uploads honour deferred", () => {
   function spiedBee(): { bee: MockBee; chunkUpload: ReturnType<typeof vi.fn> } {
@@ -172,7 +172,7 @@ describe("stamper uploads honour deferred", () => {
 /**
  * The stamper-mode SOC POST is a hand-rolled `fetch`, so it must carry the
  * headers `bee.chunk.upload` would: the `Bee` instance's own and the call's
- * `requestOptions`. Without them an authenticated node answers 401,
+ * `requestOptions` (#819). Without them an authenticated node answers 401,
  * which the batch-attach probe then misreads as "stampable".
  */
 describe("stamper SOC uploads send the Bee headers", () => {

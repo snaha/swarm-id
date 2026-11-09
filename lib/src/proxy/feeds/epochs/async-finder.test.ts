@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * `AsyncEpochFinder.findAt` probing behaviour: the exact-timestamp
+ * `AsyncEpochFinder.findAt` probing behaviour (#400): the exact-timestamp
  * fast-path probe must not run in SERIES before the tree traversal — on a
  * "latest as of now" read (every fold) it never hits and would otherwise cost a
  * full absent-chunk timeout before the traversal even starts. Its result
@@ -49,7 +49,7 @@ function notFound(): Error {
   return Object.assign(new Error("chunk not found"), { status: 404 })
 }
 
-describe("AsyncEpochFinder — exact probe does not gate the traversal", () => {
+describe("AsyncEpochFinder — exact probe does not gate the traversal (#400)", () => {
   it("issues the root traversal before the exact-timestamp probe settles", async () => {
     const exactAddr = await epochAddressHex(new EpochIndex(AT, 0))
     const rootAddr = await epochAddressHex(new EpochIndex(0n, MAX_LEVEL))

@@ -30,11 +30,11 @@ type ActUploadOptions = UploadOptions & { beeCompatible?: boolean }
 
 /**
  * The private keys one session may read or publish with. A proxy holds two —
- * the origin-bound app key and the account-wide sharing key — and does
+ * the origin-bound app key and the account-wide sharing key (#519) — and does
  * not know which one a share was made out to, so every reader/publisher entry
  * point takes candidates and uses the one the ACT names.
  *
- * A candidate may be **denied**: it is still tried, and when it is the
+ * A candidate may be **denied** (#885): it is still tried, and when it is the
  * one the ACT names the call fails with that error instead of succeeding. So
  * a share made out to a key the user has switched off reads as a permission
  * problem, not as "not a grantee".
@@ -125,11 +125,11 @@ export interface ActGranteeModifyResult {
 }
 
 /**
- * Result of ACT revocation. `encryptedReference` is returned unchanged:
+ * Result of ACT revocation. `encryptedReference` is returned unchanged (#496):
  * revocation drops the revoked entries but must not re-encrypt the reference.
  */
 export interface ActRevocationResult extends ActGranteeModifyResult {
-  encryptedReference: string // Unchanged content reference
+  encryptedReference: string // Unchanged content reference (see #496)
 }
 
 /**
@@ -548,7 +548,7 @@ export async function addGranteesToAct(
 
 /**
  * Revoke grantees from an ACT by dropping their entries. The content reference is
- * returned unchanged — revocation must not re-encrypt it.
+ * returned unchanged — revocation must not re-encrypt it (#496).
  */
 export async function revokeGranteesFromAct(
   target: UploadTarget,
@@ -611,7 +611,7 @@ export async function revokeGranteesFromAct(
   } = findPublisherKey(entries, publisherCandidates)
 
   // Keep the existing access key. Rotating it and re-encrypting the SAME content
-  // reference under the new key was a revocation bypass: counterModeEncrypt
+  // reference under the new key was a revocation bypass (#496): counterModeEncrypt
   // is nonce-free CTR, so two ciphertexts of the same reference expose the new
   // keystream to any former grantee, who read both from immutable history. Re-keying
   // is also pointless — immutability keeps the old ciphertext readable forever, so
@@ -722,7 +722,7 @@ export async function revokeGranteesFromAct(
   const historyTagUid = historyResult.tagUid
 
   return {
-    // Unchanged: revocation must not re-encrypt the reference.
+    // Unchanged — see #496: revocation must not re-encrypt the reference.
     encryptedReference,
     historyReference: newHistoryReference,
     granteeListReference: granteeListResult.reference,

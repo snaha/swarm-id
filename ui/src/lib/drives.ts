@@ -48,7 +48,7 @@ const LANE_DEPTH_SHIFT = Math.log2(PARTITION_COUNT)
 /**
  * The bytes one device can write to a drive of `depth` before its partition
  * lane reports "Storage full" — the figure every size label shows, and the
- * capacity the used % and "Storage full" are measured against.
+ * capacity the used % and "Storage full" are measured against (#566).
  *
  * bee-js's effective volume is what a single writer fits into a whole batch
  * before some bucket fills, indexed by depth — i.e. by slots per bucket over
@@ -71,8 +71,8 @@ export function driveEffectiveBytes(depth: number): number {
  * at {@link MIN_USABLE_BATCH_DEPTH}, each labelled with what one device can
  * write to it ({@link driveEffectiveBytes}). Smaller batches are not worth
  * buying or growing into: depth 17 has no per-bucket data lane at all and 18
- * a single slot, so both read "Storage full" from the first chunk written,
- * and 19's three slots fill some bucket after ~1 MB.
+ * a single slot, so both read "Storage full" from the first chunk written
+ * (#538), and 19's three slots fill some bucket after ~1 MB (#566).
  */
 export const DRIVE_SIZE_BREAKPOINTS: [depth: number, bytes: number][] = [
   ...Utils.getStampEffectiveBytesBreakpoints(true, RedundancyLevel.OFF).keys(),
@@ -108,7 +108,7 @@ export interface DriveDisplay {
   name: string
   sizeLabel: string
   usedPercent: number
-  /** Never on a scratch drive: its lane wraps instead of filling. */
+  /** Never on a scratch drive: its lane wraps instead of filling (#862). */
   storageFull: boolean
   /** A scratch drive shows no usage at all — it reads near 100% once it wraps. */
   scratch: boolean

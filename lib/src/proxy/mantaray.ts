@@ -151,7 +151,7 @@ export async function saveMantarayTree(
  * too short to hold a header, or a header that is not Mantaray's. Matched on
  * the tail, because the prefix has been reworded once already — bee-js threw
  * `MantarayNode#unmarshal …`, core-sdk throws `MantarayNode#unmarshalFromData
- * …` — and both throw a plain `Error`, so the text is the only handle
+ * …` (#705) — and both throw a plain `Error`, so the text is the only handle
  * there is. Reword the tails too and the translation below simply stops
  * firing, leaving the raw message to surface again.
  */

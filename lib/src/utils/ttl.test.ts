@@ -55,7 +55,7 @@ describe("calculateStampAmountForDays", () => {
 })
 
 describe("calculateTTLSeconds", () => {
-  // Reference figures from a real batch:
+  // Reference figures from the bug report on issue #279:
   //   amount = 13_737_600_001 PLUR (per chunk)
   //   pricePerGBPerMonth ≈ 0.7025 BZZ/GiB/month  → ≈ 15.4 days lifetime
   const REFERENCE_AMOUNT = 13_737_600_001n

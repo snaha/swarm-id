@@ -5,7 +5,7 @@ import { defineConfig, devices } from '@playwright/test'
 /**
  * The device scenarios: three browser contexts of one account sharing two
  * write partitions (`tests/three-devices.test.ts`), and two of them writing
- * two drives (`tests/two-drives.test.ts`), driven through the demo the
+ * two drives (`tests/two-drives.test.ts`, #882), driven through the demo the
  * way a person drives it. Minutes per run by construction — the
  * lease TTL, the idle yield and the beacon grace are each 30 s and the suite
  * waits them out — so it is not part of `pnpm test:e2e`. It runs on its own

@@ -4,7 +4,7 @@
 # them out — so it does not run on every change:
 #
 #   - on a PR that touches the lease seams or the suite itself (advisory: not a
-#     required check while some scenarios skip on evidence),
+#     required check while #707 makes some scenarios skip on evidence),
 #   - nightly on main, so a regression is dated to a day rather than found by
 #     hand,
 #   - before every npm publish (`release.yml` calls it once release-please has

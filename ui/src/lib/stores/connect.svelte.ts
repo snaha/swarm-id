@@ -26,7 +26,7 @@ export interface ConnectRequest {
    */
   partitionChallenge?: string
   /**
-   * What the app asked for: `drives` is `"all"`, or a row per drive
+   * What the app asked for (#862): `drives` is `"all"`, or a row per drive
    * for the done page's picker. Absent when the app asked for nothing, which
    * keeps the account default.
    */

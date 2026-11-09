@@ -6,8 +6,8 @@
   Post-connect confirmation, and where the connection is committed: the
   chooser hands over the unlocked account (`connectStore.pending`), the user
   settles the drives, and "Go to app" runs the handshake with the grant —
-  so a partitioned session is handed exactly the drives the grant names.
-  The middle varies with what the app asked for (SwarmID-MVP,
+  so a partitioned session is handed exactly the drives the grant names
+  (#862). The middle varies with what the app asked for (SwarmID-MVP,
   sections OPTION 1 / OPTION 2):
   - a list of drives: one row each, regular rows first, with a select over
     the account's drives of that kind — "Add new drive…" last — or an Add
@@ -19,7 +19,7 @@
     keeps tracking the default otherwise), or the drive pitch when there is
     none.
   Under the drives, the sharing switches the app asked for that are not
-  already on, each off; one turned on is pinned for this app.
+  already on (#885), each off; one turned on is pinned for this app.
 -->
 <script lang="ts">
   import { onMount } from 'svelte'
@@ -84,7 +84,7 @@
 
   let rows = $state<PickerRow[]>([])
   let grantAll = $state(false)
-  /** The sharing switches: what was in effect at load, and what they show now. */
+  /** The sharing switches (#885): what was in effect at load, and what they show now. */
   let initialSharing = $state<AppPermissions>({ dataSharing: true, writeAccess: true })
   let sharing = $state<AppPermissions>({ dataSharing: true, writeAccess: true })
 
@@ -176,7 +176,7 @@
 
   // A drive created meanwhile in another tab of the identity UI — its Storage
   // tab, another popup — reaches the account store over the storage event; a
-  // required row still waiting on one takes it. Not while the Add drive
+  // required row still waiting on one takes it (#879). Not while the Add drive
   // dialog is open: its drive belongs to the row it was opened for, and
   // `onDriveAdded` runs before the dialog closes and this runs again.
   $effect(() => {

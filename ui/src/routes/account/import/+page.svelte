@@ -64,7 +64,7 @@
 
         // Came from a dApp connect popup — the phrase already unlocked the
         // account; the done page runs the handshake once the drives are
-        // settled.
+        // settled (#862).
         const request = connectStore.request
         if (request) {
           connectStore.setPending({

@@ -100,9 +100,9 @@ export const DeviceSchemaV1 = z.object({
   name: z.string().optional(),
   // Rename clock, on the same pattern as a stamp's `nameUpdatedAt`. The name
   // merges on its own last-writer-wins clock because the record clock below
-  // cannot rank a rename at all: correcting a label moves neither
+  // cannot rank a rename at all: correcting a label (#570) moves neither
   // `lastSignedInAt` nor `removedAt`, so a corrected row would tie with every
-  // stale copy of itself and lose the tie, forever.
+  // stale copy of itself and lose the tie, forever (#663).
   // Optional: a row nobody has renamed since it was created has none, and a
   // name born WITH the record needs no clock — it already outranks every stale
   // copy on `lastSignedInAt`.
@@ -114,7 +114,7 @@ export const DeviceSchemaV1 = z.object({
   //
   // "Sign-in" means a user unlocking the account — a device REPUBLISHING itself
   // without the tombstone. A background poll is not one, and reading it as one
-  // is what made every removal undo itself on the next round.
+  // is what made every removal undo itself on the next round (#611).
   removedAt: z.number().optional(),
 })
 
@@ -124,7 +124,7 @@ export const DeviceSchemaV1 = z.object({
 
 /**
  * Per-account settings, on the account's `settingsAt` clock. The two sharing
- * switches are the account-wide defaults every app follows unless it
+ * switches (#885) are the account-wide defaults every app follows unless it
  * is pinned otherwise (`ConnectedAppSchemaV1`); absent means on. Each rides
  * its own clock on top (`SETTINGS_CLOCKS`, `permissions.ts`): `settingsAt`
  * ranks the object whole, so a session-length change made on a stale copy
@@ -155,12 +155,12 @@ export const ConnectedAppSchemaV1 = z.object({
   appDescription: z.string().optional(),
   connectedUntil: z.number().optional(),
   appSecret: z.string().optional(),
-  // The drives this app may write to. Absent → the account default
+  // The drives this app may write to (#862). Absent → the account default
   // (`account.defaultPostageStampBatchID`), followed wherever it moves.
   // `"all"` → every drive the account has, including ones added later. A
   // list → exactly those drives; an empty one opts the app out of drives.
   drives: z.union([z.literal("all"), z.array(StoredBatchId)]).optional(),
-  // The app's own say on the account-wide sharing key: reading with it
+  // The app's own say on the account-wide sharing key (#885): reading with it
   // (`dataSharing`) and publishing or managing with it (`writeAccess`). Absent
   // → the account's `settings` decide; present → pinned, whatever the account
   // default becomes. `effectivePermissions` (`permissions.ts`) folds the two.
@@ -178,7 +178,7 @@ export const ConnectedAppSchemaV1 = z.object({
   // `permissions.ts`), because a grant edit says nothing about whether the app
   // is still connected. Ranking the whole entry on a clock this bumped let a
   // drive picked on a stale copy outrank a revoke made elsewhere and take the
-  // tombstone with it. Membership merges on the markers below instead.
+  // tombstone with it (#681). Membership merges on the markers below instead.
   drivesAt: z.number().optional(),
   // Tombstone marker. A revoked app is kept in the snapshot (so the removal
   // propagates to other devices) but hidden from the UI and invalid for auth.
@@ -207,7 +207,7 @@ export const PostageStampSchemaV1 = z.object({
   // naming existed — and those bought outside the app — have none, and callers
   // fall back to a batch-ID-derived label.
   name: z.string().optional(),
-  // Fixed when the drive is created. A scratch drive reuses its slots
+  // Fixed when the drive is created (#862). A scratch drive reuses its slots
   // as a ring, overwriting its oldest data; a regular one never does, so the
   // two cannot be mixed on one batch. Absent → regular: only a scratch drive
   // is marked, the way only a deleted one carries `deletedAt`, so a regular
@@ -234,7 +234,7 @@ export const PostageStampSchemaV1 = z.object({
   // Optional because a stamp that has never been edited has no edit clock:
   // `addStamp` sets `createdAt` alone, so the merge's `updatedAt ?? 0` is the
   // ordinary case for a fresh add, not a shim for records written before the
-  // field existed. Without the clock an edited copy would tie with a
+  // field existed (#662). Without the clock an edited copy would tie with a
   // stale remote copy and the edit would never propagate across devices.
   updatedAt: z.number().optional(),
   // Tombstone marker. A deleted stamp is kept in the snapshot (so the removal

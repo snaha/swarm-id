@@ -62,7 +62,7 @@ describe.skipIf(!liveEnv.configured)(
         accountName,
         defaultPostageStampBatchID: undefined,
         accountNameAt,
-        // accountPublicKey is required on the device-state feed;
+        // accountPublicKey is required on the device-state feed (#377, #381);
         // without it the published snapshot fails read validation and the fold
         // reads no views. `accountStateToDeviceView` sources it from here.
         publicKey: TEST_ACCOUNT_PUBLIC_KEY,

@@ -1,7 +1,7 @@
 // Copyright 2026 The Swarm Authors. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 /**
- * The receive half of `account-delta` in the SwarmID tab.
+ * The receive half of `account-delta` in the SwarmID tab (#608).
  *
  * What these pin is the pair of rules a consumer gets wrong in opposite
  * directions: a merge that keeps the wire's stripped session fields logs this

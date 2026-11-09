@@ -41,7 +41,7 @@ describe("mergeDevices", () => {
     expect(result[1].deviceId).toBe("second-device")
   })
 
-  // Three dApps on one Safari are three partition devices. A corrected name has
+  // Three dApps on one Safari are three partition devices. A corrected name (#570) has
   // to reach the rows already in the registry, not just the next one created,
   // or a user stares at three identical "Safari on Mac" until they expire.
   it("refreshes our own name when it changed", () => {
@@ -59,7 +59,7 @@ describe("mergeDevices", () => {
   // Correcting the label locally is half the job: every other context folds the
   // registry through `mergeDevicesList`, which ranks on sign-in recency, and a
   // rename moves none of it. The name carries its own clock so the correction
-  // outranks a stale copy without pretending to be a sign-in.
+  // outranks a stale copy without pretending to be a sign-in (#663).
   it("stamps the rename clock when the name changed", () => {
     const existing = [createDevice({ name: "Safari on Mac" })]
 
@@ -74,7 +74,7 @@ describe("mergeDevices", () => {
 
   // Both callers are polls. A clock that moved every time a caller passed the
   // name it already stored would make every quiet round a byte change to
-  // persist.
+  // persist (#652).
   it("leaves the rename clock alone when the name is unchanged", () => {
     const existing = [
       createDevice({ name: "Safari on Mac · a.example", nameUpdatedAt: 1000 }),
@@ -105,9 +105,9 @@ describe("mergeDevices", () => {
 
   // A background poll is not a sign-in. `mergeDevices` runs on refresh paths
   // ONLY — the proxy's throttled roster poll and the UI's fold — so clearing
-  // our own tombstone here undid every removal on the next poll. An
+  // our own tombstone here undid every removal on the next poll (#611). An
   // expiry that undoes itself is not an expiry. Reactivation belongs to the
-  // genuine sign-in seams.
+  // genuine sign-in seams (#337).
   it("keeps our own tombstone — a poll is not a sign-in", () => {
     const existing = [createDevice({ removedAt: 5000 })]
 
@@ -310,7 +310,7 @@ describe("detectDeviceName", () => {
 // The device-registry refresh persists every merge that moved a field, not
 // only a longer list: `knownDeviceIds` prunes on `lastSignedInAt` and the
 // tombstone, so a peer the roster shows as live could otherwise age out of the
-// stored copy and be skipped by the partition-intent round.
+// stored copy and be skipped by the partition-intent round (#586).
 describe("deviceRegistryChanged", () => {
   const SELF = "self-device"
   const PEER = "peer-device"
@@ -341,7 +341,7 @@ describe("deviceRegistryChanged", () => {
   })
 
   // Our own stamp moves only on a genuine sign-in (a reactivation), never on
-  // a poll — so when it moves, it is worth persisting.
+  // a poll (#652) — so when it moves, it is worth persisting.
   it("is true when our own sign-in stamp moved", () => {
     const merged = [{ ...self, lastSignedInAt: 9000 }, peer]
     expect(deviceRegistryChanged([self, peer], merged, SELF)).toBe(true)
@@ -359,7 +359,7 @@ describe("partitionDeviceName", () => {
 
   // A partitioned iframe keeps its own device id per storage partition, so one
   // browser with three connected dApps is three devices. The browser name alone
-  // cannot tell them apart.
+  // cannot tell them apart (#570).
   it("names the dApp the partition belongs to", () => {
     stubNavigator({ userAgent: SAFARI_MAC_UA })
     expect(partitionDeviceName("https://demo.snaha.net")).toBe(

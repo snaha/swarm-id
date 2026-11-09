@@ -42,7 +42,7 @@ async function installVirtualAuthenticator(page: Page, { hasPrf = true } = {}) {
 // Holds every crypto.subtle.encrypt call until the test releases it. In the
 // create flow the only encrypt is finalize()'s encryptSeed, so this parks
 // finalization right after the passkey ceremony — the exact window where a
-// Cancel click must win the race. __encryptHeld flags that finalize
+// Cancel click must win the race (#423). __encryptHeld flags that finalize
 // reached the gate; __encryptDone that the released call finished.
 async function gateSeedEncryption(page: Page) {
   await page.addInitScript(() => {
@@ -98,7 +98,7 @@ test('passkey happy path creates a usable local account', async ({ page }) => {
   expect(await authenticator.storedCredentials()).toBe(1)
 })
 
-test('cancel during finalization does not create the account', async ({ page }) => {
+test('cancel during finalization does not create the account (#423)', async ({ page }) => {
   await installVirtualAuthenticator(page)
   await gateSeedEncryption(page)
   await gotoAccessStep(page)
@@ -125,7 +125,7 @@ test('cancel during finalization does not create the account', async ({ page }) 
   await expect(page.getByText('Account created successfully!')).toBeVisible()
 })
 
-test('a passkey without PRF is rejected, explained, and signalled for removal', async ({
+test('a passkey without PRF is rejected, explained, and signalled for removal (#870)', async ({
   page,
 }) => {
   // A passkey manager without PRF (e.g. KeePassXC) stores the passkey before
@@ -155,7 +155,7 @@ test('a passkey without PRF is rejected, explained, and signalled for removal', 
   await expect(page).toHaveURL(/\/account\/new\/done$/)
 })
 
-test('a passkey whose follow-up assertion returns no PRF output is dropped too', async ({
+test('a passkey whose follow-up assertion returns no PRF output is dropped too (#870)', async ({
   page,
 }) => {
   // The other PRF failure: registration claims PRF but evaluates nothing, and

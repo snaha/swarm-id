@@ -32,8 +32,8 @@ const SIGNING_MESSAGE =
 const UNSUPPORTED_WALLET = 'This wallet type is not supported for securing an account.'
 
 /**
- * Onboard labels of wallets confirmed to sign byte-identically every time,
- * which enrollment trusts after one signature. The label is what the
+ * Onboard labels of wallets confirmed to sign byte-identically every time
+ * (#200), which enrollment trusts after one signature. The label is what the
  * wallet reports about itself, so one posing as these skips the second
  * signature; the address check still applies to it.
  */

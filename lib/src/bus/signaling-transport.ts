@@ -100,7 +100,7 @@ export class SignalingTransport implements BusTransport {
 
   /**
    * Settles once every publish so far has been encrypted and handed to its
-   * socket or data channel — what a page about to close waits for.
+   * socket or data channel — what a page about to close waits for (#711).
    * Not a delivery receipt: nothing here says a peer has read it.
    */
   settled(): Promise<void> {
@@ -168,7 +168,7 @@ export class SignalingTransport implements BusTransport {
     // The topic travels in the first frame, not the query string: query strings
     // are recorded by every ingress and proxy access log as a matter of course,
     // and the topic IS the room capability — anything reading those logs can
-    // join. Payload confidentiality is unaffected either way (topic and
+    // join (#577). Payload confidentiality is unaffected either way (topic and
     // envelope key come from separate HMAC contexts); what a topic buys is
     // membership: presence, traffic patterns, ciphertext to keep, and a
     // position to inject from.

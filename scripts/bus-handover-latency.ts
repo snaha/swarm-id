@@ -4,7 +4,7 @@
 /**
  * One-off measurement: how long a waiting device takes to get a partition from
  * a live holder over the account bus, against the polling fallback it replaces
- * (docs/Account-Bus.md, "Bus-accelerated leases").
+ * (docs/Account-Bus.md, "Bus-accelerated leases"; #569).
  *
  * Three simulated devices in this process share one account on a two-partition
  * batch. A and B each take a partition and go idle; C then wants one. Rows:
@@ -49,9 +49,9 @@
  * partition costs. Two of five bus runs took ~17.5 s with the answer still at
  * 0.7 s: the bee served the pre-release lock for a few seconds after the
  * sentinel write, so C's woken scan still saw it held, re-asked, and the other
- * holder yielded too before C slept out a poll interval. Lease messages must
+ * holder yielded too before C slept out a poll interval (#724). Lease messages must
  * carry `batchId`, or every one is dropped at parse and the bus row measures
- * the poll backstop: 39.0 s, same as idle. `scripts/` has no typecheck, so
+ * the poll backstop: 39.0 s, same as idle (#703). `scripts/` has no typecheck, so
  * nothing but a run catches such drift (#725).
  */
 
@@ -230,7 +230,7 @@ function attachBus(
     if (!('fromDeviceId' in message) || message.fromDeviceId === device.id) {
       return
     }
-    // As in the proxy: a lane is one partition of ONE batch of one
+    // As in the proxy: a lane is one partition of ONE batch (#589) of one
     // account, so a lease message for another is nobody's business here.
     if ('accountId' in message && message.accountId !== accountId) return
     if ('batchId' in message && message.batchId !== batchID.toHex()) return

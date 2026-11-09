@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 /**
  * The store hears writes made in its OWN window by another storage manager
- * instance — the proxy iframe's, when the identity UI runs inside it.
+ * instance — the proxy iframe's, when the identity UI runs inside it (#712).
  */
 import { EthAddress } from '@ethersphere/bee-js'
 import {
@@ -142,7 +142,7 @@ describe('a same-window write by another manager instance', () => {
     expect(account.connectedApps[0].appSecret).toBeUndefined()
   })
 
-  it('is not undone by the next peer delta', () => {
+  it('is not undone by the next peer delta (#712)', () => {
     accountsStore.add(record())
     proxyDisconnects()
     applyAccountDelta(peerDelta())

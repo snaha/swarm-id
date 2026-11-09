@@ -84,10 +84,11 @@ type DeviceAuth =
  * Members split into two groups: the product mutators the shipping app calls
  * (including the postage-stamp / "drive" mutators the storage UI drives), and —
  * below the `DEV-ONLY` banner — the volatile-utilization updater and
- * `applyRefreshed`. `applyRefreshed` is how BOTH remote sources land, the Swarm
- * fold and a peer's `account-delta` off the bus, and the bus one ships despite
- * the banner. It carries `skipSync`, so a change folded FROM a peer is never
- * published back at it.
+ * `applyRefreshed`. The banner's "the shipping app never calls these" is not
+ * true of `applyRefreshed`: it is how BOTH remote sources land, the Swarm fold
+ * and a peer's `account-delta` off the bus (#608), and the bus path runs in production.
+ * It carries `skipSync`, so a change folded FROM a peer is never published back
+ * at it.
  */
 export class Account {
   readonly id: EthAddress
@@ -355,7 +356,7 @@ export class Account {
     this.#setSettings({ appSessionDuration: daysToMs(days) })
   }
 
-  /** The account-wide default of a sharing switch, every unpinned app follows. */
+  /** The account-wide default of a sharing switch, every unpinned app follows (#885). */
   setSharingDefault(permission: PermissionName, on: boolean) {
     this.#setSettings({ [permission]: on })
   }
@@ -402,13 +403,13 @@ export class Account {
   }
 
   /**
-   * Change part of what an app holds — its drives, a sharing switch or
+   * Change part of what an app holds — its drives (#862), a sharing switch or
    * its session duration pinned (or unpinned with `undefined`, to follow the
-   * account default again) — each field on its own clock. The grant
+   * account default again, #885) — each field on its own clock. The grant
    * carries through the cross-device merge on those, not the entry's: it
    * says nothing about whether the app is still connected, and a clock that
    * ranked the whole entry let a drive edit outrank a revoke made on another
-   * device. No-op when the app has no entry.
+   * device (#681). No-op when the app has no entry.
    */
   setAppPermissions(appUrl: string, patch: AppPermissionsPatch) {
     if (!this.connectedApps.some((app) => app.appUrl === appUrl)) {
@@ -445,7 +446,7 @@ export class Account {
    * Add or replace a stamp (deduped by batch id). The first REGULAR stamp
    * added becomes the account default so uploads have something to spend
    * against: the account syncs to its default drive, and a scratch drive
-   * overwrites its oldest data. Re-adding a previously removed batch
+   * overwrites its oldest data (#862). Re-adding a previously removed batch
    * revives it (a fresh `createdAt` beats the old tombstone on merge).
    */
   addStamp(stamp: Omit<PostageStamp, 'createdAt' | 'deletedAt'>): PostageStamp {
@@ -530,7 +531,7 @@ export class Account {
     )
     // Never leave a default pointing at a stamp we just removed; fall back to a
     // remaining live regular stamp so the account never references a deleted
-    // batch, nor syncs to a scratch drive.
+    // batch, nor syncs to a scratch drive (#862).
     if (this.defaultPostageStampBatchID?.equals(batchID)) {
       this.defaultPostageStampBatchID = this.postageStamps.find(
         (stamp) => stamp.deletedAt === undefined && !isScratchDrive(stamp),
@@ -541,7 +542,7 @@ export class Account {
     this.#commit()
   }
 
-  /** No-op for a scratch drive: the account never syncs to one. */
+  /** No-op for a scratch drive: the account never syncs to one (#862). */
   setDefaultStamp(batchID: BatchId | undefined) {
     const stamp = batchID && this.postageStamps.find((s) => s.batchID.equals(batchID))
     if (stamp && isScratchDrive(stamp)) return
@@ -606,7 +607,7 @@ export class Account {
       this.defaultStampAt = fields.defaultStampAt
     }
     if (fields.settingsAt !== undefined) {
-      // Whole on `settingsAt`, each switch on its own clock.
+      // Whole on `settingsAt`, each switch on its own clock (#885).
       const merged = mergeAccountSettings(
         { value: this.settings, at: this.settingsAt ?? this.createdAt },
         { value: fields.settings, at: fields.settingsAt },
@@ -625,8 +626,8 @@ function revoked(app: ConnectedApp, tombstone: boolean): ConnectedApp {
     ...app,
     // Remove means "forget this app", and the grant is a permission, not
     // routing: without this a removed app reconnects still granted the drives
-    // it had, and the picker's default choice writes nothing to clear them.
-    // On the grant's own clock so the reset wins the merge.
+    // it had, and the picker's default choice writes nothing to clear them
+    // (#862). On the grant's own clock so the reset wins the merge.
     ...(tombstone
       ? stampClocks(
           {
@@ -684,7 +685,7 @@ function persistAccount(account: Account, noRepublish = false): void {
     ? stored.map((existing) => (existing.id.equals(account.id) ? record : existing))
     : [...stored, record]
   // `skipSync` means peers must not hear about this write: the proxy sharing
-  // this window (inside the proxy iframe) must not publish it either.
+  // this window (inside the proxy iframe) must not publish it either (#707).
   storageManager.save(merged, { noRepublish })
 }
 
@@ -731,7 +732,7 @@ function refresh(): void {
 if (browser) {
   // Refresh on writes this store did not make: another tab's (sign-in, app
   // connect, stamp purchase), and another manager instance's in THIS window —
-  // the proxy iframe's Disconnect, when the identity UI runs inside it.
+  // the proxy iframe's Disconnect, when the identity UI runs inside it (#712).
   storageManager.subscribe(refresh)
 }
 
@@ -798,7 +799,7 @@ export const accountsStore = {
 // ----------------------------------------------------------------------------
 // Propagation seam — "this change should reach other contexts".
 //
-// Wired app-wide in `+layout.svelte`, and drives two publishers: the Swarm feed
+// Wired app-wide in `+layout.svelte` (#389), and drives two publishers: the Swarm feed
 // write for durability, and the
 // account bus for the live contexts a `storage` event cannot reach — a
 // partitioned dApp iframe learns about a revoke no other way.

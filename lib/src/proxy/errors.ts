@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * The one place a caught failure becomes what the bridge carries. The
+ * The one place a caught failure becomes what the bridge carries (#761). The
  * proxy's own refusals are thrown as `SwarmIdError` and pass through; every
  * other class the proxy can meet is named here, and the rest is `internal`
  * with its message kept.
@@ -70,7 +70,7 @@ export function toWireError(error: unknown, fallback: string): WireError {
   } else if (error instanceof TypeError && /fetch/i.test(error.message)) {
     // `fetch` rejects with a TypeError and no response when the request
     // never completed: DNS, a refused connection, or a CORS preflight the
-    // gateway rejected.
+    // gateway rejected (#752).
     wire.code = "network"
   }
   return wire

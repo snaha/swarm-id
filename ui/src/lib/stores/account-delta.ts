@@ -1,7 +1,8 @@
 // Copyright 2026 The Swarm Authors. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 /**
- * The receive half of `account-delta` in the SwarmID tab (docs/Account-Bus.md).
+ * The receive half of `account-delta` in the SwarmID tab (#608,
+ * docs/Account-Bus.md).
  *
  * Without it, a change made on another device reaches an *unpartitioned*
  * session only through a storage event or the popup handshake, so a revoke on

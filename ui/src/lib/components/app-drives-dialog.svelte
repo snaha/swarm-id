@@ -4,7 +4,7 @@
 -->
 
 <!--
-  Confirm an edit that takes drives away from an app, as a default
+  Confirm an edit that takes drives away from an app (#925), as a default
   drive change is confirmed (#958). Nothing moves with the edit: what the app
   saved stays on the drives it loses, and an app that keeps its files on one
   drive cannot follow them. So the user types a phrase rather than picking

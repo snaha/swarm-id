@@ -64,7 +64,7 @@ describe("restoreLocalSessionFields — a peer's Disconnect", () => {
 
   it("keeps the session across a benign update", () => {
     // A per-app drive grant from another context. It rides its own clock
-    // and wins the grant without touching membership — and it is
+    // (#681) and wins the grant without touching membership — and it is
     // nobody's logout.
     const local = localSession()
     const regranted = onWire({

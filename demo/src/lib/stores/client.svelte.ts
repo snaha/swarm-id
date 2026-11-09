@@ -37,7 +37,7 @@ const SUBSIDISED_GATEWAY_STORAGE_KEY = 'swarm-id-demo-subsidised-gateway'
 const SUBSIDISED_GATEWAY_DEFAULT = false
 const DRIVE_REQUEST_STORAGE_KEY = 'swarm-id-demo-drive-request'
 
-/** What the demo asks for at connect; picked in the sidebar, applied on the next connect. */
+/** What the demo asks for at connect (#862); picked in the sidebar, applied on the next connect. */
 export const DRIVE_REQUEST_PRESETS = {
   default: { label: 'Account default (no request)', request: undefined },
   'regular-optional-scratch': {
@@ -60,7 +60,7 @@ export const DRIVE_REQUEST_PRESETS = {
 } satisfies Record<string, { label: string; request: DriveRequest | undefined }>
 export type DriveRequestPreset = keyof typeof DRIVE_REQUEST_PRESETS
 
-/** The sharing switches asked for at connect; the Permissions page sets them. */
+/** The sharing switches asked for at connect (#885); the Permissions page sets them. */
 export interface SharingRequest {
   dataSharing: boolean
   writeAccess: boolean
@@ -137,11 +137,11 @@ let client = $state<SwarmIdClient | undefined>(undefined)
 let authenticated = $state(false)
 let canUpload = $state(false)
 let storagePartitioned = $state(false)
-// Surfaced for the Safari check: an id that CHANGES across loads means
+// Surfaced for the Safari check (#584): an id that CHANGES across loads means
 // the partitioned storage holding it was evicted.
 let deviceId = $state<string | undefined>(undefined)
 let uploadMode = $state<'user-stamp' | 'subsidised' | 'unavailable'>('unavailable')
-// Why uploads are off, when they are. Surfaced for the Safari check:
+// Why uploads are off, when they are. Surfaced for the Safari check (#584):
 // "no drive" and "the write path broke" look identical without it, and the
 // first device run was read as the second when it was the first.
 let uploadUnavailableReason = $state<UploadUnavailableReason | undefined>(undefined)
@@ -151,7 +151,7 @@ let stamp = $state<StampInfo | undefined>(undefined)
 // Every drive the app was granted, and the one its writes name — `undefined`
 // leaves each write to the primary.
 let drives = $state<Drive[]>([])
-// The sharing switches, off the snapshot: the user flips them in Swarm ID.
+// The sharing switches (#885), off the snapshot: the user flips them in Swarm ID.
 let permissions = $state<AppPermissions | undefined>(undefined)
 let targetBatchID = $state<string | undefined>(undefined)
 let partition = $state<number | undefined>(undefined)
@@ -314,7 +314,7 @@ async function onConnectionChange(info: ConnectionInfo) {
   if (isAuthenticated && !info.canUpload) {
     // Say which of the three it is rather than guessing from `storagePartitioned`:
     // a partitioned session with no drive was being reported as a partitioning
-    // problem, which sent the Safari investigation after the wrong thing.
+    // problem, which sent the Safari investigation (#584) after the wrong thing.
     logStore.log(`Upload disabled: ${uploadUnavailableDescription(info)}`, 'warn')
   }
 
@@ -546,7 +546,7 @@ export const clientStore = {
     return permissions
   },
   /**
-   * Ask the user for more: opens the "Permissions for Swarm ID
+   * Ask the user for more (#711, #885): opens the "Permissions for Swarm ID
    * Demo" popup with what is asked, or nothing when every switch asked for is
    * already on and no drive was. Resolves with what the app holds after.
    */

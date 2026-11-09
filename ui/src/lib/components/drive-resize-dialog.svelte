@@ -78,7 +78,8 @@
 
   // The current size is the default (empty-valued) option; only larger sizes are
   // offered — Bee can grow a batch (dilute) but not shrink it. An existing drive
-  // below the usable floor can grow past it, never into another unusable size.
+  // below the usable floor can grow past it, never into another unusable size
+  // (#538, #566).
   const sizeOptions = $derived([
     { value: '', label: formatBytes(driveEffectiveBytes(currentDepth)) },
     ...DRIVE_SIZE_BREAKPOINTS.filter(([depth]) => depth > currentDepth).map(([depth, bytes]) => ({
@@ -212,7 +213,7 @@
       }
       // A pending size increase is not a loss — the payment landed and the
       // lifespan grew, so it gets the benign presentation and its own wording
-      // rather than the generic failure surface.
+      // rather than the generic failure surface (#392).
       errorTone = caught instanceof SizeIncreasePendingError ? 'notice' : 'error'
       errorDetail = failureDetail(caught)
       errorMessage = caught instanceof Error ? caught.message : 'Could not increase the size.'

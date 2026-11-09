@@ -3,7 +3,7 @@
   SPDX-License-Identifier: Apache-2.0
 -->
 <!--
-  "Permissions for <app>" (SwarmID-MVP, section PERMISSIONS): an
+  "Permissions for <app>" (#711, #885; SwarmID-MVP, section PERMISSIONS): an
   app's request, in a popup. Only what it asked for is shown — a drive row
   per drive, empty; the sharing switches not already on, off — and saving
   with nothing chosen grants nothing. The drives chosen are added to what

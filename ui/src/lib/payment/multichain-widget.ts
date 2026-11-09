@@ -8,7 +8,7 @@
  * on-chain batch creation, then posts the result back via postMessage.
  * The URL carries the
  * batch-owner `destination` and, as defaults the popup opens on, the `depth` and
- * per-chunk `amount` the form asked for; chain / token, and the final
+ * per-chunk `amount` the form asked for (#632); chain / token, and the final
  * size and lifespan, are chosen inside the popup, and the `batch` event reports
  * what was actually bought.
  */
@@ -18,10 +18,10 @@ import { strip0x } from '$lib/crypto/hex'
 
 // The deployment carrying the `window.opener` fix (ethersphere/multichain-widget
 // 85eb9c37 — without it the widget posts every event to `window.parent`, which
-// in a popup is the popup itself, so nothing ever reaches us) and the
-// `depth`/`amount` defaults (ethersphere/multichain-widget#10). The other
+// in a popup is the popup itself, so nothing ever reaches us, #342) and the
+// `depth`/`amount` defaults (ethersphere/multichain-widget#10, #632). The other
 // origins stay allowed so a redeploy of either keeps working. The host is
-// named nowhere else: every label derives it from here.
+// named nowhere else: every label derives it from here (#612).
 const WIDGET_BASE_URL = 'https://fund.bzz.limo/'
 /** The popup's host as the UI names it, so copy cannot drift from the URL. */
 export const WIDGET_HOST = new URL(WIDGET_BASE_URL).host
@@ -113,7 +113,7 @@ export interface BuyStampOptions extends PopupCallbacks {
  * only for this batch id; a `batch` event is ignored, so a top-up can never be
  * recorded as a new drive. The widget cannot extend at all, and the shop has
  * no mocked mode, so this shape carries no owner, no depth and no mock: the
- * type rules out an extend popup that could get a clean `onCancel`.
+ * type rules out an extend popup that could get a clean `onCancel` (#860).
  */
 export interface TopUpStampOptions extends PopupCallbacks {
   card: true
@@ -156,8 +156,8 @@ export function buildWidgetUrl(
     intent: 'postage-batch',
     // The widget implements this as a depth shift on the capacity it shows —
     // `n` halves the label n times — so 1 is the closest it gets to our labels,
-    // which are a lane of half the slots (`driveEffectiveBytes`). With 2
-    // the popup said 111 MB for a batch we label ~650 MB.
+    // which are a lane of half the slots (#566, `driveEffectiveBytes`). With 2
+    // the popup said 111 MB for a batch we label ~650 MB (#632).
     'reserved-slots': '1',
   })
 

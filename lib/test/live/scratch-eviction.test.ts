@@ -2,13 +2,13 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * A scratch drive's lane wraps onto its oldest slot. The cluster
+ * A scratch drive's lane wraps onto its oldest slot (#862, #881). The cluster
  * test proves Bee accepts the re-used stamp index and serves the newest
  * chunk; it cannot prove the oldest is gone, because the node that uploaded
  * it keeps its own copy. On a real network the storers can say: every chunk
  * of one bucket shares the bucket's leading bits, so one neighbourhood holds
  * them all, sees the newer stamp arrive on the index the oldest used, and
- * evicts it.
+ * evicts it (#884).
  *
  * So: fill one bucket's lane and one more through `BEE_URL`, then ask
  * `READ_BEE_URL` — a node or gateway that never held these chunks — for the

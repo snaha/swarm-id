@@ -31,7 +31,7 @@ import {
   mockFetch,
 } from "../proxy/feeds/epochs/test-utils"
 
-/** The batch whose lanes these locks are about. */
+/** The batch whose lanes these locks are about (#589). */
 const TEST_BATCH_ID = new BatchId("ab".repeat(32))
 
 const DEVICE_A = "device-alpha-111"

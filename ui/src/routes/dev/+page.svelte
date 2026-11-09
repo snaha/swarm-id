@@ -90,7 +90,7 @@
 
   // Delete a single stored stamp (dev cleanup).
   // `removeStamp` tombstones the stamp (`deletedAt`) and lets the
-  // deletion sync: `mergePostageStamps` keeps the tombstone, so a peer's
+  // deletion sync: `mergePostageStamps` keeps the tombstone (#337), so a peer's
   // fold cannot resurrect it.
   function deleteStoredStamp(accountId: EthAddress, batchID: BatchId) {
     accountsStore.getAccount(accountId)?.removeStamp(batchID)

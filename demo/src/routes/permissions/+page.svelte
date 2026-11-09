@@ -3,7 +3,7 @@
   SPDX-License-Identifier: Apache-2.0
 -->
 <!--
-  Every permissions flow in one place: what the next connect asks
+  Every permissions flow in one place (#862, #885): what the next connect asks
   for, what the app holds now, and a request made while connected.
 -->
 <script lang="ts">

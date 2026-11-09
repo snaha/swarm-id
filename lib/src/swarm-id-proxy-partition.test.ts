@@ -100,7 +100,7 @@ vi.mock("./sync/published-counter", async (importActual) => ({
   }),
 }))
 /**
- * The background verify a restored session runs. Left answering
+ * The background verify a restored session runs (#635). Left answering
  * `undefined` — "nothing published" — so the tests that do not care about it
  * are not steered by it; the one that does sets a folded account.
  */
@@ -422,7 +422,7 @@ describe("SwarmIdProxy partitioned write enablement", () => {
   let messageListener: MessageListener
   let localStorageFake: Storage
   let proxy: SwarmIdProxy
-  /** The raw `storage` listener the proxy adds for network settings. */
+  /** The raw `storage` listener the proxy adds for network settings (#515). */
   let storageListener: (event: StorageEvent) => void
 
   /** (Re)create the proxy under a fresh window mock; keeps `localStorageFake`. */
@@ -676,7 +676,7 @@ describe("SwarmIdProxy partitioned write enablement", () => {
 
   // A dApp-initiated Disconnect is stated on the entry in the language the merge
   // ranks on: a `lastConnectedAt: 0` sentinel would lose every merge, and the
-  // Disconnect would never reach a peer the way the identity UI's does.
+  // Disconnect would never reach a peer the way the identity UI's does (#682).
   it("states a dApp-initiated disconnect on the entry", async () => {
     seedConnectedAccount()
     await dispatch(
@@ -710,7 +710,7 @@ describe("SwarmIdProxy partitioned write enablement", () => {
   // storage event's `refreshStampFromStorage` runs while `initializeStamper`
   // is inside an await. Reading the batch id again afterwards could see it
   // cleared, build the coordinator for `batchId: undefined`, and make every
-  // lease op on it throw.
+  // lease op on it throw (#804).
   it("drops a stamper init whose stamp was cleared while it awaited", async () => {
     seedConnectedAccount()
     const coordinatorsBefore = vi.mocked(BatchWriteCoordinator).mock.results
@@ -806,7 +806,7 @@ describe("SwarmIdProxy partitioned write enablement", () => {
   // The branch the guard above does not take: the stale init's create REJECTS
   // — a batch just removed is the likeliest reason. Its catch must not clear
   // the stamper the superseding refresh installed, or the session reports
-  // stamper-failed with a working drive.
+  // stamper-failed with a working drive (#805).
   it.each([
     { drive: "a replaced drive", batch: "dd".repeat(32) },
     // A storage event during the first init finds no stamper fingerprint yet
@@ -865,7 +865,7 @@ describe("SwarmIdProxy partitioned write enablement", () => {
     },
   )
 
-  // An account's drives share no write state: each has its own stamper,
+  // An account's drives share no write state (#862): each has its own stamper,
   // coordinator and worker pool, and what a coordinator was built with reaches
   // ITS drive, never whichever one the session resolves by the time it calls.
   describe("each drive has its own write path", () => {
@@ -1010,7 +1010,7 @@ describe("SwarmIdProxy partitioned write enablement", () => {
         })),
       }))
 
-    // The dApp is told of every change to its drives, not only to the
+    // The dApp is told of every change to its drives (#933), not only to the
     // primary's write path: a drive gone from the grant, or run out, is
     // learnt from the re-sent connection info and a `getDrives()` re-read,
     // not from the write that fails.
@@ -1084,7 +1084,7 @@ describe("SwarmIdProxy partitioned write enablement", () => {
         expect(announced()).toBe(before + 1)
       })
 
-      // The chain is read before a flip: what the record says is only
+      // The chain is read before a flip (#927): what the record says is only
       // as current as its last measurement.
       const chainSays = (
         ttl: number | undefined,
@@ -1117,7 +1117,7 @@ describe("SwarmIdProxy partitioned write enablement", () => {
         vi.mocked(fetchBlockNumber).mockImplementation(async () => head)
       afterEach(() => headSays(CHAIN_HEAD))
 
-      it("holds a drive back while its batch is younger than Bee's threshold, and lets it through once it is not", async () => {
+      it("holds a drive back while its batch is younger than Bee's threshold, and lets it through once it is not (#924)", async () => {
         vi.useFakeTimers({
           toFake: ["setTimeout", "clearTimeout", "Date"],
           shouldAdvanceTime: true,
@@ -1165,7 +1165,7 @@ describe("SwarmIdProxy partitioned write enablement", () => {
         }
       })
 
-      it("never calls a fresh drive ready before its first head read lands", async () => {
+      it("never calls a fresh drive ready before its first head read lands (#924)", async () => {
         // The read hangs until released: everything announced meanwhile
         // must hold the drive back, or a dApp would see it flap.
         let release: (head: number) => void = () => undefined
@@ -1193,7 +1193,7 @@ describe("SwarmIdProxy partitioned write enablement", () => {
         await vi.waitFor(() => expect(lastInfo().uploadMode).toBe("user-stamp"))
       })
 
-      it("announces a fresh drive joining the grant as warming up, not ready, while its head read is in flight", async () => {
+      it("announces a fresh drive joining the grant as warming up, not ready, while its head read is in flight (#924)", async () => {
         await connectWithTwoDrives([stampOf(BATCH_ID_HEX)])
         await vi.waitFor(() =>
           expect(coordinatorFor(BATCH_ID_HEX)).toBeDefined(),
@@ -1230,7 +1230,7 @@ describe("SwarmIdProxy partitioned write enablement", () => {
         await vi.waitFor(() => expect(drivesAnnounced()).toBe(before + 2))
       })
 
-      it("leaves a record older than the warm-up window alone, whatever the head says", async () => {
+      it("leaves a record older than the warm-up window alone, whatever the head says (#924)", async () => {
         // A head that would call the batch brand new, on a record written
         // eleven minutes ago: the window, not the head, decides.
         await connectWithTwoDrives([
@@ -1247,7 +1247,7 @@ describe("SwarmIdProxy partitioned write enablement", () => {
         expect(lastInfo().uploadMode).toBe("user-stamp")
       })
 
-      it("holds a fresh record with no block back by time, from when it was written", async () => {
+      it("holds a fresh record with no block back by time, from when it was written (#924)", async () => {
         await withFakeTimers(async () => {
           // A purchase whose read-back failed is recorded with block 0.
           await connectWithTwoDrives(
@@ -1273,7 +1273,7 @@ describe("SwarmIdProxy partitioned write enablement", () => {
         })
       })
 
-      it("counts down on the clock when the RPC fails after a good read, and stops asking it every block", async () => {
+      it("counts down on the clock when the RPC fails after a good read, and stops asking it every block (#924)", async () => {
         await withFakeTimers(async () => {
           // Minted at the head: ten blocks to wait.
           await connectWithTwoDrives(
@@ -1302,7 +1302,7 @@ describe("SwarmIdProxy partitioned write enablement", () => {
         })
       })
 
-      it("does not hold a fresh drive back when the chain head cannot be read", async () => {
+      it("does not hold a fresh drive back when the chain head cannot be read (#924)", async () => {
         headSays(undefined)
         await connectWithTwoDrives([
           {
@@ -1319,7 +1319,7 @@ describe("SwarmIdProxy partitioned write enablement", () => {
         expect(lastInfo().uploadMode).toBe("user-stamp")
       })
 
-      it("re-sends it the moment the primary drive expires", async () => {
+      it("re-sends it the moment the primary drive expires (#793)", async () => {
         chainSays(0)
         // One second left, measured now.
         await connectWithTwoDrives([
@@ -1352,7 +1352,7 @@ describe("SwarmIdProxy partitioned write enablement", () => {
         )
       })
 
-      it("keeps the drive when the chain still funds it at the stored expiry", async () => {
+      it("keeps the drive when the chain still funds it at the stored expiry (#927)", async () => {
         // The record says one second; the chain, read on the tick, says an
         // hour: the price fell, or someone topped the batch up.
         vi.useFakeTimers({
@@ -1384,7 +1384,7 @@ describe("SwarmIdProxy partitioned write enablement", () => {
         }
       })
 
-      it("re-measures before the stored expiry and flips early when the chain says so", async () => {
+      it("re-measures before the stored expiry and flips early when the chain says so (#927)", async () => {
         vi.useFakeTimers({
           toFake: ["setTimeout", "clearTimeout", "Date"],
           shouldAdvanceTime: true,
@@ -1418,7 +1418,7 @@ describe("SwarmIdProxy partitioned write enablement", () => {
         }
       })
 
-      it("adopts what getDrives() read from the chain", async () => {
+      it("adopts what getDrives() read from the chain (#927)", async () => {
         await connectWithTwoDrives()
         await vi.waitFor(() =>
           expect(coordinatorFor(BATCH_ID_HEX)).toBeDefined(),
@@ -1446,7 +1446,7 @@ describe("SwarmIdProxy partitioned write enablement", () => {
         )
       })
 
-      it("adopts what getPostageBatch() read from the chain", async () => {
+      it("adopts what getPostageBatch() read from the chain (#927)", async () => {
         await connectWithTwoDrives()
         await vi.waitFor(() =>
           expect(coordinatorFor(BATCH_ID_HEX)).toBeDefined(),
@@ -1463,7 +1463,7 @@ describe("SwarmIdProxy partitioned write enablement", () => {
         )
       })
 
-      it("re-reads a drive the record says has run out at the six-hour cap, and revives it", async () => {
+      it("re-reads a drive the record says has run out at the six-hour cap, and revives it (#927)", async () => {
         await withFakeTimers(async () => {
           // The record says it ran out ten seconds ago; a top-up made
           // elsewhere since is on the chain.
@@ -1489,7 +1489,7 @@ describe("SwarmIdProxy partitioned write enablement", () => {
         })
       })
 
-      it("keeps the other drives' halfway re-read while the dApp polls getPostageBatch()", async () => {
+      it("keeps the other drives' halfway re-read while the dApp polls getPostageBatch() (#927)", async () => {
         await withFakeTimers(async () => {
           // The primary is good for an hour; the second drive's halfway
           // re-read is due in five minutes.
@@ -1532,7 +1532,7 @@ describe("SwarmIdProxy partitioned write enablement", () => {
         })
       })
 
-      it("yields the reading to a record re-measured since, whatever its clock says", async () => {
+      it("yields the reading to a record re-measured since, whatever its clock says (#927)", async () => {
         await connectWithTwoDrives()
         await vi.waitFor(() =>
           expect(coordinatorFor(BATCH_ID_HEX)).toBeDefined(),
@@ -1564,7 +1564,7 @@ describe("SwarmIdProxy partitioned write enablement", () => {
 
       it("re-sends it when a granted drive the app never wrote to expires", async () => {
         chainSays(3600, { [SECOND_BATCH_ID_HEX]: 0 })
-        // The second drive has no write path; its expiry is still a
+        // The second drive has no write path (#862); its expiry is still a
         // change to the app's drives.
         await connectWithTwoDrives([
           stampOf(BATCH_ID_HEX),
@@ -1797,7 +1797,7 @@ describe("SwarmIdProxy partitioned write enablement", () => {
       expect(coordinatorFor(UNGRANTED_BATCH_ID_HEX)).toBeUndefined()
     })
 
-    // The sharing switches. Enforced where the sharing key is used,
+    // #885: the sharing switches. Enforced where the sharing key is used,
     // reported on the snapshot, and the key itself withheld while the app may
     // not read with it.
     describe("the sharing switches", () => {
@@ -2058,7 +2058,7 @@ describe("SwarmIdProxy partitioned write enablement", () => {
       )
     })
 
-    it("builds a scratch drive's stamper as a ring", async () => {
+    it("builds a scratch drive's stamper as a ring (#862)", async () => {
       nextStamper()
       await connectWithTwoDrives([
         stampOf(BATCH_ID_HEX),
@@ -2130,7 +2130,7 @@ describe("SwarmIdProxy partitioned write enablement", () => {
       ])
     })
 
-    // Each drive's lane is its own, and the dApp hears about every move.
+    // #882: each drive's lane is its own, and the dApp hears about every move.
     it("reports each drive's own lane, and announces a lane moving on a drive other than the primary", async () => {
       nextStamper()
       await connectWithTwoDrives()
@@ -2188,7 +2188,7 @@ describe("SwarmIdProxy partitioned write enablement", () => {
       )
     })
 
-    describe("capacity", () => {
+    describe("capacity (#772)", () => {
       const DEPTH = makeSyncedAccount().postageStamps[0].depth
       const SAVE_BYTES = 10 * CHUNK_SIZE
 
@@ -3148,7 +3148,7 @@ describe("SwarmIdProxy partitioned write enablement", () => {
   // Refusing the payload is only half of it: the attempt it belongs to has to
   // end. The proxy's own auth button sets `isConnecting` and shows a spinner
   // until something clears it, and the popup, which has no idea it was refused,
-  // says "Connected!" — the user has no reason to close it.
+  // says "Connected!" — the user has no reason to close it (#587).
   it("ends the connect attempt when the handover cannot be parsed", async () => {
     const challenge = await startPartitionedConnect()
     const internals = proxy as unknown as {
@@ -3169,7 +3169,7 @@ describe("SwarmIdProxy partitioned write enablement", () => {
 
   // Two ways a partitioned session ends up unable to upload, and from the
   // dApp side they were indistinguishable — every one of them just said
-  // "unavailable". That cost a real-Safari run: an account with no drive
+  // "unavailable". That cost a real-Safari run (#584): an account with no drive
   // read as a failed `window.opener` handover, which is a claim about ITP.
   it("reports no-stamp when the handed-over account has no drive", async () => {
     const account = makeSyncedAccount()
@@ -3207,7 +3207,7 @@ describe("SwarmIdProxy partitioned write enablement", () => {
     expect(last.uploadUnavailableReason).toBe("stamper-failed")
   })
 
-  // An expired drive still resolves, and the stamper still builds from
+  // #745: an expired drive still resolves, and the stamper still builds from
   // its stored record, so nothing on that path said it could not stamp. The
   // first refused write then read as partition contention on a real phone.
   it("reports stamp-expired when the only drive's lifetime has run out", async () => {
@@ -3231,7 +3231,7 @@ describe("SwarmIdProxy partitioned write enablement", () => {
     expect(last.uploadUnavailableReason).toBe("stamp-expired")
   })
 
-  // `exists` and `usable` are on the stored record and were read
+  // #765: `exists` and `usable` are on the stored record and were read
   // nowhere, so `canUpload` was true for a batch the node did not have or
   // could not use yet, and the refusal arrived 30 s later as a timeout.
   it.each([
@@ -3294,9 +3294,9 @@ describe("SwarmIdProxy partitioned write enablement", () => {
   // A partitioned session keeps its device id in the iframe's OWN (partitioned)
   // storage, which nothing outside the iframe can read. Surfacing the id is what
   // let a page answer whether that storage survives a reload — on real Safari it
-  // does (measured on iOS 18.7 / Safari 26.6). What is still unmeasured is
+  // does (#584, measured on iOS 18.7 / Safari 26.6). What is still unmeasured is
   // ITP's ~30-day eviction of a dormant account, which would make every session
-  // a new device in the roster.
+  // a new device in the roster (#570).
   it("reports the proxy's device id in the connection info", async () => {
     const challenge = await startPartitionedConnect()
     await sendSetSecret(challenge, {
@@ -3578,7 +3578,7 @@ describe("SwarmIdProxy partitioned write enablement", () => {
 
     // The rank is `parseInt(requestId, 16)`. A nanoid parses to NaN and a
     // leading minus parses negative — both would put every holder at rank 0, so
-    // every idle holder yields for one waiter. The schema drops them instead.
+    // every idle holder yields for one waiter (#576). The schema drops them instead.
     it.each(["not-hex!", "-0000002", "00000000000000"])(
       "ignores a request whose id is %s",
       async (requestId) => {
@@ -3678,7 +3678,7 @@ describe("SwarmIdProxy partitioned write enablement", () => {
         partition: 0,
         fromDeviceId: "peer-device",
       })
-      // A lane is one partition of ONE batch, so a waiter on another
+      // A lane is one partition of ONE batch (#589), so a waiter on another
       // batch contends with nothing this holder has. Answering it would drop a
       // lease that helps neither side — and per-app stamp overrides make two
       // live coordinators on two batches an ordinary account, not a
@@ -3715,7 +3715,7 @@ describe("SwarmIdProxy partitioned write enablement", () => {
     }
   })
 
-  // The handed-over session is persisted, or a plain reload would log the user
+  // The handed-over session is persisted (#635), or a plain reload would log the user
   // out of the dApp, and on Safari partitioned is the ordinary mode. It is kept
   // under the same 30-day deadline the unpartitioned path enforces.
   describe("a session that survives a reload", () => {
@@ -3790,7 +3790,7 @@ describe("SwarmIdProxy partitioned write enablement", () => {
     // Storage is partitioned by (iframe origin, top-level SITE), and a site
     // ignores the subdomain — so two dApps under example.com share one store.
     // The saved session is therefore keyed per dApp origin: under one fixed key the
-    // second dApp to connect would overwrite the first one's.
+    // second dApp to connect would overwrite the first one's (#671).
     it("keeps its session when a same-site dApp connects too", async () => {
       await connectPartitioned()
       expect(storedSession()).toBeTruthy()
@@ -3864,7 +3864,7 @@ describe("SwarmIdProxy partitioned write enablement", () => {
     // Disconnect and Remove both end a session, and both state it on the entry
     // — but only Remove wrote the marker this check looked at. So a Disconnect
     // made while the tab was closed came back still connected and still able to
-    // upload, for the rest of the session's 30 days.
+    // upload, for the rest of the session's 30 days (#667).
     it("ends a restored session the account has since disconnected", async () => {
       const connectedAt = Date.now()
       await connectPartitionedAt(connectedAt)
@@ -3937,7 +3937,7 @@ describe("SwarmIdProxy partitioned write enablement", () => {
 
     // The check fails open when the roster cannot be read, which is routine
     // whenever the gateway cannot serve the account's feeds. A routine read
-    // failure logs one line: the message and what was decided.
+    // failure logs one line: the message and what was decided (#911).
     it("logs one line, not a stack, when it cannot read the roster", async () => {
       await connectPartitionedAt(Date.now())
       vi.mocked(foldAccountFromSwarm).mockRejectedValueOnce(
@@ -3979,7 +3979,7 @@ describe("SwarmIdProxy partitioned write enablement", () => {
       }
     })
 
-    // A reload is not a connection, so `hydratePartitionAccount` must not record one.
+    // A reload is not a connection, so `hydratePartitionAccount` must not record one (#668, #670).
     it("keeps the connect instant it was handed, across a reload", async () => {
       const connectedAt = Date.now() - 60_000
       await connectPartitionedAt(connectedAt)
@@ -4079,7 +4079,7 @@ describe("SwarmIdProxy partitioned write enablement", () => {
       return new BroadcastChannel(accountChannelName)
     }
 
-    // The permissions popup. A partitioned session is handed the new
+    // #711: the permissions popup. A partitioned session is handed the new
     // grant by the popup it opened, as the delta the bus would carry.
     describe("a permissions request", () => {
       /** Past the popup watch's start delay and one poll. */
@@ -4206,7 +4206,7 @@ describe("SwarmIdProxy partitioned write enablement", () => {
       )
     })
 
-    // The plan's own claim: a live "all" grant learns of a drive added
+    // The plan's own claim (#862): a live "all" grant learns of a drive added
     // after the handover from the delta alone — the handover could not carry
     // a drive that did not exist yet.
     it('lists a drive a delta adds to a live "all" grant', async () => {
@@ -4273,7 +4273,7 @@ describe("SwarmIdProxy partitioned write enablement", () => {
       }
     })
 
-    // `verifyRestoredSession` has nothing to read for an
+    // The other end of #670. `verifyRestoredSession` has nothing to read for an
     // account that never published — no drive, no feed — so the live overlap on
     // this bus is the only thing left that can deliver a Disconnect made while
     // the tab was closed. It could not: the restore restamped `lastConnectedAt`,
@@ -4466,7 +4466,7 @@ describe("SwarmIdProxy partitioned write enablement", () => {
       })
     })
 
-    // A renewal (top-up) keeps the batch id and the signer key
+    // #745 review: a renewal (top-up) keeps the batch id and the signer key
     // and only moves `batchTTL` / `updatedAt`, so a refresh guard keyed on the
     // batch alone keeps refusing uploads until a full reload — the very
     // remediation the error message tells the user to try.
@@ -4505,7 +4505,7 @@ describe("SwarmIdProxy partitioned write enablement", () => {
       }
     })
 
-    // Expiry is a function of the clock, not of the last
+    // #745 review: expiry is a function of the clock, not of the last
     // resolution event. A tab left open past the drive's lifetime must refuse
     // the write itself rather than let Bee refuse the lease claim.
     it("refuses an upload once the drive's lifetime runs out in an open session", async () => {
@@ -4545,7 +4545,7 @@ describe("SwarmIdProxy partitioned write enablement", () => {
       }
     })
 
-    // The stored session is written at the handover, so without a
+    // The stored session (#635) is written at the handover, so without a
     // re-save the fold above lives only in memory: the next reload comes back
     // on the tombstoned stamp and its superseded signer key, and uploads with
     // it until some later delta happens to arrive while the page is open.
@@ -4609,7 +4609,7 @@ describe("SwarmIdProxy partitioned write enablement", () => {
           accountDelta({
             lastModified: localAt - 10_000,
             // The second stamp has to be one this app's grant names, or the
-            // narrowing drops it and the fold is unobservable here: the
+            // narrowing (#578) drops it and the fold is unobservable here: the
             // delta grants the app both drives in the same message.
             connectedApps: [
               {
@@ -4800,7 +4800,7 @@ describe("SwarmIdProxy partitioned write enablement", () => {
     // document, and the manager tells the proxy's own instance in the same
     // window. That write is the peer's change, not this device's: publishing
     // it back is the echo that kept two devices publishing at each other every
-    // few seconds. Written through a manager, as the shell does, so the
+    // few seconds (#707). Written through a manager, as the shell does, so the
     // subscribe wiring that carries the flag is what is under test.
     it("does not publish a delta for a write the shell marked noRepublish", async () => {
       const busChannel = await hydratedSession()
@@ -4986,7 +4986,7 @@ describe("SwarmIdProxy partitioned write enablement", () => {
     // A narrowed handover is undone by the first delta if the fold keeps
     // everything it is sent: the publisher is an unpartitioned context, and it
     // publishes the whole collection. The session may hold only what its own
-    // pointers name.
+    // pointers name (#578).
     it("does not accumulate stamps it cannot spend from a delta", async () => {
       const busChannel = await hydratedSession()
       const stamp = makeSyncedAccount().postageStamps[0]
@@ -5502,7 +5502,7 @@ describe("SwarmIdProxy partitioned write enablement", () => {
   // (`activeDeviceIds` prunes past `KNOWN_DEVICE_MAX_AGE_MS`), is refreshed by
   // the roster — same list length, so the merge was discarded and the peer
   // stayed pruned. It then never gets an intent read, which is the dual-acquire
-  // the refresh exists to prevent.
+  // the refresh exists to prevent (#586).
   it("folds a refreshed sign-in for a peer already in the view", async () => {
     const staleSignIn = Date.now() - 2 * KNOWN_DEVICE_MAX_AGE_MS
     const peerId = "peer-device-already-known"
@@ -5600,7 +5600,7 @@ describe("SwarmIdProxy partitioned write enablement", () => {
 
   // A partition is one (top-level site, iframe origin) pair, so this iframe is
   // a device per dApp — and three connected dApps on one Safari announced three
-  // identical "Safari on Mac" rows. The dApp host is what tells them
+  // identical "Safari on Mac" rows (#570). The dApp host is what tells them
   // apart. Asserted on the row ALREADY in the registry, because correcting only
   // newly-created rows would leave the existing ones ambiguous until they
   // expire.
@@ -5697,7 +5697,7 @@ describe("SwarmIdProxy partitioned write enablement", () => {
   })
 
   // Reading a tombstoned self as "not yet announced" would republish us without
-  // the tombstone and resurrect the device on every peer. A removal or an expiry
+  // the tombstone and resurrect the device on every peer (#611). A removal or an expiry
   // is news to obey, not a gap to fill.
   describe("a device tombstoned in the roster", () => {
     const selfId = "self-device-tombstoned"
@@ -5802,7 +5802,7 @@ describe("SwarmIdProxy partitioned write enablement", () => {
     })
   })
 
-  // A publish whose roster append was skipped retries the
+  // #920's proxy half: a publish whose roster append was skipped retries the
   // announce path with backoff. The retry publishes only under a held
   // partition; after the lease idled out it is the next acquire's announce
   // that appends. Both are pinned here, since disabling the branch outright
@@ -5906,7 +5906,7 @@ describe("SwarmIdProxy partitioned write enablement", () => {
     })
   })
 
-  // Only a genuine sign-in lifts a removal, and this is the one seam that can
+  // Only a genuine sign-in lifts a removal (#337, #611), and this is the one seam that can
   // tell a user unlocking their account from a timer firing. A handover is a
   // real sign-in: the user clicked connect and unlocked in the popup.
   it("lifts this device's tombstone on a fresh handover", async () => {
@@ -5965,8 +5965,8 @@ describe("SwarmIdProxy partitioned write enablement", () => {
   // The settings this session runs on came over the handover; the store this
   // event points at is the PARTITION's, which holds none. Re-reading it there
   // loads `undefined` and falls through to the public gateway and the default
-  // RPC — silently moving a user on a local or custom Bee node onto neither.
-  // The event only fires from another context in this same partition,
+  // RPC — silently moving a user on a local or custom Bee node onto neither
+  // (#580). The event only fires from another context in this same partition,
   // never from the first-party tab where settings are actually changed.
   it("keeps hydrated network settings when a storage event says they changed", async () => {
     const challenge = await startPartitionedConnect()
@@ -5991,7 +5991,7 @@ describe("SwarmIdProxy partitioned write enablement", () => {
     expect(internals.gnosisRpcUrl).toBe("https://rpc.example.test/")
   })
 
-  // The same hang, one guard down. A handover carrying OUR
+  // The same hang, one guard down (#678 review). A handover carrying OUR
   // challenge is this attempt's popup answering, so refusing it for the origin
   // it names has to end the attempt too — otherwise the button spins on while
   // the popup says "Connected!", which is the whole point of the fix above.
@@ -6142,7 +6142,7 @@ describe("SwarmIdProxy partitioned write enablement", () => {
     // window an absent intent read. The room says who left — the signaling
     // server sends `peer-left` on socket close, and its reaper sends it for a
     // crash too — which is the only departure signal a dying page can produce,
-    // since a leave published on unload never finishes encrypting.
+    // since a leave published on unload never finishes encrypting (#572).
     it("drops a peer from the rival set when the room says it left", async () => {
       proxy.destroy()
       signalingRoom.deliver.length = 0

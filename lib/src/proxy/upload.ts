@@ -63,7 +63,7 @@ import { normalizeUrl } from "../utils/url"
  */
 export class SocUploadError extends Error {
   readonly status: number
-  /** What the node or gateway answered, for the bridge's `beeMessage` */
+  /** What the node or gateway answered, for the bridge's `beeMessage` (#761) */
   readonly body: string
 
   constructor(status: number, statusText: string, body: string) {
@@ -79,7 +79,7 @@ export class SocUploadError extends Error {
 // ============================================================================
 
 /**
- * The chunks one write has sent so far: one per stamp in stamper mode,
+ * The chunks one write has sent so far (#932): one per stamp in stamper mode,
  * one per chunk the gateway accepted in subsidised mode. The proxy puts a
  * fresh one on the target of each request and reports it with the result.
  */
@@ -132,7 +132,7 @@ export interface UploadDataOptions {
    * (≤ 4096 bytes); larger data throws — pass true instead.
    */
   encryptionKey?: Uint8Array | true
-  /** Pin the uploaded data (stamper mode only; a subsidised gateway never sees it) */
+  /** Pin the uploaded data (stamper mode only; a subsidised gateway never sees it, #752) */
   pin?: boolean
   /** Use deferred upload mode */
   deferred?: boolean
@@ -166,7 +166,7 @@ export interface UploadDataResult {
 export interface UploadSOCOptions {
   /** Encryption key: undefined = plain SOC, Uint8Array = use this key, true = auto-generate */
   encryptionKey?: Uint8Array | true
-  /** Pin the uploaded SOC (stamper mode only; a subsidised gateway never sees it) */
+  /** Pin the uploaded SOC (stamper mode only; a subsidised gateway never sees it, #752) */
   pin?: boolean
   /** Use deferred upload mode */
   deferred?: boolean
@@ -192,7 +192,7 @@ export interface UploadSOCResult {
  * Options for single chunk upload
  */
 export interface UploadChunkOptions {
-  /** Pin the uploaded chunk (stamper mode only; a subsidised gateway never sees it) */
+  /** Pin the uploaded chunk (stamper mode only; a subsidised gateway never sees it, #752) */
   pin?: boolean
   /** Use deferred upload mode */
   deferred?: boolean
@@ -304,7 +304,7 @@ async function uploadStampedChunkViaHttp(
 /**
  * The headers `bee.chunk.upload` would send: the `Bee` instance's own, then
  * the call's `requestOptions` on top — for the one hand-rolled `fetch` sent
- * to a `Bee` instance rather than through a bee-js call. bee-js keeps the
+ * to a `Bee` instance rather than through a bee-js call (#819). bee-js keeps the
  * instance options private, so this reads the field it stores them in.
  */
 function beeHeaders(

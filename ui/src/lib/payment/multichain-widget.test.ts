@@ -33,14 +33,14 @@ function makeEvent(overrides: Record<string, unknown> = {}): Record<string, unkn
 }
 
 describe('buildWidgetUrl', () => {
-  it('hands the form’s depth and amount to the popup as its defaults', () => {
+  it('hands the form’s depth and amount to the popup as its defaults (#632)', () => {
     const url = new URL(buildWidgetUrl(DESTINATION, { depth: 21, amount: 10453363201n }))
     expect(url.origin).toBe(WIDGET_ORIGIN)
     expect(url.searchParams.get('mode')).toBe('batch')
     expect(url.searchParams.get('destination')).toBe(DESTINATION)
     expect(url.searchParams.get('depth')).toBe('21')
     expect(url.searchParams.get('amount')).toBe('10453363201')
-    // One halving, like our lane labels.
+    // One halving, like our lane labels (#566).
     expect(url.searchParams.get('reserved-slots')).toBe('1')
     expect(url.searchParams.has('mocked')).toBe(false)
   })

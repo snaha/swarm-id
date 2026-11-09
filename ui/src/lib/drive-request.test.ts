@@ -73,7 +73,7 @@ describe('pickerRows', () => {
   })
 })
 
-// A drive created in another tab arrives while the popup waits.
+// #879: a drive created in another tab arrives while the popup waits.
 describe('fillRequiredRows', () => {
   it('fills a waiting required row with a drive that arrived, and nothing else', () => {
     const rows = pickerRows(

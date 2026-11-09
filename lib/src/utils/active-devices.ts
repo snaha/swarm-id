@@ -26,7 +26,7 @@
  *   - `PartitionLease.occupancyBeaconBeatsUs` (in `refresh`) resolves a symmetric
  *     fresh-claim dual-acquire with such a peer.
  * `lastSignedInAt` advances only on an actual SIGN-IN (a creation or a
- * reactivation), never on a poll — so a long-running device IS pruned
+ * reactivation), never on a poll (#652) — so a long-running device IS pruned
  * from THIS half after the window; the bus half is what keeps it a rival, and
  * the occupancy channel is what keeps that safe. Pruning only removes the
  * per-acquire absent-read cost of dead ghosts.
@@ -36,7 +36,7 @@ import type { Device } from "../schemas"
 
 /**
  * How recently a device must have signed in to count as a contention rival
- * without a bus beat. The stamp is frozen at sign-in, so this bounds the
+ * without a bus beat. The stamp is frozen at sign-in (#652), so this bounds the
  * age of the SESSION, not any publish cadence: long enough that a device which
  * just signed in is a rival through its first acquires, far below a prior
  * session, so stale ghosts are dropped. A live device past the window stays a

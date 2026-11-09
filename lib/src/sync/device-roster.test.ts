@@ -367,7 +367,7 @@ describe("readRoster / ensureInRoster — inconclusive is not empty", () => {
       target: { mode: "stamper" } as never,
     })
     expect(downloadChunk).not.toHaveBeenCalled()
-    // The skip must be reportable: the caller retries later instead of
+    // The skip must be reportable (#920): the caller retries later instead of
     // calling the publish a success and leaving the roster empty.
     expect(confirmed).toBe(false)
   })
@@ -380,15 +380,15 @@ describe("readRoster / ensureInRoster — inconclusive is not empty", () => {
 })
 
 /**
- * On a small cluster, Bee's `/chunks` answers an ABSENT chunk with a
+ * #457 — on a small cluster, Bee's `/chunks` answers an ABSENT chunk with a
  * persistent 500 ("read chunk failed"), never 404, so the `/chunks`-based SOC
  * read alone can never confirm an empty slot. `readRosterEntry` must then ask
  * `GET /soc/{owner}/{id}` (raw fetch — bee-js has no GET wrapper), whose
  * authoritative JSON 404 confirms absence. Only that validated 404 may stop the
  * scan; a route-missing 404 (the public gateway's plain-text "Not Found"), any
- * other status, or a network failure stays inconclusive.
+ * other status, or a network failure stays inconclusive (#438 fencing).
  */
-describe("readRoster — /soc absence probe on an inconclusive /chunks read", () => {
+describe("readRoster — /soc absence probe on an inconclusive /chunks read (#457)", () => {
   const BEE_URL = "http://bee.test"
 
   // Factories (a Response body is single-use; the retry round re-fetches).
@@ -481,7 +481,7 @@ describe("readRoster — /soc absence probe on an inconclusive /chunks read", ()
 
   it("confirms an empty roster via /soc 404s: returns [] instead of throwing", async () => {
     // A fresh account where every /chunks probe 500s. The /soc probe's JSON 404
-    // confirms every slot empty → [], so bootstrap can proceed.
+    // confirms every slot empty → [], so bootstrap can proceed (#457).
     const { bee } = fakeSmallClusterBee({})
     await expect(
       readRoster({ bee: bee as never, accountId: ACCOUNT_ID, owner: OWNER }),
@@ -590,7 +590,7 @@ describe("readRoster — /soc absence probe on an inconclusive /chunks read", ()
   })
 })
 
-describe("readRoster — known-length memo", () => {
+describe("readRoster — known-length memo (#400)", () => {
   const scan = (present: Set<number>, probed?: number[]) =>
     readRoster({
       bee: fakeBee(present, probed) as never,

@@ -4,7 +4,7 @@
 -->
 
 <!--
-  The real-Safari smoke test, built to be run by hand on a physical
+  The real-Safari smoke test (#584), built to be run by hand on a physical
   iPhone against the DigitalOcean deployment — the only cross-site rig there is
   (GitHub Pages serves both apps from one origin, so nothing partitions there).
 

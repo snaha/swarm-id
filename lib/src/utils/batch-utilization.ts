@@ -152,7 +152,7 @@ export interface ChunkLayout {
 
 /**
  * The depth whose layout a drive's counters serialize at. A scratch drive's
- * counter wraps within its lane, so the lane no longer bounds it and
+ * counter wraps within its lane (#862), so the lane no longer bounds it and
  * uint16 would overflow: it always takes the uint32 layout. Every reader and
  * writer of the counters goes through this, so all devices agree — the kind
  * is fixed when the drive is created.
@@ -756,7 +756,7 @@ export function calculateMaxSlotsPerBucket(batchDepth: number): number {
  * `dataCounter` is the per-partition `j`, so it must be compared against the
  * partition's lane capacity — not the raw slots-per-bucket. Comparing against
  * the latter let `j` run past the lane and only surfaced as a mid-stamp bee-js
- * throw with counters already incremented.
+ * throw with counters already incremented (#416).
  */
 export function hasBucketCapacity(
   dataCounter: number,
@@ -801,9 +801,9 @@ export function partitionCapacity(
 /**
  * Fewest data chunks a partition's bucket lane must hold for a batch to be
  * worth buying. At 1 the first chunk written to a bucket already fills that
- * lane, so the batch reports 100% used while effectively empty; at 3
+ * lane, so the batch reports 100% used while effectively empty (#538); at 3
  * some bucket fills after ~1 MB of uniformly placed chunks, a drive too small
- * to be worth its purchase. 7 (depth 20) holds ~66 MB.
+ * to be worth its purchase (#566). 7 (depth 20) holds ~66 MB.
  */
 export const MIN_USABLE_PARTITION_CAPACITY = 4
 
@@ -1291,7 +1291,7 @@ export class UtilizationAwareStamper implements Stamper, SlotAssigner {
   private leaseValidUntil: number | undefined = undefined
 
   /**
-   * This device's clock, injectable for tests. The local-lapse fence
+   * This device's clock, injectable for tests (#385). The local-lapse fence
    * compares it against `leaseValidUntil`, so a test MUST drive the stamper with
    * the SAME clock it gives the `PartitionLease` (whose `leasedUntil` feeds
    * `leaseValidUntil`) — otherwise the two disagree and the fence mis-fires.
@@ -1312,7 +1312,7 @@ export class UtilizationAwareStamper implements Stamper, SlotAssigner {
   readonly depth: number
   readonly maxSlot: number
   /**
-   * A scratch drive: a full lane wraps onto its oldest slot instead of
+   * A scratch drive (#862): a full lane wraps onto its oldest slot instead of
    * refusing. The counter keeps counting; only the slot is reduced.
    */
   readonly scratch: boolean

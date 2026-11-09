@@ -177,7 +177,7 @@ describe('runPurchase', () => {
     expect(account.stamps[0].depth).toBe(21)
   })
 
-  // A scratch row on the connect screen opens this dialog preset to
+  // #862: a scratch row on the connect screen opens this dialog preset to
   // scratch. The built-in purchase records the stamp itself, so the kind has
   // to reach it — on the chain read-back and on the projection alike.
   it.each([

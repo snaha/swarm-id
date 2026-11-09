@@ -72,7 +72,7 @@ interface DeviceHarness {
    * at acquire BEFORE this session's first upload bumps it. A takeover of a
    * partition a peer already published on MUST be > 0; a zero resume means the
    * rotating state-pointer was missed and the new holder would re-issue used
-   * slots.
+   * slots (the #382 regression).
    */
   state: { acquiredAt: number; resumedCounterSum: number }
 }
@@ -266,7 +266,7 @@ describe.skipIf(!liveEnv.configured)(
         cTakeover.partition,
         "C did not dual-grab A's still-held partition",
       ).not.toBe(A.coordinator.currentPartition)
-      // Resume-correctness guard: C must resume B's published counter via
+      // Resume-correctness guard (#382): C must resume B's published counter via
       // the gone holder's leasedUntil bucket, NOT a zero seed — a zero resume
       // re-issues the slots B already used and evicts B's data chunks.
       expect(
@@ -320,7 +320,7 @@ describe.skipIf(!liveEnv.configured)(
         bReclaim.partition,
         "B did not dual-grab A's still-held partition",
       ).not.toBe(A.coordinator.currentPartition)
-      // Resume-correctness guard: B's cold reclaim must resume C's
+      // Resume-correctness guard (#382): B's cold reclaim must resume C's
       // published counter (non-zero) via C's leasedUntil bucket, not a zero seed.
       expect(
         B.state.resumedCounterSum,

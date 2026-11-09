@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * A scratch drive's lane is a ring: once full, the next stamp in a
+ * A scratch drive's lane is a ring (#862): once full, the next stamp in a
  * bucket lands on that lane's oldest slot instead of being refused. This is
  * the part only a real Bee can answer — that it accepts a stamp re-using an
  * index the batch already spent, carrying a newer timestamp — and that the
@@ -10,7 +10,7 @@
  *
  * Whether the overwritten chunk is actually evicted cannot be seen here: the
  * uploading node keeps its own copy. `test/live/scratch-eviction.test.ts`
- * reads it back from a node that never held it.
+ * reads it back from a node that never held it (#884).
  */
 import { describe, it, expect, inject } from "vitest"
 import {

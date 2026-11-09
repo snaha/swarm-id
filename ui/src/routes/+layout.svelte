@@ -31,7 +31,7 @@
   /** The one route that must render framed: the dApp's hidden iframe. */
   const PROXY_ROUTE = '/proxy'
   // Every other page grants something on a click — a connection, a drive, a
-  // switch — and nothing sets `frame-ancestors`, so a
+  // switch (#883, #885, #896) — and nothing sets `frame-ancestors`, so a
   // same-site page could frame one and clickjack it. Refused here, once, so
   // the next grant surface need not remember to; and decided before the page
   // mounts, so a framed page never parses its request or redirects.
@@ -48,7 +48,7 @@
   onMount(() => {
     themeStore.init()
     // Leave the marker a proxy iframe reads back to learn whether it shares
-    // this store — it decides which transport the auth popup can take,
+    // this store (#613) — it decides which transport the auth popup can take,
     // and it has to be known before the click. A no-op when framed, which is
     // what keeps the /proxy route (same shell, inside the iframe) from writing
     // it into a partitioned bucket and answering its own question wrong.
@@ -56,7 +56,7 @@
     // Publish account mutations app-wide (debounced): to Swarm for durability,
     // and to the account bus for the live contexts a storage event cannot
     // reach — a partitioned dApp iframe learns about a revoke no other way
-    // (docs/Account-Bus.md).
+    // (docs/Account-Bus.md, #389).
     setAccountsSyncHook((accountIdHex) => {
       triggerSync(accountIdHex)
       const record = signedInRecord(accountIdHex)
@@ -98,9 +98,9 @@
   const currentSignedIn = $derived(signedInRecord(sessionStore.currentAccountId) !== undefined)
 
   // Re-read the current account's drives from the chain while the site is
-  // open, so the expiry warnings follow the chain rather than the last
+  // open (#903), so the expiry warnings follow the chain rather than the last
   // measurement. Only top-level: the same shell renders the dApp's /proxy
-  // iframe, which keeps its own readings, and a framed page renders
+  // iframe, which keeps its own readings (#957), and a framed page renders
   // nothing. Not in a connect or permissions popup, where a read and a publish
   // would land mid-grant. One tab per account reads, so N tabs publish a
   // change once.

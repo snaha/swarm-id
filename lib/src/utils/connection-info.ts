@@ -29,7 +29,7 @@ export function connectionInfoEqual(
     a.identity?.name === b.identity?.name &&
     a.identity?.address === b.identity?.address &&
     a.identity?.publicKey === b.identity?.publicKey &&
-    // Both move when the user flips a sharing switch.
+    // Both move when the user flips a sharing switch (#885).
     a.identity?.sharingPublicKey === b.identity?.sharingPublicKey &&
     a.permissions?.dataSharing === b.permissions?.dataSharing &&
     a.permissions?.writeAccess === b.permissions?.writeAccess &&
@@ -41,7 +41,7 @@ export function connectionInfoEqual(
     a.appKey?.publicKey === b.appKey?.publicKey &&
     // A device id that changed is exactly the signal worth reporting: for a
     // partitioned session it means the storage holding it was evicted, and the
-    // session rejoined the roster as a new device.
+    // session rejoined the roster as a new device (#584, #570).
     a.deviceId === b.deviceId &&
     a.partition === b.partition
   )

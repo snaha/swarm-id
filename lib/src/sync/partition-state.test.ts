@@ -277,7 +277,7 @@ describe("writePartitionState — two-phase publish (pointer after chunks)", () 
     // Fail the first counter-chunk PUT. The pointer must NOT land: a durable
     // pointer referencing chunks Bee never stored bricks every future takeover
     // (readFailed → read-only until batch expiry), since there is no
-    // older-pointer fallback.
+    // older-pointer fallback. See #414.
     vi.mocked(uploadChunk).mockRejectedValueOnce(new Error("chunk PUT failed"))
     vi.mocked(uploadSOC).mockClear()
 

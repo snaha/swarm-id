@@ -115,7 +115,7 @@
       // in-code lease model (no parallel holder variable).
       const partitionCount = account.partitionCount ?? 1
       // The account default is the batch these lanes are about: lock, intent
-      // and occupancy addresses are per (batch, partition), so
+      // and occupancy addresses are per (batch, partition) since #589, so
       // "who holds partition p" needs one named. An account with no drive has
       // no partition writes to show.
       const batchId = account.defaultPostageStampBatchID
@@ -306,7 +306,7 @@
               <Laptop class="size-4 shrink-0" />
               {#if row.name}
                 <!-- min-w-0 so the name can shrink: a partition device is named
-                     after its dApp host, which can be long. -->
+                     after its dApp host (#570), which can be long. -->
                 <div class="flex min-w-0 flex-col items-start">
                   <p class="w-full truncate text-sm" title={row.name}>{row.name}</p>
                   <p class="text-muted-foreground font-mono text-xs">{truncate(row.deviceId)}</p>

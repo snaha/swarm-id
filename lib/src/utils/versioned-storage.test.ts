@@ -74,7 +74,7 @@ describe("VersionedStorageManager — same-window change notification", () => {
   it("tells the other instance when a write is not for republishing", () => {
     // The proxy in the iframe subscribes beside the shell's accounts store.
     // A write the shell made by folding a peer's delta is not this window's
-    // change to publish back at the peer, so the notification says so.
+    // change to publish back at the peer (#707), so the notification says so.
     const storage = new MemoryStorageAdapter()
     const writer = makeManager(storage)
     const reader = makeManager(storage)

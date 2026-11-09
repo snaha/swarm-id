@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * A folder is one manifest with a fork per file. The Swarm-specific
+ * A folder is one manifest with a fork per file (#750). The Swarm-specific
  * part — leaf references, fork metadata, the index document, the encryption
  * defaults — lives here so a dApp only has to produce `{ path, data }` pairs.
  */

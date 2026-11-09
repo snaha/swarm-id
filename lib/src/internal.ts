@@ -11,7 +11,7 @@
  * A name is on this list because `ui/` (its tests included) imports it, or
  * because the docs' "Storage layout" page names it for a host that writes the
  * identity UI's `localStorage` itself (#815) — and for no other reason:
- * nothing is re-exported for a caller that does not exist.
+ * nothing is re-exported for a caller that does not exist (#801).
  */
 
 export { AccountBus } from "./bus/account-bus"

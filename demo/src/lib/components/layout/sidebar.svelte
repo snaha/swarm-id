@@ -28,7 +28,7 @@
     { href: '/feeds', label: 'Feeds' },
     { href: '/account', label: 'Account' },
     { href: '/permissions', label: 'Permissions' },
-    // The manual iOS/ITP smoke test — reachable on the deployed site,
+    // The manual iOS/ITP smoke test (#584) — reachable on the deployed site,
     // which is the only cross-site rig that partitions at all.
     { href: '/safari-check', label: 'Safari check' },
   ]

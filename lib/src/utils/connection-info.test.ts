@@ -91,7 +91,7 @@ describe("connectionInfoEqual", () => {
   })
 
   // A data sharing flip moves `sharingPublicKey` too; a write access flip
-  // moves nothing else, so this comparison alone reports it.
+  // moves nothing else, so this comparison alone reports it (#885).
   it("returns false when a sharing switch flips", () => {
     const on = {
       ...BASE,

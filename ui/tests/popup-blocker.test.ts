@@ -1,13 +1,13 @@
 // Copyright 2026 The Swarm Authors. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 /**
- * `client.connect()` under a real popup blocker.
+ * `client.connect()` under a real popup blocker (#751).
  *
  * On a partitioned session the client asks the PROXY to open the popup, so
  * `window.opener` points at the iframe and the session can be handed over. The
  * click that triggers it lands on the dApp page, not in the iframe, so the
  * question is whether the browser's popup blocker lets the iframe open a window
- * on the strength of that click. Measured by hand, Chrome, Brave, Firefox and
+ * on the strength of that click. Measured by hand (#630), Chrome, Brave, Firefox and
  * iOS Safari all let the delegated popup through. This keeps that measured.
  *
  * Every other project runs with `--disable-popup-blocking`, and Playwright's

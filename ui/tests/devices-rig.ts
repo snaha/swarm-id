@@ -6,7 +6,7 @@
  * the way a person does, with the lease state read off the demo's own sidebar
  * and every upload a round trip. Shared by `three-devices.test.ts` (three
  * devices on one drive's two partitions) and `two-drives.test.ts` (two devices
- * on two drives); both run under `playwright.devices.config.ts`.
+ * on two drives, #882); both run under `playwright.devices.config.ts`.
  */
 import { type Browser, type BrowserContext, type Page, expect, test } from '@playwright/test'
 
@@ -50,14 +50,14 @@ export const CONNECT_TIMEOUT_MS = 60_000
 /** One SOC upload, its publish, and the read-back — seconds on the cluster. */
 export const UPLOAD_TIMEOUT_MS = 60_000
 /** A drive bought moments ago is held back for the ten blocks Bee waits before
- *  stamping with it: 50 s at anvil's 5 s block time, the proxy's
+ *  stamping with it (#924): 50 s at anvil's 5 s block time, the proxy's
  *  per-block re-check, and margin. The demo's upload button follows `canUpload`. */
 export const WARM_UP_TIMEOUT_MS = 90_000
 /** A bus-accelerated handover is ~one round trip; this is the poll fallback plus margin. */
 export const HANDOVER_TIMEOUT_MS = LEASE_REFRESH_MS * 3
 /** How long a slot nobody released stays taken: its lock lapses at the TTL, its
  *  occupancy beacon a grace later, and a refresh tick acts on it. Nothing a
- *  waiter does shortens it — a closed tab announces nothing. */
+ *  waiter does shortens it — a closed tab announces nothing (#676). */
 export const TTL_LAPSE_MS = LEASE_TTL_MS + INTENT_LIVENESS_GRACE_MS + LEASE_REFRESH_MS
 /** Past the idle window with the refresh tick that acts on it. */
 export const IDLE_WAIT_MS = IDLE_YIELD_MS + LEASE_REFRESH_MS * 2
@@ -68,7 +68,7 @@ export const UNANSWERED_WAIT = /No partition available|Partition lease timed out
  *  both marked at their source as what this suite keys on. */
 export const PUBLISHED_LINE = 'Published device state'
 export const YIELDED_LINE = 'Released idle partition'
-/** Device-state publishes inside one idle window that say a holder was never idle. */
+/** Device-state publishes inside one idle window that say a holder was never idle (#707). */
 export const BUSY_PUBLISHES = 3
 
 export const PARTITION_LINE = /^Partition: /
@@ -276,7 +276,7 @@ export class Device {
     )
     // Enabled once the session will stamp with the primary: a freshly bought
     // drive is held back until the network has had its blocks to see the
-    // batch. A named drive has its own "Setting up" line meanwhile.
+    // batch (#924). A named drive has its own "Setting up" line meanwhile.
     const uploadButton = page.getByRole('button', { name: 'Upload Data' })
     await expect(uploadButton).toBeEnabled({ timeout: WARM_UP_TIMEOUT_MS })
     if (batchHex) {
@@ -312,7 +312,7 @@ export class Device {
    * The lane this tab's session holds on each drive it was granted, keyed by
    * the drive's batch id prefix as the sidebar prints it; `undefined` for a
    * lane it does not hold. Empty while the app holds a single drive — the
-   * sidebar lists lanes only beside its "Write to" select.
+   * sidebar lists lanes only beside its "Write to" select (#882).
    */
   async lanes(page: Page = this.page): Promise<Map<string, number | undefined>> {
     const lines = await page.getByText(LANE_LINE).allInnerTexts()
@@ -339,7 +339,7 @@ export class Device {
 
   /**
    * `uploadAndHold` for a device that has to be handed a slot by a holder.
-   * While the two holders keep publishing device state to each other
+   * While the two holders keep publishing device state to each other (#707)
    * neither is ever idle, no `lease-request` is answered, and the slot wait
    * times out with "No partition available". That is the bug, not this
    * scenario's subject, so the scenario is skipped with the pointer rather
@@ -375,7 +375,7 @@ export class Device {
     // And it stays disconnected: a session that comes back by itself a few
     // seconds later — a peer's delta folding its secret back in, and its own
     // not-yet-released lock re-acquired — is a product failure this scenario
-    // exists to see, not a flake.
+    // exists to see (#712), not a flake.
     await sleep(DISCONNECT_SETTLE_MS)
     await expect(
       page.getByText(PARTITION_LINE),
@@ -453,7 +453,7 @@ export async function demoReachable(): Promise<boolean> {
 
 /**
  * The bus is what a handover rides on. Without the signaling server every
- * slot request goes unanswered, which reads exactly like busy holders
+ * slot request goes unanswered, which reads exactly like #707's busy holders
  * — so its absence must fail the gate, not masquerade as that skip.
  */
 export async function busReachable(): Promise<boolean> {

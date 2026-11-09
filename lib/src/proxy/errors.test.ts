@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * What crosses the bridge for each kind of failure: a stable `code`,
+ * What crosses the bridge for each kind of failure (#761): a stable `code`,
  * and where Bee or the gateway answered, its status and message. The message
  * text is untouched, so `error.message` reads as before.
  */

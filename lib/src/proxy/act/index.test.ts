@@ -533,7 +533,7 @@ describe("revokeGranteesFromAct", () => {
       [grantee2.publicKey],
     )
 
-    // Reference is unchanged — revocation must not re-encrypt it
+    // Reference is unchanged — revocation must not re-encrypt it (#496)
     expect(result.encryptedReference).toBe(createResult.encryptedReference)
     expect(result.actReference).toBeDefined()
 
@@ -569,7 +569,7 @@ describe("revokeGranteesFromAct", () => {
     expect(grantee1Entry).toBeDefined()
   })
 
-  it("does not re-encrypt the content reference under a rotated key", async () => {
+  it("does not re-encrypt the content reference under a rotated key (#496)", async () => {
     // A nonce-free CTR cipher must never produce a second ciphertext of the same
     // content reference under a different key. A revoked grantee keeps the access
     // key it learned while granted and can read both ciphertexts from immutable
@@ -825,7 +825,7 @@ describe("identity-level keys: a reader or publisher holding several keys", () =
   // The proxy holds two keys per session — the origin-bound app key and the
   // account-wide sharing key — and does not know which one a share was made out
   // to. Every reader/publisher entry point therefore accepts candidates and
-  // picks the one the ACT names.
+  // picks the one the ACT names (#519).
   function setup(seed: number) {
     const publisher = createTestKeyPair(seed)
     const appKey = createTestKeyPair(seed + 1)
@@ -905,7 +905,7 @@ describe("identity-level keys: a reader or publisher holding several keys", () =
     ).resolves.toEqual([newGrantee.compressedPublicKey])
   })
 
-  // The user may switch the sharing key off for an app. It is still
+  // #885: the user may switch the sharing key off for an app. It is still
   // tried, so a share made out to it fails with the denial — a permission
   // problem — rather than with "not a grantee", which the app key alone would
   // say. A share made out to the app key is untouched.

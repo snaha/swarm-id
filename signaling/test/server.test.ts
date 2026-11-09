@@ -132,7 +132,7 @@ interface TestClient {
   close(): void
 }
 
-/** Connect and name the topic in the first frame — the only way in. */
+/** Connect and name the topic in the first frame — the only way in (#577). */
 function connect(topic: string, port: number = server.port): Promise<TestClient> {
   const socket = new WebSocket(`ws://127.0.0.1:${port}/`)
   socket.addEventListener('open', () => {
@@ -346,7 +346,7 @@ describe('signaling server', () => {
   // ingress and proxy access log there is — DigitalOcean's included. Anything
   // reading those logs learns which rooms exist and can join them. So it moves
   // into the first frame, with the socket held in a pre-join state until it
-  // arrives.
+  // arrives (#577).
   describe('joining by frame instead of query string', () => {
     it('welcomes a peer that names its topic in the first frame', async () => {
       const topic = randomTopic()
@@ -371,7 +371,7 @@ describe('signaling server', () => {
     })
 
     // A socket that never joins holds a connection slot for nothing, which is
-    // a cheaper flood than any the other caps bound.
+    // a cheaper flood than any the caps in #575 bound.
     //
     // Its own close code, NOT 1008: 1008 means "this topic is refused", which
     // a client treats as permanent for the room. A socket that simply never
@@ -470,7 +470,7 @@ describe('signaling server', () => {
 })
 
 // ============================================================================
-// Liveness
+// Liveness (#573)
 // ============================================================================
 
 /** Close code and reason of the first close event, for cap assertions. */
@@ -581,7 +581,7 @@ describe('signaling server — heartbeat', () => {
 })
 
 // ============================================================================
-// Overload bounds
+// Overload bounds (#575)
 // ============================================================================
 
 describe('signaling server — limits', () => {
@@ -655,7 +655,7 @@ describe('signaling server — limits', () => {
   it('closes a socket that exceeds its message budget with a retryable code', async () => {
     // Four, for three relays: joining spends a message of the budget, the way
     // it does for every client since the topic arrives in the first frame
-    // and not the URL.
+    // and not the URL (#662).
     const capped = await createSignalingServer({
       port: 0,
       messageRateLimit: 4,

@@ -49,7 +49,7 @@ describe("deriveSecretSync", () => {
   })
 })
 
-describe("deriveSharingKey", () => {
+describe("deriveSharingKey (#519)", () => {
   it("is a pure function of the derivation key", () => {
     const a = deriveSharingKey(PARENT_KEY)
     const b = deriveSharingKey(PARENT_KEY)

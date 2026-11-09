@@ -6,7 +6,7 @@
  * Ceremony handlers (passkey/wallet/password prompts and the async work that
  * follows) must not apply side effects once the user cancelled, retried, or
  * left the page. A hand-rolled `myAttempt !== attempt` counter relies
- * on remembering a re-check after every await.
+ * on remembering a re-check after every await (#423).
  * This helper makes the check structural: route every await through
  * `attempt.guard(...)` and stale continuations throw instead of proceeding.
  *

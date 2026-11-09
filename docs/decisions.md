@@ -3,8 +3,7 @@
 Architecture and product decisions, newest first. One entry per decision: the
 context in a line or two, the decision, and why. Append only; a reversed
 decision gets a new entry that names the old one. Code comments describe the
-present; the reasons live here, and the issue or PR behind them is named here
-or in the commit message.
+present and may point at an issue or PR; the reasons live here.
 
 A PR that makes or changes a decision adds the entry in the same PR.
 

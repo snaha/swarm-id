@@ -104,7 +104,7 @@ test('an interrupted resize resumes from chain truth without paying twice', asyn
     }
     localStorage.setItem('swarm-id-accounts', JSON.stringify(doc))
   })
-  // The site re-reads its drives on load and would put the record right
+  // The site re-reads its drives on load (#903) and would put the record right
   // before the dialog opens; hold its lock so the dialog's reconcile is what
   // this tests.
   await holdDriveLifetimeLock(page)

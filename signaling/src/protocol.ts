@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * The signaling wire protocol, shared by both ends: the server parses
+ * The signaling wire protocol, shared by both ends (#700): the server parses
  * `ClientMessageSchema` and composes `ServerMessage`, the client transport in
  * `lib/src/bus/signaling-transport.ts` does the reverse. Zod only — no `ws`,
  * no `node:*` — so the browser bundle can inline it.
@@ -39,7 +39,7 @@ export const WS_CLOSE_TRY_AGAIN_LATER = 1013
  * A socket that never named a room (`preJoinTimeoutMs`). Its own code rather
  * than 1008, because 1008 already means "this server predates the join frame"
  * to a client, which answers it by putting the topic back in the URL for the
- * life of the page. Application range (4000+),
+ * life of the page — the exact thing #577 removes. Application range (4000+),
  * numbered after HTTP 408 so it reads as what it is; a client that does not
  * know it backs off and retries, which is the right answer for a socket that
  * failed to speak in time.

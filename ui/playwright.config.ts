@@ -38,7 +38,7 @@ const SERIAL_SPEC = '**/drive-onchain-serial.test.ts'
  */
 const PARTITIONED_SPEC = '**/bus-propagation.test.ts'
 /**
- * The delegated connect() popup under a REAL popup blocker. Needs
+ * The delegated connect() popup under a REAL popup blocker (#751). Needs
  * Google Chrome: Playwright's bundled Chromium never blocks a popup, with or
  * without `--disable-popup-blocking`, so on it this spec would pass vacuously —
  * which its first test refuses to do.

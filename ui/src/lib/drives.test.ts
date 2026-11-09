@@ -362,7 +362,7 @@ describe('soonestDriveExpiry / accountDriveAttention', () => {
     })
   })
 
-  it('labels and describes each reason, naming the drive rather than "storage"', () => {
+  it('labels and describes each reason, naming the drive rather than "storage" (#768)', () => {
     const expiring = { reason: 'expiring', expiry: Date.UTC(2026, 9, 2) } as const
     // The label is fixed-width — the row slot reserves for it — so the date
     // only ever shows in the description behind it.
@@ -395,7 +395,7 @@ describe('soonestDriveExpiry / accountDriveAttention', () => {
 })
 
 describe('driveEffectiveBytes', () => {
-  it('is what a single writer fits into a batch one depth smaller — one partition lane', () => {
+  it('is what a single writer fits into a batch one depth smaller — one partition lane (#566)', () => {
     expect(driveEffectiveBytes(21)).toBe(
       Utils.getStampEffectiveBytes(20, true, RedundancyLevel.OFF),
     )
@@ -415,7 +415,7 @@ describe('driveEffectiveBytes', () => {
 })
 
 describe('DRIVE_SIZE_BREAKPOINTS', () => {
-  it('starts at the smallest usable depth, dropping 17, 18 and 19', () => {
+  it('starts at the smallest usable depth, dropping 17, 18 (#538) and 19 (#566)', () => {
     const depths = DRIVE_SIZE_BREAKPOINTS.map(([depth]) => depth)
     expect(depths).not.toContain(17)
     expect(depths).not.toContain(18)
@@ -431,7 +431,7 @@ describe('DRIVE_SIZE_BREAKPOINTS', () => {
   })
 })
 
-describe('describeDrive on a scratch drive', () => {
+describe('describeDrive on a scratch drive (#862)', () => {
   it('is never storage full, and so never needs attention for it', () => {
     const full = makeDrive({ utilization: 1 })
     expect(describeDrive(full).storageFull).toBe(true)

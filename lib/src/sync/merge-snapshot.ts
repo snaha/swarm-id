@@ -78,7 +78,7 @@ export function mergeDevicesList(local: Device[], remote: Device[]): Device[] {
   //   tombstone keeps propagating).
   // - The name overlays on its own `nameUpdatedAt` clock. A rename moves
   //   neither of the membership fields, so without this it ties with every stale
-  //   copy of itself and loses. Riding its own clock also means it cannot drag a
+  //   copy of itself and loses (#643, #663). Riding its own clock also means it cannot drag a
   //   stale record's sign-in state along or resurrect a tombstone.
   const recency = (d: Device) =>
     Math.max(d.removedAt ?? 0, d.lastSignedInAt ?? 0)
@@ -116,11 +116,11 @@ export function mergeConnectedApps(
   //   older connect, and a genuine reconnect — `connectApp` clears both markers
   //   and sets a fresh `lastConnectedAt` — beats an older removal. A single clock
   //   bumped by every write would let a drive picked on a stale copy outrank a
-  //   revoke and restore the credential it cleared.
+  //   revoke and restore the credential it cleared (#681).
   // - The grant overlays field by field, each on its own clock
   //   (`GRANT_CLOCKS`). It moves no membership field, so without a clock of
   //   its own it ties with every stale copy of the entry and loses, like a
-  //   device's name. Per field, so a drive picked
+  //   device's name (#663). Per field, so a drive picked
   //   on a stale copy does not carry that copy's switches over a pin made
   //   elsewhere.
   //
@@ -146,7 +146,7 @@ export function mergeConnectedApps(
 /**
  * The account settings, last writer wins on `at` for the object and, on top,
  * per switch on its own clock (`SETTINGS_CLOCKS`): a session-length change
- * made on a stale copy must not take a data sharing "off" with it. A
+ * made on a stale copy must not take a data sharing "off" with it (#885). A
  * tie favours `local`.
  */
 export function mergeAccountSettings(

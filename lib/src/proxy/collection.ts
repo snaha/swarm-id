@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Folder upload and listing: one manifest with a fork per file, the
+ * Folder upload and listing (#750): one manifest with a fork per file, the
  * shape a gateway serves at `/bzz/<reference>/<path>`. Proxy-side, so the
  * caller never touches a Mantaray node.
  */

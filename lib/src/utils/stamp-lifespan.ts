@@ -8,7 +8,7 @@
  * last written — `updatedAt` (a node operation re-measured it), else
  * `createdAt` (purchase / attach measured it too). Aging it here is what lets
  * the proxy refuse a drive the identity UI already shows as expired, without
- * a network round trip.
+ * a network round trip (#745).
  */
 
 const MS_PER_SECOND = 1000
@@ -21,7 +21,7 @@ export interface StampLifetimeFields {
   /** What the node last said: absent on a record that predates the fields */
   usable?: boolean
   exists?: boolean
-  /** The block the batch was minted in, for the warm-up rule; `0` unknown */
+  /** The block the batch was minted in, for the warm-up rule (#924); `0` unknown */
   blockNumber?: number
 }
 
@@ -37,7 +37,7 @@ export type StampRefusal =
 
 /**
  * The readiness rule. Expiry first, because it is the older and the more
- * specific answer; then what the record says about the batch: one the
+ * specific answer; then what the record says about the batch (#765): one the
  * node does not have (`exists: false`) or cannot use (`usable: false`) has its
  * first stamped write refused, which a dApp gating on `canUpload` alone met
  * 30 s later as a timeout. The fields are what the writer last stored — the
@@ -72,7 +72,7 @@ export function remainingLifespanSeconds(
 }
 
 /**
- * How often a drive's lifetime is re-read from the chain: halfway to
+ * How often a drive's lifetime is re-read from the chain (#927): halfway to
  * its stored expiry — no sooner than a minute, no later than six hours — and
  * at the expiry itself when that comes first.
  * The oracle moves the price by at most ±0.08 % a round (≈12.7 min), about

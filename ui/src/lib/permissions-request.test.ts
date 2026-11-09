@@ -66,7 +66,7 @@ describe('parsePermissionsHash', () => {
 })
 
 describe('a request', () => {
-  // The page grants on request to a live session only: a
+  // The page grants on request to a live session only (#883 review): a
   // disconnected entry stays in the record, and so does an expired one.
   it('grants only to an app with a live connection', () => {
     const NOW = 1_000
@@ -138,7 +138,7 @@ describe('an edit', () => {
     expect(grantAfterEdit('all', [], false, A)).toBeUndefined()
   })
 
-  // What a change of drives costs the app, so it is confirmed first.
+  // What a change of drives costs the app, so it is confirmed first (#925).
   describe('the drives it takes away', () => {
     it('names a drive set to None, or swapped for another', () => {
       expect(
@@ -207,7 +207,7 @@ describe('an edit', () => {
   })
 })
 
-// The two sharing switches beside the drives.
+// #885: the two sharing switches beside the drives.
 describe('the sharing switches', () => {
   const off = { dataSharing: false, writeAccess: false }
   const readOnly = { dataSharing: true, writeAccess: false }

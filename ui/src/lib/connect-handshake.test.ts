@@ -3,9 +3,10 @@
 /**
  * What the connect popup hands a PARTITIONED proxy iframe.
  *
- * That session is a first-class writer, so the handover carries real
+ * Since #547 that session is a first-class writer, so the handover carries real
  * credentials — in a context embedded by an arbitrary dApp page. It can only
- * ever spend the stamp resolved for it, so that is all it should be given.
+ * ever spend the stamp resolved for it, so that is all it should be given
+ * (#578).
  */
 import { BatchId, EthAddress, PrivateKey } from '@ethersphere/bee-js'
 import { AuthDataSchema, type ConnectedApp, type SyncedAccount } from '@snaha/swarm-id/internal'
@@ -68,7 +69,7 @@ const batchIds = (payload: Record<string, unknown>): string[] =>
 
 describe('partitionHandoverAccount', () => {
   // A list grant names exactly what the app may spend: not even the account
-  // default rides along when the grant does not name it.
+  // default rides along when the grant does not name it (#862).
   it('hands over only the drives the app was granted', () => {
     const payload = partitionHandoverAccount(makeAccount(new BatchId(APP_BATCH)), APP_ORIGIN)
 
@@ -118,7 +119,7 @@ describe('partitionHandoverAccount', () => {
   })
 })
 
-// The connection's deadline: the app's own session length over the
+// The connection's deadline: the app's own session length (#885) over the
 // account's; and the grant made on the connect screen, each field on its
 // own clock.
 describe('commitConnect', () => {

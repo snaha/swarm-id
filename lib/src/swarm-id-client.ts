@@ -182,7 +182,7 @@ function initDeadline(
  * ```
  */
 /**
- * The chunks of a client call made of two writes, or `undefined` when
+ * The chunks of a client call made of two writes (#932), or `undefined` when
  * either is unknown: a total missing a part would read as the whole cost.
  */
 function sumChunkCounts(
@@ -216,8 +216,8 @@ export class SwarmIdClient {
   private ready: boolean = false
   /**
    * Whether the proxy iframe can read the trusted domain's first-party store,
-   * as reported on `proxyReady`. Decides which transport `connect()` uses;
-   * undefined against a proxy that predates the field, which reads as
+   * as reported on `proxyReady`. Decides which transport `connect()` uses
+   * (#613); undefined against a proxy that predates the field, which reads as
    * "not proven shared".
    */
   private storageShared: boolean | undefined
@@ -281,7 +281,7 @@ export class SwarmIdClient {
   constructor(options: ClientOptions) {
     // Before anything touches `window`: a server render reached
     // `setupMessageListener` and threw a bare `ReferenceError` from what, in
-    // the published build, is minified code. Name the package and the
+    // the published build, is minified code (#778). Name the package and the
     // fix instead.
     if (typeof window === "undefined") {
       throw new Error(
@@ -558,8 +558,8 @@ export class SwarmIdClient {
     switch (message.type) {
       case "proxyReady":
         this.ready = true
-        // Which transport `connect()` can use, known before the first click.
-        // Undefined against a proxy older than that field.
+        // Which transport `connect()` can use, known before the first click
+        // (#613). Undefined against a proxy older than that field.
         this.storageShared = message.storageShared
         if (this.readyResolve) {
           this.readyResolve()
@@ -691,7 +691,7 @@ export class SwarmIdClient {
   >(message: TRequest): Promise<TResponse> {
     // A per-call `requestOptions.timeout` bounds this whole round trip, not
     // only the Bee request the proxy makes with it: a caller raising it for a
-    // large upload must not be cut off at the constructor default.
+    // large upload must not be cut off at the constructor default (#775).
     const timeout = this.roundTripTimeout(
       (message as { requestOptions?: RequestOptions }).requestOptions?.timeout,
     )
@@ -979,7 +979,7 @@ export class SwarmIdClient {
   }
 
   /**
-   * The drives this app was granted: each with the fields of
+   * The drives this app was granted (#862): each with the fields of
    * {@link getPostageBatch}, its `kind`, and whether it is the primary — the
    * one a write goes to when it names none. Name any of them on a write with
    * `batchID`; one outside the grant rejects with `drive-not-granted`.
@@ -1007,7 +1007,7 @@ export class SwarmIdClient {
   }
 
   /**
-   * How much a drive holds and has left for this device: the primary,
+   * How much a drive holds and has left for this device (#772): the primary,
    * or the one `batchID` names. The figures are those of the partition this
    * device writes to; `partitions` breaks the drive down. Reads Swarm for the
    * partitions this session does not hold, so call it when showing storage,
@@ -1037,7 +1037,7 @@ export class SwarmIdClient {
   }
 
   /**
-   * The chance, from 0 to 1, that a save of `bytes` fits in a drive:
+   * The chance, from 0 to 1, that a save of `bytes` fits in a drive (#772):
    * the primary, or the one `batchID` names. A save goes into the partition
    * this device writes to, the same one {@link getDriveCapacity} reports, and
    * fails if any of its chunks lands in a full bucket there. The chunk tree
@@ -1115,7 +1115,7 @@ export class SwarmIdClient {
    * to the client when they return.
    *
    * **Which window opens it** is decided by the iframe's STORAGE, not by the
-   * user agent:
+   * user agent (#613):
    * - Shared storage: opened here, from the parent, so the click's activation is
    *   still unspent. The popup writes the connection to the first-party store
    *   the iframe reads, and a `storage` event carries it across.
@@ -1123,7 +1123,7 @@ export class SwarmIdClient {
    *   `window.opener` points back at the iframe and the session can be handed
    *   over directly — the only channel into a partitioned frame. The session
    *   is then kept in that partition's own store until it is disconnected or
-   *   its 30 days are up, so a reload does not re-run this; a handover
+   *   its 30 days are up (#635), so a reload does not re-run this; a handover
    *   that arrives without the account view is refused outright rather than
    *   producing a session that cannot upload and cannot hear a revoke. A popup
    *   blocked on this path falls back to opening from the parent.
@@ -1197,7 +1197,7 @@ export class SwarmIdClient {
   }
 
   /**
-   * Ask the user for more drives. Opens the "Permissions for <app>"
+   * Ask the user for more drives (#711). Opens the "Permissions for <app>"
    * popup showing only what is asked; the user picks drives, may create one,
    * or grants nothing. Resolves once the popup is closed with the drives the
    * app now holds — the same as before when the user granted nothing or
@@ -1219,7 +1219,7 @@ export class SwarmIdClient {
   }
 
   /**
-   * What this app may do with the account-wide sharing key: read what
+   * What this app may do with the account-wide sharing key (#885): read what
    * was shared with it (`dataSharing`), and publish or manage shares as the
    * identity (`writeAccess`). Both are on unless the user switched them off,
    * for every app or for this one. A call that needs one that is off rejects
@@ -1247,7 +1247,7 @@ export class SwarmIdClient {
   }
 
   /**
-   * Ask the user for more: drives, and the two sharing switches.
+   * Ask the user for more (#711, #885): drives, and the two sharing switches.
    * Opens the "Permissions for <app>" popup showing only what is asked —
    * each drive row empty, each switch off — and resolves once it is closed
    * with what the app holds, granted or not; a closed popup grants nothing.
@@ -1656,7 +1656,7 @@ export class SwarmIdClient {
    * deterministic — the same identity, app origin, and label always yield the
    * same bytes across sessions and devices — yet unguessable to anyone without
    * the identity. Use it to seed feed topics or other app material without
-   * exposing the recoverable app public key.
+   * exposing the recoverable app public key (#520).
    *
    * @param label - Application-chosen domain separator (e.g. `"state-feed"`)
    * @returns A promise resolving to the 32-byte derived secret
@@ -1863,7 +1863,7 @@ export class SwarmIdClient {
   }
 
   /**
-   * Uploads a folder as one manifest: a fork per file with its path and
+   * Uploads a folder as one manifest (#750): a fork per file with its path and
    * content type, which a gateway serves at `/bzz/<reference>/<path>` when the
    * folder is plain (`encrypt: false`). Takes what bee-js takes — the
    * `FileList` of a `webkitdirectory` input or a dropped directory, a `File[]`,
@@ -2018,7 +2018,7 @@ export class SwarmIdClient {
    * `data` is the chunk's payload, not a finished chunk: the proxy builds the
    * content-addressed chunk around it (span header, BMT address) and returns
    * that address. A chunk that already carries its span header is wrapped a
-   * second time and stored under an address nothing else computes. To
+   * second time and stored under an address nothing else computes (#774). To
    * store a folder as a manifest, use {@link uploadFiles}; to save a Mantaray
    * tree of your own, use `saveMantarayTreeRecursively` with {@link uploadData}.
    *
@@ -3494,7 +3494,7 @@ export class SwarmIdClient {
    * @param data - The binary data to upload as a Uint8Array
    * @param grantees - Array of grantee public keys as compressed hex strings (33 bytes = 66 hex chars).
    *   A grantee is either another user's `appKey.publicKey` (that user in this app origin only) or
-   *   their `identity.sharingPublicKey` (that user in every app they connect)
+   *   their `identity.sharingPublicKey` (that user in every app they connect, #519)
    * @param options - Optional upload configuration
    * @param options.publisher - `"app"` (default) publishes with this origin's app key; `"identity"`
    *   publishes with the account-wide sharing key, so any of the user's apps can manage the grantees later
@@ -3648,7 +3648,7 @@ export class SwarmIdClient {
    *
    * @param historyReference - The current history reference
    * @param grantees - Array of new grantee public keys as compressed hex strings
-   * @param options - Optional `batchID`: the drive the new history and grantee list go to
+   * @param options - Optional `batchID`: the drive the new history and grantee list go to (#862)
    * @param requestOptions - Optional request configuration (timeout, headers, endlesslyRetry). `timeout` replaces the client default for this call's whole round trip, not only the Bee request
    * @returns A promise resolving to the new references
    * @returns return.historyReference - The new history reference after adding grantees
@@ -3675,7 +3675,7 @@ export class SwarmIdClient {
     historyReference: string
     granteeListReference: string
     actReference: string
-    /** Chunks this write sent */
+    /** Chunks this write sent (#932) */
     stampedChunks?: number
   }> {
     this.ensureReady()
@@ -3716,12 +3716,12 @@ export class SwarmIdClient {
    * immutable history, so they can still decrypt content published before
    * revocation. Revocation only stops access to content published afterwards.
    * The returned `encryptedReference` is unchanged — it is NOT re-encrypted, as
-   * that would leak the keystream to former grantees.
+   * that would leak the keystream to former grantees (#496).
    *
    * @param historyReference - The current history reference
    * @param encryptedReference - The current encrypted reference
    * @param revokeGrantees - Array of grantee public keys to revoke as compressed hex strings
-   * @param options - Optional `batchID`: the drive the rotated history goes to
+   * @param options - Optional `batchID`: the drive the rotated history goes to (#862)
    * @param requestOptions - Optional request configuration (timeout, headers, endlesslyRetry). `timeout` replaces the client default for this call's whole round trip, not only the Bee request
    * @returns A promise resolving to the new references after revocation
    * @returns return.encryptedReference - The content reference, unchanged
@@ -3751,7 +3751,7 @@ export class SwarmIdClient {
     historyReference: string
     granteeListReference: string
     actReference: string
-    /** Chunks this write sent */
+    /** Chunks this write sent (#932) */
     stampedChunks?: number
   }> {
     this.ensureReady()

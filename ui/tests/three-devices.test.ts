@@ -183,7 +183,7 @@ test.describe('three devices on two partitions', () => {
       const busy = device.publishesSince(idleFrom)
       if ((await device.partition()) !== undefined && busy >= BUSY_PUBLISHES) {
         // Not idle at all: it spent the window publishing device state to a
-        // peer, and every publish is lease activity.
+        // peer (#707), and every publish is lease activity.
         skipScenario(`${device.label} published ${busy}× during the idle window (#707)`)
       }
       await expect.poll(() => device.partition(), { timeout: LEASE_REFRESH_MS * 2 }).toBeUndefined()
@@ -235,7 +235,7 @@ test.describe('three devices on two partitions', () => {
     for (const device of all()) await device.ensureConnected()
     // Fill both slots: B takes a free one, then C's request makes an idle
     // holder yield. The holder that yields may be B rather than A — then B
-    // holds nothing to release, and the scenario has no subject.
+    // holds nothing to release, and the scenario has no subject (#798).
     // One more
     // upload puts B back: C, just served, is inside the peer-yield window,
     // so the idle holder that yields is A.
@@ -282,7 +282,7 @@ test.describe('three devices on two partitions', () => {
     await C.close()
 
     // Nothing A or B does brings C's slot back sooner, so wait the lapse out
-    // first. Uploading through it instead spent the budget on trading
+    // first. Uploading through it instead (#798) spent the budget on trading
     // the one free slot: an idle release on one side and a cold re-claim on
     // the other took longer than what was left once C's lock had lapsed — and
     // when A and B share a home partition the re-claim contends for the same

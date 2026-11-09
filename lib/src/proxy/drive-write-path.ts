@@ -12,14 +12,14 @@ const MAX_WORKER_COUNT = 8
 /**
  * One drive's write path in a proxy session: a granted stamp, and the
  * stamper, coordinator and worker pool built from it. The proxy holds one per
- * drive it writes to, keyed by batch; they never reference each other.
+ * drive it writes to, keyed by batch; they never reference each other (#862).
  *
  * Everything here belongs to that one batch, so it is created when the stamp
  * resolves and dropped as a unit when it changes or leaves the grant: the stamper, the account it
  * was built for and the coordinator that writes through it arrive together
  * (`attach`), and the proxy never sets one of them alone. That is also how a
  * stale `initializeStamper` knows it has been superseded: the proxy holds a
- * different instance.
+ * different instance (#862).
  */
 export class DriveWritePath {
   private _stamper: UtilizationAwareStamper | undefined
@@ -34,7 +34,7 @@ export class DriveWritePath {
     readonly batchId: string,
     readonly signerKey: string,
     /**
-     * The stamp's stored lifetime fields. Expiry is derived from them
+     * The stamp's stored lifetime fields (#745). Expiry is derived from them
      * on every read, so a tab left open past the drive's lifetime refuses its
      * own writes rather than letting Bee refuse the lease claim.
      */

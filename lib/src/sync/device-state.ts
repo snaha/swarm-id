@@ -333,7 +333,7 @@ export function foldAccount(
     postageStamps = mergePostageStamps(postageStamps, v.postageStamps)
     accountName = pickLatest(accountName, v.accountName)
     defaultBatch = pickLatest(defaultBatch, v.defaultPostageStampBatchID)
-    // The switches inside ride their own clocks.
+    // The switches inside ride their own clocks (#885).
     settings = mergeAccountSettings(settings, v.settings)
   }
 

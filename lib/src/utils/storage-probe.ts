@@ -4,7 +4,7 @@
 /**
  * Whether the proxy iframe can read the trusted domain's first-party store —
  * asked BEFORE authentication, because it decides which transport the auth
- * popup has to take.
+ * popup has to take (#613).
  *
  * The mirror image of the probe the connect popup already runs: there, the
  * iframe writes a challenge and the popup checks whether it can read it back

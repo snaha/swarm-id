@@ -4,6 +4,7 @@
 /** User-selectable appearance preference. "auto" follows the OS setting. */
 export type ThemePreference = 'auto' | 'light' | 'dark'
 
+// Why this key: "The theme key is `swarm-id-theme`" in docs/decisions.md.
 const STORAGE_KEY = 'swarm-id-theme'
 const DARK_QUERY = '(prefers-color-scheme: dark)'
 

@@ -54,8 +54,8 @@ const MAX_ROSTER_SCAN = 256
 // a single round-trip instead of K+1 serial ones.
 const ROSTER_SCAN_WINDOW = 16
 
-// How many indices to probe past a KNOWN roster length to detect new appends.
-// Absent-slot probes are the expensive kind (Bee has no fast
+// How many indices to probe past a KNOWN roster length to detect new appends
+// (#400). Absent-slot probes are the expensive kind (Bee has no fast
 // authoritative 404), so once a scan has proven the roster reaches N we only
 // need a short lookahead — a transient 404 here can at worst delay discovering
 // a BRAND-NEW device until the next fold (minutes), never drop a known one.
@@ -64,7 +64,7 @@ const ROSTER_TAIL_PROBES = 2
 
 /**
  * Known roster length per `accountId:owner` — a monotonic LOWER bound learned
- * from previous scans/appends. The roster is append-only, so a once-seen
+ * from previous scans/appends (#400). The roster is append-only, so a once-seen
  * length can never overshoot; it must also never shrink (a stale endpoint's
  * truncated read must not poison later scans). Mirrored to localStorage when
  * available so a page reload's first fold is warm too; in Node (tests, CLI) the
@@ -159,7 +159,7 @@ const HTTP_NOT_FOUND = 404
  * Ask Bee's `GET /soc/{owner}/{id}` (raw request — bee-js has no GET wrapper)
  * whether a roster slot is present. Used only after the `/chunks`-based read
  * failed ambiguously: a small cluster answers an ABSENT chunk on `/chunks` with
- * a persistent 500, never 404, so `/soc` is the only endpoint whose 404
+ * a persistent 500, never 404 (#457), so `/soc` is the only endpoint whose 404
  * is authoritative there. Returns the SOC payload when present, `undefined` for
  * a validated absent slot, or {@link ROSTER_READ_INCONCLUSIVE}.
  *
@@ -215,7 +215,7 @@ async function readRosterEntry(opts: {
   } catch (error) {
     // A clean 404 from the `/chunks` read is a genuinely-absent slot
     // (end-of-feed). Anything else is ambiguous THERE — on a small cluster an
-    // absent chunk 500s persistently — so ask `GET /soc`, whose 404 is
+    // absent chunk 500s persistently (#457) — so ask `GET /soc`, whose 404 is
     // authoritative, before surfacing the read as inconclusive.
     if (isNotFoundError(error)) return undefined
     const probe = await probeSocSlot({
@@ -273,7 +273,7 @@ export async function readRoster(opts: {
   // rather than truncating every device after it. Only a window with no present
   // entry means we may have scanned past the end of the feed.
   //
-  // Window sizing: the memoised known range [0..known) is read as ONE
+  // Window sizing (#400): the memoised known range [0..known) is read as ONE
   // parallel window (all expected hits — cheap), and past it only
   // ROSTER_TAIL_PROBES slots are probed to detect new appends. With no memo the
   // full ROSTER_SCAN_WINDOW stop margin applies, so a cold scan (restore,
@@ -379,7 +379,7 @@ async function appendToRoster(opts: {
   )
 }
 
-// Retry schedule for a publish whose roster append was skipped: the
+// Retry schedule for a publish whose roster append was skipped (#920): the
 // public gateway 500s on absent slots while busy and recovers within minutes.
 const ROSTER_RETRY_BASE_MS = 30_000
 const ROSTER_RETRY_MAX_MS = 600_000
@@ -395,7 +395,7 @@ export function rosterRetryDelayMs(attempt: number): number {
  * removal, or a resurrection) — keeping the roster a rare, append-only write.
  *
  * Returns `false` when membership could not be confirmed: the roster read was
- * inconclusive, so nothing was appended and the caller must retry later.
+ * inconclusive, so nothing was appended and the caller must retry later (#920).
  */
 export async function ensureInRoster(opts: {
   bee: Bee

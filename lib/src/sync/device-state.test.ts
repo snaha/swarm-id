@@ -95,7 +95,7 @@ describe("device-state serialization", () => {
       postageStamps: [makeStamp("cc".repeat(32), { deletedAt: 7 })],
       accountName: { value: "my account", at: 9 },
       defaultPostageStampBatchID: { value: "cc".repeat(32), at: 9 },
-      // The sharing switches and their clocks ride the feed too.
+      // The sharing switches and their clocks (#885) ride the feed too.
       settings: { value: { dataSharing: false, dataSharingAt: 3 }, at: 3 },
     })
     const bytes = new TextEncoder().encode(
@@ -207,8 +207,8 @@ describe("foldAccount — differential equivalence with mergeSnapshotWithRemote"
   })
 })
 
-// A partitioned session publishes its own device feed from the view the
-// connect popup handed it — narrowed to the stamps this app can reach,
+// #579: a partitioned session publishes its own device feed from the view the
+// connect popup handed it — narrowed to the stamps this app can reach (#578),
 // and only as current as the last delta it folded. What that cannot do is the
 // question, and it is the fold that answers it: every device's view is unioned
 // per id, so a publisher states what it holds and never what it lacks.
@@ -238,7 +238,7 @@ describe("foldAccount — a stale, narrowed publisher", () => {
     const app = "https://dapp.example"
     // Held since connect: both entries active, on their connect-time clocks.
     // `makeApp` connects at 1_000_000, and membership ranks on
-    // `max(revokedAt, disconnectedAt, lastConnectedAt)` — so the peer's
+    // `max(revokedAt, disconnectedAt, lastConnectedAt)` (#682) — so the peer's
     // end has to be later than the CONNECT, not merely later than some edit
     // clock, or the two tie and the accumulator keeps the live copy.
     const frozen = makeView({
@@ -287,7 +287,7 @@ describe("foldAccount — per-field scalar LWW", () => {
     expect(folded.settingsAt).toBe(1)
   })
 
-  // The switches inside `settings` ride their own clocks: a stale
+  // The switches inside `settings` ride their own clocks (#885): a stale
   // copy's newer session-length edit does not undo a data sharing "off".
   it("folds the sharing switches per field, not with the settings object", () => {
     const viewA = makeView({

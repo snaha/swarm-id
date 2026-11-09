@@ -63,7 +63,7 @@ describe("sameStampLifetime", () => {
   })
 })
 
-// The stored record also says whether the node has the batch and whether
+// #765: the stored record also says whether the node has the batch and whether
 // it is usable. A dApp gating on `canUpload` alone saw `true`, uploaded, and
 // met the refusal as a 30 s timeout.
 describe("stampRefusal", () => {

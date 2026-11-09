@@ -24,7 +24,7 @@ export type SyncResult =
   | {
       // This device's state was written, but its roster membership could not
       // be confirmed (the scan was inconclusive) so the append was skipped.
-      // A second device cannot find the account until a retry lands.
+      // A second device cannot find the account until a retry lands (#920).
       status: "partial"
       reference: string
       timestamp: bigint

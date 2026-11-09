@@ -31,8 +31,8 @@ import { networkSettingsStore } from '$lib/stores/network-settings.svelte'
 import type { Account } from '$lib/types'
 
 /**
- * What the user granted on the connect screen: the drives, and the
- * sharing switches turned on there, pinned for this app. A field
+ * What the user granted on the connect screen: the drives (#862), and the
+ * sharing switches turned on there, pinned for this app (#885). A field
  * left out is left as it was on the entry: nothing for a first connect, the
  * earlier choice for a reconnect.
  */
@@ -67,11 +67,11 @@ function saveConnection(
 /**
  * The account view handed to a partitioned proxy iframe: the synced projection
  * (no vault, no app secrets) with the stamp collection narrowed to the ones
- * THIS app's drive grant names.
+ * THIS app's drive grant names (#578, #862).
  *
  * The iframe is on the SwarmID origin and an unpartitioned proxy reads the same
  * material out of shared storage, so this is least privilege rather than a
- * boundary being fixed. But a partitioned session holds real credentials in a
+ * boundary being fixed. But a partitioned session holds real credentials (#547) in a
  * context embedded by an
  * arbitrary dApp page: anything that gains script execution there gets what it
  * was handed. It can only ever spend the drives it was granted, so the rest
@@ -87,7 +87,7 @@ function saveConnection(
  * key that opens the room stays, and an `account-delta` carries the whole
  * collection (the publisher is unpartitioned and does not know its receivers'
  * apps), so script execution in that iframe can wait for one message. Bounding
- * that as well needs per-app deltas in a per-app room.
+ * that as well needs per-app deltas in a per-app room — out of scope for #578.
  */
 export function partitionHandoverAccount(
   account: SyncedAccount,

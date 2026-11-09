@@ -88,7 +88,7 @@ export { DEFAULT_FIT_CONFIDENCE } from "./utils/drive-capacity"
 export { hexToUint8Array, uint8ArrayToHex } from "./utils/hex"
 
 // Every rejection a client call produces: `code` to branch on, `message` as
-// before, and Bee's status and message where there was a response
+// before, and Bee's status and message where there was a response (#761)
 export { SwarmIdError } from "./errors"
 export type { SwarmIdErrorDetails } from "./errors"
 export type { SwarmIdErrorCode } from "./types"

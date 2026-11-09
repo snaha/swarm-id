@@ -82,7 +82,7 @@
     /**
      * The kind the new drive must be created as, and the picker is locked to
      * it: a connect-screen row asking for one kind takes whatever this dialog
-     * adds, so a drive of the other kind would fill the row unseen.
+     * adds, so a drive of the other kind would fill the row unseen (#862).
      * Absent, the picker is free and starts on regular.
      */
     kind?: DriveKind
@@ -124,7 +124,7 @@
   /**
    * The route the purchase takes, chosen BEFORE anything reads the chain.
    *
-   * The funding seam is raised only when the owner address is short, so an
+   * The funding seam is raised only when the owner address is short (#619), so an
    * account holding funds from an earlier attempt would never be asked, and a
    * purchase that cannot reach the chain at all would fail first. Asking here
    * precedes both.
@@ -292,7 +292,7 @@
     // The method first, and before any chain read: `runPurchase` opens with the
     // contract's constraints and the owner's balance, and each of those can end
     // the purchase — one by throwing, the other by covering the cost — with the
-    // question still unasked.
+    // question still unasked (#619).
     phase = 'method'
   }
 
@@ -394,7 +394,7 @@
         mocked: devSettingsStore.data.mockStampEnabled,
         mockPopup: devSettingsStore.data.mockStampPopup,
         mockError: devSettingsStore.data.mockStampResult === 'error',
-        // The form's choice, as the popup's defaults. `amountPerChunk`
+        // The form's choice, as the popup's defaults (#632). `amountPerChunk`
         // is unset when the chain price never loaded; the popup then opens on
         // its own lifespan, as it does everywhere for size when the depth is
         // not one it offers (18–25) or the lifespan not one it takes (1–365

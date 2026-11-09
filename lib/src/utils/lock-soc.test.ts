@@ -3,7 +3,7 @@
 
 /**
  * The lock SOC's address derivation. What it must encode is the scope of the
- * thing it locks: one partition of ONE postage batch.
+ * thing it locks: one partition of ONE postage batch (#589).
  */
 
 import { describe, expect, it } from "vitest"
@@ -29,7 +29,7 @@ describe("partition lock identity", () => {
   // within. The lock was per (partition) alone, so lane p of batch X and lane p
   // of batch Y resolved to ONE chunk address: two writers that share no slot
   // took turns anyway, and with per-app stamp overrides an account has two live
-  // coordinators on two batches today.
+  // coordinators on two batches today (#589).
   it("gives one partition of two batches two different locks", () => {
     expect(makePartitionLockIdentifier(BATCH_X, 0).toHex()).not.toBe(
       makePartitionLockIdentifier(BATCH_Y, 0).toHex(),

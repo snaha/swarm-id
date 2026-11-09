@@ -135,10 +135,10 @@ describe("mergeSnapshotWithRemote — devices union", () => {
     expect(entry?.removedAt).toBe(5_000_000)
   })
 
-  // A partition device's label is corrected — three identical "Safari on Mac"
+  // #643 corrects a partition device's label — three identical "Safari on Mac"
   // rows become one per dApp — on whichever context learned the better name.
   // A rename moves no clock this merge ranks on and a tie favours local, so the
-  // name needs a clock of its own or every OTHER context keeps its stale copy.
+  // name needs a clock of its own or every OTHER context keeps its stale copy (#663).
   it("a rename propagates though it carries no sign-in recency", () => {
     const stale = {
       ...makeDevice(OTHER_DEVICE_ID, 1_000_000),
@@ -394,7 +394,7 @@ describe("mergeSnapshotWithRemote — apps / stamps", () => {
     expect(result.connectedApps[0].revokedAt).toBe(5_000_000)
   })
 
-  // Every write to an entry used to bump one `updatedAt` that ranked the
+  // #681: every write to an entry used to bump one `updatedAt` that ranked the
   // WHOLE entry, so an edit that says nothing about whether the app is still
   // connected — picking a drive for it, which the connect flow's own picker
   // does — outranked a revoke made elsewhere and took the tombstone with it,
@@ -445,7 +445,7 @@ describe("mergeSnapshotWithRemote — apps / stamps", () => {
     ])
   })
 
-  // Each grant field rides its own clock: a drive picked on a stale
+  // Each grant field rides its own clock (#885): a drive picked on a stale
   // copy carries that copy's switches, and must not revert a pin made elsewhere.
   it("a switch pinned on one copy survives a newer drive choice made on a stale one", () => {
     const pinned = {
@@ -620,7 +620,7 @@ describe("snapshotContainsContribution", () => {
   })
 })
 
-// The account-wide switches ride their own clocks inside `settings`:
+// The account-wide switches ride their own clocks inside `settings` (#885):
 // a "Keep apps connected for" change made on a stale copy outranks the whole
 // object on `settingsAt`, and must not take a data sharing "off" with it.
 describe("mergeAccountSettings", () => {

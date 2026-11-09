@@ -42,7 +42,7 @@ import {
 // Fixtures
 // ============================================================================
 
-/** The batch whose lanes these locks are about. */
+/** The batch whose lanes these locks are about (#589). */
 const TEST_BATCH_ID = new BatchId("ab".repeat(32))
 
 const DEVICE_A = "device-alpha-111"
@@ -1077,7 +1077,7 @@ describe("releasePartitionLock — generation fencing", () => {
     expect((await readLock())?.holderDeviceId).toBe(NO_HOLDER_DEVICE_ID)
   })
 
-  it("skips when our own NEWER claim is visible (successor re-acquired)", async () => {
+  it("skips when our own NEWER claim is visible (successor re-acquired — #349)", async () => {
     const successorGen = gen(NOW - 1_000, DEVICE_A)
     await seedLock({
       holderDeviceId: DEVICE_A,

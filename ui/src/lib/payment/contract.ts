@@ -15,7 +15,7 @@ import { networkSettingsStore } from '$lib/stores/network-settings.svelte'
  * independently. The signer key is NOT on-chain, so the caller supplies it; its
  * address must be the batch owner, which IS on-chain and is checked here. Bee
  * refuses a stamp signed by anyone else, so an upload probe against a node that
- * cannot answer (timeout, 5xx, a gateway in front) is no substitute.
+ * cannot answer (timeout, 5xx, a gateway in front) is no substitute (#819).
  *
  * Returns `undefined` ONLY when the contract authoritatively has no such batch.
  * An endpoint that could not be read throws instead: "we couldn't ask" and
@@ -61,8 +61,8 @@ export async function fetchExistingBatchFromChain(
     )
   }
   // Swarm ID needs a mutable batch: a partition's lock and state chunks
-  // overstamp their reserved slots, and a scratch drive reuses its data slots.
-  // Refused here so every path that adopts a batch, the card shop's
+  // overstamp their reserved slots, and a scratch drive reuses its data slots
+  // (#862). Refused here so every path that adopts a batch, the card shop's
   // included, refuses it the same way.
   if (batch.immutableFlag) {
     throw new Error(

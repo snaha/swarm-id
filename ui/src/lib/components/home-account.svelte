@@ -106,7 +106,7 @@
   let signingOut = $state(false)
   let deleting = $state(false)
   // Reveals cache only their derived display value — never the raw seed, which
-  // is zeroed the moment each ceremony finishes with it.
+  // is zeroed the moment each ceremony finishes with it (issue #412).
   let revealedPrivateKey = $state<string | undefined>(undefined)
   // No unlock for the sharing and signer keys: they derive from
   // `derivationKey`, which sits in plaintext in storage while signed in, so a

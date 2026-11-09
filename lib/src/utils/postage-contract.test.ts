@@ -21,7 +21,7 @@ import {
 
 // Real on-chain data captured for batch
 // 178f3ac9741b7659c4b80e1ae80fbf5ef4975f7aceed6560712bb4d126697de0
-// at block ~46.6M.
+// (the batch from issue #344) at block ~46.6M.
 const BATCH_ID =
   "178f3ac9741b7659c4b80e1ae80fbf5ef4975f7aceed6560712bb4d126697de0"
 

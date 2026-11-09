@@ -35,7 +35,7 @@ export interface BusTransport {
    * `from` is the transport's own name for whoever sent the message — a peer
    * id on the signaling transport, absent on a transport that has no peers.
    * It is what lets `onPeerLeft` be attributed to the devices that peer spoke
-   * for.
+   * for (#572).
    */
   subscribe(handler: (raw: unknown, from?: string) => void): () => void
   /**

@@ -186,7 +186,7 @@ async function sendBundle(
       })
       // EIP-1559 fields, because a 7702 transaction has no legacy `gasPrice` to
       // fall back on the way every other write in this package does. The tip
-      // must not be zero: no validator includes such a transaction.
+      // must not be zero: no validator includes such a transaction (#618).
       const { maxFeePerGas, maxPriorityFeePerGas } = (lastOffer =
         bundleFeeFields(
           await getGasPrice(settings, rpcProvider),
@@ -225,7 +225,7 @@ async function sendBundle(
       // The node already has these exact bytes, so the send succeeded and only
       // its answer was lost. `keccak256` of what we signed IS that
       // transaction's hash, so the caller can wait for the receipt instead of
-      // being told the operation failed.
+      // being told the operation failed (#620).
       onAlreadyKnown: () => {
         if (!lastSerialized) {
           throw new TransactionAlreadyKnownError()
