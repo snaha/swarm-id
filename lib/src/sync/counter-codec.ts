@@ -144,6 +144,11 @@ export function frameFits(counters: Uint32Array, frame: CounterFrame): boolean {
 /**
  * The canonical frame (SBU1 §4): `base = min`, then the width whose packed
  * bits plus exception and reference bytes are fewest, ties to the narrower.
+ *
+ * One full pass over the table per candidate width, 24 in all; a histogram of
+ * delta bit lengths would do it in one (#981). A full publish is once per epoch
+ * and a kept frame skips this entirely, so the plain loop stays until a profile
+ * says otherwise.
  */
 export function chooseFrame(counters: Uint32Array): CounterFrame {
   let base = counters[0]
