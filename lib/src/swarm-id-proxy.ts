@@ -2680,7 +2680,9 @@ export class SwarmIdProxy {
       try {
         await this.handleParentMessage(abortable, event)
       } catch (error) {
-        console.error("[Proxy] Error handling parent message:", error)
+        if (!controller.signal.aborted) {
+          console.error("[Proxy] Error handling parent message:", error)
+        }
         this.sendErrorToParent(event, message.requestId, error, "Unknown error")
       } finally {
         this.inFlightRequests.delete(message.requestId)
@@ -3839,7 +3841,8 @@ export class SwarmIdProxy {
     error: unknown,
     fallback: string,
   ): void {
-    if (requestId) {
+    // The client dropped an aborted request and listens for no answer to it.
+    if (requestId && !this.inFlightRequests.get(requestId)?.signal.aborted) {
       this.postMessage(event, {
         type: "error",
         requestId,
@@ -6776,11 +6779,13 @@ export class SwarmIdProxy {
     // and can be stale (e.g. a batch assigned during its ~30s warm-up stays
     // `usable: false` in storage forever), so read live batch details from the
     // Bee node for those fields.
+    const signal = requestOptions?.signal
     const details = await fetchBatchDetails(
       this.beeApiUrl,
       stamp.batchID.toHex(),
-      { headers: requestOptions?.headers, signal: requestOptions?.signal },
+      { headers: requestOptions?.headers, signal },
     )
+    if (signal?.aborted) throw abortedError(signal)
 
     // Resolve TTL from live chain state: the PostageStamp contract first
     // (ground truth for any batch, even one this Bee node has never seen), then
@@ -6794,7 +6799,7 @@ export class SwarmIdProxy {
     let lifetime:
       | { batchTTL: number; source: BatchTTLSource; measuredAt: number }
       | undefined = await this.measureLifetime(stamp)
-    if (lifetime === undefined && !requestOptions?.signal?.aborted) {
+    if (lifetime === undefined && !signal?.aborted) {
       try {
         const pricePerGBPerMonth = await fetchSwarmPrice()
         lifetime = {

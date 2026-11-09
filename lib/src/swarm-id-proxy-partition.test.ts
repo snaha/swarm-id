@@ -2281,6 +2281,54 @@ describe("SwarmIdProxy partitioned write enablement", () => {
         },
       )
 
+      it.each(["getDrives", "getPostageBatch"])(
+        "%s aborted during its Bee read skips the chain read and stays quiet",
+        async (type) => {
+          nextStamper()
+          await connectWithTwoDrives([stampOf(BATCH_ID_HEX)])
+          let finishBeeRead: () => void = () => {}
+          vi.mocked(fetchBatchDetails).mockClear()
+          vi.mocked(fetchBatchDetails).mockImplementationOnce(
+            () =>
+              new Promise((resolve) => {
+                finishBeeRead = () => resolve(undefined)
+              }),
+          )
+          vi.mocked(fetchAuthoritativeBatchTTL).mockClear()
+          const errorLog = vi.spyOn(console, "error")
+          const requestId = `${type}-aborted`
+          const inFlight = (
+            proxy as unknown as { inFlightRequests: Map<string, unknown> }
+          ).inFlightRequests
+
+          const handled = dispatch(
+            { type, requestId },
+            PARENT_ORIGIN,
+            parentWindow,
+          )
+          await vi.waitFor(() =>
+            expect(fetchBatchDetails).toHaveBeenCalledTimes(1),
+          )
+          await dispatch(
+            { type: "abortRequest", requestId },
+            PARENT_ORIGIN,
+            parentWindow,
+          )
+          finishBeeRead()
+          await handled
+          expect(inFlight.size).toBe(0)
+
+          expect(fetchAuthoritativeBatchTTL).not.toHaveBeenCalled()
+          expect(
+            [
+              ...messagesOfType(`${type}Response`),
+              ...messagesOfType("error"),
+            ].filter((posted) => posted.requestId === requestId),
+          ).toEqual([])
+          expect(errorLog).not.toHaveBeenCalled()
+        },
+      )
+
       it("keeps getDrives off Swarm", async () => {
         nextStamper()
         await connectWithTwoDrives([stampOf(BATCH_ID_HEX)])

@@ -16,6 +16,7 @@ class FakeWebSocket {
   static readonly OPEN = 1
   static readonly CLOSED = 3
   static last: FakeWebSocket | undefined
+  static staysConnecting = false
 
   readyState = 0
   binaryType = ""
@@ -28,6 +29,7 @@ class FakeWebSocket {
   constructor(readonly url: string) {
     FakeWebSocket.last = this
     queueMicrotask(() => {
+      if (FakeWebSocket.staysConnecting) return
       this.readyState = FakeWebSocket.OPEN
       this.onopen?.()
     })
@@ -45,6 +47,7 @@ class FakeWebSocket {
 
 beforeEach(() => {
   FakeWebSocket.last = undefined
+  FakeWebSocket.staysConnecting = false
   vi.stubGlobal("WebSocket", FakeWebSocket)
 })
 
@@ -71,6 +74,24 @@ describe("ChunkUploadStream", () => {
       await expect(sent).rejects.toMatchObject({ code: "aborted" })
       await expect(waiting).rejects.toMatchObject({ code: "aborted" })
       await stream.close()
+      expect(FakeWebSocket.last?.readyState).toBe(FakeWebSocket.CLOSED)
+    },
+    HANG_MS,
+  )
+
+  it(
+    "rejects open() at an abort during the connect",
+    async () => {
+      FakeWebSocket.staysConnecting = true
+      const controller = new AbortController()
+      const stream = new ChunkUploadStream(BEE_URL, {
+        signal: controller.signal,
+      })
+      const opening = stream.open()
+
+      controller.abort()
+
+      await expect(opening).rejects.toMatchObject({ code: "aborted" })
       expect(FakeWebSocket.last?.readyState).toBe(FakeWebSocket.CLOSED)
     },
     HANG_MS,

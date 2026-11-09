@@ -37,6 +37,7 @@ export class ChunkUploadStream {
   private concurrency: number
   private closed = false
   private errorMessage: string | undefined
+  private rejectOpen: ((error: Error) => void) | undefined
 
   constructor(
     private beeUrl: string,
@@ -59,6 +60,7 @@ export class ChunkUploadStream {
       once: true,
     })
     return new Promise((resolve, reject) => {
+      this.rejectOpen = reject
       const wsUrl = this.buildWsUrl()
       this.ws = new WebSocket(wsUrl)
       this.ws.binaryType = "arraybuffer"
@@ -192,6 +194,7 @@ export class ChunkUploadStream {
     this.closed = true
     this.errorMessage = error.message
     this.rejectAllPending(error)
+    this.rejectOpen?.(error)
     this.ws?.close()
   }
 

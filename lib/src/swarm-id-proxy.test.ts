@@ -1233,6 +1233,20 @@ describe("SwarmIdProxy subsidised-mode selection", () => {
       await second
     })
 
+    it("answers nothing for a write it aborted", async () => {
+      await identify(GATEWAY_URL)
+      setAccountState({})
+      const fetchSpy = gatewayHangsUntilAborted()
+      const handled = upload("u1")
+      await vi.waitFor(() => expect(fetchSpy).toHaveBeenCalledTimes(1))
+      parentWindow.postMessage.mockClear()
+
+      await send({ type: "abortRequest", requestId: "u1" })
+      await handled
+
+      expect(parentWindow.postMessage).not.toHaveBeenCalled()
+    })
+
     it("ignores a request it does not know", async () => {
       await identify(GATEWAY_URL)
       parentWindow.postMessage.mockClear()
