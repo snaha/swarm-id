@@ -958,6 +958,11 @@
 <td><code dir="auto">number | undefined</code></td>
 <td>The tag UID if a tag was created</td>
 </tr>
+<tr>
+<td><code dir="auto">stampedChunks</code></td>
+<td><code dir="auto">number | undefined</code></td>
+<td>Chunks this write sent: one per stamp in <code dir="auto">user-stamp</code> mode, one per chunk the gateway accepted in <code dir="auto">subsidised</code> mode. Compare it with an estimate to show what a save cost. The partition lease’s own chunks (lock, intent, and the state publish after each write) are not counted: they re-use reserved slots and spend no capacity. Absent from an identity site older than the field</td>
+</tr>
 </tbody>
 </table>
 <p><strong>Throws:</strong></p>
@@ -1719,6 +1724,11 @@
 <td><code dir="auto">number</code></td>
 <td>Upload tag UID, if provided</td>
 </tr>
+<tr>
+<td><code dir="auto">stampedChunks</code></td>
+<td><code dir="auto">number | undefined</code></td>
+<td>Chunks this write sent, as for <code dir="auto">uploadData()</code></td>
+</tr>
 </tbody>
 </table>
 <p><strong>Returns (<code dir="auto">rawUpload</code>):</strong> <code dir="auto">Promise&lt;SocRawUploadResult&gt;</code></p>
@@ -1750,6 +1760,11 @@
 <td><code dir="auto">tagUid</code></td>
 <td><code dir="auto">number</code></td>
 <td>Upload tag UID, if provided</td>
+</tr>
+<tr>
+<td><code dir="auto">stampedChunks</code></td>
+<td><code dir="auto">number | undefined</code></td>
+<td>Chunks this write sent, as for <code dir="auto">uploadData()</code></td>
 </tr>
 </tbody>
 </table>
@@ -2148,6 +2163,11 @@
 <td><code dir="auto">timestamp</code></td>
 <td><code dir="auto">string</code></td>
 <td>The timestamp used (stringified bigint)</td>
+</tr>
+<tr>
+<td><code dir="auto">stampedChunks</code></td>
+<td><code dir="auto">number | undefined</code></td>
+<td>Chunks this update sent, the payload’s upload included, as for <code dir="auto">uploadData()</code>; absent when either part is unknown</td>
 </tr>
 </tbody>
 </table>
@@ -2733,6 +2753,11 @@
 <td><code dir="auto">number | undefined</code></td>
 <td>The tag UID if a tag was created</td>
 </tr>
+<tr>
+<td><code dir="auto">stampedChunks</code></td>
+<td><code dir="auto">number | undefined</code></td>
+<td>Chunks this write sent, the ACT, history and grantee list included, as for <code dir="auto">uploadData()</code></td>
+</tr>
 </tbody>
 </table>
 <p><strong>Throws:</strong></p>
@@ -2900,6 +2925,11 @@
 <td><code dir="auto">string</code></td>
 <td>The ACT reference</td>
 </tr>
+<tr>
+<td><code dir="auto">stampedChunks</code></td>
+<td><code dir="auto">number | undefined</code></td>
+<td>Chunks this write sent, as for <code dir="auto">uploadData()</code></td>
+</tr>
 </tbody>
 </table>
 <p><strong>Throws:</strong></p>
@@ -3005,6 +3035,11 @@ under a new ACT.</p></div></aside>
 <td><code dir="auto">actReference</code></td>
 <td><code dir="auto">string</code></td>
 <td>The ACT reference</td>
+</tr>
+<tr>
+<td><code dir="auto">stampedChunks</code></td>
+<td><code dir="auto">number | undefined</code></td>
+<td>Chunks this write sent, as for <code dir="auto">uploadData()</code></td>
 </tr>
 </tbody>
 </table>
