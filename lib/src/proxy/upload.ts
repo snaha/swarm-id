@@ -14,7 +14,7 @@
  *   const result = await uploadData(target, data, { encryptionKey: true })
  */
 
-import { SwarmIdError } from "../errors"
+import { SwarmIdError, abortedError } from "../errors"
 import { refusedPath } from "./errors"
 import { Reference, PrivateKey, Identifier, Span } from "@ethersphere/bee-js"
 import type {
@@ -88,7 +88,9 @@ export interface ChunkCounter {
 }
 
 /**
- * Upload target: stamper-based (user has postage batch) or subsidised gateway
+ * Upload target: stamper-based (user has postage batch) or subsidised gateway.
+ * `signal` is the request's abort: the proxy puts it here beside the
+ * counter, so every write through the target stops with it.
  */
 export type UploadTarget =
   | {
@@ -97,11 +99,13 @@ export type UploadTarget =
       stamper: Stamper
       workerPool?: StampWorkerPool
       counter?: ChunkCounter
+      signal?: AbortSignal
     }
   | {
       mode: "subsidised"
       gatewayUrl: string
       counter?: ChunkCounter
+      signal?: AbortSignal
     }
 
 /**
@@ -222,18 +226,26 @@ type StampChunkFn = (address: Uint8Array) => Promise<EnvelopeWithBatchId>
 /**
  * Create a StampChunkFn from a Stamper and optional worker pool.
  */
+function withSignal(
+  requestOptions: BeeRequestOptions | undefined,
+  signal: AbortSignal | undefined,
+): BeeRequestOptions | undefined {
+  return signal ? { ...requestOptions, signal } : requestOptions
+}
+
 function makeStampFn(
   stamper: Stamper,
   workerPool?: StampWorkerPool,
   counter?: ChunkCounter,
+  signal?: AbortSignal,
 ): StampChunkFn {
   const stamp: StampChunkFn = workerPool
     ? (address) => workerPool.stampChunkData(address)
     : (address) => Promise.resolve(stamper.stamp(address))
-  if (!counter) return stamp
   return async (address) => {
+    if (signal?.aborted) throw abortedError(signal)
     const envelope = await stamp(address)
-    counter.chunks++
+    if (counter) counter.chunks++
     return envelope
   }
 }
@@ -322,7 +334,7 @@ function beeHeaders(
 async function uploadChunkViaSubsidisedGatewayInternal(
   gatewayUrl: string,
   chunkData: Uint8Array,
-  options?: { deferred?: boolean },
+  options?: { deferred?: boolean; signal?: AbortSignal },
   counter?: ChunkCounter,
 ): Promise<{ reference: string }> {
   const url = `${normalizeUrl(gatewayUrl)}/chunks`
@@ -339,6 +351,7 @@ async function uploadChunkViaSubsidisedGatewayInternal(
     method: "POST",
     headers,
     body: chunkData,
+    signal: options?.signal,
   })
 
   if (!response.ok) {
@@ -639,7 +652,10 @@ async function uploadDataPlain(
 
   if (isSubsidisedTarget(target)) {
     // Subsidised gateway mode
-    const uploadOptions = { deferred: options?.deferred }
+    const uploadOptions = {
+      deferred: options?.deferred,
+      signal: target.signal,
+    }
 
     for (const chunk of chunks) {
       await uploadChunkViaSubsidisedGatewayInternal(
@@ -682,7 +698,13 @@ async function uploadDataPlain(
       deferred: options?.deferred ?? false,
     }
 
-    const stamp = makeStampFn(stamper, workerPool, target.counter)
+    const stamp = makeStampFn(
+      stamper,
+      workerPool,
+      target.counter,
+      target.signal,
+    )
+    const requestOptions = withSignal(options?.requestOptions, target.signal)
 
     // Upload leaf chunks
     for (const chunk of chunks) {
@@ -692,7 +714,7 @@ async function uploadDataPlain(
         chunk.data,
         chunk.address.toUint8Array(),
         uploadOptions,
-        options?.requestOptions,
+        requestOptions,
       )
       processedChunks++
       reportProgress()
@@ -711,7 +733,7 @@ async function uploadDataPlain(
           chunk.data,
           chunk.address.toUint8Array(),
           uploadOptions,
-          options?.requestOptions,
+          requestOptions,
         )
         totalChunks++
         processedChunks++
@@ -759,7 +781,10 @@ async function uploadDataEncrypted(
 
   if (isSubsidisedTarget(target)) {
     // Subsidised gateway mode
-    const uploadOptions = { deferred: options?.deferred }
+    const uploadOptions = {
+      deferred: options?.deferred,
+      signal: target.signal,
+    }
 
     for (const chunk of chunksToUpload) {
       await uploadChunkViaSubsidisedGatewayInternal(
@@ -805,7 +830,13 @@ async function uploadDataEncrypted(
       tag,
       deferred: options?.deferred ?? false,
     }
-    const stamp = makeStampFn(stamper, workerPool, target.counter)
+    const stamp = makeStampFn(
+      stamper,
+      workerPool,
+      target.counter,
+      target.signal,
+    )
+    const requestOptions = withSignal(options?.requestOptions, target.signal)
 
     // Open WebSocket stream if requested
     let wsStream: ChunkUploadStream | undefined
@@ -813,6 +844,7 @@ async function uploadDataEncrypted(
       wsStream = new ChunkUploadStream(bee.url, {
         tag,
         concurrency: options.webSocket.concurrency,
+        signal: target.signal,
       })
       await wsStream.open()
     }
@@ -832,7 +864,7 @@ async function uploadDataEncrypted(
           stamp,
           chunksToUpload,
           uploadOptions,
-          options?.requestOptions,
+          requestOptions,
           onChunkUploaded,
           options?.httpConcurrency,
         )
@@ -859,7 +891,7 @@ async function uploadDataEncrypted(
               chunkData,
               address.toUint8Array(),
               uploadOptions,
-              options?.requestOptions,
+              requestOptions,
             )
           }
 
@@ -967,6 +999,7 @@ export async function uploadSOC(
       method: "POST",
       headers,
       body: socBody,
+      signal: target.signal,
     })
 
     if (!response.ok) {
@@ -988,6 +1021,8 @@ export async function uploadSOC(
     const { bee, stamper } = target
     const tag = options?.tag ?? (await tryCreateTag(bee))
 
+    const { signal } = withSignal(options?.requestOptions, target.signal) ?? {}
+    if (signal?.aborted) throw abortedError(signal)
     const envelope = stamper.stamp(socAddressBytes)
     if (target.counter) target.counter.chunks++
 
@@ -1011,7 +1046,7 @@ export async function uploadSOC(
       method: "POST",
       headers,
       body: socBody,
-      signal: options?.requestOptions?.signal,
+      signal,
     })
 
     if (!response.ok) {
@@ -1048,13 +1083,14 @@ export async function uploadChunk(
     return uploadChunkViaSubsidisedGatewayInternal(
       target.gatewayUrl,
       chunkData,
-      { deferred: options?.deferred },
+      { deferred: options?.deferred, signal: target.signal },
       target.counter,
     )
   } else {
     const { bee, stamper } = target
     const address = await calculateChunkAddress(chunkData)
-    const stamp = makeStampFn(stamper, undefined, target.counter)
+    const stamp = makeStampFn(stamper, undefined, target.counter, target.signal)
+    const requestOptions = withSignal(options?.requestOptions, target.signal)
 
     await uploadStampedChunkViaHttp(
       bee,
@@ -1066,7 +1102,7 @@ export async function uploadChunk(
         pin: options?.pin,
         tag: options?.tag,
       },
-      options?.requestOptions,
+      requestOptions,
     )
 
     return { reference: uint8ArrayToHex(address.toUint8Array()) }

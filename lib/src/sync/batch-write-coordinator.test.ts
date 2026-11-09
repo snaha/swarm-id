@@ -290,6 +290,49 @@ type Internals = {
     | undefined
 }
 
+describe("BatchWriteCoordinator.withWrite — aborted while queued", () => {
+  it("stops at the lock: no lease, no worker pool, no write", async () => {
+    const lease = makeLease({
+      acquireResult: {
+        partition: 1,
+        partitionCount: 4,
+        localCounter: new Uint32Array(8),
+        isReadOnly: false,
+      },
+    })
+    leaseController.lease = lease
+    const getWorkerPool = vi.fn()
+    const coordinator = new BatchWriteCoordinator(
+      makeDeps({
+        stamper: makeStamper(
+          [],
+        ) as unknown as BatchWriteCoordinatorDeps["stamper"],
+        mode: "oneshot",
+        getWorkerPool,
+      }),
+    )
+    const controller = new AbortController()
+    writeLockController.onGrant = () => controller.abort()
+    const op = vi.fn()
+
+    try {
+      await expect(
+        coordinator.withWrite(op, {
+          wait: "block",
+          useWorkers: true,
+          signal: controller.signal,
+        }),
+      ).rejects.toMatchObject({ code: "aborted" })
+    } finally {
+      writeLockController.onGrant = undefined
+    }
+
+    expect(lease.acquire).not.toHaveBeenCalled()
+    expect(getWorkerPool).not.toHaveBeenCalled()
+    expect(op).not.toHaveBeenCalled()
+  })
+})
+
 describe("BatchWriteCoordinator.withWrite — wait fork", () => {
   it("block mode (proxy): acquires a free slot, runs op, flushes", async () => {
     leaseController.lease = makeLease({

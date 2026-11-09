@@ -198,7 +198,16 @@ export interface UploadOptions {
   concurrency?: number
 }
 
-export type RequestOptions = z.infer<typeof RequestOptionsSchema>
+/**
+ * `signal` stops the call and rejects it with `aborted`. It cannot
+ * cross the bridge, so the wire schema has no such field: the client sends
+ * `abortRequest` in its place.
+ */
+export type RequestOptions =
+  | (NonNullable<z.infer<typeof RequestOptionsSchema>> & {
+      signal?: AbortSignal
+    })
+  | undefined
 export type DownloadOptions = z.infer<typeof DownloadOptionsSchema>
 
 /**
@@ -1441,11 +1450,13 @@ export const ActGetGranteesMessageSchema = z.object({
 export const GetPostageBatchMessageSchema = z.object({
   type: z.literal("getPostageBatch"),
   requestId: z.string(),
+  requestOptions: RequestOptionsSchema,
 })
 
 export const GetDrivesMessageSchema = z.object({
   type: z.literal("getDrives"),
   requestId: z.string(),
+  requestOptions: RequestOptionsSchema,
 })
 
 export const GetPermissionsMessageSchema = z.object({
@@ -1486,8 +1497,18 @@ export const ConnectMessageSchema = z.object({
   popupMode: z.enum(["popup", "window"]).optional(),
 })
 
+/**
+ * Stop the request `requestId` names. Gets no answer: the client has
+ * already rejected that request with `aborted`.
+ */
+export const AbortRequestMessageSchema = z.object({
+  type: z.literal("abortRequest"),
+  requestId: z.string(),
+})
+
 export const ParentToIframeMessageSchema = z.discriminatedUnion("type", [
   ParentIdentifyMessageSchema,
+  AbortRequestMessageSchema,
   CheckAuthMessageSchema,
   DisconnectMessageSchema,
   UploadDataMessageSchema,
@@ -1763,6 +1784,7 @@ export const SwarmIdErrorCodeSchema = z.enum([
   "bee-rejected",
   "network",
   "timeout",
+  "aborted",
   "invalid-request",
   "invalid-state",
   "init-failed",

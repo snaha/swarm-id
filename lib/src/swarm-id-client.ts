@@ -1,7 +1,7 @@
 // Copyright 2026 The Swarm Authors. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { SwarmIdError } from "./errors"
+import { SwarmIdError, abortedError } from "./errors"
 import type {
   ClientOptions,
   ConnectOptions,
@@ -116,8 +116,11 @@ const DEFAULT_INITIALIZATION_TIMEOUT_MS = 30000
 const PERMISSIONS_REQUEST_TIMEOUT_MS =
   PERMISSIONS_POPUP_MAX_MS + DEFAULT_TIMEOUT_MS
 
-/** A request the client awaits an answer to; `parentIdentify` gets none. */
-type AwaitedRequest = Exclude<ParentToIframeMessage, { type: "parentIdentify" }>
+/** A request the client awaits an answer to; these two get none. */
+type AwaitedRequest = Exclude<
+  ParentToIframeMessage,
+  { type: "parentIdentify" | "abortRequest" }
+>
 
 /**
  * The answer type for a request type: `${type}Response`, except `checkAuth`,
@@ -689,14 +692,26 @@ export class SwarmIdClient {
       requestId: string
     },
   >(message: TRequest): Promise<TResponse> {
+    const options = (message as { requestOptions?: RequestOptions })
+      .requestOptions
+    const signal = options?.signal
+    if (signal?.aborted) throw abortedError(signal)
     // A per-call `requestOptions.timeout` bounds this whole round trip, not
     // only the Bee request the proxy makes with it: a caller raising it for a
     // large upload must not be cut off at the constructor default (#775).
-    const timeout = this.roundTripTimeout(
-      (message as { requestOptions?: RequestOptions }).requestOptions?.timeout,
-    )
+    const timeout = this.roundTripTimeout(options?.timeout)
     return new Promise((resolve, reject) => {
+      const onAbort = () => {
+        clearTimeout(timeoutId)
+        this.pendingRequests.delete(message.requestId)
+        reject(abortedError(signal!))
+        this.sendAbort(message.requestId)
+      }
+      const stopWatchingSignal = () =>
+        signal?.removeEventListener("abort", onAbort)
+
       const timeoutId = setTimeout(() => {
+        stopWatchingSignal()
         this.pendingRequests.delete(message.requestId)
         reject(
           new SwarmIdError("timeout", `Request timeout after ${timeout}ms`),
@@ -706,19 +721,45 @@ export class SwarmIdClient {
       this.pendingRequests.set(message.requestId, {
         requestType: message.type,
         responseType: responseTypeFor(message.type),
-        resolve,
-        reject,
+        resolve: (value) => {
+          stopWatchingSignal()
+          resolve(value)
+        },
+        reject: (error) => {
+          stopWatchingSignal()
+          reject(error)
+        },
         timeoutId,
       })
+      signal?.addEventListener("abort", onAbort, { once: true })
 
       try {
-        this.sendMessage(message)
+        // A signal cannot be cloned into the iframe; `abortRequest` stands in.
+        const wireOptions: RequestOptions = { ...options, signal: undefined }
+        this.sendMessage(
+          signal
+            ? ({
+                ...message,
+                requestOptions: wireOptions,
+              } as ParentToIframeMessage)
+            : message,
+        )
       } catch (error) {
+        stopWatchingSignal()
         clearTimeout(timeoutId)
         this.pendingRequests.delete(message.requestId)
         throw error
       }
     })
+  }
+
+  /** Tell the proxy to stop `requestId`, already rejected here. */
+  private sendAbort(requestId: string): void {
+    try {
+      this.sendMessage({ type: "abortRequest", requestId })
+    } catch (error) {
+      console.warn("[SwarmIdClient] Could not send abortRequest:", error)
+    }
   }
 
   /**
@@ -945,6 +986,7 @@ export class SwarmIdClient {
    * Returns information about the postage stamp associated with the
    * connected identity, including batch ID, utilization, depth, and TTL.
    *
+   * @param requestOptions - Request configuration, `signal` included
    * @returns A promise resolving to the PostageBatch or undefined if none is configured
    * @throws {Error} If the client is not initialized
    * @throws {Error} If the request times out
@@ -962,7 +1004,9 @@ export class SwarmIdClient {
    * }
    * ```
    */
-  async getPostageBatch(): Promise<PostageBatch | undefined> {
+  async getPostageBatch(
+    requestOptions?: RequestOptions,
+  ): Promise<PostageBatch | undefined> {
     this.ensureReady()
     const requestId = this.generateRequestId()
 
@@ -973,6 +1017,7 @@ export class SwarmIdClient {
     }>({
       type: "getPostageBatch",
       requestId,
+      requestOptions,
     })
 
     return response.postageBatch
@@ -990,7 +1035,7 @@ export class SwarmIdClient {
    * await client.uploadData(frame, { batchID: scratch?.batchID })
    * ```
    */
-  async getDrives(): Promise<Drive[]> {
+  async getDrives(requestOptions?: RequestOptions): Promise<Drive[]> {
     this.ensureReady()
     const requestId = this.generateRequestId()
 
@@ -1001,6 +1046,7 @@ export class SwarmIdClient {
     }>({
       type: "getDrives",
       requestId,
+      requestOptions,
     })
 
     return response.drives

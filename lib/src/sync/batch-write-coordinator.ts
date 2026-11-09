@@ -45,6 +45,7 @@ import {
   IDLE_YIELD_MS,
   UtilizationAwareStamper,
 } from "../utils/batch-utilization"
+import { abortedError } from "../errors"
 import { withBatchWriteLock } from "../utils/batch-write-lock"
 import { withTimeout } from "../utils/promise"
 import { PartitionLease } from "./partition-lease"
@@ -114,6 +115,8 @@ export interface WithWriteOptions {
   workerCount?: number
   /** Override the mode default: persistent → "block", oneshot → "skip". */
   wait?: "block" | "skip"
+  /** A write aborted while it queued for the lock stops there. */
+  signal?: AbortSignal
 }
 
 export interface BatchWriteCoordinatorDeps {
@@ -326,6 +329,7 @@ export class BatchWriteCoordinator {
     const wait =
       opts?.wait ?? (this.deps.mode === "persistent" ? "block" : "skip")
     return this.lockAndFlush(async () => {
+      if (opts?.signal?.aborted) throw abortedError(opts.signal)
       await this.ensureLease(wait)
       this.ensureHeldForUpload()
       const target = await this.buildStamperTarget(opts)

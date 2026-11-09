@@ -125,6 +125,7 @@ vi.mock("./utils/ttl", async (importActual) => ({
     throw new Error("offline")
   }),
 }))
+import { fetchBatchDetails } from "./utils/ttl"
 import {
   fetchAuthoritativeBatchTTL,
   fetchBlockNumber,
@@ -2258,6 +2259,75 @@ describe("SwarmIdProxy partitioned write enablement", () => {
           })),
         ).toEqual([{ batchId: BATCH_ID_HEX, partition: 1 }])
       })
+
+      it.each(["getDrives", "getPostageBatch"])(
+        "%s reads Bee with the call's headers and abort signal",
+        async (type) => {
+          nextStamper()
+          await connectWithTwoDrives([stampOf(BATCH_ID_HEX)])
+          const headers = { "x-test": "1" }
+          vi.mocked(fetchBatchDetails).mockClear()
+
+          await ask({ type, requestOptions: { headers } })
+
+          expect(fetchBatchDetails).toHaveBeenCalledWith(
+            expect.any(String),
+            BATCH_ID_HEX,
+            expect.objectContaining({
+              headers,
+              signal: expect.any(AbortSignal),
+            }),
+          )
+        },
+      )
+
+      it.each(["getDrives", "getPostageBatch"])(
+        "%s aborted during its Bee read skips the chain read and stays quiet",
+        async (type) => {
+          nextStamper()
+          await connectWithTwoDrives([stampOf(BATCH_ID_HEX)])
+          let finishBeeRead: () => void = () => {}
+          vi.mocked(fetchBatchDetails).mockClear()
+          vi.mocked(fetchBatchDetails).mockImplementationOnce(
+            () =>
+              new Promise((resolve) => {
+                finishBeeRead = () => resolve(undefined)
+              }),
+          )
+          vi.mocked(fetchAuthoritativeBatchTTL).mockClear()
+          const errorLog = vi.spyOn(console, "error")
+          const requestId = `${type}-aborted`
+          const inFlight = (
+            proxy as unknown as { inFlightRequests: Map<string, unknown> }
+          ).inFlightRequests
+
+          const handled = dispatch(
+            { type, requestId },
+            PARENT_ORIGIN,
+            parentWindow,
+          )
+          await vi.waitFor(() =>
+            expect(fetchBatchDetails).toHaveBeenCalledTimes(1),
+          )
+          await dispatch(
+            { type: "abortRequest", requestId },
+            PARENT_ORIGIN,
+            parentWindow,
+          )
+          finishBeeRead()
+          await handled
+          expect(inFlight.size).toBe(0)
+
+          expect(fetchAuthoritativeBatchTTL).not.toHaveBeenCalled()
+          expect(
+            [
+              ...messagesOfType(`${type}Response`),
+              ...messagesOfType("error"),
+            ].filter((posted) => posted.requestId === requestId),
+          ).toEqual([])
+          expect(errorLog).not.toHaveBeenCalled()
+        },
+      )
 
       it("keeps getDrives off Swarm", async () => {
         nextStamper()

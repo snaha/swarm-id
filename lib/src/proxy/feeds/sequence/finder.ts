@@ -11,6 +11,7 @@
 import { Binary } from "cafe-utility"
 import type { EthAddress, Topic, BeeRequestOptions } from "@ethersphere/bee-js"
 import { makeSOCAddress } from "@ethersphere/core-sdk"
+import { abortedError } from "../../../errors"
 import type { ChunkDownloader } from "../../download-data"
 import type { SequentialFinder, SequentialLookupResult } from "./types"
 
@@ -67,6 +68,9 @@ export class SyncSequentialFinder implements SequentialFinder {
         )
         return true
       } catch {
+        // An abort says nothing about the slot, and a free slot gets written.
+        const signal = requestOptions?.signal
+        if (signal?.aborted) throw abortedError(signal)
         if (attempt === 0) continue
         return false
       }

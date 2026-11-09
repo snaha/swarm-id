@@ -100,4 +100,27 @@ describe("SyncSequentialFinder — retry-then-conclude (anti-clobber)", () => {
     // index 0 read twice (initial + one retry) before concluding free.
     expect(fake.downloads).toBe(2)
   })
+
+  // A free slot is what the next write takes, so an abort must not read as one.
+  it("rejects when the lookup aborts, rather than reporting a free slot", async () => {
+    const topic = Topic.fromString("seq-d")
+    const controller = new AbortController()
+    let reads = 0
+    const bee = {
+      chunk: {
+        download: async () => {
+          reads++
+          if (reads === 2) controller.abort()
+          if (controller.signal.aborted) throw new Error("Request aborted")
+          return new Uint8Array(32)
+        },
+      },
+    }
+    const finder = new SyncSequentialFinder(bee as never, topic, OWNER)
+
+    await expect(
+      finder.findAt(0n, 0n, { signal: controller.signal }),
+    ).rejects.toMatchObject({ code: "aborted" })
+    expect(reads).toBe(2)
+  })
 })
