@@ -366,7 +366,7 @@ export class Account {
    * awaits that publish itself (`tearDownAccount`).
    */
   markDeleted() {
-    const now = Date.now()
+    const now = this.#nextDeletedAt()
     this.deleted = true
     this.deletedAt = now
     this.lastModified = now
@@ -378,12 +378,20 @@ export class Account {
    * it also outvotes a marker that reached Swarm before the failure.
    */
   cancelDeletion() {
-    // Strictly after the marker, even within the millisecond it was set.
-    const now = Math.max(Date.now(), (this.deletedAt ?? 0) + 1)
+    const now = this.#nextDeletedAt()
     this.deleted = false
     this.deletedAt = now
     this.lastModified = now
     this.#commit({ skipSync: true })
+  }
+
+  /**
+   * Strictly after the verdict on the record, so the new one wins the fold:
+   * even within the millisecond it was set, or against a clock running ahead
+   * of this device's.
+   */
+  #nextDeletedAt(): number {
+    return Math.max(Date.now(), (this.deletedAt ?? 0) + 1)
   }
 
   /**
@@ -739,8 +747,9 @@ let accounts = $state<Account[]>([])
  * the record union via `toRecord`), so a save→save interleaving with another
  * tab mutating a DIFFERENT account can't clobber that tab's write (in-memory
  * convergence still comes from the cross-tab `storage` event).
- * Accepted edge: merging by id means a mutation racing another tab's remove of
- * the SAME account re-adds it — benign, last-writer-wins. No sync.
+ * Accepted edge: merging by id means a mutation landing before another tab's
+ * remove of the SAME account reaches this one re-adds it — benign,
+ * last-writer-wins. No sync.
  */
 function persistAccount(account: Account, noRepublish = false): void {
   const record = account.toRecord()
@@ -765,6 +774,9 @@ function persistRemoval(id: EthAddress): void {
  * each `Account` as its `#commit`.
  */
 function commitAccount(account: Account, options?: { skipSync?: boolean }): void {
+  // A fold or a drive operation can hold the object across an await, and the
+  // account be removed meanwhile: writing it would bring the record back.
+  if (!accounts.includes(account)) return
   persistAccount(account, options?.skipSync)
   if (!options?.skipSync) syncHook?.(account.id.toHex())
 }
@@ -775,16 +787,15 @@ function hydrate(record: AccountRecord): Account {
 
 function load(): Account[] {
   if (!browser) return []
-  return storageManager.load().map((record) => {
-    const account = hydrate(record)
-    // A teardown the page closed on: take the marker back rather than let the
-    // next routine sync publish it (docs/Account-State.md, "Account deletion").
-    if (account.deleted) account.cancelDeletion()
-    return account
-  })
+  return storageManager.load().map(hydrate)
 }
 
 accounts = load()
+for (const account of accounts) {
+  // A teardown the page closed on: take the marker back rather than let the
+  // next routine sync publish it (docs/Account-State.md, "Account deletion").
+  if (account.deleted) account.cancelDeletion()
+}
 
 /**
  * Re-read the collection from storage, updating existing instances in place

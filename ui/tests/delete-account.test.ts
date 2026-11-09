@@ -24,6 +24,8 @@ import {
   chainReachable,
   completeCreateFlow,
   fundPostageSigner,
+  gotoAccessStep,
+  installVirtualAuthenticator,
   postageSignerAddress,
   seedLocalChain,
   seedNoChain,
@@ -131,6 +133,28 @@ test('deletes a local account', async ({ page }) => {
   await expect(page.getByText(name)).toHaveCount(0)
 })
 
+// A passkey or wallet unlock raises its own prompt screen; once it is answered
+// the dialog has to move on to the deletion and its outcome.
+test('deletes a passkey-protected local account and shows the outcome', async ({ page }) => {
+  await seedNoChain(page)
+  await installVirtualAuthenticator(page)
+  await gotoAccessStep(page)
+  await page.getByRole('button', { name: 'Confirm with passkey' }).click()
+  await page.getByRole('button', { name: 'Stay local for now' }).click()
+  await expect(page).toHaveURL(/\/$/)
+  const [account] = await storedAccounts(page)
+
+  await page.getByRole('tab', { name: 'Account' }).click()
+  await page.getByRole('button', { name: 'Delete account' }).click()
+  const dialog = page.getByRole('dialog', { name: 'Delete account' })
+  await dialog.getByPlaceholder('Account name').fill(account.name)
+  await dialog.getByRole('button', { name: 'Confirm delete with passkey' }).click()
+
+  await expect(page.getByText('Account deleted')).toBeVisible()
+  await page.getByRole('button', { name: 'Done' }).click()
+  expect(await storedAccounts(page)).toHaveLength(0)
+})
+
 test.describe('a synced account', () => {
   test.skip(!chainUp || !beeUp, 'requires a local chain and Bee cluster (pnpm dev:local)')
 
@@ -193,6 +217,9 @@ test.describe('a synced account', () => {
     await expect(partial).toBeVisible({ timeout: DELETION_SETTLE_TIMEOUT_MS })
     await partial.getByRole('button', { name: /^Reveal/ }).click()
     await expect(partial.getByText(/^0x[0-9a-f]{64}$/)).toBeVisible()
+    // With the account gone, nothing else shows this key.
+    await page.keyboard.press('Escape')
+    await expect(partial).toBeVisible()
     expect(await storedAccounts(page)).toHaveLength(0)
     expect(await chainDepth(drive.batchID)).toBe(drive.depth)
   })

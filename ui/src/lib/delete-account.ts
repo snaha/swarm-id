@@ -65,7 +65,10 @@ export async function deleteAccount(options: DeleteAccountOptions): Promise<Dele
       onProgress,
     })
     if (dilution.status === 'failed') {
-      throw new Error('Some drives could not be prepared for deletion.')
+      throw new AggregateError(
+        dilution.drives.flatMap((drive) => (drive.outcome === 'failed' ? [drive.error] : [])),
+        'Some drives could not be prepared for deletion.',
+      )
     }
     if (dilution.status === 'unfunded') {
       return { status: 'unfunded' }

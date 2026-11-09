@@ -291,6 +291,22 @@ describe('deleteAccount', () => {
     expect(accountsStore.get(ID_HEX)).toBeUndefined()
   })
 
+  it('carries why each drive failed to whoever logs the failure', async () => {
+    const account = accountsStore.add(record(true))
+    const reverted = new Error('execution reverted')
+    dilution.runDeleteDilution.mockResolvedValue({
+      status: 'failed',
+      drives: [
+        { drive: {}, outcome: 'diluted', targetDepth: 24 },
+        { drive: {}, outcome: 'failed', error: reverted },
+      ],
+    })
+
+    await expect(
+      deleteAccount({ account, keep: new Set(), requestFunding, checkpoint }),
+    ).rejects.toMatchObject({ errors: [reverted] })
+  })
+
   it('keeps the account, unmarked, when a dilution transaction failed', async () => {
     const account = accountsStore.add(record(true))
     dilution.runDeleteDilution.mockResolvedValue({ status: 'failed', drives: [] })

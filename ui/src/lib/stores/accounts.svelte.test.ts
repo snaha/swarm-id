@@ -138,6 +138,19 @@ describe('persist read-merge-write (two-tab race)', () => {
 // The proxy inside the proxy iframe subscribes beside this store and publishes
 // what it is told about — unless the write says peers must not hear of it.
 // A regression in this plumb reintroduces the echo of #707 silently.
+describe('a reference held past the removal of its account', () => {
+  // A fold or a drive operation holds the live object across an await; the
+  // account can be deleted meanwhile, and its record must stay gone.
+  it('cannot write the record back', () => {
+    const held = accountsStore.add(record(X_ID_HEX, 'X'))
+    accountsStore.remove(held.id)
+
+    held.applyRefreshed({ connectedApps: [] })
+
+    expect(stored()).toEqual([])
+  })
+})
+
 describe('persist tells the same-window proxy which writes not to republish', () => {
   function detailOfLastWrite(): { noRepublish?: boolean } {
     const spy = vi.mocked(window.dispatchEvent)
@@ -559,6 +572,21 @@ describe('Account.markDeleted', () => {
     expect(account.deletedAt).toEqual(expect.any(Number))
     expect(account.connectedApps[0].revokedAt).toBeUndefined()
     expect(account.toSyncedRecord().deleted).toBe(true)
+  })
+
+  // A restore on a device whose clock runs ahead can leave a verdict newer
+  // than this device's now; a marker behind it would lose on every fold.
+  it('clocks the marker after any verdict already on the record', () => {
+    const verdictAt = Date.now() + 60_000
+    const account = new Account(
+      { ...signedInRecord(), deleted: false, deletedAt: verdictAt },
+      noCommit,
+    )
+
+    account.markDeleted()
+
+    expect(account.deleted).toBe(true)
+    expect(account.deletedAt).toBeGreaterThan(verdictAt)
   })
 
   it('revokes every live app in one unpublished commit', () => {

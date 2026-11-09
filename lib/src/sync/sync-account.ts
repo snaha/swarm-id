@@ -312,9 +312,7 @@ export function createSyncAccount(
     return run
   }
 
-  function syncAccount(
-    accountId: string,
-  ): Promise<SyncResult | undefined> {
+  function syncAccount(accountId: string): Promise<SyncResult | undefined> {
     const waiting = queued.get(accountId)
     if (waiting) return waiting
     const current = running.get(accountId)

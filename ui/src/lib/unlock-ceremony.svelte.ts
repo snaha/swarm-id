@@ -66,11 +66,11 @@ export function createUnlockCeremony(
     } catch (caught) {
       if (attempt.current) {
         error = caught instanceof Error ? caught.message : 'Unlock failed.'
-        pending = false
       }
     } finally {
       if (attempt.current) {
         busy = false
+        pending = false
       }
     }
   }
@@ -80,7 +80,7 @@ export function createUnlockCeremony(
     get busy() {
       return busy
     },
-    /** A passkey / wallet prompt is open. */
+    /** A passkey / wallet prompt is open, or what it unlocked is being used. */
     get pending() {
       return pending
     },

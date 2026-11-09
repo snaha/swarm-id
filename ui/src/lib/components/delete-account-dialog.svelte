@@ -75,6 +75,8 @@
   let progress = $state<DeletionProgress>({ step: 'checking' })
   let signerPrivateKey = $state<string | undefined>(undefined)
   let keyShown = $state(false)
+  /** The user declined the gas and chose to go on: a retry does not ask again. */
+  let undiluted = false
   const attempts = createAttemptTracker()
   const funding = createFundingRequester(() => account)
 
@@ -138,7 +140,12 @@
     funding.cancel()
   })
 
-  async function run(undiluted = false) {
+  function deleteAnyway() {
+    undiluted = true
+    void run()
+  }
+
+  async function run() {
     const attempt = attempts.begin()
     phase = 'deleting'
     progress = { step: 'checking' }
@@ -210,7 +217,7 @@
         </p>
       </div>
     </div>
-    <Button variant="destructive" class="w-full" onclick={() => run(true)}>Delete anyway</Button>
+    <Button variant="destructive" class="w-full" onclick={deleteAnyway}>Delete anyway</Button>
     <Button variant="outline" class="w-full" onclick={() => (phase = 'form')}>Back</Button>
   </Dialog>
 {:else if phase === 'success'}
@@ -236,7 +243,8 @@
     <Button class="w-full" onclick={() => run()}>Retry</Button>
   </Dialog>
 {:else if phase === 'partial' && signerPrivateKey}
-  <Dialog onclose={onClose} label="Some data couldn't be deleted">
+  <!-- Not dismissable: with the account gone, nothing else shows this key. -->
+  <Dialog onclose={onClose} label="Some data couldn't be deleted" dismissable={false}>
     <div class="flex flex-col items-center gap-2 text-center">
       <Info class="fill-foreground text-background size-6" />
       <div class="text-sm">
@@ -261,7 +269,7 @@
 {:else}
   <Dialog onclose={close} title="Delete account" class="w-[36rem]">
     <div class="flex w-full items-center gap-3">
-      <AccountAvatar value={account.id.toChecksum()} size={40} />
+      <AccountAvatar value={account.id.toChecksum()} />
       <div class="flex min-w-0 flex-col">
         <p class="truncate text-sm font-medium">{account.name}</p>
         <p class="text-muted-foreground text-xs">{truncateAddress(account.id.toChecksum())}</p>
