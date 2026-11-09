@@ -216,7 +216,10 @@ the one with no external dependency.</p>
 <code dir="auto">signerKey</code> (the private key that owns the batch, 64 bare hex characters), <code dir="auto">createdAt</code> (epoch
 milliseconds), and the batch as the chain reports it: <code dir="auto">depth</code>, <code dir="auto">bucketDepth</code>, <code dir="auto">amount</code> (a decimal
 string, since it does not fit a JSON number), <code dir="auto">blockNumber</code>, <code dir="auto">immutableFlag</code>, <code dir="auto">exists</code>, <code dir="auto">usable</code>,
-<code dir="auto">utilization</code> (<code dir="auto">0</code> for a fresh batch) and optionally <code dir="auto">batchTTL</code>.</p>
+<code dir="auto">utilization</code> (<code dir="auto">0</code> for a fresh batch) and optionally <code dir="auto">batchTTL</code>. A drive created by the UI also
+carries <code dir="auto">stateFormat: "sbu1"</code>, the wire format of its partition state; a record without it is
+read as a drive from before that format and keeps the older fixed-width layout for good, so a
+host writing new records should set it.</p>
 <p>The signer key has to be the batch’s on-chain owner: the UI’s <strong>Use existing batch</strong> import
 checks that before attaching a batch, and refuses one the supplied key does not own
 (<a href="https://github.com/snaha/swarm-id/issues/820">#820</a>). The record is synced with the account,

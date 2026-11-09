@@ -311,13 +311,20 @@ acquire and resumes from exactly that counter, so a hand-off never re-uses a slo
 <p>A write is reported complete only after the partition state that covers its slots is
 published. An upload that was still in flight when a holder disappeared was therefore never
 acknowledged, and the next holder may safely overwrite its slots.</p>
-<div class="expressive-code"><figure class="frame not-content"><figcaption class="header"></figcaption><pre data-language="text"><code><div class="ec-line"><div class="code"><span style="--0:#d6deeb;--1:#403f53">topic = keccak256( utf8("swarm-id-partition-state-v2") ‖ batchId ‖ uint32_be(partition) )</span></div></div><div class="ec-line"><div class="code"><span style="--0:#d6deeb;--1:#403f53">owner = backupSigner address</span></div></div></code></pre><div class="copy"><div aria-live="polite"></div><button title="Copy to clipboard" data-copied="Copied!" data-code="topic = keccak256( utf8(&quot;swarm-id-partition-state-v2&quot;) ‖ batchId ‖ uint32_be(partition) )owner = backupSigner address"><div></div></button></div></figure></div>
+<div class="expressive-code"><figure class="frame not-content"><figcaption class="header"></figcaption><pre data-language="text"><code><div class="ec-line"><div class="code"><span style="--0:#d6deeb;--1:#403f53">topic = keccak256( utf8(domain) ‖ batchId ‖ uint32_be(partition) )</span></div></div><div class="ec-line"><div class="code"><span style="--0:#d6deeb;--1:#403f53">owner = backupSigner address</span></div></div><div class="ec-line"><div class="code"><span style="--0:#d6deeb;--1:#403f53">domain = "swarm-id-partition-state-v2"   SBU1 leaves (drives created with stateFormat "sbu1")</span></div></div><div class="ec-line"><div class="code"><span class="indent"><span style="--0:#d6deeb;--1:#403f53">         </span></span><span style="--0:#d6deeb;--1:#403f53">"swarm-id-partition-state-v1"   fixed-width chunks (drives created before it)</span></div></div></code></pre><div class="copy"><div aria-live="polite"></div><button title="Copy to clipboard" data-copied="Copied!" data-code="topic = keccak256( utf8(domain) ‖ batchId ‖ uint32_be(partition) )owner = backupSigner addressdomain = &quot;swarm-id-partition-state-v2&quot;   SBU1 leaves (drives created with stateFormat &quot;sbu1&quot;)         &quot;swarm-id-partition-state-v1&quot;   fixed-width chunks (drives created before it)"><div></div></button></div></figure></div>
 <p>The counter is not a single blob. It is packed into <strong>leaves</strong> under a <strong>frame</strong> (see
 <a href="#wire-format-byte-layout">Wire format</a> below), each leaf uploaded with a <strong>random</strong>
 encryption key to the partition’s reserved slot, yielding a 64-byte <strong>encrypted reference</strong>
 (<code dir="auto">address ‖ key</code>). A single <strong>reference chunk</strong> carries the frame, the exceptions and those
 references (<code dir="auto">7 + 8·E + 64·L</code> bytes, one chunk at the width cap). A taking-over device follows
 <strong>pointer → reference chunk → leaves</strong>, decrypting each from its embedded key.</p>
+<p>Which format a batch uses is fixed when its drive is created and recorded on the synced
+stamp record (<code dir="auto">stateFormat</code>), so every device reads and writes the one layout the batch has
+always used. A drive from before the field existed stays on the legacy layout: uint16
+counters in 32 chunks up to depth 31, uint32 in 64 above (a scratch drive is uint32 at every
+depth), the reference chunk their 64-byte references alone. Growing such a drive past depth
+31 would change that layout under its published chunks, so the resize dialog does not offer
+it; the drive grows within its width or is replaced by a new one.</p>
 <div class="sl-heading-wrapper level-h3"><h3 id="the-state-pointer">The state pointer</h3><a class="sl-anchor-link" href="#the-state-pointer"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 1 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 0 0-1.42-1.42m8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 1 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 0 0 0 1.42 1 1 0 0 0 1.42 0l3.88-3.89a4.49 4.49 0 0 0 0-6.33M8.83 15.17a1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.92-4.92a1 1 0 1 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42"></path></svg></span><span class="sr-only" data-pagefind-ignore>Section titled “The state pointer”</span></a></div>
 <p>The reference chunk’s address is published in a <strong>state-pointer SOC</strong> whose identifier
 rotates every epoch:</p>
@@ -332,9 +339,9 @@ once, so the lookup costs about one read timeout however long ago the holder sto
 found but an <strong>unreadable</strong> lock means fail safe: read-only, retry later, never seed a zero
 counter.</p>
 <div class="sl-heading-wrapper level-h3"><h3 id="wire-format-byte-layout">Wire format (byte layout)</h3><a class="sl-anchor-link" href="#wire-format-byte-layout"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 1 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 0 0-1.42-1.42m8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 1 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 0 0 0 1.42 1 1 0 0 0 1.42 0l3.88-3.89a4.49 4.49 0 0 0 0-6.33M8.83 15.17a1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.92-4.92a1 1 0 1 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42"></path></svg></span><span class="sr-only" data-pagefind-ignore>Section titled “Wire format (byte layout)”</span></a></div>
-<p>The format is <strong>binary</strong> and is versioned by the topic domain
-(<code dir="auto">swarm-id-partition-state-v2</code>); there is no in-blob version byte. A new version publishes
-under its own topic and never collides with older readers.</p>
+<p>The format is <strong>binary</strong> and is versioned by the topic domain; there is no in-blob version
+byte. A new version publishes under its own topic and never collides with older readers,
+which is how the legacy fixed-width layout (<code dir="auto">v1</code>) and the SBU1 layout (<code dir="auto">v2</code>) coexist.</p>
 <p>The counter table is packed with the leaf encoding of Nectar’s <strong>SBU1</strong> usage snapshot
 (<a href="https://github.com/nxm-rs/nectar/blob/main/docs/spec/sbu1.md"><code dir="auto">docs/spec/sbu1.md</code></a> §4
 and §6; <code dir="auto">lib/src/sync/counter-codec.ts</code>), byte for byte, so its golden vectors pin ours. A
@@ -344,7 +351,8 @@ whose delta does not fit is an <strong>exception</strong>: its field is all ones
 is listed in the reference chunk (at most 128). A leaf holds <code dir="auto">floor(32768 / w)</code> buckets, so
 <code dir="auto">L = ceil(65536 / floor(32768 / w))</code> leaves cover the table (none at <code dir="auto">w = 0</code>), the last one
 short. The canonical encoder takes <code dir="auto">base = min</code> and the width that minimizes the packed
-bits plus 8 bytes per exception plus 64 per leaf.</p>
+bits plus 8 bytes per exception plus a digest per leaf — under the 128-exception cap, the
+narrowest width that fits.</p>
 <p>The width follows the <em>spread</em> of the counters, not the batch depth, so a dilute changes
 no published byte. Lane counters are Poisson over the buckets, so the spread grows with
 the square root of the fill and a real drive packs into far fewer chunks than a fixed
@@ -450,7 +458,10 @@ non-zero leaf. On acquire the lease seeds this baseline from the resumed state, 
 first publish of a session is incremental.</p>
 <div class="sl-heading-wrapper level-h3"><h3 id="read-semantics">Read semantics</h3><a class="sl-anchor-link" href="#read-semantics"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 1 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 0 0-1.42-1.42m8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 1 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 0 0 0 1.42 1 1 0 0 0 1.42 0l3.88-3.89a4.49 4.49 0 0 0 0-6.33M8.83 15.17a1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.92-4.92a1 1 0 1 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42"></path></svg></span><span class="sr-only" data-pagefind-ignore>Section titled “Read semantics”</span></a></div>
 <p>Reads short-circuit on a cached “synced reference”: if the pointer still names the reference
-a device last synced with, it skips the downloads and reuses its local counter.</p>
+a device last synced with, it skips the downloads and reuses its local counter. A device keeps
+one such reference, for the lane its cached counter rows describe: the rows hold a single
+lane’s counter, so a lane switch rewrites every row before the new lane is certified, and a
+reference never vouches for rows written for another lane.</p>
 <p>When the pointer exists but the reference chunk or any counter chunk cannot be read, or fails
 the checks above, the read reports failure without caching the bad reference, and the device
 falls back to <strong>read-only without claiming the partition</strong>, retried on the next acquire. It
