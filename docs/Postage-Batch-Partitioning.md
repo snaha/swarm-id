@@ -122,7 +122,7 @@ The counter is a `Uint32Array(65536)` (one entry per bucket). Locally it is cach
 fixed uint32 chunks (`NUM_UTILIZATION_CHUNKS`), whatever the depth. On the wire it is packed
 with the SBU1 leaf encoding (`sync/counter-codec.ts`, #463): a per-publish frame (base + bit
 width chosen from the counters' spread), deltas packed to that width, outliers listed as
-exceptions in the reference chunk — typically 8–20 leaves instead of the fixed 32 or 64 the
+exceptions in the reference chunk — typically 7–23 leaves instead of the fixed 32 or 64 the
 uint16/uint32 layout before it took, and independent of the batch depth, so a dilute changes
 nothing published. Topic domain `swarm-id-partition-state-v2`.
 

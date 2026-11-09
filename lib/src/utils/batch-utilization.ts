@@ -182,13 +182,11 @@ export interface BatchUtilizationState {
    * `slot = partitionCount + partition + partitionCount·j` for the partition
    * this state represents (partition 0 in single-device mode). This is the
    * single counter of record: slot selection, persistence, reporting, and
-   * cross-device handoff all derive from it. Always uint32 in memory
-   * regardless of the on-disk codec; narrowing happens at the serialize
-   * boundary.
+   * cross-device handoff all derive from it.
    */
   dataCounters: Uint32Array // [65536]
 
-  /** Metadata for each utilization chunk (32 for uint16, 64 for uint32) */
+  /** Metadata for each of the `NUM_UTILIZATION_CHUNKS` cache chunks */
   chunks: ChunkMetadata[]
 
   /** Last sync timestamp */

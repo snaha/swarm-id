@@ -359,6 +359,13 @@ export class BatchWriteCoordinator {
         const localCounter = this.deps.stamper.getLocalCounter()
         if (localCounter !== undefined) {
           await this.partitionLease?.publishState(localCounter)
+          // The lease cache names the publish before the ack, so a reload
+          // within the TTL can tell rows certified for this publish (by the
+          // flush that follows) from rows left behind by a flush that never
+          // landed — see the adopt fast path in `acquire`.
+          if (this.partitionLease !== undefined) {
+            this.deps.writeLeaseCache?.(this.partitionLease.serialize())
+          }
           // The publish durably re-wrote the state pointer to the current
           // bucket (same effect as a successful heartbeat), so an idle-blip
           // failure streak is stale — clear it. Otherwise the refresh tick keeps
@@ -594,11 +601,15 @@ export class BatchWriteCoordinator {
       // survives transient Bee 500s. The refresh tick then reconciles with
       // Swarm and demotes only on a confirmed foreign holder. The adopt binds
       // the stamper's own table as the lane's counter, so the rows must be
-      // certified for that lane: `getSyncedReference` is defined only once a
-      // flush has written the rows for the counter a publish or read named
-      // (#463). A lane held without a publish yet, or rows a dying tab left
-      // half rewritten, take the cold acquire below instead. The
-      // reference also seeds the heartbeat's resume-pointer target: the cold
+      // certified for the lease's LAST publish: `getSyncedReference` names
+      // the publish whose counter a flush wrote the rows for (#463), and the
+      // cached lease names the publish the lease last read or made (written
+      // before every ack). The two differ when that flush never landed — a
+      // tab dying between publish and flush, an IndexedDB failure — and the
+      // rows then sit below the pointer's counter; a lane held without a
+      // publish yet has neither. Both take the cold acquire below instead,
+      // which downloads the pointer's state when the rows' reference is not
+      // it. The reference also seeds the heartbeat's resume-pointer target: the cold
       // `claimPartition` path seeds that from the state it reads on acquire;
       // the adopt path skips `claimPartition`, so without it an adopted-but-idle
       // holder never heartbeats the inherited pointer forward and it ages out
@@ -614,7 +625,10 @@ export class BatchWriteCoordinator {
               .catch(() => undefined)
       if (this.leaseEpoch !== epoch || this.disposed) return
       const adopted =
-        seededReferenceHex === undefined ? undefined : lease.adoptIfLive()
+        seededReferenceHex !== undefined &&
+        seededReferenceHex === cached?.referenceHex
+          ? lease.adoptIfLive()
+          : undefined
       if (adopted !== undefined) {
         // Diagnostic: this re-binds a CACHED lease with no Swarm scan and no
         // intent round. If two devices both adopt partition 0 from stale
@@ -1169,6 +1183,12 @@ export class BatchWriteCoordinator {
           // evict (idle-holder-crosses-an-epoch). Undefined in legacy single-
           // partition mode → the heartbeat stays a bare pointer write.
           await lease.heartbeatStatePointer(this.deps.stamper.getLocalCounter())
+          // The heartbeat may have re-pinned under a new reference: name it in
+          // the lease cache and commit it to the rows, as an upload's publish
+          // does, or a reload would adopt rows certified for the superseded
+          // one and heartbeat that back (its chunks no longer protected).
+          this.deps.writeLeaseCache?.(lease.serialize())
+          await this.deps.flushStamperState?.()
         })
         this.pointerHeartbeatFailingSince = undefined
       } catch (err) {
@@ -1230,6 +1250,10 @@ export class BatchWriteCoordinator {
           err,
         )
       }
+      // Commit the release's reference to the rows while the lane is still
+      // bound (we hold the write lock), so this device's next acquire of the
+      // same lane resumes from its rows instead of downloading the state.
+      await this.deps.flushStamperState?.()
     }
     this.deps.stamper.unbindPartition()
     this.partitionLease = undefined

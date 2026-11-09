@@ -13,7 +13,7 @@
  * `floor(32768 / w)` buckets (4096 bytes at `w` bits), so the leaf count
  * follows from `w` alone, and `w` follows the *spread* of the counters, not
  * the batch depth: a dilute changes no byte (#463). Lane counters are Poisson
- * over the buckets, so a real drive packs into 8–20 leaves where a fixed
+ * over the buckets, so a real drive packs into 7–23 leaves where a fixed
  * uint16 needed 32 and uint32 64, on the takeover read as much as the publish.
  *
  * The SBU1 root is not shared: our reference chunk carries the frame, the

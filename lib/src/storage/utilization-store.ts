@@ -52,8 +52,6 @@ export interface ChunkCacheEntry {
  */
 export interface BatchMetadata {
   batchId: string
-  lastSync: number
-  chunkCount: number
   /**
    * The v2 partition-state reference chunk (hex) this device's cache rows were
    * last in sync with, and the lane it belongs to. On a cold acquire of that
@@ -377,19 +375,22 @@ export class UtilizationStoreDB {
       }
       read.onsuccess = () => {
         const existing = read.result as BatchMetadata | undefined
-        const write = store.put({
-          lastSync: Date.now(),
-          chunkCount: 0,
-          ...existing,
-          ...patch(existing),
-          batchId,
-        })
+        let next: BatchMetadata
+        try {
+          next = { ...existing, ...patch(existing), batchId }
+        } catch (error) {
+          // Thrown inside an IndexedDB callback the error would be lost to the
+          // event loop and the transaction aborted with no `error` of its own
+          reject(error)
+          transaction.abort()
+          return
+        }
+        const write = store.put(next)
         write.onerror = () => {
           reject(new Error(`Failed to put metadata: ${write.error}`))
         }
       }
       transaction.oncomplete = () => resolve()
-      // A `patch` that throws inside the read callback aborts the transaction
       transaction.onabort = transaction.onerror = () => {
         reject(new Error(`Failed to update metadata: ${transaction.error}`))
       }

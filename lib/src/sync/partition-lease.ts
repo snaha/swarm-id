@@ -163,6 +163,14 @@ export interface PartitionLeaseStateSnapshot {
   deviceId: string
   batchId: string
   self?: SelfLease
+  /**
+   * The partition-state reference the lease last read or published for
+   * `self`. The coordinator's adopt fast path re-binds the stamper's cache
+   * rows only when their certification names this same reference: rows
+   * certified for an older publish are below the counter the pointer names,
+   * and adopting them would re-issue the acked writes in between.
+   */
+  referenceHex?: string
 }
 
 export class PartitionLease {
@@ -1607,6 +1615,7 @@ export class PartitionLease {
       deviceId: this.opts.deviceId,
       batchId: this.opts.batchId.toHex(),
       self: this.self,
+      referenceHex: this.lastReferenceHex,
     }
   }
 

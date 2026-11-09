@@ -1221,13 +1221,7 @@ describe("UtilizationAwareStamper synced reference", () => {
         patch: (existing: BatchMetadata | undefined) => Partial<BatchMetadata>,
       ) => {
         const existing = metaStore.get(batchId)
-        metaStore.set(batchId, {
-          lastSync: 0,
-          chunkCount: 0,
-          ...existing,
-          ...patch(existing),
-          batchId,
-        })
+        metaStore.set(batchId, { ...existing, ...patch(existing), batchId })
       },
     } as unknown as UtilizationStoreDB
   }
@@ -1253,7 +1247,7 @@ describe("UtilizationAwareStamper synced reference", () => {
         patch: (existing: BatchMetadata | undefined) => Partial<BatchMetadata>,
       ) => {
         await later()
-        meta = { lastSync: 0, chunkCount: 0, ...meta, ...patch(meta), batchId }
+        meta = { ...meta, ...patch(meta), batchId }
       },
     } as unknown as UtilizationStoreDB
   }

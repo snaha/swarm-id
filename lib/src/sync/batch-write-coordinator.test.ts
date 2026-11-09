@@ -937,7 +937,7 @@ describe("BatchWriteCoordinator — idle-yield under the write lock", () => {
   // 30s pause was pure UX cost). These tests declare one.
   const RIVAL_DEPS = { knownDeviceIds: () => [SELF, "device-rival-1"] }
 
-  it("yields an idle lease: releases, unbinds, emits the transition, announces", async () => {
+  it("yields an idle lease: releases, flushes, unbinds, emits the transition, announces", async () => {
     const calls: string[] = []
     const stamper = makeStamper(calls)
     const onLeaseChange = vi.fn()
@@ -947,11 +947,17 @@ describe("BatchWriteCoordinator — idle-yield under the write lock", () => {
         stamper: stamper as unknown as BatchWriteCoordinatorDeps["stamper"],
         onLeaseChange,
         onLeaseReleased,
+        flushStamperState: async () => {
+          calls.push("flush")
+        },
         ...RIVAL_DEPS,
       }),
     )
     const internals = coordinator as unknown as Internals
     const lease = makeLease({ partition: 0 })
+    lease.release = vi.fn(async () => {
+      calls.push("release")
+    })
     internals.partitionLease = lease
     internals.activeUploadCount = 0
     internals.lastLeaseActivityAt = 0 // idle for longer than IDLE_YIELD_MS
@@ -960,6 +966,10 @@ describe("BatchWriteCoordinator — idle-yield under the write lock", () => {
 
     expect(lease.release).toHaveBeenCalledTimes(1)
     expect(stamper.unbindPartition).toHaveBeenCalledTimes(1)
+    // The release publishes the final counter; the flush that follows commits
+    // its reference while the lane is still bound, so this device's next
+    // acquire of the same lane resumes from its rows instead of downloading
+    expect(calls).toEqual(["release", "flush", "unbind"])
     expect(coordinator.currentPartition).toBeUndefined()
     expect(onLeaseChange).toHaveBeenLastCalledWith({
       currentPartition: undefined,
@@ -1073,7 +1083,7 @@ describe("BatchWriteCoordinator — adopt fast path seeds the heartbeat pointer"
     const coordinator = new BatchWriteCoordinator(
       makeDeps({
         stamper: stamper as unknown as BatchWriteCoordinatorDeps["stamper"],
-        readLeaseCache: () => cachedLease(2),
+        readLeaseCache: () => cachedLease(2, "deadbeef"),
         mode: "oneshot", // no refresh timer to leak in the test
       }),
     )
@@ -1083,6 +1093,72 @@ describe("BatchWriteCoordinator — adopt fast path seeds the heartbeat pointer"
     expect(stamper.getSyncedReference).toHaveBeenCalledWith(2)
     expect(lease.seedReferenceHex).toHaveBeenCalledWith("deadbeef")
     expect(lease.acquire).not.toHaveBeenCalled()
+  })
+
+  it("takes the cold acquire when the rows are certified for an older publish than the cached lease's", async () => {
+    // The lease cache names the reference the lease last read or published;
+    // the rows' certification names the counter they hold. A publish whose
+    // flush never landed (tab died, IndexedDB failed) leaves the two apart,
+    // and the rows below the published counter: adopting them would re-issue
+    // the acked write's slots.
+    const lease = makeLease({
+      acquireResult: { partition: 2, partitionCount: 4, isReadOnly: false },
+    })
+    lease.adoptIfLive = vi.fn(() => 2)
+    leaseController.lease = lease
+    const stamper = makeStamper([])
+    stamper.getSyncedReference = vi.fn(async () => "older")
+    const coordinator = new BatchWriteCoordinator(
+      makeDeps({
+        stamper: stamper as unknown as BatchWriteCoordinatorDeps["stamper"],
+        readLeaseCache: () => cachedLease(2, "deadbeef"),
+        mode: "oneshot",
+      }),
+    )
+
+    await coordinator.withWrite(async () => "ok", { wait: "block" })
+
+    expect(lease.adoptIfLive).not.toHaveBeenCalled()
+    expect(lease.acquire).toHaveBeenCalled()
+    expect(lease.seedReferenceHex).not.toHaveBeenCalled()
+  })
+
+  it("rewrites the lease cache with the publish's reference before acking the write", async () => {
+    // So a reload within the TTL can tell rows certified for an older publish
+    // from the one the pointer names (see the test above).
+    leaseController.lease = makeLease({
+      acquireResult: { partition: 1, partitionCount: 4, isReadOnly: false },
+    })
+    const lease = leaseController.lease
+    const calls: string[] = []
+    lease.publishState = vi.fn(async () => {
+      calls.push("publish")
+      lease.serialize = vi.fn(() => ({ v: 1, referenceHex: "published" }))
+    })
+    const stamper = makeStamper(calls)
+    const writeLeaseCache = vi.fn((snap: unknown) => {
+      calls.push(`cache:${(snap as { referenceHex?: string })?.referenceHex}`)
+    })
+    const coordinator = new BatchWriteCoordinator(
+      makeDeps({
+        stamper: stamper as unknown as BatchWriteCoordinatorDeps["stamper"],
+        writeLeaseCache,
+        flushStamperState: async () => {
+          calls.push("flush")
+        },
+        mode: "oneshot",
+      }),
+    )
+
+    await coordinator.withWrite(async () => "ok", { wait: "block" })
+
+    const publishAt = calls.indexOf("publish")
+    expect(publishAt).toBeGreaterThan(-1)
+    expect(calls.slice(publishAt)).toEqual([
+      "publish",
+      "cache:published",
+      "flush",
+    ])
   })
 
   it("takes the cold acquire instead when the rows are not certified for the cached lane", async () => {
@@ -1114,10 +1190,11 @@ describe("BatchWriteCoordinator — adopt fast path seeds the heartbeat pointer"
 })
 
 /** The lease-cache snapshot a reload within the TTL hydrates from. */
-function cachedLease(partition: number) {
+function cachedLease(partition: number, referenceHex?: string) {
   return {
     deviceId: SELF,
     batchId: BATCH_ID,
+    referenceHex,
     self: {
       partition,
       generation: { timestampMs: 1, tiebreaker: "self" },
@@ -1170,6 +1247,42 @@ describe("BatchWriteCoordinator — state-pointer heartbeat vs in-flight upload"
     await internals.refreshTick(lease)
 
     expect(lease.heartbeatStatePointer).toHaveBeenCalledTimes(1)
+  })
+
+  it("rewrites the lease cache and flushes after the heartbeat: a re-pin publishes a new reference", async () => {
+    // The heartbeat may relocate the retained chunks (a forced full re-pin),
+    // which publishes under a new reference. The cache must name it and the
+    // flush must commit it, as after an upload's publish — or a reload would
+    // adopt rows certified for the superseded reference and heartbeat it back.
+    const calls: string[] = []
+    const stamper = makeStamper(calls)
+    const coordinator = new BatchWriteCoordinator(
+      makeDeps({
+        stamper: stamper as unknown as BatchWriteCoordinatorDeps["stamper"],
+        writeLeaseCache: () => {
+          calls.push("cache")
+        },
+        flushStamperState: async () => {
+          calls.push("flush")
+        },
+      }),
+    )
+    const internals = coordinator as unknown as Internals
+    const lease = makeLease({ partition: 0 })
+    lease.heartbeatStatePointer = vi.fn(async () => {
+      calls.push("heartbeat")
+    })
+    internals.partitionLease = lease
+    internals.activeUploadCount = 0
+    internals.lastLeaseActivityAt = Date.now()
+
+    await internals.refreshTick(lease)
+
+    expect(calls.slice(calls.indexOf("heartbeat"))).toEqual([
+      "heartbeat",
+      "cache",
+      "flush",
+    ])
   })
 
   it("does NOT heartbeat when an upload slips in while the tick queues on the lock", async () => {

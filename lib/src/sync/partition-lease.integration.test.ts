@@ -2358,6 +2358,15 @@ describe("PartitionLease.serialize / hydrate", () => {
     const snap = lease.serialize()
     expect(snap.deviceId).toBe(DEVICE_A)
     expect(snap.self?.partition).toBe(0)
+    // A fresh partition has no published state yet
+    expect(snap.referenceHex).toBeUndefined()
+
+    // The snapshot names the reference the lease last published, so a reload
+    // can tell whether the cache rows' certification is for that publish
+    const counter = new Uint32Array(NUM_BUCKETS)
+    counter[3] = 1
+    await lease.publishState(counter)
+    expect(lease.serialize().referenceHex).toMatch(/^[0-9a-f]{128}$/)
 
     // A fresh instance hydrated from the snapshot sees the same partition.
     const fresh = makeLease({ deviceId: DEVICE_A, bee: bee })
