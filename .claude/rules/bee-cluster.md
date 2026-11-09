@@ -24,7 +24,7 @@ pnpm dev:chain:detach   # the cluster's chain alone, on :9545 (start --without-b
 pnpm dev:chain:stop
 ```
 
-The scripts start a 4-node full network (`--full 4` = queen + 3 full workers). `pnpm dev:cluster`
+The scripts start a 4-node full network (`--full 4` = queen + 3 full workers). `dev:cluster:start` pins Bee with `BEE_VERSION` (bee-compose defaults to an older one); the CI image cache key reads it from there. Keep it at 2.8.1 or newer: `useWebSocket` uploads need it. `pnpm dev:cluster`
 passes anything else through to the CLI (`status`, `--without-bees`, …).
 
 **Bumping bee-compose needs `--pull`, not just `--fresh`.** The chain snapshot is baked into the

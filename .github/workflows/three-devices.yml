@@ -87,16 +87,18 @@ jobs:
       # The same image cache as the integration job: images only, never
       # volumes, so the chain state baked into the image is always fresh —
       # which is also what keeps the worker faucet stocked for every run.
-      # Keyed on the bee-compose version, the only thing the images are built
-      # from, so a lockfile touched for anything else still hits.
+      # Keyed on the bee-compose and Bee versions, the only things the images
+      # are built from, so a lockfile touched for anything else still hits.
       - name: Resolve the cluster version
         id: bee-compose
-        # Guarded: an empty version would leave the key `bee-images--v1`, which
-        # every run would share and no run would notice.
+        # Guarded: an empty version would leave a key every run would share and
+        # no run would notice.
         run: |
           version=$(pnpm -s dev:cluster --version)
           test -n "$version" || { echo "::error::bee-compose printed no version"; exit 1; }
-          echo "version=$version" >> "$GITHUB_OUTPUT"
+          bee=$(grep -o 'BEE_VERSION=[0-9.]*' package.json | cut -d= -f2)
+          test -n "$bee" || { echo "::error::no BEE_VERSION in dev:cluster:start"; exit 1; }
+          echo "version=$version-bee-$bee" >> "$GITHUB_OUTPUT"
 
       - name: Cache Bee cluster images
         id: bee-images

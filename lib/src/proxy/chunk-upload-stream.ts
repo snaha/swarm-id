@@ -6,6 +6,8 @@
  *
  * Uses per-chunk stamping: each message is stamp[113 bytes] + chunkData.
  * The caller is responsible for prepending the marshaled stamp before calling uploadChunk().
+ * A browser WebSocket cannot set request headers, and the stamps are what let the upgrade
+ * go without `swarm-postage-batch-id`. Bee accepts that from 2.8.1 on.
  *
  * Concurrency is controlled via a semaphore pattern: up to `concurrency` chunks
  * can be in-flight (sent but not yet acknowledged). WebSocket message ordering
@@ -15,6 +17,7 @@
 const WS_CHUNK_STREAM_PATH = "/chunks/stream"
 const WS_DEFAULT_CONCURRENCY = 32
 const WS_ACK_TIMEOUT_MS = 900_000 // 15 minutes, matching Bee's streamReadTimeout
+const WS_MIN_BEE_VERSION = "2.8.1"
 
 interface PendingAck {
   resolve: () => void
@@ -55,12 +58,17 @@ export class ChunkUploadStream {
       this.ws = new WebSocket(wsUrl)
       this.ws.binaryType = "arraybuffer"
 
+      let opened = false
       this.ws.onopen = () => {
+        opened = true
         resolve()
       }
 
       this.ws.onerror = () => {
-        const msg = "WebSocket connection error"
+        // A browser hides why an upgrade was refused, so name what it needs.
+        const msg = opened
+          ? "WebSocket connection error"
+          : `Could not open ${wsUrl}. Uploading over WebSocket needs Bee ${WS_MIN_BEE_VERSION} or newer, reached directly: a gateway does not proxy the stream.`
         this.errorMessage = msg
         this.rejectAllPending(new Error(msg))
         reject(new Error(msg))
