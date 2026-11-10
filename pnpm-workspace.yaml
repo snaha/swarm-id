@@ -26,3 +26,27 @@ allowBuilds:
 # and a devDependency that never ships. Delete once the release has aged out.
 minimumReleaseAgeExclude:
   - '@snaha/bee-compose@0.3.0'
+
+# Security fixes for transitive dependencies (`pnpm audit --prod`), each the
+# newest release at least a week old that clears the advisories. An exact target
+# also holds back every later release, security ones included, so each audit
+# pass revisits the whole block: raise an entry that has a newer fix, delete one
+# whose parents have caught up. Not overridden, because no
+# fix exists in the major they need: zod 3 (@coinbase/cdp-sdk, @reown/appkit),
+# svelte 3 and esbuild 0.19 (@web3-onboard/core, built against them), deepmerge
+# (no fixed release published).
+overrides:
+  axios@^1: 1.21.0
+  # bnc-sdk only calls SHA1, so the PBKDF2 flaw is unreachable; 2.x keeps SHA1
+  # on the default export, which is all it imports.
+  crypto-es@^1: 2.1.0
+  esbuild@~0.28: 0.28.2
+  follow-redirects@^1: 1.16.2
+  joi@^17: 17.13.9
+  nanoid@^3: 3.3.20
+  # No fix in 4.x; 5 has the same API.
+  nanoid@^4: 5.1.16
+  picomatch@^2: 2.3.2
+  ws@^8: 8.22.1
+  # Scoped: a bare zod@^4 also rewrites abitype's zod peer range.
+  '@ethersphere/bee-js>zod': 4.6.7
