@@ -11,25 +11,30 @@ name: Release & Publish
 #      creates a GitHub release + tag → the three-device suite runs against a
 #      real cluster → publish runs and publishes to npm only if it passed
 #   3. Manual workflow_dispatch → release-please and the suite are skipped,
-#      publish runs and publishes to npm directly (the override for a release
-#      whose suite run was judged and found wanting for reasons that are not
-#      the release's)
+#      and the package is built and published without them (the override for a
+#      release whose suite run was judged and found wanting for reasons that
+#      are not the release's). It still waits on the npm-publish environment.
+#
+# Only the publish job holds the OIDC token npm trusts, so it runs no
+# dependency code: the build job installs, builds and packs, and publish
+# uploads that tarball and nothing else.
 on:
   push:
     branches:
       - main
   workflow_dispatch: # allows manual publish from the Actions tab
 
-permissions:
-  contents: write # release-please needs to create releases and tags
-  pull-requests: write # release-please needs to create/update release PRs
-  id-token: write # npm OIDC trusted publishing (provenance)
+# Nothing by default; each job asks for what it needs.
+permissions: {}
 
 jobs:
   release-please:
     # Only run on push — skip on manual workflow_dispatch which is for publishing to npm only
     if: github.event_name == 'push'
     runs-on: ubuntu-latest
+    permissions:
+      contents: write # create releases and tags
+      pull-requests: write # create/update release PRs
     outputs:
       release_created: ${{ steps.release.outputs['lib--release_created'] }}
     steps:
@@ -44,8 +49,10 @@ jobs:
     needs: release-please
     if: needs.release-please.outputs.release_created == 'true'
     uses: ./.github/workflows/three-devices.yml
+    permissions:
+      contents: read
 
-  publish:
+  build:
     needs: [release-please, three-devices]
     # Runs on manual dispatch OR when release-please created a release and the
     # suite passed. !failure() is required because GitHub Actions skips
@@ -58,18 +65,13 @@ jobs:
       (github.event_name == 'workflow_dispatch' ||
       (needs.release-please.outputs.release_created == 'true' &&
       needs.three-devices.result == 'success'))
-    # Protection lives in the environment's settings, not here: it must allow
-    # only main and require a reviewer, and npm's trusted publisher must name
-    # it, so a workflow_dispatch from any other branch cannot publish.
-    environment: npm-publish
     runs-on: ubuntu-latest
     permissions:
       contents: read
-      id-token: write
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
 
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
@@ -80,11 +82,37 @@ jobs:
 
       - run: pnpm --filter @snaha/swarm-id build
 
-      - name: Upgrade npm for OIDC support
-        # Exact, not @latest: this step runs with the job's OIDC publish token, so
-        # a compromised npm release would publish as us. Bump by hand.
-        run: npm install -g npm@12.2.1
+      - name: Pack
+        working-directory: lib
+        run: npm pack --pack-destination "$RUNNER_TEMP/package"
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: package
+          path: ${{ runner.temp }}/package/*.tgz
+          if-no-files-found: error
+          retention-days: 1
+
+  publish:
+    needs: build
+    # Protection lives in the environment's settings, not here: it allows only
+    # main, requires a reviewer and admits no admin bypass, and npm's trusted
+    # publisher names it, so no other branch or workflow can publish.
+    environment: npm-publish
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write # npm OIDC trusted publishing (provenance)
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: package
+
+      # No cache: nothing restored from a cache runs beside the token. Node 24
+      # bundles an npm new enough for OIDC publishing (11.5.1+), so none is
+      # installed either.
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
 
       - name: Publish to npm
-        working-directory: lib
-        run: npm publish --provenance --access public
+        run: npm publish ./*.tgz --provenance --access public
