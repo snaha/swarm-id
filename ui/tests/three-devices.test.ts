@@ -28,7 +28,7 @@
  *
  * Skips when the chain, the Bee cluster or the demo is not up.
  */
-import { expect, test } from '@playwright/test'
+import { type Page, expect, test } from '@playwright/test'
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 
@@ -37,6 +37,7 @@ import {
   Device,
   HANDOVER_TIMEOUT_MS,
   IDLE_WAIT_MS,
+  IDLE_YIELD_MS,
   LEASE_REFRESH_MS,
   PEER_YIELD_MIN_IDLE_MS,
   type Seed,
@@ -50,6 +51,48 @@ import {
   sleep,
 } from './devices-rig'
 import { THREE_DEVICES_SEED_FILE } from './global-setup-devices'
+import { ID_ORIGIN } from './helpers'
+
+/**
+ * The live leases this tab's storage records, read from the proxy iframe's own
+ * IndexedDB (`leaseRecordIn`): the record every tab of the device shares.
+ */
+async function recordedLeases(page: Page) {
+  const proxy = page.frames().find((frame) => frame.url().startsWith(ID_ORIGIN))
+  if (!proxy) throw new Error('the page has no proxy iframe')
+  return proxy.evaluate(async () => {
+    type Stored = {
+      leases?: Record<
+        string,
+        {
+          self?: {
+            partition: number
+            generation: { timestampMs: number; tiebreaker: string }
+            leasedUntil: number
+          }
+        }
+      >
+    }
+    const db = await new Promise<IDBDatabase>((resolve, reject) => {
+      const open = indexedDB.open('swarm-utilization-store')
+      open.onsuccess = () => resolve(open.result)
+      open.onerror = () => reject(open.error)
+    })
+    try {
+      const rows = await new Promise<Stored[]>((resolve, reject) => {
+        const all = db.transaction('metadata').objectStore('metadata').getAll()
+        all.onsuccess = () => resolve(all.result as Stored[])
+        all.onerror = () => reject(all.error)
+      })
+      return rows
+        .flatMap((row) => Object.values(row.leases ?? {}))
+        .flatMap((lease) => (lease.self ? [lease.self] : []))
+        .filter((self) => self.leasedUntil > Date.now())
+    } finally {
+      db.close()
+    }
+  })
+}
 
 // Not `serial`: a scenario that fails must not hide the ones after it — the
 // point of the run is a verdict per scenario. Each one re-establishes what it
@@ -227,6 +270,45 @@ test.describe('three devices on two partitions', () => {
       await sibling.close()
     }
     // The tab that stays keeps the lease.
+    await A.upload()
+    expect(await A.partition()).toBe(held)
+  })
+
+  test('an idle tab keeps the partition its sibling tab is uploading through, on one shared lease record', async () => {
+    for (const device of all()) await device.ensureConnected()
+    // Hold something first; an upload acquires when nothing is held.
+    const held = await A.uploadAndHoldOrSkip()
+
+    const sibling = await A.openSiblingTab()
+    try {
+      await expect.poll(() => A.partition(sibling), { timeout: LEASE_REFRESH_MS }).toBe(held)
+      const [claim] = await recordedLeases(A.page)
+      expect(claim?.partition).toBe(held)
+
+      // The first tab goes quiet for longer than the idle yield while the
+      // sibling uploads back to back, leaving no gap a waiting peer's request
+      // could be answered in. Each tab has a timer and an idle clock of its
+      // own; the lease is the device's.
+      const since = Date.now()
+      while (Date.now() - since < IDLE_YIELD_MS + LEASE_REFRESH_MS * 2) {
+        await A.upload(sibling)
+      }
+
+      expect(A.yieldedSince(since)).toBe(false)
+      expect(await A.partition()).toBe(held)
+      expect(await A.partition(sibling)).toBe(held)
+      // Both tabs read one record, still under the claim they started with:
+      // neither dropped the lease and claimed afresh.
+      const [fromFirst] = await recordedLeases(A.page)
+      const [fromSibling] = await recordedLeases(sibling)
+      expect(fromFirst?.generation).toEqual(claim?.generation)
+      expect(fromSibling?.generation).toEqual(claim?.generation)
+      expect(fromSibling?.partition).toBe(held)
+      await expectNoDualHold(all())
+    } finally {
+      await sibling.close()
+    }
+    // The tab that was idle throughout still writes on the lane.
     await A.upload()
     expect(await A.partition()).toBe(held)
   })

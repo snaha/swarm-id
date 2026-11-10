@@ -71,7 +71,6 @@ import {
   STORAGE_KEY_NETWORK_SETTINGS,
   partitionSessionStorageKey,
   PartitionSessionSchemaV1,
-  leaseCacheStorageKey,
 } from "./types"
 import type { PopupToIframeMessage } from "./types"
 import {
@@ -162,8 +161,7 @@ import {
 } from "./sync/published-counter"
 import { deviceHomePartition } from "./sync/partition-lock"
 import { withTimeout } from "./utils/promise"
-import { UtilizationStoreDB } from "./storage/utilization-store"
-import type { PartitionLeaseStateSnapshot } from "./sync/partition-lease"
+import { UtilizationStoreDB, leaseRecordIn } from "./storage/utilization-store"
 import { BatchWriteCoordinator } from "./sync/batch-write-coordinator"
 import {
   getOrCreateDeviceId,
@@ -2334,9 +2332,11 @@ export class SwarmIdProxy {
       swarmEncryptionKey: accountInfo.encryptionKey,
       partitionCount: accountInfo.partitionCount,
       mode: "persistent",
-      readLeaseCache: () => this.readLeaseCache(accountInfo.accountId, batchId),
-      writeLeaseCache: (snap) =>
-        this.writeLeaseCache(accountInfo.accountId, batchId, snap ?? null),
+      leaseRecord: leaseRecordIn(
+        this.utilizationStore,
+        batchId,
+        accountInfo.accountId,
+      ),
       // Bound to this drive, not read at call time: a coordinator torn down
       // mid-write still runs these, and must not flush, or sign with, the
       // drive the session holds by then (#862).
@@ -2409,31 +2409,6 @@ export class SwarmIdProxy {
   private requireDeviceId(): string {
     if (!this.deviceId) this.deviceId = getOrCreateDeviceId()
     return this.deviceId
-  }
-
-  private readLeaseCache(
-    accountId: string,
-    batchId: string,
-  ): PartitionLeaseStateSnapshot | undefined {
-    try {
-      const raw = localStorage.getItem(leaseCacheStorageKey(accountId, batchId))
-      return raw ? (JSON.parse(raw) as PartitionLeaseStateSnapshot) : undefined
-    } catch {
-      return undefined
-    }
-  }
-
-  private writeLeaseCache(
-    accountId: string,
-    batchId: string,
-    snap: PartitionLeaseStateSnapshot | null,
-  ): void {
-    const key = leaseCacheStorageKey(accountId, batchId)
-    if (snap === null) {
-      localStorage.removeItem(key)
-    } else {
-      localStorage.setItem(key, JSON.stringify(snap))
-    }
   }
 
   /**

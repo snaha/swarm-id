@@ -72,7 +72,7 @@ export {
   randomSalt,
 } from "./utils/seed-encryption"
 
-export { UtilizationStoreDB } from "./storage/utilization-store"
+export { UtilizationStoreDB, leaseRecordIn } from "./storage/utilization-store"
 
 export { initProxy } from "./swarm-id-proxy"
 
@@ -107,7 +107,6 @@ export {
   STORAGE_CHALLENGE_KEY,
   STORAGE_KEY_ACCOUNTS,
   STORAGE_KEY_NETWORK_SETTINGS,
-  leaseCacheStorageKey,
 } from "./types"
 
 export type { AccountStateSnapshot } from "./utils/account-state-snapshot"

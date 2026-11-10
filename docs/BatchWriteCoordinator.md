@@ -43,11 +43,14 @@ lane p of batch Y one chunk address, so two coordinators whose slot sets cannot 
 coordinators on two batches without any multi-batch feature
 ([#589](https://github.com/snaha/swarm-id/issues/589)).
 
-The lock SOC on Swarm stays the source of truth for who holds a partition; the local lease cache
-(localStorage, persistent mode only) is just a hint — keyed
-`swarm-id-lease-v2:<accountId>:<batchId>`, because the lease it hints at belongs to one batch and an
-account with a per-app stamp override runs two coordinators. The coordinator is the lifecycle layer
-above `PartitionLease`.
+The lock SOC on Swarm stays the source of truth for who holds a partition. Within a storage
+partition, what this device holds is the **lease record**: one per account and batch, in
+IndexedDB next to the counter rows (`leaseRecordIn`). Every context of the partition — each
+tab's proxy, the SwarmID tab's account sync — is the same device to the lease protocol and holds
+the same lease, each through a `PartitionLease` of its own. The record is written under the
+write lock at every claim, publish and re-pin; a context brings its lease up to it on taking the
+lock, and drops it when the record names another claim or none. The coordinator is the
+lifecycle layer above `PartitionLease`.
 
 ## API
 
@@ -65,7 +68,7 @@ Dependencies are injected — no global storage-manager reach-in:
 | `backupSigner`, `swarmEncryptionKey`                                | Own/read the lock SOCs for this batch's partitions                                                                                                                                                                                                                                  |
 | `partitionCount`                                                    | `<= 1` (legacy single-device accounts) means: never lease, lock-only coordination                                                                                                                                                                                                   |
 | `mode`                                                              | `"persistent"` (proxy) or `"oneshot"` (sync-account) — see below                                                                                                                                                                                                                    |
-| `readLeaseCache` / `writeLeaseCache`                                | Optional local lease-cache hint (persistent mode)                                                                                                                                                                                                                                   |
+| `leaseRecord`                                                       | The storage partition's shared lease record (`leaseRecordIn`); omit for a caller with no siblings and no reload to survive                                                                                                                                                          |
 | `flushStamperState`                                                 | Flush stamper bucket state after a write (proxy: `saveStamperStateIfNeeded`)                                                                                                                                                                                                        |
 | `getWorkerPool`                                                     | Build/reuse a parallel-signing worker pool for `useWorkers` uploads. The pool only signs: every slot still comes from `stamper` (`assignSlot`)                                                                                                                                      |
 | `onLeaseChange`                                                     | Fired on every partition / read-only transition (proxy → `emitConnectionInfoIfChanged`)                                                                                                                                                                                             |
@@ -111,7 +114,7 @@ Methods and getters:
 ## Lease lifecycle
 
 - **Acquire.** `PartitionLease.acquire` always re-reads and reconciles against the lock SOCs
-  before binding — the cache is only a `hydrate` hint. A still-valid cached lease (e.g. a page
+  before binding — the lease record is only a `hydrate` hint. A still-valid recorded lease (e.g. a page
   reload within the TTL) is **re-adopted from local state alone** (`adoptIfLive`) with no lock-SOC
   scan/write, so it survives transient Bee 500s; the refresh tick then reconciles with Swarm and
   demotes only on a confirmed foreign holder. On success the stamper gets `bindPartition` and
@@ -158,10 +161,11 @@ Methods and getters:
   flight (and a slow tick can overlap the next one). Every tick therefore re-checks
   `disposed` / `partitionLease !== lease` at entry, before arming the displacement breaker,
   inside the locked demote (mirroring the idle-yield guards), and before the tail heartbeat +
-  cache write — a stale tick must not re-claim a released partition, demote a re-acquired
-  lease, or resurrect a cleared lease cache that a later acquire would `adoptIfLive`.
+  record write — a stale tick must not re-claim a released partition, demote a re-acquired
+  lease, or put back a cleared lease record that a later acquire would `adoptIfLive`. A tick also
+  reads the record first and touches nothing when it names another claim.
 - **Failure unwind.** `acquire()`'s cleanup undoes a partial commit: if a consumer callback
-  (`writeLeaseCache`, `onLeaseAcquired`) throws after `bindPartition`/`startRefreshTimer`, the
+  (`onLeaseAcquired`) throws, or the lease record cannot be written, after `bindPartition`/`startRefreshTimer`, the
   catch clears the timer and invalidates + unbinds the stamper so neither outlives the dropped
   lease record.
 - **Error classification.** `acquire()` propagates operational failures (a lock-SOC scan/claim

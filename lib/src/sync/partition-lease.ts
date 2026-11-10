@@ -1609,6 +1609,34 @@ export class PartitionLease {
   }
 
   /**
+   * Bring this object up to the lease record another tab of the storage
+   * partition has moved on, for the same lane and claim: take the later
+   * expiry, and the published reference. A reference this object did not
+   * publish leaves it without a baseline to diff against, so its next publish
+   * goes out in full.
+   */
+  follow(record: PartitionLeaseStateSnapshot): void {
+    if (!this.self || !record.self) return
+    if (record.self.leasedUntil > this.self.leasedUntil) {
+      this.self = { ...this.self, leasedUntil: record.self.leasedUntil }
+      const holder = this.holders.get(this.self.partition)
+      if (holder) {
+        this.holders.set(this.self.partition, {
+          ...holder,
+          leasedUntil: this.self.leasedUntil,
+        })
+      }
+    }
+    if (record.referenceHex !== this.lastReferenceHex) {
+      this.lastReferenceHex = record.referenceHex
+      this.publishedReferences = undefined
+      this.publishedCounter = undefined
+      this.publishedFrame = undefined
+      this.lastFullPublishEpoch = undefined
+    }
+  }
+
+  /**
    * Serialise the lease state for the local persistence cache. The cache is
    * a fast hint only — callers re-validate `self` against the lock SOC
    * (`refresh()` / `acquire()`) before trusting it.

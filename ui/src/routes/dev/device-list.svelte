@@ -15,9 +15,10 @@
     PartitionLease,
     type PartitionLeaseStateSnapshot,
     type SyncedAccount,
+    UtilizationStoreDB,
     deriveSwarmEncryptionKey,
     getOrCreateDeviceId,
-    leaseCacheStorageKey,
+    leaseRecordIn,
   } from '@snaha/swarm-id/internal'
 
   import { browser } from '$app/environment'
@@ -31,10 +32,9 @@
 
   const { account }: { account: SyncedAccount } = $props()
 
-  // Re-read the shared lease cache this often so the self row picks up the
-  // proxy's per-tick `leasedUntil` advances even when `storage` events don't
-  // cross the iframe/tab boundary.
-  const LEASE_CACHE_POLL_MS = 3_000
+  // Re-read the shared lease record this often so the self row picks up the
+  // proxy's per-tick `leasedUntil` advances.
+  const LEASE_RECORD_POLL_MS = 3_000
   /** Quick enough that an Online badge follows a presence beat without a
    *  visible lag, and it re-renders the relative timestamps for free. */
   const RERENDER_MS = 5_000
@@ -59,14 +59,13 @@
   // Best-effort: empty when the Bee node can't serve the lock SOC chunk.
   let holders = $state<{ partition: number; deviceId: string; leasedUntil: number }[]>([])
 
-  // SELF active state, read from the proxy-written localStorage lease cache
-  // (`swarm-id-lease-v2:<accountId>:<batchId>`). Shared across same-origin tabs,
-  // so it reflects the demo iframe's held partition without a Swarm read (which
-  // is currently 500ing). The proxy is the sole writer; refreshed ~every 10 s.
+  // SELF active state, read from the lease record the proxy keeps in
+  // IndexedDB (`leaseRecordIn`). Shared across same-origin tabs, so it reflects
+  // the demo iframe's held partition without a Swarm read.
   //
   // The account default is the batch shown, matching the holders read below: a
   // lane belongs to one batch, so an app running on a per-app stamp override
-  // caches under its own key and is not what this panel is about.
+  // has a record of its own and is not what this panel is about.
   let leaseCache = $state<PartitionLeaseStateSnapshot | undefined>(undefined)
 
   $effect(() => {
@@ -76,22 +75,22 @@
       leaseCache = undefined
       return
     }
-    const key = leaseCacheStorageKey(account.id.toHex(), defaultBatch.toHex())
-    const read = () => {
-      const raw = localStorage.getItem(key)
-      leaseCache = raw ? (JSON.parse(raw) as PartitionLeaseStateSnapshot) : undefined
-    }
+    const store = new UtilizationStoreDB()
+    const record = leaseRecordIn(store, defaultBatch.toHex(), account.id.toHex())
+    let stopped = false
+    const read = () =>
+      void record.read().then(
+        (snapshot) => {
+          if (!stopped) leaseCache = snapshot
+        },
+        () => undefined,
+      )
     read()
-    const onStorage = (e: StorageEvent) => {
-      if (e.key === key) read()
-    }
-    window.addEventListener('storage', onStorage)
-    // `storage` events don't reliably cross the iframe/tab boundary, so also
-    // poll the cache to pick up the proxy's per-tick `leasedUntil` advances.
-    const poll = setInterval(read, LEASE_CACHE_POLL_MS)
+    const poll = setInterval(read, LEASE_RECORD_POLL_MS)
     return () => {
-      window.removeEventListener('storage', onStorage)
+      stopped = true
       clearInterval(poll)
+      store.close()
     }
   })
 
@@ -356,7 +355,7 @@
       <p class="font-mono text-sm">this device: {thisDeviceId ?? '—'}</p>
       {#if leaseCache?.self}
         <p class="font-mono text-sm">
-          self (localStorage): partition {leaseCache.self.partition} — {leaseLiveness(
+          self (lease record): partition {leaseCache.self.partition} — {leaseLiveness(
             leaseCache.self.leasedUntil,
           )}
         </p>

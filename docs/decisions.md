@@ -7,6 +7,31 @@ present and may point at an issue or PR; the reasons live here.
 
 A PR that makes or changes a decision adds the entry in the same PR.
 
+## 2026-11-10 A storage partition's lease is one record in IndexedDB
+
+**Context.** Every tab of a storage partition has the same device id, so to the
+lease protocol they hold one lease. Each tab kept its own `PartitionLease`, and
+a `localStorage` cache that every tab overwrote from its own copy. An idle
+tab's heartbeat re-pointed the state pointer at its older reference; its idle
+timer released a lane a sibling was uploading through; two tabs torn down
+together published the older counter last; and the SwarmID tab's account sync
+published on the lane without telling anyone.
+
+**Decision.** The lease a partition holds is one record per account and batch,
+in the IndexedDB metadata next to the counter rows (`leaseRecordIn`), written
+under the write lock at every claim, publish and re-pin. A context brings its
+lease up to the record on taking the lock, drops it when the record names
+another claim or none, and a refresh tick reads the record before it touches
+Swarm and writes back only the expiry. Teardown releases, and clears the
+record, only for the context whose lease the record describes. The
+`localStorage` lease cache is removed. Plan: `docs/Lease-State-Plan.md`.
+
+**Why.** Copies that have to be reconciled were the defect. IndexedDB rather
+than `localStorage` because the counter rows are already there, the
+coordinator already reads that metadata on taking the lock, and one store
+cannot disagree with itself after a crash or an eviction. Nothing on the write
+path needs a synchronous read.
+
 ## 2026-11-10 A tab folds in the cache rows another tab wrote, on taking the write lock
 
 **Context.** The counter rows in IndexedDB are shared by every tab of a storage

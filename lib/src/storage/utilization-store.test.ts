@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import {
   UtilizationStoreDB,
   UtilizationStoreUnavailableError,
+  leaseRecordIn,
 } from "./utilization-store"
 
 const BATCH = "ab".repeat(32)
@@ -69,5 +70,95 @@ describe("UtilizationStoreDB metadata", () => {
     await expect(store.getMetadata(BATCH)).rejects.toBeInstanceOf(
       UtilizationStoreUnavailableError,
     )
+  })
+})
+
+describe("leaseRecordIn", () => {
+  const ACCOUNT = "aa".repeat(20)
+  const lease = (deviceId: string, batchId = BATCH) => ({
+    deviceId,
+    batchId,
+    self: {
+      partition: 1,
+      generation: { timestampMs: 7, tiebreaker: deviceId },
+      acquiredAt: 7,
+      leasedUntil: 30_007,
+    },
+    referenceHex: "published",
+  })
+  let store: UtilizationStoreDB
+
+  beforeEach(() => {
+    vi.stubGlobal("indexedDB", new IDBFactory())
+    store = new UtilizationStoreDB()
+  })
+
+  afterEach(() => {
+    store.close()
+    vi.unstubAllGlobals()
+  })
+
+  it("is one record for every context that opens the same account and batch", async () => {
+    const tab = leaseRecordIn(store, BATCH, ACCOUNT)
+    const sibling = leaseRecordIn(new UtilizationStoreDB(), BATCH, ACCOUNT)
+    expect(await sibling.read()).toBeUndefined()
+
+    await tab.update(() => lease("device"))
+    expect(await sibling.read()).toEqual(lease("device"))
+
+    await sibling.update(() => undefined)
+    expect(await tab.read()).toBeUndefined()
+  })
+
+  it("hands the update what is stored, so a renewal extends the record another tab wrote", async () => {
+    const tab = leaseRecordIn(store, BATCH, ACCOUNT)
+    const sibling = leaseRecordIn(store, BATCH, ACCOUNT)
+    await tab.update(() => lease("device"))
+
+    await sibling.update((existing) => ({
+      ...existing!,
+      self: { ...existing!.self!, leasedUntil: 60_000 },
+    }))
+
+    const stored = await tab.read()
+    expect(stored?.self?.leasedUntil).toBe(60_000)
+    expect(stored?.referenceHex).toBe("published")
+  })
+
+  it("keeps another batch's lease and another account's apart", async () => {
+    // An account has a coordinator per drive, and the store is keyed by batch
+    const otherBatch = "dd".repeat(32)
+    const otherAccount = "bb".repeat(20)
+    await leaseRecordIn(store, otherBatch, ACCOUNT).update(() =>
+      lease("other-drive", otherBatch),
+    )
+    await leaseRecordIn(store, BATCH, otherAccount).update(() =>
+      lease("other-account"),
+    )
+
+    const record = leaseRecordIn(store, BATCH, ACCOUNT)
+    expect(await record.read()).toBeUndefined()
+    await record.update(() => lease("device"))
+    await record.update(() => undefined)
+
+    expect(await leaseRecordIn(store, otherBatch, ACCOUNT).read()).toEqual(
+      lease("other-drive", otherBatch),
+    )
+    expect(await leaseRecordIn(store, BATCH, otherAccount).read()).toEqual(
+      lease("other-account"),
+    )
+  })
+
+  it("leaves the rows' metadata alone", async () => {
+    await store.updateMetadata(BATCH, () => ({ rowsPartition: 1 }))
+    await leaseRecordIn(store, BATCH, ACCOUNT).update(() => lease("device"))
+    expect((await store.getMetadata(BATCH))?.rowsPartition).toBe(1)
+  })
+
+  it("reads empty and drops writes where IndexedDB is unavailable", async () => {
+    vi.stubGlobal("indexedDB", undefined)
+    const record = leaseRecordIn(new UtilizationStoreDB(), BATCH, ACCOUNT)
+    await record.update(() => lease("device"))
+    expect(await record.read()).toBeUndefined()
   })
 })
