@@ -58,6 +58,10 @@ jobs:
       (github.event_name == 'workflow_dispatch' ||
       (needs.release-please.outputs.release_created == 'true' &&
       needs.three-devices.result == 'success'))
+    # Protection lives in the environment's settings, not here: it must allow
+    # only main and require a reviewer, and npm's trusted publisher must name
+    # it, so a workflow_dispatch from any other branch cannot publish.
+    environment: npm-publish
     runs-on: ubuntu-latest
     permissions:
       contents: read
