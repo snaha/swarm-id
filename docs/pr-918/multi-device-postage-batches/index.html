@@ -454,7 +454,12 @@ first publish of a session is incremental.</p>
 a device last synced with, it skips the downloads and reuses its local counter. A device keeps
 one such reference, for the lane its cached counter rows describe: the rows hold a single
 lane’s counter, so a lane switch rewrites every row before the new lane is certified, and a
-reference never vouches for rows written for another lane.</p>
+reference never vouches for rows written for another lane. The rows are shared by every tab,
+each with its own counter table: on taking the write lock a tab folds in, by per-bucket
+maximum, whatever another tab has written since, so no tab stamps or resumes from a table
+behind the rows. The first publish after a resume is incremental only when the rows hold
+exactly the counter the reference names; after an upload whose publish failed they are ahead
+of it, and that publish goes out in full.</p>
 <p>When the pointer exists but the reference chunk or any counter chunk cannot be read, or fails
 the checks above, the read reports failure without caching the bad reference, and the device
 falls back to <strong>read-only without claiming the partition</strong>, retried on the next acquire. It
