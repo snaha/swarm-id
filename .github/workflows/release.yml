@@ -77,7 +77,9 @@ jobs:
       - run: pnpm --filter @snaha/swarm-id build
 
       - name: Upgrade npm for OIDC support
-        run: npm install -g npm@latest
+        # Exact, not @latest: this step runs with the job's OIDC publish token, so
+        # a compromised npm release would publish as us. Bump by hand.
+        run: npm install -g npm@12.2.1
 
       - name: Publish to npm
         working-directory: lib
