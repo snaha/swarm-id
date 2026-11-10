@@ -30,28 +30,39 @@ describe("WebSocket upload against live cluster", () => {
     vi.unstubAllGlobals()
   })
 
-  it("streams an encrypted upload that reads back byte-identical", async () => {
-    const opened: string[] = []
-    class RecordingWebSocket extends WebSocket {
-      constructor(url: string | URL) {
-        super(url)
-        opened.push(String(url))
+  it.each([
+    { kind: "direct plain", options: {} },
+    { kind: "deferred plain", options: { deferred: true } },
+    { kind: "direct encrypted", options: { encryptionKey: true as const } },
+    {
+      kind: "deferred encrypted",
+      options: { encryptionKey: true as const, deferred: true },
+    },
+  ])(
+    "streams a $kind upload that reads back byte-identical",
+    async ({ options }) => {
+      const opened: string[] = []
+      class RecordingWebSocket extends WebSocket {
+        constructor(url: string | URL) {
+          super(url)
+          opened.push(String(url))
+        }
       }
-    }
-    vi.stubGlobal("WebSocket", RecordingWebSocket)
+      vi.stubGlobal("WebSocket", RecordingWebSocket)
 
-    const data = new Uint8Array(PAYLOAD_SIZE)
-    crypto.getRandomValues(data)
+      const data = new Uint8Array(PAYLOAD_SIZE)
+      crypto.getRandomValues(data)
 
-    const { reference } = await uploadData(target, data, {
-      encryptionKey: true,
-      webSocket: {},
-    })
+      const { reference } = await uploadData(target, data, {
+        ...options,
+        webSocket: {},
+      })
 
-    expect(opened).toHaveLength(1)
-    expect(opened[0]).toContain("/chunks/stream")
+      expect(opened).toHaveLength(1)
+      expect(opened[0]).toContain("/chunks/stream")
 
-    const downloaded = await downloadDataWithChunkAPI(bee, reference)
-    expect(downloaded).toEqual(data)
-  })
+      const downloaded = await downloadDataWithChunkAPI(bee, reference)
+      expect(downloaded).toEqual(data)
+    },
+  )
 })

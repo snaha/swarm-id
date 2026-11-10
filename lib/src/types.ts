@@ -189,8 +189,12 @@ export interface UploadOptions {
   onProgress?: (progress: UploadProgress) => void
   /**
    * Use WebSocket for chunk upload instead of HTTP. Per-chunk stamping is used.
-   * Needs Bee 2.8.1 or newer, reached directly rather than through a gateway.
-   * Applies to encrypted uploads; a plain upload goes over HTTP regardless.
+   * Needs Bee 2.8.1 or newer, reached directly: through a gateway the upload
+   * fails. Ignored in subsidised mode, where the gateway does the stamping.
+   *
+   * Bee defers a stream's chunks exactly when the stream has a tag, so `tag`
+   * is sent only with `deferred: true`, and a direct upload reports no tag.
+   * Bee cannot pin over the stream, so combining this with `pin` is rejected.
    */
   useWebSocket?: boolean
   /** Use Web Workers for parallel stamp signing. Speeds up upload on multi-core CPUs. */
