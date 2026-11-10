@@ -41,6 +41,6 @@
     "eslint": "10.9.1",
     "prettier": "3.7.3",
     "typescript": "5.8.3",
-    "vitest": "4.0.14"
+    "vitest": "4.1.12"
   }
 }
