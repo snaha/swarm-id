@@ -70,6 +70,7 @@ import {
   UtilizationAwareStamper,
 } from "../utils/batch-utilization"
 import { leafCount } from "./counter-codec"
+import { memoryUtilizationStore } from "../storage/memory-utilization-store"
 import { BACKUP_KEY_LABEL, deriveSecret } from "../utils/key-derivation"
 import { uint8ArrayToHex } from "../utils/hex"
 import { makeEncryptedContentAddressedChunk } from "../chunk"
@@ -1973,24 +1974,7 @@ describe("PartitionLease.acquire — a cache-hit claim and its publish baseline 
   const AHEAD_BUCKET = 100
   const NEW_BUCKET = 20_000
 
-  function makeRowsCache() {
-    const rows = new Map<number, unknown>()
-    let metadata: object | undefined
-    return {
-      getAllChunks: async () =>
-        [...rows.entries()].sort(([a], [b]) => a - b).map(([, row]) => row),
-      putChunk: async (entry: { chunkIndex: number }) => {
-        rows.set(entry.chunkIndex, { ...entry })
-      },
-      getMetadata: async () => metadata,
-      updateMetadata: async (
-        batchId: string,
-        patch: (existing: object | undefined) => object,
-      ) => {
-        metadata = { ...metadata, ...patch(metadata), batchId }
-      },
-    } as unknown as Parameters<typeof UtilizationAwareStamper.create>[3]
-  }
+  const makeRowsCache = () => memoryUtilizationStore()
   const open = (cache: ReturnType<typeof makeRowsCache>) =>
     UtilizationAwareStamper.create(
       "11".repeat(32),

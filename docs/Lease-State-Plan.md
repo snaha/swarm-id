@@ -1,6 +1,6 @@
 # One source of truth for a lane's lease state: plan
 
-Status: **in progress** (2026-11-10). Phase 1 is built; phases 2 to 5 are not. The
+Status: **in progress** (2026-11-10). Phases 1 and 2 are built; phases 3 to 5 are not. The
 decisions taken are at the end. Follows [#918](https://github.com/snaha/swarm-id/pull/918) and the
 `fix/one-lease-across-tabs` branch stacked on it.
 
@@ -120,7 +120,8 @@ one-shot writer standing in for account sync.
   transaction (joined in phase 3 by the published-counter rows).
 
 Done when: the "tab dies mid-flush" tests pass without the two-bump generation and without
-clearing the lane before a rewrite.
+clearing the lane before a rewrite. **Built**: `UtilizationStoreDB.writeRows`; a failed
+flush writes nothing and the next one lands whole.
 
 ### 3. Shared baseline
 

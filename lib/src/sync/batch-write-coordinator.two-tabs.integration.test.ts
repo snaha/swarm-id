@@ -50,6 +50,7 @@ import {
   PARTITION_COUNT,
   UtilizationAwareStamper,
 } from "../utils/batch-utilization"
+import { memoryUtilizationStore } from "../storage/memory-utilization-store"
 import { withBatchWriteLock } from "../utils/batch-write-lock"
 import { BACKUP_KEY_LABEL, deriveSecret } from "../utils/key-derivation"
 import { uint8ArrayToHex } from "../utils/hex"
@@ -97,22 +98,7 @@ beforeEach(async () => {
   const store = new MockChunkStore()
   bee = new MockBee(store)
   mockFetch(store, backupSigner.publicKey().address())
-  const rows = new Map<number, unknown>()
-  let metadata: object | undefined
-  rowsCache = {
-    getAllChunks: async () =>
-      [...rows.entries()].sort(([a], [b]) => a - b).map(([, row]) => row),
-    putChunk: async (entry: { chunkIndex: number }) => {
-      rows.set(entry.chunkIndex, { ...entry })
-    },
-    getMetadata: async () => metadata,
-    updateMetadata: async (
-      batchId: string,
-      patch: (existing: object | undefined) => object,
-    ) => {
-      metadata = { ...metadata, ...patch(metadata), batchId }
-    },
-  } as unknown as Cache
+  rowsCache = memoryUtilizationStore()
   leaseCache = undefined
   leaseCacheWorks = true
   knownDevices = [DEVICE]

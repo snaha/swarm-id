@@ -33,6 +33,7 @@ import {
 import { stamp as stampAtSlot } from "@ethersphere/core-sdk"
 import { Binary } from "cafe-utility"
 import {
+  type ChunkCacheEntry,
   UtilizationStoreUnavailableError,
   type BatchMetadata,
   type UtilizationStoreDB,
@@ -1707,114 +1708,100 @@ export class UtilizationAwareStamper implements Stamper, SlotAssigner {
     // stamped; a caller that did not must still never lower a row.
     await this.syncRows()
 
-    if (!this.dirty) {
-      // The rows already hold the table, so a reference the lease recorded
-      // for it (a release or a full re-pin publishes without a new slot) is
-      // committed here, with nothing to write first.
-      await this.commitCertification(false)
-      return
-    }
-
-    // Say what is about to happen to the rows before touching one, so a tab
-    // dying midway leaves nothing certified that is not true:
-    // - a generation other tabs have not seen, so they fold in what landed;
-    // - no lane, when every row is being rewritten (rows nothing resumes from);
-    // - no claim to be exactly the reference's counter, when data rows are
-    //   going past it. The patch after the rows restores what still holds.
-    const rewriteAll = this.rowsStale
-    const dataRows = this.dirtyBuckets.size > 0
-    await this.patchMetadata((existing) => {
-      this.rowsGeneration = (existing?.rowsGeneration ?? 0) + 1
-      return {
-        rowsGeneration: this.rowsGeneration,
-        ...(rewriteAll ? { rowsPartition: undefined } : {}),
-        ...(dataRows && existing?.stateReference
-          ? { stateReference: { ...existing.stateReference, exact: false } }
-          : {}),
+    // Which rows: the ones written to, or — after a bind to a table the rows
+    // do not hold — all of them. The rows must describe one lane, or a cold
+    // start would resume from a table mixing two.
+    const allRows = this.rowsStale
+    const chunkIndexes = new Set<number>()
+    if (this.dirty) {
+      for (const bucket of this.dirtyBuckets) {
+        chunkIndexes.add(getChunkIndexForBucket(bucket))
       }
-    })
-    if (rewriteAll) this.rowsPartition = undefined
-
-    // Mark utilization chunks as dirty for the affected buckets
-    const dirtyChunkIndexes = new Set<number>()
-    for (const bucket of this.dirtyBuckets) {
-      const chunkIndex = getChunkIndexForBucket(bucket)
-      dirtyChunkIndexes.add(chunkIndex)
-      this.utilizationState.chunks[chunkIndex].dirty = true
-    }
-    // After a lane switch every row is stale, not only the written ones: the
-    // rows must describe one lane, or a cold start would resume from a table
-    // mixing two — the previous lane's counters wherever this one wrote nothing.
-    if (this.rowsStale) {
-      for (let i = 0; i < NUM_UTILIZATION_CHUNKS; i++) dirtyChunkIndexes.add(i)
-    }
-
-    // Save dirty chunks to cache. We do not upload here, but we still record
-    // the contentHash that an upload *would* assign — i.e. the BMT address of
-    // the encrypted chunk for this plaintext + the per-chunk derived key. That
-    // is what the upload-path dedup at saveUtilizationState compares against,
-    // so storing anything else (or using a different key) would force a
-    // redundant re-upload of every flushed chunk on the next sync.
-    try {
-      const claimedBuckets = claimedBucketsForCleanChunks(this.utilizationState)
-      // Reserve each partition's lock-SOC bucket so utilisation-chunk key
-      // search picks a different nonce. Otherwise a utilisation chunk could
-      // land in the same bucket and try to claim slot 0/1 — the slot the
-      // lock SOC overstamps every refresh.
-      for (const soc of this.lockSocs ?? []) {
-        claimedBuckets.add(toBucket(soc.address))
-      }
-      // Also reserve the latest published partition-state chunks' buckets —
-      // they share this partition's reserved slot, and overstamping one
-      // evicts the resume point a later takeover depends on.
-      for (const bucket of this.protectedStateBuckets.get(
-        this.partition ?? 0,
-      ) ?? []) {
-        claimedBuckets.add(bucket)
-      }
-      const sortedDirtyChunkIndexes = Array.from(dirtyChunkIndexes).sort(
-        (a, b) => a - b,
-      )
-      for (const chunkIndex of sortedDirtyChunkIndexes) {
-        const chunkData = extractChunk(
-          this.utilizationState.dataCounters,
-          chunkIndex,
-        )
-
-        const resolved = await chooseUtilizationChunkKey({
-          swarmEncryptionKey: this.encryptionKey,
-          batchId: this.batchId,
-          chunkIndex,
-          plaintext: chunkData,
-          priorNonce: this.utilizationState.chunks[chunkIndex].nonce,
-          claimedBuckets,
-        })
-        const contentHash = Binary.uint8ArrayToHex(resolved.address)
-
-        await this.cache.putChunk({
-          batchId: this.batchId.toHex(),
-          chunkIndex,
-          data: chunkData,
-          contentHash,
-          nonce: resolved.nonce,
-          lastAccess: Date.now(),
-        })
-        this.utilizationState.chunks[chunkIndex].contentHash = contentHash
-        this.utilizationState.chunks[chunkIndex].nonce = resolved.nonce
-        this.utilizationState.chunks[chunkIndex].dirty = false
-      }
-
-      // Update lastSync timestamp
-      this.utilizationState.lastSync = Date.now()
-
-      // The rows now hold the table: certify them for the lane, and with the
-      // reference that names this counter, in one patch.
-      const allRows = this.rowsStale
       if (allRows) {
-        this.rowsPartition = this.partition
-        this.rowsStale = false
+        for (let i = 0; i < NUM_UTILIZATION_CHUNKS; i++) chunkIndexes.add(i)
       }
-      await this.commitCertification(true, allRows)
+    }
+
+    // We do not upload here, but we still record the contentHash that an
+    // upload *would* assign — i.e. the BMT address of the encrypted chunk for
+    // this plaintext + the per-chunk derived key. That is what the
+    // upload-path dedup at saveUtilizationState compares against, so storing
+    // anything else (or using a different key) would force a redundant
+    // re-upload of every flushed chunk on the next sync.
+    const claimedBuckets = claimedBucketsForCleanChunks(this.utilizationState)
+    // Reserve each partition's lock-SOC bucket so utilisation-chunk key
+    // search picks a different nonce. Otherwise a utilisation chunk could
+    // land in the same bucket and try to claim slot 0/1 — the slot the
+    // lock SOC overstamps every refresh.
+    for (const soc of this.lockSocs ?? []) {
+      claimedBuckets.add(toBucket(soc.address))
+    }
+    // Also reserve the latest published partition-state chunks' buckets —
+    // they share this partition's reserved slot, and overstamping one
+    // evicts the resume point a later takeover depends on.
+    for (const bucket of this.protectedStateBuckets.get(this.partition ?? 0) ??
+      []) {
+      claimedBuckets.add(bucket)
+    }
+    const batchId = this.batchId.toHex()
+    const entries: ChunkCacheEntry[] = []
+    for (const chunkIndex of [...chunkIndexes].sort((x, y) => x - y)) {
+      const data = extractChunk(this.utilizationState.dataCounters, chunkIndex)
+      const resolved = await chooseUtilizationChunkKey({
+        swarmEncryptionKey: this.encryptionKey,
+        batchId: this.batchId,
+        chunkIndex,
+        plaintext: data,
+        priorNonce: this.utilizationState.chunks[chunkIndex].nonce,
+        claimedBuckets,
+      })
+      entries.push({
+        batchId,
+        chunkIndex,
+        data,
+        contentHash: Binary.uint8ArrayToHex(resolved.address),
+        nonce: resolved.nonce,
+        lastAccess: Date.now(),
+      })
+    }
+
+    // What the rows are once this lands: the lane they describe, and the
+    // reference that names their counter.
+    // - A reference waiting for this flush certifies them, as `exact` unless
+    //   the table moved after it was recorded.
+    // - With none waiting, a rewrite of every row leaves a table no reference
+    //   names — a lane zero-seeded, or left unbound.
+    // - Data rows going past a reference (an upload whose publish failed)
+    //   keep it as a floor only.
+    const pending = this.pendingForBoundLane()
+    const rowsPartition = allRows ? this.partition : this.rowsPartition
+    const dataRows = this.dirtyBuckets.size > 0
+    const expected = this.rowsGeneration
+    let generation = expected
+    try {
+      // Rows and metadata in one transaction: the flush lands whole or not at
+      // all, so nothing is ever certified that the rows do not hold.
+      await this.cache.writeRows(batchId, entries, (existing) => {
+        const stored = existing?.rowsGeneration ?? 0
+        if (stored !== expected) {
+          throw new Error(
+            "the cache rows were written by another tab during this flush",
+          )
+        }
+        generation = entries.length > 0 ? stored + 1 : stored
+        return {
+          rowsGeneration: generation,
+          rowsPartition,
+          stateReference:
+            pending !== undefined
+              ? { ...pending }
+              : allRows
+                ? undefined
+                : dataRows && existing?.stateReference
+                  ? { ...existing.stateReference, exact: false }
+                  : existing?.stateReference,
+        }
+      })
     } catch (error) {
       console.error(
         `[UtilizationAwareStamper] Failed to flush to cache:`,
@@ -1823,7 +1810,19 @@ export class UtilizationAwareStamper implements Stamper, SlotAssigner {
       throw error
     }
 
-    // Clear dirty flags
+    this.rowsGeneration = generation
+    this.rowsPartition = rowsPartition
+    this.rowsStale = false
+    if (pending !== undefined && this.pendingReference === pending) {
+      this.pendingReference = undefined
+    }
+    for (const entry of entries) {
+      const chunk = this.utilizationState.chunks[entry.chunkIndex]
+      chunk.contentHash = entry.contentHash
+      chunk.nonce = entry.nonce
+      chunk.dirty = false
+    }
+    this.utilizationState.lastSync = Date.now()
     this.dirtyBuckets.clear()
     this.dirty = false
   }
@@ -1881,40 +1880,6 @@ export class UtilizationAwareStamper implements Stamper, SlotAssigner {
   }
 
   /**
-   * Say what the rows are, in one metadata patch after any that were written:
-   * the lane they describe, the reference that names their counter, and — when
-   * rows were written — a second new generation, so a stamper that read the
-   * rows while the flush was running sees them change once it is done.
-   *
-   * A reference waiting for this flush certifies the rows, as `exact` unless
-   * the table moved after it was recorded. With none waiting, a rewrite of
-   * every row (`allRows`) leaves a table no reference names — a lane
-   * zero-seeded, or left unbound — and anything else keeps what is there.
-   */
-  private async commitCertification(
-    wroteRows: boolean,
-    allRows = false,
-  ): Promise<void> {
-    const pending = this.pendingForBoundLane()
-    if (pending === undefined && !wroteRows) return
-    const rowsPartition = this.rowsPartition
-    await this.patchMetadata((existing) => {
-      if (wroteRows) this.rowsGeneration = (existing?.rowsGeneration ?? 0) + 1
-      return {
-        rowsPartition,
-        ...(wroteRows ? { rowsGeneration: this.rowsGeneration } : {}),
-        stateReference:
-          pending !== undefined
-            ? { ...pending }
-            : allRows
-              ? undefined
-              : existing?.stateReference,
-      }
-    })
-    if (pending !== undefined) this.pendingReference = undefined
-  }
-
-  /**
    * Bring the counter table up to the cache rows when another tab has written
    * them since this stamper last read or flushed them (or `reload` asks).
    * The rows are shared by every tab of the storage partition; the coordinator
@@ -1928,9 +1893,9 @@ export class UtilizationAwareStamper implements Stamper, SlotAssigner {
    * Rows for a lane other than the bound one are not this table's, and the
    * next flush rewrites them all.
    *
-   * The metadata is read before the rows. A flush bumps the generation before
-   * its first row and again after its last, so a read that overlaps one keeps
-   * a generation the store has moved past, and syncs again.
+   * The metadata is read before the rows. A flush lands in one transaction,
+   * so one that commits between the two reads leaves this stamper with the
+   * older generation, and it syncs again.
    */
   async syncRows(reload = false): Promise<BatchMetadata | undefined> {
     const batchId = this.batchId.toHex()

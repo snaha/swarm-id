@@ -7,6 +7,25 @@ present and may point at an issue or PR; the reasons live here.
 
 A PR that makes or changes a decision adds the entry in the same PR.
 
+## 2026-11-10 A flush is one transaction, and runs before the publish
+
+**Context.** A flush wrote its rows one by one and the metadata that describes
+them in separate transactions, after the publish. A tab dying midway had to be
+planned for at every step: the generation was bumped before the first row and
+after the last, the lane was cleared before a full rewrite, and rows stopped
+being called exact before a data row went in. Supersedes that part of "A tab
+folds in the cache rows another tab wrote".
+
+**Decision.** The rows and their metadata go in one IndexedDB transaction
+(`UtilizationStoreDB.writeRows`), which also refuses to land if another tab
+wrote the rows since this one last read them. The coordinator flushes before
+it publishes; the flush after the publish only records its reference.
+
+**Why.** A flush that lands whole or not at all has no intermediate state to
+certify wrongly. Flushing first means the shared rows always hold every slot a
+publish may have named, whichever point a tab dies at, and it costs nothing in
+latency: both flushes already finished before the caller's promise resolved.
+
 ## 2026-11-10 A storage partition's lease is one record in IndexedDB
 
 **Context.** Every tab of a storage partition has the same device id, so to the
