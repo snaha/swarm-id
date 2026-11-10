@@ -168,11 +168,13 @@ is gone after the user’s next change to any account. Validate before writing.<
 </table>
 <p><code dir="auto">id</code>, <code dir="auto">publicKey</code> and the master key all come from the recovery phrase on the first Ethereum
 path of BIP-44, as <a href="../key-derivation/">Key Derivation</a> describes. The optional fields of the
-schema (the per-field clocks, <code dir="auto">settings</code>, <code dir="auto">defaultPostageStampBatchID</code>, <code dir="auto">lastModified</code>) are left
-out of a fresh record; the UI sets them as the user edits. <code dir="auto">settings</code> holds the app session
+schema (the per-field clocks, <code dir="auto">settings</code>, <code dir="auto">defaultPostageStampBatchID</code>, <code dir="auto">deleted</code>, <code dir="auto">lastModified</code>)
+are left out of a fresh record; the UI sets them as the user edits. <code dir="auto">settings</code> holds the app session
 duration and the account-wide sharing switches (<code dir="auto">dataSharing</code>, <code dir="auto">writeAccess</code>, on when absent),
 which a connected app may pin for itself with the same two fields on its entry, as it may its own
-<code dir="auto">sessionDuration</code>.</p>
+<code dir="auto">sessionDuration</code>. <code dir="auto">deleted</code> is set only by deleting the account, and a record carrying
+<code dir="auto">deleted: true</code> is mid-deletion: the UI removes it once the deletion is published, or takes the
+marker back if it never is.</p>
 <p>Everything on the record except <code dir="auto">access</code> and <code dir="auto">encryptedSeed</code> is the synced projection, and a
 record with the same <code dir="auto">id</code> may already exist from an earlier import. Replace it only with the
 vault fields; replacing the collections discards stamps and connected apps the user added on
