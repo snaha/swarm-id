@@ -138,6 +138,19 @@ describe('persist read-merge-write (two-tab race)', () => {
 // The proxy inside the proxy iframe subscribes beside this store and publishes
 // what it is told about — unless the write says peers must not hear of it.
 // A regression in this plumb reintroduces the echo of #707 silently.
+describe('a reference held past the removal of its account', () => {
+  // A fold or a drive operation holds the live object across an await; the
+  // account can be deleted meanwhile, and its record must stay gone.
+  it('cannot write the record back', () => {
+    const held = accountsStore.add(record(X_ID_HEX, 'X'))
+    accountsStore.remove(held.id)
+
+    held.applyRefreshed({ connectedApps: [] })
+
+    expect(stored()).toEqual([])
+  })
+})
+
 describe('persist tells the same-window proxy which writes not to republish', () => {
   function detailOfLastWrite(): { noRepublish?: boolean } {
     const spy = vi.mocked(window.dispatchEvent)
@@ -523,5 +536,174 @@ describe('Account.setAccess', () => {
     expect(account.isSignedOut).toBe(true)
     expect(account.vault.encryptedSeed).toBe('aabbccdd')
     expect(account.toRecord()).toMatchObject({ signedOutAt: expect.any(Number) })
+  })
+})
+
+describe('Account.markDeleted', () => {
+  const APP_URL = 'https://app.example.com'
+  const OTHER_APP_URL = 'https://other.example.com'
+  const REVOKED_AT = 1700000000500
+
+  function accountWithApps(commit: (account: Account, options?: { skipSync?: boolean }) => void) {
+    return new Account(
+      {
+        ...signedInRecord(),
+        connectedApps: [
+          { appUrl: APP_URL, appName: 'App', lastConnectedAt: 1, appSecret: '44'.repeat(32) },
+          // Already removed: its tombstone keeps its own clock.
+          { appUrl: OTHER_APP_URL, appName: 'Other', lastConnectedAt: 1, revokedAt: REVOKED_AT },
+        ],
+      },
+      commit,
+    )
+  }
+
+  // Not a published commit: the caller awaits the publish itself, and the
+  // apps are only revoked once it has landed.
+  it('marks the account deleted in one unpublished commit, leaving its apps', () => {
+    const commit = vi.fn()
+    const account = accountWithApps(commit)
+
+    account.markDeleted()
+
+    expect(commit).toHaveBeenCalledTimes(1)
+    expect(commit).toHaveBeenCalledWith(account, { skipSync: true })
+    expect(account.deleted).toBe(true)
+    expect(account.deletedAt).toEqual(expect.any(Number))
+    expect(account.connectedApps[0].revokedAt).toBeUndefined()
+    expect(account.toSyncedRecord().deleted).toBe(true)
+  })
+
+  // A restore on a device whose clock runs ahead can leave a verdict newer
+  // than this device's now; a marker behind it would lose on every fold.
+  it('clocks the marker after any verdict already on the record', () => {
+    const verdictAt = Date.now() + 60_000
+    const account = new Account(
+      { ...signedInRecord(), deleted: false, deletedAt: verdictAt },
+      noCommit,
+    )
+
+    account.markDeleted()
+
+    expect(account.deleted).toBe(true)
+    expect(account.deletedAt).toBeGreaterThan(verdictAt)
+  })
+
+  it('revokes every live app in one unpublished commit', () => {
+    const commit = vi.fn()
+    const account = accountWithApps(commit)
+
+    account.revokeAllApps()
+
+    expect(commit).toHaveBeenCalledWith(account, { skipSync: true })
+    const [live, removed] = account.connectedApps
+    expect(live.revokedAt).toEqual(expect.any(Number))
+    expect(live.appSecret).toBeUndefined()
+    expect(removed.revokedAt).toBe(REVOKED_AT)
+  })
+
+  // Drives stay: the account publishes through its default drive, and the
+  // fold skips a removed device's view.
+  it('leaves drives and devices alone', () => {
+    const account = new Account(
+      {
+        ...signedInRecord(),
+        devices: [{ deviceId: 'd', name: 'd', createdAt: 1, lastSignedInAt: 1 }],
+        postageStamps: [
+          {
+            batchID: new BatchId('c'.repeat(64)),
+            signerKey: new PrivateKey('b'.repeat(64)),
+            depth: 20,
+            amount: 1n,
+            bucketDepth: 16,
+            blockNumber: 1,
+            immutableFlag: false,
+            utilization: 0,
+            usable: true,
+            exists: true,
+            createdAt: 1,
+          },
+        ],
+      },
+      noCommit,
+    )
+
+    account.markDeleted()
+
+    expect(account.stamps).toHaveLength(1)
+    expect(account.devices[0].removedAt).toBeUndefined()
+  })
+})
+
+describe('Account.cancelDeletion', () => {
+  // The marker comes off on a clock after the marking, so it outvotes one that
+  // reached Swarm; and nothing is published, so a retry's own publish is not
+  // contended.
+  it('takes the marker back on a newer clock, unpublished', () => {
+    const commit = vi.fn()
+    const account = new Account(
+      {
+        ...signedInRecord(),
+        connectedApps: [
+          {
+            appUrl: 'https://app.example.com',
+            appName: 'App',
+            lastConnectedAt: 1,
+            appSecret: '44'.repeat(32),
+          },
+        ],
+      },
+      commit,
+    )
+    account.markDeleted()
+    const markedAt = account.deletedAt ?? 0
+    vi.useFakeTimers({ toFake: ['Date'] })
+    try {
+      vi.setSystemTime(markedAt + 1)
+      account.cancelDeletion()
+    } finally {
+      vi.useRealTimers()
+    }
+    expect(account.deleted).toBe(false)
+    expect(account.deletedAt).toBeGreaterThan(markedAt)
+    expect(commit).toHaveBeenLastCalledWith(account, { skipSync: true })
+  })
+})
+
+describe('Account.applyRefreshed deletion verdict', () => {
+  const CREATED_AT = 1700000000000
+
+  it('reports a peer deletion that wins', () => {
+    const account = new Account(signedInRecord(), noCommit)
+    expect(account.applyRefreshed({ deleted: true, deletedAt: CREATED_AT + 1 })).toBe(true)
+    expect(account.deleted).toBe(true)
+  })
+
+  it('ignores a deletion older than the local verdict', () => {
+    const account = new Account(
+      { ...signedInRecord(), deleted: false, deletedAt: CREATED_AT + 10 },
+      noCommit,
+    )
+    expect(account.applyRefreshed({ deleted: true, deletedAt: CREATED_AT + 5 })).toBe(false)
+    expect(account.deleted).toBe(false)
+  })
+
+  // The deleting device folds peers while it publishes; its own deletion is
+  // not news, and a stale peer's live copy must not undo it.
+  it('neither reports nor undoes a deletion this device made', () => {
+    const account = new Account(signedInRecord(), noCommit)
+    account.markDeleted()
+    expect(account.applyRefreshed({ deleted: false, deletedAt: CREATED_AT })).toBe(false)
+    expect(account.applyRefreshed({ deleted: true, deletedAt: Date.now() + 1 })).toBe(false)
+    expect(account.deleted).toBe(true)
+  })
+
+  it('takes a newer restore from a peer', () => {
+    const account = new Account(
+      { ...signedInRecord(), deleted: true, deletedAt: CREATED_AT + 5 },
+      noCommit,
+    )
+    expect(account.applyRefreshed({ deleted: false, deletedAt: CREATED_AT + 10 })).toBe(false)
+    expect(account.deleted).toBe(false)
   })
 })

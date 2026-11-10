@@ -76,7 +76,7 @@ type DeviceAuth =
  * the persisted collection and its mutations are never dropped.
  *
  * Scalar fields each carry a per-field last-writer-wins clock
- * (`accountNameAt` / `defaultStampAt` / `settingsAt`) so concurrent edits to
+ * (`accountNameAt` / `defaultStampAt` / `settingsAt` / `deletedAt`) so concurrent edits to
  * different scalars on different devices converge instead of clobbering. A
  * mutator that changes a scalar MUST stamp the matching clock; the fold folds
  * them by LWW (`applyRefreshed`).
@@ -112,6 +112,9 @@ export class Account {
   accountNameAt = $state<number | undefined>(undefined)
   defaultStampAt = $state<number | undefined>(undefined)
   settingsAt = $state<number | undefined>(undefined)
+  /** Deleted on some device: set by `markDeleted`, or folded from a peer. */
+  deleted = $state(false)
+  deletedAt = $state<number | undefined>(undefined)
   lastModified = $state<number | undefined>(undefined)
   partitionCount = $state<number | undefined>(undefined)
   // Persist-and-publish this account's change, bound to `this` in the ctor so
@@ -164,6 +167,8 @@ export class Account {
     this.accountNameAt = record.accountNameAt
     this.defaultStampAt = record.defaultStampAt
     this.settingsAt = record.settingsAt
+    this.deleted = record.deleted ?? false
+    this.deletedAt = record.deletedAt
     this.lastModified = record.lastModified
     this.partitionCount = record.partitionCount
   }
@@ -184,6 +189,8 @@ export class Account {
     this.accountNameAt = undefined
     this.defaultStampAt = undefined
     this.settingsAt = undefined
+    this.deleted = false
+    this.deletedAt = undefined
     this.lastModified = undefined
     this.partitionCount = undefined
   }
@@ -234,6 +241,8 @@ export class Account {
       accountNameAt: this.accountNameAt,
       defaultStampAt: this.defaultStampAt,
       settingsAt: this.settingsAt,
+      deleted: this.deleted,
+      deletedAt: this.deletedAt,
       lastModified: this.lastModified,
       partitionCount: this.partitionCount,
     }
@@ -348,6 +357,53 @@ export class Account {
       soonestDriveExpiry: soonestDriveExpiry(this.stamps),
     }
     this.#resetSyncedFields()
+    this.#commit({ skipSync: true })
+  }
+
+  /**
+   * Mark the account deleted, so a peer that folds it forgets the account.
+   * Drives and devices stay live: the marker is published through the default
+   * drive, and the fold skips a removed device's view. `skipSync`: the caller
+   * awaits that publish itself (`tearDownAccount`).
+   */
+  markDeleted() {
+    const now = this.#nextDeletedAt()
+    this.deleted = true
+    this.deletedAt = now
+    this.lastModified = now
+    this.#commit({ skipSync: true })
+  }
+
+  /**
+   * Take back a `markDeleted` whose publish never landed, on a newer clock so
+   * it also outvotes a marker that reached Swarm before the failure.
+   */
+  cancelDeletion() {
+    const now = this.#nextDeletedAt()
+    this.deleted = false
+    this.deletedAt = now
+    this.lastModified = now
+    this.#commit({ skipSync: true })
+  }
+
+  /**
+   * Strictly after the verdict on the record, so the new one wins the fold:
+   * even within the millisecond it was set, or against a clock running ahead
+   * of this device's.
+   */
+  #nextDeletedAt(): number {
+    return Math.max(Date.now(), (this.deletedAt ?? 0) + 1)
+  }
+
+  /**
+   * Revoke every live app: a deleted account's last word to its partitioned
+   * dApp sessions, which the bus delta carries. `skipSync`, like the marker.
+   */
+  revokeAllApps() {
+    this.connectedApps = this.connectedApps.map((app) =>
+      app.revokedAt === undefined ? revoked(app, true) : app,
+    )
+    this.lastModified = Date.now()
     this.#commit({ skipSync: true })
   }
 
@@ -576,6 +632,11 @@ export class Account {
    * came from Swarm). Collections replace wholesale (already merged upstream).
    * Scalars are folded by per-field LWW: a remote value wins only if its clock
    * is newer than ours, so a stale device can't clobber a local edit.
+   *
+   * @returns true when this fold is what deleted the account — a peer's
+   *   deletion won over a live local record. The caller then forgets the
+   *   account (`forgetAccountDeletedElsewhere`). An account already deleted
+   *   here is not news: that is the deleting device mid-publish.
    */
   applyRefreshed(fields: {
     devices?: Device[]
@@ -587,7 +648,10 @@ export class Account {
     defaultStampAt?: number
     settings?: AccountSettings | undefined
     settingsAt?: number
-  }) {
+    deleted?: boolean
+    deletedAt?: number
+  }): boolean {
+    const wasDeleted = this.deleted
     if (fields.devices) this.devices = fields.devices
     if (fields.connectedApps) this.connectedApps = fields.connectedApps
     if (fields.postageStamps) this.postageStamps = fields.postageStamps
@@ -615,7 +679,16 @@ export class Account {
       this.settings = merged.value
       this.settingsAt = merged.at
     }
+    if (
+      fields.deleted !== undefined &&
+      fields.deletedAt !== undefined &&
+      fields.deletedAt > (this.deletedAt ?? this.createdAt)
+    ) {
+      this.deleted = fields.deleted
+      this.deletedAt = fields.deletedAt
+    }
     this.#commit({ skipSync: true })
+    return this.deleted && !wasDeleted
   }
 }
 
@@ -675,8 +748,9 @@ let accounts = $state<Account[]>([])
  * the record union via `toRecord`), so a save→save interleaving with another
  * tab mutating a DIFFERENT account can't clobber that tab's write (in-memory
  * convergence still comes from the cross-tab `storage` event).
- * Accepted edge: merging by id means a mutation racing another tab's remove of
- * the SAME account re-adds it — benign, last-writer-wins. No sync.
+ * Accepted edge: merging by id means a mutation landing before another tab's
+ * remove of the SAME account reaches this one re-adds it — benign,
+ * last-writer-wins. No sync.
  */
 function persistAccount(account: Account, noRepublish = false): void {
   const record = account.toRecord()
@@ -701,6 +775,9 @@ function persistRemoval(id: EthAddress): void {
  * each `Account` as its `#commit`.
  */
 function commitAccount(account: Account, options?: { skipSync?: boolean }): void {
+  // A fold or a drive operation can hold the object across an await, and the
+  // account be removed meanwhile: writing it would bring the record back.
+  if (!accounts.includes(account)) return
   persistAccount(account, options?.skipSync)
   if (!options?.skipSync) syncHook?.(account.id.toHex())
 }
@@ -715,6 +792,11 @@ function load(): Account[] {
 }
 
 accounts = load()
+for (const account of accounts) {
+  // A teardown the page closed on: take the marker back rather than let the
+  // next routine sync publish it (docs/Account-State.md, "Account deletion").
+  if (account.deleted) account.cancelDeletion()
+}
 
 /**
  * Re-read the collection from storage, updating existing instances in place

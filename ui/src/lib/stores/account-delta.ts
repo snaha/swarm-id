@@ -30,6 +30,7 @@ import {
 } from '@snaha/swarm-id/internal'
 import type { AccountStateSnapshot } from '@snaha/swarm-id/internal'
 
+import { forgetAccountDeletedElsewhere } from '$lib/account-deleted'
 import { accountsStore } from '$lib/stores/accounts.svelte'
 
 /**
@@ -39,6 +40,10 @@ import { accountsStore } from '$lib/stores/accounts.svelte'
  * sign-out remnant, is dropped: the remnant kept no `derivationKey`, and
  * writing synced state back onto it would resurrect an account the user signed
  * out of.
+ *
+ * A delta whose deletion marker wins removes the account from this device
+ * (`forgetAccountDeletedElsewhere`) — after the fold, so the revokes it carries
+ * reach shared storage, and the unpartitioned proxies reading it, first.
  */
 export function applyAccountDelta(snapshot: AccountStateSnapshot): void {
   const account = accountsStore.get(snapshot.accountId)
@@ -48,7 +53,7 @@ export function applyAccountDelta(snapshot: AccountStateSnapshot): void {
   // ours rather than adopting a peer's identical-clock copy.
   const mergedApps = mergeConnectedApps(account.connectedApps, snapshot.connectedApps)
 
-  account.applyRefreshed({
+  const deletedByPeer = account.applyRefreshed({
     devices: mergeDevicesList(account.devices, snapshot.metadata.devices),
     // The wire strips `appSecret` and `connectedUntil` from every entry — the
     // receive schema does it again — so a merely newer incoming entry (a
@@ -66,5 +71,10 @@ export function applyAccountDelta(snapshot: AccountStateSnapshot): void {
     defaultStampAt: snapshot.metadata.defaultStampAt,
     settings: snapshot.metadata.settings,
     settingsAt: snapshot.metadata.settingsAt,
+    deleted: snapshot.metadata.deleted,
+    deletedAt: snapshot.metadata.deletedAt,
   })
+  if (deletedByPeer) {
+    forgetAccountDeletedElsewhere(account)
+  }
 }

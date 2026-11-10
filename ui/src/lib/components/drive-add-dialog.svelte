@@ -35,9 +35,8 @@
   import { currentChainPrice } from '$lib/payment/chain-price'
   import { fetchExistingBatchFromChain } from '$lib/payment/contract'
   import { createCostEstimate } from '$lib/payment/cost-estimate.svelte'
-  import { runPurchase } from '$lib/payment/drive-operation'
+  import { PaymentCancelledError, runPurchase } from '$lib/payment/drive-operation'
   import {
-    PaymentCancelledError,
     UseWidgetError,
     createFundingRequester,
     describeStep,

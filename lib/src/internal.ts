@@ -162,6 +162,7 @@ export {
   nextRemeasureMs,
   REMEASURE_MAX_MS,
   remainingLifespanSeconds,
+  stampRefusal,
 } from "./utils/stamp-lifespan"
 
 export {

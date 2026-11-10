@@ -2,6 +2,8 @@
 // SPDX-License-Identifier: Apache-2.0
 import { type Page, expect, test } from '@playwright/test'
 
+import { gotoAccessStep, installVirtualAuthenticator } from './helpers'
+
 // STORAGE_KEY_ACCOUNTS from @snaha/swarm-id, inlined — the lib's browser
 // bundle cannot be imported into Node-side Playwright specs.
 const STORAGE_KEY_ACCOUNTS = 'swarm-id-accounts'
@@ -11,32 +13,6 @@ interface EncryptGate {
   __encryptHeld: boolean
   __encryptDone: boolean
   __releaseEncrypt: () => void
-}
-
-// Installs a Chrome virtual WebAuthn authenticator so the passkey ceremony
-// resolves without real hardware. It must expose the PRF extension (hmac-secret)
-// and be a resident-key, user-verifying platform authenticator — passkey.ts
-// derives the seed-encryption key from PRF output and requires all three.
-async function installVirtualAuthenticator(page: Page, { hasPrf = true } = {}) {
-  const client = await page.context().newCDPSession(page)
-  await client.send('WebAuthn.enable')
-  const { authenticatorId } = await client.send('WebAuthn.addVirtualAuthenticator', {
-    options: {
-      protocol: 'ctap2',
-      ctap2Version: 'ctap2_1',
-      transport: 'internal',
-      hasResidentKey: true,
-      hasUserVerification: true,
-      hasPrf,
-      // Auto-satisfy user presence/verification so create() needs no interaction.
-      automaticPresenceSimulation: true,
-      isUserVerified: true,
-    },
-  })
-  return {
-    storedCredentials: async () =>
-      (await client.send('WebAuthn.getCredentials', { authenticatorId })).credentials.length,
-  }
 }
 
 // Holds every crypto.subtle.encrypt call until the test releases it. In the
@@ -59,24 +35,6 @@ async function gateSeedEncryption(page: Page) {
       return result
     }
   })
-}
-
-// Walks the create wizard from the home page to the access step.
-async function gotoAccessStep(page: Page) {
-  await page.goto('/')
-  // The first hit on a cold dev server pays vite's on-demand transform of the
-  // whole route graph — give the initial render extra headroom.
-  await page.getByRole('link', { name: 'Get started' }).first().click({ timeout: 15000 })
-  await page.getByRole('link', { name: 'Create a new account' }).click()
-
-  await expect(page).toHaveURL(/\/account\/new$/)
-  await page.getByRole('button', { name: 'Continue' }).click()
-
-  await expect(page).toHaveURL(/\/account\/new\/phrase$/)
-  await page.getByRole('button', { name: 'Reveal' }).click()
-  await page.getByRole('button', { name: 'Continue' }).click()
-
-  await expect(page).toHaveURL(/\/account\/new\/access$/)
 }
 
 test('passkey happy path creates a usable local account', async ({ page }) => {

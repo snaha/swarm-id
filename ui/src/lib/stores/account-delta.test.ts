@@ -16,10 +16,14 @@ import {
   type SignedInAccount,
   createAccountsStorageManager,
 } from '@snaha/swarm-id/internal'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+
+import { DELETED_ELSEWHERE_MESSAGE } from '$lib/account-deleted'
 
 import { applyAccountDelta } from './account-delta'
 import { accountsStore, setAccountsSyncHook } from './accounts.svelte'
+import { sessionStore } from './session.svelte'
+import { toastStore } from './toast.svelte'
 
 // Same harness as `accounts.svelte.test.ts`: the store reads `browser` and
 // `window.localStorage` at import time, and `browser: false` keeps the
@@ -99,6 +103,8 @@ function delta(overrides?: {
   accountNameAt?: number
   defaultPostageStampBatchID?: string
   defaultStampAt?: number
+  deleted?: boolean
+  deletedAt?: number
 }): AccountStateSnapshot {
   return {
     version: 1,
@@ -112,6 +118,8 @@ function delta(overrides?: {
       accountNameAt: overrides?.accountNameAt ?? CREATED_AT,
       defaultStampAt: overrides?.defaultStampAt ?? CREATED_AT,
       settingsAt: CREATED_AT,
+      deleted: overrides?.deleted ?? false,
+      deletedAt: overrides?.deletedAt ?? CREATED_AT,
       createdAt: CREATED_AT,
       lastModified: CREATED_AT + 5_000,
       devices: [],
@@ -288,5 +296,73 @@ describe('applyAccountDelta', () => {
     applyAccountDelta(delta({ accountName: 'Renamed', accountNameAt: CREATED_AT + 5_000 }))
 
     expect(accountsStore.get(ID_HEX)?.name).not.toBe('Renamed')
+  })
+})
+
+describe('applyAccountDelta — account deletion', () => {
+  const DELETED_AT = CREATED_AT + 5_000
+
+  afterEach(() => {
+    vi.restoreAllMocks()
+    sessionStore.clearCurrentAccount()
+  })
+
+  it('forgets an account a peer deleted, and says so', () => {
+    const account = accountsStore.add(record())
+    sessionStore.setCurrentAccount(account.id)
+    const syncHook = vi.fn()
+    setAccountsSyncHook(syncHook)
+    const show = vi.spyOn(toastStore, 'show')
+
+    applyAccountDelta(delta({ deleted: true, deletedAt: DELETED_AT }))
+
+    expect(accountsStore.get(ID_HEX)).toBeUndefined()
+    expect(createAccountsStorageManager().load()).toHaveLength(0)
+    expect(sessionStore.currentAccountId).toBeUndefined()
+    expect(show).toHaveBeenCalledWith(DELETED_ELSEWHERE_MESSAGE)
+    // Folded from a peer, so nothing is published back at it.
+    expect(syncHook).not.toHaveBeenCalled()
+  })
+
+  it('leaves the current session alone when another account is deleted', () => {
+    accountsStore.add(record())
+    const other = accountsStore.add(record({ id: new EthAddress(OTHER_ID_HEX) }))
+    sessionStore.setCurrentAccount(other.id)
+
+    applyAccountDelta(delta({ deleted: true, deletedAt: DELETED_AT }))
+
+    expect(accountsStore.get(ID_HEX)).toBeUndefined()
+    expect(sessionStore.currentAccountId).toBe(OTHER_ID_HEX)
+  })
+
+  it('keeps an account restored after the deletion', () => {
+    accountsStore.add(record({ deleted: false, deletedAt: DELETED_AT + 1 }))
+
+    applyAccountDelta(delta({ deleted: true, deletedAt: DELETED_AT }))
+
+    expect(accountsStore.get(ID_HEX)?.deleted).toBe(false)
+  })
+
+  // The deleting device keeps its record until its own publish has landed;
+  // a peer's delta in that window must neither remove it early nor undo it.
+  it('does not act on the deletion this device is still publishing', () => {
+    const account = accountsStore.add(record())
+    account.markDeleted()
+    const show = vi.spyOn(toastStore, 'show')
+
+    applyAccountDelta(delta({ deleted: false, deletedAt: CREATED_AT }))
+    applyAccountDelta(delta({ deleted: true, deletedAt: DELETED_AT }))
+
+    expect(accountsStore.get(ID_HEX)?.deleted).toBe(true)
+    expect(show).not.toHaveBeenCalled()
+  })
+
+  it('does not bring back an account this device already removed', () => {
+    accountsStore.add(record())
+    accountsStore.remove(ID_HEX)
+
+    applyAccountDelta(delta({ deleted: false, deletedAt: DELETED_AT }))
+
+    expect(accountsStore.get(ID_HEX)).toBeUndefined()
   })
 })

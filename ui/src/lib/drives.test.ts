@@ -7,6 +7,7 @@ import { describe, expect, it } from 'vitest'
 import {
   DRIVE_SIZE_BREAKPOINTS,
   accountDriveAttention,
+  appsUsingDrive,
   attentionKey,
   describeDrive,
   driveAttentionDescription,
@@ -438,5 +439,52 @@ describe('describeDrive on a scratch drive (#862)', () => {
     const scratch = { ...full, kind: 'scratch' as const }
     expect(describeDrive(scratch)).toMatchObject({ storageFull: false, scratch: true })
     expect(driveNeedsAttention(scratch)).toBe(false)
+  })
+})
+
+describe('appsUsingDrive', () => {
+  const DRIVE = makeDrive({ batchID: new BatchId('c'.repeat(64)) })
+  const OTHER = new BatchId('d'.repeat(64))
+  const ACCOUNT = { defaultPostageStampBatchID: DRIVE.batchID }
+
+  it('names the apps whose grant reaches the drive', () => {
+    const apps = [
+      { appUrl: 'https://default.example', appName: 'Follows default', lastConnectedAt: 1 },
+      {
+        appUrl: 'https://all.example',
+        appName: 'All drives',
+        lastConnectedAt: 1,
+        drives: 'all' as const,
+      },
+      {
+        appUrl: 'https://listed.example',
+        appName: 'Listed',
+        lastConnectedAt: 1,
+        drives: [DRIVE.batchID],
+      },
+      {
+        appUrl: 'https://elsewhere.example',
+        appName: 'Elsewhere',
+        lastConnectedAt: 1,
+        drives: [OTHER],
+      },
+    ]
+    expect(appsUsingDrive(DRIVE, apps, ACCOUNT)).toEqual([
+      'Follows default',
+      'All drives',
+      'Listed',
+    ])
+  })
+
+  it('leaves out removed apps', () => {
+    const apps = [
+      { appUrl: 'https://gone.example', appName: 'Gone', lastConnectedAt: 1, revokedAt: 2 },
+    ]
+    expect(appsUsingDrive(DRIVE, apps, ACCOUNT)).toEqual([])
+  })
+
+  it('does not count the default for a drive that is not it', () => {
+    const apps = [{ appUrl: 'https://default.example', appName: 'Default app', lastConnectedAt: 1 }]
+    expect(appsUsingDrive(DRIVE, apps, { defaultPostageStampBatchID: OTHER })).toEqual([])
   })
 })

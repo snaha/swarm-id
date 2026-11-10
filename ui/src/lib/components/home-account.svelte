@@ -30,7 +30,6 @@
 
   import { createAttemptTracker } from '$lib/attempt'
   import AccountAvatar from '$lib/components/account-avatar.svelte'
-  import DeleteAccountDialog from '$lib/components/delete-account-dialog.svelte'
   import DriveAddDialog from '$lib/components/drive-add-dialog.svelte'
   import KeyCard from '$lib/components/key-card.svelte'
   import NewPasswordFields, { isNewPasswordValid } from '$lib/components/new-password-fields.svelte'
@@ -59,9 +58,14 @@
     account: Account
     /** From the URL hash (`#account/<section>[/<key card>]`): what to open. */
     target?: string[]
+    /**
+     * Open the delete dialog. The page mounts it, not this tab: the tab is
+     * gone as soon as the account is, and the outcome still has to show.
+     */
+    ondelete: () => void
   }
 
-  let { account, target = [] }: Props = $props()
+  let { account, target = [], ondelete }: Props = $props()
 
   const SECTION_IDS = ['identity', 'access', 'keys', 'phrase', 'backup'] as const
   type SectionId = (typeof SECTION_IDS)[number]
@@ -104,7 +108,6 @@
   })
 
   let signingOut = $state(false)
-  let deleting = $state(false)
   // Reveals cache only their derived display value — never the raw seed, which
   // is zeroed the moment each ceremony finishes with it (issue #412).
   let revealedPrivateKey = $state<string | undefined>(undefined)
@@ -555,7 +558,7 @@
     {:else}
       <Button variant="outline" onclick={() => (signingOut = true)}>Sign out</Button>
     {/if}
-    <Button variant="destructive" onclick={() => (deleting = true)}>Delete account</Button>
+    <Button variant="destructive" onclick={ondelete}>Delete account</Button>
   </div>
 </div>
 
@@ -628,8 +631,4 @@
 
 {#if signingOut}
   <SignOutDialog {account} onClose={() => (signingOut = false)} />
-{/if}
-
-{#if deleting}
-  <DeleteAccountDialog {account} onClose={() => (deleting = false)} />
 {/if}
