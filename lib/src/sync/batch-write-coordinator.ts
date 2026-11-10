@@ -1167,6 +1167,11 @@ export class BatchWriteCoordinator {
     // reverse-clobber the post-op ack guard can't cover for a long upload).
     let confirmedHeld = false
     try {
+      // `ui/tests/three-devices.test.ts` counts this line, one per Swarm
+      // renewal, to measure how many a device makes per interval
+      console.debug(
+        `[BatchWriteCoordinator] Renewing partition ${partition} on Swarm`,
+      )
       const outcome = await lease.refresh()
       if (outcome === "held") confirmedHeld = true
       if (outcome === "displaced") {

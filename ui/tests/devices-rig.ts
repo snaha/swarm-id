@@ -68,6 +68,8 @@ export const UNANSWERED_WAIT = /No partition available|Partition lease timed out
  *  both marked at their source as what this suite keys on. */
 export const PUBLISHED_LINE = 'Published device state'
 export const YIELDED_LINE = 'Released idle partition'
+/** The coordinator's log line per Swarm renewal of a lease, marked there too. */
+export const RENEWED_LINE = 'Renewing partition'
 /** Device-state publishes inside one idle window that say a holder was never idle (#707). */
 export const BUSY_PUBLISHES = 3
 
@@ -102,7 +104,7 @@ export function skipScenario(reason: string): never {
  */
 export class Device {
   /** Console lines from every tab, proxy iframes included, with the time seen. */
-  readonly log: { at: number; text: string }[] = []
+  readonly log: { at: number; text: string; page: Page }[] = []
 
   private constructor(
     readonly label: string,
@@ -114,7 +116,13 @@ export class Device {
   }
 
   private record(page: Page): void {
-    page.on('console', (message) => this.log.push({ at: Date.now(), text: message.text() }))
+    page.on('console', (message) => this.log.push({ at: Date.now(), text: message.text(), page }))
+  }
+
+  /** The Swarm renewals each of `pages` made since `since`, in that order. */
+  renewalsSince(since: number, pages: Page[]): number[] {
+    const renewals = this.log.filter((l) => l.at >= since && l.text.includes(RENEWED_LINE))
+    return pages.map((page) => renewals.filter((l) => l.page === page).length)
   }
 
   /** How many device-state publishes this device made since `since`. Keyed on

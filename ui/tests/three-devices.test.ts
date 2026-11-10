@@ -53,6 +53,11 @@ import {
 import { THREE_DEVICES_SEED_FILE } from './global-setup-devices'
 import { ID_ORIGIN } from './helpers'
 
+/** How long the renewal measurement watches three tabs: six intervals. */
+const RENEWAL_WINDOW_MS = LEASE_REFRESH_MS * 6
+/** Pause between the measurement's uploads, well inside the idle yield. */
+const RENEWAL_UPLOAD_GAP_MS = 5000
+
 /**
  * The live leases this tab's storage records, read from the proxy iframe's own
  * IndexedDB (`leaseRecordIn`): the record every tab of the device shares.
@@ -311,6 +316,47 @@ test.describe('three devices on two partitions', () => {
     // The tab that was idle throughout still writes on the lane.
     await A.upload()
     expect(await A.partition()).toBe(held)
+  })
+
+  test('tabs of one device renew their shared lease on Swarm about once per interval', async () => {
+    // A measurement as much as a check: the per-tab counts and the ratio go
+    // to the log as the baseline later work on the renewal is held against.
+    for (const device of all()) await device.ensureConnected()
+    const held = await A.uploadAndHoldOrSkip()
+
+    const siblings = [await A.openSiblingTab(), await A.openSiblingTab()]
+    const tabs = [A.page, ...siblings]
+    try {
+      for (const tab of siblings) {
+        await expect.poll(() => A.partition(tab), { timeout: LEASE_REFRESH_MS }).toBe(held)
+      }
+
+      // Uploads from one tab keep the lane out of the idle yield; the
+      // renewals are every tab's timer.
+      const since = Date.now()
+      while (Date.now() - since < RENEWAL_WINDOW_MS) {
+        await A.upload(siblings[0])
+        await sleep(RENEWAL_UPLOAD_GAP_MS)
+      }
+      const elapsed = Date.now() - since
+
+      const perTab = A.renewalsSince(since, tabs)
+      const renewals = perTab.reduce((sum, n) => sum + n, 0)
+      const intervals = elapsed / LEASE_REFRESH_MS
+      const summary =
+        `${tabs.length} tabs, ${intervals.toFixed(1)} intervals: ${renewals} renewals ` +
+        `(${(renewals / intervals).toFixed(2)} per interval; per tab ${perTab.join(', ')})`
+      console.log(process.env.CI ? `::notice::lease renewals: ${summary}` : `--- ${summary}`)
+      test.info().annotations.push({ type: 'renewals', description: summary })
+
+      // Not every tab renewing, and renewing still: the device keeps its lane
+      expect(renewals).toBeGreaterThan(0)
+      expect(renewals).toBeLessThan(tabs.length * Math.floor(intervals))
+      for (const tab of tabs) expect(await A.partition(tab)).toBe(held)
+      await expectNoDualHold(all())
+    } finally {
+      for (const tab of siblings) await tab.close()
+    }
   })
 
   test('a disconnect releases the partition at once, and a waiting device takes it', async () => {
