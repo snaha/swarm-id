@@ -480,10 +480,8 @@ function ensureInitialized(): Promise<void> {
 }
 
 async function runConnect(): Promise<void> {
-  // Let a run that is already in flight finish first. Pressing Connect while
-  // the initial `initialize()` was still in its tail used to drop the connect
-  // (the old re-entrancy guard bailed out) and crash that tail on the client it
-  // had just destroyed, leaving the demo dead until a page reload.
+  // Let a run that is already in flight finish first: a connect during the tail
+  // of `initialize()` would destroy the client that tail is still using.
   await ensureInitialized()
 
   const subsidisedUrl = subsidisedGatewayEnabled ? DEFAULT_BEE_NODE_URL : undefined

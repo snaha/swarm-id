@@ -235,8 +235,8 @@ test.describe('three devices on two partitions', () => {
     for (const device of all()) await device.ensureConnected()
     // Fill both slots: B takes a free one, then C's request makes an idle
     // holder yield. The holder that yields may be B rather than A — then B
-    // holds nothing to release, and the scenario has no subject (#798: the
-    // assertion below once compared A's slot with `undefined`). One more
+    // holds nothing to release, and the scenario has no subject (#798).
+    // One more
     // upload puts B back: C, just served, is inside the peer-yield window,
     // so the idle holder that yields is A.
     await B.uploadAndHoldOrSkip()

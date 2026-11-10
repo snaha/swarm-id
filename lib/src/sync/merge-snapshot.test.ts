@@ -137,10 +137,8 @@ describe("mergeSnapshotWithRemote — devices union", () => {
 
   // #643 corrects a partition device's label — three identical "Safari on Mac"
   // rows become one per dApp — on whichever context learned the better name.
-  // A rename moves no clock this merge ranks on, and a tie favours local, so
-  // until the name had a clock of its own every OTHER context kept its stale
-  // copy forever (#663). #643's own test pins only the local view, so nothing
-  // went red.
+  // A rename moves no clock this merge ranks on and a tie favours local, so the
+  // name needs a clock of its own or every OTHER context keeps its stale copy (#663).
   it("a rename propagates though it carries no sign-in recency", () => {
     const stale = {
       ...makeDevice(OTHER_DEVICE_ID, 1_000_000),
@@ -238,7 +236,7 @@ describe("mergeSnapshotWithRemote — apps / stamps", () => {
 
   it("local deletion is not undone by an older remote active copy (publish merge)", () => {
     // The publish case: device 1 deleted locally; the remote snapshot still has
-    // the stamp active (older). The union used to re-add it — LWW keeps the tombstone.
+    // the stamp active (older). LWW keeps the tombstone.
     const batchHex = "ee".repeat(32)
     const tombstone = {
       ...makeStamp(batchHex, 1_000_000),
@@ -544,7 +542,7 @@ describe("mergeSnapshotWithRemote — apps / stamps", () => {
 
   it("local revocation is not undone by an older remote active copy (publish merge)", () => {
     // The publish case: device 1 revoked locally; the remote snapshot still has
-    // the app active (older). The union used to re-add it — LWW keeps the tombstone.
+    // the app active (older). LWW keeps the tombstone.
     const tombstone = {
       ...makeConnectedApp("https://app.example"),
       disconnectedAt: 5_000_000,

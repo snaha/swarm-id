@@ -45,8 +45,7 @@ export type {
 // ============================================================================
 
 // Storage keys for versioned storage managers. The account is the single nested
-// document of record (it owns its connected apps and postage stamps inline), so
-// there are no longer separate identity/app/stamp collection keys.
+// document of record: it owns its connected apps and postage stamps inline.
 export const STORAGE_KEY_ACCOUNTS = "swarm-id-accounts"
 export const STORAGE_KEY_NETWORK_SETTINGS = "swarm-id-network-settings"
 export const STORAGE_CHALLENGE_KEY = "swarm-storage-challenge"
@@ -1834,8 +1833,8 @@ export const ConnectionInfoChangedMessageSchema = z.object({
    * `connectionInfoChanged` it cannot parse, and if that is the first one
    * after `proxyReady`, `initialize()` rejects on its timeout — so one
    * unrecognised enum member would stop the dApp starting at all. Reachable
-   * through deploy-cache skew alone: a proxy from the #616–#642 window still
-   * emits the `"download-only"` this lib removed.
+   * through deploy-cache skew alone: an older proxy (#616–#642) can emit a value this lib
+   * does not know.
    */
   uploadUnavailableReason:
     UploadUnavailableReasonSchema.optional().catch(undefined),

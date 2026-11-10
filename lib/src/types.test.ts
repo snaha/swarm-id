@@ -73,7 +73,7 @@ describe("connectionInfoChanged forward compatibility (#642)", () => {
   }
 
   it("drops an unknown uploadUnavailableReason rather than the whole snapshot", () => {
-    // A proxy deployed between #616 and #642 still emits `"download-only"`.
+    // An older proxy (#616–#642) can emit a value this lib does not know.
     // Hard-parsing the enum would fail the message, and the client drops a
     // message it cannot parse — if it is the first one after `proxyReady`,
     // `initialize()` then rejects on its timeout and the dApp never starts.

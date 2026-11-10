@@ -74,12 +74,11 @@ export function mergeDevicesList(local: Device[], remote: Device[]): Device[] {
   // - Membership (the whole record) merges on `max(removedAt, lastSignedInAt)`,
   //   so a removal beats an older sign-in and a newer sign-in beats an older
   //   removal (re-activating the device). With nothing removed this reduces to
-  //   the old "larger lastSignedInAt wins". Removed devices are kept (the
+  //   "larger lastSignedInAt wins". Removed devices are kept (the
   //   tombstone keeps propagating).
   // - The name overlays on its own `nameUpdatedAt` clock. A rename moves
-  //   neither of the membership fields, so without this it tied with every
-  //   stale copy of itself and lost — #643's correction never left the device
-  //   that made it (#663). Riding its own clock also means it cannot drag a
+  //   neither of the membership fields, so without this it ties with every stale
+  //   copy of itself and loses (#643, #663). Riding its own clock also means it cannot drag a
   //   stale record's sign-in state along or resurrect a tombstone.
   const recency = (d: Device) =>
     Math.max(d.removedAt ?? 0, d.lastSignedInAt ?? 0)
@@ -115,14 +114,13 @@ export function mergeConnectedApps(
   // - Membership (the whole entry) merges on the fields that STATE membership,
   //   `max(revokedAt, disconnectedAt, lastConnectedAt)`. A removal beats an
   //   older connect, and a genuine reconnect — `connectApp` clears both markers
-  //   and sets a fresh `lastConnectedAt` — beats an older removal. One clock
-  //   bumped by every write ranked the entry instead, so a drive picked on a
-  //   stale copy outranked a revoke and restored the credential it had cleared
-  //   (#681).
+  //   and sets a fresh `lastConnectedAt` — beats an older removal. A single clock
+  //   bumped by every write would let a drive picked on a stale copy outrank a
+  //   revoke and restore the credential it cleared (#681).
   // - The grant overlays field by field, each on its own clock
   //   (`GRANT_CLOCKS`). It moves no membership field, so without a clock of
-  //   its own it ties with every stale copy of the entry and loses — the same
-  //   correction #663 made for a device's name. Per field, so a drive picked
+  //   its own it ties with every stale copy of the entry and loses, like a
+  //   device's name (#663). Per field, so a drive picked
   //   on a stale copy does not carry that copy's switches over a pin made
   //   elsewhere.
   //

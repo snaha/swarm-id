@@ -120,8 +120,6 @@ export const CHUNK_SIZE = 4096
  * At depth D the post-stamp counter caps at 2^(D-16). uint16 can hold
  * 0..65535; depth 31 → 32768 (fits), depth 32 → 65536 (overflows).
  * For depth > UINT16_COUNTER_MAX_DEPTH the serializer falls back to uint32.
- *
- * Issue: https://github.com/snaha/swarm-id/issues/243
  */
 export const UINT16_COUNTER_MAX_DEPTH = 31
 

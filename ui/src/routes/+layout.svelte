@@ -13,7 +13,7 @@
 
   import Toast from '$lib/components/toast.svelte'
   // ponytail: the sync engine lives under `$lib/dev` but operates on real account
-  // data — #389 can relocate it out of `$lib/dev`; not worth the churn here.
+  // data; relocating it is not worth the churn here.
   import { foldCurrentAccount, startFoldInterval } from '$lib/dev/account-refresh'
   import { triggerSync } from '$lib/dev/sync-hooks'
   import { inOneTab, watchDriveLifetimes } from '$lib/drive-lifetime-watch'
@@ -56,8 +56,7 @@
     // Publish account mutations app-wide (debounced): to Swarm for durability,
     // and to the account bus for the live contexts a storage event cannot
     // reach — a partitioned dApp iframe learns about a revoke no other way
-    // (docs/Account-Bus.md). Previously wired only in /dev, so the shipping app
-    // never synced (#389). Owned here now.
+    // (docs/Account-Bus.md, #389).
     setAccountsSyncHook((accountIdHex) => {
       triggerSync(accountIdHex)
       const record = signedInRecord(accountIdHex)

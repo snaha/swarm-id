@@ -190,7 +190,7 @@ const FLOOR_MARGIN_BLOCKS = 36n
  * balance (chain truth — never the stored `stamp.amount`, which is a stale
  * snapshot that would over- or under-top). With `keepLifespan`, the top-up
  * restores the post-dilution balance to the current one (cost = remaining ×
- * (2^Δ − 1) per chunk, identical in total to the old dilute-first model).
+ * (2^Δ − 1) per chunk).
  * Either way the plan is raised to clear `minimumInitialBalancePerChunk`
  * after division, by {@link FLOOR_MARGIN_BLOCKS} of decay — a plan that only
  * meets the floor is as certain a revert as one below it, since the balance

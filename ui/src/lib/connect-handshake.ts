@@ -71,8 +71,8 @@ function saveConnection(
  *
  * The iframe is on the SwarmID origin and an unpartitioned proxy reads the same
  * material out of shared storage, so this is least privilege rather than a
- * boundary being fixed. But before #547 a partitioned session held no
- * credentials at all, and it now holds real ones in a context embedded by an
+ * boundary being fixed. But a partitioned session holds real credentials (#547) in a
+ * context embedded by an
  * arbitrary dApp page: anything that gains script execution there gets what it
  * was handed. It can only ever spend the drives it was granted, so the rest
  * of the collection's signer keys are pure exposure with no use.

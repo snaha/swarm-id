@@ -150,7 +150,7 @@ describe('runChecks', () => {
     expect(verdictOf(results, 'persistence')).toBe('pass')
   })
 
-  // The finding #570 is waiting on: a new id means the partitioned storage was
+  // A new id (#570) means the partitioned storage was
   // evicted and the roster gained another device.
   it('fails persistence when the device id changed', () => {
     const results = runChecks({

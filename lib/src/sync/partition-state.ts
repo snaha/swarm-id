@@ -639,7 +639,7 @@ export async function readPartitionState(
 
   // No feed-SOC compensation needed: the state pointer is a reserved-slot SOC
   // (it overstamps the partition's reserved slot, like the counter chunks), so
-  // — unlike the old data-slot epoch feed entry — it consumes no data slot that
+  // it consumes no data slot that
   // the snapshot would have to account for.
 
   return {

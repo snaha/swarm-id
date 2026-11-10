@@ -84,10 +84,11 @@ type DeviceAuth =
  * Members split into two groups: the product mutators the shipping app calls
  * (including the postage-stamp / "drive" mutators the storage UI drives), and —
  * below the `DEV-ONLY` banner — the volatile-utilization updater and
- * `applyRefreshed`. That banner is now half true: `applyRefreshed` is how BOTH
- * remote sources land, the Swarm fold and a peer's `account-delta` off the bus
- * (#608), and the bus one ships. What still holds is the rule it carries —
- * `skipSync`, so a change folded FROM a peer is never published back at it.
+ * `applyRefreshed`. The banner's "the shipping app never calls these" is not
+ * true of `applyRefreshed`: it is how BOTH remote sources land, the Swarm fold
+ * and a peer's `account-delta` off the bus (#608), and the bus path runs in production.
+ * It carries `skipSync`, so a change folded FROM a peer is never published back
+ * at it.
  */
 export class Account {
   readonly id: EthAddress
@@ -798,8 +799,8 @@ export const accountsStore = {
 // ----------------------------------------------------------------------------
 // Propagation seam — "this change should reach other contexts".
 //
-// Wired app-wide in `+layout.svelte` (#389; it was dev-only before that), and
-// it now drives two publishers: the Swarm feed write for durability, and the
+// Wired app-wide in `+layout.svelte` (#389), and drives two publishers: the Swarm feed
+// write for durability, and the
 // account bus for the live contexts a `storage` event cannot reach — a
 // partitioned dApp iframe learns about a revoke no other way.
 //

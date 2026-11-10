@@ -91,7 +91,8 @@ export const LeaseRequestMessageSchema = z.object({
  * BEFORE the release starts, because the release itself is two stamped Swarm
  * writes — an order of magnitude longer than the rank step — so a signal sent
  * after it would reach the other holders only once they had all begun yielding
- * too, which is #576 again. Holders further down the order stand down on this;
+ * too, and every idle holder would yield for one waiter (#576). Holders further down
+ * the order stand down on this;
  * the waiter ignores it (no slot is free yet).
  */
 export const LeaseClaimMessageSchema = z.object({

@@ -28,10 +28,10 @@ const FEE_TOO_LOW = /FeeTooLow|(?<!replacement transaction )underpriced/i
 /**
  * Whether the node is saying it ALREADY HAS this transaction.
  *
- * Not a failure: a successful broadcast reported as an error. It used to take
- * the rethrow branch below, so once a send reached any mempool every resend of
- * those bytes failed — including the user's Try again, forever, since the
- * nonce and the payload do not change on their own (#620).
+ * Not a failure: a successful broadcast reported as an error. Rethrowing it
+ * would fail every resend of those bytes once a send reached any mempool —
+ * including the user's Try again, forever, since the nonce and the payload do
+ * not change on their own (#620).
  */
 export function isAlreadyKnown(error: unknown): boolean {
   for (let e = error; e instanceof Error; e = e.cause) {

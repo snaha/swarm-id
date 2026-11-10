@@ -428,8 +428,7 @@
    * Through the chain's own endpoint, never the wallet's: the same chain state
    * either way, and one path instead of two.
    *
-   * Reversing #534, which read through the wallet wherever it was on the
-   * selected chain, for the figures the wallet itself shows. Over WalletConnect
+   * Not through the wallet, even when it is on the selected chain (reverses #534). Over WalletConnect
    * every read is a relay round-trip to the user's phone — one per token, fired
    * together, given up on at the deadline above — and a session left holding
    * responses nobody is waiting for redelivers them for the rest of its life.

@@ -221,8 +221,7 @@ describe("readPartitionState / writePartitionState round-trip", () => {
 
     expect(result.unchanged).toBe(false)
     // The reader reconstructs the exact published counter. No compensation: the
-    // state pointer is a reserved-slot SOC, so it consumes no data slot (unlike
-    // the old data-slot epoch feed entry).
+    // state pointer is a reserved-slot SOC, so it consumes no data slot.
     expect(result.localCounter).toEqual(localCounter)
   })
 
@@ -545,7 +544,7 @@ describe("readPartitionState / writePartitionState round-trip", () => {
     // `leasedUntil` then advanced ~2 epochs further — the last couple of
     // best-effort heartbeats were dropped (flaky gateway), or the lease TTL is
     // wider than one pointer epoch. The pointer is NOT in the {leasedUntil,
-    // leasedUntil-1} window the old reader probed.
+    // leasedUntil-1} window.
     const T0 = Date.now() - 5 * 60_000
     vi.spyOn(Date, "now").mockReturnValue(T0)
     await partitionState.writePartitionState({
@@ -561,7 +560,7 @@ describe("readPartitionState / writePartitionState round-trip", () => {
     vi.restoreAllMocks()
 
     const leasedUntil = T0 + 2 * STATE_EPOCH_MS + 1_000
-    // The pointer's bucket is ≥2 below the leasedUntil bucket — outside the old
+    // The pointer's bucket is ≥2 below the leasedUntil bucket — outside a
     // ±1 window, inside the full-TTL span the reader must scan.
     expect(
       partitionState.statePointerEpochBucket(leasedUntil) -
@@ -904,8 +903,8 @@ describe("PartitionLease.acquire — seeds the incremental first publish", () =>
       //
       // The retained chunk's bucket is random (its encryption key is), so the
       // scan is a geometric draw with mean 65536: it stops at the first hit, and
-      // the bound only matters when it misses. The old bound of 400 000 missed
-      // once in ~450 runs (#796); a million misses once in ~4 million. A full
+      // the bound only matters when it misses. A bound of 400 000 misses once in
+      // ~450 runs (#796); a million misses once in ~4 million. A full
       // scan measured 7.5–16 µs per epoch idle, and this test inflates ~3× under
       // the parallel suite (#686), so the suite's 30 s timeout would cut a long
       // scan short of the bound: the `timeout` on this test is what lets the

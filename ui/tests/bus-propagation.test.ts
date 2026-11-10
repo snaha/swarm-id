@@ -94,7 +94,7 @@ async function createAccountWithDrive(page: Page) {
  *
  * Since #635 the session survives a reload — it is kept in the partition's own
  * store until it is disconnected or its 30 days are up — so navigating the demo
- * afterwards no longer ends it.
+ * afterwards does not end it.
  */
 async function connectPartitioned(page: Page, path: string) {
   await page.goto(`${demoOrigin}${path}`)
@@ -164,9 +164,8 @@ test('a partitioned session with no drive reports the handover, not a failure', 
   await expect(page.getByText('❌')).toHaveCount(0)
 })
 
-// #613: the transport used to be picked by user agent, so a partitioned
-// Chromium was put on the storage-event path — which cannot reach it — while
-// only WebKit got the handover. Every test above reaches the popup through the
+// The transport is picked by storage mode, not user agent (#613): a partitioned
+// Chromium cannot be reached on the storage-event path. Every test above reaches the popup through the
 // PROXY's own button (`openProxyConnectPopup`), which always delegated; this one
 // goes through the demo's own Connect button, i.e. `client.connect()`, the API a
 // dApp with its own button uses. It fails on the UA gate by construction.
@@ -185,9 +184,8 @@ test('client.connect() authenticates a partitioned session', async ({ page }) =>
   await expect(page.getByRole('heading', { name: 'Identity' })).toBeVisible({ timeout: 15000 })
 })
 
-// #635: the handed-over session used to live in memory only, so every page
-// load re-ran the connect popup — on Safari, where partitioned is the ordinary
-// mode, that made a plain reload a logout. Found on the device run for #584.
+// The handed-over session is persisted: on Safari, where partitioned is the
+// ordinary mode, a plain reload must not be a logout (#635, #584).
 test('a partitioned session survives a reload', async ({ page }) => {
   await page.goto(`${demoOrigin}/account`)
   await expectProxyPartitioned(page)
@@ -231,8 +229,7 @@ test('the bus carries an app removal to a partitioned session', async ({ page })
   // A rename DOES reach the session: since #610 the fold merges the metadata
   // scalars on their own per-field clocks, not just the collections, so
   // `identity.name` follows a rename made on another device with no reconnect
-  // and no reload. (It did not before — this suite asserted the old behaviour
-  // and #610 flipped the line, which is what it was there for.)
+  // and no reload.
   await idPage.getByRole('button', { name: /^Identity/ }).click()
   await idPage.getByRole('textbox').fill(RENAMED)
   await idPage.getByRole('textbox').press('Enter')

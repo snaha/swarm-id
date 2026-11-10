@@ -38,9 +38,9 @@ const DEFAULT_BEE_URL = "https://api.gateway.ethswarm.org/"
 const KEY_BYTES = 32
 
 /**
- * Stand-in account public key for the now-REQUIRED `DeviceStateView`/
- * `DeviceStateSnapshotSchemaV1.accountPublicKey` field (#377/#381 made it
- * mandatory). The read schema only requires a string, and the fold just needs it
+ * Stand-in account public key for the required `DeviceStateView`/
+ * `DeviceStateSnapshotSchemaV1.accountPublicKey` field (#377, #381).
+ * The read schema only requires a string, and the fold just needs it
  * present + consistent across an account's device feeds — these throwaway test
  * accounts never validate its curve identity — so one shared compressed-pubkey-
  * shaped constant suffices. Without it, every published snapshot fails read

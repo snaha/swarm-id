@@ -374,7 +374,7 @@ describe("SwarmIdClient connect()", () => {
         expect.stringContaining("https://swarm-id.example.com/connect#origin="),
         "_blank",
       )
-      // Even on WebKit: the user agent no longer decides this.
+      // Even on WebKit: the user agent does not decide this.
       expect(sendRequestSpy).not.toHaveBeenCalled()
     })
 
@@ -587,8 +587,8 @@ describe("SwarmIdClient connectionInfo", () => {
 
   // `uploadUnavailableReason` is `.catch(undefined)` on purpose: the client
   // DROPS a `connectionInfoChanged` it cannot parse, and dropping the first one
-  // after `proxyReady` leaves `initialize()` to time out. A proxy from the
-  // #616–#642 window still emits the `"download-only"` this lib removed, and
+  // after `proxyReady` leaves `initialize()` to time out. An older proxy (#616–#642)
+  // can emit an enum value this lib does not know, and
   // deploy-cache skew alone is enough to pair it with a current client — so one
   // unrecognised member must degrade the field, not stop the dApp starting.
   it("keeps a snapshot whose uploadUnavailableReason this lib no longer knows", () => {
@@ -926,10 +926,9 @@ describe("SwarmIdClient request seam", () => {
     await expect(promise).resolves.toEqual(data)
   })
 
-  // #775 review: `requestOptions.timeout` used to reach only the Bee request
-  // inside the iframe, while the client's own round-trip timer kept the
-  // constructor default — so a per-call value above 30 s still rejected at
-  // 30 s, with the same message the caller had just tried to escape.
+  // `requestOptions.timeout` bounds the client's round-trip timer as well as the
+  // Bee request inside the iframe, or a per-call value above the constructor
+  // default would still reject at that default (#775).
   it("a per-call requestOptions.timeout bounds the whole round trip", async () => {
     const DEFAULT_CLIENT_TIMEOUT_MS = 30_000
     const PER_CALL_TIMEOUT_MS = 60_000
@@ -2242,9 +2241,9 @@ describe("SwarmIdClient initialize() sequencing", () => {
 })
 
 // A server render (Next.js App Router, SvelteKit with SSR) reaches the
-// constructor with no `window`. It used to throw a bare `ReferenceError` from
-// inside `setupMessageListener` — in the published build, a stack into
-// minified code that named neither the package nor the fix (#778).
+// constructor with no `window`. A bare `ReferenceError` from inside
+// `setupMessageListener` would be, in the published build, a stack into
+// minified code that names neither the package nor the fix (#778).
 describe("SwarmIdClient on a server", () => {
   it("says the package is browser-only and where to construct instead", () => {
     vi.unstubAllGlobals()

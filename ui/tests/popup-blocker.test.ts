@@ -7,8 +7,7 @@
  * `window.opener` points at the iframe and the session can be handed over. The
  * click that triggers it lands on the dApp page, not in the iframe, so the
  * question is whether the browser's popup blocker lets the iframe open a window
- * on the strength of that click. PR #630 could not measure it and added a
- * parent-opens fallback; measured by hand since, Chrome, Brave, Firefox and
+ * on the strength of that click. Measured by hand (#630), Chrome, Brave, Firefox and
  * iOS Safari all let the delegated popup through. This keeps that measured.
  *
  * Every other project runs with `--disable-popup-blocking`, and Playwright's

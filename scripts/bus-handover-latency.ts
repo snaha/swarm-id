@@ -49,11 +49,10 @@
  * partition costs. Two of five bus runs took ~17.5 s with the answer still at
  * 0.7 s: the bee served the pre-release lock for a few seconds after the
  * sentinel write, so C's woken scan still saw it held, re-asked, and the other
- * holder yielded too before C slept out a poll interval (#724). Until the fix
- * for #703 the script's lease messages carried no `batchId`, so every one was
- * dropped at parse and the bus row measured the poll backstop: 39.0 s, same
- * as idle. `scripts/` has no typecheck, so nothing but a run catches the next
- * such drift (#725).
+ * holder yielded too before C slept out a poll interval (#724). Lease messages must
+ * carry `batchId`, or every one is dropped at parse and the bus row measures
+ * the poll backstop: 39.0 s, same as idle (#703). `scripts/` has no typecheck, so
+ * nothing but a run catches such drift (#725).
  */
 
 import { randomBytes } from 'node:crypto'

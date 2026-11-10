@@ -675,16 +675,9 @@ describe("SwarmIdProxy partitioned write enablement", () => {
     expect(deps.readLeaseCache()).toMatchObject({ deviceId: "self-device" })
   })
 
-  // A payload with no account used to build a "download-only" session: no
-  // stamps, and — the part that made it untenable — no `derivationKey`, so it
-  // derived no bus topic, joined no room, and could never be told it had been
-  // revoked. `AuthDataSchema` now requires the projection, so the parse fails
-  // and the message is ignored. No session beats a session nothing can reach.
-  // The end has to be stated in the language the merge ranks on (#682 review).
-  // This wrote `lastConnectedAt: 0` — a sentinel nothing read, and under the
-  // membership clock the value that loses every merge, so the next fold handed
-  // the entry its old timestamp back and a dApp-initiated Disconnect never
-  // travelled the way the identity UI's does.
+  // A dApp-initiated Disconnect is stated on the entry in the language the merge
+  // ranks on: a `lastConnectedAt: 0` sentinel would lose every merge, and the
+  // Disconnect would never reach a peer the way the identity UI's does (#682).
   it("states a dApp-initiated disconnect on the entry", async () => {
     seedConnectedAccount()
     await dispatch(
@@ -716,9 +709,9 @@ describe("SwarmIdProxy partitioned write enablement", () => {
 
   // `loadAuthData` runs in the identify handler, off the reconcile queue, so a
   // storage event's `refreshStampFromStorage` runs while `initializeStamper`
-  // is inside an await. It used to read the batch id again afterwards: cleared
-  // in between, the coordinator was built for `batchId: undefined` and every
-  // lease op on it threw (#804).
+  // is inside an await. Reading the batch id again afterwards could see it
+  // cleared, build the coordinator for `batchId: undefined`, and make every
+  // lease op on it throw (#804).
   it("drops a stamper init whose stamp was cleared while it awaited", async () => {
     seedConnectedAccount()
     const coordinatorsBefore = vi.mocked(BatchWriteCoordinator).mock.results
@@ -812,9 +805,9 @@ describe("SwarmIdProxy partitioned write enablement", () => {
   })
 
   // The branch the guard above does not take: the stale init's create REJECTS
-  // — a batch just removed is the likeliest reason — and its catch used to
-  // clear the stamper the superseding refresh had installed, so the session
-  // reported stamper-failed with a working drive (#805 review).
+  // — a batch just removed is the likeliest reason. Its catch must not clear
+  // the stamper the superseding refresh installed, or the session reports
+  // stamper-failed with a working drive (#805).
   it.each([
     { drive: "a replaced drive", batch: "dd".repeat(32) },
     // A storage event during the first init finds no stamper fingerprint yet
@@ -3224,10 +3217,8 @@ describe("SwarmIdProxy partitioned write enablement", () => {
 
   // Refusing the payload is only half of it: the attempt it belongs to has to
   // end. The proxy's own auth button sets `isConnecting` and shows a spinner
-  // until something clears it, and on this path nothing did — the spinner sat
-  // there while the popup, which has no idea it was refused, said "Connected!"
-  // (#587). The only thing that eventually cleared it was the popup closing,
-  // which the user had no reason to do.
+  // until something clears it, and the popup, which has no idea it was refused,
+  // says "Connected!" — the user has no reason to close it (#587).
   it("ends the connect attempt when the handover cannot be parsed", async () => {
     const challenge = await startPartitionedConnect()
     const internals = proxy as unknown as {
@@ -3501,7 +3492,7 @@ describe("SwarmIdProxy partitioned write enablement", () => {
     }
 
     it("drops a lease-request that carries no id at parse", () => {
-      // Every holder takes a rank; there is no unranked answer any more.
+      // Every holder takes a rank; there is no unranked answer.
       const result = BusMessageSchema.safeParse({
         type: "lease-request",
         accountId: ACCOUNT_ID,
@@ -3656,8 +3647,8 @@ describe("SwarmIdProxy partitioned write enablement", () => {
     })
 
     // The rank is `parseInt(requestId, 16)`. A nanoid parses to NaN and a
-    // leading minus parses negative — both used to put every holder at rank 0,
-    // i.e. #576 again, silently. The schema drops them instead.
+    // leading minus parses negative — both would put every holder at rank 0, so
+    // every idle holder yields for one waiter (#576). The schema drops them instead.
     it.each(["not-hex!", "-0000002", "00000000000000"])(
       "ignores a request whose id is %s",
       async (requestId) => {
@@ -3794,10 +3785,9 @@ describe("SwarmIdProxy partitioned write enablement", () => {
     }
   })
 
-  // #635: the handed-over session used to live only in memory, so a plain
-  // reload logged the user out of the dApp — on Safari, where partitioned is
-  // the ordinary mode, that is every reload. It is kept now, under the same
-  // 30-day deadline the unpartitioned path enforces out of shared storage.
+  // The handed-over session is persisted (#635), or a plain reload would log the user
+  // out of the dApp, and on Safari partitioned is the ordinary mode. It is kept
+  // under the same 30-day deadline the unpartitioned path enforces.
   describe("a session that survives a reload", () => {
     async function connectPartitioned(): Promise<void> {
       const challenge = await startPartitionedConnect()
@@ -3825,7 +3815,7 @@ describe("SwarmIdProxy partitioned write enablement", () => {
       expect(last.uploadMode).toBe("user-stamp")
       expect(last.canUpload).toBe(true)
       expect(last.identity?.name).toBe("Partition Test Account")
-      // The popup is what a reload used to require; nothing opened one here.
+      // A reload needs no popup.
       expect(window.open).not.toHaveBeenCalled()
     })
 
@@ -3869,10 +3859,8 @@ describe("SwarmIdProxy partitioned write enablement", () => {
 
     // Storage is partitioned by (iframe origin, top-level SITE), and a site
     // ignores the subdomain — so two dApps under example.com share one store.
-    // The saved session used to live under a single fixed key there, so the
-    // second dApp to connect overwrote the first one's, and the first came back
-    // to a record belonging to somebody else, read it as "no session", and
-    // needed the popup again. Both of them, on every reload (#671).
+    // The saved session is therefore keyed per dApp origin: under one fixed key the
+    // second dApp to connect would overwrite the first one's (#671).
     it("keeps its session when a same-site dApp connects too", async () => {
       await connectPartitioned()
       expect(storedSession()).toBeTruthy()
@@ -3912,8 +3900,7 @@ describe("SwarmIdProxy partitioned write enablement", () => {
       expect(storedSession()).toBeUndefined()
     })
 
-    // The deadline cannot see a revoke made while the tab was closed — the
-    // re-handshake used to be what caught that, and persisting removes it. So
+    // The deadline cannot see a revoke made while the tab was closed, so
     // a restored session checks the account's own Swarm state in the
     // background and tears itself down on a tombstone.
     it("ends a restored session the account has since revoked", async () => {
@@ -4062,9 +4049,7 @@ describe("SwarmIdProxy partitioned write enablement", () => {
       }
     })
 
-    // A reload is not a connection, and `hydratePartitionAccount` used to
-    // record it as one. #668 worked around that at the one call site that
-    // needed the true instant; every other reader still got "just now" (#670).
+    // A reload is not a connection, so `hydratePartitionAccount` must not record one (#668, #670).
     it("keeps the connect instant it was handed, across a reload", async () => {
       const connectedAt = Date.now() - 60_000
       await connectPartitionedAt(connectedAt)
@@ -5592,7 +5577,7 @@ describe("SwarmIdProxy partitioned write enablement", () => {
     const staleSignIn = Date.now() - 2 * KNOWN_DEVICE_MAX_AGE_MS
     const peerId = "peer-device-already-known"
     // Our own device has to be in the list already, or `mergeDevices` adds it
-    // and the length changes — which is the one case the old guard did catch.
+    // and the length changes.
     const selfId = "self-device-already-known"
     localStorageFake.setItem("swarm-id-device-id", selfId)
     const account = makeSyncedAccount()
@@ -5781,10 +5766,9 @@ describe("SwarmIdProxy partitioned write enablement", () => {
     expect(self?.name).not.toContain("dapp.example.com")
   })
 
-  // The roster half of #611, and the half that PROPAGATES. `alreadyAnnounced`
-  // read a tombstoned self as "not yet announced" and republished us without
-  // the tombstone, resurrecting the device on every peer. A removal or an
-  // expiry is news to obey, not a gap to fill.
+  // Reading a tombstoned self as "not yet announced" would republish us without
+  // the tombstone and resurrect the device on every peer (#611). A removal or an expiry
+  // is news to obey, not a gap to fill.
   describe("a device tombstoned in the roster", () => {
     const selfId = "self-device-tombstoned"
     /** Well in the past, so a reactivation's fresh stamp must outrank it. */
@@ -5992,10 +5976,9 @@ describe("SwarmIdProxy partitioned write enablement", () => {
     })
   })
 
-  // #337's rule, at the one seam that can tell a user unlocking their account
-  // from a timer firing. `mergeDevices` used to do this on every refresh, which
-  // is why no removal stuck (#611). A handover is a real sign-in: the user
-  // clicked connect and unlocked in the popup.
+  // Only a genuine sign-in lifts a removal (#337, #611), and this is the one seam that can
+  // tell a user unlocking their account from a timer firing. A handover is a
+  // real sign-in: the user clicked connect and unlocked in the popup.
   it("lifts this device's tombstone on a fresh handover", async () => {
     const selfId = "self-device-returning"
     const removedAt = 2_000_000
@@ -6498,8 +6481,8 @@ describe("SwarmIdProxy partitioned write enablement", () => {
     // The signaling constructor throws synchronously on a url that is SET but
     // unusable (`ws://` from an https page, a CSP that omits the bus host, a
     // typo). That must cost the signaling transport only: taking the local one
-    // down with it is the same "no bus at all, silently" this PR exists to
-    // prevent, and it is indistinguishable from the healthy no-url case.
+    // down with it would leave no bus at all, silently, indistinguishable from the
+    // healthy no-url case.
     it("keeps the local bus when the signaling constructor throws", async () => {
       seedConnectedAccount()
       await remountWithSignaling()

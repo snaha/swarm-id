@@ -44,8 +44,7 @@ const FOLD_RUNS = 10
  * bee-js 13 puts both behind namespaces, so the proxy intercepts the namespace
  * property and hands back an object inheriting from it with the read method
  * overridden — the namespaces are class instances, so a spread copy would
- * lose their other methods. Trapping the old flat method names would count
- * nothing: they no longer exist on `Bee`.
+ * lose their other methods.
  */
 function withReadCounter(bee: Bee): { bee: Bee; counter: { reads: number } } {
   const counter = { reads: 0 }

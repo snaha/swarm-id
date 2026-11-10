@@ -1176,8 +1176,7 @@ export class SwarmIdClient {
    *
    * Safari private mode sessions are ephemeral (lost when the private window
    * closes). The whole partitioned path — handover, stamper, upload — is
-   * confirmed on real Safari; see
-   * https://github.com/snaha/swarm-id/issues/584
+   * confirmed on real Safari.
    *
    * @param options - Configuration options for the connect flow
    * @throws {SwarmIdError} `invalid-state` if the client is not initialized

@@ -1158,9 +1158,9 @@ describe("acquirePartitionLock — verify vs fenced sentinels", () => {
     await waitA.triggered
 
     // A stale generation-fenced release (of some EARLIER claim) lands while
-    // A is parked in its guard window. Under the old fresh-generation
-    // sentinel this read back as a HIGHER generation → false lost-race →
-    // spurious read-only. The fenced sentinel is older → A's claim stands.
+    // A is parked in its guard window. A fresh-generation sentinel would read back
+    // as a HIGHER generation → false lost-race → spurious read-only. The fenced
+    // sentinel is older → A's claim stands.
     await writePartitionLock({
       bee: bee,
       stamper,

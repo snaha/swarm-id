@@ -196,8 +196,8 @@ describe("readPartitionIntent / writePartitionIntent round-trip", () => {
 })
 
 describe("readPartitionIntent — a transient 5xx is not 'no intent'", () => {
-  // A gateway 500 storm previously read as "rival absent" and let the
-  // dual-acquire through. A 5xx is retried once; a 404 is genuine absence.
+  // A gateway 500 storm must not read as "rival absent" and let a dual-acquire
+  // through. A 5xx is retried once; a 404 is genuine absence.
   it("retries once on a 5xx and returns the payload on the retry", async () => {
     await writePartitionIntent({
       bee: bee,

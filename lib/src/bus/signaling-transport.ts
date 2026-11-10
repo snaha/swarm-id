@@ -239,7 +239,7 @@ export class SignalingTransport implements BusTransport {
     for (const [peerId, peer] of this.peers) {
       // Per peer, and never fatal to the rest of the fan-out: a `send` that
       // throws (SCTP size limit, a channel torn down between the readyState
-      // read and the call) used to escape this loop and starve every peer
+      // read and the call) must not escape this loop and starve every peer
       // after it — for a teardown `lease-released` that costs the waiter its
       // whole poll interval. A failed channel falls through to the relay.
       if (peer.dataChannel?.readyState === "open") {
@@ -389,8 +389,7 @@ export class SignalingTransport implements BusTransport {
       }
       if (signal.kind === "answer") {
         // An answer for no connection describes nothing, so it must not mark
-        // the queue as flushable either — the optional chain used to make this
-        // a no-op that still set the flag.
+        // the queue as flushable either.
         const connection = peer.connection
         if (!connection) return
         await connection.setRemoteDescription({

@@ -3,11 +3,10 @@
 /**
  * The SwarmID tab's account bus (docs/Account-Bus.md, `account-delta`).
  *
- * This tab is where a revoke happens, and until now nothing told the dApp
- * proxies about it: a partitioned iframe cannot see shared storage, so a
- * revoked Safari session kept its hydrated account view — every stamp's signer
- * key — until the page closed. The proxy learned to consume `account-delta`;
- * this is the publisher.
+ * This tab is where a revoke happens, and a partitioned iframe cannot see
+ * shared storage: without a message, a revoked Safari session would keep its
+ * hydrated account view — every stamp's signer key — until the page closed.
+ * This is the `account-delta` publisher.
  *
  * **Signaling transport only.** The contexts a `BroadcastChannel` would reach —
  * other SwarmID tabs, an unpartitioned iframe on this origin — already converge

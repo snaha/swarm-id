@@ -415,10 +415,9 @@ describe("SignalingTransport — joining a room", () => {
 })
 
 describe("SignalingTransport — WebRTC upgrade", () => {
-  // A `send` that throws for one peer used to escape the fan-out loop and
-  // starve every peer after it. For a teardown `lease-released` that costs the
-  // waiter its whole poll interval — so the peer falls back to the relay and
-  // the others are unaffected.
+  // A `send` that throws for one peer must not starve every peer after it: for
+  // a teardown `lease-released` that costs the waiter its whole poll interval.
+  // The peer falls back to the relay and the others are unaffected.
   it("relays past a peer whose data channel send throws", async () => {
     const sender = makeTransport({ createPeerConnection: fakeRtcFactory })
     const receiver = makeTransport({ createPeerConnection: fakeRtcFactory })

@@ -47,7 +47,7 @@ jobs:
         run: pnpm test
 
       # The package holding the PostageStamp ABI selectors, the EIP-7702 bundle
-      # and the local solver protocol — previously in no workflow at all.
+      # and the local solver protocol.
       - name: Code linting (multichain)
         working-directory: ./multichain
         run: pnpm lint

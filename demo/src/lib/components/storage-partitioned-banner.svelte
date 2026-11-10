@@ -5,7 +5,7 @@
 
 <!--
   Shown only when storage is partitioned AND the session cannot upload.
-  Partitioning alone no longer implies read-only: the connect popup hands the
+  Partitioning alone does not imply read-only: the connect popup hands the
   iframe the account's upload credentials, so a reconnect usually fixes this.
 -->
 <script lang="ts">

@@ -33,7 +33,7 @@ describe('usdForPlur', () => {
 
   /**
    * Matches what was measured against the real pool on 2026-08-10: BZZ at
-   * 0.0376 xDAI, a depth-22 drive (labelled 6.6 GB then, 2.4 GB since #566)
+   * 0.0376 xDAI, a depth-22 drive (labelled 2.4 GB since #566)
    * for a year needing 187.47 BZZ.
    */
   it('reproduces a real mainnet quote', () => {

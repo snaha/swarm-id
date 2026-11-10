@@ -243,8 +243,8 @@ describe("readRoster — a timed-out read is not end-of-feed", () => {
   })
 
   it("does not truncate the tail when a later window's only device times out once", async () => {
-    // Window 0 (0..15) full + index 16 present-but-slow in window 1. The old
-    // behaviour read window 1 as all-empty and dropped dev-16.
+    // Window 0 (0..15) full + index 16 present-but-slow in window 1, which must
+    // not read as all-empty and drop dev-16.
     const present = new Set<number>()
     for (let i = 0; i <= 15; i++) present.add(i)
     const { bee } = fakeBeeWithSlow({ present, slowOnce: 16 })
@@ -480,9 +480,8 @@ describe("readRoster — /soc absence probe on an inconclusive /chunks read (#45
   })
 
   it("confirms an empty roster via /soc 404s: returns [] instead of throwing", async () => {
-    // The #457 deadlock: fresh account, every /chunks probe 500s. The /soc
-    // probe's JSON 404 confirms every slot empty → [] (today: inconclusive →
-    // RosterScanInconclusiveError → bootstrap never happens).
+    // A fresh account where every /chunks probe 500s. The /soc probe's JSON 404
+    // confirms every slot empty → [], so bootstrap can proceed (#457).
     const { bee } = fakeSmallClusterBee({})
     await expect(
       readRoster({ bee: bee as never, accountId: ACCOUNT_ID, owner: OWNER }),

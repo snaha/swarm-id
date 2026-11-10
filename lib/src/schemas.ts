@@ -100,9 +100,9 @@ export const DeviceSchemaV1 = z.object({
   name: z.string().optional(),
   // Rename clock, on the same pattern as a stamp's `nameUpdatedAt`. The name
   // merges on its own last-writer-wins clock because the record clock below
-  // cannot rank a rename at all: correcting a label — the partition naming of
-  // #570 — moves neither `lastSignedInAt` nor `removedAt`, so a corrected row
-  // tied with every stale copy of itself and lost the tie, forever (#663).
+  // cannot rank a rename at all: correcting a label (#570) moves neither
+  // `lastSignedInAt` nor `removedAt`, so a corrected row would tie with every
+  // stale copy of itself and lose the tie, forever (#663).
   // Optional: a row nobody has renamed since it was created has none, and a
   // name born WITH the record needs no clock — it already outranks every stale
   // copy on `lastSignedInAt`.
@@ -145,8 +145,7 @@ export const AccountSettingsSchemaV1 = z.object({
 /**
  * Connected App Schema V1.
  *
- * Account-owned: keyed by `appUrl` within its owning account (the `identityId`
- * pointer was removed when the identity tier was collapsed into the account).
+ * Account-owned: keyed by `appUrl` within its owning account.
  */
 export const ConnectedAppSchemaV1 = z.object({
   appUrl: z.string(),
@@ -298,10 +297,8 @@ export const LocalVaultSchemaV1 = z.object({
  * Synced Account Schema V1
  *
  * The single, unified account model. There is exactly one kind of account: a
- * BIP-39 seed account. What used to be distinct `type`s (passkey / ethereum /
- * agent) were really just different ways of protecting the seed — now expressed
- * uniformly by the device-local vault (`LocalVaultSchemaV1`). No `type`
- * discriminant remains.
+ * BIP-39 seed account. The ways of protecting the seed are expressed uniformly by
+ * the device-local vault (`LocalVaultSchemaV1`), so there is no `type` discriminant.
  *
  * This is the portable projection of the account — every field that may travel
  * off the device, and nothing device-local. Backup files serialize/parse it
@@ -325,15 +322,14 @@ export const SyncedAccountSchemaV1 = z.object({
   createdAt: z.number(),
   derivationKey: z.string().length(64), // derived key for deterministic sub-key generation (64-char hex)
   // App-facing public key (compressed secp256k1). Surfaced to dApps as the
-  // identity public key in ConnectionInfo. Was previously on the identity.
+  // identity public key in ConnectionInfo.
   publicKey: CompressedPublicKeySchema,
   defaultPostageStampBatchID: StoredBatchId.optional(),
   devices: z.array(DeviceSchemaV1).default([]),
-  // Account-owned nested collections (replace the old flat identities/apps/
-  // stamps stores joined by accountId/identityId pointers).
+  // Account-owned nested collections.
   connectedApps: z.array(ConnectedAppSchemaV1).default([]),
   postageStamps: z.array(PostageStampSchemaV1).default([]),
-  // Per-account settings (was identity.settings).
+  // Per-account settings.
   settings: AccountSettingsSchemaV1.optional(),
   // Per-field LWW clocks for the scalar account fields, so a concurrent change to
   // a *different* scalar on another device is not dropped wholesale, and a peer's

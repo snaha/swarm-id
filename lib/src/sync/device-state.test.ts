@@ -129,8 +129,8 @@ describe("accountStateToDeviceView — never-edited scalar clocks", () => {
         defaultPostageStampBatchID: undefined,
         publicKey: TEST_ACCOUNT_PUBLIC_KEY,
         createdAt: CREATED_AT,
-        // Always freshly stamped at publish time — the trap the old fallback
-        // (`?? lastModified`) fell into, re-clocking unedited fields every sync.
+        // Always freshly stamped at publish time, so a `?? lastModified` fallback would
+        // re-clock unedited fields every sync.
         lastModified: 1_700_000_999_000,
         devices: [],
         partitionCount: 2,

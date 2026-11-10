@@ -1824,8 +1824,8 @@ export class SwarmIdProxy {
    * The `lease-claim` goes out FIRST. Releasing is two stamped Swarm writes
    * (`yieldIdleLease` → `lease.release()`), which is orders of magnitude
    * longer than a rank step, so announcing only on completion would reach the
-   * other holders long after every one of them had begun releasing too — #576
-   * with extra steps. A claim is cheap to send and is what the rank step
+   * other holders long after every one of them had begun releasing too (#576).
+   * A claim is cheap to send and is what the rank step
    * actually budgets for.
    */
   private answerLeaseRequest(
@@ -2395,7 +2395,7 @@ export class SwarmIdProxy {
    * This device's identity, captured once. Lazily initialised here as a
    * fallback; the auth entry points set it eagerly. Reused for every lease
    * operation so acquire / refresh / validate never disagree about who we
-   * are (which previously caused false "reclaimed by another device").
+   * are (disagreement reads as a false "reclaimed by another device").
    */
   /** Drop a pending roster-append retry (#920) and its backoff, so the next
    *  session on this proxy starts over at the base delay. */
@@ -2490,7 +2490,7 @@ export class SwarmIdProxy {
    * there is no local stamp state to protect and we run unlocked. In user-stamp
    * mode the write goes through the {@link BatchWriteCoordinator}, which takes
    * the cross-tab write lock, ensures a held partition, and flushes stamper
-   * state — the proxy no longer owns any of that.
+   * state; the proxy owns none of that.
    *
    * `targetOptions.counter`, when given, counts the chunks the write sends
    * (#932): the lease's own lock, intent and state-publish chunks go out
@@ -2631,9 +2631,7 @@ export class SwarmIdProxy {
           // Say what actually happened. Falling through from here reaches the
           // parent-origin check below, which rejects this message as coming
           // from an "unauthorized origin" — it came from the right one and
-          // failed the schema (#587). That was a rare diagnostic while any
-          // payload shape produced SOME session; now that the projection is
-          // required, a refused handover is the ordinary way a version-skewed
+          // failed the schema (#587). A refused handover is the ordinary way a version-skewed
           // identity deployment fails, and it must not read as an origin bug.
           console.warn(`[Proxy] Invalid ${type} payload:`, popupResult.error)
           if (type === "setSecret") this.endRefusedConnect()
@@ -2979,8 +2977,8 @@ export class SwarmIdProxy {
    * Through the same `hydratePartitionAccount`, so there is one function that
    * builds a partitioned session rather than two that drift.
    *
-   * The deadline cannot see a revoke made while the tab was closed — the
-   * re-handshake used to be what caught that. So the session comes up now and
+   * The deadline cannot see a revoke made while the tab was closed, so the
+   * session comes up at once and
    * is checked against the account's own Swarm state in the background
    * (`verifyRestoredSession`), which is the posture the unpartitioned path
    * already has: trust local storage first, learn of a remote revoke after.
@@ -3024,8 +3022,7 @@ export class SwarmIdProxy {
    * Read the account's PUBLISHED state once, on restore, and end the session if
    * this origin's connection has ended since. A check, not a fold — the view
    * keeps what was handed over, and any other change (a rotated signer key, a
-   * moved default stamp) is adopted from the bus at the next live overlap, as
-   * it was before #635.
+   * moved default stamp) is adopted from the bus at the next live overlap (#635).
    *
    * Ended means what it means everywhere else: the entry is gone, `revokedAt`
    * (Remove), or a `disconnectedAt` newer than the connection this session came
@@ -3272,11 +3269,9 @@ export class SwarmIdProxy {
         this.announcedDeviceName(),
       )
       // Persist when anything the rival set reads actually moved — a peer
-      // appearing, a refreshed sign-in, a tombstone — not merely when the list
-      // got longer, which discarded the timestamp-only merges `activeDeviceIds`
-      // prunes on (#586). A poll no longer stamps our own entry (#652), so a
-      // quiet round compares equal and the cross-tab storage-event churn the
-      // length check was really for does not come back.
+      // appearing, a refreshed sign-in, a tombstone — including the timestamp-only
+      // merges `activeDeviceIds` prunes on (#586). A poll does not stamp our own entry (#652), so
+      // a quiet round compares equal and causes no cross-tab storage-event churn.
       if (
         deviceRegistryChanged(
           account.devices,
@@ -3509,10 +3504,9 @@ export class SwarmIdProxy {
         }).catch(() => [])
         const rosterEntry = rosterDevices.find((d) => d.deviceId === deviceId)
         if (rosterEntry?.removedAt) {
-          // A tombstoned self is NOT "not yet announced". Reading it that way
-          // republished us without the tombstone, which resurrected the device
-          // on every peer — the roster half of #611, and the half that
-          // propagates. A removal or an expiry is news to obey, not a gap to
+          // A tombstoned self is NOT "not yet announced". Reading it that way would
+          // republish us without the tombstone and resurrect the device on every peer (#611).
+          // A removal or an expiry is news to obey, not a gap to
           // fill: stand down, and let a genuine sign-in put us back
           // (`reactivateThisDevice`).
           //
@@ -3770,12 +3764,8 @@ export class SwarmIdProxy {
     // Invalidate matching connected-app entries in the nested account documents
     // so a refresh does not reconnect: `connectedUntil: undefined` is what
     // `isConnectionValid` gates on, and `disconnectedAt` is how the end travels
-    // — the marker membership merges on (#681). This used to write
-    // `lastConnectedAt: 0` instead, a sentinel nothing ever read and a claim
-    // ("never connected") that was not true; under the membership clock a zero
-    // is simply the value that loses every merge, so the entry's old timestamp
-    // came back on the next fold and a dApp-initiated Disconnect never reached
-    // a peer the way the identity UI's does.
+    // — the marker membership merges on (#681). A `lastConnectedAt: 0` sentinel would
+    // lose every merge, and the Disconnect would never reach a peer.
     try {
       const manager = createAccountsStorageManager()
       const accounts = manager.load()

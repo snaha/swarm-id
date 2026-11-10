@@ -1108,19 +1108,3 @@ export async function uploadChunk(
     return { reference: uint8ArrayToHex(address.toUint8Array()) }
   }
 }
-
-// ============================================================================
-// Internal exports for legacy wrappers
-// ============================================================================
-
-// These are exposed for the legacy wrapper module to use
-export {
-  uploadChunkViaSubsidisedGatewayInternal,
-  uploadStampedChunkViaHttp,
-  makeStampFn,
-  buildPlainMerkleTree,
-  buildEncryptedMerkleTree,
-  encryptChunkPayloads,
-  type EncryptedChunkRef,
-  type StampChunkFn,
-}

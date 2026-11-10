@@ -65,10 +65,9 @@ export function busChannelName(topic: string): string {
  * Safari tabs; delivery is per browsing-context, never back to the sender.
  *
  * The topic is the account-derived one from `deriveBusContext`, the same value
- * the signaling transport uses as its room. It used to be a single origin-wide
- * constant, which put every co-resident account's contexts on one unencrypted
- * channel — fine while the only traffic was batch-scoped utilization counters,
- * untenable for `account-delta`, whose payload carries `postageStamps[].signerKey`.
+ * the signaling transport uses as its room, so co-resident accounts never share
+ * an unencrypted channel: an `account-delta` payload carries
+ * `postageStamps[].signerKey`.
  */
 export class BroadcastChannelTransport implements BusTransport {
   readonly local = true

@@ -186,8 +186,7 @@ async function sendBundle(
       })
       // EIP-1559 fields, because a 7702 transaction has no legacy `gasPrice` to
       // fall back on the way every other write in this package does. The tip
-      // used to be hardcoded to zero here, which is a transaction no validator
-      // will include (#618).
+      // must not be zero: no validator includes such a transaction (#618).
       const { maxFeePerGas, maxPriorityFeePerGas } = (lastOffer =
         bundleFeeFields(
           await getGasPrice(settings, rpcProvider),

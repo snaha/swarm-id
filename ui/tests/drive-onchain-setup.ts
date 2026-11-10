@@ -11,9 +11,7 @@ import { type Page, expect } from '@playwright/test'
 
 import { CHAIN_RPC_URL, chainReachable, completeCreateFlow } from './helpers'
 
-// Re-exported under its old name: `drive-onchain-serial.test.ts` imports it
-// from here, and the two files are owned separately — the shared probe and
-// URL live once, in `helpers.ts`, and this keeps their import untouched.
+// `drive-onchain-serial.test.ts` imports the chain URL from here under this name.
 export const ANVIL_RPC_URL = CHAIN_RPC_URL
 const BEE_NODE_URL = 'http://localhost:1633/'
 /** On-chain work spans several 5s-block confirmations. */

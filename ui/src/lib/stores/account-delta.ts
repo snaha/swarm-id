@@ -4,10 +4,9 @@
  * The receive half of `account-delta` in the SwarmID tab (#608,
  * docs/Account-Bus.md).
  *
- * The publisher landed first, and until now nothing here consumed: a change
- * made on another device reached an *unpartitioned* session only through a
- * storage event or the popup handshake, so a revoke on device A never reached
- * device B's proxy iframe at all. This folds a peer's delta into **shared
+ * Without it, a change made on another device reaches an *unpartitioned*
+ * session only through a storage event or the popup handshake, so a revoke on
+ * device A would never reach device B's proxy iframe. This folds a peer's delta into **shared
  * storage**, which is what every unpartitioned context on this device already
  * reads — the partitioned ones keep their own in-memory fold in the proxy.
  *

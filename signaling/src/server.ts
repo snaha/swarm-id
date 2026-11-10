@@ -6,9 +6,8 @@
  *
  * Peers connect over WebSocket and name their room in a `join` frame, forming
  * one room per topic (topics are account-derived and unguessable). The topic
- * used to travel as `/?topic=<hex>`, which put the room capability into every
- * ingress and proxy access log; it moved into the `join` frame (#577) and the
- * URL form is no longer accepted. The server does two things and nothing else:
+ * never travels in the URL, which would put the room capability into every
+ * ingress and proxy access log (#577). The server does two things and nothing else:
  *
  * - `signal`: forward WebRTC SDP/ICE blobs to one named peer, so browsers can
  *   upgrade to direct DataChannels — the preferred data path.
@@ -222,9 +221,7 @@ export function createSignalingServer(options: SignalingServerOptions): Promise<
     // The topic arrives in the first frame, never the URL: query strings are
     // recorded by every ingress and proxy access log as a matter of course, and
     // the topic IS the room capability — anything that reads those logs can
-    // join (#577). The query string used to be accepted too, for a client
-    // bundle cached from before the join frame existed; both sides deploy
-    // together, so that is gone (#662).
+    // join (#577, #662).
 
     const peer: Peer = {
       id: randomUUID(),

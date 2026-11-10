@@ -12,8 +12,7 @@ import { browser } from '$app/environment'
 /**
  * Read through the getters, written only through `updateSettings` (pin these
  * exact endpoints) or `reset` (go back to following the defaults). Readonly on
- * purpose: a per-field setter existed for one input binding that no longer
- * exists, and a store with two write paths invites saving half a pair.
+ * purpose: a store with two write paths invites saving half a pair.
  */
 export interface NetworkSettingsStore {
   readonly settings: NetworkSettings

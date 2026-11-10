@@ -198,10 +198,9 @@ test('drive management: add, rename, set default, remove', async ({ page }) => {
   expect(afterRemove.default).toBe(afterRemove.live[0].batchID)
 })
 
-// #619: the funding seam used to be the only place the method could be chosen,
-// and it is raised only when the owner address is short — so an account holding
-// funds from an earlier attempt was committed to the built-in engine, with the
-// widget reachable from nowhere. The chooser now precedes the balance read.
+// The funding seam is raised only when the owner address is short (#619), so the
+// method chooser precedes the balance read: an account holding funds from an
+// earlier attempt is still asked.
 test('a funded account is still asked which payment method to use', async ({ page }) => {
   test.setTimeout(CHAIN_TEST_TIMEOUT_MS)
   await createLocalAccount(page)

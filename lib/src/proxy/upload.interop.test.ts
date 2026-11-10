@@ -115,8 +115,8 @@ describe("plain uploads match Bee's canonical Merkle layout", () => {
   const CASES: Array<{ name: string; size: number }> = [
     { name: "3 full chunks (single intermediate)", size: 3 * CHUNK_SIZE },
     {
-      // The filed threshold: the first size where the old 64-ref fanout
-      // split the tree while the canonical layout still fits one level.
+      // The first size where a 64-ref fanout splits the tree while the canonical
+      // layout still fits one level.
       name: "65 full chunks (>256KB, minimal reproducer)",
       size: 65 * CHUNK_SIZE,
     },

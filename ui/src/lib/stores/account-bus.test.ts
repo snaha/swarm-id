@@ -275,9 +275,9 @@ describe('accountBusStore', () => {
   })
 
   // The debounce holds ONE pending account. A commit for another account
-  // landing in the same window used to overwrite it, and the publish-time guard
-  // then dropped the intruder — losing the joined account's delta rather than
-  // ignoring the other one's. A revoke is what goes missing.
+  // landing in the same window must not overwrite it: the publish-time guard
+  // would drop the intruder and lose the joined account's delta, and a revoke is
+  // what goes missing.
   it('keeps the joined account pending when another account commits in the same window', async () => {
     const account = makeAccount()
     accountBusStore.join(account)

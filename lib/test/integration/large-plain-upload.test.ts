@@ -5,8 +5,8 @@
  * Integration test for plain uploads large enough to need 128-ref
  * intermediate chunks (>512 KiB), read back through Bee's native /bytes
  * API. This is the interop proof that our plain Merkle layout matches what
- * a stock node builds and can traverse (#417): with the old 64-ref fanout
- * Bee could not join these trees.
+ * a stock node builds and can traverse (#417): with a 64-ref fanout
+ * Bee cannot join these trees.
  */
 
 import { describe, it, expect, beforeAll, inject } from "vitest"

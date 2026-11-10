@@ -170,11 +170,9 @@ describe('resolvePaymentRail', () => {
   })
 
   /**
-   * The defect this closes. A genesis probe that blips — a rate limit, a
-   * dropped connection — used to be routed exactly like a proven dev chain, so
-   * a wallet pointed at REAL Gnosis was offered a rail whose deposit goes to a
-   * local chain and whose delivery waits two minutes on a solver that was
-   * never involved, before blaming it. Unprovable is not dev.
+   * A genesis probe that blips — a rate limit, a dropped connection — must not
+   * route like a proven dev chain, or a wallet pointed at REAL Gnosis is offered a
+   * rail whose deposit goes to a local chain. Unprovable is not dev.
    */
   it('offers no bridged rail when the endpoint could not be identified', async () => {
     expect(await resolvedChains(undefined)).toEqual([gnosis.id])

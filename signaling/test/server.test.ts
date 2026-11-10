@@ -654,7 +654,7 @@ describe('signaling server — limits', () => {
   // legitimately bursts, which is what the budget is now sized for.
   it('closes a socket that exceeds its message budget with a retryable code', async () => {
     // Four, for three relays: joining spends a message of the budget, the way
-    // it does for every client now that the topic arrives in the first frame
+    // it does for every client since the topic arrives in the first frame
     // and not the URL (#662).
     const capped = await createSignalingServer({
       port: 0,

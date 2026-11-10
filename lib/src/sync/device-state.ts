@@ -231,7 +231,7 @@ export async function publishDeviceState(opts: {
   encryptionKey: string
   view: DeviceStateView
   target: UploadTarget
-  /** Per-chunk utilisation hook (mirrors the old publish path). */
+  /** Per-chunk utilisation hook. */
   onChunksUploaded?: (chunkAddresses: Uint8Array[]) => Promise<void>
 }): Promise<SyncResult> {
   const written = await writeDeviceState({

@@ -5,8 +5,8 @@
  *
  * Integrates with the Ethersphere multichain widget for purchasing postage
  * stamps. The widget popup handles the cross-chain crypto payment and the
- * on-chain batch creation, then posts the result back via postMessage. This is
- * the same proven settlement path the legacy UI uses. The URL carries the
+ * on-chain batch creation, then posts the result back via postMessage.
+ * The URL carries the
  * batch-owner `destination` and, as defaults the popup opens on, the `depth` and
  * per-chunk `amount` the form asked for (#632); chain / token, and the final
  * size and lifespan, are chosen inside the popup, and the `batch` event reports

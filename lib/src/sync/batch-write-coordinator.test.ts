@@ -547,7 +547,7 @@ describe("BatchWriteCoordinator — acquire does not block on the device-registr
     })
     const stamper = makeStamper([])
     // A refresh that never settles — modelling the slow gateway roster fold.
-    // If `acquire` awaited it (the old bug), `withWrite` would hang to the 45s
+    // If `acquire` awaited it, `withWrite` would hang to the 45s
     // cap; non-blocking, the acquire binds the partition immediately.
     let settleRefresh!: () => void
     const refreshKnownDeviceIds = vi.fn(

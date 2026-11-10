@@ -11,8 +11,7 @@
  *
  * Stamper mode still sends it — the node is the user's own — so the positive
  * half is asserted too, or a header dropped from the wrong branch stays green.
- * Stamper mode also honours the caller's `deferred`, which every data and
- * chunk upload hard-coded away from #298 until #784.
+ * Stamper mode also honours the caller's `deferred` on every data and chunk upload (#784).
  */
 
 import { describe, it, expect, vi, afterEach } from "vitest"
@@ -264,8 +263,8 @@ describe("an aborted signal stops the write", () => {
 /**
  * Stamper mode honours `deferred` (#780 adjacent): a dev-mode Bee serves only
  * deferred uploads, and the documented remedy is to set the flag from
- * `getNodeInfo()`. #298 wrote `{ ...options, deferred: false }`, so the
- * caller's `true` was silently dropped and the upload timed out anyway.
+ * `getNodeInfo()`. Forcing `deferred: false` would silently drop the caller's
+ * `true` and the upload would time out anyway (#298).
  */
 describe("stamper uploads honour deferred", () => {
   function spiedBee(): { bee: MockBee; chunkUpload: ReturnType<typeof vi.fn> } {

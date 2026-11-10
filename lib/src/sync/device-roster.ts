@@ -4,10 +4,8 @@
 /**
  * Device roster (Phase 3a hardening) — append-only discovery log.
  *
- * Replaces the single shared *mutable* registry doc, which a device could
- * **clobber** on a high-latency/caching gateway: it read-merge-overwrote the
- * whole doc, so a device that couldn't yet see a peer's just-written entry
- * dropped it. (See the gateway finding in the Phase 3a implementation log.)
+ * Append-only, so a device on a high-latency/caching gateway cannot clobber a
+ * peer's just-written entry the way read-merge-overwrite of a shared doc would.
  *
  * The roster is a **sequential append-only feed** (`swarm-id-roster-v1:<acct>`):
  * each device appends ONLY its own membership record (`Device`) at the next free
@@ -19,7 +17,7 @@
  * LWW). Account-level immutables (publicKey, createdAt, partitionCount) live on
  * the robust per-device state feed (`device-state.ts`), not here.
  *
- * Each entry is an encrypted blob (privacy parity with the old registry)
+ * Each entry is an encrypted blob
  * referenced by the sequential SOC, reusing `uploadData`/`downloadDataWithChunkAPI`.
  */
 

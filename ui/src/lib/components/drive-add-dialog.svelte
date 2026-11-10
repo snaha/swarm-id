@@ -124,11 +124,10 @@
   /**
    * The route the purchase takes, chosen BEFORE anything reads the chain.
    *
-   * The funding seam used to be the only place this could be asked, and it is
-   * raised only when the owner address is short (#619) — so an account holding
-   * funds from an earlier attempt was committed to the built-in engine with no
-   * way to say otherwise, and a purchase that could not reach the chain at all
-   * failed before the question was ever put. Asking here precedes both.
+   * The funding seam is raised only when the owner address is short (#619), so an
+   * account holding funds from an earlier attempt would never be asked, and a
+   * purchase that cannot reach the chain at all would fail first. Asking here
+   * precedes both.
    */
   let method = $state<PaymentMethod>('widget')
   let pendingLabel = $state('')

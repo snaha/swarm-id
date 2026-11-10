@@ -115,9 +115,8 @@ describe("resolveStampForApp", () => {
   })
 })
 
-// A partitioned session is handed its account view by the connect popup, and
-// before #578 that view carried EVERY stamp with its signer key — in a context
-// embedded by an arbitrary dApp page. It holds what its grant names (#578).
+// A partitioned session is handed its account view by the connect popup, in a
+// context embedded by an arbitrary dApp page. It holds only what its grant names (#578).
 describe("stampsReachableByApp", () => {
   it("keeps only the drives a list names", () => {
     const result = stampsReachableByApp(

@@ -403,8 +403,8 @@ async function waitForNodeToSeeBatch(beeNodeUrl: string, blockNumber: string): P
  */
 export async function createTestDrive(account: Account, shape?: BatchShape): Promise<string> {
   // Both endpoints read once, at the top: a purchase takes tens of seconds, and
-  // an endpoint switch during it used to send the read-back to a chain the
-  // batch was never bought on — reported as "could not be read back".
+  // an endpoint switch during it must not send the read-back to a chain the
+  // batch was never bought on.
   const rpcUrl = networkSettingsStore.gnosisRpcUrl
   const beeNodeUrl = networkSettingsStore.beeNodeUrl
   const { batchId, blockNumber, signer } = await createOwnedBatchOnChain(
