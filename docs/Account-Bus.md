@@ -253,7 +253,7 @@ With the bus in place the partitioned iframe is a first-class writer:
   while the tab was closed, which reaches it no other way. That read is a revocation check,
   not a fold: everything else still arrives over the bus, and a fold that lands re-persists
   the record so the next reload does not undo it. The iframe keeps its own
-  `swarm-id-device-id` and lease cache — it _is_ a device, named after the dApp it belongs to
+  `swarm-id-device-id` and lease record — it _is_ a device, named after the dApp it belongs to
   in the roster (#643), and its liveness comes from presence like every other device's; nothing
   expires a device (see Message kinds).
 - **What that session PUBLISHES, and why a partial view is safe to publish**

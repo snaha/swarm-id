@@ -28,7 +28,10 @@ import {
   calculateUtilization,
   UtilizationAwareStamper,
 } from "../utils/batch-utilization"
-import type { UtilizationStoreDB } from "../storage/utilization-store"
+import {
+  leaseRecordIn,
+  type UtilizationStoreDB,
+} from "../storage/utilization-store"
 import type { DebouncedUtilizationUploader } from "../storage/debounced-uploader"
 import type {
   AccountsStoreInterface,
@@ -371,6 +374,14 @@ export function createSyncAccount(
       swarmEncryptionKey: hexToUint8Array(encryptionKey),
       partitionCount,
       mode: "oneshot",
+      // The same record the proxy's coordinators read: this publish moves the
+      // lane's reference, and a context that did not learn of it would put
+      // its own older one back.
+      leaseRecord: leaseRecordIn(
+        utilizationStore,
+        defaultStamp.batchID.toHex(),
+        accountId,
+      ),
     })
 
     console.log(

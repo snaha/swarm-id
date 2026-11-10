@@ -54,6 +54,7 @@ import type {
   PartitionLeaseStateSnapshot,
 } from "./partition-lease"
 import { readPartitionLock, NO_HOLDER_DEVICE_ID } from "./partition-lock"
+import type { LeaseRecordStore } from "../storage/utilization-store"
 import { STATE_POINTER_EPOCH_MS } from "./partition-state"
 import type { UploadTarget } from "../proxy/upload"
 import type { StampWorkerPool } from "../proxy/stamp-worker-pool"
@@ -102,6 +103,21 @@ export function isDisplaced(
 }
 
 /** Long-lived (proxy) vs one-off (`sync-account`) lease behaviour. */
+/** Whether two lease snapshots name the same claim: partition and claim
+ *  generation. Expiry and the published reference move under one claim. */
+function sameClaim(
+  a: PartitionLeaseStateSnapshot | undefined,
+  b: PartitionLeaseStateSnapshot | undefined,
+): boolean {
+  return (
+    a?.self !== undefined &&
+    b?.self !== undefined &&
+    a.self.partition === b.self.partition &&
+    a.self.generation.timestampMs === b.self.generation.timestampMs &&
+    a.self.generation.tiebreaker === b.self.generation.tiebreaker
+  )
+}
+
 export type CoordinatorMode = "persistent" | "oneshot"
 
 /** Per-transition lease snapshot handed to `onLeaseChange`. */
@@ -157,9 +173,14 @@ export interface BatchWriteCoordinatorDeps {
   swarmEncryptionKey: Uint8Array
   partitionCount: number
   mode: CoordinatorMode
-  /** Persistent mode only: read/write the local lease-cache hint. */
-  readLeaseCache?: () => PartitionLeaseStateSnapshot | undefined
-  writeLeaseCache?: (snap: PartitionLeaseStateSnapshot | undefined) => void
+  /**
+   * The lease this storage partition holds on the drive, shared by every
+   * context of the partition (`leaseRecordIn`). Each context is the same
+   * device to the lease protocol and holds the same lease; the record is
+   * where they read it. Omit for a caller with no siblings and no reload to
+   * survive (tests, node).
+   */
+  leaseRecord?: LeaseRecordStore
   /** Flush stamper bucket state after a write (proxy: `saveStamperState`). */
   flushStamperState?: () => Promise<void>
   /** Build/reuse a parallel-signing worker pool (proxy: `getOrCreateWorkerPool`). */
@@ -274,6 +295,11 @@ export class BatchWriteCoordinator {
    *  continuation would otherwise resurrect a lease the coordinator already
    *  cleared. */
   private leaseEpoch: number = 0
+  /** Whether the lease record gave back a snapshot written to it. Until it
+   *  has, it says nothing about this context's lease — none wired, or a
+   *  store that keeps nothing, which no sibling shares either — and the
+   *  lease is not judged against it. */
+  private leaseRecordWorks: boolean = false
 
   constructor(deps: BatchWriteCoordinatorDeps) {
     this.deps = deps
@@ -359,12 +385,12 @@ export class BatchWriteCoordinator {
         const localCounter = this.deps.stamper.getLocalCounter()
         if (localCounter !== undefined) {
           await this.partitionLease?.publishState(localCounter)
-          // The lease cache names the publish before the ack, so a reload
+          // The lease record names the publish before the ack, so a reload
           // within the TTL can tell rows certified for this publish (by the
           // flush that follows) from rows left behind by a flush that never
           // landed — see the adopt fast path in `acquire`.
           if (this.partitionLease !== undefined) {
-            this.deps.writeLeaseCache?.(this.partitionLease.serialize())
+            await this.saveLease(this.partitionLease)
           }
           // The publish durably re-wrote the state pointer to the current
           // bucket (same effect as a successful heartbeat), so an idle-blip
@@ -431,7 +457,8 @@ export class BatchWriteCoordinator {
     const stamper = this.deps.stamper
     if (lease) {
       const localCounter = stamper.getLocalCounter()
-      if (localCounter !== undefined) {
+      const mine = lease.serialize()
+      {
         // Serialize the detached release under the batch write lock (#349):
         // a successor coordinator's acquire (`startLease`/`withWrite` →
         // `lockAndFlush`) queues on the same origin-wide Web Lock, so the
@@ -447,7 +474,25 @@ export class BatchWriteCoordinator {
         // goes through an unbound stamper, which is safe because
         // `writePartitionState` marks its chunks with the explicit partition
         // slot.
-        void this.lock(() => lease.release(localCounter)).catch((err) =>
+        //
+        // Only the context whose lease is the one the record describes, down
+        // to the published reference, speaks for it: a sibling that published
+        // since is ahead of this table, and a release from here would publish
+        // an older counter over the lane's latest. The record is cleared in
+        // the same section, ahead of any successor's acquire.
+        void this.lock(async () => {
+          const record = await this.deps.leaseRecord?.read()
+          const current = this.leaseRecordWorks
+            ? sameClaim(record, mine) &&
+              record?.referenceHex === mine.referenceHex
+            : true
+          if (!current) return
+          try {
+            if (localCounter !== undefined) await lease.release(localCounter)
+          } finally {
+            await this.clearLease(mine)
+          }
+        }).catch((err) =>
           console.warn(
             "[BatchWriteCoordinator] Partition lease release failed:",
             err,
@@ -466,7 +511,6 @@ export class BatchWriteCoordinator {
     this.partitionLease = undefined
     this.readOnly = false
     this.lastLeaseValidatedAt = 0
-    this.deps.writeLeaseCache?.(undefined)
     this.emitLeaseChange()
     // Announced before the detached release lands, which is harmless: the
     // lock SOCs stay the authority, so a peer woken early spends one extra
@@ -592,7 +636,8 @@ export class BatchWriteCoordinator {
         intentGuardPollMs: this.deps.intentGuardPollMs,
       })
       if (this.leaseEpoch !== epoch) return
-      const cached = this.deps.readLeaseCache?.()
+      const cached = await this.deps.leaseRecord?.read()
+      if (this.leaseEpoch !== epoch || this.disposed) return
       if (cached) lease.hydrate(cached)
 
       // Re-adopt fast path: a still-valid cached lease (e.g. after a reload
@@ -651,11 +696,12 @@ export class BatchWriteCoordinator {
         // Seed before `onLeaseAcquired` (which may publish): a publish's
         // `flushState` then overwrites this with the fresh reference.
         lease.seedReferenceHex(seededReferenceHex)
-        this.deps.writeLeaseCache?.(lease.serialize())
         this.startRefreshTimer(lease)
         this.lastLeaseValidatedAt = Date.now()
         this.lastLeaseActivityAt = Date.now()
         this.pointerHeartbeatFailingSince = undefined // fresh lease session
+        await this.saveLease(lease)
+        if (this.leaseEpoch !== epoch || this.disposed) return
         this.deps.onLeaseAcquired?.(adopted)
         return
       }
@@ -671,7 +717,7 @@ export class BatchWriteCoordinator {
             "[BatchWriteCoordinator] All partitions held; entering read-only mode until a peer releases.",
           )
         }
-        this.deps.writeLeaseCache?.(lease.serialize())
+        await this.saveLease(lease)
         return
       }
 
@@ -682,11 +728,12 @@ export class BatchWriteCoordinator {
       })
       // Fence in-flight stamps to the lease's local expiry (bind clears it).
       this.syncStamperLeaseDeadline()
-      this.deps.writeLeaseCache?.(lease.serialize())
       this.startRefreshTimer(lease)
       this.lastLeaseValidatedAt = Date.now()
       this.lastLeaseActivityAt = Date.now()
       this.pointerHeartbeatFailingSince = undefined // fresh lease session
+      await this.saveLease(lease)
+      if (this.leaseEpoch !== epoch || this.disposed) return
       this.deps.onLeaseAcquired?.(result.partition)
     } catch (error) {
       console.error(
@@ -700,7 +747,8 @@ export class BatchWriteCoordinator {
       // wipe its cache — just propagate.
       if (this.leaseEpoch !== epoch) throw error
       // The throw may have come AFTER bindPartition/startRefreshTimer (e.g. a
-      // consumer callback — writeLeaseCache/onLeaseAcquired — threw): undo the
+      // consumer callback — `onLeaseAcquired` — threw, or the lease record
+      // could not be written): undo the
       // partial commit so the stamper and the interval don't outlive the lease
       // record. Invalidate-before-unbind per the displacement-race ordering;
       // all three are no-ops when nothing was bound/armed. When something was,
@@ -714,8 +762,6 @@ export class BatchWriteCoordinator {
       stamper.unbindPartition()
       this.partitionLease = undefined
       this.readOnly = false
-      // Keep cache and in-memory state in lockstep: no lease → no live cache.
-      this.deps.writeLeaseCache?.(undefined)
       // Operational failure (the lock-SOC scan/claim threw) — NOT contention.
       // Propagate so the skip path reports an error instead of "all partitions
       // held", and the block path pauses background work on the real cause.
@@ -888,7 +934,7 @@ export class BatchWriteCoordinator {
       // Web Locks are not reentrant). `signalLeaseLost` first so the breaker is
       // armed before unbind, consistent with the refresh-tick path.
       this.signalLeaseLost()
-      this.finalizeDemote()
+      await this.finalizeDemote()
       throw new Error("Partition lease was reclaimed by another device.")
     }
 
@@ -924,13 +970,13 @@ export class BatchWriteCoordinator {
           `[BatchWriteCoordinator] Sentinel re-assert: partition ${partition} taken by a peer; demoting.`,
         )
         this.signalLeaseLost()
-        this.finalizeDemote()
+        await this.finalizeDemote()
         throw new Error("Partition lease was reclaimed by another device.")
       }
       // Re-asserted: refresh() rewrote the claim and bumped the lease.
       this.syncStamperLeaseDeadline()
       this.lastLeaseValidatedAt = Date.now()
-      this.deps.writeLeaseCache?.(this.partitionLease.serialize())
+      await this.saveLease(this.partitionLease)
       return
     }
 
@@ -949,7 +995,7 @@ export class BatchWriteCoordinator {
     this.partitionLease.bumpLocalLease(LEASE_TTL_MS)
     this.syncStamperLeaseDeadline()
     this.lastLeaseValidatedAt = Date.now()
-    this.deps.writeLeaseCache?.(this.partitionLease.serialize())
+    await this.saveLease(this.partitionLease)
   }
 
   /**
@@ -967,7 +1013,8 @@ export class BatchWriteCoordinator {
    * under the write lock when called outside a held lock (see `refreshTick`),
    * so no `stamp()` runs between `invalidateLease` and `unbindPartition`.
    */
-  private finalizeDemote(): void {
+  private async finalizeDemote(): Promise<void> {
+    const mine = this.partitionLease?.serialize()
     this.leaseEpoch++
     this.deps.stamper.unbindPartition()
     if (this.partitionRefreshTimer !== undefined) {
@@ -978,10 +1025,12 @@ export class BatchWriteCoordinator {
     this.readOnly = true
     this.lastLeaseValidatedAt = 0
     this.pointerHeartbeatFailingSince = undefined
-    this.deps.writeLeaseCache?.(undefined)
     // Re-arm so the next write re-acquires.
     this.pendingAcquire = true
     this.emitLeaseChange()
+    // The device lost the lane: the record goes with it, unless a sibling has
+    // claimed again since
+    if (mine) await this.clearLease(mine)
   }
 
   /**
@@ -1007,12 +1056,24 @@ export class BatchWriteCoordinator {
     // Stale-continuation guard: clearing the interval (teardown / demote /
     // pause) cannot stop a tick already in flight, and a slow tick can overlap
     // the next one. A tick for a lease the coordinator no longer tracks must
-    // not touch Swarm, the stamper, or the cache. Re-checked after every await
+    // not touch Swarm, the stamper, or the record. Re-checked after every await
     // below; a teardown landing mid-`lease.refresh()` can still produce one
     // ghost lock-SOC re-claim, which self-heals via LEASE_TTL_MS.
     if (this.disposed || this.partitionLease !== lease) return
     const partition = lease.currentPartition
     if (partition === undefined) return
+
+    // The lease is the device's, shared by every context of this storage
+    // partition through the lease record; this object is one context's hold
+    // on it. If the record names another claim, or none — a sibling yielded,
+    // tore down, was displaced, or claimed afresh — a tick from here would
+    // renew a claim the device gave up. Touch nothing: taking the lock drops
+    // it (`followLeaseRecord`).
+    if (!(await this.holdsRecordedClaim(lease))) {
+      await this.lock(async () => undefined)
+      return
+    }
+    if (this.disposed || this.partitionLease !== lease) return
 
     // Idle yield: if no upload touched this lease for IDLE_YIELD_MS and none is
     // in flight, voluntarily release so a waiting peer takes the slot without
@@ -1129,12 +1190,12 @@ export class BatchWriteCoordinator {
         // guards as the idle-yield branch — this is the correctness-critical
         // check; the off-lock one above only narrows the breaker window.
         if (this.disposed || this.partitionLease !== lease) return
-        this.finalizeDemote()
+        await this.finalizeDemote()
       })
       return
     }
 
-    // Guard the tail too: after teardown/demote cleared the cache, a stale
+    // Guard the tail too: after teardown/demote cleared the record, a stale
     // tick must not re-write a live-looking snapshot that a future acquire
     // would hydrate + adoptIfLive without any Swarm round-trip.
     if (this.disposed || this.partitionLease !== lease) return
@@ -1154,17 +1215,43 @@ export class BatchWriteCoordinator {
         this.signalLeaseLost()
         await this.lock(async () => {
           if (this.disposed || this.partitionLease !== lease) return
-          this.finalizeDemote()
+          await this.finalizeDemote()
         })
       }
       return
     }
 
-    // Renewed on Swarm → bump the local heartbeat and persist it.
+    // Renewed on Swarm → bump the local heartbeat and record the new expiry.
+    // Only the expiry: this tick runs off the lock, and the record's
+    // reference belongs to whoever publishes under it.
     lease.bumpLocalLease(LEASE_TTL_MS)
     this.syncStamperLeaseDeadline()
     this.lastLeaseValidatedAt = Date.now()
-    this.deps.writeLeaseCache?.(lease.serialize())
+    const renewed = lease.serialize()
+    await this.deps.leaseRecord
+      ?.update((existing) =>
+        existing?.self !== undefined &&
+        renewed.self !== undefined &&
+        sameClaim(existing, renewed)
+          ? {
+              ...existing,
+              self: {
+                ...existing.self,
+                leasedUntil: Math.max(
+                  existing.self.leasedUntil,
+                  renewed.self.leasedUntil,
+                ),
+              },
+            }
+          : existing,
+      )
+      .catch((err: unknown) =>
+        console.warn(
+          "[BatchWriteCoordinator] Could not record the renewed lease expiry:",
+          err,
+        ),
+      )
+    if (this.disposed || this.partitionLease !== lease) return
     // Heartbeat the state pointer to the current rotating bucket (best-effort,
     // off the critical path) so an idle-but-alive holder keeps a fresh resume
     // pointer the next reader can find without a feed walk. `withWrite`'s publish
@@ -1187,10 +1274,10 @@ export class BatchWriteCoordinator {
           // partition mode → the heartbeat stays a bare pointer write.
           await lease.heartbeatStatePointer(this.deps.stamper.getLocalCounter())
           // The heartbeat may have re-pinned under a new reference: name it in
-          // the lease cache and commit it to the rows, as an upload's publish
+          // the lease record and commit it to the rows, as an upload's publish
           // does, or a reload would adopt rows certified for the superseded
           // one and heartbeat that back (its chunks no longer protected).
-          this.deps.writeLeaseCache?.(lease.serialize())
+          await this.saveLease(lease)
           await this.deps.flushStamperState?.()
         })
         this.pointerHeartbeatFailingSince = undefined
@@ -1219,7 +1306,7 @@ export class BatchWriteCoordinator {
           this.signalLeaseLost()
           await this.lock(async () => {
             if (this.disposed || this.partitionLease !== lease) return
-            this.finalizeDemote()
+            await this.finalizeDemote()
           })
         }
       }
@@ -1236,6 +1323,7 @@ export class BatchWriteCoordinator {
     requestId?: string,
   ): Promise<void> {
     this.leaseEpoch++
+    const mine = lease.serialize()
     const yieldedPartition = lease.currentPartition
     if (this.partitionRefreshTimer !== undefined) {
       clearInterval(this.partitionRefreshTimer)
@@ -1262,7 +1350,7 @@ export class BatchWriteCoordinator {
     this.partitionLease = undefined
     this.readOnly = false
     this.lastLeaseValidatedAt = 0
-    this.deps.writeLeaseCache?.(undefined)
+    await this.clearLease(mine)
     this.emitLeaseChange()
     // `ui/tests/three-devices.test.ts` reads this line as "a yield happened"
     // (a teardown release logs nothing); reword it there too.
@@ -1351,7 +1439,6 @@ export class BatchWriteCoordinator {
     }
     this.partitionLease = undefined
     this.readOnly = false
-    this.deps.writeLeaseCache?.(undefined)
   }
 
   // ---- helpers ------------------------------------------------------------
@@ -1402,8 +1489,103 @@ export class BatchWriteCoordinator {
             err,
           ),
         )
+      await this.followLeaseRecord()
       return op()
     })
+  }
+
+  /** Write `lease` to the shared record, noting whether the record keeps it. */
+  private async saveLease(lease: PartitionLease): Promise<void> {
+    const record = this.deps.leaseRecord
+    if (!record) return
+    const snapshot = lease.serialize()
+    await record.update(() => snapshot)
+    if (!this.leaseRecordWorks) {
+      this.leaseRecordWorks = sameClaim(await record.read(), snapshot)
+    }
+  }
+
+  /** Remove `mine` from the shared record, unless it names another claim. */
+  private async clearLease(mine: PartitionLeaseStateSnapshot): Promise<void> {
+    await this.deps.leaseRecord
+      ?.update((existing) => (sameClaim(existing, mine) ? undefined : existing))
+      .catch((err: unknown) =>
+        console.warn(
+          "[BatchWriteCoordinator] Could not clear the lease record:",
+          err,
+        ),
+      )
+  }
+
+  /**
+   * Whether the shared record still names the claim `lease` holds. True when
+   * there is no working record to ask, or it cannot be read.
+   */
+  private async holdsRecordedClaim(lease: PartitionLease): Promise<boolean> {
+    if (!this.leaseRecordWorks) return true
+    try {
+      return sameClaim(await this.deps.leaseRecord?.read(), lease.serialize())
+    } catch (err) {
+      console.warn(
+        "[BatchWriteCoordinator] Could not read the lease record:",
+        err,
+      )
+      return true
+    }
+  }
+
+  /**
+   * Bring this context's lease up to the shared record, on taking the write
+   * lock. Every context of a storage partition is the same device to the
+   * lease protocol and holds the same lease, each through a `PartitionLease`
+   * of its own; the record is written under this lock at every claim,
+   * publish and re-pin.
+   *
+   * - Same claim: take its expiry and published reference. A reference a
+   *   sibling published means the lane was in use a moment ago, which is
+   *   what the idle yield measures.
+   * - Another claim, or none: the device no longer holds this lane on this
+   *   object's terms. Drop it locally — no Swarm write, and the record (the
+   *   sibling's) is left alone; the next write acquires through the record.
+   *   No stamp of this context's is in flight: uploads hold this lock.
+   */
+  private async followLeaseRecord(): Promise<void> {
+    const lease = this.partitionLease
+    if (lease?.currentPartition === undefined) return
+    if (!this.leaseRecordWorks) return
+    let record: PartitionLeaseStateSnapshot | undefined
+    try {
+      record = await this.deps.leaseRecord?.read()
+    } catch (err) {
+      console.warn(
+        "[BatchWriteCoordinator] Could not read the lease record:",
+        err,
+      )
+      return
+    }
+    if (this.partitionLease !== lease) return
+    const mine = lease.serialize()
+    if (record !== undefined && sameClaim(record, mine)) {
+      lease.follow(record)
+      if (record.referenceHex !== mine.referenceHex) {
+        this.lastLeaseActivityAt = Date.now()
+      }
+      this.syncStamperLeaseDeadline()
+      return
+    }
+    this.leaseEpoch++
+    this.deps.stamper.invalidateLease()
+    this.deps.stamper.unbindPartition()
+    if (this.partitionRefreshTimer !== undefined) {
+      clearInterval(this.partitionRefreshTimer)
+      this.partitionRefreshTimer = undefined
+    }
+    this.partitionLease = undefined
+    this.readOnly = false
+    this.lastLeaseValidatedAt = 0
+    this.pointerHeartbeatFailingSince = undefined
+    this.pendingAcquire = true
+    this.emitLeaseChange()
   }
 
   /** Post-acquisition guard: a multi-device account must hold a partition. */

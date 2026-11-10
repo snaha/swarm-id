@@ -9,6 +9,8 @@
  * bucket counters, whatever the batch depth or the batch's wire format (#463).
  */
 
+import type { PartitionLeaseStateSnapshot } from "../sync/partition-lease"
+
 // ============================================================================
 // Types
 // ============================================================================
@@ -87,6 +89,28 @@ export interface BatchMetadata {
    * Keyed by partition index; replaced wholesale on every publish/read.
    */
   stateChunkBuckets?: Record<number, number[]>
+  /**
+   * The lease this storage partition holds on the drive, per account id:
+   * which lane, under which claim, until when, and the reference of its
+   * latest publish. Every tab of the partition is the same device to the
+   * lease protocol and reads its lease from here (`leaseRecordIn`). Per
+   * account because the store is keyed by batch alone, and a lease belongs to
+   * an account's lock SOCs.
+   */
+  leases?: Record<string, PartitionLeaseStateSnapshot>
+}
+
+/**
+ * One drive's lease record, as a context reads and writes it. `update` is one
+ * atomic step, so two tabs changing the record cannot undo each other.
+ */
+export interface LeaseRecordStore {
+  read(): Promise<PartitionLeaseStateSnapshot | undefined>
+  update(
+    next: (
+      existing: PartitionLeaseStateSnapshot | undefined,
+    ) => PartitionLeaseStateSnapshot | undefined,
+  ): Promise<void>
 }
 
 // ============================================================================
@@ -414,5 +438,38 @@ export class UtilizationStoreDB {
       this.db.close()
       this.db = undefined
     }
+  }
+}
+
+/**
+ * The lease record of `accountId` on `batchId` in `store`. A store that
+ * cannot be opened holds no record and keeps none: reads are empty and writes
+ * are dropped, so a context without IndexedDB runs from memory.
+ */
+export function leaseRecordIn(
+  store: UtilizationStoreDB,
+  batchId: string,
+  accountId: string,
+): LeaseRecordStore {
+  const account = accountId.toLowerCase()
+  const unlessUnavailable = (error: unknown): undefined => {
+    if (error instanceof UtilizationStoreUnavailableError) return undefined
+    throw error
+  }
+  return {
+    read: () =>
+      store
+        .getMetadata(batchId)
+        .then((metadata) => metadata?.leases?.[account], unlessUnavailable),
+    update: (next) =>
+      store
+        .updateMetadata(batchId, (existing) => {
+          const { [account]: mine, ...others } = existing?.leases ?? {}
+          const snapshot = next(mine)
+          return {
+            leases: snapshot ? { ...others, [account]: snapshot } : others,
+          }
+        })
+        .catch(unlessUnavailable),
   }
 }
