@@ -28,8 +28,10 @@ minimumReleaseAgeExclude:
   - '@snaha/bee-compose@0.3.0'
 
 # Security fixes for transitive dependencies (`pnpm audit --prod`), each the
-# newest release at least a week old that clears the advisories. Delete an entry
-# once the packages that pull it in have caught up. Not overridden, because no
+# newest release at least a week old that clears the advisories. An exact target
+# also holds back every later release, security ones included, so each audit
+# pass revisits the whole block: raise an entry that has a newer fix, delete one
+# whose parents have caught up. Not overridden, because no
 # fix exists in the major they need: zod 3 (@coinbase/cdp-sdk, @reown/appkit),
 # svelte 3 and esbuild 0.19 (@web3-onboard/core, built against them), deepmerge
 # (no fixed release published).
