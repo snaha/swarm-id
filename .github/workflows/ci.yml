@@ -30,6 +30,11 @@ jobs:
       - name: Check formatting
         run: pnpm exec prettier --check .
 
+      # A range admits whatever the registry serves next, compromised releases
+      # included (bee-js 13.3.0); only the lockfile would stand in the way.
+      - name: Check dependency versions are exact
+        run: pnpm check:versions
+
       - name: Build lib dependency
         working-directory: ./lib
         run: pnpm build
