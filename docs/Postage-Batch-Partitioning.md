@@ -259,13 +259,17 @@ A device that reloads within its own lease TTL skips the read entirely and re-de
 counter from local state (the re-adopt fast path) — provided its cache rows are certified for
 that lane: the device keeps one synced reference, for the lane the rows describe, and a lane
 switch rewrites every row (certifying no lane while it runs) before the new lane's first publish
-certifies them again. Rows a dying tab left half rewritten take the cold read instead; a lane
-claimed from zero and not yet published has no publish to be behind, and re-adopts.
+certifies them again. Rows a dying tab left half rewritten, or a lane held without a publish
+yet, take the cold read instead.
 
-The rows are shared by every tab of the storage partition, each with its own stamper. A flush
-bumps a generation on the rows, so a tab that finds one it did not write knows another tab has
-written them since: it reloads them before resuming a lane from local state, and rewrites every
-row rather than only its dirty ones, so no certification covers a mix of two tabs' tables.
+The rows are shared by every tab of the storage partition, each with its own stamper and its
+own counter table in memory. A flush bumps a generation on the rows before its first row and
+after its last, and a tab reads that generation on taking the cross-tab write lock, before it
+binds or stamps anything: if another tab has written the rows since, it folds them into its
+table. Counters only grow, so rows for the lane the tab is on are folded in by per-bucket
+maximum — neither tab can lower the other's — and an unbound tab simply takes the rows, which
+is the table a resume from local state binds. The broadcast between tabs still carries each
+write across early; it is no longer what correctness rests on.
 
 A reference certifies rows as _at or past_ its counter. They are _exactly_ it only until an
 upload whose publish failed flushes its stamps; from then the device still resumes from the

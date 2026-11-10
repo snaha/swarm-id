@@ -71,9 +71,10 @@ export interface BatchMetadata {
    */
   rowsPartition?: number
   /**
-   * Bumped by every flush that writes rows. The rows are shared by every tab
-   * of the storage partition; a stamper whose last-seen generation is not this
-   * one knows another tab wrote them since.
+   * Bumped by a flush before its first row and again after its last. The rows
+   * are shared by every tab of the storage partition; a stamper whose
+   * last-seen generation is not this one knows another tab wrote them since
+   * (or is writing them now), and folds them into its table.
    */
   rowsGeneration?: number
   /**

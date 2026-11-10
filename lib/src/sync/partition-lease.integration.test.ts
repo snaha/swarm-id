@@ -1964,15 +1964,19 @@ describe("writePartitionState — incremental", () => {
   })
 })
 
-describe("PartitionLease.acquire — rows past their reference (#463)", () => {
-  // An upload whose publish failed leaves the cache rows ahead of the leaves
-  // the synced reference points to. The exception list rides in the reference
-  // chunk, so a leaf retained by an incremental publish must be the leaf the
-  // published counter encodes — a diff against the rows cannot tell.
-  it("publishes in full after a cache-hit claim of rows a failed publish moved on, and stays readable", async () => {
+describe("PartitionLease.acquire — a cache-hit claim and its publish baseline (#463)", () => {
+  // The exception list rides in the reference chunk, so a leaf retained by an
+  // incremental publish must be the leaf the published counter encodes. The
+  // lease diffs against the stamper's rows on a cache hit, which is that
+  // counter only while the rows are exactly it.
+  const clock = 30_000 * 1000
+  const AHEAD_BUCKET = 100
+  const NEW_BUCKET = 20_000
+
+  function makeRowsCache() {
     const rows = new Map<number, unknown>()
     let metadata: object | undefined
-    const cache = {
+    return {
       getAllChunks: async () =>
         [...rows.entries()].sort(([a], [b]) => a - b).map(([, row]) => row),
       putChunk: async (entry: { chunkIndex: number }) => {
@@ -1986,77 +1990,62 @@ describe("PartitionLease.acquire — rows past their reference (#463)", () => {
         metadata = { ...metadata, ...patch(metadata), batchId }
       },
     } as unknown as Parameters<typeof UtilizationAwareStamper.create>[3]
-    const open = () =>
-      UtilizationAwareStamper.create(
-        "11".repeat(32),
-        TEST_BATCH_ID,
-        TEST_BATCH_DEPTH,
-        cache,
-        OWNER,
-        TEST_ENC_KEY,
-      )
-    const clock = 30_000 * 1000
-    const claim = async (stamper: UtilizationAwareStamper) => {
-      const lease = await PartitionLease.fromSwarmEncryptionKey({
-        bee,
-        deviceId: DEVICE_A,
-        batchId: TEST_BATCH_ID,
-        swarmEncryptionKey: TEST_ENC_KEY,
-        guardMs: GUARD_MS,
-        intentGuardWindowMs: 0,
-        now: () => clock,
-        stamper,
-      })
-      const acquired = await lease.acquire({ partitionCount: PARTITION_COUNT })
-      expect(acquired.partition).toBe(0)
-      stamper.bindPartition({
-        partition: 0,
-        partitionCount: PARTITION_COUNT,
-        localCounter: acquired.localCounter!,
-      })
-      return lease
+  }
+  const open = (cache: ReturnType<typeof makeRowsCache>) =>
+    UtilizationAwareStamper.create(
+      "11".repeat(32),
+      TEST_BATCH_ID,
+      TEST_BATCH_DEPTH,
+      cache,
+      OWNER,
+      TEST_ENC_KEY,
+    )
+  async function claim(stamper: UtilizationAwareStamper) {
+    const lease = await PartitionLease.fromSwarmEncryptionKey({
+      bee,
+      deviceId: DEVICE_A,
+      batchId: TEST_BATCH_ID,
+      swarmEncryptionKey: TEST_ENC_KEY,
+      guardMs: GUARD_MS,
+      intentGuardWindowMs: 0,
+      now: () => clock,
+      stamper,
+    })
+    const acquired = await lease.acquire({ partitionCount: PARTITION_COUNT })
+    expect(acquired.partition).toBe(0)
+    stamper.bindPartition({
+      partition: 0,
+      partitionCount: PARTITION_COUNT,
+      localCounter: acquired.localCounter!,
+    })
+    return lease
+  }
+  function stampInBucket(
+    stamper: UtilizationAwareStamper,
+    bucket: number,
+    times: number,
+  ) {
+    for (let i = 0; i < times; i++) {
+      const address = new Uint8Array(32).fill(i + 1)
+      address[0] = bucket >> 8
+      address[1] = bucket & 0xff
+      stamper.stamp(address)
     }
-    const stampInBucket = (
-      stamper: UtilizationAwareStamper,
-      bucket: number,
-      times: number,
-    ) => {
-      for (let i = 0; i < times; i++) {
-        const address = new Uint8Array(32).fill(i + 1)
-        address[0] = bucket >> 8
-        address[1] = bucket & 0xff
-        stamper.stamp(address)
-      }
-    }
-
-    // An acked upload: bucket 100 at 2 under the width-2 frame, in band
-    const first = await open()
-    let lease = await claim(first)
-    first.getLocalCounter()!.set(leafyCounter())
-    await lease.publishState(first.getLocalCounter()!)
-    await first.flush()
-
-    // An upload whose publish failed: bucket 100 goes to 5, past the width
-    const AHEAD_BUCKET = 100
-    stampInBucket(first, AHEAD_BUCKET, 3)
-    await first.flush()
-
-    // Reload: the pointer still names the rows' reference, a cache hit
-    const readSpy = vi.spyOn(downloadData, "downloadDataWithChunkAPI")
-    const second = await open()
-    lease = await claim(second)
-    expect(readSpy).toHaveBeenCalledTimes(1) // the reference chunk, no leaves
-    expect(second.getLocalCounter()![AHEAD_BUCKET]).toBe(5)
-
-    // A small upload in another leaf, in the same epoch
-    const NEW_BUCKET = 20_000
-    stampInBucket(second, NEW_BUCKET, 1)
-    await lease.publishState(second.getLocalCounter()!)
-
+  }
+  /** An acked upload: bucket 100 at 2 under the width-2 frame, in band. */
+  async function ackedSession(cache: ReturnType<typeof makeRowsCache>) {
+    const stamper = await open(cache)
+    const lease = await claim(stamper)
+    stamper.getLocalCounter()!.set(leafyCounter())
+    await lease.publishState(stamper.getLocalCounter()!)
+    await stamper.flush()
+    return stamper
+  }
+  async function readBack() {
     const backupSigner = new PrivateKey(
       await deriveSecret(uint8ArrayToHex(TEST_ENC_KEY), BACKUP_KEY_LABEL),
     )
-    const read = await partitionState.readPartitionState({
+    return partitionState.readPartitionState({
       bee,
       owner: backupSigner.publicKey().address(),
       swarmEncryptionKey: TEST_ENC_KEY,
@@ -2064,6 +2053,55 @@ describe("PartitionLease.acquire — rows past their reference (#463)", () => {
       partition: 0,
       nowMs: clock,
     })
+  }
+
+  it("publishes incrementally when the rows are exactly the reference's counter", async () => {
+    const cache = makeRowsCache()
+    await ackedSession(cache)
+
+    // Reload: a cache hit, the reference chunk read and no leaf
+    const readSpy = vi.spyOn(downloadData, "downloadDataWithChunkAPI")
+    const second = await open(cache)
+    const lease = await claim(second)
+    expect(readSpy).toHaveBeenCalledTimes(1)
+
+    const writeSpy = vi.spyOn(partitionState, "writePartitionState")
+    stampInBucket(second, NEW_BUCKET, 1)
+    await lease.publishState(second.getLocalCounter()!)
+    expect(writeSpy.mock.calls[0][0].previousReferences).toHaveLength(
+      LEAFY_LEAVES,
+    )
+    expect(writeSpy.mock.calls[0][0].previousFrame).toEqual(LEAFY_FRAME)
+
+    const read = await readBack()
+    expect(read.readFailed).toBeUndefined()
+    expect(read.localCounter?.[AHEAD_BUCKET]).toBe(2)
+    expect(read.localCounter?.[NEW_BUCKET]).toBe(1)
+  })
+
+  it("publishes in full after rows a failed publish moved on, and stays readable", async () => {
+    const cache = makeRowsCache()
+    const first = await ackedSession(cache)
+
+    // An upload whose publish failed: its stamps reach the rows, bucket 100
+    // going to 5, past the width
+    stampInBucket(first, AHEAD_BUCKET, 3)
+    await first.flush()
+
+    // Reload: the pointer still names the rows' reference, a cache hit
+    const readSpy = vi.spyOn(downloadData, "downloadDataWithChunkAPI")
+    const second = await open(cache)
+    const lease = await claim(second)
+    expect(readSpy).toHaveBeenCalledTimes(1)
+    expect(second.getLocalCounter()![AHEAD_BUCKET]).toBe(5)
+
+    // A small upload in another leaf, in the same epoch
+    const writeSpy = vi.spyOn(partitionState, "writePartitionState")
+    stampInBucket(second, NEW_BUCKET, 1)
+    await lease.publishState(second.getLocalCounter()!)
+    expect(writeSpy.mock.calls[0][0].previousReferences).toBeUndefined()
+
+    const read = await readBack()
     expect(read.readFailed).toBeUndefined()
     expect(read.localCounter?.[AHEAD_BUCKET]).toBe(5)
     expect(read.localCounter?.[NEW_BUCKET]).toBe(1)

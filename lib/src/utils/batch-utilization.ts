@@ -1168,19 +1168,20 @@ export class UtilizationAwareStamper implements Stamper, SlotAssigner {
   private rowsPartition: number | undefined
   private rowsStale = false
   /**
-   * `BatchMetadata.rowsGeneration` as of this stamper's last load or flush of
+   * `BatchMetadata.rowsGeneration` as of this stamper's last read or flush of
    * the rows. The rows are shared by every tab of the storage partition, each
-   * with a stamper of its own: while the two agree the rows are this
-   * stamper's table as it last flushed it, and once they differ another tab
-   * has written them and nothing this stamper remembers of them holds.
+   * with a stamper of its own; a different generation in the store means
+   * another tab has written them since, and `syncRows` folds them in. Starts
+   * at a value no store holds, so the first sync always reads.
    */
-  private rowsGeneration = 0
+  private rowsGeneration = -1
   /**
    * The partition-state reference the lease last read or published for the
    * bound lane, waiting for the flush that writes the rows it describes
    * (`BatchMetadata.stateReference`). Recording it at the publish would
-   * certify rows one write behind the counter it names. `exact` until a data
-   * slot is taken after it: the rows that land are then past its counter.
+   * certify rows one write behind the counter it names. `exact` until the
+   * table moves after it — a data slot taken, a sibling's counter folded in:
+   * the rows that land are then past its counter.
    */
   private pendingReference:
     | { partition: number; referenceHex: string; exact: boolean }
@@ -1535,7 +1536,7 @@ export class UtilizationAwareStamper implements Stamper, SlotAssigner {
     // exist flushes zero-based rows over them on the first write and re-issues
     // every slot they record. A store that cannot be opened at all holds no
     // rows, so the stamper starts fresh, as it did before the cache existed.
-    await instance.loadRows().catch((error: unknown) => {
+    await instance.syncRows().catch((error: unknown) => {
       if (!(error instanceof UtilizationStoreUnavailableError)) throw error
       console.warn(
         "[UtilizationAwareStamper] Utilization store unavailable; starting with fresh counters:",
@@ -1701,42 +1702,38 @@ export class UtilizationAwareStamper implements Stamper, SlotAssigner {
     // wrote them last.
     if (!this.dirty && this.pendingForBoundLane() === undefined) return
 
-    // Take the rows over: bump their generation, and learn in the same
-    // transaction whether another tab wrote them since this stamper last did.
-    // If so they are not this table's past, and every row is rewritten rather
-    // than only the dirty ones — which would certify a mix of two tables. A
-    // rewrite of every row certifies no lane while it runs: a tab dying
-    // midway leaves rows nothing resumes from, and a generation every other
-    // tab sees as foreign.
-    let foreign = false
-    let generation = this.rowsGeneration
-    let certifiedExact = false
-    await this.patchMetadata((existing) => {
-      const current = existing?.rowsGeneration ?? 0
-      foreign = current !== this.rowsGeneration
-      const rewriteAll = this.rowsStale || foreign
-      if (!this.dirty && !foreign) return {}
-      generation = current + 1
-      certifiedExact = existing?.stateReference?.exact === true
-      return {
-        rowsGeneration: generation,
-        ...(rewriteAll ? { rowsPartition: undefined } : {}),
-      }
-    })
-    this.rowsGeneration = generation
-    if (foreign) {
-      this.rowsStale = true
-      this.dirty = true
-    }
-    if (this.rowsStale) this.rowsPartition = undefined
+    // Backstop: fold in rows another tab wrote since this stamper last looked.
+    // The coordinator syncs on taking the write lock, before anything is
+    // stamped; a caller that did not must still never lower a row.
+    await this.syncRows()
 
     if (!this.dirty) {
       // The rows already hold the table, so a reference the lease recorded
       // for it (a release or a full re-pin publishes without a new slot) is
       // committed here, with nothing to write first.
-      await this.commitCertification({ allRows: false, uncertified: false })
+      await this.commitCertification(false)
       return
     }
+
+    // Say what is about to happen to the rows before touching one, so a tab
+    // dying midway leaves nothing certified that is not true:
+    // - a generation other tabs have not seen, so they fold in what landed;
+    // - no lane, when every row is being rewritten (rows nothing resumes from);
+    // - no claim to be exactly the reference's counter, when data rows are
+    //   going past it. The patch after the rows restores what still holds.
+    const rewriteAll = this.rowsStale
+    const dataRows = this.dirtyBuckets.size > 0
+    await this.patchMetadata((existing) => {
+      this.rowsGeneration = (existing?.rowsGeneration ?? 0) + 1
+      return {
+        rowsGeneration: this.rowsGeneration,
+        ...(rewriteAll ? { rowsPartition: undefined } : {}),
+        ...(dataRows && existing?.stateReference
+          ? { stateReference: { ...existing.stateReference, exact: false } }
+          : {}),
+      }
+    })
+    if (rewriteAll) this.rowsPartition = undefined
 
     // Mark utilization chunks as dirty for the affected buckets
     const dirtyChunkIndexes = new Set<number>()
@@ -1817,11 +1814,7 @@ export class UtilizationAwareStamper implements Stamper, SlotAssigner {
         this.rowsPartition = this.partition
         this.rowsStale = false
       }
-      await this.commitCertification({
-        allRows,
-        // Data slots reached rows a reference called exact
-        uncertified: this.dirtyBuckets.size > 0 && certifiedExact,
-      })
+      await this.commitCertification(true, allRows)
     } catch (error) {
       console.error(
         `[UtilizationAwareStamper] Failed to flush to cache:`,
@@ -1858,6 +1851,7 @@ export class UtilizationAwareStamper implements Stamper, SlotAssigner {
         // Only update if the incoming value is higher (monotonic increase)
         if (value > this.utilizationState.dataCounters[index]) {
           this.utilizationState.dataCounters[index] = value
+          if (this.pendingReference) this.pendingReference.exact = false
         }
       }
     }
@@ -1887,58 +1881,92 @@ export class UtilizationAwareStamper implements Stamper, SlotAssigner {
   }
 
   /**
-   * Say what the rows just flushed are, in one metadata patch after them: the
-   * lane they describe, and the reference that names their counter.
+   * Say what the rows are, in one metadata patch after any that were written:
+   * the lane they describe, the reference that names their counter, and — when
+   * rows were written — a second new generation, so a stamper that read the
+   * rows while the flush was running sees them change once it is done.
    *
-   * - A reference waiting for this flush certifies them, as `exact` unless a
-   *   data slot was taken after it was recorded.
-   * - A rewrite of every row (`allRows`) with no reference waiting leaves a
-   *   table no reference names: a lane zero-seeded, or left unbound.
-   * - Data rows written past a reference recorded as exact (`uncertified`:
-   *   an upload whose publish failed) keep it as a floor only.
+   * A reference waiting for this flush certifies the rows, as `exact` unless
+   * the table moved after it was recorded. With none waiting, a rewrite of
+   * every row (`allRows`) leaves a table no reference names — a lane
+   * zero-seeded, or left unbound — and anything else keeps what is there.
    */
-  private async commitCertification(wrote: {
-    allRows: boolean
-    uncertified: boolean
-  }): Promise<void> {
+  private async commitCertification(
+    wroteRows: boolean,
+    allRows = false,
+  ): Promise<void> {
     const pending = this.pendingForBoundLane()
-    if (pending === undefined && !wrote.allRows && !wrote.uncertified) return
+    if (pending === undefined && !wroteRows) return
     const rowsPartition = this.rowsPartition
-    await this.patchMetadata((existing) => ({
-      rowsPartition,
-      stateReference:
-        pending !== undefined
-          ? { ...pending }
-          : wrote.allRows || existing?.stateReference === undefined
-            ? undefined
-            : { ...existing.stateReference, exact: false },
-    }))
+    await this.patchMetadata((existing) => {
+      if (wroteRows) this.rowsGeneration = (existing?.rowsGeneration ?? 0) + 1
+      return {
+        rowsPartition,
+        ...(wroteRows ? { rowsGeneration: this.rowsGeneration } : {}),
+        stateReference:
+          pending !== undefined
+            ? { ...pending }
+            : allRows
+              ? undefined
+              : existing?.stateReference,
+      }
+    })
     if (pending !== undefined) this.pendingReference = undefined
   }
 
   /**
-   * Read the cache rows into the counter table, with what the metadata says
-   * of them. The metadata is read first: a flush landing between the two
-   * reads leaves a generation behind the rows, which the next flush takes for
-   * foreign and rewrites — the safe way round.
+   * Bring the counter table up to the cache rows when another tab has written
+   * them since this stamper last read or flushed them (or `reload` asks).
+   * The rows are shared by every tab of the storage partition; the coordinator
+   * calls this on taking the cross-tab write lock, before anything is bound or
+   * stamped, so a tab never works from what it remembers of the rows.
+   *
+   * Counters only grow, so rows for the lane this table is on are folded in
+   * by per-bucket maximum: neither tab's writes can lower the other's. An
+   * unbound stamper's table has no standing of its own, so rows that describe
+   * a lane replace it — that is the table a resume from local state binds.
+   * Rows for a lane other than the bound one are not this table's, and the
+   * next flush rewrites them all.
+   *
+   * The metadata is read before the rows. A flush bumps the generation before
+   * its first row and again after its last, so a read that overlaps one keeps
+   * a generation the store has moved past, and syncs again.
    */
-  private async loadRows(): Promise<BatchMetadata | undefined> {
+  async syncRows(reload = false): Promise<BatchMetadata | undefined> {
     const batchId = this.batchId.toHex()
     // Tolerates minimal caches (tests stub only getAllChunks/putChunk)
     const meta = await this.cache.getMetadata?.(batchId)
+    const generation = meta?.rowsGeneration ?? 0
+    if (generation === this.rowsGeneration && !reload) return meta
     const rows = await this.cache.getAllChunks(batchId)
-    const counters = new Uint32Array(NUM_BUCKETS)
-    for (const row of rows) {
-      if (row.chunkIndex < NUM_UTILIZATION_CHUNKS) {
-        mergeChunk(counters, row.chunkIndex, row.data)
+    // No await from here on: the lane is judged and the table changed in one
+    // step, so a bind landing during the reads above is seen, not overwritten.
+    const bound = this.partition !== undefined
+    if (bound && meta?.rowsPartition !== this.partition) {
+      this.rowsStale = true
+      this.dirty = true
+    } else {
+      if (!bound && meta?.rowsPartition !== undefined) {
+        this.utilizationState.dataCounters = new Uint32Array(NUM_BUCKETS)
+        this.dirtyBuckets.clear()
+        this.dirty = false
+        this.rowsStale = false
       }
+      const counters = this.utilizationState.dataCounters
+      for (const row of rows) {
+        if (row.chunkIndex >= NUM_UTILIZATION_CHUNKS) continue
+        const start = row.chunkIndex * BUCKETS_PER_CHUNK
+        const stored = deserializeUint32Array(row.data)
+        for (let i = 0; i < stored.length; i++) {
+          if (stored[i] > counters[start + i]) {
+            counters[start + i] = stored[i]
+            if (this.pendingReference) this.pendingReference.exact = false
+          }
+        }
+      }
+      this.rowsPartition = meta?.rowsPartition
     }
-    this.utilizationState.dataCounters = counters
-    this.rowsPartition = meta?.rowsPartition
-    this.rowsGeneration = meta?.rowsGeneration ?? 0
-    this.rowsStale = false
-    this.dirtyBuckets.clear()
-    this.dirty = false
+    this.rowsGeneration = generation
     // Restore the protected partition-state buckets so saves keep avoiding
     // the published resume point across reloads.
     for (const [p, buckets] of Object.entries(meta?.stateChunkBuckets ?? {})) {
@@ -1948,38 +1976,27 @@ export class UtilizationAwareStamper implements Stamper, SlotAssigner {
   }
 
   /**
-   * What the cache rows are certified as for `partition`, or undefined when
-   * they do not describe that lane (another lane's, or a rewrite that died
-   * midway). Called while no lane is bound, by the two paths that resume a
-   * lane from local state — the lease's cache-hit claim and the coordinator's
-   * adopt — and both then bind this stamper's table. So the table must BE the
-   * rows: when another tab has written them since this stamper last did, they
-   * are loaded here first, rather than trusting a broadcast to have carried
-   * every write across.
+   * The reference the cache rows are certified by for `partition`, or
+   * undefined when none names them for that lane: another lane's rows, a
+   * rewrite that died midway, a lane zero-seeded and not yet published.
+   * Called by the two paths that resume a lane from local state — the lease's
+   * cache-hit claim and the coordinator's adopt — and both then bind this
+   * stamper's table, so the rows are read into it here first.
    *
-   * `referenceHex` names a published counter the rows are at or past;
-   * undefined for a lane claimed from zero and not yet published. `exact`
-   * says the rows hold precisely that counter, which is what an incremental
-   * publish diffs against: a leaf it retains must be the leaf the reference
-   * chunk's exception list describes. Rows a failed publish moved on are
-   * safe to resume from, and not to diff against.
+   * `referenceHex` names a published counter the rows are at or past.
+   * `exact` says they hold precisely that counter, which is what an
+   * incremental publish diffs against: a leaf it retains must be the leaf the
+   * reference chunk's exception list describes. Rows a failed publish moved
+   * on are safe to resume from, and not to diff against.
    */
   async getRowsCertification(
     partition: number,
-  ): Promise<{ referenceHex: string | undefined; exact: boolean } | undefined> {
-    let meta = await this.cache.getMetadata(this.batchId.toHex())
-    if (meta?.rowsPartition !== partition) return undefined
-    if (
-      this.partition === undefined &&
-      (meta.rowsGeneration ?? 0) !== this.rowsGeneration
-    ) {
-      meta = await this.loadRows()
-      if (meta?.rowsPartition !== partition) return undefined
-    }
-    const synced = meta.stateReference
-    return synced?.partition === partition
+  ): Promise<{ referenceHex: string; exact: boolean } | undefined> {
+    const meta = await this.syncRows(this.partition === undefined)
+    const synced = meta?.stateReference
+    return synced?.partition === partition && meta?.rowsPartition === partition
       ? { referenceHex: synced.referenceHex, exact: synced.exact }
-      : { referenceHex: undefined, exact: false }
+      : undefined
   }
 
   /**

@@ -1335,10 +1335,7 @@ describe("UtilizationAwareStamper synced reference", () => {
     // Back on lane 0 with no state found (its pointer aged out): zero-seeded
     bind(stamper, 0)
     await stamper.flush()
-    expect(await stamper.getRowsCertification(0)).toEqual({
-      referenceHex: undefined,
-      exact: false,
-    })
+    expect(await stamper.getRowsCertification(0)).toBeUndefined()
     expect(await stamper.getRowsCertification(1)).toBeUndefined()
   })
 
@@ -1407,6 +1404,281 @@ describe("UtilizationAwareStamper synced reference", () => {
       exact: true,
     })
     expect(tabB.buildLeaseLocalCounter()[7]).toBe(2)
+  })
+
+  it("a flush that dies after an unpublished row landed leaves the rows inexact", async () => {
+    // An upload whose publish failed, and a tab closed mid-flush: the row is
+    // past the reference, and nothing ran after it to say so
+    const cache = makeRecordingCache()
+    const stamper = await makeStamper(cache)
+    bind(stamper, 0)
+    stamper.stamp(makeAddressInBucket(7, 1))
+    await stamper.setSyncedReference(0, "published")
+    await stamper.flush()
+
+    stamper.stamp(makeAddressInBucket(7, 2))
+    const putChunk = cache.putChunk.bind(cache)
+    const updateMetadata = cache.updateMetadata.bind(cache)
+    let rowLanded = false
+    cache.putChunk = async (entry) => {
+      await putChunk(entry)
+      rowLanded = true
+    }
+    cache.updateMetadata = async (batchId, patch) => {
+      if (rowLanded) throw new Error("tab closed")
+      await updateMetadata(batchId, patch)
+    }
+    await expect(stamper.flush()).rejects.toThrow("tab closed")
+    cache.updateMetadata = updateMetadata
+
+    const reopened = await makeStamper(cache)
+    expect(reopened.getUtilizationState().dataCounters[7]).toBe(2)
+    expect(await reopened.getRowsCertification(0)).toEqual({
+      referenceHex: "published",
+      exact: false,
+    })
+  })
+
+  it("a sibling's counters folded in after a reference was recorded make it inexact", async () => {
+    const cache = makeRecordingCache()
+    const stamper = await makeStamper(cache)
+    bind(stamper, 0)
+    await stamper.setSyncedReference(0, "read-on-claim")
+    stamper.applyUtilizationUpdate([{ index: 9, value: 4 }])
+    await stamper.flush()
+    expect(await stamper.getRowsCertification(0)).toEqual({
+      referenceHex: "read-on-claim",
+      exact: false,
+    })
+  })
+
+  // Counters only grow, so rows another tab wrote are folded in by maximum:
+  // neither tab's table may lower the other's.
+  it("a tab that missed a sibling's writes folds the rows in at the lock, and stamps past them", async () => {
+    const cache = makeRecordingCache()
+    const tabA = await makeStamper(cache)
+    const tabB = await makeStamper(cache) // legacy lane: neither ever binds
+    for (let i = 0; i < 3; i++) tabA.stamp(makeAddressInBucket(7, i))
+    await tabA.flush()
+
+    await tabB.syncRows() // what the coordinator does on taking the write lock
+    expect(tabB.getUtilizationState().dataCounters[7]).toBe(3)
+    tabB.stamp(makeAddressInBucket(7, 9))
+    tabB.stamp(makeAddressInBucket(5000, 1))
+    await tabB.flush()
+
+    const counters = (await makeStamper(cache)).getUtilizationState()
+      .dataCounters
+    expect(counters[7]).toBe(4)
+    expect(counters[5000]).toBe(1)
+  })
+
+  it("a flush never lowers a row another tab wrote, even with no sync before the stamps", async () => {
+    const cache = makeRecordingCache()
+    const tabA = await makeStamper(cache)
+    const tabB = await makeStamper(cache)
+    for (let i = 0; i < 3; i++) tabA.stamp(makeAddressInBucket(7, i))
+    await tabA.flush()
+
+    tabB.stamp(makeAddressInBucket(5000, 1))
+    tabB.stamp(makeAddressInBucket(8, 1)) // same row as bucket 7
+    await tabB.flush()
+
+    const counters = (await makeStamper(cache)).getUtilizationState()
+      .dataCounters
+    expect(counters[7]).toBe(3)
+    expect(counters[8]).toBe(1)
+    expect(counters[5000]).toBe(1)
+  })
+
+  it("two tabs bound to one lane keep each other's counters, and the certification stays true to the rows", async () => {
+    const cache = makeRecordingCache()
+    const tabA = await makeStamper(cache)
+    bind(tabA, 0)
+    await tabA.flush()
+    const tabB = await makeStamper(cache)
+    bind(tabB, 0)
+
+    for (let i = 0; i < 3; i++) tabA.stamp(makeAddressInBucket(7, i))
+    await tabA.setSyncedReference(0, "ref-a")
+    await tabA.flush()
+
+    await tabB.syncRows()
+    tabB.stamp(makeAddressInBucket(5000, 1))
+    await tabB.setSyncedReference(0, "ref-b")
+    await tabB.flush()
+
+    const cold = await makeStamper(cache)
+    expect(cold.getUtilizationState().dataCounters[7]).toBe(3)
+    expect(cold.getUtilizationState().dataCounters[5000]).toBe(1)
+    expect(await cold.getRowsCertification(0)).toEqual({
+      referenceHex: "ref-b",
+      exact: true,
+    })
+    expect(tabB.getLocalCounter()![7]).toBe(3)
+  })
+
+  it("a stamper opened while another tab's flush is in flight still ends up with the rows that flush wrote", async () => {
+    const cache = makeRecordingCache()
+    const tabA = await makeStamper(cache)
+    bind(tabA, 0)
+    tabA.stamp(makeAddressInBucket(7, 1))
+    await tabA.setSyncedReference(0, "first")
+    await tabA.flush()
+
+    tabA.stamp(makeAddressInBucket(7, 2))
+    tabA.stamp(makeAddressInBucket(5000, 1))
+    await tabA.setSyncedReference(0, "second")
+    const putChunk = cache.putChunk.bind(cache)
+    let openGate!: () => void
+    const gate = new Promise<void>((resolve) => (openGate = resolve))
+    let reachedRows!: () => void
+    const atRows = new Promise<void>((resolve) => (reachedRows = resolve))
+    cache.putChunk = async (entry) => {
+      reachedRows()
+      await gate
+      await putChunk(entry)
+    }
+    const flushing = tabA.flush()
+    await atRows
+    const tabB = await makeStamper(cache) // reads metadata and rows mid-flush
+    openGate()
+    await flushing
+
+    expect(await tabB.getRowsCertification(0)).toEqual({
+      referenceHex: "second",
+      exact: true,
+    })
+    const table = tabB.buildLeaseLocalCounter()
+    expect(table[7]).toBe(2)
+    expect(table[5000]).toBe(1)
+  })
+
+  it("a legacy stamper opened mid-flush folds the finished rows in at its next lock", async () => {
+    const cache = makeRecordingCache()
+    const tabA = await makeStamper(cache)
+    tabA.stamp(makeAddressInBucket(7, 1))
+    tabA.stamp(makeAddressInBucket(5000, 1))
+    const putChunk = cache.putChunk.bind(cache)
+    let openGate!: () => void
+    const gate = new Promise<void>((resolve) => (openGate = resolve))
+    let reachedRows!: () => void
+    const atRows = new Promise<void>((resolve) => (reachedRows = resolve))
+    cache.putChunk = async (entry) => {
+      reachedRows()
+      await gate
+      await putChunk(entry)
+    }
+    const flushing = tabA.flush()
+    await atRows
+    const tabB = await makeStamper(cache)
+    openGate()
+    await flushing
+
+    await tabB.syncRows()
+    expect(tabB.getUtilizationState().dataCounters[7]).toBe(1)
+    expect(tabB.getUtilizationState().dataCounters[5000]).toBe(1)
+  })
+
+  it("resumes a lane from the rows even when this stamper's own table was left as another lane's", async () => {
+    // A bind whose flush never ran (IndexedDB failed, the lease was lost
+    // first): the table in memory is lane 1's, the rows still lane 0's
+    const cache = makeRecordingCache()
+    const stamper = await makeStamper(cache)
+    bind(stamper, 0)
+    stamper.stamp(makeAddressInBucket(7, 1))
+    await stamper.setSyncedReference(0, "ref-zero")
+    await stamper.flush()
+
+    bind(stamper, 1)
+    stamper.unbindPartition()
+
+    expect(await stamper.getRowsCertification(0)).toEqual({
+      referenceHex: "ref-zero",
+      exact: true,
+    })
+    expect(stamper.buildLeaseLocalCounter()[7]).toBe(1)
+  })
+
+  it("holds its invariants under any interleaving of two tabs on one lane", async () => {
+    // Model: a publish records the counter it names. Whatever the tabs do,
+    // rows certified by a reference are at or past its counter, and exactly
+    // it when they are called exact; and no row ever goes down.
+    let seed = 0x5eed
+    const random = (n: number) => {
+      seed = (seed * 1103515245 + 12345) & 0x7fffffff
+      return seed % n
+    }
+    const BUCKETS = [7, 8, 5000, 0x4321]
+    const ROUNDS = 400
+    const cache = makeRecordingCache()
+    const published = new Map<string, Uint32Array>()
+    const tabs = [await makeStamper(cache), await makeStamper(cache)]
+    for (const tab of tabs) {
+      await tab.syncRows()
+      tab.bindPartition({
+        partition: 0,
+        partitionCount: PARTITION_COUNT,
+        localCounter: tab.buildLeaseLocalCounter(),
+      })
+      await tab.flush()
+    }
+    let floor = new Uint32Array(NUM_BUCKETS)
+    for (let round = 0; round < ROUNDS; round++) {
+      const tab = tabs[random(tabs.length)]
+      // One locked section: sync, some stamps, maybe a publish, a flush
+      // that may die at any of its store writes
+      if (random(4) !== 0) await tab.syncRows()
+      for (let i = random(4); i > 0; i--) {
+        tab.stamp(makeAddressInBucket(BUCKETS[random(BUCKETS.length)], round))
+      }
+      if (random(3) !== 0) {
+        const referenceHex = `ref-${round}`
+        published.set(referenceHex, tab.getLocalCounter()!.slice())
+        await tab.setSyncedReference(0, referenceHex)
+      }
+      const dieAt = random(5) === 0 ? random(4) : -1
+      let writes = 0
+      const putChunk = cache.putChunk.bind(cache)
+      const updateMetadata = cache.updateMetadata.bind(cache)
+      const maybeDie = () => {
+        if (writes++ === dieAt) throw new Error("tab closed")
+      }
+      cache.putChunk = async (entry) => {
+        maybeDie()
+        await putChunk(entry)
+      }
+      cache.updateMetadata = async (batchId, patch) => {
+        maybeDie()
+        await updateMetadata(batchId, patch)
+      }
+      await tab.flush().catch(() => undefined)
+      cache.putChunk = putChunk
+      cache.updateMetadata = updateMetadata
+
+      const cold = await makeStamper(cache)
+      const rows = cold.getUtilizationState().dataCounters
+      for (const bucket of BUCKETS) {
+        expect(
+          rows[bucket],
+          `round ${round} bucket ${bucket}`,
+        ).toBeGreaterThanOrEqual(floor[bucket])
+      }
+      floor = rows.slice()
+      const certification = await cold.getRowsCertification(0)
+      if (certification !== undefined) {
+        const named = published.get(certification.referenceHex)!
+        for (const bucket of BUCKETS) {
+          if (certification.exact) {
+            expect(rows[bucket], `round ${round} exact ${bucket}`).toBe(
+              named[bucket],
+            )
+          } else {
+            expect(rows[bucket]).toBeGreaterThanOrEqual(named[bucket])
+          }
+        }
+      }
+    }
   })
 
   // The cache rows hold one lane's counter — `bindPartition` replaces the
