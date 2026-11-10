@@ -52,19 +52,36 @@ export interface ChunkCacheEntry {
 /**
  * Metadata for a batch's utilization state
  */
+/** One row of the counter as last published: the same layout as a cache row. */
+export interface PublishedRow {
+  batchId: string
+  chunkIndex: number
+  data: Uint8Array
+}
+
 export interface BatchMetadata {
   batchId: string
   /**
-   * The v2 partition-state reference chunk (hex) this device's cache rows were
-   * last in sync with, and the lane it belongs to. On a cold acquire of that
-   * lane, if the state pointer still names it the leaf downloads are skipped
-   * and the local counter reused. One, not one per partition: the rows hold a
-   * single lane's counter (`bindPartition` replaces the table), so a reference
-   * certifies them for that lane only, and only while `rowsPartition` agrees.
-   * `exact` while the rows hold precisely the counter the reference names;
-   * false once data rows were flushed past it with no publish to name them.
+   * The latest partition-state publish this storage partition knows of, and
+   * the lane it belongs to: its reference chunk (hex), and — when recorded by
+   * the publish itself or a full read — the frame and leaf references it went
+   * out with and the epoch of its last full re-pin. The counter as published
+   * is in the published rows (`getPublishedRows`). Together they are the
+   * baseline the next publish diffs against, whichever tab makes it.
+   *
+   * It also certifies the cache rows: they are at or past this counter, for
+   * this lane, while `rowsPartition` agrees. On a cold acquire of the lane,
+   * if the state pointer still names the reference the leaf downloads are
+   * skipped and the rows reused. One, not one per partition: the rows hold a
+   * single lane's counter (`bindPartition` replaces the table).
    */
-  stateReference?: { partition: number; referenceHex: string; exact: boolean }
+  stateReference?: {
+    partition: number
+    referenceHex: string
+    frame?: { base: number; width: number }
+    references?: Uint8Array[]
+    fullPublishEpoch?: number
+  }
   /**
    * The lane the cache rows describe. Cleared before a flush that rewrites
    * them for another lane and set again after it, so a tab that dies midway
@@ -123,9 +140,10 @@ const DB_NAME = "swarm-utilization-store"
  * stores rather than migrating them: this is a cache of utilisation counters
  * that re-derives itself on next use, and 0.x owes no migration (#661).
  */
-const DB_VERSION = 5
+const DB_VERSION = 6
 const CHUNKS_STORE = "chunks"
 const METADATA_STORE = "metadata"
+const PUBLISHED_STORE = "published"
 
 /**
  * The store could not be opened at all: IndexedDB is missing or refused the
@@ -207,6 +225,14 @@ export class UtilizationStoreDB {
 
         // Metadata store
         db.createObjectStore(METADATA_STORE, { keyPath: "batchId" })
+
+        // The counter as last published, row for row like the chunks store
+        if (db.objectStoreNames.contains(PUBLISHED_STORE)) {
+          db.deleteObjectStore(PUBLISHED_STORE)
+        }
+        db.createObjectStore(PUBLISHED_STORE, {
+          keyPath: ["batchId", "chunkIndex"],
+        }).createIndex("batchId", "batchId", { unique: false })
       }
     })
   }
@@ -278,21 +304,25 @@ export class UtilizationStoreDB {
    * lands whole or not at all. No reader sees rows without the metadata that
    * describes them, and a tab that dies mid-flush leaves both as they were.
    * `patch` sees the stored record, as in `updateMetadata`; when it throws,
-   * nothing is written.
+   * nothing is written. `published` are rows of the counter as last
+   * published, written in the same transaction as the reference that names
+   * them.
    */
   async writeRows(
     batchId: string,
     entries: ChunkCacheEntry[],
     patch: (existing: BatchMetadata | undefined) => Partial<BatchMetadata>,
+    published: PublishedRow[] = [],
   ): Promise<void> {
     await this.open()
 
     return new Promise((resolve, reject) => {
       const transaction = this.db!.transaction(
-        [CHUNKS_STORE, METADATA_STORE],
+        [CHUNKS_STORE, METADATA_STORE, PUBLISHED_STORE],
         "readwrite",
       )
       const chunks = transaction.objectStore(CHUNKS_STORE)
+      const publishedRows = transaction.objectStore(PUBLISHED_STORE)
       const metadata = transaction.objectStore(METADATA_STORE)
       const lastAccess = Date.now()
       const read = metadata.get(batchId)
@@ -309,11 +339,28 @@ export class UtilizationStoreDB {
           return
         }
         for (const entry of entries) chunks.put({ ...entry, lastAccess })
+        for (const row of published) publishedRows.put(row)
         metadata.put(next)
       }
       transaction.oncomplete = () => resolve()
       transaction.onabort = transaction.onerror = () => {
         reject(new Error(`Failed to write rows: ${transaction.error}`))
+      }
+    })
+  }
+
+  /** The rows of the counter as last published for `batchId`. */
+  async getPublishedRows(batchId: string): Promise<PublishedRow[]> {
+    await this.open()
+
+    return new Promise((resolve, reject) => {
+      const request = this.db!.transaction([PUBLISHED_STORE], "readonly")
+        .objectStore(PUBLISHED_STORE)
+        .index("batchId")
+        .getAll(batchId)
+      request.onsuccess = () => resolve(request.result as PublishedRow[])
+      request.onerror = () => {
+        reject(new Error(`Failed to get published rows: ${request.error}`))
       }
     })
   }

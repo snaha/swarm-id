@@ -972,7 +972,21 @@ export class PartitionLease {
       stateResult.referenceHex &&
       stamper instanceof UtilizationAwareStamper
     ) {
-      await stamper.setSyncedReference(partition, stateResult.referenceHex)
+      // With what the next publish diffs against, when the read recovered it:
+      // the store then holds the lane's baseline for every tab of this
+      // storage partition.
+      await stamper.setSyncedReference(
+        partition,
+        stateResult.referenceHex,
+        stateResult.references && stateResult.frame && stateResult.localCounter
+          ? {
+              frame: stateResult.frame,
+              references: stateResult.references,
+              counter: stateResult.localCounter.slice(),
+              fullPublishEpoch: intentEpochBucket(this.now()),
+            }
+          : undefined,
+      )
       if (stateResult.stateBuckets) {
         await stamper.setProtectedStateBuckets(
           partition,
@@ -981,41 +995,22 @@ export class PartitionLease {
       }
     }
 
-    // Seed the publish baseline from the state we just resumed, so the FIRST
-    // publish of this session is incremental (only the bucket the upload touches
-    // + the reference chunk) instead of a full re-publish. `publishedCounter`
-    // must be a COPY: bindPartition aliases `localCounter` and the stamper
-    // mutates it on stamp(), which would otherwise empty the diff. When the read
-    // recovered no refs (fresh account / cache-miss), these stay undefined and
-    // the first publish falls back to the sparse-full path.
-    //
-    // The baseline must be EXACT: `publishedCounter` is the counter
-    // `publishedReferences` encode, leaf for leaf. An incremental publish
-    // retains every leaf the diff against it finds unchanged, under a
-    // reference chunk whose frame and exception list are computed from the
-    // live counter — so a retained leaf that encodes anything else is a leaf
-    // the reference chunk does not describe, and no reader can decode the
-    // state (#463). A full read is exact by construction. A cache hit is
-    // exact only when the rows hold precisely the counter the reference
-    // names: an upload whose publish FAILED still flushes its stamps
-    // (withWrite's `finally`), leaving the rows ahead of the acked leaves.
-    // Resuming from those rows is right — it keeps the unacked slots unissued
-    // — but there is then no baseline to diff against, and the first publish
-    // goes out in full.
-    //
-    // KEYSTONE (the one upstream fact this rests on): the stamper keeps its
-    // local per-partition counter monotonic and >= its synced-reference
-    // counter, and calls its rows exact only when they equal it
-    // (`UtilizationAwareStamper.getRowsCertification`). `writePartitionState`
-    // carries a cheap monotonicity tripwire that fails the publish loudly if
-    // the counter ever falls below the baseline — see the assert there.
-    const exactBaseline =
-      !stateResult.unchanged || certification?.exact === true
-    this.publishedReferences = exactBaseline
-      ? stateResult.references
-      : undefined
-    this.publishedFrame = exactBaseline ? stateResult.frame : undefined
-    this.publishedCounter = localCounter.slice()
+    // The publish baseline — the leaf references, the frame and the counter
+    // as published — is what an incremental publish diffs against, and it
+    // must be exact: a leaf retained under an exception list computed from
+    // another counter is state no reader can decode (#463). A full read
+    // seeds it from what was just downloaded. A cache hit seeds nothing:
+    // the rows may be ahead of the published leaves (an upload whose publish
+    // failed still flushes its stamps), so the first publish loads the
+    // baseline from the store, where the counter as published is kept apart
+    // from the rows (`loadBaseline`).
+    this.publishedReferences = stateResult.unchanged
+      ? undefined
+      : stateResult.references
+    this.publishedFrame = stateResult.unchanged ? undefined : stateResult.frame
+    this.publishedCounter = stateResult.unchanged
+      ? undefined
+      : localCounter.slice()
     // Mark this epoch as already full-pinned so the FIRST publish of the session
     // stays incremental against the resumed refs (the cheap-first-publish win).
     // On the FULL-read branch every non-zero counter chunk was just downloaded,
@@ -1401,6 +1396,7 @@ export class PartitionLease {
     opts?: { forceFull?: boolean },
   ): Promise<void> {
     const { stamper, batchId } = this.requireWriteContext()
+    await this.loadBaseline(partition)
     // Force a FULL (non-incremental) publish once per epoch: incremental
     // publishes leave unchanged chunks pinned across epochs, where a later
     // epoch's rotating pointer/beacon SOC (same reserved slot) can evict one and
@@ -1441,9 +1437,37 @@ export class PartitionLease {
     this.publishedFrame = published.frame
     this.lastReferenceHex = published.referenceHex
     if (stamper instanceof UtilizationAwareStamper) {
-      await stamper.setSyncedReference(partition, published.referenceHex)
+      await stamper.setSyncedReference(partition, published.referenceHex, {
+        frame: published.frame,
+        references: published.references,
+        counter: published.publishedCounter,
+        fullPublishEpoch: this.lastFullPublishEpoch,
+      })
       await stamper.setProtectedStateBuckets(partition, published.stateBuckets)
     }
+  }
+
+  /**
+   * Take the publish baseline from the store when this object holds none:
+   * after a cache-hit claim, an adopt, or a sibling tab's publish. The store
+   * keeps one per lane for every tab of the storage partition, so whichever
+   * tab publishes next re-uploads only what changed. It is used only when it
+   * belongs to the reference this lease heartbeats; anything else, or a
+   * store that cannot be read, leaves no baseline and the publish goes out
+   * in full.
+   */
+  private async loadBaseline(partition: number): Promise<void> {
+    if (this.publishedReferences !== undefined) return
+    const stamper = this.opts.stamper
+    if (!(stamper instanceof UtilizationAwareStamper)) return
+    const stored = await stamper.readPublished(partition).catch(() => undefined)
+    if (stored === undefined || stored.referenceHex !== this.lastReferenceHex) {
+      return
+    }
+    this.publishedReferences = stored.references
+    this.publishedFrame = stored.frame
+    this.publishedCounter = stored.counter
+    this.lastFullPublishEpoch ??= stored.fullPublishEpoch
   }
 
   /**
@@ -1486,6 +1510,8 @@ export class PartitionLease {
   async heartbeatStatePointer(localCounter?: Uint32Array): Promise<void> {
     if (!this.self || this.lastReferenceHex === undefined) return
     const { stamper, batchId } = this.requireWriteContext()
+    // The retained chunks to check for a collision are the baseline's
+    await this.loadBaseline(this.self.partition)
     if (
       localCounter !== undefined &&
       this.retainedChunksCollideThisEpoch(this.self.partition)

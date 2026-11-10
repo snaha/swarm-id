@@ -7,6 +7,29 @@ present and may point at an issue or PR; the reasons live here.
 
 A PR that makes or changes a decision adds the entry in the same PR.
 
+## 2026-11-10 The publish baseline is stored, apart from the cache rows
+
+**Context.** What an incremental publish diffs against — the leaf references,
+the frame and the counter as published — lived in each tab's lease object. A
+reload or a sibling tab's publish lost it, so that publish went out in full,
+and a cache-hit claim rebuilt it from the cache rows, which an upload whose
+publish failed leaves ahead of the published leaves. Supersedes "An
+incremental publish needs rows that are exactly its baseline".
+
+**Decision.** The frame and leaf references ride on the rows' `stateReference`
+and a copy of the counter as published is kept in its own object store,
+written in the transaction that records the reference. A lease with no
+baseline loads it, and uses it only when it belongs to the reference the lease
+record names. A cache-hit claim downloads nothing. The `exact` flag is gone.
+A lane with no publish on either side is adopted from the record.
+
+**Why.** A diff against what was actually published cannot be wrong about
+which leaves changed, whatever has happened to the rows since; a flag saying
+the rows happen to equal it was bookkeeping that could drift. A stored copy
+was preferred to a changed-bucket bitmap for the same reason, and it keeps the
+publish's diff and its monotonicity tripwire as they were. It costs 256 KB per
+drive and a second write of each changed row.
+
 ## 2026-11-10 A flush is one transaction, and runs before the publish
 
 **Context.** A flush wrote its rows one by one and the metadata that describes

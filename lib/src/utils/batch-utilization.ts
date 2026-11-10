@@ -34,6 +34,7 @@ import { stamp as stampAtSlot } from "@ethersphere/core-sdk"
 import { Binary } from "cafe-utility"
 import {
   type ChunkCacheEntry,
+  type PublishedRow,
   UtilizationStoreUnavailableError,
   type BatchMetadata,
   type UtilizationStoreDB,
@@ -1031,6 +1032,18 @@ export interface SlotAssigner {
 }
 
 /**
+ * What a partition-state publish leaves behind for the next one to diff
+ * against: the frame and leaf references it went out with, the counter it
+ * named, and the epoch of the lane's last full re-pin.
+ */
+export interface PublishBaseline {
+  frame: { base: number; width: number }
+  references: Uint8Array[]
+  counter: Uint32Array
+  fullPublishEpoch?: number
+}
+
+/**
  * Stamper that owns slot assignment for a postage batch
  *
  * - Loads the per-bucket counters from cached utilization data on creation
@@ -1180,12 +1193,20 @@ export class UtilizationAwareStamper implements Stamper, SlotAssigner {
    * The partition-state reference the lease last read or published for the
    * bound lane, waiting for the flush that writes the rows it describes
    * (`BatchMetadata.stateReference`). Recording it at the publish would
-   * certify rows one write behind the counter it names. `exact` until the
-   * table moves after it — a data slot taken, a sibling's counter folded in:
-   * the rows that land are then past its counter.
+   * certify rows one write behind the counter it names. With a `baseline`,
+   * the same flush stores what the next publish diffs against.
    */
   private pendingReference:
-    | { partition: number; referenceHex: string; exact: boolean }
+    | { partition: number; referenceHex: string; baseline?: PublishBaseline }
+    | undefined
+  /**
+   * The published counter this stamper knows the store to hold — read by
+   * `readPublished`, or written by its own flush — and the reference it
+   * belongs to. A flush that records the next publish writes only the rows
+   * that differ from it, when the store's reference is still this one.
+   */
+  private storedPublished:
+    | { referenceHex: string; counter: Uint32Array }
     | undefined
 
   readonly signer: PrivateKey
@@ -1658,8 +1679,6 @@ export class UtilizationAwareStamper implements Stamper, SlotAssigner {
     // Advance the per-partition counter so the next stamp into this bucket
     // lands on this partition's next slot.
     this.utilizationState.dataCounters[bucket]++
-    // The rows that land now are past the counter a waiting reference names
-    if (this.pendingReference) this.pendingReference.exact = false
 
     // Mark bucket as dirty for eventual flush
     this.dirtyBuckets.add(bucket)
@@ -1767,41 +1786,79 @@ export class UtilizationAwareStamper implements Stamper, SlotAssigner {
 
     // What the rows are once this lands: the lane they describe, and the
     // reference that names their counter.
-    // - A reference waiting for this flush certifies them, as `exact` unless
-    //   the table moved after it was recorded.
+    // - A reference waiting for this flush certifies them, and brings the
+    //   baseline of its publish with it: the frame and leaf references in the
+    //   metadata, the counter as published in the published rows — the rows
+    //   that differ from the publish before it, or all of them.
     // - With none waiting, a rewrite of every row leaves a table no reference
     //   names — a lane zero-seeded, or left unbound.
     // - Data rows going past a reference (an upload whose publish failed)
-    //   keep it as a floor only.
+    //   leave it, and the baseline, as they are.
     const pending = this.pendingForBoundLane()
+    const baseline = pending?.baseline
+    const published: PublishedRow[] = []
+    let replacesStored: string | undefined
+    if (baseline) {
+      replacesStored = this.storedPublished?.referenceHex
+      const stored = this.storedPublished?.counter
+      for (let i = 0; i < NUM_UTILIZATION_CHUNKS; i++) {
+        const data = extractChunk(baseline.counter, i)
+        if (
+          stored === undefined ||
+          !Binary.equals(data, extractChunk(stored, i))
+        ) {
+          published.push({ batchId, chunkIndex: i, data })
+        }
+      }
+    }
     const rowsPartition = allRows ? this.partition : this.rowsPartition
-    const dataRows = this.dirtyBuckets.size > 0
     const expected = this.rowsGeneration
     let generation = expected
     try {
       // Rows and metadata in one transaction: the flush lands whole or not at
       // all, so nothing is ever certified that the rows do not hold.
-      await this.cache.writeRows(batchId, entries, (existing) => {
-        const stored = existing?.rowsGeneration ?? 0
-        if (stored !== expected) {
-          throw new Error(
-            "the cache rows were written by another tab during this flush",
-          )
-        }
-        generation = entries.length > 0 ? stored + 1 : stored
-        return {
-          rowsGeneration: generation,
-          rowsPartition,
-          stateReference:
-            pending !== undefined
-              ? { ...pending }
-              : allRows
-                ? undefined
-                : dataRows && existing?.stateReference
-                  ? { ...existing.stateReference, exact: false }
+      await this.cache.writeRows(
+        batchId,
+        entries,
+        (existing) => {
+          const stored = existing?.rowsGeneration ?? 0
+          if (stored !== expected) {
+            throw new Error(
+              "the cache rows were written by another tab during this flush",
+            )
+          }
+          // Only the rows that differ from the published counter this
+          // stamper last saw were prepared: that holds only while it is
+          // still the one stored
+          if (
+            baseline !== undefined &&
+            replacesStored !== undefined &&
+            existing?.stateReference?.referenceHex !== replacesStored
+          ) {
+            throw new Error(
+              "the published counter was replaced by another tab during this flush",
+            )
+          }
+          generation = entries.length > 0 ? stored + 1 : stored
+          return {
+            rowsGeneration: generation,
+            rowsPartition,
+            stateReference:
+              pending !== undefined
+                ? {
+                    partition: pending.partition,
+                    referenceHex: pending.referenceHex,
+                    frame: baseline?.frame,
+                    references: baseline?.references,
+                    fullPublishEpoch: baseline?.fullPublishEpoch,
+                  }
+                : allRows
+                  ? undefined
                   : existing?.stateReference,
-        }
-      })
+          }
+        },
+        published,
+      )
     } catch (error) {
       console.error(
         `[UtilizationAwareStamper] Failed to flush to cache:`,
@@ -1815,6 +1872,14 @@ export class UtilizationAwareStamper implements Stamper, SlotAssigner {
     this.rowsStale = false
     if (pending !== undefined && this.pendingReference === pending) {
       this.pendingReference = undefined
+    }
+    if (baseline !== undefined && pending !== undefined) {
+      this.storedPublished = {
+        referenceHex: pending.referenceHex,
+        counter: baseline.counter,
+      }
+    } else if (pending !== undefined || allRows) {
+      this.storedPublished = undefined
     }
     for (const entry of entries) {
       const chunk = this.utilizationState.chunks[entry.chunkIndex]
@@ -1850,7 +1915,6 @@ export class UtilizationAwareStamper implements Stamper, SlotAssigner {
         // Only update if the incoming value is higher (monotonic increase)
         if (value > this.utilizationState.dataCounters[index]) {
           this.utilizationState.dataCounters[index] = value
-          if (this.pendingReference) this.pendingReference.exact = false
         }
       }
     }
@@ -1871,7 +1935,7 @@ export class UtilizationAwareStamper implements Stamper, SlotAssigner {
 
   /** The reference waiting for a flush, when it is for the bound lane. */
   private pendingForBoundLane():
-    | { partition: number; referenceHex: string; exact: boolean }
+    | { partition: number; referenceHex: string; baseline?: PublishBaseline }
     | undefined {
     const pending = this.pendingReference
     return pending !== undefined && pending.partition === this.partition
@@ -1925,7 +1989,6 @@ export class UtilizationAwareStamper implements Stamper, SlotAssigner {
         for (let i = 0; i < stored.length; i++) {
           if (stored[i] > counters[start + i]) {
             counters[start + i] = stored[i]
-            if (this.pendingReference) this.pendingReference.exact = false
           }
         }
       }
@@ -1941,40 +2004,87 @@ export class UtilizationAwareStamper implements Stamper, SlotAssigner {
   }
 
   /**
-   * The reference the cache rows are certified by for `partition`, or
-   * undefined when none names them for that lane: another lane's rows, a
-   * rewrite that died midway, a lane zero-seeded and not yet published.
+   * What the cache rows are for `partition`, or undefined when they do not
+   * describe that lane: another lane's rows, or none flushed for it yet.
    * Called by the two paths that resume a lane from local state — the lease's
    * cache-hit claim and the coordinator's adopt — and both then bind this
    * stamper's table, so the rows are read into it here first.
    *
-   * `referenceHex` names a published counter the rows are at or past.
-   * `exact` says they hold precisely that counter, which is what an
-   * incremental publish diffs against: a leaf it retains must be the leaf the
-   * reference chunk's exception list describes. Rows a failed publish moved
-   * on are safe to resume from, and not to diff against.
+   * `referenceHex` names a published counter the rows are at or past: safe
+   * to resume from. Undefined for a lane claimed from zero and not yet
+   * published. What a publish diffs against is not the rows but the counter
+   * as published (`readPublished`).
    */
   async getRowsCertification(
     partition: number,
-  ): Promise<{ referenceHex: string; exact: boolean } | undefined> {
+  ): Promise<{ referenceHex: string | undefined } | undefined> {
     const meta = await this.syncRows(this.partition === undefined)
-    const synced = meta?.stateReference
-    return synced?.partition === partition && meta?.rowsPartition === partition
-      ? { referenceHex: synced.referenceHex, exact: synced.exact }
-      : undefined
+    if (meta?.rowsPartition !== partition) return undefined
+    const synced = meta.stateReference
+    return {
+      referenceHex:
+        synced?.partition === partition ? synced.referenceHex : undefined,
+    }
   }
 
   /**
    * Record the partition-state feed reference the counter of `partition` is
-   * now in sync with (after a download or a publish). Held in memory until
-   * the next `flush`, which writes the rows the reference describes and
-   * commits it with them — see `BatchMetadata.stateReference`.
+   * now in sync with (after a download or a publish), with what the next
+   * publish diffs against. Held in memory until the next `flush`, which
+   * writes the rows the reference describes and commits it with them — see
+   * `BatchMetadata.stateReference`.
    */
   async setSyncedReference(
     partition: number,
     referenceHex: string,
+    baseline?: PublishBaseline,
   ): Promise<void> {
-    this.pendingReference = { partition, referenceHex, exact: true }
+    this.pendingReference = { partition, referenceHex, baseline }
+  }
+
+  /**
+   * The baseline of `partition`'s latest publish, as the store holds it: the
+   * leaf references and frame it went out with and the counter it named. Any
+   * tab of the storage partition reads the same one, so whichever publishes
+   * next re-uploads only the leaves that changed. Undefined when the store
+   * holds none for the lane.
+   */
+  async readPublished(
+    partition: number,
+  ): Promise<(PublishBaseline & { referenceHex: string }) | undefined> {
+    const batchId = this.batchId.toHex()
+    const synced = (await this.cache.getMetadata?.(batchId))?.stateReference
+    if (
+      synced?.partition !== partition ||
+      synced.frame === undefined ||
+      synced.references === undefined
+    ) {
+      this.storedPublished = undefined
+      return undefined
+    }
+    if (this.storedPublished?.referenceHex === synced.referenceHex) {
+      return {
+        referenceHex: synced.referenceHex,
+        frame: synced.frame,
+        references: synced.references,
+        counter: this.storedPublished.counter,
+        fullPublishEpoch: synced.fullPublishEpoch,
+      }
+    }
+    const counter = new Uint32Array(NUM_BUCKETS)
+    for (const row of await this.cache.getPublishedRows(batchId)) {
+      if (row.chunkIndex < NUM_UTILIZATION_CHUNKS) {
+        mergeChunk(counter, row.chunkIndex, row.data)
+      }
+    }
+    this.storedPublished = { referenceHex: synced.referenceHex, counter }
+    return {
+      referenceHex: synced.referenceHex,
+      frame: synced.frame,
+      references: synced.references,
+      counter,
+      fullPublishEpoch: synced.fullPublishEpoch,
+    }
   }
 
   /**

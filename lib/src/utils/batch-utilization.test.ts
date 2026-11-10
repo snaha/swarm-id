@@ -1261,11 +1261,9 @@ describe("UtilizationAwareStamper synced reference", () => {
     })
   }
 
-  // A reference certifies rows as "at or past the counter it names". Only
-  // rows that hold exactly that counter may seed an incremental publish: the
-  // lease diffs against them, and a leaf it retains must be the leaf the
-  // reference chunk describes.
-  it("certifies rows as exact only while they hold the counter the reference names", async () => {
+  // A reference certifies rows as "at or past the counter it names": safe to
+  // resume from. Rows that move past it keep it as their floor.
+  it("keeps the reference as the rows' floor while an unpublished upload moves them past it", async () => {
     const cache = makeRecordingCache()
     const stamper = await makeStamper(cache)
     bind(stamper, 0)
@@ -1274,7 +1272,6 @@ describe("UtilizationAwareStamper synced reference", () => {
     await stamper.flush()
     expect(await stamper.getRowsCertification(0)).toEqual({
       referenceHex: "published",
-      exact: true,
     })
 
     // An upload whose publish failed: its stamps reach the rows, no reference
@@ -1283,7 +1280,6 @@ describe("UtilizationAwareStamper synced reference", () => {
     await stamper.flush()
     expect(await stamper.getRowsCertification(0)).toEqual({
       referenceHex: "published",
-      exact: false,
     })
 
     // The next publish names the rows again
@@ -1291,22 +1287,6 @@ describe("UtilizationAwareStamper synced reference", () => {
     await stamper.flush()
     expect(await stamper.getRowsCertification(0)).toEqual({
       referenceHex: "republished",
-      exact: true,
-    })
-  })
-
-  it("a reference recorded before later stamps is committed as inexact", async () => {
-    // A publish whose flush failed, then an upload whose publish failed: the
-    // rows that finally land are past the counter the pending reference names
-    const cache = makeRecordingCache()
-    const stamper = await makeStamper(cache)
-    bind(stamper, 0)
-    await stamper.setSyncedReference(0, "published")
-    stamper.stamp(makeAddressInBucket(7, 1))
-    await stamper.flush()
-    expect(await stamper.getRowsCertification(0)).toEqual({
-      referenceHex: "published",
-      exact: false,
     })
   })
 
@@ -1323,7 +1303,9 @@ describe("UtilizationAwareStamper synced reference", () => {
     // Back on lane 0 with no state found (its pointer aged out): zero-seeded
     bind(stamper, 0)
     await stamper.flush()
-    expect(await stamper.getRowsCertification(0)).toBeUndefined()
+    expect(await stamper.getRowsCertification(0)).toEqual({
+      referenceHex: undefined,
+    })
     expect(await stamper.getRowsCertification(1)).toBeUndefined()
   })
 
@@ -1389,7 +1371,6 @@ describe("UtilizationAwareStamper synced reference", () => {
     // Tab B takes the lane over with no broadcast having reached it
     expect(await tabB.getRowsCertification(0)).toEqual({
       referenceHex: "second",
-      exact: true,
     })
     expect(tabB.buildLeaseLocalCounter()[7]).toBe(2)
   })
@@ -1415,7 +1396,6 @@ describe("UtilizationAwareStamper synced reference", () => {
     expect(reopened.getUtilizationState().dataCounters[7]).toBe(1)
     expect(await reopened.getRowsCertification(0)).toEqual({
       referenceHex: "published",
-      exact: true,
     })
 
     // The stamper keeps what it could not write, and writes it next time
@@ -1425,20 +1405,6 @@ describe("UtilizationAwareStamper synced reference", () => {
     expect(afterRetry.getUtilizationState().dataCounters[7]).toBe(2)
     expect(await afterRetry.getRowsCertification(0)).toEqual({
       referenceHex: "published",
-      exact: false,
-    })
-  })
-
-  it("a sibling's counters folded in after a reference was recorded make it inexact", async () => {
-    const cache = makeRecordingCache()
-    const stamper = await makeStamper(cache)
-    bind(stamper, 0)
-    await stamper.setSyncedReference(0, "read-on-claim")
-    stamper.applyUtilizationUpdate([{ index: 9, value: 4 }])
-    await stamper.flush()
-    expect(await stamper.getRowsCertification(0)).toEqual({
-      referenceHex: "read-on-claim",
-      exact: false,
     })
   })
 
@@ -1531,7 +1497,6 @@ describe("UtilizationAwareStamper synced reference", () => {
     expect(cold.getUtilizationState().dataCounters[5000]).toBe(1)
     expect(await cold.getRowsCertification(0)).toEqual({
       referenceHex: "ref-b",
-      exact: true,
     })
     expect(tabB.getLocalCounter()![7]).toBe(3)
   })
@@ -1565,7 +1530,6 @@ describe("UtilizationAwareStamper synced reference", () => {
 
     expect(await tabB.getRowsCertification(0)).toEqual({
       referenceHex: "second",
-      exact: true,
     })
     const table = tabB.buildLeaseLocalCounter()
     expect(table[7]).toBe(2)
@@ -1613,15 +1577,122 @@ describe("UtilizationAwareStamper synced reference", () => {
 
     expect(await stamper.getRowsCertification(0)).toEqual({
       referenceHex: "ref-zero",
-      exact: true,
     })
     expect(stamper.buildLeaseLocalCounter()[7]).toBe(1)
   })
 
+  // What a publish diffs against is the counter as published, kept apart
+  // from the rows: an upload whose publish failed moves the rows on and
+  // leaves the baseline where Swarm is.
+  it("stores a publish's baseline with its reference, and keeps it while unpublished stamps move the rows", async () => {
+    const cache = makeRecordingCache()
+    const stamper = await makeStamper(cache)
+    bind(stamper, 0)
+    expect(await stamper.readPublished(0)).toBeUndefined()
+
+    stamper.stamp(makeAddressInBucket(7, 1))
+    const frame = { base: 0, width: 2 }
+    const references = [new Uint8Array(64).fill(1)]
+    await stamper.setSyncedReference(0, "published", {
+      frame,
+      references,
+      counter: stamper.getLocalCounter()!.slice(),
+      fullPublishEpoch: 12,
+    })
+    await stamper.flush()
+
+    stamper.stamp(makeAddressInBucket(7, 2)) // its publish fails
+    await stamper.flush()
+
+    const reopened = await makeStamper(cache)
+    expect(reopened.getUtilizationState().dataCounters[7]).toBe(2)
+    const baseline = await reopened.readPublished(0)
+    expect(baseline?.referenceHex).toBe("published")
+    expect(baseline?.frame).toEqual(frame)
+    expect(baseline?.references).toEqual(references)
+    expect(baseline?.fullPublishEpoch).toBe(12)
+    expect(baseline?.counter[7]).toBe(1)
+    expect(await reopened.readPublished(1)).toBeUndefined()
+  })
+
+  it("writes only the published rows that changed since the publish it replaces", async () => {
+    const cache = makeRecordingCache()
+    const stamper = await makeStamper(cache)
+    bind(stamper, 0)
+    const record = async (referenceHex: string) => {
+      await stamper.readPublished(0)
+      await stamper.setSyncedReference(0, referenceHex, {
+        frame: { base: 0, width: 1 },
+        references: [],
+        counter: stamper.getLocalCounter()!.slice(),
+      })
+      await stamper.flush()
+    }
+    stamper.stamp(makeAddressInBucket(7, 1))
+    stamper.stamp(makeAddressInBucket(5000, 1))
+    await record("first")
+
+    const written: number[] = []
+    const writeRows = cache.writeRows.bind(cache)
+    cache.writeRows = async (batchId, entries, patch, published) => {
+      written.push(...(published ?? []).map((row) => row.chunkIndex))
+      await writeRows(batchId, entries, patch, published)
+    }
+    stamper.stamp(makeAddressInBucket(5000, 2))
+    await record("second")
+
+    expect(written).toEqual([getChunkIndexForBucket(5000)])
+    const baseline = await (await makeStamper(cache)).readPublished(0)
+    expect(baseline?.referenceHex).toBe("second")
+    expect(baseline?.counter[7]).toBe(1)
+    expect(baseline?.counter[5000]).toBe(2)
+  })
+
+  it("rewrites every published row when another tab's publish replaced the one it knew", async () => {
+    const cache = makeRecordingCache()
+    const tabA = await makeStamper(cache)
+    const tabB = await makeStamper(cache)
+    for (const tab of [tabA, tabB]) bind(tab, 0)
+    const record = async (
+      tab: UtilizationAwareStamper,
+      referenceHex: string,
+    ) => {
+      await tab.readPublished(0)
+      await tab.setSyncedReference(0, referenceHex, {
+        frame: { base: 0, width: 1 },
+        references: [],
+        counter: tab.getLocalCounter()!.slice(),
+      })
+      await tab.flush()
+    }
+    tabA.stamp(makeAddressInBucket(7, 1))
+    await record(tabA, "a-first")
+    await tabB.syncRows()
+    tabB.stamp(makeAddressInBucket(5000, 1))
+    await record(tabB, "b-first")
+
+    // Tab A publishes again without having seen tab B's baseline
+    await tabA.syncRows()
+    tabA.stamp(makeAddressInBucket(7, 2))
+    await tabA.setSyncedReference(0, "a-second", {
+      frame: { base: 0, width: 1 },
+      references: [],
+      counter: tabA.getLocalCounter()!.slice(),
+    })
+    await expect(tabA.flush()).rejects.toThrow("replaced by another tab")
+
+    await record(tabA, "a-second")
+    const baseline = await (await makeStamper(cache)).readPublished(0)
+    expect(baseline?.referenceHex).toBe("a-second")
+    expect(baseline?.counter[7]).toBe(2)
+    expect(baseline?.counter[5000]).toBe(1)
+  })
+
   it("holds its invariants under any interleaving of two tabs on one lane", async () => {
     // Model: a publish records the counter it names. Whatever the tabs do,
-    // rows certified by a reference are at or past its counter, and exactly
-    // it when they are called exact; and no row ever goes down.
+    // rows certified by a reference are at or past its counter; the stored
+    // baseline is exactly the counter its reference named; and no row ever
+    // goes down.
     let seed = 0x5eed
     const random = (n: number) => {
       seed = (seed * 1103515245 + 12345) & 0x7fffffff
@@ -1652,8 +1723,16 @@ describe("UtilizationAwareStamper synced reference", () => {
       }
       if (random(3) !== 0) {
         const referenceHex = `ref-${round}`
-        published.set(referenceHex, tab.getLocalCounter()!.slice())
-        await tab.setSyncedReference(0, referenceHex)
+        const counter = tab.getLocalCounter()!.slice()
+        published.set(referenceHex, counter)
+        // As the lease does: read what the store holds, then record the
+        // publish that replaces it
+        await tab.readPublished(0)
+        await tab.setSyncedReference(0, referenceHex, {
+          frame: { base: 0, width: 1 },
+          references: [],
+          counter,
+        })
       }
       const writeRows = cache.writeRows.bind(cache)
       if (random(5) === 0) {
@@ -1673,17 +1752,21 @@ describe("UtilizationAwareStamper synced reference", () => {
         ).toBeGreaterThanOrEqual(floor[bucket])
       }
       floor = rows.slice()
-      const certification = await cold.getRowsCertification(0)
-      if (certification !== undefined) {
-        const named = published.get(certification.referenceHex)!
+      const certified = (await cold.getRowsCertification(0))?.referenceHex
+      if (certified !== undefined) {
+        const named = published.get(certified)!
         for (const bucket of BUCKETS) {
-          if (certification.exact) {
-            expect(rows[bucket], `round ${round} exact ${bucket}`).toBe(
-              named[bucket],
-            )
-          } else {
-            expect(rows[bucket]).toBeGreaterThanOrEqual(named[bucket])
-          }
+          expect(rows[bucket]).toBeGreaterThanOrEqual(named[bucket])
+        }
+      }
+      const baseline = await cold.readPublished(0)
+      if (baseline !== undefined) {
+        const named = published.get(baseline.referenceHex)!
+        for (const bucket of BUCKETS) {
+          expect(
+            baseline.counter[bucket],
+            `round ${round} baseline ${bucket}`,
+          ).toBe(named[bucket])
         }
       }
     }
@@ -1765,7 +1848,6 @@ describe("UtilizationAwareStamper synced reference", () => {
     expect(await reloaded.getRowsCertification(1)).toBeUndefined()
     expect(await reloaded.getRowsCertification(0)).toEqual({
       referenceHex: "ref-zero",
-      exact: true,
     })
     expect(reloaded.buildLeaseLocalCounter()[7]).toBe(1)
   })
