@@ -281,6 +281,7 @@ export function serializeNetworkSettings(
   return {
     beeNodeUrl: settings.beeNodeUrl,
     gnosisRpcUrl: settings.gnosisRpcUrl,
+    useWeeb3: settings.useWeeb3,
   }
 }
 

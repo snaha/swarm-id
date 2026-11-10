@@ -26,3 +26,6 @@ vite.config.ts.timestamp-*
 /playwright-report
 /test-results
 .cache
+
+# weeb-3, copied from node_modules by vite.config.ts
+/static/weeb-3

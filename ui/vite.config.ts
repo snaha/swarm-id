@@ -2,7 +2,8 @@
 // SPDX-License-Identifier: Apache-2.0
 import { sveltekit } from '@sveltejs/kit/vite'
 import tailwindcss from '@tailwindcss/vite'
-import { readFileSync } from 'node:fs'
+import { cpSync, readFileSync } from 'node:fs'
+import { createRequire } from 'node:module'
 import { dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import type { Plugin } from 'vite'
@@ -70,6 +71,15 @@ function stubDevOnlyModules(): Plugin {
   }
 }
 
+// Experimental (#306): weeb-3 runs its node in a SharedWorker it loads by URL,
+// and that worker imports its siblings relatively, so the package is served
+// whole from `static/weeb-3` (gitignored) rather than bundled.
+cpSync(
+  dirname(createRequire(import.meta.url).resolve('@lat-murmeldjur/weeb_3/worker.js')),
+  fileURLToPath(new URL('./static/weeb-3', import.meta.url)),
+  { recursive: true },
+)
+
 export default defineConfig(({ command }) => ({
   plugins: [tailwindcss(), sveltekit(), stampWorkerDev(), stubDevOnlyModules()],
   resolve: {
@@ -86,7 +96,8 @@ export default defineConfig(({ command }) => ({
         : undefined,
   },
   optimizeDeps: {
-    exclude: ['@snaha/swarm-id', '@snaha/swarm-id/internal'],
+    // weeb-3 finds its wasm next to itself, which pre-bundling would move.
+    exclude: ['@snaha/swarm-id', '@snaha/swarm-id/internal', '@lat-murmeldjur/weeb_3'],
   },
   test: {
     include: ['src/**/*.{test,spec}.{js,ts}'],

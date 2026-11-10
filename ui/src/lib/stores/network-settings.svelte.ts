@@ -18,6 +18,7 @@ export interface NetworkSettingsStore {
   readonly settings: NetworkSettings
   readonly beeNodeUrl: string
   readonly gnosisRpcUrl: string
+  readonly useWeeb3: boolean
   updateSettings(newSettings: NetworkSettings): void
   reset(): void
 }
@@ -60,6 +61,9 @@ function withNetworkSettingsStore(): NetworkSettingsStore {
     },
     get gnosisRpcUrl() {
       return settings.gnosisRpcUrl
+    },
+    get useWeeb3() {
+      return settings.useWeeb3 ?? false
     },
     updateSettings,
     reset,

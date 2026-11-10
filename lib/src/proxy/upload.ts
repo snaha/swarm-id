@@ -50,6 +50,7 @@ import type { StampWorkerPool } from "./stamp-worker-pool"
 import { tryCreateTag } from "../utils/tag"
 import { uint8ArrayToHex } from "../utils/hex"
 import { normalizeUrl } from "../utils/url"
+import { weeb3Push } from "./weeb3-bee"
 
 // ============================================================================
 // Errors
@@ -1025,6 +1026,21 @@ export async function uploadSOC(
     if (signal?.aborted) throw abortedError(signal)
     const envelope = stamper.stamp(socAddressBytes)
     if (target.counter) target.counter.chunks++
+
+    const push = weeb3Push(bee)
+    if (push) {
+      await push(
+        Binary.concatBytes(
+          identifier.toUint8Array(),
+          signature.toUint8Array(),
+          socBody,
+        ),
+        true,
+        socAddressBytes,
+        envelope,
+      )
+      return { socAddress: socAddressBytes, encryptionKey: encryptionKeyResult }
+    }
 
     const stampHex = convertEnvelopeToMarshaledStamp(envelope).toHex()
     const url = `${bee.url}/soc/${owner.toHex()}/${identifier.toHex()}?sig=${signature.toHex()}`
