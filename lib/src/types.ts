@@ -187,7 +187,11 @@ export interface UploadOptions {
   tag?: number
   deferred?: boolean
   onProgress?: (progress: UploadProgress) => void
-  /** Use WebSocket for chunk upload instead of HTTP. Per-chunk stamping is used. */
+  /**
+   * Use WebSocket for chunk upload instead of HTTP. Per-chunk stamping is used.
+   * Needs Bee 2.8.1 or newer, reached directly rather than through a gateway.
+   * Applies to encrypted uploads; a plain upload goes over HTTP regardless.
+   */
   useWebSocket?: boolean
   /** Use Web Workers for parallel stamp signing. Speeds up upload on multi-core CPUs. */
   useWorkers?: boolean
