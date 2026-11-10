@@ -274,6 +274,51 @@ export class UtilizationStoreDB {
   }
 
   /**
+   * Write `entries` and patch the batch's metadata in ONE transaction: a flush
+   * lands whole or not at all. No reader sees rows without the metadata that
+   * describes them, and a tab that dies mid-flush leaves both as they were.
+   * `patch` sees the stored record, as in `updateMetadata`; when it throws,
+   * nothing is written.
+   */
+  async writeRows(
+    batchId: string,
+    entries: ChunkCacheEntry[],
+    patch: (existing: BatchMetadata | undefined) => Partial<BatchMetadata>,
+  ): Promise<void> {
+    await this.open()
+
+    return new Promise((resolve, reject) => {
+      const transaction = this.db!.transaction(
+        [CHUNKS_STORE, METADATA_STORE],
+        "readwrite",
+      )
+      const chunks = transaction.objectStore(CHUNKS_STORE)
+      const metadata = transaction.objectStore(METADATA_STORE)
+      const lastAccess = Date.now()
+      const read = metadata.get(batchId)
+      read.onsuccess = () => {
+        let next: BatchMetadata
+        try {
+          const existing = read.result as BatchMetadata | undefined
+          next = { ...existing, ...patch(existing), batchId }
+        } catch (error) {
+          // Thrown inside an IndexedDB callback the error would be lost to the
+          // event loop and the transaction aborted with no `error` of its own
+          reject(error)
+          transaction.abort()
+          return
+        }
+        for (const entry of entries) chunks.put({ ...entry, lastAccess })
+        metadata.put(next)
+      }
+      transaction.oncomplete = () => resolve()
+      transaction.onabort = transaction.onerror = () => {
+        reject(new Error(`Failed to write rows: ${transaction.error}`))
+      }
+    })
+  }
+
+  /**
    * Get all chunks for a batch
    * @param batchId - Batch ID (hex string)
    * @returns Array of cache entries (sorted by chunkIndex)

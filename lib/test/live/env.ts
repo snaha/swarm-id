@@ -20,6 +20,7 @@
 import { randomBytes } from "node:crypto"
 import { Bee, BatchId, PrivateKey, Stamper } from "@ethersphere/bee-js"
 import type { UploadTarget } from "../../src/proxy/upload"
+import { memoryUtilizationStore } from "../../src/storage/memory-utilization-store"
 import {
   deriveAccountDerivationKey,
   deriveSwarmEncryptionKey,
@@ -28,11 +29,7 @@ import {
 import { foldAccountFromSwarm } from "../../src/sync/fold-account-from-swarm"
 import type { DeviceStateView } from "../../src/sync/device-state"
 import type { ConnectedApp, Device, PostageStamp } from "../../src/schemas"
-import type {
-  BatchMetadata,
-  ChunkCacheEntry,
-  UtilizationStoreDB,
-} from "../../src/storage/utilization-store"
+import type { UtilizationStoreDB } from "../../src/storage/utilization-store"
 
 const DEFAULT_BEE_URL = "https://api.gateway.ethswarm.org/"
 const KEY_BYTES = 32
@@ -56,23 +53,7 @@ export const TEST_ACCOUNT_PUBLIC_KEY = `02${"11".repeat(KEY_BYTES)}`
  * interface changes.
  */
 export function makeInMemoryCache(): UtilizationStoreDB {
-  const chunks = new Map<string, ChunkCacheEntry>()
-  const meta = new Map<string, BatchMetadata>()
-  return {
-    getAllChunks: async (batchId: string) =>
-      Array.from(chunks.values())
-        .filter((c) => c.batchId === batchId)
-        .sort((a, b) => a.chunkIndex - b.chunkIndex),
-    putChunk: async (entry: ChunkCacheEntry) => {
-      chunks.set(`${entry.batchId}:${entry.chunkIndex}`, { ...entry })
-    },
-    getChunk: async (batchId: string, chunkIndex: number) =>
-      chunks.get(`${batchId}:${chunkIndex}`),
-    getMetadata: async (batchId: string) => meta.get(batchId),
-    putMetadata: async (metadata: BatchMetadata) => {
-      meta.set(metadata.batchId, { ...metadata })
-    },
-  } as unknown as UtilizationStoreDB
+  return memoryUtilizationStore()
 }
 
 const str = (name: string): string | undefined => {

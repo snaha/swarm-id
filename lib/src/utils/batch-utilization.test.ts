@@ -38,6 +38,7 @@ import {
   type ChunkCacheEntry,
   type UtilizationStoreDB,
 } from "../storage/utilization-store"
+import { memoryUtilizationStore } from "../storage/memory-utilization-store"
 import { lockSocAddress } from "./lock-soc"
 import { deriveSecret, BACKUP_KEY_LABEL } from "./key-derivation"
 import { uint8ArrayToHex } from "./hex"
@@ -1202,28 +1203,7 @@ describe("UtilizationAwareStamper synced reference", () => {
   const TEST_DEPTH_LM = 24
 
   function makeRecordingCache(): UtilizationStoreDB {
-    const store = new Map<string, ChunkCacheEntry>()
-    const metaStore = new Map<string, BatchMetadata>()
-    return {
-      getAllChunks: async () => {
-        const entries: ChunkCacheEntry[] = []
-        for (const entry of store.values()) entries.push(entry)
-        return entries.sort((a, b) => a.chunkIndex - b.chunkIndex)
-      },
-      putChunk: async (entry: ChunkCacheEntry) => {
-        store.set(`${entry.batchId}:${entry.chunkIndex}`, { ...entry })
-      },
-      getChunk: async (batchId: string, chunkIndex: number) =>
-        store.get(`${batchId}:${chunkIndex}`),
-      getMetadata: async (batchId: string) => metaStore.get(batchId),
-      updateMetadata: async (
-        batchId: string,
-        patch: (existing: BatchMetadata | undefined) => Partial<BatchMetadata>,
-      ) => {
-        const existing = metaStore.get(batchId)
-        metaStore.set(batchId, { ...existing, ...patch(existing), batchId })
-      },
-    } as unknown as UtilizationStoreDB
+    return memoryUtilizationStore()
   }
 
   /**
@@ -1244,6 +1224,14 @@ describe("UtilizationAwareStamper synced reference", () => {
       },
       updateMetadata: async (
         batchId: string,
+        patch: (existing: BatchMetadata | undefined) => Partial<BatchMetadata>,
+      ) => {
+        await later()
+        meta = { ...meta, ...patch(meta), batchId }
+      },
+      writeRows: async (
+        batchId: string,
+        _entries: ChunkCacheEntry[],
         patch: (existing: BatchMetadata | undefined) => Partial<BatchMetadata>,
       ) => {
         await later()
@@ -1406,9 +1394,9 @@ describe("UtilizationAwareStamper synced reference", () => {
     expect(tabB.buildLeaseLocalCounter()[7]).toBe(2)
   })
 
-  it("a flush that dies after an unpublished row landed leaves the rows inexact", async () => {
-    // An upload whose publish failed, and a tab closed mid-flush: the row is
-    // past the reference, and nothing ran after it to say so
+  it("a flush that fails writes nothing, and the next one lands whole", async () => {
+    // Rows and metadata go in one transaction: a tab closed mid-flush leaves
+    // neither a row past its reference nor a reference past its rows
     const cache = makeRecordingCache()
     const stamper = await makeStamper(cache)
     bind(stamper, 0)
@@ -1417,23 +1405,25 @@ describe("UtilizationAwareStamper synced reference", () => {
     await stamper.flush()
 
     stamper.stamp(makeAddressInBucket(7, 2))
-    const putChunk = cache.putChunk.bind(cache)
-    const updateMetadata = cache.updateMetadata.bind(cache)
-    let rowLanded = false
-    cache.putChunk = async (entry) => {
-      await putChunk(entry)
-      rowLanded = true
-    }
-    cache.updateMetadata = async (batchId, patch) => {
-      if (rowLanded) throw new Error("tab closed")
-      await updateMetadata(batchId, patch)
+    const writeRows = cache.writeRows.bind(cache)
+    cache.writeRows = async () => {
+      throw new Error("tab closed")
     }
     await expect(stamper.flush()).rejects.toThrow("tab closed")
-    cache.updateMetadata = updateMetadata
 
     const reopened = await makeStamper(cache)
-    expect(reopened.getUtilizationState().dataCounters[7]).toBe(2)
+    expect(reopened.getUtilizationState().dataCounters[7]).toBe(1)
     expect(await reopened.getRowsCertification(0)).toEqual({
+      referenceHex: "published",
+      exact: true,
+    })
+
+    // The stamper keeps what it could not write, and writes it next time
+    cache.writeRows = writeRows
+    await stamper.flush()
+    const afterRetry = await makeStamper(cache)
+    expect(afterRetry.getUtilizationState().dataCounters[7]).toBe(2)
+    expect(await afterRetry.getRowsCertification(0)).toEqual({
       referenceHex: "published",
       exact: false,
     })
@@ -1491,6 +1481,34 @@ describe("UtilizationAwareStamper synced reference", () => {
     expect(counters[5000]).toBe(1)
   })
 
+  it("a flush refuses to land over rows another tab wrote while it was being prepared, and lands once it has folded them in", async () => {
+    // Not reachable under the write lock; the transaction still checks, so a
+    // caller outside it cannot lower a row either
+    const cache = makeRecordingCache()
+    const tabA = await makeStamper(cache)
+    const tabB = await makeStamper(cache)
+    tabB.stamp(makeAddressInBucket(8, 1))
+
+    const writeRows = cache.writeRows.bind(cache)
+    cache.writeRows = async (batchId, entries, patch) => {
+      // Tab A's whole flush slips in between tab B's read and its write
+      cache.writeRows = writeRows
+      for (let i = 0; i < 3; i++) tabA.stamp(makeAddressInBucket(7, i))
+      await tabA.flush()
+      await writeRows(batchId, entries, patch)
+    }
+    await expect(tabB.flush()).rejects.toThrow("another tab")
+    expect(
+      (await makeStamper(cache)).getUtilizationState().dataCounters[8],
+    ).toBe(0)
+
+    await tabB.flush()
+    const counters = (await makeStamper(cache)).getUtilizationState()
+      .dataCounters
+    expect(counters[7]).toBe(3)
+    expect(counters[8]).toBe(1)
+  })
+
   it("two tabs bound to one lane keep each other's counters, and the certification stays true to the rows", async () => {
     const cache = makeRecordingCache()
     const tabA = await makeStamper(cache)
@@ -1529,15 +1547,15 @@ describe("UtilizationAwareStamper synced reference", () => {
     tabA.stamp(makeAddressInBucket(7, 2))
     tabA.stamp(makeAddressInBucket(5000, 1))
     await tabA.setSyncedReference(0, "second")
-    const putChunk = cache.putChunk.bind(cache)
+    const writeRows = cache.writeRows.bind(cache)
     let openGate!: () => void
     const gate = new Promise<void>((resolve) => (openGate = resolve))
     let reachedRows!: () => void
     const atRows = new Promise<void>((resolve) => (reachedRows = resolve))
-    cache.putChunk = async (entry) => {
+    cache.writeRows = async (batchId, entries, patch) => {
       reachedRows()
       await gate
-      await putChunk(entry)
+      await writeRows(batchId, entries, patch)
     }
     const flushing = tabA.flush()
     await atRows
@@ -1559,15 +1577,15 @@ describe("UtilizationAwareStamper synced reference", () => {
     const tabA = await makeStamper(cache)
     tabA.stamp(makeAddressInBucket(7, 1))
     tabA.stamp(makeAddressInBucket(5000, 1))
-    const putChunk = cache.putChunk.bind(cache)
+    const writeRows = cache.writeRows.bind(cache)
     let openGate!: () => void
     const gate = new Promise<void>((resolve) => (openGate = resolve))
     let reachedRows!: () => void
     const atRows = new Promise<void>((resolve) => (reachedRows = resolve))
-    cache.putChunk = async (entry) => {
+    cache.writeRows = async (batchId, entries, patch) => {
       reachedRows()
       await gate
-      await putChunk(entry)
+      await writeRows(batchId, entries, patch)
     }
     const flushing = tabA.flush()
     await atRows
@@ -1627,7 +1645,7 @@ describe("UtilizationAwareStamper synced reference", () => {
     for (let round = 0; round < ROUNDS; round++) {
       const tab = tabs[random(tabs.length)]
       // One locked section: sync, some stamps, maybe a publish, a flush
-      // that may die at any of its store writes
+      // that may fail
       if (random(4) !== 0) await tab.syncRows()
       for (let i = random(4); i > 0; i--) {
         tab.stamp(makeAddressInBucket(BUCKETS[random(BUCKETS.length)], round))
@@ -1637,24 +1655,14 @@ describe("UtilizationAwareStamper synced reference", () => {
         published.set(referenceHex, tab.getLocalCounter()!.slice())
         await tab.setSyncedReference(0, referenceHex)
       }
-      const dieAt = random(5) === 0 ? random(4) : -1
-      let writes = 0
-      const putChunk = cache.putChunk.bind(cache)
-      const updateMetadata = cache.updateMetadata.bind(cache)
-      const maybeDie = () => {
-        if (writes++ === dieAt) throw new Error("tab closed")
-      }
-      cache.putChunk = async (entry) => {
-        maybeDie()
-        await putChunk(entry)
-      }
-      cache.updateMetadata = async (batchId, patch) => {
-        maybeDie()
-        await updateMetadata(batchId, patch)
+      const writeRows = cache.writeRows.bind(cache)
+      if (random(5) === 0) {
+        cache.writeRows = async () => {
+          throw new Error("tab closed")
+        }
       }
       await tab.flush().catch(() => undefined)
-      cache.putChunk = putChunk
-      cache.updateMetadata = updateMetadata
+      cache.writeRows = writeRows
 
       const cold = await makeStamper(cache)
       const rows = cold.getUtilizationState().dataCounters
@@ -1738,30 +1746,28 @@ describe("UtilizationAwareStamper synced reference", () => {
     )
   })
 
-  it("a flush that dies midway through a lane change certifies neither lane", async () => {
+  it("a lane change whose flush fails leaves the rows and their certification as they were", async () => {
     const cache = makeRecordingCache()
     const stamper = await makeStamper(cache)
     bind(stamper, 0)
+    stamper.stamp(makeAddressInBucket(7, 1))
     await stamper.setSyncedReference(0, "ref-zero")
     await stamper.flush()
 
     bind(stamper, 1)
     await stamper.setSyncedReference(1, "ref-one")
-    const putChunk = cache.putChunk.bind(cache)
-    let written = 0
-    cache.putChunk = async (entry) => {
-      if (++written === 3) throw new Error("tab closed")
-      await putChunk(entry)
+    cache.writeRows = async () => {
+      throw new Error("tab closed")
     }
     await expect(stamper.flush()).rejects.toThrow("tab closed")
 
     const reloaded = await makeStamper(cache)
-    expect(
-      (await reloaded.getRowsCertification(0))?.referenceHex,
-    ).toBeUndefined()
-    expect(
-      (await reloaded.getRowsCertification(1))?.referenceHex,
-    ).toBeUndefined()
+    expect(await reloaded.getRowsCertification(1)).toBeUndefined()
+    expect(await reloaded.getRowsCertification(0)).toEqual({
+      referenceHex: "ref-zero",
+      exact: true,
+    })
+    expect(reloaded.buildLeaseLocalCounter()[7]).toBe(1)
   })
 
   it("persists protected state buckets and restores them on create", async () => {
@@ -1877,19 +1883,7 @@ describe("UtilizationAwareStamper cache rows (#463)", () => {
   const ENC_KEY = new Uint8Array(32).fill(0x24)
 
   function makeRecordingCache(seed: ChunkCacheEntry[] = []) {
-    const rows = new Map<number, ChunkCacheEntry>()
-    for (const row of seed) rows.set(row.chunkIndex, { ...row })
-    const sorted = () =>
-      [...rows.values()].sort((a, b) => a.chunkIndex - b.chunkIndex)
-    const cache = {
-      getAllChunks: async () => sorted(),
-      putChunk: async (entry: ChunkCacheEntry) => {
-        rows.set(entry.chunkIndex, { ...entry })
-      },
-      getMetadata: async () => undefined,
-      updateMetadata: async () => undefined,
-    } as unknown as UtilizationStoreDB
-    return { cache, rows }
+    return { cache: memoryUtilizationStore(seed) }
   }
 
   async function create(
@@ -1980,10 +1974,10 @@ describe("UtilizationAwareStamper cache rows (#463)", () => {
     await stamper.flush()
 
     let writes = 0
-    const putChunk = cache.putChunk.bind(cache)
-    cache.putChunk = async (entry) => {
-      writes++
-      await putChunk(entry)
+    const writeRows = cache.writeRows.bind(cache)
+    cache.writeRows = async (batchId, entries, patch) => {
+      writes += entries.length
+      await writeRows(batchId, entries, patch)
     }
     stamper.bindPartition({
       partition: 0,

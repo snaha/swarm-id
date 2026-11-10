@@ -73,6 +73,60 @@ describe("UtilizationStoreDB metadata", () => {
   })
 })
 
+describe("UtilizationStoreDB.writeRows", () => {
+  const row = (chunkIndex: number, fill: number) => ({
+    batchId: BATCH,
+    chunkIndex,
+    data: new Uint8Array(4096).fill(fill),
+    contentHash: `hash-${chunkIndex}-${fill}`,
+    nonce: 0,
+    lastAccess: 0,
+  })
+  let store: UtilizationStoreDB
+
+  beforeEach(() => {
+    vi.stubGlobal("indexedDB", new IDBFactory())
+    store = new UtilizationStoreDB()
+  })
+
+  afterEach(() => {
+    store.close()
+    vi.unstubAllGlobals()
+  })
+
+  it("writes the rows and the metadata patch together", async () => {
+    await store.updateMetadata(BATCH, () => ({ rowsGeneration: 4 }))
+    await store.writeRows(BATCH, [row(0, 1), row(3, 2)], (existing) => ({
+      rowsGeneration: (existing?.rowsGeneration ?? 0) + 1,
+      rowsPartition: 1,
+    }))
+
+    const rows = await store.getAllChunks(BATCH)
+    expect(rows.map((r) => [r.chunkIndex, r.data[0]])).toEqual([
+      [0, 1],
+      [3, 2],
+    ])
+    expect(await store.getMetadata(BATCH)).toMatchObject({
+      rowsGeneration: 5,
+      rowsPartition: 1,
+    })
+  })
+
+  it("writes nothing when the patch refuses", async () => {
+    await store.writeRows(BATCH, [row(0, 1)], () => ({ rowsGeneration: 1 }))
+
+    await expect(
+      store.writeRows(BATCH, [row(0, 9), row(1, 9)], () => {
+        throw new Error("rows changed underneath")
+      }),
+    ).rejects.toThrow("rows changed underneath")
+
+    const rows = await store.getAllChunks(BATCH)
+    expect(rows.map((r) => [r.chunkIndex, r.data[0]])).toEqual([[0, 1]])
+    expect((await store.getMetadata(BATCH))?.rowsGeneration).toBe(1)
+  })
+})
+
 describe("leaseRecordIn", () => {
   const ACCOUNT = "aa".repeat(20)
   const lease = (deviceId: string, batchId = BATCH) => ({

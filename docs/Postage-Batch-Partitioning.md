@@ -263,8 +263,11 @@ certifies them again. Rows a dying tab left half rewritten, or a lane held witho
 yet, take the cold read instead.
 
 The rows are shared by every tab of the storage partition, each with its own stamper and its
-own counter table in memory. A flush bumps a generation on the rows before its first row and
-after its last, and a tab reads that generation on taking the cross-tab write lock, before it
+own counter table in memory. A flush writes its rows and what describes them — the lane, the
+reference that names their counter, a new generation — in one IndexedDB transaction, so it
+lands whole or not at all. It runs before the publish: the stamps are in the shared rows
+before anything reaches Swarm, and a reload resumes from rows that include every slot a
+publish may have named. A tab reads the generation on taking the cross-tab write lock, before it
 binds or stamps anything: if another tab has written the rows since, it folds them into its
 table. Counters only grow, so rows for the lane the tab is on are folded in by per-bucket
 maximum — neither tab can lower the other's — and an unbound tab simply takes the rows, which

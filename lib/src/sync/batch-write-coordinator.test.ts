@@ -389,7 +389,8 @@ describe("BatchWriteCoordinator.withWrite — wait fork", () => {
     expect(stamper.bindPartition).toHaveBeenCalled()
     expect(coordinator.currentPartition).toBe(1)
     expect(onLeaseAcquired).toHaveBeenCalledWith(1)
-    expect(flushStamperState).toHaveBeenCalledTimes(1)
+    // Once before the publish, for the rows; once after, for its reference
+    expect(flushStamperState).toHaveBeenCalledTimes(2)
   })
 
   it("skip mode (sync-account): throws PartitionContendedError and never runs op", async () => {
@@ -1154,7 +1155,7 @@ describe("BatchWriteCoordinator — adopt fast path seeds the heartbeat pointer"
     expect(lease.seedReferenceHex).not.toHaveBeenCalled()
   })
 
-  it("rewrites the lease cache with the publish's reference before acking the write", async () => {
+  it("flushes the rows before the publish, and records the publish's reference before acking the write", async () => {
     // So a reload within the TTL can tell rows certified for an older publish
     // from the one the pointer names (see the test above).
     leaseController.lease = makeLease({
@@ -1183,9 +1184,10 @@ describe("BatchWriteCoordinator — adopt fast path seeds the heartbeat pointer"
 
     await coordinator.withWrite(async () => "ok", { wait: "block" })
 
-    const publishAt = calls.indexOf("publish")
-    expect(publishAt).toBeGreaterThan(-1)
-    expect(calls.slice(publishAt)).toEqual([
+    // The rows first, so they hold the stamps before the publish names them;
+    // then the publish, the record, and the flush that commits its reference.
+    expect(calls.slice(calls.indexOf("flush"))).toEqual([
+      "flush",
       "publish",
       "cache:published",
       "flush",
@@ -1251,7 +1253,7 @@ describe("BatchWriteCoordinator — the cache rows at the write lock", () => {
       { wait: "block" },
     )
 
-    expect(calls).toEqual(["sync", "bind", "upload", "flush"])
+    expect(calls).toEqual(["sync", "bind", "upload", "flush", "flush"])
   })
 
   it("still writes when the rows cannot be read", async () => {

@@ -384,6 +384,11 @@ export class BatchWriteCoordinator {
         await this.ensureLeaseStillValid()
         const localCounter = this.deps.stamper.getLocalCounter()
         if (localCounter !== undefined) {
+          // The stamps go into the shared rows before anything reaches Swarm,
+          // so whichever point a tab dies at, a reload resumes from rows that
+          // include every slot a publish may have named. The flush after the
+          // publish (`lockAndFlush`) then only records its reference.
+          await this.deps.flushStamperState?.()
           await this.partitionLease?.publishState(localCounter)
           // The lease record names the publish before the ack, so a reload
           // within the TTL can tell rows certified for this publish (by the
