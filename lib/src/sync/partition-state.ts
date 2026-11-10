@@ -93,9 +93,9 @@ const ENCRYPTED_REFERENCE_BYTES = 64
 const ZERO_CHUNK_REF = new Uint8Array(ENCRYPTED_REFERENCE_BYTES)
 
 /**
- * Domain-separation tag for partition-state-feed topics. `v1` was the
- * fixed-width uint16/uint32 layout; its chunks stay under their own topic,
- * where nothing looks any more (#463).
+ * Domain-separation tag for partition-state-feed topics. `v2` is the SBU1
+ * leaf layout; state under `v1` (fixed-width uint16/uint32 chunks) is not
+ * read (#463).
  */
 const PARTITION_STATE_TOPIC_DOMAIN = "swarm-id-partition-state-v2"
 

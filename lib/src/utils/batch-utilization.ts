@@ -1535,7 +1535,7 @@ export class UtilizationAwareStamper implements Stamper, SlotAssigner {
     // stamper rather than starting it from zero: a zero counter over rows that
     // exist flushes zero-based rows over them on the first write and re-issues
     // every slot they record. A store that cannot be opened at all holds no
-    // rows, so the stamper starts fresh, as it did before the cache existed.
+    // rows, so the stamper starts fresh.
     await instance.syncRows().catch((error: unknown) => {
       if (!(error instanceof UtilizationStoreUnavailableError)) throw error
       console.warn(

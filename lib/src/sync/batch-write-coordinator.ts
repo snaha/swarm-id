@@ -1389,8 +1389,8 @@ export class BatchWriteCoordinator {
    * counter table is per tab, and the lock is the one place a tab can read
    * them knowing nobody is writing. Without it a tab stamps from what it
    * remembers, and only a broadcast it may have missed stands between that
-   * and a slot a sibling already used. Best-effort: a store that cannot be
-   * read leaves the tab where it was before this existed.
+   * and a slot a sibling already used. Best-effort: when the store cannot be
+   * read the tab works from its own table.
    */
   private lock<T>(op: () => Promise<T>): Promise<T> {
     return withBatchWriteLock(this.deps.batchId, async () => {
