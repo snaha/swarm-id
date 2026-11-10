@@ -171,6 +171,15 @@ export interface PartitionLeaseStateSnapshot {
    * and adopting them would re-issue the acked writes in between.
    */
   referenceHex?: string
+  /**
+   * When a context of the storage partition last took on the Swarm renewal
+   * of this claim. Every context ticks; the one that finds this older than
+   * half a refresh interval renews, the rest take the renewed expiry.
+   */
+  renewingAt?: number
+  /** When an upload through this claim last started or finished, in any
+   *  context — the clock the idle yield measures. */
+  activeAt?: number
 }
 
 export class PartitionLease {
@@ -1643,16 +1652,7 @@ export class PartitionLease {
    */
   follow(record: PartitionLeaseStateSnapshot): void {
     if (!this.self || !record.self) return
-    if (record.self.leasedUntil > this.self.leasedUntil) {
-      this.self = { ...this.self, leasedUntil: record.self.leasedUntil }
-      const holder = this.holders.get(this.self.partition)
-      if (holder) {
-        this.holders.set(this.self.partition, {
-          ...holder,
-          leasedUntil: this.self.leasedUntil,
-        })
-      }
-    }
+    this.followExpiry(record.self.leasedUntil)
     if (record.referenceHex !== this.lastReferenceHex) {
       this.lastReferenceHex = record.referenceHex
       this.publishedReferences = undefined
@@ -1660,6 +1660,17 @@ export class PartitionLease {
       this.publishedFrame = undefined
       this.lastFullPublishEpoch = undefined
     }
+  }
+
+  /** Take a later expiry a sibling's renewal recorded for this same claim.
+   *  Only the expiry: the published reference belongs to whoever publishes
+   *  under the write lock (`follow`). */
+  followExpiry(leasedUntil: number): void {
+    if (!this.self || leasedUntil <= this.self.leasedUntil) return
+    this.self = { ...this.self, leasedUntil }
+    const holder = this.holders.get(this.self.partition)
+    if (holder)
+      this.holders.set(this.self.partition, { ...holder, leasedUntil })
   }
 
   /**

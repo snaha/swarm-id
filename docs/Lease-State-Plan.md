@@ -1,6 +1,6 @@
 # One source of truth for a lane's lease state: plan
 
-Status: **in progress** (2026-11-10). Phases 1 to 3 are built; phases 4 and 5 are not. The
+Status: **in progress** (2026-11-10). Phases 1 to 4 are built; phase 5 is not. The
 decisions taken are at the end. Follows [#918](https://github.com/snaha/swarm-id/pull/918) and the
 `fix/one-lease-across-tabs` branch stacked on it.
 
@@ -134,12 +134,16 @@ object store; the `exact` flag is gone; a cache-hit claim downloads nothing.
 
 ### 4. One ticker, one idle clock
 
-- A context refreshes the lease only when it wins a try-lock for the drive, or has an
-  upload in flight (it must detect its own displacement).
-- The idle yield reads `activity` from the record.
+- Every context ticks. A tick claims the interval's Swarm renewal in the record
+  (`renewingAt`, one atomic update) unless another context claimed it within half an
+  interval; a context that does not renew takes the recorded expiry. A lease near expiry
+  renews whatever the record says.
+- The context that finds the lane taken clears the record off-lock; a sibling's next tick
+  sees the claim gone and stops its in-flight upload's stamps without waiting for the lock.
+- The idle yield reads `activeAt` from the record, written as an upload starts and ends.
 
 Done when: N tabs produce one refresh per interval, and closing the ticking tab hands the
-tick to another.
+tick to another. **Built**: eight two-tab tests, each piece mutation-checked.
 
 ### 5. Group commit (optimisation)
 
@@ -184,8 +188,9 @@ it and which has no reference on either side is adopted like any other.
 5. **Every context ticks, one refreshes** (2026-11-10). Each context reads the record on
    its own timer and does the Swarm refresh only when the record shows nobody renewed
    within the last interval. No election and no messaging; an uploading context still
-   learns within one interval that the lease is gone. To check when phase 4 is built: the
-   beacons a refresh also writes.
+   learns within one interval that the lease is gone. The presence and occupancy beacons a
+   refresh writes are per device, not per context, so one writer per interval is the right
+   count; so is one state-pointer heartbeat.
 
 ## Not verified
 
