@@ -657,10 +657,11 @@ export class BatchWriteCoordinator {
       // (#463); the cached lease names the publish the lease last read or
       // made (written before every ack). The two differ when that flush never
       // landed — a tab dying between publish and flush, an IndexedDB failure —
-      // and the rows then sit below the pointer's counter; a lane held
-      // without a publish yet has neither. Both take the cold acquire below
-      // instead, which downloads the pointer's state when the rows'
-      // reference is not it.
+      // and the rows then sit below the pointer's counter, so the cold
+      // acquire below downloads its state. A lane claimed from zero and not
+      // yet published has no reference on either side — nothing the rows
+      // could be behind, since a publish is in the record before its ack —
+      // and adopts too.
       // The reference also seeds the heartbeat's resume-pointer target: the cold
       // `claimPartition` path seeds that from the state it reads on acquire;
       // the adopt path skips `claimPartition`, so without it an adopted-but-idle

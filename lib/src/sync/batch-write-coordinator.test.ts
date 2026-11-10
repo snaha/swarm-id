@@ -96,8 +96,7 @@ function makeStamper(calls: string[]) {
     getRowsCertification: vi.fn(
       async (
         _partition: number,
-      ): Promise<{ referenceHex: string; exact: boolean } | undefined> =>
-        undefined,
+      ): Promise<{ referenceHex: string | undefined } | undefined> => undefined,
     ),
     // Folds in the rows a sibling tab wrote; called on taking the write lock.
     syncRows: vi.fn(async (): Promise<undefined> => undefined),
@@ -1107,7 +1106,6 @@ describe("BatchWriteCoordinator — adopt fast path seeds the heartbeat pointer"
     const stamper = makeStamper(calls)
     stamper.getRowsCertification = vi.fn(async () => ({
       referenceHex: "deadbeef",
-      exact: true,
     }))
     const coordinator = new BatchWriteCoordinator(
       makeDeps({
@@ -1138,7 +1136,6 @@ describe("BatchWriteCoordinator — adopt fast path seeds the heartbeat pointer"
     const stamper = makeStamper([])
     stamper.getRowsCertification = vi.fn(async () => ({
       referenceHex: "older",
-      exact: true,
     }))
     const coordinator = new BatchWriteCoordinator(
       makeDeps({
@@ -1195,10 +1192,10 @@ describe("BatchWriteCoordinator — adopt fast path seeds the heartbeat pointer"
   })
 
   it("takes the cold acquire instead when the rows are not certified for the cached lane", async () => {
-    // The adopt binds the stamper's own table as the lane's counter. With no
-    // certified reference — a lane never published, or rows a dying tab left
-    // half rewritten for another lane (#463) — that table is not known to be
-    // the lane's, so the lease is re-established from Swarm.
+    // The adopt binds the stamper's own table as the lane's counter. Rows
+    // that do not describe the lane — another lane's, or none flushed for it
+    // (#463) — are not that counter, so the lease is re-established from
+    // Swarm.
     const lease = makeLease({
       acquireResult: { partition: 2, partitionCount: 4, isReadOnly: false },
     })
@@ -1219,6 +1216,59 @@ describe("BatchWriteCoordinator — adopt fast path seeds the heartbeat pointer"
     expect(lease.adoptIfLive).not.toHaveBeenCalled()
     expect(lease.acquire).toHaveBeenCalled()
     expect(lease.seedReferenceHex).not.toHaveBeenCalled()
+  })
+})
+
+describe("BatchWriteCoordinator — adopt fast path on a lane never published", () => {
+  it("adopts when the rows describe the lane and neither they nor the recorded lease name a reference", async () => {
+    // A lane claimed from zero and not yet uploaded to. A publish is in the
+    // lease record before its ack, so with none recorded there is nothing
+    // the rows could be behind, and a reload or a second tab need not claim
+    // afresh.
+    const lease = makeLease({ partition: 2 })
+    lease.adoptIfLive = vi.fn(() => 2)
+    leaseController.lease = lease
+    const stamper = makeStamper([])
+    stamper.getRowsCertification = vi.fn(async () => ({
+      referenceHex: undefined,
+    }))
+    const coordinator = new BatchWriteCoordinator(
+      makeDeps({
+        stamper: stamper as unknown as BatchWriteCoordinatorDeps["stamper"],
+        readLease: () => cachedLease(2),
+        mode: "oneshot",
+      }),
+    )
+
+    await coordinator.withWrite(async () => "ok", { wait: "block" })
+
+    expect(lease.adoptIfLive).toHaveBeenCalled()
+    expect(lease.acquire).not.toHaveBeenCalled()
+    expect(stamper.bindPartition).toHaveBeenCalled()
+  })
+
+  it("takes the cold acquire when the rows name a reference the recorded lease does not", async () => {
+    const lease = makeLease({
+      acquireResult: { partition: 2, partitionCount: 4, isReadOnly: false },
+    })
+    lease.adoptIfLive = vi.fn(() => 2)
+    leaseController.lease = lease
+    const stamper = makeStamper([])
+    stamper.getRowsCertification = vi.fn(async () => ({
+      referenceHex: "earlier",
+    }))
+    const coordinator = new BatchWriteCoordinator(
+      makeDeps({
+        stamper: stamper as unknown as BatchWriteCoordinatorDeps["stamper"],
+        readLease: () => cachedLease(2),
+        mode: "oneshot",
+      }),
+    )
+
+    await coordinator.withWrite(async () => "ok", { wait: "block" })
+
+    expect(lease.adoptIfLive).not.toHaveBeenCalled()
+    expect(lease.acquire).toHaveBeenCalled()
   })
 })
 

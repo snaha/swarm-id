@@ -112,6 +112,49 @@ describe("UtilizationStoreDB.writeRows", () => {
     })
   })
 
+  it("writes the published rows in the same step, and keeps them apart from the cache rows", async () => {
+    const publishedRow = (chunkIndex: number, fill: number) => ({
+      batchId: BATCH,
+      chunkIndex,
+      data: new Uint8Array(4096).fill(fill),
+    })
+    await store.writeRows(
+      BATCH,
+      [row(0, 5)],
+      () => ({ stateReference: { partition: 0, referenceHex: "published" } }),
+      [publishedRow(0, 2), publishedRow(7, 3)],
+    )
+    await store.writeRows("ee".repeat(32), [], () => ({}), [
+      { ...publishedRow(0, 9), batchId: "ee".repeat(32) },
+    ])
+
+    const published = await store.getPublishedRows(BATCH)
+    expect(
+      published
+        .sort((a, b) => a.chunkIndex - b.chunkIndex)
+        .map((r) => [r.chunkIndex, r.data[0]]),
+    ).toEqual([
+      [0, 2],
+      [7, 3],
+    ])
+    expect((await store.getAllChunks(BATCH)).map((r) => r.data[0])).toEqual([5])
+
+    await expect(
+      store.writeRows(
+        BATCH,
+        [],
+        () => {
+          throw new Error("refused")
+        },
+        [publishedRow(0, 8)],
+      ),
+    ).rejects.toThrow("refused")
+    expect(
+      (await store.getPublishedRows(BATCH)).find((r) => r.chunkIndex === 0)
+        ?.data[0],
+    ).toBe(2)
+  })
+
   it("writes nothing when the patch refuses", async () => {
     await store.writeRows(BATCH, [row(0, 1)], () => ({ rowsGeneration: 1 }))
 

@@ -278,7 +278,7 @@ describe("readPartitionState / writePartitionState round-trip", () => {
     expect(new Set(read.stateBuckets)).toEqual(new Set(written.stateBuckets))
   })
 
-  it("returns the per-leaf references (incl. sentinels) for the caller to seed", async () => {
+  it("returns the per-leaf references (incl. sentinels) on a full read, and nothing on a cache hit", async () => {
     const localCounter = leafyCounter()
     const stamper = createMockStamper()
     const { referenceHex } = await partitionState.writePartitionState({
@@ -312,8 +312,9 @@ describe("readPartitionState / writePartitionState round-trip", () => {
       false,
     ])
 
-    // Cache hit still returns references (best-effort ref-chunk download), so a
-    // reload's re-acquire can seed an incremental first publish too.
+    // A cache hit downloads nothing: the caller resumes from its rows and
+    // takes its publish baseline from its own store.
+    const readSpy = vi.spyOn(downloadData, "downloadDataWithChunkAPI")
     const cached = await partitionState.readPartitionState(
       {
         bee: bee,
@@ -325,9 +326,9 @@ describe("readPartitionState / writePartitionState round-trip", () => {
       referenceHex,
     )
     expect(cached.unchanged).toBe(true)
-    expect(cached.references).toHaveLength(numLeaves)
-    expect(cached.references).toEqual(full.references)
-    expect(cached.frame).toEqual(full.frame)
+    expect(cached.referenceHex).toBe(referenceHex)
+    expect(cached.references).toBeUndefined()
+    expect(readSpy).not.toHaveBeenCalled()
   })
 
   it("skips the reference + leaf downloads when the pointer is unchanged", async () => {
@@ -2039,15 +2040,16 @@ describe("PartitionLease.acquire — a cache-hit claim and its publish baseline 
     })
   }
 
-  it("publishes incrementally when the rows are exactly the reference's counter", async () => {
+  it("publishes incrementally after a reload, from the baseline in the store", async () => {
     const cache = makeRowsCache()
     await ackedSession(cache)
 
-    // Reload: a cache hit, the reference chunk read and no leaf
+    // Reload: a cache hit, and nothing downloaded — the leaf references, the
+    // frame and the counter as published are all in the store
     const readSpy = vi.spyOn(downloadData, "downloadDataWithChunkAPI")
     const second = await open(cache)
     const lease = await claim(second)
-    expect(readSpy).toHaveBeenCalledTimes(1)
+    expect(readSpy).not.toHaveBeenCalled()
 
     const writeSpy = vi.spyOn(partitionState, "writePartitionState")
     stampInBucket(second, NEW_BUCKET, 1)
@@ -2063,7 +2065,7 @@ describe("PartitionLease.acquire — a cache-hit claim and its publish baseline 
     expect(read.localCounter?.[NEW_BUCKET]).toBe(1)
   })
 
-  it("publishes in full after rows a failed publish moved on, and stays readable", async () => {
+  it("publishes incrementally after rows a failed publish moved on, against the counter as published, and stays readable", async () => {
     const cache = makeRowsCache()
     const first = await ackedSession(cache)
 
@@ -2076,14 +2078,19 @@ describe("PartitionLease.acquire — a cache-hit claim and its publish baseline 
     const readSpy = vi.spyOn(downloadData, "downloadDataWithChunkAPI")
     const second = await open(cache)
     const lease = await claim(second)
-    expect(readSpy).toHaveBeenCalledTimes(1)
+    expect(readSpy).not.toHaveBeenCalled()
     expect(second.getLocalCounter()![AHEAD_BUCKET]).toBe(5)
 
     // A small upload in another leaf, in the same epoch
     const writeSpy = vi.spyOn(partitionState, "writePartitionState")
     stampInBucket(second, NEW_BUCKET, 1)
     await lease.publishState(second.getLocalCounter()!)
-    expect(writeSpy.mock.calls[0][0].previousReferences).toBeUndefined()
+    // The diff runs against what Swarm holds (bucket 100 at 2), not against
+    // the rows (at 5): the leaf with bucket 100 is re-uploaded, so it matches
+    // the exception list that goes out with it
+    const baseline = writeSpy.mock.calls[0][0]
+    expect(baseline.previousReferences).toHaveLength(LEAFY_LEAVES)
+    expect(baseline.previousCounter?.[AHEAD_BUCKET]).toBe(2)
 
     const read = await readBack()
     expect(read.readFailed).toBeUndefined()

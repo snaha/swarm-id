@@ -259,8 +259,9 @@ A device that reloads within its own lease TTL skips the read entirely and re-de
 counter from local state (the re-adopt fast path) — provided its cache rows are certified for
 that lane: the device keeps one synced reference, for the lane the rows describe, and a lane
 switch rewrites every row (certifying no lane while it runs) before the new lane's first publish
-certifies them again. Rows a dying tab left half rewritten, or a lane held without a publish
-yet, take the cold read instead.
+certifies them again. Rows that do not describe the lane take the cold read instead. A lane
+claimed from zero and not yet published has no reference on either side — a publish is in the
+lease record before its ack, so there is nothing the rows could be behind — and re-adopts.
 
 The rows are shared by every tab of the storage partition, each with its own stamper and its
 own counter table in memory. A flush writes its rows and what describes them — the lane, the
@@ -274,10 +275,15 @@ maximum — neither tab can lower the other's — and an unbound tab simply take
 is the table a resume from local state binds. The broadcast between tabs still carries each
 write across early; it is no longer what correctness rests on.
 
-A reference certifies rows as _at or past_ its counter. They are _exactly_ it only until an
-upload whose publish failed flushes its stamps; from then the device still resumes from the
-rows (the unacked slots stay unissued), but its first publish goes out in full: an incremental
-one would retain leaves under an exception list they do not match, which no reader can decode.
+A reference certifies rows as _at or past_ its counter: safe to resume from, and no more. An
+upload whose publish failed still flushes its stamps, so the rows can be ahead of what Swarm
+holds. What a publish diffs against is therefore kept apart from them: the **publish
+baseline** — the frame and leaf references of the lane's latest publish, and a copy of the
+counter as it was published — is stored beside the rows, written in the same transaction as
+the reference that names it. Whichever tab publishes next loads it, re-uploads only the leaves
+that changed, and retains the rest; a leaf retained under an exception list computed from any
+other counter would be state no reader can decode. A baseline that is not the one the lease
+record names is not used, and that publish goes out in full.
 
 ## 9. Release fencing (#349)
 

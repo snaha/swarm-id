@@ -664,22 +664,11 @@ export async function readPartitionState(
   const referenceHex = pointer.referenceHex
   const refBytes = new Reference(referenceHex).toUint8Array()
 
-  // Cache hit: the pointer still names the reference this device's local counter
-  // is already in sync with. Skip the leaf downloads — but still fetch the
-  // single reference chunk so we can return its per-leaf refs and frame, letting
-  // the caller's FIRST publish be incremental against the resumed state rather
-  // than a full re-publish. Best-effort: on failure omit them (the first publish
-  // then falls back to the sparse-full path).
+  // Cache hit: the pointer still names the reference this device's local
+  // counter is at or past. Nothing to download: the caller resumes from its
+  // rows, and takes what its first publish diffs against from its store.
   if (knownReferenceHex !== undefined && referenceHex === knownReferenceHex) {
-    const referenceChunk = await downloadReferenceChunk(bee, refBytes).catch(
-      () => undefined,
-    )
-    return {
-      referenceHex,
-      unchanged: true,
-      references: referenceChunk?.references,
-      frame: referenceChunk?.frame,
-    }
+    return { referenceHex, unchanged: true }
   }
 
   const localCounter = new Uint32Array(NUM_BUCKETS)

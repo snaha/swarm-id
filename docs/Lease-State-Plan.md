@@ -1,6 +1,6 @@
 # One source of truth for a lane's lease state: plan
 
-Status: **in progress** (2026-11-10). Phases 1 and 2 are built; phases 3 to 5 are not. The
+Status: **in progress** (2026-11-10). Phases 1 to 3 are built; phases 4 and 5 are not. The
 decisions taken are at the end. Follows [#918](https://github.com/snaha/swarm-id/pull/918) and the
 `fix/one-lease-across-tabs` branch stacked on it.
 
@@ -68,10 +68,9 @@ at the start of every locked section and written only under the write lock.
 
 ```
 lane        partition, claim generation, acquiredAt, leasedUntil   (absent: no lane held)
-published   referenceHex, frame, leaf references,
-            coveredGeneration   — the rows generation the publish includes
+published   referenceHex, frame, leaf references, epoch of the last full re-pin
+            rows: the counter as last published (a second set of rows)
 rows        lane, generation
-published   rows: the counter as last published (a second set of rows)
 activity    last upload, for the idle yield
 protected   buckets of the latest published state chunks
 ```
@@ -130,7 +129,8 @@ flush writes nothing and the next one lands whole.
 - `writePartitionState` keeps its diff; its previous counter comes from those rows.
 
 Done when: two tabs alternating, and a reload, both publish incrementally; the decoder
-stays strict.
+stays strict. **Built**: the baseline rides on the rows' `stateReference` and a `published`
+object store; the `exact` flag is gone; a cache-hit claim downloads nothing.
 
 ### 4. One ticker, one idle clock
 
@@ -157,10 +157,9 @@ cannot share it: the second tab's claim leaves the first without a lease object 
 first has something to write, when it claims again. The device holds the lane throughout;
 it is the first tab that holds nothing.
 
-Phase 1 does not change this: the lane is in the record, but adopting it still requires
-rows certified by a published reference. Once nothing can put an older reference back in the
-record, adopting when the rows describe the lane and neither side names a reference is safe
-again; that is a small follow-up, with its own test, not part of phase 1.
+Phase 1 did not change this. Phase 3 does: nothing can put an older reference back in the
+record any more, and a publish is in the record before its ack, so a lane whose rows describe
+it and which has no reference on either side is adopted like any other.
 
 ## Decisions taken
 

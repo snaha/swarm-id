@@ -409,9 +409,10 @@ lane's counter, so a lane switch rewrites every row before the new lane is certi
 reference never vouches for rows written for another lane. The rows are shared by every tab,
 each with its own counter table: on taking the write lock a tab folds in, by per-bucket
 maximum, whatever another tab has written since, so no tab stamps or resumes from a table
-behind the rows. The first publish after a resume is incremental only when the rows hold
-exactly the counter the reference names; after an upload whose publish failed they are ahead
-of it, and that publish goes out in full.
+behind the rows. A publish does not diff against the rows, which an upload whose publish
+failed leaves ahead of what Swarm holds: the frame, the leaf references and a copy of the
+counter as last published are stored beside them, and the next publish from any tab, or after
+a reload, re-uploads only the leaves that changed since.
 
 When the pointer exists but the reference chunk or any counter chunk cannot be read, or fails
 the checks above, the read reports failure without caching the bad reference, and the device

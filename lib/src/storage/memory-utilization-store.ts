@@ -4,6 +4,7 @@
 import type {
   BatchMetadata,
   ChunkCacheEntry,
+  PublishedRow,
   UtilizationStoreDB,
 } from "./utilization-store"
 
@@ -18,6 +19,7 @@ export function memoryUtilizationStore(
 ): UtilizationStoreDB {
   const rows = new Map<string, ChunkCacheEntry>()
   const metadata = new Map<string, BatchMetadata>()
+  const published = new Map<string, PublishedRow>()
   const key = (batchId: string, chunkIndex: number) =>
     `${batchId}:${chunkIndex}`
   for (const row of seed) rows.set(key(row.batchId, row.chunkIndex), { ...row })
@@ -39,6 +41,8 @@ export function memoryUtilizationStore(
     putChunk: async (entry: ChunkCacheEntry) => {
       rows.set(key(entry.batchId, entry.chunkIndex), { ...entry })
     },
+    getPublishedRows: async (batchId: string) =>
+      [...published.values()].filter((row) => row.batchId === batchId),
     getMetadata: async (batchId: string) => metadata.get(batchId),
     updateMetadata: async (
       batchId: string,
@@ -50,11 +54,15 @@ export function memoryUtilizationStore(
       batchId: string,
       entries: ChunkCacheEntry[],
       patch: (existing: BatchMetadata | undefined) => Partial<BatchMetadata>,
+      publishedRows: PublishedRow[] = [],
     ) => {
       // The patch runs first: when it throws, nothing has been written
       const next = patched(batchId, patch)
       for (const entry of entries) {
         rows.set(key(entry.batchId, entry.chunkIndex), { ...entry })
+      }
+      for (const row of publishedRows) {
+        published.set(key(row.batchId, row.chunkIndex), { ...row })
       }
       metadata.set(batchId, next)
     },

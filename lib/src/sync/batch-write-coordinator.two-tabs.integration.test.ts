@@ -44,6 +44,7 @@ import type {
   PartitionLeaseStateSnapshot,
 } from "./partition-lease"
 import { NO_HOLDER_DEVICE_ID, readPartitionLock } from "./partition-lock"
+import * as partitionState from "./partition-state"
 import { readPartitionState } from "./partition-state"
 import {
   IDLE_YIELD_MS,
@@ -137,7 +138,8 @@ async function openTab(mode: BatchWriteCoordinatorDeps["mode"] = "persistent") {
         if (leaseCacheWorks) leaseCache = next(leaseCache)
       },
     },
-    flushStamperState: () => stamper.flush(),
+    // As the proxy does: a flush that fails is logged, and the write goes on
+    flushStamperState: () => stamper.flush().catch(() => undefined),
     onLeaseAcquired: () => {
       acquired++
     },
@@ -376,17 +378,17 @@ describe("two tabs sharing one lease", () => {
     expect(tabB.acquired()).toBe(announced)
   })
 
-  it("two tabs on a lane not yet published do not trade claims", async () => {
-    // Nothing certifies the rows of an unpublished lane, so a tab cannot
-    // adopt it from the cache. It must wait for its next write rather than
-    // claim afresh on a timer, or each claim strands the other tab's view.
+  it("two tabs share a lane that has not been published yet, under one claim", async () => {
+    // The lane is in the lease record and the rows describe it; with no
+    // publish recorded there is nothing the rows could be behind, so the
+    // second tab adopts it and neither claims afresh.
     const tabA = await openTab()
     const tabB = await openTab()
     await tabA.hold()
-    clock += 1000 // a claim's generation is its timestamp
+    const generation = leaseCache?.self?.generation
+    clock += 1000 // a fresh claim's generation would be its timestamp
     await tabB.hold()
     await lockDrained()
-    const generation = leaseCache?.self?.generation
 
     for (const tab of [tabA, tabB, tabA]) {
       clock += 1000
@@ -395,9 +397,9 @@ describe("two tabs sharing one lease", () => {
     }
 
     expect(leaseCache?.self?.generation).toEqual(generation)
-    // The tab left without a view claims again when it has something to write
-    await tabA.upload(BUCKET)
-    expect(tabA.coordinator.currentPartition).not.toBeUndefined()
+    const partition = leaseCache?.self?.partition
+    expect(tabA.coordinator.currentPartition).toBe(partition)
+    expect(tabB.coordinator.currentPartition).toBe(partition)
   })
 
   it("a one-shot writer's publish is the one an idle tab's heartbeat carries forward", async () => {
@@ -451,5 +453,56 @@ describe("two tabs sharing one lease", () => {
     expect((await publishedCounter(partition)).localCounter?.[BUCKET]).toBe(2)
     await tabA.upload(BUCKET)
     expect((await publishedCounter(partition)).localCounter?.[BUCKET]).toBe(3)
+  })
+
+  it("tabs taking turns publish incrementally, each from the baseline the other left in the store", async () => {
+    const tabA = await openTab()
+    const tabB = await openTab()
+    await tabA.upload(BUCKET)
+    await tabB.hold()
+    const partition = tabA.coordinator.currentPartition!
+
+    const writeSpy = vi.spyOn(partitionState, "writePartitionState")
+    await tabB.upload(BUCKET)
+    await tabA.upload(BUCKET)
+    await tabB.upload(BUCKET)
+
+    expect(writeSpy).toHaveBeenCalledTimes(3)
+    for (const [publish] of writeSpy.mock.calls) {
+      expect(publish.previousReferences).toBeDefined()
+      expect(publish.previousCounter).toBeDefined()
+    }
+    const resume = await publishedCounter(partition)
+    expect(resume.readFailed).toBeUndefined()
+    expect(resume.localCounter?.[BUCKET]).toBe(4)
+  })
+
+  it("publishes in full when the store's baseline is not the publish the lease record names", async () => {
+    // Tab A's publish lands and is recorded, but the flush that stores its
+    // baseline fails: the store still holds the baseline of the publish
+    // before it, whose leaves no longer match what the pointer names.
+    const tabA = await openTab()
+    const tabB = await openTab()
+    await tabA.upload(BUCKET)
+    await tabB.hold()
+    const partition = tabA.coordinator.currentPartition!
+
+    const writeRows = rowsCache.writeRows.bind(rowsCache)
+    let flushes = 0
+    rowsCache.writeRows = async (batchId, entries, patch, published) => {
+      // The first flush of an upload carries its rows; the second its publish
+      if (++flushes === 2) throw new Error("IndexedDB failed")
+      await writeRows(batchId, entries, patch, published)
+    }
+    await tabA.upload(BUCKET)
+    rowsCache.writeRows = writeRows
+
+    const writeSpy = vi.spyOn(partitionState, "writePartitionState")
+    await tabB.upload(BUCKET)
+    expect(writeSpy.mock.calls[0][0].previousReferences).toBeUndefined()
+
+    const resume = await publishedCounter(partition)
+    expect(resume.readFailed).toBeUndefined()
+    expect(resume.localCounter?.[BUCKET]).toBe(3)
   })
 })
