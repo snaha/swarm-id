@@ -1,25 +1,16 @@
-# Version bumps wait out a cooldown, so a release that is pulled within days
-# (bee-js 13.3.0 lived 76 minutes) never reaches a PR. Security updates are
-# not delayed by it; they are enabled in the repository settings.
+# Only GitHub Actions get version updates, to keep the SHA pins current; one
+# grouped PR a month. npm packages get no version-bump PRs: security updates
+# (enabled in the repository settings) cover them, for direct and transitive
+# dependencies alike. The cooldown keeps a release pulled within days (bee-js
+# 13.3.0 lived 76 minutes) from ever reaching a PR.
 version: 2
 updates:
   - package-ecosystem: github-actions
     directory: /
     schedule:
-      interval: weekly
+      interval: monthly
     cooldown:
       default-days: 14
     groups:
       actions:
         patterns: ['*']
-
-  - package-ecosystem: npm # covers the pnpm workspace and its lockfile
-    directory: /
-    schedule:
-      interval: weekly
-    cooldown:
-      default-days: 14
-    open-pull-requests-limit: 5
-    groups:
-      minor-and-patch:
-        update-types: [minor, patch]
