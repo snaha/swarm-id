@@ -275,7 +275,7 @@ protocol are all HTTP or postMessage.</p>
 <tr>
 <td><strong>Chunk upload stream to Bee</strong></td>
 <td>the Bee node’s <code dir="auto">/chunks/stream</code>, with <code dir="auto">http</code> swapped for <code dir="auto">ws</code></td>
-<td>only when an upload passes <code dir="auto">useWebSocket: true</code>. The iframe stamps each chunk itself and keeps up to 32 chunks in flight, waiting for Bee’s acknowledgement of each. The default upload path is HTTP with 8 chunks in flight</td>
+<td>only when an encrypted upload passes <code dir="auto">useWebSocket: true</code>, against Bee 2.8.1 or newer reached directly (a gateway does not proxy it). The iframe stamps each chunk itself and keeps up to 32 chunks in flight, waiting for Bee’s acknowledgement of each. The default upload path is HTTP with 8 chunks in flight</td>
 </tr>
 <tr>
 <td><strong>Account bus signaling</strong></td>
