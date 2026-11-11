@@ -662,4 +662,135 @@ describe("one refresher, one idle clock", () => {
       expect.stringContaining(`Released idle partition ${partition}`),
     )
   })
+
+  it("an upload that finishes after its sibling found the lane taken is not acked, and leaves the record cleared", async () => {
+    const { tabA, tabB } = await twoHolders()
+    let open!: () => void
+    let entered!: () => void
+    const inside = new Promise<void>((resolve) => (entered = resolve))
+    const uploading = tabA.upload(
+      BUCKET,
+      new Promise<void>((resolve) => (open = resolve)),
+      entered,
+    )
+    await inside
+
+    // Tab B finds the lane taken, inside tab A's validation throttle
+    vi.spyOn(tabB.lease()!, "refresh").mockResolvedValueOnce("displaced")
+    clock += LEASE_REFRESH_MS / 2
+    const bTick = tabB.tick()
+    await vi.waitFor(() => expect(leaseCache?.self).toBeUndefined(), SETTLE)
+
+    // Tab A's upload finishes before its own tick comes round
+    open()
+    await expect(uploading).rejects.toBeInstanceOf(PartitionLeaseLostError)
+    await bTick
+    await lockDrained()
+    expect(leaseCache?.self).toBeUndefined()
+    expect(tabA.coordinator.currentPartition).toBeUndefined()
+  })
+
+  it("a renewal claim dated ahead of the clock does not stop the renewals", async () => {
+    const { tabB, refreshes } = await twoHolders()
+    const AHEAD_MS = 60_000
+    leaseCache = { ...leaseCache!, renewingAt: clock + AHEAD_MS }
+
+    clock += LEASE_REFRESH_MS
+    await tabB.tick()
+
+    expect(refreshes()).toBe(1)
+  })
+
+  it("upload activity dated ahead of the clock does not hold off the idle yield", async () => {
+    const { tabA, tabB } = await twoHolders()
+    const partition = tabA.coordinator.currentPartition!
+    knownDevices = [DEVICE, RIVAL]
+    const AHEAD_MS = 3_600_000
+    leaseCache = { ...leaseCache!, activeAt: clock + AHEAD_MS }
+
+    clock += IDLE_YIELD_MS + 1000
+    vi.spyOn(console, "info")
+    await tabB.tick()
+    await lockDrained()
+
+    expect(console.info).toHaveBeenCalledWith(
+      expect.stringContaining(`Released idle partition ${partition}`),
+    )
+  })
+
+  it("a tab whose timer was held back takes the expiry its sibling renewed, and a failing node does not cost the device its lease", async () => {
+    const { tabA, tabB } = await twoHolders()
+    const partition = tabA.coordinator.currentPartition!
+    const HELD_BACK_INTERVALS = 4
+    for (let i = 0; i < HELD_BACK_INTERVALS; i++) {
+      clock += LEASE_REFRESH_MS
+      await tabA.tick()
+    }
+    await lockDrained()
+
+    const renewal = vi
+      .spyOn(tabB.lease()!, "refresh")
+      .mockRejectedValue(new Error("500"))
+    renewal.mockClear()
+    clock += 1000
+    await tabB.tick()
+    await lockDrained()
+
+    expect(renewal).not.toHaveBeenCalled()
+    expect(leaseCache?.self).toBeDefined()
+    expect(tabB.coordinator.currentPartition).toBe(partition)
+    expect(tabB.lease()?.leasedUntil).toBe(leaseCache?.self?.leasedUntil)
+  })
+
+  it("a heartbeat failure a sibling's heartbeats have since made good does not count against a later one", async () => {
+    const { tabA, tabB } = await twoHolders()
+    const partition = tabA.coordinator.currentPartition!
+    const heartbeat = vi.spyOn(tabA.lease()!, "heartbeatStatePointer")
+    vi.spyOn(console, "warn").mockImplementation(() => undefined)
+
+    heartbeat.mockRejectedValueOnce(new Error("500"))
+    clock += LEASE_REFRESH_MS
+    await tabA.tick()
+
+    // Tab B renews and heartbeats for a while; tab A follows a second behind
+    const FOLLOWING_INTERVALS = 4
+    for (let i = 0; i < FOLLOWING_INTERVALS; i++) {
+      clock += LEASE_REFRESH_MS - 1000
+      await tabB.tick()
+      clock += 1000
+      await tabA.tick()
+    }
+
+    // Tab A renews again, and one heartbeat fails
+    heartbeat.mockRejectedValueOnce(new Error("500"))
+    clock += LEASE_REFRESH_MS
+    await tabA.tick()
+    await lockDrained()
+
+    expect(heartbeat).toHaveBeenCalledTimes(2)
+    expect(leaseCache?.self).toBeDefined()
+    expect(tabA.coordinator.currentPartition).toBe(partition)
+  })
+
+  it("heartbeats failing in whichever tab renews demote the device within a pointer epoch", async () => {
+    const { tabA, tabB } = await twoHolders()
+    vi.spyOn(console, "warn").mockImplementation(() => undefined)
+    for (const tab of [tabA, tabB]) {
+      vi.spyOn(tab.lease()!, "heartbeatStatePointer").mockRejectedValue(
+        new Error("500"),
+      )
+    }
+
+    // The renewal alternates, so neither tab alone fails for a whole epoch
+    const ALTERNATIONS = 3
+    for (let i = 0; i < ALTERNATIONS; i++) {
+      clock += LEASE_REFRESH_MS
+      await tabA.tick()
+      clock += LEASE_REFRESH_MS
+      await tabB.tick()
+    }
+    await lockDrained()
+
+    expect(leaseCache?.self).toBeUndefined()
+  })
 })

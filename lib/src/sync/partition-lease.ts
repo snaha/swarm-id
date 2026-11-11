@@ -180,6 +180,9 @@ export interface PartitionLeaseStateSnapshot {
   /** When an upload through this claim last started or finished, in any
    *  context — the clock the idle yield measures. */
   activeAt?: number
+  /** Since when the claim's state-pointer heartbeats have been failing, in
+   *  whichever context made them; absent after one succeeds or a publish. */
+  pointerFailingSince?: number
 }
 
 export class PartitionLease {
