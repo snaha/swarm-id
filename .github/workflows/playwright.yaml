@@ -37,7 +37,10 @@ jobs:
       - name: Install Playwright browsers
         working-directory: ./ui
         timeout-minutes: 10
-        run: pnpm exec playwright install --with-deps chromium
+        # Without `--with-deps`: the runner image already carries the system
+        # libraries Chromium needs, and installing them again goes through
+        # Ubuntu's mirror, which the runner at times cannot resolve.
+        run: pnpm exec playwright install chromium
 
       - name: Build lib dependency
         working-directory: ./lib
