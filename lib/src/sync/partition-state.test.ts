@@ -226,6 +226,37 @@ describe("writePartitionState — reserved-slot bucket-collision avoidance", () 
   })
 })
 
+describe("writePartitionState — the state the pointer still names", () => {
+  it("does not place a chunk in the bucket of a chunk the publish supersedes", async () => {
+    // Until this publish's pointer lands, the pointer names the previous
+    // reference chunk and its leaves. A new chunk in one of their buckets
+    // evicts it at once; if the publish then fails, readers are left with a
+    // pointer to a state that can no longer be read.
+    const now = 1_000_000_000_000
+    const stamper = await makeBoundStamper()
+    const SUPERSEDED_BUCKET = 0x4a17
+    const superseded = new Uint8Array(64).fill(7)
+    superseded[0] = SUPERSEDED_BUCKET >>> 8
+    superseded[1] = SUPERSEDED_BUCKET & 0xff
+
+    force.bucket = SUPERSEDED_BUCKET
+    vi.spyOn(Date, "now").mockReturnValue(now)
+    const result = await writePartitionState({
+      bee: bee,
+      stamper,
+      batchId: TEST_BATCH_ID,
+      partition: PARTITION,
+      localCounter: leafyCounter(),
+      backupSigner: BACKUP_SIGNER,
+      swarmEncryptionKey: TEST_ENC_KEY,
+      deviceId: DEVICE_ID,
+      supersededReferences: [superseded],
+    })
+
+    expect(result.stateBuckets).not.toContain(SUPERSEDED_BUCKET)
+  })
+})
+
 describe("writePartitionState — sparse sentinel refs are independent", () => {
   it("returns a distinct zero-ref instance per never-written leaf", async () => {
     const stamper = await makeBoundStamper()

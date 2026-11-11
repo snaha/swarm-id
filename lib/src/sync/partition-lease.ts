@@ -32,7 +32,7 @@ import {
   Reference,
   type Stamper,
 } from "@ethersphere/bee-js"
-import { uint8ArrayToHex } from "../utils/hex"
+import { hexToUint8Array, uint8ArrayToHex } from "../utils/hex"
 import { withTimeout } from "../utils/promise"
 import { SYNC_READ_TIMEOUT_MS } from "./timing-constants"
 import { deriveSecret, BACKUP_KEY_LABEL } from "../utils/key-derivation"
@@ -1438,6 +1438,14 @@ export class PartitionLease {
       // nothing, but the publish still refuses a counter below the last one.
       previousCounter: this.publishedCounter,
       previousFrame: forceFullRepin ? undefined : this.publishedFrame,
+      // What the pointer names until this publish's own lands, full re-pin
+      // or not: kept whole in case the publish fails partway.
+      supersededReferences: [
+        ...(this.publishedReferences ?? []),
+        ...(this.lastReferenceHex !== undefined
+          ? [hexToUint8Array(this.lastReferenceHex)]
+          : []),
+      ],
       // Lets the publish also avoid this device's intent-beacon buckets (the
       // refresh tick re-writes them off-lock at the same reserved slot).
       deviceId: this.opts.deviceId,

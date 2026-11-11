@@ -788,6 +788,11 @@ describe("PartitionLease.acquire — seeds the incremental first publish", () =>
     // The counter still goes along: a full publish diffs against nothing,
     // but it must not go below what was published
     expect(writeSpy.mock.calls[1][0].previousCounter?.[101]).toBe(a[101])
+    // …and so does the state the pointer still names — every leaf and the
+    // reference chunk — for the new chunks to keep clear of
+    expect(writeSpy.mock.calls[1][0].supersededReferences).toHaveLength(
+      LEAFY_LEAVES + 1,
+    )
   })
 
   it("refuses the full re-pin of a new epoch when the counter went below the last publish", async () => {
