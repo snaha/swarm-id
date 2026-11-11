@@ -16,7 +16,14 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  # Known advisories in the lockfile stop the deploy (`audit.yml`).
+  audit:
+    uses: ./.github/workflows/audit.yml
+    permissions:
+      contents: read
+
   deploy:
+    needs: audit
     runs-on: ubuntu-latest
     name: Deploy to Digital Ocean App Platform
 
