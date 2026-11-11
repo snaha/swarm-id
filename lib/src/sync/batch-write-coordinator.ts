@@ -371,6 +371,7 @@ export class BatchWriteCoordinator {
       await this.ensureLease(wait)
       this.ensureHeldForUpload()
       const target = await this.buildStamperTarget(opts)
+      const held = this.partitionLease
       // Bracket the in-flight upload so the refresh tick's idle-yield can't
       // release the partition (and unbind the stamper) underneath us. A
       // sibling's yield waits for this section's write lock, and by then the
@@ -387,6 +388,17 @@ export class BatchWriteCoordinator {
         // write — stamps only re-check the local `leaseStale` flag — only the
         // ack is. Bounded by skew + TTL (see Postage-Batch-Partitioning.md §12).
         const result = await op(target)
+        // A teardown (disconnect, the drive leaving the grant, a dilute)
+        // landing after the last stamp leaves nothing to publish from here:
+        // the stamper is unbound and the lease gone. Its detached release
+        // publishes the counter, after the fact and best-effort, which is not
+        // an ack's worth of durability. Chunks are content-addressed, so the
+        // caller's retry is safe.
+        if (held !== undefined && this.partitionLease !== held) {
+          throw new PartitionLeaseLostError(
+            "The drive's write path was torn down during the upload.",
+          )
+        }
         // Commit-ordered ack: only report the upload durable after the
         // partition-state that reserves its slots is published.
         //  1. Reverse-clobber guard (#rule 2): re-validate the lease before

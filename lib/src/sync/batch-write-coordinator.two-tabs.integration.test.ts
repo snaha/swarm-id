@@ -856,4 +856,29 @@ describe("a sibling's stamps that never reached the rows", () => {
     // Whenever a writer stamped, the lock on Swarm named this device as live
     expect((await lockHolder(partition))!.leasedUntil).toBeGreaterThan(clock)
   })
+
+  it("an upload whose drive is torn down after its last stamp is not acked", async () => {
+    // The teardown's own release publishes those stamps, detached and after
+    // the fact: nothing the upload could vouch for.
+    const tab = await openTab()
+    await tab.upload(BUCKET)
+    let open!: () => void
+    let stamped!: () => void
+    const afterStamp = new Promise<void>((resolve) => (stamped = resolve))
+    const gate = new Promise<void>((resolve) => (open = resolve))
+    const uploading = tab.coordinator.withWrite(async () => {
+      const address = new Uint8Array(32).fill(0x55)
+      address[0] = BUCKET >> 8
+      address[1] = BUCKET & 0xff
+      tab.stamper.stamp(address)
+      stamped()
+      await gate
+    })
+    await afterStamp
+
+    tab.coordinator.teardown()
+    open()
+
+    await expect(uploading).rejects.toBeInstanceOf(PartitionLeaseLostError)
+  })
 })
