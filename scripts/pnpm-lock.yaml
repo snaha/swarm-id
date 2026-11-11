@@ -9,11 +9,11 @@ importers:
   .:
     dependencies:
       '@ethersphere/bee-js':
-        specifier: ^13.0.0
+        specifier: 13.1.0
         version: 13.1.0
     devDependencies:
       tsx:
-        specifier: ^4.20.0
+        specifier: 4.23.13
         version: 4.23.13
 
 packages:
