@@ -55,7 +55,10 @@ import type {
   PartitionLeaseStateSnapshot,
 } from "./partition-lease"
 import { readPartitionLock, NO_HOLDER_DEVICE_ID } from "./partition-lock"
-import type { LeaseRecordStore } from "../storage/utilization-store"
+import type {
+  BatchMetadata,
+  LeaseRecordStore,
+} from "../storage/utilization-store"
 import { STATE_POINTER_EPOCH_MS } from "./partition-state"
 import type { UploadTarget } from "../proxy/upload"
 import type { StampWorkerPool } from "../proxy/stamp-worker-pool"
@@ -1550,15 +1553,14 @@ export class BatchWriteCoordinator {
    */
   private lock<T>(op: () => Promise<T>): Promise<T> {
     return withBatchWriteLock(this.deps.batchId, async () => {
-      await this.deps.stamper
-        .syncRows()
-        .catch((err: unknown) =>
-          console.warn(
-            "[BatchWriteCoordinator] Could not read the cached counters on taking the write lock:",
-            err,
-          ),
+      const rows = await this.deps.stamper.syncRows().catch((err: unknown) => {
+        console.warn(
+          "[BatchWriteCoordinator] Could not read the cached counters on taking the write lock:",
+          err,
         )
-      await this.followLeaseRecord()
+        return undefined
+      })
+      await this.followLeaseRecord(rows)
       return op()
     })
   }
@@ -1771,7 +1773,7 @@ export class BatchWriteCoordinator {
    *   sibling's) is left alone; the next write acquires through the record.
    *   No stamp of this context's is in flight: uploads hold this lock.
    */
-  private async followLeaseRecord(): Promise<void> {
+  private async followLeaseRecord(rows?: BatchMetadata): Promise<void> {
     const lease = this.partitionLease
     if (lease?.currentPartition === undefined) return
     if (!this.leaseRecordWorks) return
@@ -1787,7 +1789,17 @@ export class BatchWriteCoordinator {
     }
     if (this.partitionLease !== lease) return
     const mine = lease.serialize()
-    if (record !== undefined && sameClaim(record, mine)) {
+    // A reference this context did not publish stands for stamps it has not
+    // seen. The rows carry them once the publisher's flush lands, and say so
+    // by naming the reference; rows that do not — the publisher never
+    // flushed, or its flush failed — leave this table behind the lane's
+    // counter, so drop the lease and read the state from Swarm.
+    const upToDate =
+      record?.referenceHex === mine.referenceHex ||
+      (rows?.rowsPartition === mine.self?.partition &&
+        rows?.stateReference?.partition === mine.self?.partition &&
+        rows?.stateReference?.referenceHex === record?.referenceHex)
+    if (record !== undefined && sameClaim(record, mine) && upToDate) {
       lease.follow(record)
       this.takeRecordedActivity(record)
       this.syncStamperLeaseDeadline()

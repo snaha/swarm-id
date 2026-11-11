@@ -113,7 +113,11 @@ afterEach(() => {
   vi.restoreAllMocks()
 })
 
-async function openTab(mode: BatchWriteCoordinatorDeps["mode"] = "persistent") {
+async function openTab(
+  mode: BatchWriteCoordinatorDeps["mode"] = "persistent",
+  /** `flush: false` wires no flush at all: nothing of this context's reaches the rows. */
+  wiring: { flush?: boolean } = {},
+) {
   const stamper = await UtilizationAwareStamper.create(
     "11".repeat(32),
     new BatchId(BATCH_ID),
@@ -141,7 +145,10 @@ async function openTab(mode: BatchWriteCoordinatorDeps["mode"] = "persistent") {
       },
     },
     // As the proxy does: a flush that fails is logged, and the write goes on
-    flushStamperState: () => stamper.flush().catch(() => undefined),
+    flushStamperState:
+      wiring.flush === false
+        ? undefined
+        : () => stamper.flush().catch(() => undefined),
     onLeaseAcquired: () => {
       acquired++
     },
@@ -484,7 +491,7 @@ describe("two tabs sharing one lease", () => {
     expect(resume.localCounter?.[BUCKET]).toBe(4)
   })
 
-  it("publishes in full when the store's baseline is not the publish the lease record names", async () => {
+  it("reads the published state back when the store's baseline is not the publish the lease record names", async () => {
     // Tab A's publish lands and is recorded, but the flush that stores its
     // baseline fails: the store still holds the baseline of the publish
     // before it, whose leaves no longer match what the pointer names.
@@ -506,7 +513,9 @@ describe("two tabs sharing one lease", () => {
 
     const writeSpy = vi.spyOn(partitionState, "writePartitionState")
     await tabB.upload(BUCKET)
-    expect(writeSpy.mock.calls[0][0].previousReferences).toBeUndefined()
+    // Tab B diffs against the counter it read back from Swarm, not against
+    // the store's, which is a publish behind
+    expect(writeSpy.mock.calls[0][0].previousCounter?.[BUCKET]).toBe(2)
 
     const resume = await publishedCounter(partition)
     expect(resume.readFailed).toBeUndefined()
@@ -792,5 +801,59 @@ describe("one refresher, one idle clock", () => {
     await lockDrained()
 
     expect(leaseCache?.self).toBeUndefined()
+  })
+})
+
+describe("a sibling's stamps that never reached the rows", () => {
+  const BUCKET = 0x0123
+
+  it("a tab reads the lane's state from Swarm when a sibling published without flushing", async () => {
+    const tabA = await openTab()
+    await tabA.upload(BUCKET)
+    const partition = tabA.coordinator.currentPartition!
+
+    const unflushed = await openTab("oneshot", { flush: false })
+    await unflushed.upload(BUCKET)
+    expect((await publishedCounter(partition)).localCounter?.[BUCKET]).toBe(2)
+
+    await tabA.upload(BUCKET)
+    expect((await publishedCounter(partition)).localCounter?.[BUCKET]).toBe(3)
+  })
+
+  it("a tab reads the lane's state from Swarm when a sibling's flushes failed around its publish", async () => {
+    const tabA = await openTab()
+    const tabB = await openTab()
+    await tabA.upload(BUCKET)
+    await tabB.hold()
+    await lockDrained()
+    const partition = tabA.coordinator.currentPartition!
+
+    const writeRows = rowsCache.writeRows.bind(rowsCache)
+    rowsCache.writeRows = async () => {
+      throw new Error("IndexedDB failed")
+    }
+    vi.spyOn(console, "error").mockImplementation(() => undefined)
+    await tabA.upload(BUCKET)
+    rowsCache.writeRows = writeRows
+    expect((await publishedCounter(partition)).localCounter?.[BUCKET]).toBe(2)
+
+    await tabB.upload(BUCKET)
+    expect((await publishedCounter(partition)).localCounter?.[BUCKET]).toBe(3)
+  })
+
+  it("a one-shot writer taking the recorded lease does not extend it past the lock on Swarm", async () => {
+    const tab = await openTab()
+    await tab.upload(BUCKET)
+    const partition = tab.coordinator.currentPartition!
+    // The tab is gone without a release; one-shot writers keep arriving
+    const NEAR_EXPIRY_MS = 3000
+    clock = (await lockHolder(partition))!.leasedUntil - NEAR_EXPIRY_MS
+    await (await openTab("oneshot")).upload(BUCKET)
+
+    clock = leaseCache!.self!.leasedUntil - NEAR_EXPIRY_MS
+    await (await openTab("oneshot")).upload(BUCKET)
+
+    // Whenever a writer stamped, the lock on Swarm named this device as live
+    expect((await lockHolder(partition))!.leasedUntil).toBeGreaterThan(clock)
   })
 })

@@ -1635,8 +1635,10 @@ export class PartitionLease {
    * failures. The next `refresh()` reconciles with Swarm.
    */
   adoptIfLive(): number | undefined {
+    // The expiry stays the recorded one: it is what the lock on Swarm says,
+    // and a context that adopts without renewing (a one-shot writer has no
+    // refresh tick) must not push the record past it.
     if (!this.self || this.self.leasedUntil <= this.now()) return undefined
-    this.self = { ...this.self, leasedUntil: this.now() + LEASE_TTL_MS }
     this.holders.set(this.self.partition, {
       deviceId: this.opts.deviceId,
       generation: this.self.generation,
