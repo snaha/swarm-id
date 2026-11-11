@@ -38,7 +38,7 @@ export default defineConfig({
   expect: { timeout: 15_000 },
   use: {
     baseURL: 'http://localhost:5500',
-    trace: 'retain-on-failure',
+    trace: 'on',
     actionTimeout: 10_000,
     navigationTimeout: 15_000,
   },
