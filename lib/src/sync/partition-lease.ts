@@ -881,10 +881,21 @@ export class PartitionLease {
       }
     }
 
-    const localCounter =
-      stateResult.unchanged && stamper instanceof UtilizationAwareStamper
-        ? stamper.buildLeaseLocalCounter()
-        : (stateResult.localCounter ?? new Uint32Array(NUM_BUCKETS))
+    // What Swarm holds for the lane: the baseline the first publish diffs
+    // against. What the stamper binds may be higher: rows that describe this
+    // lane record every slot this device issued on it, and the counter never
+    // goes below them — whatever the pointer names. Skipping slots costs
+    // capacity; re-issuing one overwrites a chunk.
+    const downloaded = stateResult.localCounter ?? new Uint32Array(NUM_BUCKETS)
+    let localCounter = downloaded
+    if (stamper instanceof UtilizationAwareStamper) {
+      if (stateResult.unchanged) {
+        localCounter = stamper.buildLeaseLocalCounter()
+      } else if (certification !== undefined) {
+        const rows = stamper.buildLeaseLocalCounter()
+        localCounter = downloaded.map((count, b) => Math.max(count, rows[b]))
+      }
+    }
 
     // The generation we will both advertise (intent round) and claim with, so
     // the round's winner binds the lock with the exact generation it announced.
@@ -1022,7 +1033,7 @@ export class PartitionLease {
     this.publishedFrame = stateResult.unchanged ? undefined : stateResult.frame
     this.publishedCounter = stateResult.unchanged
       ? undefined
-      : localCounter.slice()
+      : downloaded.slice()
     // Mark this epoch as already full-pinned so the FIRST publish of the session
     // stays incremental against the resumed refs (the cheap-first-publish win).
     // On the FULL-read branch every non-zero counter chunk was just downloaded,

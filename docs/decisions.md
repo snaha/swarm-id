@@ -30,12 +30,19 @@ stamp let it ack on the strength of the teardown's detached release.
   `PartitionLeaseLostError`.
 - A teardown's release is flushed to the rows, like an idle yield's.
 - A full publish is still checked against the last published counter.
+- A publish keeps its new chunks out of the buckets of the state it replaces, leaves and
+  reference chunk alike, until its own pointer lands.
+- A cold acquire binds the larger, per bucket, of the counter it downloaded and the rows
+  this device holds for the lane. The publish baseline stays the downloaded counter.
 
 **Why.** The record says which claim and which publish; only the rows, or Swarm, say which
 slots are used. Reading the state back costs a download in the failure cases and nothing
 otherwise, where a context that guesses re-issues acked slots. The expiry in the record is
 the lock's on Swarm, and only a renewal may move it. A failed upload is retried safely,
-its chunks being content-addressed; an ack without a publish is not recoverable.
+its chunks being content-addressed; an ack without a publish is not recoverable. A publish
+that fails partway must leave the previous state readable, since the pointer still names
+it. And a counter that skips slots only costs capacity, where one that goes back
+overwrites a chunk, so the rows are a floor whatever the pointer says.
 
 ## 2026-11-10 One context of a storage partition renews its lease
 

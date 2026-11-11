@@ -73,6 +73,8 @@ const START_MS = 30_000 * 1000 + 5000
 /** A background acquire is a dozen mock-Bee round trips: quick alone, not
  *  under the full suite's parallel load. */
 const SETTLE = { timeout: 10_000 }
+/** Past the lease TTL: the lock on Swarm no longer names a live holder. */
+const LAPSED_MS = 31_000
 
 type Cache = Parameters<typeof UtilizationAwareStamper.create>[3]
 
@@ -872,6 +874,38 @@ describe("a sibling's stamps that never reached the rows", () => {
 
     // Whenever a writer stamped, the lock on Swarm named this device as live
     expect((await lockHolder(partition))!.leasedUntil).toBeGreaterThan(clock)
+  })
+
+  it("a cold acquire never binds below what this device's rows record for the lane", async () => {
+    const first = await openTab()
+    await first.upload(BUCKET)
+    await first.upload(BUCKET)
+    const partition = first.coordinator.currentPartition!
+    await lockDrained()
+
+    // The pointer ends up on an older state (whatever let that through), the
+    // lease lapses and its record is gone: nothing but the rows remembers
+    const older = new Uint32Array(first.stamper.getLocalCounter()!.length)
+    older[BUCKET] = 1
+    await partitionState.writePartitionState({
+      bee,
+      stamper: first.stamper,
+      batchId: new BatchId(BATCH_ID),
+      partition,
+      localCounter: older,
+      backupSigner,
+      swarmEncryptionKey: ENC_KEY,
+      nowMs: clock,
+    })
+    coordinators = []
+    leaseCache = undefined
+    clock += LAPSED_MS
+
+    const successor = await openTab()
+    await successor.upload(BUCKET)
+
+    expect(successor.coordinator.currentPartition).toBe(partition)
+    expect((await publishedCounter(partition)).localCounter?.[BUCKET]).toBe(3)
   })
 
   it("an upload whose drive is torn down after its last stamp is not acked", async () => {
