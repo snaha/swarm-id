@@ -107,10 +107,10 @@ Chain-backed suites are NOT in `check:all` — they need a chain running. `pnpm 
 - **Conventional commits**: `feat:`, `fix:`, `docs:`, etc.
 - **TypeScript execution**: Use `pnpm exec tsx` from a package that depends on it (`multichain`, `signaling`, `scripts`) — not `pnpx tsx` or `npx ts-node`, which resolve from the registry and bypass the pin
 - **Dependency versions are exact**: every `package.json` names a version (`13.0.0`), never a
-  range (`^13.0.0`, `~13.0.0`), so what a package resolves to is decided by review, not by whatever
-  the registry serves that day — `@ethersphere/bee-js@13.3.0` was a compromised release inside the
-  `^13.0.0` range (Nov 2026). `pnpm-workspace.yaml` sets `savePrefix: ''` so `pnpm add` complies;
-  a bump is a deliberate edit of the version plus `pnpm install`, with the lockfile diff read
+  range (`^13.0.0`, `~13.0.0`). `pnpm-workspace.yaml` sets `savePrefix: ''` so `pnpm add`
+  complies; a bump is a deliberate edit of the version plus `pnpm install`, with the lockfile diff
+  read. A release younger than pnpm's `minimumReleaseAge` needs a `minimumReleaseAgeExclude`
+  entry in the same PR
 - **Monorepo version pinning**: toolchain versions are pinned across the monorepo (eslint 10,
   vite 7, svelte 5.48, vite-plugin-svelte 6) — do NOT bump these in one package independently
   of the rest of the monorepo
