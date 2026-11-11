@@ -1411,6 +1411,27 @@ describe("UtilizationAwareStamper synced reference", () => {
     expect(reloaded.getProtectedBuckets().has(22)).toBe(false)
     expect(await reloaded.getSyncedReference(0)).toBe("ref-zero")
   })
+
+  it("does not build when the cache cannot be read: uploads require IndexedDB", async () => {
+    // Counters started from zero over rows that exist would re-issue every
+    // slot they record. No stamper means no write path: the proxy reports
+    // `canUpload: false` and never claims a partition (docs/decisions.md).
+    const cache = {
+      getAllChunks: async () => {
+        throw new Error("IndexedDB is unavailable")
+      },
+    } as unknown as UtilizationStoreDB
+    await expect(
+      UtilizationAwareStamper.create(
+        TEST_SIGNER_KEY_LM,
+        new BatchId("ab".repeat(32)),
+        TEST_DEPTH_LM,
+        cache,
+        TEST_OWNER_LM,
+        TEST_ENC_KEY_LM,
+      ),
+    ).rejects.toThrow("IndexedDB is unavailable")
+  })
 })
 
 describe("hasBucketCapacity (partition-aware, #416)", () => {

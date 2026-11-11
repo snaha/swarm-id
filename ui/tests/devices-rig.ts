@@ -68,6 +68,10 @@ export const UNANSWERED_WAIT = /No partition available|Partition lease timed out
  *  both marked at their source as what this suite keys on. */
 export const PUBLISHED_LINE = 'Published device state'
 export const YIELDED_LINE = 'Released idle partition'
+/** The proxy's line when a drive's stamper does not build (`initializeStamper`). */
+export const NO_STAMPER_LINE = 'Failed to create stamper'
+/** The lease's line on every acquire attempt that reaches a partition choice. */
+export const ACQUIRE_LINE = '[PartitionLease] acquire'
 /** Device-state publishes inside one idle window that say a holder was never idle (#707). */
 export const BUSY_PUBLISHES = 3
 
@@ -102,7 +106,7 @@ export function skipScenario(reason: string): never {
  */
 export class Device {
   /** Console lines from every tab, proxy iframes included, with the time seen. */
-  readonly log: { at: number; text: string }[] = []
+  readonly log: { at: number; text: string; page: Page }[] = []
 
   private constructor(
     readonly label: string,
@@ -114,7 +118,7 @@ export class Device {
   }
 
   private record(page: Page): void {
-    page.on('console', (message) => this.log.push({ at: Date.now(), text: message.text() }))
+    page.on('console', (message) => this.log.push({ at: Date.now(), text: message.text(), page }))
   }
 
   /** How many device-state publishes this device made since `since`. Keyed on
@@ -364,6 +368,24 @@ export class Device {
     // Same store, same session: no popup, the proxy authenticates from storage.
     await expect(page.getByText(PARTITION_LINE)).toBeVisible({ timeout: 30_000 })
     return page
+  }
+
+  /**
+   * A tab of the same dApp whose contexts, proxy iframe included, have no
+   * IndexedDB. It shares the session through `localStorage` like any sibling.
+   */
+  async openTabWithoutIndexedDB(): Promise<Page> {
+    const page = await this.context.newPage()
+    await page.addInitScript(() => {
+      Object.defineProperty(window, 'indexedDB', { get: () => undefined, configurable: true })
+    })
+    await page.goto(`${DEMO_ORIGIN}/storage`)
+    return page
+  }
+
+  /** Whether `page`, its frames included, logged a line containing `text`. */
+  logged(page: Page, text: string): boolean {
+    return this.log.some((l) => l.page === page && l.text.includes(text))
   }
 
   /** The demo's own Disconnect, from the account popover in the sidebar. */

@@ -33,11 +33,14 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 
 import {
+  ACQUIRE_LINE,
   BUSY_PUBLISHES,
+  CONNECT_TIMEOUT_MS,
   Device,
   HANDOVER_TIMEOUT_MS,
   IDLE_WAIT_MS,
   LEASE_REFRESH_MS,
+  NO_STAMPER_LINE,
   PEER_YIELD_MIN_IDLE_MS,
   type Seed,
   TTL_LAPSE_MS,
@@ -229,6 +232,32 @@ test.describe('three devices on two partitions', () => {
     // The tab that stays keeps the lease.
     await A.upload()
     expect(await A.partition()).toBe(held)
+  })
+
+  test('a tab without IndexedDB is read-only: it cannot upload and claims no partition', async () => {
+    for (const device of all()) await device.ensureConnected()
+    const held = await A.uploadAndHoldOrSkip()
+
+    const tab = await A.openTabWithoutIndexedDB()
+    try {
+      // The session reached the tab and its drive resolved; only the stamper
+      // is missing, for want of the store its counters live in.
+      await expect
+        .poll(() => A.logged(tab, NO_STAMPER_LINE), { timeout: CONNECT_TIMEOUT_MS })
+        .toBe(true)
+      await expect(tab.getByRole('button', { name: 'Upload Data' })).toBeDisabled()
+      // Long enough for a background acquire to have started, had there been one
+      await sleep(LEASE_REFRESH_MS)
+      expect(A.logged(tab, ACQUIRE_LINE)).toBe(false)
+      await expect(tab.getByRole('button', { name: 'Upload Data' })).toBeDisabled()
+
+      // The device's other tab is untouched: same lane, and it uploads
+      await A.upload()
+      expect(await A.partition()).toBe(held)
+      await expectNoDualHold(all())
+    } finally {
+      await tab.close()
+    }
   })
 
   test('a disconnect releases the partition at once, and a waiting device takes it', async () => {
