@@ -2092,16 +2092,17 @@ describe("UtilizationAwareStamper cache rows (#463)", () => {
     )
   })
 
-  it("starts fresh when the store itself is unavailable: no rows can exist there", async () => {
+  it("does not build when the store itself is unavailable: uploads require IndexedDB", async () => {
+    // No stamper means no write path: the proxy reports `canUpload: false`
+    // and never claims a partition (docs/decisions.md).
     const cache = {
       getAllChunks: async () => {
         throw new UtilizationStoreUnavailableError("IndexedDB disabled")
       },
     } as unknown as UtilizationStoreDB
-    const stamper = await create(cache, 24)
-    expect(
-      stamper.getUtilizationState().dataCounters.every((c) => c === 0),
-    ).toBe(true)
+    await expect(create(cache, 24)).rejects.toThrow(
+      UtilizationStoreUnavailableError,
+    )
   })
 
   it("refuses to start from zero when the cache cannot be read", async () => {

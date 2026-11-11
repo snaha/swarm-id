@@ -88,8 +88,9 @@ What this replaces:
   counter as published is in its own rows; a failed publish leaves all three as they were.
 - **The per-context idle clock.**
 
-A context without IndexedDB has no shared record and no sibling that shares one; it runs
-from memory, as it does today when the store cannot be opened.
+A context without IndexedDB is read-only: its stamper does not build, so it reports
+`canUpload: false` and never acquires a partition (see `docs/decisions.md`, "Uploads
+require IndexedDB").
 
 ## Phases
 
