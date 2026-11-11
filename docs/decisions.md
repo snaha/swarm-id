@@ -12,8 +12,12 @@ A PR that makes or changes a decision adds the entry in the same PR.
 **Context.** Dependencies were pinned once (#18); caret ranges crept back through
 feature PRs, 35 of them, including `@ethersphere/bee-js: ^13.0.0` in four
 packages. `@ethersphere/bee-js@13.3.0`, published 2026-11-09 with a malicious
-`postinstall`, sits inside that range; only the lockfile, resolved to 13.0.0,
-kept it out.
+`postinstall`, sits inside that range. In this repo three things stood in its
+way: the lockfile, resolved to 13.0.0; pnpm's release-age gate, which refuses
+a release under a day old on a fresh resolution; and `allowBuilds`, which does
+not name bee-js, so its `postinstall` would not have run. An npm consumer of
+`@snaha/swarm-id` has none of them: `0.8.0` shipped `^13.0.0`, so a fresh
+install while 13.3.0 was up could resolve to it and run the script.
 
 **Decision.** Every `package.json` names an exact version, `savePrefix: ''`
 makes `pnpm add` write one, and a bump is a reviewed edit plus `pnpm install`.
@@ -23,11 +27,14 @@ since a local override does not survive CI's frozen install. (#982, #984)
 
 **Why.** A range lets the registry decide what a fresh resolution installs,
 and a compromised release is pulled within hours of the first report, after
-the installs it was aimed at. An exact version makes the diff the place where
-an upgrade is seen; the age gate covers the window a pin cannot, a fresh
-release pinned on purpose. Three days was considered for the gate, to span a
-weekend; the default was kept because a takedown takes hours, not days, and
-the exclude list already carries the deliberate exceptions.
+the installs it was aimed at. The published `package.json` is the only one of
+these defences that travels to whoever installs the library, so the exact
+version there is what protects them. In the repo it makes the diff the place
+where an upgrade is seen; the age gate holds back any fresh release, whether a
+range reaches it or a pin names it on purpose. Three days was considered for
+the gate, to span a weekend; the default was kept because a takedown takes
+hours, not days, and the exclude list already carries the deliberate
+exceptions.
 
 ## 2026-09-21 Stamper-mode uploads honour the caller's `deferred`
 
