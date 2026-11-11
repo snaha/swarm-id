@@ -6,22 +6,20 @@ import { BatchId } from "@ethersphere/bee-js"
 import { Binary } from "cafe-utility"
 import { makeEncryptedContentAddressedChunk } from "../chunk"
 import {
+  BUCKETS_PER_CHUNK,
   CHUNK_SIZE,
   DATA_COUNTER_START,
   NUM_BUCKETS,
+  NUM_UTILIZATION_CHUNKS,
   PARTITION_COUNT,
   PartitionLeaseLostError,
-  UINT16_COUNTER_MAX_DEPTH,
   UtilizationAwareStamper,
-  counterLayoutDepth,
   dataSlot,
   partitionCapacity,
   deriveUtilizationChunkKey,
-  deserializeUint16Array,
   deserializeUint32Array,
   extractChunk,
   getChunkIndexForBucket,
-  getChunkLayout,
   hasBucketCapacity,
   updateAfterWrite,
   calculateUtilization,
@@ -31,14 +29,14 @@ import {
   MIN_USABLE_BATCH_DEPTH,
   MIN_USABLE_PARTITION_CAPACITY,
   mergeChunk,
-  serializeUint16Array,
   serializeUint32Array,
 } from "./batch-utilization"
 import { EthAddress, PrivateKey } from "@ethersphere/bee-js"
-import type {
-  BatchMetadata,
-  ChunkCacheEntry,
-  UtilizationStoreDB,
+import {
+  UtilizationStoreUnavailableError,
+  type BatchMetadata,
+  type ChunkCacheEntry,
+  type UtilizationStoreDB,
 } from "../storage/utilization-store"
 import { lockSocAddress } from "./lock-soc"
 import { deriveSecret, BACKUP_KEY_LABEL } from "./key-derivation"
@@ -60,156 +58,68 @@ function makeAddressInBucket(bucket: number, indexSeed: number): Uint8Array {
   return address
 }
 
-describe("getChunkLayout", () => {
-  it("uses uint16 codec for depth <= UINT16_COUNTER_MAX_DEPTH", () => {
-    const layout = getChunkLayout(24)
-    expect(layout.counterByteSize).toBe(2)
-    expect(layout.bucketsPerChunk).toBe(2048)
-    expect(layout.numUtilizationChunks).toBe(32)
-  })
-
-  it("uses uint16 codec at the boundary (depth = UINT16_COUNTER_MAX_DEPTH)", () => {
-    expect(UINT16_COUNTER_MAX_DEPTH).toBe(31)
-    const layout = getChunkLayout(UINT16_COUNTER_MAX_DEPTH)
-    expect(layout.counterByteSize).toBe(2)
-    expect(layout.numUtilizationChunks).toBe(32)
-  })
-
-  it("falls back to uint32 codec for depth > UINT16_COUNTER_MAX_DEPTH", () => {
-    const layout = getChunkLayout(32)
-    expect(layout.counterByteSize).toBe(4)
-    expect(layout.bucketsPerChunk).toBe(1024)
-    expect(layout.numUtilizationChunks).toBe(64)
-  })
-
-  it("returns a chunk size that covers all NUM_BUCKETS in both layouts", () => {
-    expect(getChunkLayout(24).bucketsPerChunk * 32).toBe(NUM_BUCKETS)
-    expect(getChunkLayout(32).bucketsPerChunk * 64).toBe(NUM_BUCKETS)
-    expect(getChunkLayout(24).bucketsPerChunk * 2).toBe(CHUNK_SIZE)
-    expect(getChunkLayout(32).bucketsPerChunk * 4).toBe(CHUNK_SIZE)
-  })
-})
-
-describe("serializeUint16Array / deserializeUint16Array", () => {
-  it("round-trips representative values", () => {
-    const source = new Uint32Array([0, 1, 255, 256, 32768, 65535])
-    const bytes = serializeUint16Array(source)
-    expect(bytes.byteLength).toBe(source.length * 2)
-    const decoded = deserializeUint16Array(bytes)
-    expect(Array.from(decoded)).toEqual(Array.from(source))
-  })
-
-  it("round-trips a full-bucket random fill", () => {
-    const source = new Uint32Array(2048)
-    for (let i = 0; i < source.length; i++) {
-      source[i] = Math.floor(Math.random() * 0x10000)
-    }
-    const bytes = serializeUint16Array(source)
-    expect(bytes.byteLength).toBe(CHUNK_SIZE)
-    const decoded = deserializeUint16Array(bytes)
-    expect(Array.from(decoded)).toEqual(Array.from(source))
-  })
-
-  it("rejects values that exceed uint16 range", () => {
-    const source = new Uint32Array([0, 0x10000])
-    expect(() => serializeUint16Array(source)).toThrow(/uint16 range/)
-  })
-
-  it("rejects odd-length byte input on deserialize", () => {
-    expect(() => deserializeUint16Array(new Uint8Array(3))).toThrow(
-      /multiple of 2/,
-    )
-  })
-})
-
-describe("extractChunk / mergeChunk", () => {
-  it("round-trips a full dataCounters at depth 24 (uint16 layout)", () => {
-    const depth = 24
-    const { numUtilizationChunks } = getChunkLayout(depth)
-    const source = new Uint32Array(NUM_BUCKETS)
-    for (let i = 0; i < source.length; i++) {
-      source[i] = i % 0xffff
-    }
-
-    const target = new Uint32Array(NUM_BUCKETS)
-    for (let i = 0; i < numUtilizationChunks; i++) {
-      const chunk = extractChunk(source, i, depth)
-      expect(chunk.byteLength).toBe(CHUNK_SIZE)
-      mergeChunk(target, i, chunk, depth)
-    }
-
-    expect(Array.from(target)).toEqual(Array.from(source))
-  })
-
-  it("round-trips a full dataCounters at depth 32 (uint32 layout)", () => {
-    const depth = 32
-    const { numUtilizationChunks } = getChunkLayout(depth)
+describe("extractChunk / mergeChunk (fixed uint32 cache layout)", () => {
+  it("round-trips a full dataCounters through every chunk", () => {
     const source = new Uint32Array(NUM_BUCKETS)
     for (let i = 0; i < source.length; i++) {
       source[i] = (i * 1664525 + 1013904223) >>> 0
     }
 
     const target = new Uint32Array(NUM_BUCKETS)
-    for (let i = 0; i < numUtilizationChunks; i++) {
-      const chunk = extractChunk(source, i, depth)
+    for (let i = 0; i < NUM_UTILIZATION_CHUNKS; i++) {
+      const chunk = extractChunk(source, i)
       expect(chunk.byteLength).toBe(CHUNK_SIZE)
-      mergeChunk(target, i, chunk, depth)
+      mergeChunk(target, i, chunk)
     }
 
     expect(Array.from(target)).toEqual(Array.from(source))
   })
 
+  it("covers all buckets with 64 chunks of 1,024, whatever the depth", () => {
+    expect(BUCKETS_PER_CHUNK).toBe(1024)
+    expect(NUM_UTILIZATION_CHUNKS).toBe(64)
+    expect(BUCKETS_PER_CHUNK * NUM_UTILIZATION_CHUNKS).toBe(NUM_BUCKETS)
+  })
+
   it("rejects an out-of-range chunk index", () => {
     const counters = new Uint32Array(NUM_BUCKETS)
-    expect(() => extractChunk(counters, 32, 24)).toThrow(/Invalid chunk index/)
-    expect(() => extractChunk(counters, 64, 32)).toThrow(/Invalid chunk index/)
+    expect(() => extractChunk(counters, 64)).toThrow(/Invalid chunk index/)
   })
 
   it("rejects a chunk whose byte length is not CHUNK_SIZE", () => {
     const counters = new Uint32Array(NUM_BUCKETS)
-    expect(() => mergeChunk(counters, 0, new Uint8Array(100), 24)).toThrow(
+    expect(() => mergeChunk(counters, 0, new Uint8Array(100))).toThrow(
       /Invalid chunk data length/,
     )
   })
 })
 
 describe("initializeBatchUtilization", () => {
-  it("seeds the per-partition counter at 0 and matches the layout's chunk count", () => {
-    const state = initializeBatchUtilization(TEST_BATCH_ID, 24)
-    expect(state.batchDepth).toBe(24)
-    expect(state.dataCounters.length).toBe(NUM_BUCKETS)
-    // Counter is the 0-based per-partition `j`; reserved headroom lives in the
-    // slot formula (`dataSlot`), not in the counter.
-    expect(state.dataCounters[0]).toBe(0)
-    expect(state.dataCounters[NUM_BUCKETS - 1]).toBe(0)
-    expect(state.chunks.length).toBe(32)
-  })
-
-  it("uses the 64-chunk layout at depth 32", () => {
-    const state = initializeBatchUtilization(TEST_BATCH_ID, 32)
-    expect(state.batchDepth).toBe(32)
-    expect(state.chunks.length).toBe(64)
+  it("seeds the per-partition counter at 0 with the fixed chunk count at any depth", () => {
+    for (const depth of [24, 32]) {
+      const state = initializeBatchUtilization(TEST_BATCH_ID, depth)
+      expect(state.batchDepth).toBe(depth)
+      expect(state.dataCounters.length).toBe(NUM_BUCKETS)
+      // Counter is the 0-based per-partition `j`; reserved headroom lives in
+      // the slot formula (`dataSlot`), not in the counter.
+      expect(state.dataCounters[0]).toBe(0)
+      expect(state.dataCounters[NUM_BUCKETS - 1]).toBe(0)
+      expect(state.chunks.length).toBe(NUM_UTILIZATION_CHUNKS)
+    }
   })
 })
 
-describe("getChunkIndexForBucket (depth-dependent layout)", () => {
-  it("maps buckets to chunks using the uint16 layout at depth 24", () => {
-    expect(getChunkIndexForBucket(0, 24)).toBe(0)
-    expect(getChunkIndexForBucket(2047, 24)).toBe(0)
-    expect(getChunkIndexForBucket(2048, 24)).toBe(1)
-    expect(getChunkIndexForBucket(NUM_BUCKETS - 1, 24)).toBe(31)
-  })
-
-  it("maps buckets to chunks using the uint32 layout at depth 32", () => {
-    expect(getChunkIndexForBucket(0, 32)).toBe(0)
-    expect(getChunkIndexForBucket(1023, 32)).toBe(0)
-    expect(getChunkIndexForBucket(1024, 32)).toBe(1)
-    expect(getChunkIndexForBucket(NUM_BUCKETS - 1, 32)).toBe(63)
+describe("getChunkIndexForBucket (fixed layout)", () => {
+  it("maps buckets to 1,024-bucket chunks", () => {
+    expect(getChunkIndexForBucket(0)).toBe(0)
+    expect(getChunkIndexForBucket(1023)).toBe(0)
+    expect(getChunkIndexForBucket(1024)).toBe(1)
+    expect(getChunkIndexForBucket(NUM_BUCKETS - 1)).toBe(63)
   })
 
   it("rejects an out-of-range bucket index", () => {
-    expect(() => getChunkIndexForBucket(-1, 24)).toThrow(/Invalid bucket index/)
-    expect(() => getChunkIndexForBucket(NUM_BUCKETS, 24)).toThrow(
+    expect(() => getChunkIndexForBucket(-1)).toThrow(/Invalid bucket index/)
+    expect(() => getChunkIndexForBucket(NUM_BUCKETS)).toThrow(
       /Invalid bucket index/,
     )
   })
@@ -525,26 +435,6 @@ describe("UtilizationAwareStamper partition awareness", () => {
     )
     expect(slots).toEqual([...lane, ...lane, lane[0]])
     expect(stamper.getLocalCounter()![BUCKET]).toBe(2 * cap + 1)
-  })
-
-  it("serializes a scratch drive's counters as uint32 at a uint16 depth", () => {
-    const DEPTH = 20
-    expect(
-      getChunkLayout(counterLayoutDepth(DEPTH, false)).counterByteSize,
-    ).toBe(2)
-    expect(
-      getChunkLayout(counterLayoutDepth(DEPTH, true)).counterByteSize,
-    ).toBe(4)
-
-    // Past uint16: a wrapped counter a uint16 layout would refuse.
-    const PAST_UINT16 = 70_000
-    const counters = new Uint32Array(NUM_BUCKETS)
-    counters[3] = PAST_UINT16
-    const layoutDepth = counterLayoutDepth(DEPTH, true)
-    const restored = new Uint32Array(NUM_BUCKETS)
-    mergeChunk(restored, 0, extractChunk(counters, 0, layoutDepth), layoutDepth)
-    expect(restored[3]).toBe(PAST_UINT16)
-    expect(() => extractChunk(counters, 0, DEPTH)).toThrow(/uint16/)
   })
 
   it("legacy mode (no partition bound) collapses to partition 0, K=1", async () => {
@@ -1326,8 +1216,38 @@ describe("UtilizationAwareStamper synced reference", () => {
       getChunk: async (batchId: string, chunkIndex: number) =>
         store.get(`${batchId}:${chunkIndex}`),
       getMetadata: async (batchId: string) => metaStore.get(batchId),
-      putMetadata: async (metadata: BatchMetadata) => {
-        metaStore.set(metadata.batchId, { ...metadata })
+      updateMetadata: async (
+        batchId: string,
+        patch: (existing: BatchMetadata | undefined) => Partial<BatchMetadata>,
+      ) => {
+        const existing = metaStore.get(batchId)
+        metaStore.set(batchId, { ...existing, ...patch(existing), batchId })
+      },
+    } as unknown as UtilizationStoreDB
+  }
+
+  /**
+   * A store whose every call lands a macrotask later, so two writers in
+   * flight interleave the way two IndexedDB transactions can. Its patch is
+   * still atomic: read and write in one tick, as the real store's one
+   * `readwrite` transaction is.
+   */
+  function makeYieldingCache(): UtilizationStoreDB {
+    const later = () => new Promise<void>((resolve) => setTimeout(resolve, 0))
+    let meta: BatchMetadata | undefined
+    return {
+      getAllChunks: async () => [],
+      putChunk: async () => undefined,
+      getMetadata: async () => {
+        await later()
+        return meta
+      },
+      updateMetadata: async (
+        batchId: string,
+        patch: (existing: BatchMetadata | undefined) => Partial<BatchMetadata>,
+      ) => {
+        await later()
+        meta = { ...meta, ...patch(meta), batchId }
       },
     } as unknown as UtilizationStoreDB
   }
@@ -1345,21 +1265,503 @@ describe("UtilizationAwareStamper synced reference", () => {
     )
   }
 
-  it("getSyncedReference round-trips through setSyncedReference (per partition, merge-preserving)", async () => {
+  function bind(stamper: UtilizationAwareStamper, partition: number): void {
+    stamper.bindPartition({
+      partition,
+      partitionCount: PARTITION_COUNT,
+      localCounter: new Uint32Array(NUM_BUCKETS),
+    })
+  }
+
+  // A reference certifies rows as "at or past the counter it names". Only
+  // rows that hold exactly that counter may seed an incremental publish: the
+  // lease diffs against them, and a leaf it retains must be the leaf the
+  // reference chunk describes.
+  it("certifies rows as exact only while they hold the counter the reference names", async () => {
     const cache = makeRecordingCache()
     const stamper = await makeStamper(cache)
+    bind(stamper, 0)
+    stamper.stamp(makeAddressInBucket(7, 1))
+    await stamper.setSyncedReference(0, "published")
+    await stamper.flush()
+    expect(await stamper.getRowsCertification(0)).toEqual({
+      referenceHex: "published",
+      exact: true,
+    })
 
-    expect(await stamper.getSyncedReference(0)).toBeUndefined()
+    // An upload whose publish failed: its stamps reach the rows, no reference
+    // names them
+    stamper.stamp(makeAddressInBucket(7, 2))
+    await stamper.flush()
+    expect(await stamper.getRowsCertification(0)).toEqual({
+      referenceHex: "published",
+      exact: false,
+    })
 
+    // The next publish names the rows again
+    await stamper.setSyncedReference(0, "republished")
+    await stamper.flush()
+    expect(await stamper.getRowsCertification(0)).toEqual({
+      referenceHex: "republished",
+      exact: true,
+    })
+  })
+
+  it("a reference recorded before later stamps is committed as inexact", async () => {
+    // A publish whose flush failed, then an upload whose publish failed: the
+    // rows that finally land are past the counter the pending reference names
+    const cache = makeRecordingCache()
+    const stamper = await makeStamper(cache)
+    bind(stamper, 0)
+    await stamper.setSyncedReference(0, "published")
+    stamper.stamp(makeAddressInBucket(7, 1))
+    await stamper.flush()
+    expect(await stamper.getRowsCertification(0)).toEqual({
+      referenceHex: "published",
+      exact: false,
+    })
+  })
+
+  it("rows rewritten for a table no reference names lose the lane's old reference", async () => {
+    const cache = makeRecordingCache()
+    const stamper = await makeStamper(cache)
+    bind(stamper, 0)
+    stamper.stamp(makeAddressInBucket(7, 1))
     await stamper.setSyncedReference(0, "ref-zero")
-    await stamper.setSyncedReference(1, "ref-one")
-    expect(await stamper.getSyncedReference(0)).toBe("ref-zero")
-    expect(await stamper.getSyncedReference(1)).toBe("ref-one")
+    await stamper.flush()
+    bind(stamper, 1)
+    await stamper.flush()
 
-    // Overwriting one partition preserves the other.
-    await stamper.setSyncedReference(0, "ref-zero-v2")
-    expect(await stamper.getSyncedReference(0)).toBe("ref-zero-v2")
-    expect(await stamper.getSyncedReference(1)).toBe("ref-one")
+    // Back on lane 0 with no state found (its pointer aged out): zero-seeded
+    bind(stamper, 0)
+    await stamper.flush()
+    expect(await stamper.getRowsCertification(0)).toBeUndefined()
+    expect(await stamper.getRowsCertification(1)).toBeUndefined()
+  })
+
+  // The rows are shared by every tab of the partition, each with its own
+  // stamper. What a tab knew of the rows when it opened says nothing about
+  // them once another tab has flushed.
+  it("a tab whose view of the rows is stale rewrites them all rather than certify a mix of two lanes", async () => {
+    const cache = makeRecordingCache()
+    const laneZero = new Uint32Array(NUM_BUCKETS)
+    laneZero[0x4321] = 9
+    const bindTable = (
+      stamper: UtilizationAwareStamper,
+      partition: number,
+      localCounter: Uint32Array,
+    ) =>
+      stamper.bindPartition({
+        partition,
+        partitionCount: PARTITION_COUNT,
+        localCounter,
+      })
+
+    const tabA = await makeStamper(cache)
+    bindTable(tabA, 0, laneZero.slice())
+    await tabA.setSyncedReference(0, "ref-a")
+    await tabA.flush()
+
+    const tabB = await makeStamper(cache) // opened while the rows are lane 0's
+
+    bindTable(tabA, 1, new Uint32Array(NUM_BUCKETS))
+    tabA.stamp(makeAddressInBucket(7, 2))
+    await tabA.flush()
+
+    // Tab B claims lane 0: the rows are no longer certified for it, so it
+    // downloads the lane's (unchanged) state and binds that
+    expect(await tabB.getRowsCertification(0)).toBeUndefined()
+    bindTable(tabB, 0, laneZero.slice())
+    tabB.stamp(makeAddressInBucket(5, 3))
+    await tabB.setSyncedReference(0, "ref-b")
+    await tabB.flush()
+
+    const cold = await makeStamper(cache)
+    expect((await cold.getRowsCertification(0))?.referenceHex).toBe("ref-b")
+    const counters = cold.getUtilizationState().dataCounters
+    expect(counters[0x4321]).toBe(9)
+    expect(counters[5]).toBe(1)
+    expect(counters[7]).toBe(0)
+  })
+
+  it("a tab resumes a lane from the rows another tab wrote, not from its own older table", async () => {
+    const cache = makeRecordingCache()
+    const tabA = await makeStamper(cache)
+    bind(tabA, 0)
+    tabA.stamp(makeAddressInBucket(7, 1))
+    await tabA.setSyncedReference(0, "first")
+    await tabA.flush()
+
+    const tabB = await makeStamper(cache)
+
+    tabA.stamp(makeAddressInBucket(7, 2))
+    await tabA.setSyncedReference(0, "second")
+    await tabA.flush()
+
+    // Tab B takes the lane over with no broadcast having reached it
+    expect(await tabB.getRowsCertification(0)).toEqual({
+      referenceHex: "second",
+      exact: true,
+    })
+    expect(tabB.buildLeaseLocalCounter()[7]).toBe(2)
+  })
+
+  it("a flush that dies after an unpublished row landed leaves the rows inexact", async () => {
+    // An upload whose publish failed, and a tab closed mid-flush: the row is
+    // past the reference, and nothing ran after it to say so
+    const cache = makeRecordingCache()
+    const stamper = await makeStamper(cache)
+    bind(stamper, 0)
+    stamper.stamp(makeAddressInBucket(7, 1))
+    await stamper.setSyncedReference(0, "published")
+    await stamper.flush()
+
+    stamper.stamp(makeAddressInBucket(7, 2))
+    const putChunk = cache.putChunk.bind(cache)
+    const updateMetadata = cache.updateMetadata.bind(cache)
+    let rowLanded = false
+    cache.putChunk = async (entry) => {
+      await putChunk(entry)
+      rowLanded = true
+    }
+    cache.updateMetadata = async (batchId, patch) => {
+      if (rowLanded) throw new Error("tab closed")
+      await updateMetadata(batchId, patch)
+    }
+    await expect(stamper.flush()).rejects.toThrow("tab closed")
+    cache.updateMetadata = updateMetadata
+
+    const reopened = await makeStamper(cache)
+    expect(reopened.getUtilizationState().dataCounters[7]).toBe(2)
+    expect(await reopened.getRowsCertification(0)).toEqual({
+      referenceHex: "published",
+      exact: false,
+    })
+  })
+
+  it("a sibling's counters folded in after a reference was recorded make it inexact", async () => {
+    const cache = makeRecordingCache()
+    const stamper = await makeStamper(cache)
+    bind(stamper, 0)
+    await stamper.setSyncedReference(0, "read-on-claim")
+    stamper.applyUtilizationUpdate([{ index: 9, value: 4 }])
+    await stamper.flush()
+    expect(await stamper.getRowsCertification(0)).toEqual({
+      referenceHex: "read-on-claim",
+      exact: false,
+    })
+  })
+
+  // Counters only grow, so rows another tab wrote are folded in by maximum:
+  // neither tab's table may lower the other's.
+  it("a tab that missed a sibling's writes folds the rows in at the lock, and stamps past them", async () => {
+    const cache = makeRecordingCache()
+    const tabA = await makeStamper(cache)
+    const tabB = await makeStamper(cache) // legacy lane: neither ever binds
+    for (let i = 0; i < 3; i++) tabA.stamp(makeAddressInBucket(7, i))
+    await tabA.flush()
+
+    await tabB.syncRows() // what the coordinator does on taking the write lock
+    expect(tabB.getUtilizationState().dataCounters[7]).toBe(3)
+    tabB.stamp(makeAddressInBucket(7, 9))
+    tabB.stamp(makeAddressInBucket(5000, 1))
+    await tabB.flush()
+
+    const counters = (await makeStamper(cache)).getUtilizationState()
+      .dataCounters
+    expect(counters[7]).toBe(4)
+    expect(counters[5000]).toBe(1)
+  })
+
+  it("a flush never lowers a row another tab wrote, even with no sync before the stamps", async () => {
+    const cache = makeRecordingCache()
+    const tabA = await makeStamper(cache)
+    const tabB = await makeStamper(cache)
+    for (let i = 0; i < 3; i++) tabA.stamp(makeAddressInBucket(7, i))
+    await tabA.flush()
+
+    tabB.stamp(makeAddressInBucket(5000, 1))
+    tabB.stamp(makeAddressInBucket(8, 1)) // same row as bucket 7
+    await tabB.flush()
+
+    const counters = (await makeStamper(cache)).getUtilizationState()
+      .dataCounters
+    expect(counters[7]).toBe(3)
+    expect(counters[8]).toBe(1)
+    expect(counters[5000]).toBe(1)
+  })
+
+  it("two tabs bound to one lane keep each other's counters, and the certification stays true to the rows", async () => {
+    const cache = makeRecordingCache()
+    const tabA = await makeStamper(cache)
+    bind(tabA, 0)
+    await tabA.flush()
+    const tabB = await makeStamper(cache)
+    bind(tabB, 0)
+
+    for (let i = 0; i < 3; i++) tabA.stamp(makeAddressInBucket(7, i))
+    await tabA.setSyncedReference(0, "ref-a")
+    await tabA.flush()
+
+    await tabB.syncRows()
+    tabB.stamp(makeAddressInBucket(5000, 1))
+    await tabB.setSyncedReference(0, "ref-b")
+    await tabB.flush()
+
+    const cold = await makeStamper(cache)
+    expect(cold.getUtilizationState().dataCounters[7]).toBe(3)
+    expect(cold.getUtilizationState().dataCounters[5000]).toBe(1)
+    expect(await cold.getRowsCertification(0)).toEqual({
+      referenceHex: "ref-b",
+      exact: true,
+    })
+    expect(tabB.getLocalCounter()![7]).toBe(3)
+  })
+
+  it("a stamper opened while another tab's flush is in flight still ends up with the rows that flush wrote", async () => {
+    const cache = makeRecordingCache()
+    const tabA = await makeStamper(cache)
+    bind(tabA, 0)
+    tabA.stamp(makeAddressInBucket(7, 1))
+    await tabA.setSyncedReference(0, "first")
+    await tabA.flush()
+
+    tabA.stamp(makeAddressInBucket(7, 2))
+    tabA.stamp(makeAddressInBucket(5000, 1))
+    await tabA.setSyncedReference(0, "second")
+    const putChunk = cache.putChunk.bind(cache)
+    let openGate!: () => void
+    const gate = new Promise<void>((resolve) => (openGate = resolve))
+    let reachedRows!: () => void
+    const atRows = new Promise<void>((resolve) => (reachedRows = resolve))
+    cache.putChunk = async (entry) => {
+      reachedRows()
+      await gate
+      await putChunk(entry)
+    }
+    const flushing = tabA.flush()
+    await atRows
+    const tabB = await makeStamper(cache) // reads metadata and rows mid-flush
+    openGate()
+    await flushing
+
+    expect(await tabB.getRowsCertification(0)).toEqual({
+      referenceHex: "second",
+      exact: true,
+    })
+    const table = tabB.buildLeaseLocalCounter()
+    expect(table[7]).toBe(2)
+    expect(table[5000]).toBe(1)
+  })
+
+  it("a legacy stamper opened mid-flush folds the finished rows in at its next lock", async () => {
+    const cache = makeRecordingCache()
+    const tabA = await makeStamper(cache)
+    tabA.stamp(makeAddressInBucket(7, 1))
+    tabA.stamp(makeAddressInBucket(5000, 1))
+    const putChunk = cache.putChunk.bind(cache)
+    let openGate!: () => void
+    const gate = new Promise<void>((resolve) => (openGate = resolve))
+    let reachedRows!: () => void
+    const atRows = new Promise<void>((resolve) => (reachedRows = resolve))
+    cache.putChunk = async (entry) => {
+      reachedRows()
+      await gate
+      await putChunk(entry)
+    }
+    const flushing = tabA.flush()
+    await atRows
+    const tabB = await makeStamper(cache)
+    openGate()
+    await flushing
+
+    await tabB.syncRows()
+    expect(tabB.getUtilizationState().dataCounters[7]).toBe(1)
+    expect(tabB.getUtilizationState().dataCounters[5000]).toBe(1)
+  })
+
+  it("resumes a lane from the rows even when this stamper's own table was left as another lane's", async () => {
+    // A bind whose flush never ran (IndexedDB failed, the lease was lost
+    // first): the table in memory is lane 1's, the rows still lane 0's
+    const cache = makeRecordingCache()
+    const stamper = await makeStamper(cache)
+    bind(stamper, 0)
+    stamper.stamp(makeAddressInBucket(7, 1))
+    await stamper.setSyncedReference(0, "ref-zero")
+    await stamper.flush()
+
+    bind(stamper, 1)
+    stamper.unbindPartition()
+
+    expect(await stamper.getRowsCertification(0)).toEqual({
+      referenceHex: "ref-zero",
+      exact: true,
+    })
+    expect(stamper.buildLeaseLocalCounter()[7]).toBe(1)
+  })
+
+  it("holds its invariants under any interleaving of two tabs on one lane", async () => {
+    // Model: a publish records the counter it names. Whatever the tabs do,
+    // rows certified by a reference are at or past its counter, and exactly
+    // it when they are called exact; and no row ever goes down.
+    let seed = 0x5eed
+    const random = (n: number) => {
+      seed = (seed * 1103515245 + 12345) & 0x7fffffff
+      return seed % n
+    }
+    const BUCKETS = [7, 8, 5000, 0x4321]
+    const ROUNDS = 400
+    const cache = makeRecordingCache()
+    const published = new Map<string, Uint32Array>()
+    const tabs = [await makeStamper(cache), await makeStamper(cache)]
+    for (const tab of tabs) {
+      await tab.syncRows()
+      tab.bindPartition({
+        partition: 0,
+        partitionCount: PARTITION_COUNT,
+        localCounter: tab.buildLeaseLocalCounter(),
+      })
+      await tab.flush()
+    }
+    let floor = new Uint32Array(NUM_BUCKETS)
+    for (let round = 0; round < ROUNDS; round++) {
+      const tab = tabs[random(tabs.length)]
+      // One locked section: sync, some stamps, maybe a publish, a flush
+      // that may die at any of its store writes
+      if (random(4) !== 0) await tab.syncRows()
+      for (let i = random(4); i > 0; i--) {
+        tab.stamp(makeAddressInBucket(BUCKETS[random(BUCKETS.length)], round))
+      }
+      if (random(3) !== 0) {
+        const referenceHex = `ref-${round}`
+        published.set(referenceHex, tab.getLocalCounter()!.slice())
+        await tab.setSyncedReference(0, referenceHex)
+      }
+      const dieAt = random(5) === 0 ? random(4) : -1
+      let writes = 0
+      const putChunk = cache.putChunk.bind(cache)
+      const updateMetadata = cache.updateMetadata.bind(cache)
+      const maybeDie = () => {
+        if (writes++ === dieAt) throw new Error("tab closed")
+      }
+      cache.putChunk = async (entry) => {
+        maybeDie()
+        await putChunk(entry)
+      }
+      cache.updateMetadata = async (batchId, patch) => {
+        maybeDie()
+        await updateMetadata(batchId, patch)
+      }
+      await tab.flush().catch(() => undefined)
+      cache.putChunk = putChunk
+      cache.updateMetadata = updateMetadata
+
+      const cold = await makeStamper(cache)
+      const rows = cold.getUtilizationState().dataCounters
+      for (const bucket of BUCKETS) {
+        expect(
+          rows[bucket],
+          `round ${round} bucket ${bucket}`,
+        ).toBeGreaterThanOrEqual(floor[bucket])
+      }
+      floor = rows.slice()
+      const certification = await cold.getRowsCertification(0)
+      if (certification !== undefined) {
+        const named = published.get(certification.referenceHex)!
+        for (const bucket of BUCKETS) {
+          if (certification.exact) {
+            expect(rows[bucket], `round ${round} exact ${bucket}`).toBe(
+              named[bucket],
+            )
+          } else {
+            expect(rows[bucket]).toBeGreaterThanOrEqual(named[bucket])
+          }
+        }
+      }
+    }
+  })
+
+  // The cache rows hold one lane's counter — `bindPartition` replaces the
+  // table — so one synced reference certifies them, not one per partition.
+  it("keeps one lane's reference: a publish of another lane replaces it", async () => {
+    const cache = makeRecordingCache()
+    const stamper = await makeStamper(cache)
+    expect(
+      (await stamper.getRowsCertification(0))?.referenceHex,
+    ).toBeUndefined()
+
+    bind(stamper, 0)
+    await stamper.setSyncedReference(0, "ref-zero")
+    await stamper.flush()
+    expect((await stamper.getRowsCertification(0))?.referenceHex).toBe(
+      "ref-zero",
+    )
+
+    bind(stamper, 1)
+    await stamper.setSyncedReference(1, "ref-one")
+    await stamper.flush()
+    expect((await stamper.getRowsCertification(1))?.referenceHex).toBe(
+      "ref-one",
+    )
+    expect(
+      (await stamper.getRowsCertification(0))?.referenceHex,
+    ).toBeUndefined()
+
+    // A cold start sees the same
+    const reloaded = await makeStamper(cache)
+    expect((await reloaded.getRowsCertification(1))?.referenceHex).toBe(
+      "ref-one",
+    )
+    expect(
+      (await reloaded.getRowsCertification(0))?.referenceHex,
+    ).toBeUndefined()
+  })
+
+  it("certifies a reference only once the rows describe its lane: a publish no flush followed is not a resume point", async () => {
+    const cache = makeRecordingCache()
+    const stamper = await makeStamper(cache)
+    bind(stamper, 0)
+    await stamper.setSyncedReference(0, "ref-zero")
+    await stamper.flush()
+    // Lane switch: the publish lands (ack-after-publish) and the tab dies
+    // before the flush that would rewrite the rows for lane 1. The rows still
+    // hold lane 0's counter at "ref-zero", so that stays a resume point
+    bind(stamper, 1)
+    await stamper.setSyncedReference(1, "ref-one")
+
+    const reloaded = await makeStamper(cache)
+    expect(
+      (await reloaded.getRowsCertification(1))?.referenceHex,
+    ).toBeUndefined()
+    expect((await reloaded.getRowsCertification(0))?.referenceHex).toBe(
+      "ref-zero",
+    )
+  })
+
+  it("a flush that dies midway through a lane change certifies neither lane", async () => {
+    const cache = makeRecordingCache()
+    const stamper = await makeStamper(cache)
+    bind(stamper, 0)
+    await stamper.setSyncedReference(0, "ref-zero")
+    await stamper.flush()
+
+    bind(stamper, 1)
+    await stamper.setSyncedReference(1, "ref-one")
+    const putChunk = cache.putChunk.bind(cache)
+    let written = 0
+    cache.putChunk = async (entry) => {
+      if (++written === 3) throw new Error("tab closed")
+      await putChunk(entry)
+    }
+    await expect(stamper.flush()).rejects.toThrow("tab closed")
+
+    const reloaded = await makeStamper(cache)
+    expect(
+      (await reloaded.getRowsCertification(0))?.referenceHex,
+    ).toBeUndefined()
+    expect(
+      (await reloaded.getRowsCertification(1))?.referenceHex,
+    ).toBeUndefined()
   })
 
   it("persists protected state buckets and restores them on create", async () => {
@@ -1397,8 +1799,11 @@ describe("UtilizationAwareStamper synced reference", () => {
     await stamper.setProtectedStateBuckets(0, [11])
     await stamper.setProtectedStateBuckets(1, [22])
     // Persisting a synced reference must not drop the protected buckets
-    // (both live in the same metadata record).
+    // (both live in the same metadata record). The reference certifies the
+    // rows for lane 0 once a flush has written them for it.
+    bind(stamper, 0)
     await stamper.setSyncedReference(0, "ref-zero")
+    await stamper.flush()
 
     const reloaded = await makeStamper(cache)
     reloaded.bindPartition({
@@ -1409,7 +1814,229 @@ describe("UtilizationAwareStamper synced reference", () => {
     expect(reloaded.getProtectedBuckets().has(11)).toBe(true)
     // Partition 1's set does not leak into partition 0's saves.
     expect(reloaded.getProtectedBuckets().has(22)).toBe(false)
-    expect(await reloaded.getSyncedReference(0)).toBe("ref-zero")
+    expect((await reloaded.getRowsCertification(0))?.referenceHex).toBe(
+      "ref-zero",
+    )
+  })
+
+  // Every upload publishes, then acks, then flushes. A reference recorded at
+  // the publish would vouch for rows one write behind the counter it names:
+  // a tab dying before the flush resumes from them and re-issues that
+  // write's slots. So the flush that writes the rows commits the reference.
+  it("commits a reference at the flush that writes the rows it describes, never before", async () => {
+    const cache = makeRecordingCache()
+    const stamper = await makeStamper(cache)
+    bind(stamper, 0)
+    await stamper.setSyncedReference(0, "ref-a")
+    await stamper.flush()
+    expect((await stamper.getRowsCertification(0))?.referenceHex).toBe("ref-a")
+
+    // A write and its publish land; the tab dies before the flush
+    stamper.stamp(makeAddressInBucket(7, 1))
+    await stamper.setSyncedReference(0, "ref-b")
+    const died = await makeStamper(cache)
+    expect((await died.getRowsCertification(0))?.referenceHex).toBe("ref-a")
+
+    await stamper.flush()
+    const reloaded = await makeStamper(cache)
+    expect((await reloaded.getRowsCertification(0))?.referenceHex).toBe("ref-b")
+    expect(reloaded.getUtilizationState().dataCounters[7]).toBe(1)
+  })
+
+  it("commits a publish's reference even when the publish wrote no new slot", async () => {
+    // A release or a full re-pin publishes the counter the rows already hold
+    const cache = makeRecordingCache()
+    const stamper = await makeStamper(cache)
+    bind(stamper, 0)
+    await stamper.flush()
+    await stamper.setSyncedReference(0, "ref-a")
+    await stamper.flush()
+    expect(
+      (await (await makeStamper(cache)).getRowsCertification(0))?.referenceHex,
+    ).toBe("ref-a")
+  })
+
+  it("keeps every field when two metadata writers are in flight at once", async () => {
+    const cache = makeYieldingCache()
+    const stamper = await makeStamper(cache)
+    await Promise.all([
+      stamper.setProtectedStateBuckets(0, [11]),
+      stamper.setProtectedStateBuckets(1, [22]),
+    ])
+    expect(
+      (await cache.getMetadata(TEST_BATCH_ID.toHex()))?.stateChunkBuckets,
+    ).toEqual({ 0: [11], 1: [22] })
+  })
+})
+
+describe("UtilizationAwareStamper cache rows (#463)", () => {
+  const SIGNER = new PrivateKey(
+    new Uint8Array(32).map((_, i) => (i + 11) & 0xff),
+  ).toHex()
+  const OWNER = new EthAddress("33".repeat(20))
+  const ENC_KEY = new Uint8Array(32).fill(0x24)
+
+  function makeRecordingCache(seed: ChunkCacheEntry[] = []) {
+    const rows = new Map<number, ChunkCacheEntry>()
+    for (const row of seed) rows.set(row.chunkIndex, { ...row })
+    const sorted = () =>
+      [...rows.values()].sort((a, b) => a.chunkIndex - b.chunkIndex)
+    const cache = {
+      getAllChunks: async () => sorted(),
+      putChunk: async (entry: ChunkCacheEntry) => {
+        rows.set(entry.chunkIndex, { ...entry })
+      },
+      getMetadata: async () => undefined,
+      updateMetadata: async () => undefined,
+    } as unknown as UtilizationStoreDB
+    return { cache, rows }
+  }
+
+  async function create(
+    cache: UtilizationStoreDB,
+    depth: number,
+    scratch = false,
+  ): Promise<UtilizationAwareStamper> {
+    return UtilizationAwareStamper.create(
+      SIGNER,
+      TEST_BATCH_ID,
+      depth,
+      cache,
+      OWNER,
+      ENC_KEY,
+      undefined,
+      { scratch },
+    )
+  }
+
+  it("a lane switch rewrites every row, so a cold start reads the bound lane and never a mix", async () => {
+    const { cache } = makeRecordingCache()
+    const stamper = await create(cache, 24)
+    const laneZero = new Uint32Array(NUM_BUCKETS)
+    laneZero[0x4321] = 9
+    stamper.bindPartition({
+      partition: 0,
+      partitionCount: PARTITION_COUNT,
+      localCounter: laneZero,
+    })
+    stamper.stamp(makeAddressInBucket(0x4321, 1))
+    await stamper.flush()
+
+    // Lane 1 never touched bucket 0x4321: its row must not keep lane 0's 10
+    const laneOne = new Uint32Array(NUM_BUCKETS)
+    stamper.bindPartition({
+      partition: 1,
+      partitionCount: PARTITION_COUNT,
+      localCounter: laneOne,
+    })
+    stamper.stamp(makeAddressInBucket(7, 2))
+    await stamper.flush()
+
+    const counters = (await create(cache, 24)).getUtilizationState()
+      .dataCounters
+    expect(counters[7]).toBe(1)
+    expect(counters[0x4321]).toBe(0)
+    expect(counters).toEqual(stamper.getUtilizationState().dataCounters)
+  })
+
+  it("a bind to a counter the rows do not hold rewrites every row, lane switch or not", async () => {
+    const { cache } = makeRecordingCache()
+    const stamper = await create(cache, 24)
+    stamper.bindPartition({
+      partition: 0,
+      partitionCount: PARTITION_COUNT,
+      localCounter: new Uint32Array(NUM_BUCKETS),
+    })
+    stamper.stamp(makeAddressInBucket(0x4321, 1))
+    await stamper.flush()
+
+    // Another device held lane 0 meanwhile and wrote bucket 7 five times; the
+    // counter resumed from its publish is ahead of the rows there
+    const resumed = stamper.buildLeaseLocalCounter()
+    resumed[7] = 5
+    stamper.bindPartition({
+      partition: 0,
+      partitionCount: PARTITION_COUNT,
+      localCounter: resumed,
+    })
+    await stamper.flush()
+
+    const counters = (await create(cache, 24)).getUtilizationState()
+      .dataCounters
+    expect(counters[7]).toBe(5)
+    expect(counters[0x4321]).toBe(1)
+  })
+
+  it("a bind to the counter the rows already hold writes nothing", async () => {
+    // The adopt fast path and an unchanged resume bind the stamper's own table
+    const { cache } = makeRecordingCache()
+    const stamper = await create(cache, 24)
+    stamper.bindPartition({
+      partition: 0,
+      partitionCount: PARTITION_COUNT,
+      localCounter: new Uint32Array(NUM_BUCKETS),
+    })
+    stamper.stamp(makeAddressInBucket(0x4321, 1))
+    await stamper.flush()
+
+    let writes = 0
+    const putChunk = cache.putChunk.bind(cache)
+    cache.putChunk = async (entry) => {
+      writes++
+      await putChunk(entry)
+    }
+    stamper.bindPartition({
+      partition: 0,
+      partitionCount: PARTITION_COUNT,
+      localCounter: stamper.buildLeaseLocalCounter(),
+    })
+    await stamper.flush()
+    expect(writes).toBe(0)
+  })
+
+  it("rows flushed at one depth load unchanged at another: a dilute changes no cached byte", async () => {
+    const { cache } = makeRecordingCache()
+    const before = await create(cache, 24)
+    before.bindPartition({
+      partition: 0,
+      partitionCount: PARTITION_COUNT,
+      localCounter: new Uint32Array(NUM_BUCKETS),
+    })
+    const BUCKET = 0x4321
+    before.stamp(makeAddressInBucket(BUCKET, 1))
+    before.stamp(makeAddressInBucket(BUCKET, 2))
+    before.stamp(makeAddressInBucket(NUM_BUCKETS - 1, 3))
+    await before.flush()
+
+    const after = await create(cache, 32)
+    expect(after.getUtilizationState().dataCounters[BUCKET]).toBe(2)
+    expect(after.getUtilizationState().dataCounters[NUM_BUCKETS - 1]).toBe(1)
+    expect(after.getUtilizationState().dataCounters).toEqual(
+      before.getUtilizationState().dataCounters,
+    )
+  })
+
+  it("starts fresh when the store itself is unavailable: no rows can exist there", async () => {
+    const cache = {
+      getAllChunks: async () => {
+        throw new UtilizationStoreUnavailableError("IndexedDB disabled")
+      },
+    } as unknown as UtilizationStoreDB
+    const stamper = await create(cache, 24)
+    expect(
+      stamper.getUtilizationState().dataCounters.every((c) => c === 0),
+    ).toBe(true)
+  })
+
+  it("refuses to start from zero when the cache cannot be read", async () => {
+    // A zero counter over rows that exist would flush zero-based rows over
+    // them on the first write and re-issue every slot they record.
+    const cache = {
+      getAllChunks: async () => {
+        throw new Error("IndexedDB blocked")
+      },
+    } as unknown as UtilizationStoreDB
+    await expect(create(cache, 24)).rejects.toThrow("IndexedDB blocked")
   })
 })
 

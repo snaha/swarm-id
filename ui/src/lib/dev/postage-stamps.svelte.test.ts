@@ -12,7 +12,7 @@
  * The assertions are therefore on the stamper's own depth-derived state, not
  * on the depth passed to it: `maxSlot` (`2^(depth - bucketDepth)`, the
  * per-bucket slot budget the inner bee-js stamper enforces) and the
- * utilization state's `batchDepth` (which picks the on-disk chunk layout).
+ * utilization state's `batchDepth` (which sets the lane capacity).
  * A stale cached stamper fails on those.
  */
 import { BatchId, EthAddress, PrivateKey } from '@ethersphere/bee-js'
@@ -29,8 +29,8 @@ import { postageStampsStore } from './postage-stamps.svelte'
 vi.mock('$app/environment', () => ({ browser: true }))
 
 // Node has no IndexedDB; stub the utilization cache the stamper opens at
-// construction so it starts from fresh counters (`create()` would otherwise
-// warn its way through a failed open). Everything else — the stamper itself
+// construction so it starts from fresh counters (`create()` refuses to start
+// over a cache it cannot read). Everything else — the stamper itself
 // included — stays real, since the depth assertions ride on it.
 vi.mock('@snaha/swarm-id/internal', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@snaha/swarm-id/internal')>()),

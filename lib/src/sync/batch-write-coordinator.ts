@@ -359,6 +359,13 @@ export class BatchWriteCoordinator {
         const localCounter = this.deps.stamper.getLocalCounter()
         if (localCounter !== undefined) {
           await this.partitionLease?.publishState(localCounter)
+          // The lease cache names the publish before the ack, so a reload
+          // within the TTL can tell rows certified for this publish (by the
+          // flush that follows) from rows left behind by a flush that never
+          // landed — see the adopt fast path in `acquire`.
+          if (this.partitionLease !== undefined) {
+            this.deps.writeLeaseCache?.(this.partitionLease.serialize())
+          }
           // The publish durably re-wrote the state pointer to the current
           // bucket (same effect as a successful heartbeat), so an idle-blip
           // failure streak is stale — clear it. Otherwise the refresh tick keeps
@@ -577,8 +584,6 @@ export class BatchWriteCoordinator {
         bee: this.deps.bee,
         deviceId: this.deps.deviceId,
         batchId: new BatchId(this.deps.batchId),
-        // The depth the counters serialize at: wider on a scratch drive.
-        batchDepth: stamper.counterDepth,
         swarmEncryptionKey,
         stamper,
         knownDeviceIds: this.deps.knownDeviceIds,
@@ -591,24 +596,43 @@ export class BatchWriteCoordinator {
       if (cached) lease.hydrate(cached)
 
       // Re-adopt fast path: a still-valid cached lease (e.g. after a reload
-      // within the TTL) is re-established from local state alone — no lock-SOC
-      // scan/write, so it survives transient Bee 500s. The refresh tick then
-      // reconciles with Swarm and demotes only on a confirmed foreign holder.
-      const adopted = lease.adoptIfLive()
+      // within the TTL) whose cache rows are certified for the lane is
+      // re-established from local state alone — no lock-SOC scan/write, so it
+      // survives transient Bee 500s. The refresh tick then reconciles with
+      // Swarm and demotes only on a confirmed foreign holder. The adopt binds
+      // the stamper's own table as the lane's counter, so that table must be
+      // the rows, and the rows must describe the lane as of the lease's LAST
+      // publish. `getRowsCertification` answers both: it reads the rows into
+      // the table, and names the publish whose counter a flush wrote them for
+      // (#463); the cached lease names the publish the lease last read or
+      // made (written before every ack). The two differ when that flush never
+      // landed — a tab dying between publish and flush, an IndexedDB failure —
+      // and the rows then sit below the pointer's counter; a lane held
+      // without a publish yet has neither. Both take the cold acquire below
+      // instead, which downloads the pointer's state when the rows'
+      // reference is not it.
+      // The reference also seeds the heartbeat's resume-pointer target: the cold
+      // `claimPartition` path seeds that from the state it reads on acquire;
+      // the adopt path skips `claimPartition`, so without it an adopted-but-idle
+      // holder never heartbeats the inherited pointer forward and it ages out
+      // of the takeover lookup span (resume-from-zero → re-issues a gone
+      // holder's acked slots). Read BEFORE the synchronous commit below so no
+      // await splits the bind, then re-check the epoch as the cold path does.
+      const cachedPartition = cached?.self?.partition
+      const certification =
+        cachedPartition === undefined
+          ? undefined
+          : await stamper
+              .getRowsCertification(cachedPartition)
+              .catch(() => undefined)
+      if (this.leaseEpoch !== epoch || this.disposed) return
+      const seededReferenceHex = certification?.referenceHex
+      const adopted =
+        certification !== undefined &&
+        seededReferenceHex === cached?.referenceHex
+          ? lease.adoptIfLive()
+          : undefined
       if (adopted !== undefined) {
-        // Seed the heartbeat's resume-pointer target from the persisted synced
-        // reference. The cold `claimPartition` path seeds this from the state it
-        // reads on acquire; the adopt fast path skips `claimPartition`, so
-        // without this an adopted-but-idle holder never heartbeats the inherited
-        // pointer forward and it ages out of the takeover lookup span
-        // (resume-from-zero → re-issues a gone holder's acked slots). Read it
-        // BEFORE the synchronous commit below so no await splits the bind, then
-        // re-check the epoch the same way the cold path does. Best-effort
-        // (undefined on a genuinely fresh partition → heartbeat stays a no-op).
-        const seededReferenceHex = await stamper
-          .getSyncedReference(adopted)
-          .catch(() => undefined)
-        if (this.leaseEpoch !== epoch || this.disposed) return
         // Diagnostic: this re-binds a CACHED lease with no Swarm scan and no
         // intent round. If two devices both adopt partition 0 from stale
         // caches, that's a dual-hold the intent round never gets to arbitrate.
@@ -1162,6 +1186,12 @@ export class BatchWriteCoordinator {
           // evict (idle-holder-crosses-an-epoch). Undefined in legacy single-
           // partition mode → the heartbeat stays a bare pointer write.
           await lease.heartbeatStatePointer(this.deps.stamper.getLocalCounter())
+          // The heartbeat may have re-pinned under a new reference: name it in
+          // the lease cache and commit it to the rows, as an upload's publish
+          // does, or a reload would adopt rows certified for the superseded
+          // one and heartbeat that back (its chunks no longer protected).
+          this.deps.writeLeaseCache?.(lease.serialize())
+          await this.deps.flushStamperState?.()
         })
         this.pointerHeartbeatFailingSince = undefined
       } catch (err) {
@@ -1223,6 +1253,10 @@ export class BatchWriteCoordinator {
           err,
         )
       }
+      // Commit the release's reference to the rows while the lane is still
+      // bound (we hold the write lock), so this device's next acquire of the
+      // same lane resumes from its rows instead of downloading the state.
+      await this.deps.flushStamperState?.()
     }
     this.deps.stamper.unbindPartition()
     this.partitionLease = undefined
@@ -1338,7 +1372,7 @@ export class BatchWriteCoordinator {
 
   /** Take the cross-tab Web Lock, run `op`, then flush stamper state. */
   private async lockAndFlush<T>(op: () => Promise<T>): Promise<T> {
-    return withBatchWriteLock(this.deps.batchId, async () => {
+    return this.lock(async () => {
       try {
         return await op()
       } finally {
@@ -1347,9 +1381,29 @@ export class BatchWriteCoordinator {
     })
   }
 
-  /** Take the cross-tab Web Lock without the stamper flush (lease mutations). */
+  /**
+   * Take the cross-tab Web Lock without the stamper flush (lease mutations).
+   *
+   * Every locked section starts by folding in the cache rows another tab
+   * wrote since this one last held the lock: the rows are shared, the
+   * counter table is per tab, and the lock is the one place a tab can read
+   * them knowing nobody is writing. Without it a tab stamps from what it
+   * remembers, and only a broadcast it may have missed stands between that
+   * and a slot a sibling already used. Best-effort: when the store cannot be
+   * read the tab works from its own table.
+   */
   private lock<T>(op: () => Promise<T>): Promise<T> {
-    return withBatchWriteLock(this.deps.batchId, op)
+    return withBatchWriteLock(this.deps.batchId, async () => {
+      await this.deps.stamper
+        .syncRows()
+        .catch((err: unknown) =>
+          console.warn(
+            "[BatchWriteCoordinator] Could not read the cached counters on taking the write lock:",
+            err,
+          ),
+        )
+      return op()
+    })
   }
 
   /** Post-acquisition guard: a multi-device account must hold a partition. */

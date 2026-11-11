@@ -118,16 +118,17 @@ Capacity is enforced per partition: a write is rejected when `j` would reach
 
 ## 5. Persistence of the counter
 
-The counter is a `Uint32Array(65536)` (one entry per bucket), serialised and split into
-chunks by `getChunkLayout(depth)`:
-
-- counter codec is uint16 for `depth ≤ UINT16_COUNTER_MAX_DEPTH`, else uint32;
-- `bucketsPerChunk = CHUNK_SIZE / counterByteSize`; `numUtilizationChunks = 65536 /
-bucketsPerChunk` (uint16 → 2,048 buckets/chunk → **32 chunks**).
+The counter is a `Uint32Array(65536)` (one entry per bucket). Locally it is cached as 64
+fixed uint32 chunks (`NUM_UTILIZATION_CHUNKS`), whatever the depth. On the wire it is packed
+with the SBU1 leaf encoding (`sync/counter-codec.ts`, #463): a per-publish frame (base + bit
+width chosen from the counters' spread), deltas packed to that width, outliers listed as
+exceptions in the reference chunk — typically 7–23 leaves instead of the fixed 32 or 64 the
+uint16/uint32 layout before it took, and independent of the batch depth, so a dilute changes
+nothing published. Topic domain `swarm-id-partition-state-v2`.
 
 Persistence rules:
 
-- **Each counter chunk is routed to its bucket's reserved slot `p`** (mutable overwrite),
+- **Each leaf is routed to its bucket's reserved slot `p`** (mutable overwrite),
   so persisting the counter never consumes data capacity. Per-chunk keys are varied so a
   partition's chunks land in **distinct buckets**; each then occupies slot `p` of its
   bucket.
@@ -143,18 +144,19 @@ consuming capacity and eventually throwing "Bucket is full" — even on a fresh 
 `writePartitionState` (`partition-state.ts`) turns the live counter into durable Swarm
 state:
 
-1. Each non-zero counter chunk is uploaded with a random encryption key to a reserved slot,
+1. Each non-zero leaf is uploaded with a random encryption key to a reserved slot,
    yielding a 64-byte **encrypted reference** (`address ‖ key`).
-2. A single **reference chunk** lists those N references (`N·64 ≤ 4096` even at `N = 64`)
-   and is itself uploaded the same way. A chunk that is entirely zero (never written) is
-   not uploaded — the reference chunk carries an **all-zero sentinel** at that index and the
-   reader defaults it to a zero chunk (a sparse first publish).
+2. A single **reference chunk** carries the frame, the exceptions and those L references
+   (within one chunk at the width cap) and is itself uploaded the same way. A leaf that is
+   entirely zero (never written) is not uploaded — the reference chunk carries an
+   **all-zero sentinel** at that index and the reader defaults it to a zero leaf (a sparse
+   first publish).
 3. The reference chunk's reference is published in the rotating state-pointer SOC (§8).
 
-**Incremental.** Given the previous publish's references and the counter it published,
-only the chunks whose serialized bytes changed are re-uploaded; unchanged chunks reuse the
-retained reference. A typical upload changes the data SOC's bucket plus the previous
-publish's feed bucket → ~3–4 chunk writes in one `Promise.all`, not all 32. On acquire the
+**Incremental.** Given the previous publish's references, the counter it published and
+the frame it packed with — kept while it still fits, so leaf boundaries hold — only the
+leaves whose bytes changed are re-uploaded; unchanged leaves reuse the retained reference.
+A small upload changes a leaf or two → a few writes in one `Promise.all`, not every leaf. On acquire the
 lease seeds this baseline from the resumed state, so even the **first** publish of a
 session is incremental, not a full re-publish. A genuinely fresh account (no recovered
 refs) falls back to the sparse-full path.
@@ -254,7 +256,25 @@ overwrite a **new** holder's already-acked data. Chunks are content-addressed, s
 upload is a safe retry.
 
 A device that reloads within its own lease TTL skips the read entirely and re-derives its
-counter from local state (the re-adopt fast path).
+counter from local state (the re-adopt fast path) — provided its cache rows are certified for
+that lane: the device keeps one synced reference, for the lane the rows describe, and a lane
+switch rewrites every row (certifying no lane while it runs) before the new lane's first publish
+certifies them again. Rows a dying tab left half rewritten, or a lane held without a publish
+yet, take the cold read instead.
+
+The rows are shared by every tab of the storage partition, each with its own stamper and its
+own counter table in memory. A flush bumps a generation on the rows before its first row and
+after its last, and a tab reads that generation on taking the cross-tab write lock, before it
+binds or stamps anything: if another tab has written the rows since, it folds them into its
+table. Counters only grow, so rows for the lane the tab is on are folded in by per-bucket
+maximum — neither tab can lower the other's — and an unbound tab simply takes the rows, which
+is the table a resume from local state binds. The broadcast between tabs still carries each
+write across early; it is no longer what correctness rests on.
+
+A reference certifies rows as _at or past_ its counter. They are _exactly_ it only until an
+upload whose publish failed flushes its stamps; from then the device still resumes from the
+rows (the unacked slots stay unissued), but its first publish goes out in full: an incremental
+one would retain leaves under an exception list they do not match, which no reader can decode.
 
 ## 9. Release fencing (#349)
 
@@ -363,7 +383,12 @@ that feeds the rival set. The beacon is a correctness mechanism; the heartbeat i
   state. Accepted because the lib is bundled into the centrally-deployed UI apps — every
   device loads the current build fresh, so the exposure is one already-open tab spanning a
   deploy, and the data at risk overlaps the unclean-crash slots already accepted above. A
-  future wire-format change must bump the topic domain (`…-v2`) instead of reusing v1.
+  future wire-format change must bump the topic domain instead of reusing it.
+- **The SBU1 format replaced the fixed-width one outright (#463).** State published under
+  the `v1` topic domain (uint16 counters in 32 chunks up to depth 31, uint32 in 64 above) is
+  not read or converted: a batch's first acquire under `v2` finds no state and resumes from
+  zero, re-issuing the slots its `v1` counters recorded. Accepted as a `0.x` break (there are
+  no users to keep); the IndexedDB counter cache was dropped with it (`DB_VERSION`).
 
 ## Key constants (in `lib/src/utils/batch-utilization.ts` unless noted)
 

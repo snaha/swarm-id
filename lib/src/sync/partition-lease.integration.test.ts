@@ -66,10 +66,12 @@ import {
   PARTITION_COUNT,
   NUM_BUCKETS,
   PartitionLeaseLostError,
-  getChunkLayout,
   toBucket,
   UtilizationAwareStamper,
 } from "../utils/batch-utilization"
+import { leafCount } from "./counter-codec"
+import { BACKUP_KEY_LABEL, deriveSecret } from "../utils/key-derivation"
+import { uint8ArrayToHex } from "../utils/hex"
 import { makeEncryptedContentAddressedChunk } from "../chunk"
 import { uploadData, type UploadTarget } from "../proxy/upload"
 import {
@@ -99,6 +101,25 @@ const BACKUP_SIGNER = createTestSigner() as PrivateKey
 const OWNER = BACKUP_SIGNER.publicKey().address()
 
 const GUARD_MS = 50 // small for tests; production default is 2000
+
+/**
+ * A counter with more touched buckets than the exception list holds, so it
+ * packs into leaves rather than exceptions alone: 200 buckets at 2 in the
+ * first `LEAFY_BUCKETS_PER_LEAF` buckets, which the canonical frame
+ * (`LEAFY_FRAME`) spreads over `LEAFY_LEAVES` leaves — the first real, the
+ * rest all-zero sentinels. At 2, not 1: delta 1 fits width 1, whose two
+ * leaves leave a single sentinel. `extra` puts more buckets at 2 wherever a
+ * test wants another real leaf.
+ */
+const LEAFY_FRAME = { base: 0, width: 2 }
+const LEAFY_LEAVES = 4
+const LEAFY_BUCKETS_PER_LEAF = 16384
+function leafyCounter(extra: number[] = []): Uint32Array {
+  const counter = new Uint32Array(NUM_BUCKETS)
+  for (let b = 0; b < 200; b++) counter[b * 50] = 2
+  for (const bucket of extra) counter[bucket] = 2
+  return counter
+}
 
 // ============================================================================
 // Helpers
@@ -154,7 +175,6 @@ function makeLease(opts: {
     bee: opts.bee,
     deviceId: opts.deviceId,
     batchId: TEST_BATCH_ID,
-    batchDepth: TEST_BATCH_DEPTH,
     swarmEncryptionKey: TEST_ENC_KEY,
     backupSigner: BACKUP_SIGNER,
     stamper: createMockStamper(),
@@ -203,7 +223,6 @@ describe("readPartitionState / writePartitionState round-trip", () => {
       bee: bee,
       stamper,
       batchId: TEST_BATCH_ID,
-      batchDepth: TEST_BATCH_DEPTH,
       partition: 0,
       localCounter,
       backupSigner: BACKUP_SIGNER,
@@ -216,7 +235,6 @@ describe("readPartitionState / writePartitionState round-trip", () => {
       swarmEncryptionKey: TEST_ENC_KEY,
       batchId: TEST_BATCH_ID,
       partition: 0,
-      batchDepth: TEST_BATCH_DEPTH,
     })
 
     expect(result.unchanged).toBe(false)
@@ -232,21 +250,17 @@ describe("readPartitionState / writePartitionState round-trip", () => {
       bee: bee,
       stamper: createMockStamper(),
       batchId: TEST_BATCH_ID,
-      batchDepth: TEST_BATCH_DEPTH,
       partition: 0,
       localCounter,
       backupSigner: BACKUP_SIGNER,
       swarmEncryptionKey: TEST_ENC_KEY,
     })
 
-    // Sparse publish: only the ONE non-zero counter chunk (bucket 42's chunk)
-    // is uploaded, plus the reference chunk — far fewer than
-    // numUtilizationChunks (the all-zero chunks are sentinels, never uploaded).
-    // All distinct, none on the partition's lock-SOC bucket.
-    const { numUtilizationChunks } = getChunkLayout(TEST_BATCH_DEPTH)
-    expect(written.stateBuckets).toHaveLength(2) // 1 non-zero counter chunk + ref chunk
-    expect(written.stateBuckets.length).toBeLessThan(numUtilizationChunks)
-    expect(new Set(written.stateBuckets).size).toBe(2)
+    // Sparse publish: one touched bucket packs as an exception at width 0, so
+    // there is no leaf at all — only the reference chunk is uploaded. Not on
+    // the partition's lock-SOC bucket.
+    expect(written.frame).toEqual({ base: 0, width: 0 })
+    expect(written.stateBuckets).toHaveLength(1) // the reference chunk alone
     expect(written.stateBuckets).not.toContain(
       lockSocBucket(TEST_BATCH_ID, 0, OWNER),
     )
@@ -259,30 +273,25 @@ describe("readPartitionState / writePartitionState round-trip", () => {
       swarmEncryptionKey: TEST_ENC_KEY,
       batchId: TEST_BATCH_ID,
       partition: 0,
-      batchDepth: TEST_BATCH_DEPTH,
     })
     expect(new Set(read.stateBuckets)).toEqual(new Set(written.stateBuckets))
   })
 
-  it("returns the per-chunk references (incl. sentinels) for the caller to seed", async () => {
-    const { numUtilizationChunks } = getChunkLayout(TEST_BATCH_DEPTH)
-
-    const localCounter = new Uint32Array(NUM_BUCKETS)
-    localCounter[100] = 5 // chunk 0
+  it("returns the per-leaf references (incl. sentinels) for the caller to seed", async () => {
+    const localCounter = leafyCounter()
     const stamper = createMockStamper()
     const { referenceHex } = await partitionState.writePartitionState({
       bee: bee,
       stamper,
       batchId: TEST_BATCH_ID,
-      batchDepth: TEST_BATCH_DEPTH,
       partition: 0,
       localCounter,
       backupSigner: BACKUP_SIGNER,
       swarmEncryptionKey: TEST_ENC_KEY,
     })
 
-    // Full read: the complete ref set (one real ref + sentinels for the rest),
-    // length numUtilizationChunks — exactly what claimPartition seeds as the
+    // Full read: the complete ref set (one real ref + a sentinel for the
+    // all-zero leaf) and the frame — exactly what claimPartition seeds as the
     // publish baseline so the first publish is incremental.
     const full = await partitionState.readPartitionState({
       bee: bee,
@@ -290,9 +299,17 @@ describe("readPartitionState / writePartitionState round-trip", () => {
       swarmEncryptionKey: TEST_ENC_KEY,
       batchId: TEST_BATCH_ID,
       partition: 0,
-      batchDepth: TEST_BATCH_DEPTH,
     })
-    expect(full.references).toHaveLength(numUtilizationChunks)
+    expect(full.frame).toEqual(LEAFY_FRAME)
+    const numLeaves = leafCount(LEAFY_FRAME.width)
+    expect(numLeaves).toBe(LEAFY_LEAVES)
+    expect(full.references).toHaveLength(numLeaves)
+    expect(full.references!.map((r) => r.some((b) => b !== 0))).toEqual([
+      true,
+      false,
+      false,
+      false,
+    ])
 
     // Cache hit still returns references (best-effort ref-chunk download), so a
     // reload's re-acquire can seed an incremental first publish too.
@@ -303,25 +320,23 @@ describe("readPartitionState / writePartitionState round-trip", () => {
         swarmEncryptionKey: TEST_ENC_KEY,
         batchId: TEST_BATCH_ID,
         partition: 0,
-        batchDepth: TEST_BATCH_DEPTH,
       },
       referenceHex,
     )
     expect(cached.unchanged).toBe(true)
-    expect(cached.references).toHaveLength(numUtilizationChunks)
+    expect(cached.references).toHaveLength(numLeaves)
     expect(cached.references).toEqual(full.references)
+    expect(cached.frame).toEqual(full.frame)
   })
 
-  it("skips the reference + counter-chunk downloads when the pointer is unchanged", async () => {
-    const localCounter = new Uint32Array(NUM_BUCKETS)
-    localCounter[100] = 5
+  it("skips the reference + leaf downloads when the pointer is unchanged", async () => {
+    const localCounter = leafyCounter()
     const stamper = createMockStamper()
     const { referenceHex: writtenRef } =
       await partitionState.writePartitionState({
         bee: bee,
         stamper,
         batchId: TEST_BATCH_ID,
-        batchDepth: TEST_BATCH_DEPTH,
         partition: 0,
         localCounter,
         backupSigner: BACKUP_SIGNER,
@@ -337,7 +352,6 @@ describe("readPartitionState / writePartitionState round-trip", () => {
       swarmEncryptionKey: TEST_ENC_KEY,
       batchId: TEST_BATCH_ID,
       partition: 0,
-      batchDepth: TEST_BATCH_DEPTH,
     })
     expect(full.unchanged).toBe(false)
     expect(full.localCounter).toEqual(localCounter)
@@ -352,7 +366,6 @@ describe("readPartitionState / writePartitionState round-trip", () => {
         swarmEncryptionKey: TEST_ENC_KEY,
         batchId: TEST_BATCH_ID,
         partition: 0,
-        batchDepth: TEST_BATCH_DEPTH,
       },
       writtenRef,
     )
@@ -386,7 +399,6 @@ describe("readPartitionState / writePartitionState round-trip", () => {
       swarmEncryptionKey: TEST_ENC_KEY,
       batchId: TEST_BATCH_ID,
       partition: 0,
-      batchDepth: TEST_BATCH_DEPTH,
     })
 
     expect(result.readFailed).toBe(true)
@@ -401,7 +413,6 @@ describe("readPartitionState / writePartitionState round-trip", () => {
       bee: bee,
       stamper: createMockStamper(),
       batchId: TEST_BATCH_ID,
-      batchDepth: TEST_BATCH_DEPTH,
       partition: 0,
       localCounter,
       backupSigner: BACKUP_SIGNER,
@@ -418,7 +429,6 @@ describe("readPartitionState / writePartitionState round-trip", () => {
       swarmEncryptionKey: TEST_ENC_KEY,
       batchId: TEST_BATCH_ID,
       partition: 0,
-      batchDepth: TEST_BATCH_DEPTH,
     })
     expect(ok.readFailed).toBeUndefined()
     const lastFetched = getSpy.mock.calls.at(-1)![0]
@@ -431,7 +441,6 @@ describe("readPartitionState / writePartitionState round-trip", () => {
       swarmEncryptionKey: TEST_ENC_KEY,
       batchId: TEST_BATCH_ID,
       partition: 0,
-      batchDepth: TEST_BATCH_DEPTH,
     })
     expect(result.readFailed).toBe(true)
     expect(result.localCounter).toBeUndefined()
@@ -444,7 +453,6 @@ describe("readPartitionState / writePartitionState round-trip", () => {
       swarmEncryptionKey: TEST_ENC_KEY,
       batchId: TEST_BATCH_ID,
       partition: 0,
-      batchDepth: TEST_BATCH_DEPTH,
     })
 
     expect(result.readFailed).toBeUndefined()
@@ -463,7 +471,6 @@ describe("readPartitionState / writePartitionState round-trip", () => {
       swarmEncryptionKey: TEST_ENC_KEY,
       batchId: TEST_BATCH_ID,
       partition: 0,
-      batchDepth: TEST_BATCH_DEPTH,
       lockUnreadable: true,
     })
 
@@ -480,7 +487,6 @@ describe("readPartitionState / writePartitionState round-trip", () => {
       swarmEncryptionKey: TEST_ENC_KEY,
       batchId: TEST_BATCH_ID,
       partition: 0,
-      batchDepth: TEST_BATCH_DEPTH,
       lockUnreadable: false,
     })
 
@@ -500,7 +506,6 @@ describe("readPartitionState / writePartitionState round-trip", () => {
       bee: bee,
       stamper: createMockStamper(),
       batchId: TEST_BATCH_ID,
-      batchDepth: TEST_BATCH_DEPTH,
       partition: 0,
       localCounter,
       backupSigner: BACKUP_SIGNER,
@@ -518,7 +523,6 @@ describe("readPartitionState / writePartitionState round-trip", () => {
       swarmEncryptionKey: TEST_ENC_KEY,
       batchId: TEST_BATCH_ID,
       partition: 0,
-      batchDepth: TEST_BATCH_DEPTH,
     })
     expect(missed.localCounter![7]).toBe(0) // zero-seed (not found)
 
@@ -530,7 +534,6 @@ describe("readPartitionState / writePartitionState round-trip", () => {
       swarmEncryptionKey: TEST_ENC_KEY,
       batchId: TEST_BATCH_ID,
       partition: 0,
-      batchDepth: TEST_BATCH_DEPTH,
       holderLeasedUntilMs: longAgo + STATE_EPOCH_MS,
     })
     expect(found.localCounter).toEqual(localCounter)
@@ -551,7 +554,6 @@ describe("readPartitionState / writePartitionState round-trip", () => {
       bee: bee,
       stamper: createMockStamper(),
       batchId: TEST_BATCH_ID,
-      batchDepth: TEST_BATCH_DEPTH,
       partition: 0,
       localCounter,
       backupSigner: BACKUP_SIGNER,
@@ -577,7 +579,6 @@ describe("readPartitionState / writePartitionState round-trip", () => {
       swarmEncryptionKey: TEST_ENC_KEY,
       batchId: TEST_BATCH_ID,
       partition: 0,
-      batchDepth: TEST_BATCH_DEPTH,
       holderLeasedUntilMs: leasedUntil,
     })
     expect(found.localCounter).toEqual(localCounter)
@@ -668,9 +669,7 @@ describe("intent / occupancy / state-pointer SOC slot race (regression)", () => 
 })
 
 describe("PartitionLease.acquire — seeds the incremental first publish", () => {
-  it("a fresh lease resumes from the published refs, so its first publish is incremental (one chunk)", async () => {
-    const { numUtilizationChunks } = getChunkLayout(TEST_BATCH_DEPTH)
-
+  it("a fresh lease resumes from the published refs, so its first publish is incremental (one leaf)", async () => {
     // Pin a fixed clock (as the epoch-re-pin sibling below does): acquire seeds
     // `lastFullPublishEpoch` from `now`, and `flushState` forces a FULL re-pin
     // (previousReferences nulled) whenever the epoch has rolled since. On the
@@ -681,17 +680,12 @@ describe("PartitionLease.acquire — seeds the incremental first publish", () =>
     // bucket the lease reads (#385).
     const clock = 30_000 * 1000
 
-    // A prior holder published multi-chunk state (non-zero buckets across three
-    // distinct counter chunks; bucketsPerChunk = 2048).
-    const published = new Uint32Array(NUM_BUCKETS)
-    published[100] = 5 // chunk 0
-    published[3000] = 7 // chunk 1
-    published[5000] = 9 // chunk 2
+    // A prior holder published multi-leaf state: real leaves 0, 1 and 2.
+    const published = leafyCounter([20_000, 40_000])
     await partitionState.writePartitionState({
       bee: bee,
       stamper: createMockStamper(),
       batchId: TEST_BATCH_ID,
-      batchDepth: TEST_BATCH_DEPTH,
       partition: 0,
       localCounter: published,
       backupSigner: BACKUP_SIGNER,
@@ -714,23 +708,23 @@ describe("PartitionLease.acquire — seeds the incremental first publish", () =>
     expect(acquired.partition).toBe(0)
     expect(acquired.localCounter).toEqual(published)
 
-    // Advance exactly ONE bucket (same chunk 0) and publish.
+    // Advance exactly ONE bucket (same leaf 0) and publish.
     const next = acquired.localCounter.slice()
     next[101] += 1
     await lease.publishState(next)
 
     // The fix: the first publish ran incrementally against the resumed state —
-    // it received the full seeded ref set as `previousReferences` (not undefined,
-    // which would force a full re-publish of all three non-zero chunks).
+    // it received the full seeded ref set and frame as `previousReferences` /
+    // `previousFrame` (not undefined, which would force a full re-publish of
+    // all three non-zero leaves).
     expect(writeSpy).toHaveBeenCalledTimes(1)
     const firstPublishArgs = writeSpy.mock.calls[0][0]
-    expect(firstPublishArgs.previousReferences).toHaveLength(
-      numUtilizationChunks,
-    )
+    expect(firstPublishArgs.previousReferences).toHaveLength(LEAFY_LEAVES)
+    expect(firstPublishArgs.previousFrame).toEqual(LEAFY_FRAME)
     expect(firstPublishArgs.previousCounter).toEqual(published)
 
-    // ...and it re-uploaded only the changed chunk: the resulting refs differ
-    // from the seed at exactly chunk 0 (101 lives in chunk 0); chunks 1 & 2 keep
+    // ...and it re-uploaded only the changed leaf: the resulting refs differ
+    // from the seed at exactly leaf 0 (101 lives in leaf 0); leaves 1 & 2 keep
     // their original refs.
     const seed = firstPublishArgs.previousReferences as Uint8Array[]
     const after = (await writeSpy.mock.results[0].value).references
@@ -749,14 +743,11 @@ describe("PartitionLease.acquire — seeds the incremental first publish", () =>
     // rotating pointer lands in a different bucket and acquire can't resume it.
     let clock = EPOCH_MS * 1000 // start of epoch 1000
 
-    const published = new Uint32Array(NUM_BUCKETS)
-    published[100] = 5 // chunk 0
-    published[3000] = 7 // chunk 1
+    const published = leafyCounter([20_000]) // real leaves 0 and 1
     await partitionState.writePartitionState({
       bee: bee,
       stamper: createMockStamper(),
       batchId: TEST_BATCH_ID,
-      batchDepth: TEST_BATCH_DEPTH,
       partition: 0,
       localCounter: published,
       backupSigner: BACKUP_SIGNER,
@@ -779,8 +770,9 @@ describe("PartitionLease.acquire — seeds the incremental first publish", () =>
     a[101] += 1
     await lease.publishState(a)
     expect(writeSpy.mock.calls[0][0].previousReferences).toHaveLength(
-      getChunkLayout(TEST_BATCH_DEPTH).numUtilizationChunks,
+      LEAFY_LEAVES,
     )
+    expect(writeSpy.mock.calls[0][0].previousFrame).toEqual(LEAFY_FRAME)
 
     // Roll the clock into the NEXT epoch → the first publish there forces a full
     // re-pin (previousReferences nulled) so a chunk retained from the prior epoch
@@ -791,6 +783,7 @@ describe("PartitionLease.acquire — seeds the incremental first publish", () =>
     await lease.publishState(b)
     expect(writeSpy.mock.calls[1][0].previousReferences).toBeUndefined()
     expect(writeSpy.mock.calls[1][0].previousCounter).toBeUndefined()
+    expect(writeSpy.mock.calls[1][0].previousFrame).toBeUndefined()
   })
 
   it("a resumed holder heartbeats the inherited pointer (acquire seeds lastReferenceHex)", async () => {
@@ -801,7 +794,6 @@ describe("PartitionLease.acquire — seeds the incremental first publish", () =>
       bee: bee,
       stamper: createMockStamper(),
       batchId: TEST_BATCH_ID,
-      batchDepth: TEST_BATCH_DEPTH,
       partition: 0,
       localCounter: published,
       backupSigner: BACKUP_SIGNER,
@@ -887,7 +879,6 @@ describe("PartitionLease.acquire — seeds the incremental first publish", () =>
         bee: bee,
         stamper: createMockStamper(),
         batchId: TEST_BATCH_ID,
-        batchDepth: TEST_BATCH_DEPTH,
         partition: 0,
         localCounter: published,
         backupSigner: BACKUP_SIGNER,
@@ -966,7 +957,6 @@ describe("PartitionLease.acquire — seeds the incremental first publish", () =>
       bee: bee,
       stamper: createMockStamper(),
       batchId: TEST_BATCH_ID,
-      batchDepth: TEST_BATCH_DEPTH,
       partition: 0,
       localCounter: published,
       backupSigner: BACKUP_SIGNER,
@@ -1028,7 +1018,7 @@ describe("PartitionLease.acquire — unreadable partition state", () => {
       stamper: createMockStamper(),
     }
 
-    // A readable chunk that is NOT numUtilizationChunks × 64 bytes — e.g. an
+    // A readable chunk that is NOT a reference chunk its own header describes — e.g. an
     // entry written by a buggy or older writer. Reads must fail safe: a pointer
     // EXISTS, so the partition has a real resume point — a zero counter would
     // re-issue every used slot.
@@ -1044,7 +1034,6 @@ describe("PartitionLease.acquire — unreadable partition state", () => {
       swarmEncryptionKey: TEST_ENC_KEY,
       batchId: TEST_BATCH_ID,
       partition: 0,
-      batchDepth: TEST_BATCH_DEPTH,
     })
 
     expect(result.readFailed).toBe(true)
@@ -1053,24 +1042,29 @@ describe("PartitionLease.acquire — unreadable partition state", () => {
     expect(result.referenceHex).toBeUndefined()
   })
 
-  it("reports readFailed when a counter chunk has the wrong length", async () => {
+  it("reports readFailed when a leaf has the wrong length", async () => {
     const target: UploadTarget = {
       mode: "stamper",
       bee: bee,
       stamper: createMockStamper(),
     }
 
-    // A correctly-sized reference chunk whose entries all point at a counter
-    // chunk of the wrong length (100 bytes instead of CHUNK_SIZE). mergeChunk
-    // must reject it and the read must fail safe (readFailed, no zero-seed).
-    const shortCounterRef = await uploadEncryptedBlob(
+    // A well-formed reference chunk (width 2 → four leaves, no exceptions)
+    // whose entries all point at a leaf of the wrong length (100 bytes). The
+    // decoder must reject it and the read must fail safe (readFailed, no
+    // zero-seed).
+    const shortLeafRef = await uploadEncryptedBlob(
       target,
       new Uint8Array(100).fill(1),
     )
-    const { numUtilizationChunks } = getChunkLayout(TEST_BATCH_DEPTH)
-    const referenceChunk = Binary.concatBytes(
-      ...Array.from({ length: numUtilizationChunks }, () => shortCounterRef),
+    const REFERENCE_HEADER_BYTES = 7
+    const referenceChunk = new Uint8Array(
+      REFERENCE_HEADER_BYTES + LEAFY_LEAVES * 64,
     )
+    referenceChunk[0] = LEAFY_FRAME.width
+    for (let i = 0; i < LEAFY_LEAVES; i++) {
+      referenceChunk.set(shortLeafRef, REFERENCE_HEADER_BYTES + i * 64)
+    }
     const referenceChunkRef = await uploadEncryptedBlob(target, referenceChunk)
     await seedStatePointer(Binary.uint8ArrayToHex(referenceChunkRef))
 
@@ -1080,7 +1074,6 @@ describe("PartitionLease.acquire — unreadable partition state", () => {
       swarmEncryptionKey: TEST_ENC_KEY,
       batchId: TEST_BATCH_ID,
       partition: 0,
-      batchDepth: TEST_BATCH_DEPTH,
     })
 
     expect(result.readFailed).toBe(true)
@@ -1104,7 +1097,6 @@ describe("PartitionLease.acquire — unreadable partition state", () => {
         swarmEncryptionKey: TEST_ENC_KEY,
         batchId: TEST_BATCH_ID,
         partition: 0,
-        batchDepth: TEST_BATCH_DEPTH,
         holderLeasedUntilMs: 1_000_000, // a gone holder → state may exist
       })
       expect(result.readFailed).toBe(true)
@@ -1130,7 +1122,6 @@ describe("PartitionLease.acquire — unreadable partition state", () => {
         swarmEncryptionKey: TEST_ENC_KEY,
         batchId: TEST_BATCH_ID,
         partition: 0,
-        batchDepth: TEST_BATCH_DEPTH,
       })
       expect(result.readFailed).toBeFalsy()
       expect(result.localCounter).toEqual(new Uint32Array(NUM_BUCKETS))
@@ -1149,7 +1140,6 @@ describe("PartitionLease.acquire — unreadable partition state", () => {
       bee: bee,
       stamper: createMockStamper(),
       batchId: TEST_BATCH_ID,
-      batchDepth: TEST_BATCH_DEPTH,
       partition: 0,
       localCounter,
       backupSigner: BACKUP_SIGNER,
@@ -1172,7 +1162,6 @@ describe("PartitionLease.acquire — unreadable partition state", () => {
         swarmEncryptionKey: TEST_ENC_KEY,
         batchId: TEST_BATCH_ID,
         partition: 0,
-        batchDepth: TEST_BATCH_DEPTH,
         nowMs,
       })
       expect(result.readFailed).toBe(true)
@@ -1201,7 +1190,6 @@ describe("PartitionLease.acquire — unreadable partition state", () => {
           swarmEncryptionKey: TEST_ENC_KEY,
           batchId: TEST_BATCH_ID,
           partition: 0,
-          batchDepth: TEST_BATCH_DEPTH,
           holderLeasedUntilMs: 1_000_000, // a gone holder → state may exist
         },
         "aa".repeat(64), // stale local synced reference
@@ -1226,7 +1214,6 @@ describe("PartitionLease.acquire — unreadable partition state", () => {
         swarmEncryptionKey: TEST_ENC_KEY,
         batchId: TEST_BATCH_ID,
         partition: 0,
-        batchDepth: TEST_BATCH_DEPTH,
         holderLeasedUntilMs: 1_000_000,
       },
       knownRef,
@@ -1242,7 +1229,6 @@ describe("PartitionLease.acquire — unreadable partition state", () => {
         bee: bee,
         stamper: createMockStamper(),
         batchId: TEST_BATCH_ID,
-        batchDepth: TEST_BATCH_DEPTH,
         partition: 0,
         localCounter: new Uint32Array(5),
         backupSigner: BACKUP_SIGNER,
@@ -1368,7 +1354,6 @@ describe("PartitionLease.acquire — fresh scan", () => {
       bee: bee,
       stamper: createMockStamper(),
       batchId: TEST_BATCH_ID,
-      batchDepth: TEST_BATCH_DEPTH,
       partition: 0,
       localCounter: published,
       backupSigner: BACKUP_SIGNER,
@@ -1738,7 +1723,6 @@ describe("PartitionLease.acquire — solo-clean guard skip", () => {
       bee: bee,
       deviceId: opts.deviceId,
       batchId: TEST_BATCH_ID,
-      batchDepth: TEST_BATCH_DEPTH,
       swarmEncryptionKey: TEST_ENC_KEY,
       backupSigner: BACKUP_SIGNER,
       stamper: createMockStamper(),
@@ -1804,8 +1788,11 @@ describe("PartitionLease.release — after the coordinator's teardown", () => {
       getAllChunks: async () => [],
       putChunk: async () => undefined,
       getMetadata: async () => metadata,
-      putMetadata: async (next: unknown) => {
-        metadata = next
+      updateMetadata: async (
+        batchId: string,
+        patch: (existing: unknown) => object,
+      ) => {
+        metadata = { ...patch(metadata), batchId }
       },
     } as unknown as Parameters<typeof UtilizationAwareStamper.create>[3]
     const stamper = await UtilizationAwareStamper.create(
@@ -1822,7 +1809,6 @@ describe("PartitionLease.release — after the coordinator's teardown", () => {
       bee,
       deviceId: DEVICE_A,
       batchId: TEST_BATCH_ID,
-      batchDepth: TEST_BATCH_DEPTH,
       swarmEncryptionKey: TEST_ENC_KEY,
       guardMs: GUARD_MS,
       intentGuardWindowMs: 0,
@@ -1895,32 +1881,31 @@ describe("PartitionLease.refresh", () => {
 })
 
 describe("writePartitionState — incremental", () => {
-  it("re-uploads only changed chunks (unchanged refs retained) and reads back the full counter", async () => {
+  it("re-uploads only changed leaves (unchanged refs retained) and reads back the full counter", async () => {
     const stamper = createMockStamper()
-    const { numUtilizationChunks, bucketsPerChunk } =
-      getChunkLayout(TEST_BATCH_DEPTH)
 
-    const counter = new Uint32Array(NUM_BUCKETS)
-    counter[100] = 5
+    // Real leaves 0, 1 and 2; leaf 3 a sentinel.
+    const counter = leafyCounter([20_000, 40_000])
     const first = await partitionState.writePartitionState({
       bee: bee,
       stamper,
       batchId: TEST_BATCH_ID,
-      batchDepth: TEST_BATCH_DEPTH,
       partition: 0,
       localCounter: counter,
       backupSigner: BACKUP_SIGNER,
       swarmEncryptionKey: TEST_ENC_KEY,
     })
-    expect(first.references).toHaveLength(numUtilizationChunks)
+    expect(first.frame).toEqual(LEAFY_FRAME)
+    expect(first.references).toHaveLength(LEAFY_LEAVES)
 
-    // Change two buckets that fall in two distinct counter chunks.
+    // Change two buckets that fall in two distinct leaves, within the width
+    // (3 = 2^2 − 1, the largest delta width 2 holds in-band).
     const next = first.publishedCounter.slice()
-    next[100] = 9
-    next[5000] = 7
+    next[100] = 3
+    next[20_000] = 3
     const changed = new Set([
-      Math.floor(100 / bucketsPerChunk),
-      Math.floor(5000 / bucketsPerChunk),
+      Math.floor(100 / LEAFY_BUCKETS_PER_LEAF),
+      Math.floor(20_000 / LEAFY_BUCKETS_PER_LEAF),
     ])
     expect(changed.size).toBe(2)
 
@@ -1928,23 +1913,24 @@ describe("writePartitionState — incremental", () => {
       bee: bee,
       stamper,
       batchId: TEST_BATCH_ID,
-      batchDepth: TEST_BATCH_DEPTH,
       partition: 0,
       localCounter: next,
       backupSigner: BACKUP_SIGNER,
       swarmEncryptionKey: TEST_ENC_KEY,
       previousReferences: first.references,
       previousCounter: first.publishedCounter,
+      previousFrame: first.frame,
     })
+    expect(second.frame).toEqual(first.frame)
 
-    // A re-uploaded chunk is re-keyed (fresh random key → new ref); an untouched
-    // chunk keeps its prior ref, i.e. it was NOT re-uploaded. This is the
-    // incremental guarantee — only the changed chunks hit the network.
-    for (let i = 0; i < numUtilizationChunks; i++) {
+    // A re-uploaded leaf is re-keyed (fresh random key → new ref); an untouched
+    // leaf keeps its prior ref, i.e. it was NOT re-uploaded. This is the
+    // incremental guarantee — only the changed leaves hit the network.
+    for (let i = 0; i < LEAFY_LEAVES; i++) {
       const retained =
         Binary.uint8ArrayToHex(second.references[i]) ===
         Binary.uint8ArrayToHex(first.references[i])
-      expect(retained, `chunk ${i} retained?`).toBe(!changed.has(i))
+      expect(retained, `leaf ${i} retained?`).toBe(!changed.has(i))
     }
 
     // The taking-over device still reconstructs the FULL counter (changed +
@@ -1955,109 +1941,169 @@ describe("writePartitionState — incremental", () => {
       swarmEncryptionKey: TEST_ENC_KEY,
       batchId: TEST_BATCH_ID,
       partition: 0,
-      batchDepth: TEST_BATCH_DEPTH,
     })
     expect(read.localCounter).toEqual(next)
   })
 
   it("does a full publish when no previous refs are supplied", async () => {
     const stamper = createMockStamper()
-    const { numUtilizationChunks } = getChunkLayout(TEST_BATCH_DEPTH)
-    const counter = new Uint32Array(NUM_BUCKETS)
-    counter[1] = 1
+    const counter = leafyCounter()
     // previousCounter without previousReferences → NOT incremental.
     const res = await partitionState.writePartitionState({
       bee: bee,
       stamper,
       batchId: TEST_BATCH_ID,
-      batchDepth: TEST_BATCH_DEPTH,
       partition: 0,
       localCounter: counter,
       backupSigner: BACKUP_SIGNER,
       swarmEncryptionKey: TEST_ENC_KEY,
       previousCounter: counter.slice(),
     })
-    expect(res.references).toHaveLength(numUtilizationChunks)
+    expect(res.references).toHaveLength(LEAFY_LEAVES)
     expect(res.references.every((r) => r.length === 64)).toBe(true)
   })
+})
 
-  // Regression: the "divergent seed" the cache-hit branch of `claimPartition`
-  // produces after a FAILED publish — `previousReferences` describe the last
-  // ACKED counter, but `previousCounter` (= the stamper's local counter) is
-  // AHEAD by an unacked write. The incremental diff must retain the acked ref
-  // for the ahead-but-unchanged chunk, so a takeover resumes at the acked FLOOR
-  // (never past it into an acked slot). See the SAFETY INVARIANT note in
-  // partition-lease.ts (`claimPartition`).
-  it("retains the acked ref when the seed counter is ahead (unacked write); reader resumes at the acked floor", async () => {
-    const stamper = createMockStamper()
-    const { bucketsPerChunk } = getChunkLayout(TEST_BATCH_DEPTH)
+describe("PartitionLease.acquire — a cache-hit claim and its publish baseline (#463)", () => {
+  // The exception list rides in the reference chunk, so a leaf retained by an
+  // incremental publish must be the leaf the published counter encodes. The
+  // lease diffs against the stamper's rows on a cache hit, which is that
+  // counter only while the rows are exactly it.
+  const clock = 30_000 * 1000
+  const AHEAD_BUCKET = 100
+  const NEW_BUCKET = 20_000
 
-    // 1. The last ACKED publish: bucket 100 at counter 5.
-    const AHEAD_BUCKET = 100
-    const NEW_BUCKET = 5000
-    const ACKED_VALUE = 5
-    const acked = new Uint32Array(NUM_BUCKETS)
-    acked[AHEAD_BUCKET] = ACKED_VALUE
-    const ackedPublish = await partitionState.writePartitionState({
-      bee: bee,
+  function makeRowsCache() {
+    const rows = new Map<number, unknown>()
+    let metadata: object | undefined
+    return {
+      getAllChunks: async () =>
+        [...rows.entries()].sort(([a], [b]) => a - b).map(([, row]) => row),
+      putChunk: async (entry: { chunkIndex: number }) => {
+        rows.set(entry.chunkIndex, { ...entry })
+      },
+      getMetadata: async () => metadata,
+      updateMetadata: async (
+        batchId: string,
+        patch: (existing: object | undefined) => object,
+      ) => {
+        metadata = { ...metadata, ...patch(metadata), batchId }
+      },
+    } as unknown as Parameters<typeof UtilizationAwareStamper.create>[3]
+  }
+  const open = (cache: ReturnType<typeof makeRowsCache>) =>
+    UtilizationAwareStamper.create(
+      "11".repeat(32),
+      TEST_BATCH_ID,
+      TEST_BATCH_DEPTH,
+      cache,
+      OWNER,
+      TEST_ENC_KEY,
+    )
+  async function claim(stamper: UtilizationAwareStamper) {
+    const lease = await PartitionLease.fromSwarmEncryptionKey({
+      bee,
+      deviceId: DEVICE_A,
+      batchId: TEST_BATCH_ID,
+      swarmEncryptionKey: TEST_ENC_KEY,
+      guardMs: GUARD_MS,
+      intentGuardWindowMs: 0,
+      now: () => clock,
       stamper,
-      batchId: TEST_BATCH_ID,
-      batchDepth: TEST_BATCH_DEPTH,
-      partition: 0,
-      localCounter: acked,
-      backupSigner: BACKUP_SIGNER,
-      swarmEncryptionKey: TEST_ENC_KEY,
     })
-
-    // 2. Seed as claimPartition's cache-hit branch would AFTER a failed publish:
-    //    refs describe the acked counter (100 -> 5) but the baseline counter is
-    //    AHEAD (100 -> 6), the unacked write that never reached Swarm.
-    const seededCounter = ackedPublish.publishedCounter.slice()
-    seededCounter[AHEAD_BUCKET] = ACKED_VALUE + 1 // 6, unacked
-
-    // 3. First incremental publish: a NEW upload touches a DIFFERENT bucket, so
-    //    the chunk holding AHEAD_BUCKET is unchanged vs the ahead baseline and
-    //    its ref is retained (the acked-floor ref, describing 5 — not 6).
-    const current = seededCounter.slice()
-    current[NEW_BUCKET] = 1
-    const aheadChunk = Math.floor(AHEAD_BUCKET / bucketsPerChunk)
-    const newChunk = Math.floor(NEW_BUCKET / bucketsPerChunk)
-    expect(aheadChunk).not.toBe(newChunk)
-
-    const incremental = await partitionState.writePartitionState({
-      bee: bee,
-      stamper,
-      batchId: TEST_BATCH_ID,
-      batchDepth: TEST_BATCH_DEPTH,
+    const acquired = await lease.acquire({ partitionCount: PARTITION_COUNT })
+    expect(acquired.partition).toBe(0)
+    stamper.bindPartition({
       partition: 0,
-      localCounter: current,
-      backupSigner: BACKUP_SIGNER,
-      swarmEncryptionKey: TEST_ENC_KEY,
-      previousReferences: ackedPublish.references,
-      previousCounter: seededCounter,
+      partitionCount: PARTITION_COUNT,
+      localCounter: acquired.localCounter!,
     })
-
-    // The ahead chunk kept the ACKED ref (not re-uploaded); the new chunk changed.
-    expect(
-      Binary.uint8ArrayToHex(incremental.references[aheadChunk]),
-      "ahead chunk ref retained (acked floor)",
-    ).toBe(Binary.uint8ArrayToHex(ackedPublish.references[aheadChunk]))
-    expect(
-      Binary.uint8ArrayToHex(incremental.references[newChunk]),
-      "new chunk re-uploaded",
-    ).not.toBe(Binary.uint8ArrayToHex(ackedPublish.references[newChunk]))
-
-    // A takeover reconstructs the ACKED floor for the ahead bucket (5), never the
-    // unacked 6 — so it reissues only the unacked slot, never an acked one.
-    const read = await partitionState.readPartitionState({
-      bee: bee,
-      owner: OWNER,
+    return lease
+  }
+  function stampInBucket(
+    stamper: UtilizationAwareStamper,
+    bucket: number,
+    times: number,
+  ) {
+    for (let i = 0; i < times; i++) {
+      const address = new Uint8Array(32).fill(i + 1)
+      address[0] = bucket >> 8
+      address[1] = bucket & 0xff
+      stamper.stamp(address)
+    }
+  }
+  /** An acked upload: bucket 100 at 2 under the width-2 frame, in band. */
+  async function ackedSession(cache: ReturnType<typeof makeRowsCache>) {
+    const stamper = await open(cache)
+    const lease = await claim(stamper)
+    stamper.getLocalCounter()!.set(leafyCounter())
+    await lease.publishState(stamper.getLocalCounter()!)
+    await stamper.flush()
+    return stamper
+  }
+  async function readBack() {
+    const backupSigner = new PrivateKey(
+      await deriveSecret(uint8ArrayToHex(TEST_ENC_KEY), BACKUP_KEY_LABEL),
+    )
+    return partitionState.readPartitionState({
+      bee,
+      owner: backupSigner.publicKey().address(),
       swarmEncryptionKey: TEST_ENC_KEY,
       batchId: TEST_BATCH_ID,
       partition: 0,
-      batchDepth: TEST_BATCH_DEPTH,
+      nowMs: clock,
     })
-    expect(read.localCounter?.[AHEAD_BUCKET]).toBe(ACKED_VALUE)
+  }
+
+  it("publishes incrementally when the rows are exactly the reference's counter", async () => {
+    const cache = makeRowsCache()
+    await ackedSession(cache)
+
+    // Reload: a cache hit, the reference chunk read and no leaf
+    const readSpy = vi.spyOn(downloadData, "downloadDataWithChunkAPI")
+    const second = await open(cache)
+    const lease = await claim(second)
+    expect(readSpy).toHaveBeenCalledTimes(1)
+
+    const writeSpy = vi.spyOn(partitionState, "writePartitionState")
+    stampInBucket(second, NEW_BUCKET, 1)
+    await lease.publishState(second.getLocalCounter()!)
+    expect(writeSpy.mock.calls[0][0].previousReferences).toHaveLength(
+      LEAFY_LEAVES,
+    )
+    expect(writeSpy.mock.calls[0][0].previousFrame).toEqual(LEAFY_FRAME)
+
+    const read = await readBack()
+    expect(read.readFailed).toBeUndefined()
+    expect(read.localCounter?.[AHEAD_BUCKET]).toBe(2)
+    expect(read.localCounter?.[NEW_BUCKET]).toBe(1)
+  })
+
+  it("publishes in full after rows a failed publish moved on, and stays readable", async () => {
+    const cache = makeRowsCache()
+    const first = await ackedSession(cache)
+
+    // An upload whose publish failed: its stamps reach the rows, bucket 100
+    // going to 5, past the width
+    stampInBucket(first, AHEAD_BUCKET, 3)
+    await first.flush()
+
+    // Reload: the pointer still names the rows' reference, a cache hit
+    const readSpy = vi.spyOn(downloadData, "downloadDataWithChunkAPI")
+    const second = await open(cache)
+    const lease = await claim(second)
+    expect(readSpy).toHaveBeenCalledTimes(1)
+    expect(second.getLocalCounter()![AHEAD_BUCKET]).toBe(5)
+
+    // A small upload in another leaf, in the same epoch
+    const writeSpy = vi.spyOn(partitionState, "writePartitionState")
+    stampInBucket(second, NEW_BUCKET, 1)
+    await lease.publishState(second.getLocalCounter()!)
+    expect(writeSpy.mock.calls[0][0].previousReferences).toBeUndefined()
+
+    const read = await readBack()
+    expect(read.readFailed).toBeUndefined()
+    expect(read.localCounter?.[AHEAD_BUCKET]).toBe(5)
     expect(read.localCounter?.[NEW_BUCKET]).toBe(1)
   })
 })
@@ -2087,7 +2133,6 @@ describe("PartitionLease.publishState — commit without release", () => {
       swarmEncryptionKey: TEST_ENC_KEY,
       batchId: TEST_BATCH_ID,
       partition: 0,
-      batchDepth: TEST_BATCH_DEPTH,
       nowMs: NOW,
     })
     expect(read.localCounter).toEqual(counter)
@@ -2381,6 +2426,15 @@ describe("PartitionLease.serialize / hydrate", () => {
     const snap = lease.serialize()
     expect(snap.deviceId).toBe(DEVICE_A)
     expect(snap.self?.partition).toBe(0)
+    // A fresh partition has no published state yet
+    expect(snap.referenceHex).toBeUndefined()
+
+    // The snapshot names the reference the lease last published, so a reload
+    // can tell whether the cache rows' certification is for that publish
+    const counter = new Uint32Array(NUM_BUCKETS)
+    counter[3] = 1
+    await lease.publishState(counter)
+    expect(lease.serialize().referenceHex).toMatch(/^[0-9a-f]{128}$/)
 
     // A fresh instance hydrated from the snapshot sees the same partition.
     const fresh = makeLease({ deviceId: DEVICE_A, bee: bee })

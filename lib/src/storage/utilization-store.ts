@@ -5,8 +5,8 @@
  * IndexedDB Cache for Batch Utilization Chunks
  *
  * Provides fast local caching of 4KB utilization chunks to avoid
- * repeated Swarm downloads. Each chunk is 4096 bytes containing either
- * 2048 uint16 or 1024 uint32 bucket counters, depending on batch depth.
+ * repeated Swarm downloads. Each chunk is 4096 bytes holding 1024 uint32
+ * bucket counters, whatever the batch depth or the batch's wire format (#463).
  */
 
 // ============================================================================
@@ -20,7 +20,7 @@ export interface ChunkCacheEntry {
   /** Batch ID (hex string) */
   batchId: string
 
-  /** Chunk index within the depth-dependent layout */
+  /** Chunk index within the fixed cache layout */
   chunkIndex: number
 
   /** Serialized chunk data (4KB) */
@@ -52,15 +52,31 @@ export interface ChunkCacheEntry {
  */
 export interface BatchMetadata {
   batchId: string
-  lastSync: number
-  chunkCount: number
   /**
-   * Per-partition "synced reference": the partition-state feed reference
-   * (hex) this device's local counter was last in sync with. On a cold
-   * acquire, if the feed still points here the counter-chunk download is
-   * skipped and the local counter reused. Keyed by partition index.
+   * The v2 partition-state reference chunk (hex) this device's cache rows were
+   * last in sync with, and the lane it belongs to. On a cold acquire of that
+   * lane, if the state pointer still names it the leaf downloads are skipped
+   * and the local counter reused. One, not one per partition: the rows hold a
+   * single lane's counter (`bindPartition` replaces the table), so a reference
+   * certifies them for that lane only, and only while `rowsPartition` agrees.
+   * `exact` while the rows hold precisely the counter the reference names;
+   * false once data rows were flushed past it with no publish to name them.
    */
-  syncedReferences?: Record<number, string>
+  stateReference?: { partition: number; referenceHex: string; exact: boolean }
+  /**
+   * The lane the cache rows describe. Cleared before a flush that rewrites
+   * them for another lane and set again after it, so a tab that dies midway
+   * leaves rows no reference certifies — a cache miss on the next claim, never
+   * a table mixing two lanes. Undefined until the first flush after a bind.
+   */
+  rowsPartition?: number
+  /**
+   * Bumped by a flush before its first row and again after its last. The rows
+   * are shared by every tab of the storage partition; a stamper whose
+   * last-seen generation is not this one knows another tab wrote them since
+   * (or is writing them now), and folds them into its table.
+   */
+  rowsGeneration?: number
   /**
    * Per-partition buckets occupied by the LATEST published partition-state
    * chunks (counter chunks + reference chunk). Those chunks overstamp the
@@ -83,9 +99,21 @@ const DB_NAME = "swarm-utilization-store"
  * stores rather than migrating them: this is a cache of utilisation counters
  * that re-derives itself on next use, and 0.x owes no migration (#661).
  */
-const DB_VERSION = 4
+const DB_VERSION = 5
 const CHUNKS_STORE = "chunks"
 const METADATA_STORE = "metadata"
+
+/**
+ * The store could not be opened at all: IndexedDB is missing or refused the
+ * database. No rows can exist behind this error, so a stamper may start from
+ * zero; any other error means rows may exist and were not read.
+ */
+export class UtilizationStoreUnavailableError extends Error {
+  constructor(message: string) {
+    super(message)
+    this.name = "UtilizationStoreUnavailableError"
+  }
+}
 
 /**
  * Manages IndexedDB cache for batch utilization chunks
@@ -100,10 +128,18 @@ export class UtilizationStoreDB {
     if (this.db) return
 
     return new Promise((resolve, reject) => {
+      if (typeof indexedDB === "undefined") {
+        reject(new UtilizationStoreUnavailableError("IndexedDB is unavailable"))
+        return
+      }
       const request = indexedDB.open(DB_NAME, DB_VERSION)
 
       request.onerror = () => {
-        reject(new Error(`Failed to open IndexedDB: ${request.error}`))
+        reject(
+          new UtilizationStoreUnavailableError(
+            `Failed to open IndexedDB: ${request.error}`,
+          ),
+        )
       }
 
       // Fires when an upgrade is held up by another open connection (e.g.
@@ -327,20 +363,45 @@ export class UtilizationStoreDB {
   }
 
   /**
-   * Update batch metadata
-   * @param metadata - Metadata to store
+   * Merge what `patch` returns into a batch's metadata record, in one
+   * `readwrite` transaction. The record is one object with several fields
+   * and more than one writer; a read-then-put in two transactions lets a
+   * concurrent writer put back the field this one just changed, so every
+   * writer goes through here and names only what it changes.
    */
-  async putMetadata(metadata: BatchMetadata): Promise<void> {
+  async updateMetadata(
+    batchId: string,
+    patch: (existing: BatchMetadata | undefined) => Partial<BatchMetadata>,
+  ): Promise<void> {
     await this.open()
 
     return new Promise((resolve, reject) => {
       const transaction = this.db!.transaction([METADATA_STORE], "readwrite")
       const store = transaction.objectStore(METADATA_STORE)
-      const request = store.put(metadata)
-
-      request.onsuccess = () => resolve()
-      request.onerror = () => {
-        reject(new Error(`Failed to put metadata: ${request.error}`))
+      const read = store.get(batchId)
+      read.onerror = () => {
+        reject(new Error(`Failed to get metadata: ${read.error}`))
+      }
+      read.onsuccess = () => {
+        const existing = read.result as BatchMetadata | undefined
+        let next: BatchMetadata
+        try {
+          next = { ...existing, ...patch(existing), batchId }
+        } catch (error) {
+          // Thrown inside an IndexedDB callback the error would be lost to the
+          // event loop and the transaction aborted with no `error` of its own
+          reject(error)
+          transaction.abort()
+          return
+        }
+        const write = store.put(next)
+        write.onerror = () => {
+          reject(new Error(`Failed to put metadata: ${write.error}`))
+        }
+      }
+      transaction.oncomplete = () => resolve()
+      transaction.onabort = transaction.onerror = () => {
+        reject(new Error(`Failed to update metadata: ${transaction.error}`))
       }
     })
   }

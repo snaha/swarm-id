@@ -68,6 +68,7 @@ import {
   writePartitionOccupancy,
   type PartitionIntentPayload,
 } from "./partition-intent"
+import type { CounterFrame } from "./counter-codec"
 import {
   readPartitionState,
   readStatePointer,
@@ -162,6 +163,14 @@ export interface PartitionLeaseStateSnapshot {
   deviceId: string
   batchId: string
   self?: SelfLease
+  /**
+   * The partition-state reference the lease last read or published for
+   * `self`. The coordinator's adopt fast path re-binds the stamper's cache
+   * rows only when their certification names this same reference: rows
+   * certified for an older publish are below the counter the pointer names,
+   * and adopting them would re-issue the acked writes in between.
+   */
+  referenceHex?: string
 }
 
 export class PartitionLease {
@@ -209,6 +218,8 @@ export class PartitionLease {
    */
   private publishedReferences: Uint8Array[] | undefined
   private publishedCounter: Uint32Array | undefined
+  /** The frame those references were encoded under (`counter-codec.ts`). */
+  private publishedFrame: CounterFrame | undefined
   /** Reference-chunk ref (hex) of this session's last publish — re-written to the
    *  current rotating bucket on each refresh tick (heartbeat) so an idle holder
    *  keeps a fresh state pointer the next reader can find. */
@@ -258,16 +269,12 @@ export class PartitionLease {
        */
       batchId: BatchId
       /**
-       * Stamper + depth are only needed for the WRITE paths (acquire,
-       * refresh, release). They're optional so a reader — e.g. the SwarmID
-       * UI's Devices tab — can build a lease purely to `refreshFromSwarm`
-       * and inspect holders without a stamper.
-       */
-      batchDepth?: number
-      /**
        * Stamper used to upload the small payload chunks (lock SOC, state
-       * feed). In practice this is the `UtilizationAwareStamper` the proxy
-       * uses for data uploads. Omitted for read-only use.
+       * feed) — only the WRITE paths (acquire, refresh, release) need it, so
+       * a reader — e.g. the SwarmID UI's Devices tab — can build a lease
+       * purely to `refreshFromSwarm` and inspect holders without one. In
+       * practice this is the `UtilizationAwareStamper` the proxy uses for
+       * data uploads.
        */
       stamper?: Stamper
       /** Override for tests; defaults to `() => Date.now()`. */
@@ -305,15 +312,14 @@ export class PartitionLease {
   /**
    * Build a `PartitionLease` whose `backupSigner` is derived from the
    * account's `swarmEncryptionKey` (same derivation as the partition-state
-   * and partition-lock feeds). Pass `stamper`/`batchId`/`batchDepth` for the
-   * write path; omit them for a read-only lease (UI display).
+   * and partition-lock feeds). Pass `stamper` for the write path; omit it for
+   * a read-only lease (UI display).
    */
   static async fromSwarmEncryptionKey(opts: {
     bee: Bee
     deviceId: string
     swarmEncryptionKey: Uint8Array
     batchId: BatchId
-    batchDepth?: number
     stamper?: Stamper
     now?: () => number
     guardMs?: number
@@ -660,6 +666,7 @@ export class PartitionLease {
     this.closed = false
     this.publishedReferences = undefined
     this.publishedCounter = undefined
+    this.publishedFrame = undefined
     this.lastReferenceHex = undefined
     this.lastFullPublishEpoch = undefined
 
@@ -804,15 +811,16 @@ export class PartitionLease {
     soloClean: boolean
   }): Promise<AcquireResult> {
     const { partition, partitionCount, freshClaim } = args
-    const { stamper, batchId, batchDepth } = this.requireWriteContext()
+    const { stamper, batchId } = this.requireWriteContext()
 
-    // Cache-aware seed: pass the reference our local counter is already in
-    // sync with. If the feed still points there, `readPartitionState` skips
-    // the reference + counter-chunk downloads and we reuse the local counter.
-    const knownReference =
+    // Cache-aware seed: pass the reference our local counter is at or past.
+    // If the feed still points there, `readPartitionState` skips the leaf
+    // downloads and we reuse the local counter.
+    const certification =
       stamper instanceof UtilizationAwareStamper
-        ? await stamper.getSyncedReference(partition)
+        ? await stamper.getRowsCertification(partition)
         : undefined
+    const knownReference = certification?.referenceHex
     const stateResult = await readPartitionState(
       {
         bee: this.opts.bee,
@@ -820,7 +828,6 @@ export class PartitionLease {
         swarmEncryptionKey: this.opts.swarmEncryptionKey,
         batchId,
         partition,
-        batchDepth,
         // Locate the pointer of a partition that's been free for a while at the
         // gone holder's last-heartbeat bucket (its `leasedUntil`), so a takeover
         // resumes at the right counter however long ago the holder stopped. A live
@@ -982,29 +989,32 @@ export class PartitionLease {
     // recovered no refs (fresh account / cache-miss), these stay undefined and
     // the first publish falls back to the sparse-full path.
     //
-    // SAFETY INVARIANT (why a divergent seed is safe). On the cache-hit
-    // (`unchanged`) branch `publishedReferences` describes the last *acked*
-    // counter (the synced reference, advanced only on a successful publish/read)
-    // while `publishedCounter` = `buildLeaseLocalCounter()`, which can be AHEAD
-    // if a prior publish FAILED after the local counter advanced (withWrite's
-    // `finally` still flushes the bumped counter). Counters are monotonic, so
-    // `publishedCounter >= synced-ref counter` always — the refs never describe a
-    // value ABOVE the counter. On the first incremental publish an unchanged
-    // (ahead) chunk therefore RETAINS a ref describing the acked floor, and a
-    // takeover resumes at ≤ the acked high-water: it only ever reissues *unacked*
-    // (content-addressed → safe) slots, never an acked one. The dangerous
-    // direction — a ref reporting above the counter, which could resume PAST an
-    // acked slot into reuse — cannot occur. See the "divergent seed" regression
-    // test in partition-lease.integration.test.ts.
+    // The baseline must be EXACT: `publishedCounter` is the counter
+    // `publishedReferences` encode, leaf for leaf. An incremental publish
+    // retains every leaf the diff against it finds unchanged, under a
+    // reference chunk whose frame and exception list are computed from the
+    // live counter — so a retained leaf that encodes anything else is a leaf
+    // the reference chunk does not describe, and no reader can decode the
+    // state (#463). A full read is exact by construction. A cache hit is
+    // exact only when the rows hold precisely the counter the reference
+    // names: an upload whose publish FAILED still flushes its stamps
+    // (withWrite's `finally`), leaving the rows ahead of the acked leaves.
+    // Resuming from those rows is right — it keeps the unacked slots unissued
+    // — but there is then no baseline to diff against, and the first publish
+    // goes out in full.
     //
-    // KEYSTONE (the one upstream fact this rests on): the stamper keeps its local
-    // per-partition counter monotonic and >= its synced-reference counter. Every
-    // guarantee above collapses if a future change to stamper-state persistence
-    // lets the local counter fall BELOW the synced ref. `writePartitionState`'s
-    // incremental path carries a cheap monotonicity tripwire that fails the
-    // publish loudly (rather than silently retaining a ref above the counter) if
-    // that invariant is ever broken — see the assert there.
-    this.publishedReferences = stateResult.references
+    // KEYSTONE (the one upstream fact this rests on): the stamper keeps its
+    // local per-partition counter monotonic and >= its synced-reference
+    // counter, and calls its rows exact only when they equal it
+    // (`UtilizationAwareStamper.getRowsCertification`). `writePartitionState`
+    // carries a cheap monotonicity tripwire that fails the publish loudly if
+    // the counter ever falls below the baseline — see the assert there.
+    const exactBaseline =
+      !stateResult.unchanged || certification?.exact === true
+    this.publishedReferences = exactBaseline
+      ? stateResult.references
+      : undefined
+    this.publishedFrame = exactBaseline ? stateResult.frame : undefined
     this.publishedCounter = localCounter.slice()
     // Mark this epoch as already full-pinned so the FIRST publish of the session
     // stays incremental against the resumed refs (the cheap-first-publish win).
@@ -1390,7 +1400,7 @@ export class PartitionLease {
     localCounter: Uint32Array,
     opts?: { forceFull?: boolean },
   ): Promise<void> {
-    const { stamper, batchId, batchDepth } = this.requireWriteContext()
+    const { stamper, batchId } = this.requireWriteContext()
     // Force a FULL (non-incremental) publish once per epoch: incremental
     // publishes leave unchanged chunks pinned across epochs, where a later
     // epoch's rotating pointer/beacon SOC (same reserved slot) can evict one and
@@ -1408,7 +1418,6 @@ export class PartitionLease {
       bee: this.opts.bee,
       stamper,
       batchId,
-      batchDepth,
       partition,
       localCounter,
       backupSigner: this.opts.backupSigner,
@@ -1418,6 +1427,7 @@ export class PartitionLease {
       // full re-pin (see `lastFullPublishEpoch`).
       previousReferences: forceFullRepin ? undefined : this.publishedReferences,
       previousCounter: forceFullRepin ? undefined : this.publishedCounter,
+      previousFrame: forceFullRepin ? undefined : this.publishedFrame,
       // Lets the publish also avoid this device's intent-beacon buckets (the
       // refresh tick re-writes them off-lock at the same reserved slot).
       deviceId: this.opts.deviceId,
@@ -1428,6 +1438,7 @@ export class PartitionLease {
     if (forceFullRepin) this.lastFullPublishEpoch = currentEpoch
     this.publishedReferences = published.references
     this.publishedCounter = published.publishedCounter
+    this.publishedFrame = published.frame
     this.lastReferenceHex = published.referenceHex
     if (stamper instanceof UtilizationAwareStamper) {
       await stamper.setSyncedReference(partition, published.referenceHex)
@@ -1444,7 +1455,7 @@ export class PartitionLease {
    * heartbeats the inherited resume pointer forward, so it ages out of the
    * takeover lookup span (resume-from-zero → re-issue acked slots). The caller
    * passes the partition's persisted synced reference
-   * (`UtilizationAwareStamper.getSyncedReference`); `undefined` (fresh partition)
+   * (`UtilizationAwareStamper.getRowsCertification`); `undefined` (fresh partition)
    * keeps the heartbeat a no-op.
    */
   seedReferenceHex(referenceHex: string | undefined): void {
@@ -1607,6 +1618,7 @@ export class PartitionLease {
       deviceId: this.opts.deviceId,
       batchId: this.opts.batchId.toHex(),
       self: this.self,
+      referenceHex: this.lastReferenceHex,
     }
   }
 
@@ -1625,21 +1637,13 @@ export class PartitionLease {
    * Assert the write context (stamper + batch) is present. Throws on a
    * read-only instance — acquire / refresh / release require it.
    */
-  private requireWriteContext(): {
-    stamper: Stamper
-    batchId: BatchId
-    batchDepth: number
-  } {
-    if (!this.opts.stamper || this.opts.batchDepth === undefined) {
+  private requireWriteContext(): { stamper: Stamper; batchId: BatchId } {
+    if (!this.opts.stamper) {
       throw new Error(
-        "PartitionLease: write operation requires stamper + batchDepth (read-only instance)",
+        "PartitionLease: write operation requires a stamper (read-only instance)",
       )
     }
-    return {
-      stamper: this.opts.stamper,
-      batchId: this.opts.batchId,
-      batchDepth: this.opts.batchDepth,
-    }
+    return { stamper: this.opts.stamper, batchId: this.opts.batchId }
   }
 
   private now(): number {

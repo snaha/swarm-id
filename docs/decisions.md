@@ -7,6 +7,75 @@ present and may point at an issue or PR; the reasons live here.
 
 A PR that makes or changes a decision adds the entry in the same PR.
 
+## 2026-11-10 A tab folds in the cache rows another tab wrote, on taking the write lock
+
+**Context.** The counter rows in IndexedDB are shared by every tab of a storage
+partition, each with its own stamper and its own table in memory. A tab judged
+the rows by what it remembered of them, and relied on a broadcast to learn of a
+sibling's writes.
+
+**Decision.** A flush bumps a generation on the rows before its first row and
+after its last. On taking the cross-tab write lock, and again at a flush, a tab
+that finds a generation it did not write folds the rows into its table by
+per-bucket maximum; an unbound stamper takes the rows. (#918)
+
+**Why.** Counters only grow, so a maximum can never lower either side, where
+rewriting the rows from one tab's table erased a sibling's counters wherever
+that tab had missed them. The lock is the one point a tab can read the rows
+knowing nobody is writing them.
+
+## 2026-11-10 An incremental publish needs rows that are exactly its baseline
+
+**Context.** An upload whose publish failed still flushes its stamps, so the
+cache rows can be ahead of the leaves the synced reference points to. A
+cache-hit claim seeded the publish baseline from those rows.
+
+**Decision.** The rows' certification says whether they hold exactly the
+counter their reference names. A cache-hit claim seeds an incremental baseline
+only then; otherwise it still resumes from the rows and its first publish goes
+out in full. Rows stop being called exact before a data row is written, not
+after. (#918)
+
+**Why.** The exception list rides in the reference chunk, computed from the
+live counter. A leaf retained from an older counter can hold an in-band field
+for a bucket the list calls an exception, and the decoder rejects that: every
+reader goes read-only on the lane until the holder re-pins, or for good if it
+is gone.
+
+## 2026-11-10 Cache rows are certified by the flush that writes them
+
+**Context.** The rows hold a single lane's counter, and binding a lane replaced
+the table without rewriting them. The synced reference was recorded at the
+publish, one write ahead of the rows, and kept one per partition.
+
+**Decision.** One reference certifies the rows, for the lane they describe, and
+it is committed by the flush that writes the rows it names. A bind to a table
+the rows do not hold rewrites every row. The adopt fast path requires the rows'
+reference to be the one the cached lease last read or published. (#918)
+
+**Why.** A cold start could otherwise resume from a table mixing two lanes, or
+from rows one write behind the published counter, and re-issue slots an
+acknowledged upload had used.
+
+## 2026-11-10 Partition state is published as SBU1 leaves, with no depth on the wire
+
+**Context.** The counter was serialized as fixed uint16 or uint32 chunks chosen
+from the batch depth, so a dilute across depth 31 to 32 changed the published
+layout and a peer on a stale record misparsed it. (#463)
+
+**Decision.** The counters are packed with the leaf encoding of Nectar's SBU1
+usage snapshot: a frame (base and bit width) chosen per publish from the
+counters' spread, deltas packed to that width, outliers as exceptions. The
+frame rides in the reference chunk under topic domain `v2`. The cache rows are
+one fixed uint32 layout at every depth, and a drive's write path is rebuilt
+when its stamp's depth changes. State under `v1` is not read. (#918)
+
+**Why.** Nothing published or cached depends on the depth, so a dilute changes
+no byte, and a takeover reads 8–24 chunks instead of 33 or 65. Not reading `v1`
+means a lane's first acquire under `v2` resumes from zero; accepted while the
+version is `0.x`. The widest delta is 23 bits, so that the frame, 128
+exceptions and a reference per leaf fit one chunk.
+
 ## 2026-09-21 Stamper-mode uploads honour the caller's `deferred`
 
 **Context.** Every data and chunk upload in stamper mode forced

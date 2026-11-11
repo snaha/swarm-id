@@ -16,7 +16,6 @@ import { writePartitionState } from "./partition-state"
 import { readPublishedCounter } from "./published-counter"
 
 const BATCH_ID = new BatchId("ab".repeat(32))
-const BATCH_DEPTH = 24
 const ENCRYPTION_KEY = new Uint8Array(32).map((_, i) => (i * 7 + 3) & 0xff)
 const BACKUP_SIGNER = createTestSigner() as PrivateKey
 const PARTITION = 1
@@ -42,7 +41,6 @@ const read = (known?: Parameters<typeof readPublishedCounter>[1]) =>
       backupSigner: BACKUP_SIGNER,
       swarmEncryptionKey: ENCRYPTION_KEY,
       batchId: BATCH_ID,
-      batchDepth: BATCH_DEPTH,
       partition: PARTITION,
     },
     known,
@@ -53,7 +51,6 @@ async function publish(counter: Uint32Array): Promise<void> {
     bee,
     stamper: createMockStamper(),
     batchId: BATCH_ID,
-    batchDepth: BATCH_DEPTH,
     partition: PARTITION,
     localCounter: counter,
     backupSigner: BACKUP_SIGNER,

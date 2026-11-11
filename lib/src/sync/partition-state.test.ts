@@ -133,19 +133,30 @@ async function makeBoundStamper(): Promise<UtilizationAwareStamper> {
   return stamper
 }
 
-/** Publish a counter with exactly one non-zero chunk (one counter-chunk PUT). */
+/**
+ * A counter that packs into leaves rather than exceptions alone: 200 touched
+ * buckets, all in the first of the four leaves a width-2 frame takes, so a
+ * publish uploads exactly one leaf and carries three sentinels.
+ */
+function leafyCounter(): Uint32Array {
+  const localCounter = new Uint32Array(NUM_BUCKETS)
+  // Delta 2 packs at width 2 (4 leaves) with every non-zero bucket in leaf 0;
+  // delta 1 would fit width 1, whose 2 leaves leave a single zero one
+  for (let b = 0; b < 200; b++) localCounter[b * 50] = 2
+  return localCounter
+}
+
+/** Publish a counter with exactly one non-zero leaf (one leaf PUT). */
 async function publishOneChunk(
   stamper: UtilizationAwareStamper,
   nowMs: number,
 ): Promise<number[]> {
-  const localCounter = new Uint32Array(NUM_BUCKETS)
-  localCounter[1000] = 1
+  const localCounter = leafyCounter()
   vi.spyOn(Date, "now").mockReturnValue(nowMs)
   const result = await writePartitionState({
     bee: bee,
     stamper,
     batchId: TEST_BATCH_ID,
-    batchDepth: TEST_BATCH_DEPTH,
     partition: PARTITION,
     localCounter,
     backupSigner: BACKUP_SIGNER,
@@ -160,12 +171,13 @@ async function publishOneChunk(
 describe("statePointerAddress", () => {
   const POINTER_NOW_MS = 1_700_000_000_000
 
+  // Under the v2 topic domain (#463); it moves with every domain bump
   it("derives the state-pointer SOC address", () => {
     expect(
       uint8ArrayToHex(
         statePointerAddress(TEST_BATCH_ID, PARTITION, OWNER, POINTER_NOW_MS),
       ),
-    ).toBe("17461bbea226a1f86c59cc2c3eceb97ed6fabd35dc401152a34fb4e9c1caeb8d")
+    ).toBe("582b9c147fa33f51d6f3f25e6fd99d1a5f5d99e3a90d06770c35b06fcabb5471")
   })
 })
 
@@ -215,16 +227,14 @@ describe("writePartitionState — reserved-slot bucket-collision avoidance", () 
 })
 
 describe("writePartitionState — sparse sentinel refs are independent", () => {
-  it("returns a distinct zero-ref instance per never-written chunk", async () => {
+  it("returns a distinct zero-ref instance per never-written leaf", async () => {
     const stamper = await makeBoundStamper()
-    const localCounter = new Uint32Array(NUM_BUCKETS)
-    localCounter[1000] = 1 // exactly one non-zero chunk → the rest are sentinels
+    const localCounter = leafyCounter() // one real leaf → the rest are sentinels
 
     const { references } = await writePartitionState({
       bee: bee,
       stamper,
       batchId: TEST_BATCH_ID,
-      batchDepth: TEST_BATCH_DEPTH,
       partition: PARTITION,
       localCounter,
       backupSigner: BACKUP_SIGNER,
@@ -254,7 +264,6 @@ describe("writePartitionState — distinct-bucket invariant guard", () => {
       bee: bee,
       stamper,
       batchId: TEST_BATCH_ID,
-      batchDepth: TEST_BATCH_DEPTH,
       partition: PARTITION,
       localCounter,
       backupSigner: BACKUP_SIGNER,
@@ -286,7 +295,6 @@ describe("writePartitionState — two-phase publish (pointer after chunks)", () 
         bee: bee,
         stamper,
         batchId: TEST_BATCH_ID,
-        batchDepth: TEST_BATCH_DEPTH,
         partition: PARTITION,
         localCounter,
         backupSigner: BACKUP_SIGNER,
@@ -311,7 +319,6 @@ describe("writePartitionState — counter monotonicity tripwire", () => {
       bee: bee,
       stamper,
       batchId: TEST_BATCH_ID,
-      batchDepth: TEST_BATCH_DEPTH,
       partition: PARTITION,
       localCounter: baseline,
       backupSigner: BACKUP_SIGNER,
@@ -329,7 +336,6 @@ describe("writePartitionState — counter monotonicity tripwire", () => {
         bee: bee,
         stamper,
         batchId: TEST_BATCH_ID,
-        batchDepth: TEST_BATCH_DEPTH,
         partition: PARTITION,
         localCounter: regressed,
         backupSigner: BACKUP_SIGNER,
@@ -350,7 +356,6 @@ describe("writePartitionState — counter monotonicity tripwire", () => {
       bee: bee,
       stamper,
       batchId: TEST_BATCH_ID,
-      batchDepth: TEST_BATCH_DEPTH,
       partition: PARTITION,
       localCounter: baseline,
       backupSigner: BACKUP_SIGNER,
@@ -369,7 +374,6 @@ describe("writePartitionState — counter monotonicity tripwire", () => {
         bee: bee,
         stamper,
         batchId: TEST_BATCH_ID,
-        batchDepth: TEST_BATCH_DEPTH,
         partition: PARTITION,
         localCounter: regressed,
         backupSigner: BACKUP_SIGNER,

@@ -4,8 +4,6 @@
 import { describe, it, expect, vi } from "vitest"
 import { BatchId, EthAddress, PrivateKey } from "@ethersphere/bee-js"
 
-import { PartitionLease } from "./partition-lease"
-
 type MockLease = ReturnType<typeof makeLease>
 
 // The lease primitive and the lock-SOC read are mocked so the coordinator's
@@ -83,18 +81,23 @@ const BATCH_ID = "ab".repeat(32)
 function makeStamper(calls: string[]) {
   return {
     depth: 20,
-    counterDepth: 20,
     invalidateLease: vi.fn(() => calls.push("invalidate")),
     unbindPartition: vi.fn(() => calls.push("unbind")),
     bindPartition: vi.fn(() => calls.push("bind")),
     setLeaseValidUntil: vi.fn(),
     buildLeaseLocalCounter: () => new Uint32Array(8),
     getLocalCounter: (): Uint32Array | undefined => new Uint32Array(8),
-    // Persisted per-partition synced reference; the adopt fast path reads it to
-    // seed the lease's heartbeat pointer. Default: none (fresh partition).
-    getSyncedReference: vi.fn(
-      async (_partition: number): Promise<string | undefined> => undefined,
+    // The reference the cache rows are certified by for a lane; the adopt
+    // fast path reads it to decide whether the stamper's table is the lane's
+    // counter. Default: none (fresh partition, or another lane's rows).
+    getRowsCertification: vi.fn(
+      async (
+        _partition: number,
+      ): Promise<{ referenceHex: string; exact: boolean } | undefined> =>
+        undefined,
     ),
+    // Folds in the rows a sibling tab wrote; called on taking the write lock.
+    syncRows: vi.fn(async (): Promise<undefined> => undefined),
   }
 }
 
@@ -940,7 +943,7 @@ describe("BatchWriteCoordinator — idle-yield under the write lock", () => {
   // 30s pause was pure UX cost). These tests declare one.
   const RIVAL_DEPS = { knownDeviceIds: () => [SELF, "device-rival-1"] }
 
-  it("yields an idle lease: releases, unbinds, emits the transition, announces", async () => {
+  it("yields an idle lease: releases, flushes, unbinds, emits the transition, announces", async () => {
     const calls: string[] = []
     const stamper = makeStamper(calls)
     const onLeaseChange = vi.fn()
@@ -950,11 +953,17 @@ describe("BatchWriteCoordinator — idle-yield under the write lock", () => {
         stamper: stamper as unknown as BatchWriteCoordinatorDeps["stamper"],
         onLeaseChange,
         onLeaseReleased,
+        flushStamperState: async () => {
+          calls.push("flush")
+        },
         ...RIVAL_DEPS,
       }),
     )
     const internals = coordinator as unknown as Internals
     const lease = makeLease({ partition: 0 })
+    lease.release = vi.fn(async () => {
+      calls.push("release")
+    })
     internals.partitionLease = lease
     internals.activeUploadCount = 0
     internals.lastLeaseActivityAt = 0 // idle for longer than IDLE_YIELD_MS
@@ -963,6 +972,10 @@ describe("BatchWriteCoordinator — idle-yield under the write lock", () => {
 
     expect(lease.release).toHaveBeenCalledTimes(1)
     expect(stamper.unbindPartition).toHaveBeenCalledTimes(1)
+    // The release publishes the final counter; the flush that follows commits
+    // its reference while the lane is still bound, so this device's next
+    // acquire of the same lane resumes from its rows instead of downloading
+    expect(calls).toEqual(["release", "flush", "unbind"])
     expect(coordinator.currentPartition).toBeUndefined()
     expect(onLeaseChange).toHaveBeenLastCalledWith({
       currentPartition: undefined,
@@ -1072,20 +1085,191 @@ describe("BatchWriteCoordinator — adopt fast path seeds the heartbeat pointer"
     leaseController.lease = lease
     const calls: string[] = []
     const stamper = makeStamper(calls)
-    stamper.getSyncedReference = vi.fn(async () => "deadbeef")
+    stamper.getRowsCertification = vi.fn(async () => ({
+      referenceHex: "deadbeef",
+      exact: true,
+    }))
     const coordinator = new BatchWriteCoordinator(
       makeDeps({
         stamper: stamper as unknown as BatchWriteCoordinatorDeps["stamper"],
+        readLeaseCache: () => cachedLease(2, "deadbeef"),
         mode: "oneshot", // no refresh timer to leak in the test
       }),
     )
 
     await coordinator.withWrite(async () => "ok", { wait: "block" })
 
-    expect(stamper.getSyncedReference).toHaveBeenCalledWith(2)
+    expect(stamper.getRowsCertification).toHaveBeenCalledWith(2)
     expect(lease.seedReferenceHex).toHaveBeenCalledWith("deadbeef")
+    expect(lease.acquire).not.toHaveBeenCalled()
+  })
+
+  it("takes the cold acquire when the rows are certified for an older publish than the cached lease's", async () => {
+    // The lease cache names the reference the lease last read or published;
+    // the rows' certification names the counter they hold. A publish whose
+    // flush never landed (tab died, IndexedDB failed) leaves the two apart,
+    // and the rows below the published counter: adopting them would re-issue
+    // the acked write's slots.
+    const lease = makeLease({
+      acquireResult: { partition: 2, partitionCount: 4, isReadOnly: false },
+    })
+    lease.adoptIfLive = vi.fn(() => 2)
+    leaseController.lease = lease
+    const stamper = makeStamper([])
+    stamper.getRowsCertification = vi.fn(async () => ({
+      referenceHex: "older",
+      exact: true,
+    }))
+    const coordinator = new BatchWriteCoordinator(
+      makeDeps({
+        stamper: stamper as unknown as BatchWriteCoordinatorDeps["stamper"],
+        readLeaseCache: () => cachedLease(2, "deadbeef"),
+        mode: "oneshot",
+      }),
+    )
+
+    await coordinator.withWrite(async () => "ok", { wait: "block" })
+
+    expect(lease.adoptIfLive).not.toHaveBeenCalled()
+    expect(lease.acquire).toHaveBeenCalled()
+    expect(lease.seedReferenceHex).not.toHaveBeenCalled()
+  })
+
+  it("rewrites the lease cache with the publish's reference before acking the write", async () => {
+    // So a reload within the TTL can tell rows certified for an older publish
+    // from the one the pointer names (see the test above).
+    leaseController.lease = makeLease({
+      acquireResult: { partition: 1, partitionCount: 4, isReadOnly: false },
+    })
+    const lease = leaseController.lease
+    const calls: string[] = []
+    lease.publishState = vi.fn(async () => {
+      calls.push("publish")
+      lease.serialize = vi.fn(() => ({ v: 1, referenceHex: "published" }))
+    })
+    const stamper = makeStamper(calls)
+    const writeLeaseCache = vi.fn((snap: unknown) => {
+      calls.push(`cache:${(snap as { referenceHex?: string })?.referenceHex}`)
+    })
+    const coordinator = new BatchWriteCoordinator(
+      makeDeps({
+        stamper: stamper as unknown as BatchWriteCoordinatorDeps["stamper"],
+        writeLeaseCache,
+        flushStamperState: async () => {
+          calls.push("flush")
+        },
+        mode: "oneshot",
+      }),
+    )
+
+    await coordinator.withWrite(async () => "ok", { wait: "block" })
+
+    const publishAt = calls.indexOf("publish")
+    expect(publishAt).toBeGreaterThan(-1)
+    expect(calls.slice(publishAt)).toEqual([
+      "publish",
+      "cache:published",
+      "flush",
+    ])
+  })
+
+  it("takes the cold acquire instead when the rows are not certified for the cached lane", async () => {
+    // The adopt binds the stamper's own table as the lane's counter. With no
+    // certified reference — a lane never published, or rows a dying tab left
+    // half rewritten for another lane (#463) — that table is not known to be
+    // the lane's, so the lease is re-established from Swarm.
+    const lease = makeLease({
+      acquireResult: { partition: 2, partitionCount: 4, isReadOnly: false },
+    })
+    lease.adoptIfLive = vi.fn(() => 2)
+    leaseController.lease = lease
+    const stamper = makeStamper([])
+    const coordinator = new BatchWriteCoordinator(
+      makeDeps({
+        stamper: stamper as unknown as BatchWriteCoordinatorDeps["stamper"],
+        readLeaseCache: () => cachedLease(2),
+        mode: "oneshot",
+      }),
+    )
+
+    await coordinator.withWrite(async () => "ok", { wait: "block" })
+
+    expect(stamper.getRowsCertification).toHaveBeenCalledWith(2)
+    expect(lease.adoptIfLive).not.toHaveBeenCalled()
+    expect(lease.acquire).toHaveBeenCalled()
+    expect(lease.seedReferenceHex).not.toHaveBeenCalled()
   })
 })
+
+describe("BatchWriteCoordinator — the cache rows at the write lock", () => {
+  it("folds in the rows a sibling tab wrote before it binds or stamps anything", async () => {
+    // The rows are shared by every tab; the table is this tab's. The lock is
+    // where a tab can read them with nobody writing, and it must do so before
+    // the lease is established or the upload takes a slot.
+    leaseController.lease = makeLease({
+      acquireResult: { partition: 1, partitionCount: 4, isReadOnly: false },
+    })
+    const calls: string[] = []
+    const stamper = makeStamper(calls)
+    stamper.syncRows = vi.fn(async (): Promise<undefined> => {
+      calls.push("sync")
+    })
+    const coordinator = new BatchWriteCoordinator(
+      makeDeps({
+        stamper: stamper as unknown as BatchWriteCoordinatorDeps["stamper"],
+        flushStamperState: async () => {
+          calls.push("flush")
+        },
+        mode: "oneshot",
+      }),
+    )
+
+    await coordinator.withWrite(
+      async () => {
+        calls.push("upload")
+        return "ok"
+      },
+      { wait: "block" },
+    )
+
+    expect(calls).toEqual(["sync", "bind", "upload", "flush"])
+  })
+
+  it("still writes when the rows cannot be read", async () => {
+    leaseController.lease = makeLease({
+      acquireResult: { partition: 1, partitionCount: 4, isReadOnly: false },
+    })
+    const stamper = makeStamper([])
+    stamper.syncRows = vi.fn(async () => {
+      throw new Error("IndexedDB failed")
+    })
+    const coordinator = new BatchWriteCoordinator(
+      makeDeps({
+        stamper: stamper as unknown as BatchWriteCoordinatorDeps["stamper"],
+        mode: "oneshot",
+      }),
+    )
+
+    await expect(
+      coordinator.withWrite(async () => "ok", { wait: "block" }),
+    ).resolves.toBe("ok")
+  })
+})
+
+/** The lease-cache snapshot a reload within the TTL hydrates from. */
+function cachedLease(partition: number, referenceHex?: string) {
+  return {
+    deviceId: SELF,
+    batchId: BATCH_ID,
+    referenceHex,
+    self: {
+      partition,
+      generation: { timestampMs: 1, tiebreaker: "self" },
+      acquiredAt: 1,
+      leasedUntil: Date.now() + 60_000,
+    },
+  }
+}
 
 describe("BatchWriteCoordinator — state-pointer heartbeat vs in-flight upload", () => {
   // The refresh tick runs OFF the write lock; `withWrite`'s publish (which also
@@ -1130,6 +1314,42 @@ describe("BatchWriteCoordinator — state-pointer heartbeat vs in-flight upload"
     await internals.refreshTick(lease)
 
     expect(lease.heartbeatStatePointer).toHaveBeenCalledTimes(1)
+  })
+
+  it("rewrites the lease cache and flushes after the heartbeat: a re-pin publishes a new reference", async () => {
+    // The heartbeat may relocate the retained chunks (a forced full re-pin),
+    // which publishes under a new reference. The cache must name it and the
+    // flush must commit it, as after an upload's publish — or a reload would
+    // adopt rows certified for the superseded reference and heartbeat it back.
+    const calls: string[] = []
+    const stamper = makeStamper(calls)
+    const coordinator = new BatchWriteCoordinator(
+      makeDeps({
+        stamper: stamper as unknown as BatchWriteCoordinatorDeps["stamper"],
+        writeLeaseCache: () => {
+          calls.push("cache")
+        },
+        flushStamperState: async () => {
+          calls.push("flush")
+        },
+      }),
+    )
+    const internals = coordinator as unknown as Internals
+    const lease = makeLease({ partition: 0 })
+    lease.heartbeatStatePointer = vi.fn(async () => {
+      calls.push("heartbeat")
+    })
+    internals.partitionLease = lease
+    internals.activeUploadCount = 0
+    internals.lastLeaseActivityAt = Date.now()
+
+    await internals.refreshTick(lease)
+
+    expect(calls.slice(calls.indexOf("heartbeat"))).toEqual([
+      "heartbeat",
+      "cache",
+      "flush",
+    ])
   })
 
   it("does NOT heartbeat when an upload slips in while the tick queues on the lock", async () => {
@@ -2165,41 +2385,5 @@ describe("BatchWriteCoordinator — bus-accelerated leases (docs/Account-Bus.md)
     const coordinator = new BatchWriteCoordinator(makeDeps())
     coordinator.teardown()
     await expect(coordinator.yieldForPeer()).resolves.toBeUndefined()
-  })
-})
-
-describe("BatchWriteCoordinator — scratch drive counter layout", () => {
-  it("builds the lease at the stamper's counterDepth, not the batch depth", async () => {
-    // A scratch drive's counters wrap within the lane, so they serialize as
-    // uint32 at a wider layout depth than the batch. The lease publishes and
-    // resumes partition state at that layout; on the batch depth a bucket's
-    // counter passing 65535 (an SOC rewritten once a second for ~18 hours)
-    // would make `serializeUint16Array` throw.
-    leaseController.lease = makeLease({
-      acquireResult: {
-        partition: 1,
-        partitionCount: 4,
-        localCounter: new Uint32Array(8),
-        isReadOnly: false,
-      },
-    })
-    const fromSwarmEncryptionKey = vi.mocked(
-      PartitionLease.fromSwarmEncryptionKey,
-    )
-    fromSwarmEncryptionKey.mockClear()
-    const stamper = { ...makeStamper([]), depth: 20, counterDepth: 24 }
-    const coordinator = new BatchWriteCoordinator(
-      makeDeps({
-        stamper: stamper as unknown as BatchWriteCoordinatorDeps["stamper"],
-        mode: "oneshot",
-      }),
-    )
-
-    await coordinator.withWrite(async () => "ok", { wait: "block" })
-
-    expect(fromSwarmEncryptionKey).toHaveBeenCalledTimes(1)
-    expect(fromSwarmEncryptionKey.mock.calls[0][0]).toMatchObject({
-      batchDepth: 24,
-    })
   })
 })

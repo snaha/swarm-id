@@ -880,6 +880,7 @@ export class SwarmIdProxy {
         const unchanged =
           stamp !== undefined &&
           stamp.signerKey.toHex() === drive.signerKey &&
+          stamp.depth === drive.depth &&
           fingerprint === drive.accountFingerprint &&
           sameStampLifetime(stamp, drive.lifetime)
         if (!unchanged) this.teardownDrive(drive)
@@ -900,13 +901,10 @@ export class SwarmIdProxy {
       stamp.batchID.toHex(),
       stamp.signerKey.toHex(),
       stamp,
+      stamp.depth,
     )
     this.drives.set(drive.batchId, drive)
-    drive.ready = this.initializeStamper(
-      drive,
-      stamp.depth,
-      isScratchDrive(stamp),
-    )
+    drive.ready = this.initializeStamper(drive, stamp)
     return drive
   }
 
@@ -2241,10 +2239,11 @@ export class SwarmIdProxy {
    */
   private async initializeStamper(
     drive: DriveWritePath,
-    stampDepth: number,
-    scratch: boolean,
+    stamp: PostageStamp,
   ): Promise<void> {
     const { signerKey, batchId } = drive
+    const stampDepth = stamp.depth
+    const scratch = isScratchDrive(stamp)
     // `loadAuthData` calls this off the reconcile queue, so a storage event's
     // `refreshStampFromStorage` can clear or rebind the stamp under any await
     // below (#804). Every rebind is a new `DriveWritePath`, a re-resolve of the
@@ -6698,7 +6697,6 @@ export class SwarmIdProxy {
             backupSigner,
             swarmEncryptionKey: encryptionKey,
             batchId: stamp.batchID,
-            batchDepth: stamp.depth,
             partition,
           },
           known.get(key),
