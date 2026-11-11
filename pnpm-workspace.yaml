@@ -55,7 +55,7 @@ overrides:
   # Scoped: a bare zod@^4 also rewrites abitype's zod peer range.
   '@ethersphere/bee-js>zod': 4.6.7
   # Dev tooling only (`pnpm audit`, not --prod), same rule. Not overridden:
-  # vite 7 and svelte 5.48 (pinned monorepo toolchain, bumped as one change),
+  # vite 7 (pinned monorepo toolchain, bumped as one change),
   # minimatch 10 and cookie 0.6 (fix only in the next major), @sveltejs/kit
   # (fix only in 3.x).
   '@humanfs/node@^0.16': 0.16.8
@@ -86,23 +86,21 @@ overrides:
 auditConfig:
   ignoreGhsas:
     # Inside @web3-onboard/core and @relayprotocol/relay-sdk, with no fix in
-    # the major they need (see above): zod 3, deepmerge, esbuild 0.19, svelte 3.
+    # the major they need (see above): zod 3, deepmerge, esbuild 0.19.
     - GHSA-mrhx-c7xc-m3w5
     - GHSA-gcqx-w48m-w2h4
     - GHSA-67mh-4wv8-2f99
+    # The svelte 3 runtime compiled into @web3-onboard/core, which has no fixed
+    # release in its major. The apps' own svelte is past every one of these.
+    # All but the first and last are server-side rendering, which the wallet
+    # modal never does; the last (DOM clobbering) needs attributes spread onto
+    # a form, and the modal renders no form.
     - GHSA-8266-84wp-wv5c
-    # Svelte server-side rendering. Both apps are client-rendered
-    # (`ssr = false`), so no user input meets the server renderer.
     - GHSA-crpf-4hrx-3jrp
     - GHSA-f7gr-6p89-r883
     - GHSA-m56q-vw4c-c2cp
     - GHSA-phwv-c562-gvmh
     - GHSA-pr6f-5x2q-rwfp
-    - GHSA-f3cj-j4f6-wq85
-    - GHSA-h7h7-mm68-gmrc
-    # Svelte DOM clobbering: needs attributes spread onto a <form> and onto an
-    # input inside it, both user-controlled. No form in ui/ or demo/ spreads.
-    # Cleared by the svelte bump (#1011).
     - GHSA-rcqx-6q8c-2c42
     # Vite's dev server and its launch-editor. Neither is deployed.
     - GHSA-587h-7wmj-h5pm

@@ -56,7 +56,7 @@
   </CardHeader>
   <CardContent class="space-y-4">
     <div class="flex items-center gap-3">
-      <Switch checked={isEpoch} onchange={handleEpochToggle} />
+      <Switch checked={isEpoch} onchange={handleEpochToggle} aria-label="Use epoch feeds" />
       <Label class="cursor-pointer">Use epoch feeds (off = sequential)</Label>
     </div>
 
