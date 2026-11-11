@@ -47,10 +47,10 @@
   "devDependencies": {
     "@snaha/bee-compose": "0.3.0",
     "@trivago/prettier-plugin-sort-imports": "6.0.2",
-    "concurrently": "9.2.1",
+    "concurrently": "9.2.5",
     "prettier": "3.8.1",
     "prettier-plugin-svelte": "3.4.0",
-    "serve": "14.2.5"
+    "serve": "14.2.6"
   },
   "keywords": [
     "swarm",
