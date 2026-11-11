@@ -349,4 +349,19 @@ describe("counter-codec — decoder validation", () => {
       }),
     ).toThrow(/bucket/)
   })
+  it("rejects a frame or an exception whose counts do not fit 32 bits", () => {
+    // A counter above 2^32 - 1 would wrap to a low one in the table, and a
+    // takeover would resume below slots that were issued
+    const e = encoded()
+    const UINT32_MAX = 0xffffffff
+    expect(() =>
+      decodeCounters({ ...e, frame: { base: UINT32_MAX - 1, width: 6 } }),
+    ).toThrow(/32 bits/)
+    expect(() =>
+      decodeCounters({
+        ...e,
+        exceptions: e.exceptions.map((x) => ({ ...x, count: UINT32_MAX + 1 })),
+      }),
+    ).toThrow(/32 bits/)
+  })
 })

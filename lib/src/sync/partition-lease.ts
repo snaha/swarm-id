@@ -1434,7 +1434,9 @@ export class PartitionLease {
       // first → full publish, which seeds them). Nulled once per epoch to force a
       // full re-pin (see `lastFullPublishEpoch`).
       previousReferences: forceFullRepin ? undefined : this.publishedReferences,
-      previousCounter: forceFullRepin ? undefined : this.publishedCounter,
+      // Passed on a full re-pin too: without the references it diffs against
+      // nothing, but the publish still refuses a counter below the last one.
+      previousCounter: this.publishedCounter,
       previousFrame: forceFullRepin ? undefined : this.publishedFrame,
       // Lets the publish also avoid this device's intent-beacon buckets (the
       // refresh tick re-writes them off-lock at the same reserved slot).
