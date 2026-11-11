@@ -102,6 +102,7 @@ auditConfig:
     - GHSA-h7h7-mm68-gmrc
     # Svelte DOM clobbering: needs attributes spread onto a <form> and onto an
     # input inside it, both user-controlled. No form in ui/ or demo/ spreads.
+    # Cleared by the svelte bump (#1011).
     - GHSA-rcqx-6q8c-2c42
     # Vite's dev server and its launch-editor. Neither is deployed.
     - GHSA-587h-7wmj-h5pm
