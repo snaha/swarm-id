@@ -35,7 +35,6 @@ import { Binary } from "cafe-utility"
 import {
   type ChunkCacheEntry,
   type PublishedRow,
-  UtilizationStoreUnavailableError,
   type BatchMetadata,
   type UtilizationStoreDB,
 } from "../storage/utilization-store"
@@ -1556,15 +1555,10 @@ export class UtilizationAwareStamper implements Stamper, SlotAssigner {
     // Load the counters from the cache. A cache that cannot be read fails the
     // stamper rather than starting it from zero: a zero counter over rows that
     // exist flushes zero-based rows over them on the first write and re-issues
-    // every slot they record. A store that cannot be opened at all holds no
-    // rows, so the stamper starts fresh.
-    await instance.syncRows().catch((error: unknown) => {
-      if (!(error instanceof UtilizationStoreUnavailableError)) throw error
-      console.warn(
-        "[UtilizationAwareStamper] Utilization store unavailable; starting with fresh counters:",
-        error,
-      )
-    })
+    // every slot they record. That includes a store that cannot be opened at
+    // all: uploads require IndexedDB, and with no stamper the proxy reports
+    // `canUpload: false` and claims no partition (docs/decisions.md).
+    await instance.syncRows()
 
     // Auto-bind lock SOCs for all partitions. The lock-SOC owner is the
     // BACKUP signer's address — same value `writePartitionLock` derives

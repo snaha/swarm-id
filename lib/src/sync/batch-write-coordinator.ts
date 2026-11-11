@@ -44,6 +44,7 @@ import {
   LEASE_SKEW_MARGIN_MS,
   IDLE_YIELD_MS,
   UtilizationAwareStamper,
+  PartitionLeaseLostError,
 } from "../utils/batch-utilization"
 import { abortedError } from "../errors"
 import { withBatchWriteLock } from "../utils/batch-write-lock"
@@ -214,6 +215,14 @@ export interface BatchWriteCoordinatorDeps {
 export const PEER_YIELD_MIN_IDLE_MS = 3000
 
 /**
+ * How long a context's claim on the interval's Swarm renewal keeps the other
+ * contexts of its storage partition from renewing too. Half an interval: the
+ * tabs' timers run out of phase, and the claimant's own next tick, one
+ * interval on, must find it lapsed.
+ */
+const RENEWAL_CLAIM_MS = LEASE_REFRESH_MS / 2
+
+/**
  * A `lease-released` reaches a waiter over the bus well before the released
  * slot's sentinel write is readable from its node, so the scan it wakes often
  * still reads the old holder (#724). Rather than sleep out a poll interval on
@@ -360,9 +369,12 @@ export class BatchWriteCoordinator {
       this.ensureHeldForUpload()
       const target = await this.buildStamperTarget(opts)
       // Bracket the in-flight upload so the refresh tick's idle-yield can't
-      // release the partition (and unbind the stamper) underneath us.
+      // release the partition (and unbind the stamper) underneath us. A
+      // sibling's yield waits for this section's write lock, and by then the
+      // record carries the mark this upload leaves on its way out.
       this.lastLeaseActivityAt = Date.now()
       this.activeUploadCount++
+      let marked = false
       try {
         // NOTE: `op` performs the chunk write(s) BEFORE the post-op guard
         // below. The cold-re-entry case (a woken/throttled holder) is fenced by
@@ -395,7 +407,11 @@ export class BatchWriteCoordinator {
           // flush that follows) from rows left behind by a flush that never
           // landed — see the adopt fast path in `acquire`.
           if (this.partitionLease !== undefined) {
-            await this.saveLease(this.partitionLease)
+            await this.saveHeldLease(this.partitionLease, {
+              pointerFresh: true,
+              active: true,
+            })
+            marked = true
           }
           // The publish durably re-wrote the state pointer to the current
           // bucket (same effect as a successful heartbeat), so an idle-blip
@@ -419,7 +435,8 @@ export class BatchWriteCoordinator {
         return result
       } finally {
         this.activeUploadCount--
-        this.lastLeaseActivityAt = Date.now()
+        if (marked) this.lastLeaseActivityAt = Date.now()
+        else await this.markActive()
       }
     })
   }
@@ -982,7 +999,7 @@ export class BatchWriteCoordinator {
       // Re-asserted: refresh() rewrote the claim and bumped the lease.
       this.syncStamperLeaseDeadline()
       this.lastLeaseValidatedAt = Date.now()
-      await this.saveLease(this.partitionLease)
+      await this.saveHeldLease(this.partitionLease)
       return
     }
 
@@ -1001,7 +1018,7 @@ export class BatchWriteCoordinator {
     this.partitionLease.bumpLocalLease(LEASE_TTL_MS)
     this.syncStamperLeaseDeadline()
     this.lastLeaseValidatedAt = Date.now()
-    await this.saveLease(this.partitionLease)
+    await this.saveHeldLease(this.partitionLease)
   }
 
   /**
@@ -1073,13 +1090,25 @@ export class BatchWriteCoordinator {
     // partition through the lease record; this object is one context's hold
     // on it. If the record names another claim, or none — a sibling yielded,
     // tore down, was displaced, or claimed afresh — a tick from here would
-    // renew a claim the device gave up. Touch nothing: taking the lock drops
-    // it (`followLeaseRecord`).
-    if (!(await this.holdsRecordedClaim(lease))) {
+    // renew a claim the device gave up. Touch nothing on Swarm: taking the
+    // lock drops it (`followLeaseRecord`).
+    // A claim that went off-lock is a lost one — every path that gives the
+    // lane up in good order holds the write lock — so an upload of this
+    // context's in flight stops stamping now, not when it lets go of the lock.
+    const recorded = await this.recordedClaim(lease)
+    if (this.disposed || this.partitionLease !== lease) return
+    if (!recorded.holds) {
+      this.signalLeaseLost()
       await this.lock(async () => undefined)
       return
     }
-    if (this.disposed || this.partitionLease !== lease) return
+    this.takeRecordedActivity(recorded.record)
+    // A context whose timer was held back (a background tab) judges the
+    // lease by what its siblings renewed meanwhile, not by its own last tick
+    this.followRecordedExpiry(lease, recorded.record)
+    if (recorded.record !== undefined) {
+      this.pointerHeartbeatFailingSince = recorded.record.pointerFailingSince
+    }
 
     // Idle yield: if no upload touched this lease for IDLE_YIELD_MS and none is
     // in flight, voluntarily release so a waiting peer takes the slot without
@@ -1124,6 +1153,25 @@ export class BatchWriteCoordinator {
       return
     }
 
+    // One renewal per interval for the whole storage partition: a sibling
+    // that took it on within half an interval is renewing; take the expiry it
+    // recorded. A lease near expiry renews from here whatever the record
+    // says, so a renewer that died or keeps failing costs one interval.
+    if (!this.leaseNearExpiry()) {
+      const renewal = await this.claimRenewal(lease)
+      if (this.disposed || this.partitionLease !== lease) return
+      if (renewal !== undefined) {
+        lease.followExpiry(renewal.leasedUntil)
+        this.syncStamperLeaseDeadline()
+        // The renewal validated the lock as of its expiry's start
+        this.lastLeaseValidatedAt = Math.max(
+          this.lastLeaseValidatedAt,
+          renewal.leasedUntil - LEASE_TTL_MS,
+        )
+        return
+      }
+    }
+
     let confirmedDisplaced = false
     // Did this tick confirm we STILL hold the slot? Either write-verified
     // (`refresh()` returns "held") or read-verified (a "lost" whose lock-SOC
@@ -1134,6 +1182,11 @@ export class BatchWriteCoordinator {
     // reverse-clobber the post-op ack guard can't cover for a long upload).
     let confirmedHeld = false
     try {
+      // `ui/tests/three-devices.test.ts` counts this line, one per Swarm
+      // renewal, to measure how many a device makes per interval
+      console.debug(
+        `[BatchWriteCoordinator] Renewing partition ${partition} on Swarm`,
+      )
       const outcome = await lease.refresh()
       if (outcome === "held") confirmedHeld = true
       if (outcome === "displaced") {
@@ -1188,8 +1241,11 @@ export class BatchWriteCoordinator {
         `[BatchWriteCoordinator] Refresh: partition ${partition} taken by a peer; demoting.`,
       )
       // Race fix: abort any in-flight upload immediately, THEN unbind under the
-      // write lock (this tick is not under the lock).
+      // write lock (this tick is not under the lock). The record goes now
+      // too, off-lock: a sibling uploading holds that lock, and learns of the
+      // loss from the record on its own next tick.
       this.signalLeaseLost()
+      if (this.leaseRecordWorks) await this.clearLease(lease.serialize())
       await this.lock(async () => {
         // Re-check after winning the lock: a queued withWrite may have demoted
         // this lease and re-acquired a new live one while we waited. Same
@@ -1215,6 +1271,10 @@ export class BatchWriteCoordinator {
       // `leasedUntil` tracks the last successful renewal and genuinely counts
       // down. The UI stays Active through the blip (lease not yet lapsed).
       if (this.leaseNearExpiry()) {
+        const latest = await this.recordedClaim(lease)
+        if (this.disposed || this.partitionLease !== lease) return
+        this.followRecordedExpiry(lease, latest.record)
+        if (!this.leaseNearExpiry()) return
         console.warn(
           `[BatchWriteCoordinator] Refresh: partition ${partition} lease lapsed without a successful renewal; demoting.`,
         )
@@ -1283,11 +1343,14 @@ export class BatchWriteCoordinator {
           // the lease record and commit it to the rows, as an upload's publish
           // does, or a reload would adopt rows certified for the superseded
           // one and heartbeat that back (its chunks no longer protected).
-          await this.saveLease(lease)
+          await this.saveHeldLease(lease, { pointerFresh: true })
           await this.deps.flushStamperState?.()
         })
         this.pointerHeartbeatFailingSince = undefined
       } catch (err) {
+        // The record went while the heartbeat held the lock: the lease is
+        // lost and already demoted, there is no streak to count
+        if (this.disposed || this.partitionLease !== lease) return
         console.warn(
           "[BatchWriteCoordinator] State-pointer heartbeat failed:",
           err,
@@ -1301,11 +1364,11 @@ export class BatchWriteCoordinator {
         // floor (one pointer epoch of failures, well inside the
         // TTL + slack·epoch tolerance): the next upload re-acquires and its
         // publish re-pins the pointer.
-        this.pointerHeartbeatFailingSince ??= Date.now()
-        if (
-          Date.now() - this.pointerHeartbeatFailingSince >
-          STATE_POINTER_EPOCH_MS
-        ) {
+        // The streak is the lane's, kept in the record: the renewal moves
+        // between contexts, and each sees only its own heartbeats fail.
+        const failingSince = await this.markPointerFailing(lease)
+        if (this.disposed || this.partitionLease !== lease) return
+        if (Date.now() - failingSince > STATE_POINTER_EPOCH_MS) {
           console.warn(
             `[BatchWriteCoordinator] Refresh: partition ${partition} state-pointer heartbeat failing persistently; demoting before the resume pointer ages out of the takeover lookup.`,
           )
@@ -1500,15 +1563,98 @@ export class BatchWriteCoordinator {
     })
   }
 
-  /** Write `lease` to the shared record, noting whether the record keeps it. */
-  private async saveLease(lease: PartitionLease): Promise<void> {
+  /**
+   * Write `lease` to the shared record, noting whether the record keeps it.
+   * With `held`, the record is expected to name this claim already, and one
+   * that does not is left alone: returns whether the lease is still the
+   * record's. `pointerFresh` ends the heartbeat failure streak (the state
+   * pointer was just written); `active` marks an upload finishing.
+   */
+  private async saveLease(
+    lease: PartitionLease,
+    opts: { held?: boolean; pointerFresh?: boolean; active?: boolean } = {},
+  ): Promise<boolean> {
     const record = this.deps.leaseRecord
-    if (!record) return
+    if (!record) return true
     const snapshot = lease.serialize()
-    await record.update(() => snapshot)
+    const expectClaim = opts.held === true && this.leaseRecordWorks
+    let kept = true
+    // The renewal and activity marks belong to the claim, not to this write
+    await record.update((existing) => {
+      if (!sameClaim(existing, snapshot)) {
+        if (!expectClaim) return snapshot
+        kept = false
+        return existing
+      }
+      return {
+        ...snapshot,
+        renewingAt: existing?.renewingAt,
+        activeAt: opts.active ? Date.now() : existing?.activeAt,
+        pointerFailingSince: opts.pointerFresh
+          ? undefined
+          : existing?.pointerFailingSince,
+      }
+    })
     if (!this.leaseRecordWorks) {
       this.leaseRecordWorks = sameClaim(await record.read(), snapshot)
     }
+    return kept
+  }
+
+  /**
+   * `saveLease` for a lease held under the write lock. A record that no
+   * longer names the claim was cleared off-lock by a sibling that found the
+   * lane taken: the lease is lost, so demote and fail the section rather
+   * than write the claim back and ack what was stamped on a peer's lane.
+   */
+  private async saveHeldLease(
+    lease: PartitionLease,
+    opts: { pointerFresh?: boolean; active?: boolean } = {},
+  ): Promise<void> {
+    if (await this.saveLease(lease, { ...opts, held: true })) return
+    console.warn(
+      "[BatchWriteCoordinator] The lease record no longer names this claim; demoting.",
+    )
+    this.signalLeaseLost()
+    await this.finalizeDemote()
+    throw new PartitionLeaseLostError()
+  }
+
+  /** Take the expiry the record holds for `lease`, when it is later. */
+  private followRecordedExpiry(
+    lease: PartitionLease,
+    record: PartitionLeaseStateSnapshot | undefined,
+  ): void {
+    if (record?.self === undefined) return
+    lease.followExpiry(record.self.leasedUntil)
+    this.syncStamperLeaseDeadline()
+  }
+
+  /**
+   * Note a failed state-pointer heartbeat in the record, and return since
+   * when the lane's heartbeats have been failing.
+   */
+  private async markPointerFailing(lease: PartitionLease): Promise<number> {
+    let since = (this.pointerHeartbeatFailingSince ??= Date.now())
+    if (this.leaseRecordWorks) {
+      const mine = lease.serialize()
+      await this.deps.leaseRecord
+        ?.update((existing) => {
+          if (existing === undefined || !sameClaim(existing, mine)) {
+            return existing
+          }
+          since = Math.min(existing.pointerFailingSince ?? since, since)
+          return { ...existing, pointerFailingSince: since }
+        })
+        .catch((err: unknown) =>
+          console.warn(
+            "[BatchWriteCoordinator] Could not record the failed heartbeat:",
+            err,
+          ),
+        )
+    }
+    this.pointerHeartbeatFailingSince = since
+    return since
   }
 
   /** Remove `mine` from the shared record, unless it names another claim. */
@@ -1524,20 +1670,91 @@ export class BatchWriteCoordinator {
   }
 
   /**
-   * Whether the shared record still names the claim `lease` holds. True when
-   * there is no working record to ask, or it cannot be read.
+   * Whether the shared record still names the claim `lease` holds, with the
+   * record. Holds when there is no working record to ask, or it cannot be
+   * read.
    */
-  private async holdsRecordedClaim(lease: PartitionLease): Promise<boolean> {
-    if (!this.leaseRecordWorks) return true
+  private async recordedClaim(
+    lease: PartitionLease,
+  ): Promise<{ holds: boolean; record?: PartitionLeaseStateSnapshot }> {
+    if (!this.leaseRecordWorks) return { holds: true }
     try {
-      return sameClaim(await this.deps.leaseRecord?.read(), lease.serialize())
+      const record = await this.deps.leaseRecord?.read()
+      return { holds: sameClaim(record, lease.serialize()), record }
     } catch (err) {
       console.warn(
         "[BatchWriteCoordinator] Could not read the lease record:",
         err,
       )
-      return true
+      return { holds: true }
     }
+  }
+
+  /**
+   * Take on this interval's Swarm renewal of `lease`, unless a context of
+   * the storage partition took it on within half an interval. Returns the
+   * recorded claim when a sibling is renewing, `undefined` when this
+   * context renews — also whenever the record cannot say.
+   */
+  private async claimRenewal(
+    lease: PartitionLease,
+  ): Promise<{ leasedUntil: number } | undefined> {
+    const record = this.deps.leaseRecord
+    if (!record || !this.leaseRecordWorks) return undefined
+    const mine = lease.serialize()
+    const now = Date.now()
+    let renewing: { leasedUntil: number } | undefined
+    await record
+      .update((existing) => {
+        if (existing?.self === undefined || !sameClaim(existing, mine)) {
+          return existing
+        }
+        // A claim dated ahead of this clock (the clock stepped back) is no
+        // claim: honouring it would stop every renewal until the clock caught up
+        const age = now - (existing.renewingAt ?? 0)
+        if (age >= 0 && age < RENEWAL_CLAIM_MS) {
+          renewing = { leasedUntil: existing.self.leasedUntil }
+          return existing
+        }
+        return { ...existing, renewingAt: now }
+      })
+      .catch((err: unknown) =>
+        console.warn(
+          "[BatchWriteCoordinator] Could not claim the lease renewal:",
+          err,
+        ),
+      )
+    return renewing
+  }
+
+  /** Record an upload starting or finishing, for every context's idle yield. */
+  private async markActive(): Promise<void> {
+    const at = Date.now()
+    this.lastLeaseActivityAt = at
+    if (!this.leaseRecordWorks || this.partitionLease === undefined) return
+    await this.deps.leaseRecord
+      ?.update((existing) =>
+        existing?.self === undefined ? existing : { ...existing, activeAt: at },
+      )
+      .catch((err: unknown) =>
+        console.warn(
+          "[BatchWriteCoordinator] Could not record the upload activity:",
+          err,
+        ),
+      )
+  }
+
+  /** Measure idleness from the latest upload of any context of the lane. */
+  private takeRecordedActivity(
+    record: PartitionLeaseStateSnapshot | undefined,
+  ): void {
+    // A mark dated ahead of this clock (the clock stepped back) says nothing:
+    // taking it would hold off the idle yield until the clock caught up
+    if (record?.activeAt === undefined || record.activeAt > Date.now()) return
+    this.lastLeaseActivityAt = Math.max(
+      this.lastLeaseActivityAt,
+      record.activeAt,
+    )
   }
 
   /**
@@ -1547,9 +1764,8 @@ export class BatchWriteCoordinator {
    * of its own; the record is written under this lock at every claim,
    * publish and re-pin.
    *
-   * - Same claim: take its expiry and published reference. A reference a
-   *   sibling published means the lane was in use a moment ago, which is
-   *   what the idle yield measures.
+   * - Same claim: take its expiry, published reference and last upload
+   *   activity, which is what the idle yield measures.
    * - Another claim, or none: the device no longer holds this lane on this
    *   object's terms. Drop it locally — no Swarm write, and the record (the
    *   sibling's) is left alone; the next write acquires through the record.
@@ -1573,9 +1789,7 @@ export class BatchWriteCoordinator {
     const mine = lease.serialize()
     if (record !== undefined && sameClaim(record, mine)) {
       lease.follow(record)
-      if (record.referenceHex !== mine.referenceHex) {
-        this.lastLeaseActivityAt = Date.now()
-      }
+      this.takeRecordedActivity(record)
       this.syncStamperLeaseDeadline()
       return
     }

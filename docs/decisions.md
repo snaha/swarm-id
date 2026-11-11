@@ -7,6 +7,27 @@ present and may point at an issue or PR; the reasons live here.
 
 A PR that makes or changes a decision adds the entry in the same PR.
 
+## 2026-11-10 One context of a storage partition renews its lease
+
+**Context.** Every tab, iframe and the SwarmID tab of one storage partition holds the
+same lease and ran its own refresh tick, so N contexts made N lock-SOC renewals, N pairs
+of presence beacons and N state-pointer heartbeats per interval. Each measured idleness
+from its own clock, and learned of a lost lease only from its own renewal.
+
+**Decision.** Every context still ticks, and claims the interval's renewal in the lease
+record (`renewingAt`) in one atomic update; a context that finds a claim younger than half
+an interval takes the recorded expiry instead. A lease near expiry renews regardless, so a
+renewer that closes or keeps failing costs one interval. A renewer that finds the lane
+taken clears the record off-lock, and a sibling's tick invalidates its stamper on seeing
+the claim gone. The idle yield measures from `activeAt`, written as each upload starts and
+ends.
+
+**Why.** No election and no messaging: the record is already read at every tick, and an
+IndexedDB transaction is the arbiter. Half an interval tolerates tabs' timers running out
+of phase while the claimant's own next tick still finds its claim lapsed. The off-lock
+clear is what keeps a sibling's long upload from stamping a lost lane until it lets go of
+the write lock, which the renewer's demote would otherwise wait for.
+
 ## 2026-11-10 The publish baseline is stored, apart from the cache rows
 
 **Context.** What an incremental publish diffs against — the leaf references,
