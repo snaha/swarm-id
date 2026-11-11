@@ -1795,13 +1795,20 @@ export class UtilizationAwareStamper implements Stamper, SlotAssigner {
     if (baseline) {
       replacesStored = this.storedPublished?.referenceHex
       const stored = this.storedPublished?.counter
+      // Compared in place: serialising both tables to find the one or two
+      // rows an upload moved would allocate half a megabyte per flush.
       for (let i = 0; i < NUM_UTILIZATION_CHUNKS; i++) {
-        const data = extractChunk(baseline.counter, i)
-        if (
-          stored === undefined ||
-          !Binary.equals(data, extractChunk(stored, i))
-        ) {
-          published.push({ batchId, chunkIndex: i, data })
+        const start = i * BUCKETS_PER_CHUNK
+        let changed = stored === undefined
+        for (let b = start; !changed && b < start + BUCKETS_PER_CHUNK; b++) {
+          changed = baseline.counter[b] !== stored?.[b]
+        }
+        if (changed) {
+          published.push({
+            batchId,
+            chunkIndex: i,
+            data: extractChunk(baseline.counter, i),
+          })
         }
       }
     }
