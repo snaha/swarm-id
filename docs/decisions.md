@@ -7,6 +7,24 @@ present and may point at an issue or PR; the reasons live here.
 
 A PR that makes or changes a decision adds the entry in the same PR.
 
+## 2026-11-11 Uploads require IndexedDB
+
+**Context.** A drive's stamp counters are kept in IndexedDB, and that store is what
+carries them across reloads and between the tabs of one device. A stamper whose store
+could not be read started with fresh counters and went on to upload.
+
+**Decision.** A browser context without IndexedDB is read-only. The stamper does not
+build, so the drive has no write path: the proxy reports `canUpload: false`
+(`uploadUnavailableReason: "stamper-failed"`) and never tries to acquire a partition.
+Downloads are unaffected. There is no in-memory fallback.
+
+**Why.** Counters started from zero over rows that exist re-issue every slot those rows
+record, and without a shared store two tabs of one device each stamp from their own
+table with nothing to carry stamps between them. A second shared store (`localStorage`
+cannot hold 256 KB of rows per drive) or single-tab enforcement is a lot of machinery for
+a rare context: `localStorage` and Web Locks working while IndexedDB does not. Safari
+private windows are not that case.
+
 ## 2026-09-21 Stamper-mode uploads honour the caller's `deferred`
 
 **Context.** Every data and chunk upload in stamper mode forced

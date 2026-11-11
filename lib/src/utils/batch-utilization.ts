@@ -1626,25 +1626,22 @@ export class UtilizationAwareStamper implements Stamper, SlotAssigner {
     // Initialize utilization state (always, since owner is now required)
     const utilizationState = initializeBatchUtilization(batchId, layoutDepth)
 
-    // Try to load utilization state from cache
-    try {
-      const cachedChunks = await cache.getAllChunks(batchId.toHex())
-      const { numUtilizationChunks } = getChunkLayout(layoutDepth)
-      // Merge cached chunks into state; ignore any that fall outside the
-      // current depth's layout (e.g. stale entries from a different depth)
-      for (const cached of cachedChunks) {
-        if (cached.chunkIndex >= numUtilizationChunks) continue
-        mergeChunk(
-          utilizationState.dataCounters,
-          cached.chunkIndex,
-          cached.data,
-          layoutDepth,
-        )
-      }
-    } catch (error) {
-      console.warn(
-        `[UtilizationAwareStamper] Failed to load state from cache, starting with fresh state:`,
-        error,
+    // Load the counters from the cache. A cache that cannot be read fails the
+    // stamper rather than starting it from zero: counters at zero over rows
+    // that exist re-issue every slot they record. Uploads require IndexedDB;
+    // with no stamper the proxy reports `canUpload: false` and claims no
+    // partition (docs/decisions.md).
+    const cachedChunks = await cache.getAllChunks(batchId.toHex())
+    const { numUtilizationChunks } = getChunkLayout(layoutDepth)
+    // Merge cached chunks into state; ignore any that fall outside the
+    // current depth's layout (e.g. stale entries from a different depth)
+    for (const cached of cachedChunks) {
+      if (cached.chunkIndex >= numUtilizationChunks) continue
+      mergeChunk(
+        utilizationState.dataCounters,
+        cached.chunkIndex,
+        cached.data,
+        layoutDepth,
       )
     }
 
