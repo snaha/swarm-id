@@ -451,6 +451,23 @@ describe("two tabs sharing one lease", () => {
     expect((await publishedCounter(partition)).localCounter?.[BUCKET]).toBe(2)
   })
 
+  it("a coordinator built after a teardown resumes from the rows, without downloading the released state", async () => {
+    const first = await openTab()
+    await first.upload(BUCKET)
+    first.coordinator.teardown()
+    await lockDrained()
+
+    clock += 1000
+    const reads = vi.spyOn(partitionState, "readPartitionState")
+    const successor = await openTab()
+    await successor.upload(BUCKET)
+
+    const claimRead = await reads.mock.results[0].value
+    expect(claimRead.unchanged).toBe(true)
+    const partition = successor.coordinator.currentPartition!
+    expect((await publishedCounter(partition)).localCounter?.[BUCKET]).toBe(2)
+  })
+
   it("a tab that disconnects leaves alone the lease a sibling has published under since", async () => {
     const tabA = await openTab()
     const tabB = await openTab()

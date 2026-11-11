@@ -1932,7 +1932,10 @@ export class UtilizationAwareStamper implements Stamper, SlotAssigner {
     | { partition: number; referenceHex: string; baseline?: PublishBaseline }
     | undefined {
     const pending = this.pendingReference
-    return pending !== undefined && pending.partition === this.partition
+    // An unbound stamper speaks for the lane its rows describe: a teardown
+    // unbinds before its release publishes, and that reference is the rows'.
+    const lane = this.partition ?? this.rowsPartition
+    return pending !== undefined && pending.partition === lane
       ? pending
       : undefined
   }

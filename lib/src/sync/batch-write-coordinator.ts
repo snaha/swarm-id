@@ -525,7 +525,13 @@ export class BatchWriteCoordinator {
             : true
           if (!current) return
           try {
-            if (localCounter !== undefined) await lease.release(localCounter)
+            if (localCounter !== undefined) {
+              await lease.release(localCounter)
+              // Commit the release's reference to the rows, as the idle yield
+              // does, so the next acquire of the lane resumes from them
+              // instead of downloading the state it just published.
+              await stamper.flush()
+            }
           } finally {
             await this.clearLease(mine)
           }

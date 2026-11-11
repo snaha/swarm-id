@@ -88,6 +88,7 @@ function makeStamper(calls: string[]) {
     unbindPartition: vi.fn(() => calls.push("unbind")),
     bindPartition: vi.fn(() => calls.push("bind")),
     setLeaseValidUntil: vi.fn(),
+    flush: vi.fn(async () => undefined),
     buildLeaseLocalCounter: () => new Uint32Array(8),
     getLocalCounter: (): Uint32Array | undefined => new Uint32Array(8),
     // The reference the cache rows are certified by for a lane; the adopt
