@@ -45,8 +45,8 @@ class FakeWebSocket {
     this.onclose?.({ code: NORMAL_CLOSURE, reason: "" })
   }
 
-  /** What a browser reports for any failed connect: an error, then a close, no reason. */
-  failConnect(): void {
+  /** What a browser reports for any failed connection: an error, then a close, no reason. */
+  fail(): void {
     this.readyState = FakeWebSocket.CLOSED
     this.onerror?.()
     this.onclose?.({ code: ABNORMAL_CLOSURE, reason: "" })
@@ -106,31 +106,34 @@ describe("ChunkUploadStream", () => {
   )
 
   it(
-    "words a failed connect as likely causes, since it cannot know which",
-    async () => {
-      FakeWebSocket.staysConnecting = true
-      const stream = new ChunkUploadStream(BEE_URL)
-      const opening = stream.open()
-
-      FakeWebSocket.last?.failConnect()
-
-      await expect(opening).rejects.toThrow("may be down")
-    },
-    HANG_MS,
-  )
-
-  it(
     "keeps the failed connect's message after the close that follows it",
     async () => {
       FakeWebSocket.staysConnecting = true
       const stream = new ChunkUploadStream(BEE_URL)
       const opening = stream.open()
 
-      FakeWebSocket.last?.failConnect()
+      FakeWebSocket.last?.fail()
 
       await expect(opening).rejects.toThrow("Could not open")
       await expect(stream.uploadChunk(new Uint8Array(1))).rejects.toThrow(
         "Could not open",
+      )
+    },
+    HANG_MS,
+  )
+
+  it(
+    "reports a mid-stream error to later chunks, as it did to the ones in flight",
+    async () => {
+      const stream = new ChunkUploadStream(BEE_URL)
+      await stream.open()
+      const inFlight = stream.uploadChunk(new Uint8Array(1))
+
+      FakeWebSocket.last?.fail()
+
+      await expect(inFlight).rejects.toThrow("WebSocket connection error")
+      await expect(stream.uploadChunk(new Uint8Array(1))).rejects.toThrow(
+        "WebSocket connection error",
       )
     },
     HANG_MS,
