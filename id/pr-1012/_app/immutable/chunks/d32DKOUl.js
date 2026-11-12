@@ -1,1 +1,0 @@
-import{s,g as r,e as a}from"./CYiUPmn2.js";const i=4e3;function m(){let t=a(void 0),e;return{get message(){return r(t)},show:o=>{s(t,o,!0),clearTimeout(e),e=setTimeout(()=>s(t,void 0),i)}}}const u=m();export{u as t};
