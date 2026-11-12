@@ -75,10 +75,10 @@ export class ChunkUploadStream {
       }
 
       this.ws.onerror = () => {
-        // A browser hides why an upgrade was refused, so name what it needs.
+        // A browser hides why a connect failed, so all this can offer is the likely causes.
         const msg = opened
           ? "WebSocket connection error"
-          : `Could not open ${wsUrl}. Uploading over WebSocket needs Bee ${WS_MIN_BEE_VERSION} or newer, reached directly: a gateway does not proxy the stream.`
+          : `Could not open ${wsUrl}. The node may be down or unreachable from this page. If it is up, it refused the upgrade: uploading over WebSocket needs Bee ${WS_MIN_BEE_VERSION} or newer, reached directly, as a gateway does not proxy the stream.`
         this.errorMessage = msg
         this.rejectAllPending(new Error(msg))
         reject(new Error(msg))
@@ -94,7 +94,8 @@ export class ChunkUploadStream {
       }
 
       this.ws.onclose = (event) => {
-        if (!this.closed) {
+        // An error event is always followed by a close, and the error is the one reported.
+        if (!this.closed && this.errorMessage === undefined) {
           const msg = `WebSocket closed unexpectedly: ${event.code} ${event.reason}`
           this.errorMessage = msg
           this.rejectAllPending(new Error(msg))

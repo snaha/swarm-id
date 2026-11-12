@@ -24,14 +24,14 @@ pnpm dev:chain:detach   # the cluster's chain alone, on :9545 (start --without-b
 pnpm dev:chain:stop
 ```
 
-The scripts start a 4-node full network (`--full 4` = queen + 3 full workers). `dev:cluster:start` pins Bee with `BEE_VERSION` (bee-compose defaults to an older one); the CI image cache key reads it from there. Keep it at 2.8.1 or newer: `useWebSocket` uploads need it. `pnpm dev:cluster`
+The scripts start a 4-node full network (`--full 4` = queen + 3 full workers). `dev:cluster:start` pins Bee with `BEE_VERSION` (bee-compose defaults to an older one); the CI image cache key reads it from there. Keep it at 2.8.1 or newer: `useWebSocket` uploads need it. The image tags carry the version, so the first `pnpm dev:cluster:start` after it changes recompiles Bee for a few minutes rather than hanging. `pnpm dev:cluster`
 passes anything else through to the CLI (`status`, `--without-bees`, …).
 
 **Bumping bee-compose needs `--pull`, not just `--fresh`.** The chain snapshot is baked into the
 `bee-compose:blockchain-*` image at build time, and `--fresh` only tears down volumes — it reuses
 the image it already has, so the cluster keeps serving the OLD chain. The only symptom is that
 nodes never ingest a batch you can plainly see on-chain (`/chainstate` looks healthy). Use
-`pnpm dev:cluster:start --fresh --pull`. CI is immune: its image cache is keyed on the lockfile.
+`pnpm dev:cluster:start --fresh --pull`. CI is immune: its image cache is keyed on the bee-compose and Bee versions.
 
 ## Pushsync needs `reachabilityOverridePublic=true` — now built into bee-compose ≥ 0.1.4
 

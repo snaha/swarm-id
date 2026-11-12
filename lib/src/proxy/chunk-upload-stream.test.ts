@@ -9,6 +9,7 @@ import { MockBee, createMockStamper } from "./feeds/epochs/test-utils"
 const BEE_URL = "http://bee.example"
 const TAG_UID = 7
 const NORMAL_CLOSURE = 1000
+const ABNORMAL_CLOSURE = 1006
 /** Every wait below ends at once or never: a hang fails here, not at 5 s. */
 const HANG_MS = 500
 
@@ -42,6 +43,13 @@ class FakeWebSocket {
   close(): void {
     this.readyState = FakeWebSocket.CLOSED
     this.onclose?.({ code: NORMAL_CLOSURE, reason: "" })
+  }
+
+  /** What a browser reports for any failed connection: an error, then a close, no reason. */
+  fail(): void {
+    this.readyState = FakeWebSocket.CLOSED
+    this.onerror?.()
+    this.onclose?.({ code: ABNORMAL_CLOSURE, reason: "" })
   }
 }
 
@@ -93,6 +101,40 @@ describe("ChunkUploadStream", () => {
 
       await expect(opening).rejects.toMatchObject({ code: "aborted" })
       expect(FakeWebSocket.last?.readyState).toBe(FakeWebSocket.CLOSED)
+    },
+    HANG_MS,
+  )
+
+  it(
+    "keeps the failed connect's message after the close that follows it",
+    async () => {
+      FakeWebSocket.staysConnecting = true
+      const stream = new ChunkUploadStream(BEE_URL)
+      const opening = stream.open()
+
+      FakeWebSocket.last?.fail()
+
+      await expect(opening).rejects.toThrow("Could not open")
+      await expect(stream.uploadChunk(new Uint8Array(1))).rejects.toThrow(
+        "Could not open",
+      )
+    },
+    HANG_MS,
+  )
+
+  it(
+    "reports a mid-stream error to later chunks, as it did to the ones in flight",
+    async () => {
+      const stream = new ChunkUploadStream(BEE_URL)
+      await stream.open()
+      const inFlight = stream.uploadChunk(new Uint8Array(1))
+
+      FakeWebSocket.last?.fail()
+
+      await expect(inFlight).rejects.toThrow("WebSocket connection error")
+      await expect(stream.uploadChunk(new Uint8Array(1))).rejects.toThrow(
+        "WebSocket connection error",
+      )
     },
     HANG_MS,
   )
