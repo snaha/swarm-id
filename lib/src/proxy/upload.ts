@@ -1035,9 +1035,9 @@ export async function uploadSOC(
       "swarm-postage-stamp": stampHex,
     }
     if (tag) headers["swarm-tag"] = tag.toString()
-    if (options?.deferred !== undefined) {
-      headers["swarm-deferred-upload"] = options.deferred.toString()
-    }
+    // Always stated: from Bee 2.8.1 a tag alone makes a `/soc` upload deferred,
+    // and a deferred overwrite of a SOC reaches no node.
+    headers["swarm-deferred-upload"] = (options?.deferred ?? false).toString()
     if (options?.pin !== undefined) {
       headers["swarm-pin"] = options.pin.toString()
     }
