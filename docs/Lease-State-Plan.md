@@ -185,7 +185,8 @@ it and which has no reference on either side is adopted like any other.
    caller's promise resolves, so the ack is no later. With one record there is no second
    store to disagree with after a crash between publish and local write; flushing first
    means a reload always finds rows that include the stamps that reached Swarm. A flush
-   that fails stays non-fatal: publish from memory and leave the record untouched.
+   that fails stays non-fatal for the publisher; a sibling that finds the record naming a
+   publish its rows do not reads the state from Swarm.
 5. **Every context ticks, one refreshes** (2026-11-10). Each context reads the record on
    its own timer and does the Swarm refresh only when the record shows nobody renewed
    within the last interval. No election and no messaging; an uploading context still

@@ -7,6 +7,43 @@ present and may point at an issue or PR; the reasons live here.
 
 A PR that makes or changes a decision adds the entry in the same PR.
 
+## 2026-11-11 A context trusts the lease record only as far as its rows go
+
+**Context.** A review of the lease stack found paths where a context acted on the lease
+record without the counters behind it. A context followed the record's new reference
+whatever the rows held, so a sibling that published without flushing (account sync) or
+whose flushes failed left it stamping slots the sibling had used. An upload finishing after
+a sibling cleared the record off-lock wrote the claim back and was acked. Adopting the
+recorded lease pushed its expiry out by a full TTL with no write to Swarm, which a chain of
+one-shot writers could repeat past the lock's expiry. A teardown after an upload's last
+stamp let it ack on the strength of the teardown's detached release.
+
+**Decision.**
+
+- A reference this context did not publish is followed only when the rows name it;
+  otherwise the context drops its lease and reads the lane's state from Swarm. Account sync
+  flushes its stamper like the proxy.
+- Under the write lock, a held lease whose record no longer names its claim is lost: the
+  context demotes and the section fails before its ack.
+- Adopting the recorded lease keeps the recorded expiry.
+- An upload whose lease is gone when its operation returns fails with
+  `PartitionLeaseLostError`.
+- A teardown's release is flushed to the rows, like an idle yield's.
+- A full publish is still checked against the last published counter.
+- A publish keeps its new chunks out of the buckets of the state it replaces, leaves and
+  reference chunk alike, until its own pointer lands.
+- A cold acquire binds the larger, per bucket, of the counter it downloaded and the rows
+  this device holds for the lane. The publish baseline stays the downloaded counter.
+
+**Why.** The record says which claim and which publish; only the rows, or Swarm, say which
+slots are used. Reading the state back costs a download in the failure cases and nothing
+otherwise, where a context that guesses re-issues acked slots. The expiry in the record is
+the lock's on Swarm, and only a renewal may move it. A failed upload is retried safely,
+its chunks being content-addressed; an ack without a publish is not recoverable. A publish
+that fails partway must leave the previous state readable, since the pointer still names
+it. And a counter that skips slots only costs capacity, where one that goes back
+overwrites a chunk, so the rows are a floor whatever the pointer says.
+
 ## 2026-11-10 One context of a storage partition renews its lease
 
 **Context.** Every tab, iframe and the SwarmID tab of one storage partition holds the

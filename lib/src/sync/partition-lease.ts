@@ -32,7 +32,7 @@ import {
   Reference,
   type Stamper,
 } from "@ethersphere/bee-js"
-import { uint8ArrayToHex } from "../utils/hex"
+import { hexToUint8Array, uint8ArrayToHex } from "../utils/hex"
 import { withTimeout } from "../utils/promise"
 import { SYNC_READ_TIMEOUT_MS } from "./timing-constants"
 import { deriveSecret, BACKUP_KEY_LABEL } from "../utils/key-derivation"
@@ -881,10 +881,21 @@ export class PartitionLease {
       }
     }
 
-    const localCounter =
-      stateResult.unchanged && stamper instanceof UtilizationAwareStamper
-        ? stamper.buildLeaseLocalCounter()
-        : (stateResult.localCounter ?? new Uint32Array(NUM_BUCKETS))
+    // What Swarm holds for the lane: the baseline the first publish diffs
+    // against. What the stamper binds may be higher: rows that describe this
+    // lane record every slot this device issued on it, and the counter never
+    // goes below them — whatever the pointer names. Skipping slots costs
+    // capacity; re-issuing one overwrites a chunk.
+    const downloaded = stateResult.localCounter ?? new Uint32Array(NUM_BUCKETS)
+    let localCounter = downloaded
+    if (stamper instanceof UtilizationAwareStamper) {
+      if (stateResult.unchanged) {
+        localCounter = stamper.buildLeaseLocalCounter()
+      } else if (certification !== undefined) {
+        const rows = stamper.buildLeaseLocalCounter()
+        localCounter = downloaded.map((count, b) => Math.max(count, rows[b]))
+      }
+    }
 
     // The generation we will both advertise (intent round) and claim with, so
     // the round's winner binds the lock with the exact generation it announced.
@@ -1022,7 +1033,7 @@ export class PartitionLease {
     this.publishedFrame = stateResult.unchanged ? undefined : stateResult.frame
     this.publishedCounter = stateResult.unchanged
       ? undefined
-      : localCounter.slice()
+      : downloaded.slice()
     // Mark this epoch as already full-pinned so the FIRST publish of the session
     // stays incremental against the resumed refs (the cheap-first-publish win).
     // On the FULL-read branch every non-zero counter chunk was just downloaded,
@@ -1434,8 +1445,18 @@ export class PartitionLease {
       // first → full publish, which seeds them). Nulled once per epoch to force a
       // full re-pin (see `lastFullPublishEpoch`).
       previousReferences: forceFullRepin ? undefined : this.publishedReferences,
-      previousCounter: forceFullRepin ? undefined : this.publishedCounter,
+      // Passed on a full re-pin too: without the references it diffs against
+      // nothing, but the publish still refuses a counter below the last one.
+      previousCounter: this.publishedCounter,
       previousFrame: forceFullRepin ? undefined : this.publishedFrame,
+      // What the pointer names until this publish's own lands, full re-pin
+      // or not: kept whole in case the publish fails partway.
+      supersededReferences: [
+        ...(this.publishedReferences ?? []),
+        ...(this.lastReferenceHex !== undefined
+          ? [hexToUint8Array(this.lastReferenceHex)]
+          : []),
+      ],
       // Lets the publish also avoid this device's intent-beacon buckets (the
       // refresh tick re-writes them off-lock at the same reserved slot).
       deviceId: this.opts.deviceId,
@@ -1635,8 +1656,10 @@ export class PartitionLease {
    * failures. The next `refresh()` reconciles with Swarm.
    */
   adoptIfLive(): number | undefined {
+    // The expiry stays the recorded one: it is what the lock on Swarm says,
+    // and a context that adopts without renewing (a one-shot writer has no
+    // refresh tick) must not push the record past it.
     if (!this.self || this.self.leasedUntil <= this.now()) return undefined
-    this.self = { ...this.self, leasedUntil: this.now() + LEASE_TTL_MS }
     this.holders.set(this.self.partition, {
       deviceId: this.opts.deviceId,
       generation: this.self.generation,

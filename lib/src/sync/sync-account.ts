@@ -374,6 +374,10 @@ export function createSyncAccount(
       swarmEncryptionKey: hexToUint8Array(encryptionKey),
       partitionCount,
       mode: "oneshot",
+      // The stamps this publish makes go into the shared rows, as the proxy's
+      // do: a context that follows the record's new reference takes its
+      // counters from them.
+      flushStamperState: () => stamper.flush(),
       // The same record the proxy's coordinators read: this publish moves the
       // lane's reference, and a context that did not learn of it would put
       // its own older one back.

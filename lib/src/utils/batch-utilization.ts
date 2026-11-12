@@ -1795,13 +1795,20 @@ export class UtilizationAwareStamper implements Stamper, SlotAssigner {
     if (baseline) {
       replacesStored = this.storedPublished?.referenceHex
       const stored = this.storedPublished?.counter
+      // Compared in place: serialising both tables to find the one or two
+      // rows an upload moved would allocate half a megabyte per flush.
       for (let i = 0; i < NUM_UTILIZATION_CHUNKS; i++) {
-        const data = extractChunk(baseline.counter, i)
-        if (
-          stored === undefined ||
-          !Binary.equals(data, extractChunk(stored, i))
-        ) {
-          published.push({ batchId, chunkIndex: i, data })
+        const start = i * BUCKETS_PER_CHUNK
+        let changed = stored === undefined
+        for (let b = start; !changed && b < start + BUCKETS_PER_CHUNK; b++) {
+          changed = baseline.counter[b] !== stored?.[b]
+        }
+        if (changed) {
+          published.push({
+            batchId,
+            chunkIndex: i,
+            data: extractChunk(baseline.counter, i),
+          })
         }
       }
     }
@@ -1932,7 +1939,10 @@ export class UtilizationAwareStamper implements Stamper, SlotAssigner {
     | { partition: number; referenceHex: string; baseline?: PublishBaseline }
     | undefined {
     const pending = this.pendingReference
-    return pending !== undefined && pending.partition === this.partition
+    // An unbound stamper speaks for the lane its rows describe: a teardown
+    // unbinds before its release publishes, and that reference is the rows'.
+    const lane = this.partition ?? this.rowsPartition
+    return pending !== undefined && pending.partition === lane
       ? pending
       : undefined
   }

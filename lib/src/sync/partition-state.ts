@@ -806,6 +806,13 @@ export async function writePartitionState(opts: {
   /** The frame the previous publish packed with; kept while it still fits. */
   previousFrame?: CounterFrame
   /**
+   * References of the chunks the state pointer names until this publish's own
+   * pointer lands: the previous reference chunk and its leaves. Their buckets
+   * are kept clear, so a publish that fails partway leaves the state it was
+   * replacing readable.
+   */
+  supersededReferences?: Uint8Array[]
+  /**
    * This device's id. When provided, the publish also avoids the buckets of
    * this device's current/previous-epoch intent beacons (the refresh tick
    * writes them off-lock at the same reserved slot). Omit for read-only / the
@@ -850,6 +857,7 @@ export async function writePartitionState(opts: {
     previousReferences,
     previousCounter,
     previousFrame,
+    supersededReferences,
     deviceId,
     nowMs = Date.now(),
   } = opts
@@ -950,6 +958,13 @@ export async function writePartitionState(opts: {
     for (let i = 0; i < numLeaves; i++) {
       if (!uploadSet.has(i) && !bytesAllZero(references[i]))
         claimedBuckets.add(toBucket(references[i].slice(0, 32)))
+    }
+  }
+  // And clear of the state this publish replaces: the pointer names it until
+  // phase 2 below, and a publish that fails before then must leave it whole.
+  for (const reference of supersededReferences ?? []) {
+    if (!bytesAllZero(reference)) {
+      claimedBuckets.add(toBucket(reference.slice(0, 32)))
     }
   }
 

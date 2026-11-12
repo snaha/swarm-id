@@ -98,6 +98,9 @@ export function leafByteLength(width: number, leaf: number): number {
 }
 
 /** Delta at or above this marks an exception (all ones) at `width` ≥ 1. */
+/** The largest count a bucket of the counter table holds. */
+const MAX_COUNT = 0xffffffff
+
 function exceptionThreshold(width: number): number {
   return 2 ** width - 1
 }
@@ -207,6 +210,16 @@ export function decodeCounters(encoded: EncodedCounters): Uint32Array {
   const { base, width } = encoded.frame
   assertWidth(width)
   const { exceptions, leaves } = encoded
+  // The table is 32 bits a bucket: a count past that wraps to a low one
+  if (
+    !Number.isInteger(base) ||
+    base < 0 ||
+    base + exceptionThreshold(width) > MAX_COUNT
+  ) {
+    throw new Error(
+      `counter-codec: base ${base} at width ${width} does not fit 32 bits`,
+    )
+  }
   if (exceptions.length > MAX_EXCEPTIONS) {
     throw new Error(`counter-codec: ${exceptions.length} exceptions`)
   }
@@ -259,6 +272,11 @@ export function decodeCounters(encoded: EncodedCounters): Uint32Array {
     if (width > 0 && counters[bucket] !== allOnes) {
       throw new Error(
         `counter-codec: exception bucket ${bucket} has an in-band field`,
+      )
+    }
+    if (!Number.isInteger(count) || count > MAX_COUNT) {
+      throw new Error(
+        `counter-codec: exception bucket ${bucket} counts ${count}, which does not fit 32 bits`,
       )
     }
     if (count < base) {

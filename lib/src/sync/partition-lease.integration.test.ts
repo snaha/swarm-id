@@ -784,8 +784,31 @@ describe("PartitionLease.acquire — seeds the incremental first publish", () =>
     b[102] += 1
     await lease.publishState(b)
     expect(writeSpy.mock.calls[1][0].previousReferences).toBeUndefined()
-    expect(writeSpy.mock.calls[1][0].previousCounter).toBeUndefined()
     expect(writeSpy.mock.calls[1][0].previousFrame).toBeUndefined()
+    // The counter still goes along: a full publish diffs against nothing,
+    // but it must not go below what was published
+    expect(writeSpy.mock.calls[1][0].previousCounter?.[101]).toBe(a[101])
+    // …and so does the state the pointer still names — every leaf and the
+    // reference chunk — for the new chunks to keep clear of
+    expect(writeSpy.mock.calls[1][0].supersededReferences).toHaveLength(
+      LEAFY_LEAVES + 1,
+    )
+  })
+
+  it("refuses the full re-pin of a new epoch when the counter went below the last publish", async () => {
+    const EPOCH_MS = 30_000
+    let clock = EPOCH_MS * 1000
+    const lease = makeLease({ deviceId: DEVICE_A, bee: bee, now: () => clock })
+    const acquired = await lease.acquire({ partitionCount: PARTITION_COUNT })
+    const published = acquired.localCounter.slice()
+    published[101] = 5
+    await lease.publishState(published)
+
+    clock += EPOCH_MS
+    const lower = published.slice()
+    lower[101] = 4
+
+    await expect(lease.publishState(lower)).rejects.toThrow(/counter regressed/)
   })
 
   it("a resumed holder heartbeats the inherited pointer (acquire seeds lastReferenceHex)", async () => {

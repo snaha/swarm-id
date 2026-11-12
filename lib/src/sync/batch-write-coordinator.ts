@@ -55,7 +55,10 @@ import type {
   PartitionLeaseStateSnapshot,
 } from "./partition-lease"
 import { readPartitionLock, NO_HOLDER_DEVICE_ID } from "./partition-lock"
-import type { LeaseRecordStore } from "../storage/utilization-store"
+import type {
+  BatchMetadata,
+  LeaseRecordStore,
+} from "../storage/utilization-store"
 import { STATE_POINTER_EPOCH_MS } from "./partition-state"
 import type { UploadTarget } from "../proxy/upload"
 import type { StampWorkerPool } from "../proxy/stamp-worker-pool"
@@ -368,6 +371,7 @@ export class BatchWriteCoordinator {
       await this.ensureLease(wait)
       this.ensureHeldForUpload()
       const target = await this.buildStamperTarget(opts)
+      const held = this.partitionLease
       // Bracket the in-flight upload so the refresh tick's idle-yield can't
       // release the partition (and unbind the stamper) underneath us. A
       // sibling's yield waits for this section's write lock, and by then the
@@ -384,6 +388,17 @@ export class BatchWriteCoordinator {
         // write — stamps only re-check the local `leaseStale` flag — only the
         // ack is. Bounded by skew + TTL (see Postage-Batch-Partitioning.md §12).
         const result = await op(target)
+        // A teardown (disconnect, the drive leaving the grant, a dilute)
+        // landing after the last stamp leaves nothing to publish from here:
+        // the stamper is unbound and the lease gone. Its detached release
+        // publishes the counter, after the fact and best-effort, which is not
+        // an ack's worth of durability. Chunks are content-addressed, so the
+        // caller's retry is safe.
+        if (held !== undefined && this.partitionLease !== held) {
+          throw new PartitionLeaseLostError(
+            "The drive's write path was torn down during the upload.",
+          )
+        }
         // Commit-ordered ack: only report the upload durable after the
         // partition-state that reserves its slots is published.
         //  1. Reverse-clobber guard (#rule 2): re-validate the lease before
@@ -510,7 +525,13 @@ export class BatchWriteCoordinator {
             : true
           if (!current) return
           try {
-            if (localCounter !== undefined) await lease.release(localCounter)
+            if (localCounter !== undefined) {
+              await lease.release(localCounter)
+              // Commit the release's reference to the rows, as the idle yield
+              // does, so the next acquire of the lane resumes from them
+              // instead of downloading the state it just published.
+              await stamper.flush()
+            }
           } finally {
             await this.clearLease(mine)
           }
@@ -1550,15 +1571,14 @@ export class BatchWriteCoordinator {
    */
   private lock<T>(op: () => Promise<T>): Promise<T> {
     return withBatchWriteLock(this.deps.batchId, async () => {
-      await this.deps.stamper
-        .syncRows()
-        .catch((err: unknown) =>
-          console.warn(
-            "[BatchWriteCoordinator] Could not read the cached counters on taking the write lock:",
-            err,
-          ),
+      const rows = await this.deps.stamper.syncRows().catch((err: unknown) => {
+        console.warn(
+          "[BatchWriteCoordinator] Could not read the cached counters on taking the write lock:",
+          err,
         )
-      await this.followLeaseRecord()
+        return undefined
+      })
+      await this.followLeaseRecord(rows)
       return op()
     })
   }
@@ -1771,7 +1791,7 @@ export class BatchWriteCoordinator {
    *   sibling's) is left alone; the next write acquires through the record.
    *   No stamp of this context's is in flight: uploads hold this lock.
    */
-  private async followLeaseRecord(): Promise<void> {
+  private async followLeaseRecord(rows?: BatchMetadata): Promise<void> {
     const lease = this.partitionLease
     if (lease?.currentPartition === undefined) return
     if (!this.leaseRecordWorks) return
@@ -1787,7 +1807,17 @@ export class BatchWriteCoordinator {
     }
     if (this.partitionLease !== lease) return
     const mine = lease.serialize()
-    if (record !== undefined && sameClaim(record, mine)) {
+    // A reference this context did not publish stands for stamps it has not
+    // seen. The rows carry them once the publisher's flush lands, and say so
+    // by naming the reference; rows that do not — the publisher never
+    // flushed, or its flush failed — leave this table behind the lane's
+    // counter, so drop the lease and read the state from Swarm.
+    const upToDate =
+      record?.referenceHex === mine.referenceHex ||
+      (rows?.rowsPartition === mine.self?.partition &&
+        rows?.stateReference?.partition === mine.self?.partition &&
+        rows?.stateReference?.referenceHex === record?.referenceHex)
+    if (record !== undefined && sameClaim(record, mine) && upToDate) {
       lease.follow(record)
       this.takeRecordedActivity(record)
       this.syncStamperLeaseDeadline()
