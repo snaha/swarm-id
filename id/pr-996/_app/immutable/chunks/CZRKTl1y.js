@@ -1,0 +1,1 @@
+import{p as t}from"./B-i4bjbo.js";const r={get error(){return t.error},get route(){return t.route},get state(){return t.state},get status(){return t.status},get url(){return t.url}},u=r;export{u as p};
