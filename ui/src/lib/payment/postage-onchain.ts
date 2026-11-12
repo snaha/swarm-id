@@ -503,8 +503,8 @@ export async function readDilutionState(
  * Patch the stamp record from chain truth (`readStampFromChain`; the
  * readiness rule refuses a record that says the batch is missing or unusable,
  * so a stale `false` must clear here). Called after every confirmed
- * transaction and on dialog open, so an interrupted flow reconciles instead of
- * trusting local state. Returns false when the chain could not answer (record
+ * transaction, so an interrupted flow reconciles instead of trusting local
+ * state; the dialogs reconcile on open through `reconciledChainDepth`. Returns false when the chain could not answer (record
  * left untouched).
  */
 export async function reconcileStampFromChain(

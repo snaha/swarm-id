@@ -7,6 +7,24 @@ present and may point at an issue or PR; the reasons live here.
 
 A PR that makes or changes a decision adds the entry in the same PR.
 
+## 2026-11-12 The dApp session follows a drive's depth from the chain
+
+**Context.** The proxy re-read each granted drive's lifetime from the chain
+(#927) but kept the stored depth. A drive resized outside the app (another
+device, another wallet) stayed at its old capacity in every dApp session until
+the identity site was opened and wrote the new depth back (#1018).
+
+**Decision.** The contract read that gives the lifetime also gives the depth;
+the proxy keeps the deepest it has seen per batch in memory, lays it over the
+stored record, and rebuilds a write path built shallower. Like the lifetime it
+is never written back.
+
+**Why.** A depth only grows on chain, so the deeper of the two is always the
+truer, and a lagging RPC cannot shrink a drive. Writing back stays the identity
+site's job: a proxy that published would have every open dApp session racing
+to publish the same reading. The rebuild aborts an upload in flight, as a
+resize arriving through storage already does.
+
 ## 2026-11-09 Dependency versions are exact
 
 **Context.** Dependencies were pinned once (#18); caret ranges crept back through
