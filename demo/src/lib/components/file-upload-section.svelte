@@ -67,6 +67,7 @@
         ...clientStore.uploadTarget,
         encrypt: enableEncryption,
         encryptManifest: enableEncryption,
+        deferred: clientStore.deferred,
         useWebSocket,
         useWorkers,
         workerCount: useWorkers ? workerCount : undefined,
