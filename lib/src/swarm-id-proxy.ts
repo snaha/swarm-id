@@ -169,9 +169,13 @@ import {
   type PublishedCounter,
 } from "./sync/published-counter"
 import { deviceHomePartition } from "./sync/partition-lock"
-import { withTimeout } from "./utils/promise"
+import { MAX_TIMER_DELAY_MS, TimeoutError, withTimeout } from "./utils/promise"
 import { Inbox } from "./utils/inbox"
-import { STREAM_PIECE_SIZE, rechunk } from "./proxy/chunking"
+import {
+  STREAM_IDLE_TIMEOUT_MS,
+  STREAM_PIECE_SIZE,
+  rechunk,
+} from "./proxy/chunking"
 import { UtilizationStoreDB } from "./storage/utilization-store"
 import type { PartitionLeaseStateSnapshot } from "./sync/partition-lease"
 import { BatchWriteCoordinator } from "./sync/batch-write-coordinator"
@@ -369,6 +373,18 @@ function deltaFoldView(snapshot: AccountStateSnapshot): DeviceStateSnapshot {
 /** A parent message as its handler gets it, the request's abort signal on it. */
 type Abortable<M> = M & {
   requestOptions: NonNullable<RequestOptions> & { signal: AbortSignal }
+}
+
+/**
+ * How long a streaming upload's source may stay silent: the default, or a
+ * longer `requestOptions.timeout`. A shorter one bounds only the proxy's own
+ * silence, on the client.
+ */
+function sourceIdleTimeout(perCall: number | undefined): number {
+  return Math.min(
+    Math.max(perCall ?? 0, STREAM_IDLE_TIMEOUT_MS),
+    MAX_TIMER_DELAY_MS,
+  )
 }
 
 /**
@@ -4681,21 +4697,34 @@ export class SwarmIdProxy {
     if (data instanceof Uint8Array) return uploadData(target, data, options)
     return uploadDataStream(
       target,
-      this.pullPieces(event, message.requestId, message.requestOptions.signal),
+      this.pullPieces(event, message.requestId, message.requestOptions),
       { ...options, size: data.size },
     )
   }
 
+  /**
+   * The parent's pieces, one per pull. The drive's write lock is held for every
+   * other writer on the device meanwhile, so a source silent past its deadline
+   * ends the upload rather than holding it indefinitely.
+   */
   private async *pullPieces(
     event: MessageEvent,
     requestId: string,
-    signal: AbortSignal,
+    requestOptions: Abortable<object>["requestOptions"],
   ): AsyncGenerator<Uint8Array> {
-    const inbox = new Inbox<Uint8Array | undefined>(signal)
+    const inbox = new Inbox<Uint8Array | undefined>(requestOptions.signal)
     this.uploadSources.set(requestId, inbox)
+    const deadline = sourceIdleTimeout(requestOptions.timeout)
     while (true) {
       this.postMessage(event, { type: "uploadSourcePull", requestId })
-      const piece = await inbox.next()
+      const piece = await withTimeout(
+        inbox.next(),
+        deadline,
+        `The upload source sent nothing for ${deadline}ms`,
+      ).catch((error: unknown) => {
+        if (!(error instanceof TimeoutError)) throw error
+        throw new SwarmIdError("timeout", error.message, { cause: error })
+      })
       if (!piece) return
       yield piece
     }

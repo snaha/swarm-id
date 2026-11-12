@@ -7,6 +7,34 @@ present and may point at an issue or PR; the reasons live here.
 
 A PR that makes or changes a decision adds the entry in the same PR.
 
+## 2026-11-12 Streaming transfers are pulled over `postMessage`
+
+**Context.** `uploadData` and `actUploadData` took only a `Uint8Array`, so a
+caller read a whole file into memory and the iframe bridge copied it again
+(#930, #523). Measured on Safari 26.5.2: posting a transferred
+`ReadableStream` throws `DataCloneError`, and `Blob.stream()` handed a 5 MB
+blob back as one piece.
+
+**Decision.** A `Blob`, `File` or `ReadableStream` crosses the bridge as
+pieces of up to 256 KiB, one per pull from the receiving side, buffers
+transferred; a `Blob` is read with `slice()`. Every upload, plain bytes
+included, goes through one pipeline that builds the Merkle tree level by
+level, and plain uploads honour `concurrency`. For a streamed input,
+`requestOptions.timeout` bounds silence rather than the whole call, which
+narrows "A per-call timeout bounds the whole round trip" below: the client
+lets the proxy stay silent for it, at least 2 minutes by default, and the
+proxy lets the source stay silent for at least 2 minutes or a longer
+`timeout`, then fails the upload. (#979)
+
+**Why.** One transport that works on every engine beats a fast path plus a
+Safari fallback, and a pull costs under 0.25 ms against a node that takes
+milliseconds per chunk. Pulling is the backpressure: nothing is read faster
+than the node takes chunks. A whole-call bound cannot fit an upload of
+unknown length, so silence is what is bounded. The source's own deadline
+exists because the upload holds the drive's cross-tab write lock: without
+it, one app's stalled source blocks every writer to that drive on the
+device, the identity UI included.
+
 ## 2026-11-09 Dependency versions are exact
 
 **Context.** Dependencies were pinned once (#18); caret ranges crept back through

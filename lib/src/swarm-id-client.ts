@@ -104,18 +104,11 @@ import { uint8ArrayToHex } from "./utils/hex"
 import { collectionPath } from "./utils/collection"
 import { PERMISSIONS_POPUP_MAX_MS, untilPopupClosed } from "./utils/popup"
 import { buildAuthUrl } from "./utils/url"
-import { TimeoutError, withTimeout } from "./utils/promise"
+import { MAX_TIMER_DELAY_MS, TimeoutError, withTimeout } from "./utils/promise"
 import { openPieceSource, type PieceSource } from "./utils/piece-source"
+import { STREAM_IDLE_TIMEOUT_MS } from "./proxy/chunking"
 
 const DEFAULT_TIMEOUT_MS = 30000
-/**
- * The silence a streaming transfer tolerates from the proxy. The proxy can be
- * quiet for a while before its first pull: it queues for the drive's write lock
- * and may wait for a partition lease.
- */
-const STREAM_IDLE_TIMEOUT_MS = 120_000
-/** The largest delay `setTimeout` honours; past it, it fires almost at once. */
-const MAX_TIMER_DELAY_MS = 2 ** 31 - 1
 const DEFAULT_INITIALIZATION_TIMEOUT_MS = 30000
 /**
  * The round trip of a `requestPermissions` message: the proxy answers it
@@ -989,16 +982,23 @@ export class SwarmIdClient {
    * firing almost at once, so it clamps to the ceiling instead. `Infinity` and
    * `NaN` never get this far: `z.number()` rejects them on the way out.
    */
-  private streamIdleTimeout(perCall: number | undefined): number {
+  private roundTripTimeout(perCall: number | undefined): number {
     if (perCall === undefined || perCall <= 0) {
-      return Math.max(this.timeout, STREAM_IDLE_TIMEOUT_MS)
+      return this.timeout
     }
     return Math.min(perCall, MAX_TIMER_DELAY_MS)
   }
 
-  private roundTripTimeout(perCall: number | undefined): number {
+  /**
+   * How long a streaming transfer lets the proxy stay silent, from the call's
+   * own `requestOptions.timeout` as {@link roundTripTimeout} reads it. The
+   * default is at least {@link STREAM_IDLE_TIMEOUT_MS}: before its first pull
+   * the proxy queues for the drive's write lock and may wait for a partition
+   * lease.
+   */
+  private streamIdleTimeout(perCall: number | undefined): number {
     if (perCall === undefined || perCall <= 0) {
-      return this.timeout
+      return Math.max(this.timeout, STREAM_IDLE_TIMEOUT_MS)
     }
     return Math.min(perCall, MAX_TIMER_DELAY_MS)
   }
@@ -1774,7 +1774,9 @@ export class SwarmIdClient {
    * Pass a `Blob`, `File` or `ReadableStream` for a large file: it is read
    * piece by piece, as fast as the node takes it, so it is never held whole.
    * `requestOptions.timeout` then bounds the proxy's silence (default: at
-   * least 2 minutes), not the whole upload.
+   * least 2 minutes), not the whole upload. The source may stay silent for 2
+   * minutes, or a longer timeout, before the upload fails with `timeout`: it
+   * holds the drive's write lock for every other writer meanwhile.
    *
    * @param data - The bytes to upload: a Uint8Array, Blob, File or ReadableStream
    * @param options - Optional upload configuration
