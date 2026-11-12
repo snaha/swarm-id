@@ -411,6 +411,14 @@ export class SwarmIdProxy {
     { batchTTL: number; measuredAt: number; recordMeasuredAt: number }
   >()
   /**
+   * The deepest depth the chain has reported for each granted drive (#1018),
+   * by batch id, taken in the same reads as `liveLifetimes`. Laid over the
+   * stored record when it is the deeper (`withLiveDepth`): a batch's depth
+   * only grows, so a lower reading is a lagging RPC and a higher one is a
+   * resize made where this session cannot see it. Never written back.
+   */
+  private liveDepths = new Map<string, number>()
+  /**
    * The chain head last read for the warm-up rule (#924), and when a read
    * was last attempted, so a failing RPC is retried at the re-measure floor
    * rather than on every reconcile.
@@ -854,9 +862,9 @@ export class SwarmIdProxy {
    * Brings the write paths in line with the grant. Each belongs to the stamp
    * it was built for, so it goes whenever that stamp leaves the grant or the fields
    * naming it change — the batch's signer key, its lifetime (a renewal keeps
-   * the batch and the key), or the account inputs baked into its stamper (a
-   * local account migrating to a synced one keeps the stamp) — before
-   * anything is built for the next one. Otherwise a coordinator outlives its
+   * the batch and the key), its depth (a resize, #1018), or the account
+   * inputs baked into its stamper (a local account migrating to a synced one
+   * keeps the stamp) — before anything is built for the next one. Otherwise a coordinator outlives its
    * stamp: after the drive is removed, or the connection moves to another
    * account, an upload still takes that coordinator's lease and spends the old
    * batch while the dApp is told there is no stamp at all. Tearing it down
@@ -881,7 +889,8 @@ export class SwarmIdProxy {
           stamp !== undefined &&
           stamp.signerKey.toHex() === drive.signerKey &&
           fingerprint === drive.accountFingerprint &&
-          sameStampLifetime(stamp, drive.lifetime)
+          sameStampLifetime(stamp, drive.lifetime) &&
+          stamp.depth === drive.depth
         if (!unchanged) this.teardownDrive(drive)
       }
     }
@@ -900,6 +909,7 @@ export class SwarmIdProxy {
       stamp.batchID.toHex(),
       stamp.signerKey.toHex(),
       stamp,
+      stamp.depth,
     )
     this.drives.set(drive.batchId, drive)
     drive.ready = this.initializeStamper(
@@ -1117,8 +1127,24 @@ export class SwarmIdProxy {
     this.adoptLifetimeReadings()
   }
 
-  /** Let the refusal and the expiry timer follow the latest chain readings. */
+  /**
+   * Let the refusal, the expiry timer and the write paths follow the latest
+   * chain readings. A write path built shallower than the chain now reports
+   * is rebuilt on the reconcile queue, as a resize recorded in storage would
+   * be; that aborts an upload in flight on it.
+   */
   private adoptLifetimeReadings(): void {
+    const { granted } = this.lookupDrivesForApp()
+    const resized = granted.some((stamp) => {
+      const drive = this.drives.get(stamp.batchID.toHex())
+      return drive !== undefined && drive.depth < stamp.depth
+    })
+    if (resized) {
+      this.enqueueReconcile("adoptLiveDepth", async () => {
+        await this.reconcileDrives()
+        this.emitConnectionInfoIfChanged()
+      })
+    }
     this.emitConnectionInfoIfChanged()
     this.armExpiryTimer()
   }
@@ -1126,7 +1152,8 @@ export class SwarmIdProxy {
   /**
    * One authoritative read of a drive's remaining lifetime (#927): the
    * PostageStamp contract, then the Bee node. A reading is kept in
-   * `liveLifetimes`; a failed read keeps whatever was known.
+   * `liveLifetimes`, and the depth the contract gave with it in `liveDepths`;
+   * a failed read keeps whatever was known.
    */
   private async measureLifetime(
     stamp: PostageStamp,
@@ -1145,6 +1172,12 @@ export class SwarmIdProxy {
         : undefined,
     ])
     if (reading === undefined) return undefined
+    if (reading.depth !== undefined) {
+      this.liveDepths.set(
+        batchId,
+        Math.max(reading.depth, this.liveDepths.get(batchId) ?? 0),
+      )
+    }
     this.liveLifetimes.set(batchId, {
       batchTTL: reading.batchTTL,
       measuredAt,
@@ -1172,6 +1205,14 @@ export class SwarmIdProxy {
       return stored
     }
     return { ...stored, batchTTL: live.batchTTL, updatedAt: live.measuredAt }
+  }
+
+  /** `stamp` at the deeper of its stored depth and the chain's latest reading. */
+  private withLiveDepth(stamp: PostageStamp): PostageStamp {
+    const live = this.liveDepths.get(stamp.batchID.toHex())
+    return live === undefined || live <= stamp.depth
+      ? stamp
+      : { ...stamp, depth: live }
   }
 
   /** Why the session refuses to stamp with `drive`, if it does. */
@@ -1210,6 +1251,7 @@ export class SwarmIdProxy {
     clearTimeout(this.warmUpTimer)
     this.warmUpTimer = undefined
     this.liveLifetimes.clear()
+    this.liveDepths.clear()
   }
 
   /** Tear everything down and build the write paths afresh. */
@@ -3094,7 +3136,8 @@ export class SwarmIdProxy {
   /**
    * The connected app's drives, from shared storage or the partitioned
    * session's account view: its primary (`resolveStampForApp`), and every
-   * live drive its grant names — the ones it may write to (#862).
+   * live drive its grant names — the ones it may write to (#862). Each at the
+   * depth the chain last reported, when that is deeper (`withLiveDepth`).
    */
   private lookupDrivesForApp(): {
     primary: PostageStamp | undefined
@@ -3110,13 +3153,12 @@ export class SwarmIdProxy {
       // The app's primary drive (#862): the account default for no grant or
       // `"all"`, the first granted regular drive for a list. Never a drive the
       // app was not granted.
+      const primary = resolveStampForApp(app, account, account.postageStamps)
       return {
-        primary: resolveStampForApp(app, account, account.postageStamps),
-        granted: stampsReachableByApp(
-          app,
-          account,
-          account.postageStamps,
-        ).filter((stamp) => !stamp.deletedAt),
+        primary: primary && this.withLiveDepth(primary),
+        granted: stampsReachableByApp(app, account, account.postageStamps)
+          .filter((stamp) => !stamp.deletedAt)
+          .map((stamp) => this.withLiveDepth(stamp)),
       }
     } catch (error) {
       console.error("[Proxy] Error looking up postage stamps:", error)
@@ -4102,9 +4144,9 @@ export class SwarmIdProxy {
 
   /**
    * The app's drives as one comparable string (#933): the primary, each
-   * granted drive with its refusal, and each built write path's lane. A
-   * change here re-sends `connectionInfoChanged` even when the info itself is
-   * the same, so the dApp re-reads `getDrives()` rather than learning of a
+   * granted drive with its refusal and depth, and each built write path's
+   * lane. A change here re-sends `connectionInfoChanged` even when the info
+   * itself is the same, so the dApp re-reads `getDrives()` rather than learning of a
    * drive gone from the grant, moved (#882) or run out (#793) from a failing
    * write. The refusal is read off every granted drive, not only the built
    * ones: a drive the app never wrote to expires all the same.
@@ -4114,7 +4156,7 @@ export class SwarmIdProxy {
     const drives = granted
       .map(
         (stamp) =>
-          `${stamp.batchID.toHex()}:${this.refusalOfStamp(stamp.batchID.toHex(), stamp)}`,
+          `${stamp.batchID.toHex()}:${this.refusalOfStamp(stamp.batchID.toHex(), stamp)}:${stamp.depth}`,
       )
       .sort()
     const lanes = [...this.drives.values()]
@@ -6811,7 +6853,8 @@ export class SwarmIdProxy {
         details?.usable ??
         (stamp.usable && this.blocksUntilUsable(stamp) === 0),
       label: "", // PostageStamp doesn't store label
-      depth: stamp.depth,
+      // The read above may just have found the batch resized
+      depth: this.withLiveDepth(stamp).depth,
       amount: stamp.amount.toString(),
       bucketDepth: stamp.bucketDepth,
       blockNumber: stamp.blockNumber,
