@@ -190,11 +190,14 @@ export interface UploadOptions {
   /**
    * Use WebSocket for chunk upload instead of HTTP. Per-chunk stamping is used.
    * Needs Bee 2.8.1 or newer, reached directly: through a gateway the upload
-   * fails. Ignored in subsidised mode, where the gateway does the stamping.
+   * fails. Ignored in subsidised mode, where the gateway does the stamping,
+   * but the requests refused below are refused in either mode.
    *
-   * Bee defers a stream's chunks exactly when the stream has a tag, so `tag`
-   * is sent only with `deferred: true`, and a direct upload reports no tag.
-   * Bee cannot pin over the stream, so combining this with `pin` is rejected.
+   * Bee defers a stream's chunks exactly when the stream has a tag, so a
+   * direct upload goes untagged and reports no tag, and `tag` without
+   * `deferred: true` is refused. Bee cannot pin over the stream, so `pin` is
+   * refused too. A direct upload is slower than a deferred one: Bee takes its
+   * chunks one at a time, each waiting for push-sync before its ack.
    */
   useWebSocket?: boolean
   /** Use Web Workers for parallel stamp signing. Speeds up upload on multi-core CPUs. */

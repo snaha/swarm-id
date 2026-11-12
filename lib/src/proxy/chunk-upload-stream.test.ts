@@ -216,18 +216,14 @@ describe.each([
   )
 
   // Bee defers a stream's chunks exactly when the stream has a tag.
-  it.each([
-    { title: "an explicit tag", tagOption: { tag: TAG_UID } },
-    { title: "no tag", tagOption: {} },
-  ])(
-    "leaves the stream of a direct upload untagged, given $title",
-    async ({ tagOption }) => {
+  it(
+    "leaves the stream of a direct upload untagged",
+    async () => {
       FakeWebSocket.acks = true
       const { target, tagCreate } = spiedStamperTarget()
 
       const { tagUid } = await uploadData(target, new Uint8Array(1), {
         ...encryption,
-        ...tagOption,
         webSocket: {},
       })
 
@@ -238,21 +234,28 @@ describe.each([
     HANG_MS,
   )
 
-  it(
-    "refuses to pin, which the stream cannot do",
-    async () => {
-      const { target, chunkUpload } = spiedStamperTarget()
+  it.each([
+    { title: "to pin, which the stream cannot do", conflict: { pin: true } },
+    {
+      title: "a tag without deferred, which would defer the stream",
+      conflict: { tag: TAG_UID },
+    },
+  ])(
+    "refuses $title",
+    async ({ conflict }) => {
+      const { target, chunkUpload, tagCreate } = spiedStamperTarget()
 
       await expect(
         uploadData(target, new Uint8Array(1), {
           ...encryption,
-          pin: true,
+          ...conflict,
           webSocket: {},
         }),
       ).rejects.toMatchObject({ code: "invalid-request" })
 
       expect(FakeWebSocket.last).toBeUndefined()
       expect(chunkUpload).not.toHaveBeenCalled()
+      expect(tagCreate).not.toHaveBeenCalled()
     },
     HANG_MS,
   )

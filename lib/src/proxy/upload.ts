@@ -145,7 +145,8 @@ export interface UploadDataOptions {
   /**
    * Send the chunks over Bee's chunk stream instead of HTTP (stamper mode only;
    * a subsidised gateway stamps the chunks itself and takes no stream). The
-   * stream carries `tag` only when `deferred` is set, and cannot pin.
+   * stream carries a tag only when `deferred` is set; see
+   * {@link refuseChunkStreamConflicts} for what it refuses.
    */
   webSocket?: { concurrency?: number }
   /** HTTP concurrency for parallel uploads */
@@ -462,12 +463,31 @@ async function uploadChunksViaWebSocket(
 }
 
 /**
- * The tag of a stamper upload and, when it goes over WebSocket, its open stream.
- *
- * Bee defers a stream's chunks exactly when the stream has a tag, so a direct
- * upload's stream goes untagged and reports no tag back. Bee has no pinning on
- * the stream at all, so asking for both is an error rather than an unpinned
- * upload.
+ * Refuse what Bee's chunk stream cannot honour. Bee has no pinning on the
+ * stream, and defers a stream's chunks exactly when the stream has a tag, so a
+ * tag without `deferred` would make a direct upload deferred. Either is an
+ * error rather than an upload that quietly differs from the request.
+ */
+export function refuseChunkStreamConflicts(
+  options: Pick<UploadDataOptions, "pin" | "tag" | "deferred"> | undefined,
+): void {
+  if (options?.pin) {
+    throw new SwarmIdError(
+      "invalid-request",
+      "Bee cannot pin chunks sent over WebSocket: upload without useWebSocket to pin",
+    )
+  }
+  if (options?.tag !== undefined && !options.deferred) {
+    throw new SwarmIdError(
+      "invalid-request",
+      "A tag makes Bee defer the chunks it receives over WebSocket: pass deferred: true with it",
+    )
+  }
+}
+
+/**
+ * The tag of a stamper upload and, when it goes over WebSocket, its open
+ * stream. A direct upload's stream goes untagged and reports no tag back.
  */
 async function prepareStamperUpload(
   target: Extract<UploadTarget, { mode: "stamper" }>,
@@ -477,12 +497,7 @@ async function prepareStamperUpload(
   if (!options?.webSocket) {
     return { tag: options?.tag ?? (await tryCreateTag(bee)), stream: undefined }
   }
-  if (options.pin) {
-    throw new SwarmIdError(
-      "invalid-request",
-      "Bee cannot pin chunks sent over WebSocket: upload without useWebSocket to pin",
-    )
-  }
+  refuseChunkStreamConflicts(options)
   const tag = options.deferred
     ? (options.tag ?? (await tryCreateTag(bee)))
     : undefined
@@ -769,10 +784,15 @@ async function uploadDataPlain(
       if (stream) {
         await uploadChunksViaWebSocket(stamp, stream, leaves, onLeafUploaded)
       } else {
-        for (const leaf of leaves) {
-          await sendChunk(leaf.data, leaf.address)
-          onLeafUploaded()
-        }
+        await uploadChunksViaHttp(
+          bee,
+          stamp,
+          leaves,
+          uploadOptions,
+          requestOptions,
+          onLeafUploaded,
+          /* concurrency */ 1,
+        )
       }
 
       // Build merkle tree if multiple chunks
