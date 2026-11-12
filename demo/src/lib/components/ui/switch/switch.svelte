@@ -10,10 +10,17 @@
     checked?: boolean
     disabled?: boolean
     class?: string
+    'aria-label'?: string
     onchange?: (checked: boolean) => void
   }
 
-  let { checked = $bindable(false), disabled = false, class: className, onchange }: Props = $props()
+  let {
+    checked = $bindable(false),
+    disabled = false,
+    class: className,
+    'aria-label': ariaLabel,
+    onchange,
+  }: Props = $props()
 
   function toggle() {
     if (disabled) return
@@ -26,6 +33,7 @@
   type="button"
   role="switch"
   aria-checked={checked}
+  aria-label={ariaLabel}
   {disabled}
   class={cn(
     'peer inline-flex h-5 w-9 shrink-0 cursor-pointer items-center rounded-full border-2 border-transparent shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background disabled:cursor-not-allowed disabled:opacity-50',

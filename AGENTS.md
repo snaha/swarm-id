@@ -112,7 +112,7 @@ Chain-backed suites are NOT in `check:all` — they need a chain running. `pnpm 
   read. A release younger than pnpm's `minimumReleaseAge` needs a `minimumReleaseAgeExclude`
   entry in the same PR
 - **Monorepo version pinning**: toolchain versions are pinned across the monorepo (eslint 10,
-  vite 7, svelte 5.48, vite-plugin-svelte 6) — do NOT bump these in one package independently
+  vite 7, svelte 5.57, vite-plugin-svelte 6) — do NOT bump these in one package independently
   of the rest of the monorepo
 - **Recursive scripts: `pnpm -r run <script>`** — a bare `pnpm -r <script>` resolves to a
   built-in pnpm command whenever the names collide (pnpm 11 added a built-in `clean`)

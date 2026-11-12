@@ -58,7 +58,7 @@ Conventions:
 
 - **License headers** (Apache-2.0 SPDX) are enforced by eslint on every source file;
   `format` inserts them automatically.
-- **Toolchain versions are pinned to match the monorepo** (eslint 10, vite 7, svelte 5.48,
+- **Toolchain versions are pinned to match the monorepo** (eslint 10, vite 7, svelte 5.57,
   vite-plugin-svelte 6) — don't bump them independently of the other packages.
 
 ## Deployment
