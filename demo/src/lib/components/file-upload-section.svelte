@@ -139,12 +139,22 @@
 
     <div class="space-y-3">
       <div class="flex items-start gap-2">
-        <Checkbox id="encrypt" bind:checked={enableEncryption} />
+        <Checkbox id="file-encrypt" bind:checked={enableEncryption} />
         <div>
-          <Label for="encrypt" class="cursor-pointer">Enable encryption (recommended)</Label>
+          <Label for="file-encrypt" class="cursor-pointer">Enable encryption (recommended)</Label>
           <p class="text-xs text-muted-foreground mt-1">
             When enabled, data is encrypted with unique keys. Reference will be 128 chars (64
             bytes).
+          </p>
+        </div>
+      </div>
+
+      <div class="flex items-start gap-2">
+        <Checkbox id="file-deferred" bind:checked={clientStore.deferred} />
+        <div>
+          <Label for="file-deferred" class="cursor-pointer">Deferred upload mode</Label>
+          <p class="text-xs text-muted-foreground mt-1">
+            Required for dev mode. Uncheck for direct uploads in production.
           </p>
         </div>
       </div>
