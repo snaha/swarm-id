@@ -96,6 +96,7 @@ import {
   uploadData,
   uploadSOC,
   uploadChunk,
+  refuseChunkStreamConflicts,
   type ChunkCounter,
   type UploadTarget,
 } from "./proxy/upload"
@@ -4501,6 +4502,7 @@ export class SwarmIdProxy {
     } = message
 
     try {
+      if (useWebSocket) refuseChunkStreamConflicts(options)
       const batchID = options?.batchID
       this.ensureCanUpload(batchID)
 
@@ -4589,6 +4591,7 @@ export class SwarmIdProxy {
     const fileName = name || "index.bin"
 
     try {
+      if (useWebSocket) refuseChunkStreamConflicts(options)
       const batchID = options?.batchID
       this.ensureCanUpload(batchID)
 
@@ -4599,8 +4602,12 @@ export class SwarmIdProxy {
         enableProgress,
       )
 
-      // Create or use provided tag for the entire upload operation
-      const uploadTag = options?.tag ?? (await tryCreateTag(this.bee))
+      // One tag for the whole upload, unless the content goes over a direct
+      // stream: that goes untagged, and the tag would track the manifest alone.
+      const uploadTag =
+        !useWebSocket || options?.deferred
+          ? (options?.tag ?? (await tryCreateTag(this.bee)))
+          : undefined
 
       // Execute upload with mode-aware locking
       const { result: manifestResult, stampedChunks } =

@@ -14,6 +14,8 @@ import { STORAGE_KEY_NETWORK_SETTINGS } from "./types"
 import type { ButtonConfig } from "./types"
 import type { StampLifetimeFields } from "./utils/stamp-lifespan"
 import { DriveWritePath } from "./proxy/drive-write-path"
+import type { UploadTarget } from "./proxy/upload"
+import { MockBee, createMockStamper } from "./proxy/feeds/epochs/test-utils"
 
 /**
  * A view of the proxy that admits to the private members these tests drive.
@@ -1373,6 +1375,130 @@ describe("SwarmIdProxy subsidised-mode selection", () => {
         expect(withWrite).not.toHaveBeenCalled()
       })
     })
+  })
+
+  // Bee defers a stream's chunks exactly when the stream has a tag, and has
+  // no pinning on it.
+  describe("a WebSocket upload with the user's own stamp", () => {
+    const TAG_UID = 42
+    const CALLER_TAG = 7
+
+    /** Opens at once and acknowledges every chunk it is sent. */
+    class AckingWebSocket {
+      static readonly OPEN = 1
+      static readonly CLOSED = 3
+      readyState = 0
+      binaryType = ""
+      onopen: (() => void) | undefined
+      onmessage: (() => void) | undefined
+      onclose: (() => void) | undefined
+
+      constructor(readonly url: string) {
+        queueMicrotask(() => {
+          this.readyState = AckingWebSocket.OPEN
+          this.onopen?.()
+        })
+      }
+
+      send(): void {
+        queueMicrotask(() => this.onmessage?.())
+      }
+
+      close(): void {
+        this.readyState = AckingWebSocket.CLOSED
+        this.onclose?.()
+      }
+    }
+
+    const send = (data: Record<string, unknown>) =>
+      messageListener({
+        data,
+        origin: PARENT_ORIGIN,
+        source: parentWindow,
+      } as unknown as MessageEvent)
+
+    const answer = () =>
+      parentWindow.postMessage.mock.calls
+        .map(([message]) => message)
+        .find((message) => message?.requestId === "w1")
+
+    /** A user-stamp session whose writes run against a mock Bee. */
+    async function userStampSession() {
+      await identify()
+      setAccountState({
+        postageBatchId: BATCH_ID,
+        signerKey: SIGNER_KEY,
+        stamper: true,
+      })
+      vi.stubGlobal("WebSocket", AckingWebSocket)
+      const withWrite = vi.fn(
+        (operation: (target: UploadTarget) => Promise<unknown>) =>
+          operation({
+            mode: "stamper",
+            bee: new MockBee(),
+            stamper: createMockStamper(),
+          }),
+      )
+      Object.assign(internals(proxy).drive!.coordinator!, { withWrite })
+      const tagCreate = vi.fn(async () => ({ uid: TAG_UID }))
+      Object.assign(internals(proxy).bee, { tag: { create: tagCreate } })
+      return { withWrite, tagCreate }
+    }
+
+    const fileUpload = (options: Record<string, unknown>) => ({
+      type: "uploadFile",
+      requestId: "w1",
+      data: new Uint8Array(16),
+      name: "a.txt",
+      options,
+      useWebSocket: true,
+    })
+
+    it("creates no tag for a direct file upload, and reports none", async () => {
+      const { tagCreate } = await userStampSession()
+
+      await send(fileUpload({}))
+
+      expect(answer()).toMatchObject({ type: "uploadFileResponse" })
+      expect(answer().tagUid).toBeUndefined()
+      expect(tagCreate).not.toHaveBeenCalled()
+    })
+
+    it("tags a deferred file upload", async () => {
+      await userStampSession()
+
+      await send(fileUpload({ deferred: true }))
+
+      expect(answer()).toMatchObject({
+        type: "uploadFileResponse",
+        tagUid: TAG_UID,
+      })
+    })
+
+    it.each([
+      {
+        title: "an explicit tag without deferred",
+        options: { tag: CALLER_TAG },
+      },
+      { title: "pin", options: { pin: true, deferred: true } },
+    ])(
+      "refuses $title before taking the write lock or a tag",
+      async ({ options }) => {
+        for (const type of ["uploadData", "uploadFile"]) {
+          parentWindow.postMessage.mockClear()
+          const { withWrite, tagCreate } = await userStampSession()
+
+          await send({ ...fileUpload(options), type })
+
+          expect(answer()).toMatchObject({
+            type: "error",
+            code: "invalid-request",
+          })
+          expect(withWrite).not.toHaveBeenCalled()
+          expect(tagCreate).not.toHaveBeenCalled()
+        }
+      },
+    )
   })
 
   describe("a custom Bee node drops the dApp's gateway", () => {

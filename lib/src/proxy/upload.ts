@@ -142,7 +142,12 @@ export interface UploadDataOptions {
   deferred?: boolean
   /** Tag for tracking upload progress */
   tag?: number
-  /** WebSocket upload options (stamper mode only) */
+  /**
+   * Send the chunks over Bee's chunk stream instead of HTTP (stamper mode only;
+   * a subsidised gateway stamps the chunks itself and takes no stream). The
+   * stream carries a tag only when `deferred` is set; see
+   * {@link refuseChunkStreamConflicts} for what it refuses.
+   */
   webSocket?: { concurrency?: number }
   /** HTTP concurrency for parallel uploads */
   httpConcurrency?: number
@@ -457,6 +462,54 @@ async function uploadChunksViaWebSocket(
   await Promise.all(Array.from({ length: workerCount }, () => worker()))
 }
 
+/**
+ * Refuse what Bee's chunk stream cannot honour. Bee has no pinning on the
+ * stream, and defers a stream's chunks exactly when the stream has a tag, so a
+ * tag without `deferred` would make a direct upload deferred. Either is an
+ * error rather than an upload that quietly differs from the request.
+ */
+export function refuseChunkStreamConflicts(
+  options: Pick<UploadDataOptions, "pin" | "tag" | "deferred"> | undefined,
+): void {
+  if (options?.pin) {
+    throw new SwarmIdError(
+      "invalid-request",
+      "Bee cannot pin chunks sent over WebSocket: upload without useWebSocket to pin",
+    )
+  }
+  if (options?.tag !== undefined && !options.deferred) {
+    throw new SwarmIdError(
+      "invalid-request",
+      "A tag makes Bee defer the chunks it receives over WebSocket: pass deferred: true with it",
+    )
+  }
+}
+
+/**
+ * The tag of a stamper upload and, when it goes over WebSocket, its open
+ * stream. A direct upload's stream goes untagged and reports no tag back.
+ */
+async function prepareStamperUpload(
+  target: Extract<UploadTarget, { mode: "stamper" }>,
+  options: UploadDataOptions | undefined,
+): Promise<{ tag: number | undefined; stream: ChunkUploadStream | undefined }> {
+  const { bee, signal } = target
+  if (!options?.webSocket) {
+    return { tag: options?.tag ?? (await tryCreateTag(bee)), stream: undefined }
+  }
+  refuseChunkStreamConflicts(options)
+  const tag = options.deferred
+    ? (options.tag ?? (await tryCreateTag(bee)))
+    : undefined
+  const stream = new ChunkUploadStream(bee.url, {
+    tag,
+    concurrency: options.webSocket.concurrency,
+    signal,
+  })
+  await stream.open()
+  return { tag, stream }
+}
+
 // ============================================================================
 // Merkle Tree Building
 // ============================================================================
@@ -691,7 +744,7 @@ async function uploadDataPlain(
   } else {
     // Stamper mode
     const { bee, stamper, workerPool } = target
-    const tag = options?.tag ?? (await tryCreateTag(bee))
+    const { tag, stream } = await prepareStamperUpload(target, options)
     const uploadOptions = {
       ...options,
       tag,
@@ -706,42 +759,60 @@ async function uploadDataPlain(
     )
     const requestOptions = withSignal(options?.requestOptions, target.signal)
 
-    // Upload leaf chunks
-    for (const chunk of chunks) {
-      await uploadStampedChunkViaHttp(
-        bee,
-        stamp,
-        chunk.data,
-        chunk.address.toUint8Array(),
-        uploadOptions,
-        requestOptions,
-      )
+    const sendChunk = (data: Uint8Array, address: Uint8Array) =>
+      stream
+        ? uploadStampedChunkViaWebSocket(stamp, stream, data, address)
+        : uploadStampedChunkViaHttp(
+            bee,
+            stamp,
+            data,
+            address,
+            uploadOptions,
+            requestOptions,
+          )
+    const onLeafUploaded = () => {
       processedChunks++
       reportProgress()
     }
 
-    // Build merkle tree if multiple chunks
-    let rootReference: Reference
-
-    if (chunkRefs.length === 1) {
-      rootReference = new Reference(chunkRefs[0].address)
-    } else {
-      rootReference = await buildPlainMerkleTree(chunkRefs, async (chunk) => {
-        await uploadStampedChunkViaHttp(
+    try {
+      // Upload leaf chunks
+      const leaves = chunks.map((chunk) => ({
+        data: chunk.data,
+        address: chunk.address.toUint8Array(),
+      }))
+      if (stream) {
+        await uploadChunksViaWebSocket(stamp, stream, leaves, onLeafUploaded)
+      } else {
+        await uploadChunksViaHttp(
           bee,
           stamp,
-          chunk.data,
-          chunk.address.toUint8Array(),
+          leaves,
           uploadOptions,
           requestOptions,
+          onLeafUploaded,
+          /* concurrency */ 1,
         )
-        totalChunks++
-        processedChunks++
-        reportProgress()
-      })
-    }
+      }
 
-    return { reference: rootReference.toHex(), tagUid: tag }
+      // Build merkle tree if multiple chunks
+      let rootReference: Reference
+
+      if (chunkRefs.length === 1) {
+        rootReference = new Reference(chunkRefs[0].address)
+      } else {
+        rootReference = await buildPlainMerkleTree(chunkRefs, async (chunk) => {
+          await sendChunk(chunk.data, chunk.address.toUint8Array())
+          totalChunks++
+          processedChunks++
+          reportProgress()
+        })
+      }
+
+      return { reference: rootReference.toHex(), tagUid: tag }
+    } finally {
+      await stream?.close()
+    }
   }
 }
 
@@ -824,7 +895,10 @@ async function uploadDataEncrypted(
   } else {
     // Stamper mode
     const { bee, stamper, workerPool } = target
-    const tag = options?.tag ?? (await tryCreateTag(bee))
+    const { tag, stream: wsStream } = await prepareStamperUpload(
+      target,
+      options,
+    )
     const uploadOptions = {
       ...options,
       tag,
@@ -837,17 +911,6 @@ async function uploadDataEncrypted(
       target.signal,
     )
     const requestOptions = withSignal(options?.requestOptions, target.signal)
-
-    // Open WebSocket stream if requested
-    let wsStream: ChunkUploadStream | undefined
-    if (options?.webSocket) {
-      wsStream = new ChunkUploadStream(bee.url, {
-        tag,
-        concurrency: options.webSocket.concurrency,
-        signal: target.signal,
-      })
-      await wsStream.open()
-    }
 
     try {
       // Upload chunks
@@ -910,9 +973,7 @@ async function uploadDataEncrypted(
         chunkAddresses: uploadedChunkAddresses,
       }
     } finally {
-      if (wsStream) {
-        await wsStream.close()
-      }
+      await wsStream?.close()
     }
   }
 }
