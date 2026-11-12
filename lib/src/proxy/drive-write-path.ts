@@ -39,6 +39,8 @@ export class DriveWritePath {
      * own writes rather than letting Bee refuse the lease claim.
      */
     readonly lifetime: StampLifetimeFields,
+    /** The batch depth the stamper is built for; a deeper batch needs a new one (#1018) */
+    readonly depth: number,
   ) {}
 
   /**

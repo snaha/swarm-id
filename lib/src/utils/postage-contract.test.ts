@@ -11,7 +11,6 @@ import {
   blocksUntilUsable,
   fetchAuthoritativeBatchTTL,
   fetchBlockNumber,
-  fetchBatchTTLFromContract,
   fetchOnChainBatchState,
   fetchOnChainBatchStateResult,
   POSTAGE_STAMP_CONTRACT_ADDRESS,
@@ -289,34 +288,6 @@ describe("fetchOnChainBatchState", () => {
   })
 })
 
-describe("fetchBatchTTLFromContract", () => {
-  let fetchSpy: MockInstance<typeof fetch>
-
-  beforeEach(() => {
-    fetchSpy = vi.spyOn(globalThis, "fetch")
-  })
-
-  afterEach(() => {
-    fetchSpy.mockRestore()
-  })
-
-  it("returns the ground-truth TTL in seconds", async () => {
-    fetchSpy.mockResolvedValue(batchResponse(FULL_RESPONSE))
-
-    const ttl = await fetchBatchTTLFromContract("https://rpc.example", BATCH_ID)
-
-    expect(ttl).toBe(EXPECTED_TTL_SECONDS)
-  })
-
-  it("returns undefined when the batch is unknown", async () => {
-    fetchSpy.mockRejectedValue(new Error("network error"))
-
-    const ttl = await fetchBatchTTLFromContract("https://rpc.example", BATCH_ID)
-
-    expect(ttl).toBeUndefined()
-  })
-})
-
 describe("fetchAuthoritativeBatchTTL", () => {
   let fetchSpy: MockInstance<typeof fetch>
 
@@ -349,7 +320,20 @@ describe("fetchAuthoritativeBatchTTL", () => {
 
     const ttl = await fetchAuthoritativeBatchTTL(RPC, BEE, BATCH_ID)
 
-    expect(ttl).toEqual({ batchTTL: EXPECTED_TTL_SECONDS, source: "chain" })
+    expect(ttl).toMatchObject({
+      batchTTL: EXPECTED_TTL_SECONDS,
+      source: "chain",
+    })
+  })
+
+  it("carries the batch's depth with a contract reading", async () => {
+    fetchSpy.mockImplementation(() =>
+      Promise.resolve(batchResponse(FULL_RESPONSE)),
+    )
+
+    const ttl = await fetchAuthoritativeBatchTTL(RPC, BEE, BATCH_ID)
+
+    expect(ttl?.depth).toBe(decodeBatches(BATCHES_RESULT).depth)
   })
 
   it("falls back to the Bee node batchTTL when the contract read fails", async () => {

@@ -303,30 +303,6 @@ export function calculateContractTTLSeconds(
 }
 
 /**
- * Convenience wrapper: fetches a batch's on-chain state and returns its
- * remaining TTL in seconds. This is the contract-backed counterpart to
- * {@link fetchBatchTTL} (which reads the Bee node), and unlike it works for any
- * batch the contract knows about, regardless of whether the configured Bee node
- * tracks it.
- *
- * @param contractAddress - PostageStamp contract address (defaults to mainnet;
- *          override for a local dev chain).
- * @returns Remaining TTL in seconds (`0` when expired), or `undefined` when the
- *          batch is unknown, the RPC request fails, or the price is zero.
- */
-export async function fetchBatchTTLFromContract(
-  rpcUrl: string,
-  batchId: string,
-  contractAddress: string = POSTAGE_STAMP_CONTRACT_ADDRESS,
-): Promise<number | undefined> {
-  const state = await fetchOnChainBatchState(rpcUrl, batchId, contractAddress)
-  if (state === undefined) {
-    return undefined
-  }
-  return calculateContractTTLSeconds(state)
-}
-
-/**
  * Resolves a batch's remaining TTL (seconds) from the most authoritative source
  * available, in order:
  *   1. The PostageStamp contract, read directly by batchId — ground truth that
@@ -345,8 +321,9 @@ export async function fetchBatchTTLFromContract(
  *          honoured when `gnosisRpcUrl` targets a local node; against any remote
  *          RPC the Gnosis mainnet deployment is used regardless (see
  *          {@link resolvePostageStampContractAddress}).
- * @returns The remaining TTL in seconds with its source, or `undefined` if
- *          neither source can answer.
+ * @returns The remaining TTL in seconds with its source, and the batch's
+ *          depth whenever the contract answered, or `undefined` if neither
+ *          source can answer.
  */
 export async function fetchAuthoritativeBatchTTL(
   gnosisRpcUrl: string,
@@ -358,16 +335,21 @@ export async function fetchAuthoritativeBatchTTL(
     gnosisRpcUrl,
     localContractAddress,
   )
-  const fromChain = await fetchBatchTTLFromContract(
+  const state = await fetchOnChainBatchState(
     gnosisRpcUrl,
     batchId,
     contractAddress,
   )
-  if (fromChain !== undefined) return { batchTTL: fromChain, source: "chain" }
+  const depth = state === undefined ? {} : { depth: state.batch.depth }
+  const fromChain =
+    state === undefined ? undefined : calculateContractTTLSeconds(state)
+  if (fromChain !== undefined) {
+    return { batchTTL: fromChain, source: "chain", ...depth }
+  }
   const fromBee = await fetchBatchTTL(beeUrl, batchId)
   return fromBee === undefined
     ? undefined
-    : { batchTTL: fromBee, source: "bee" }
+    : { batchTTL: fromBee, source: "bee", ...depth }
 }
 
 /**
@@ -408,6 +390,8 @@ export function blocksUntilUsable(blockNumber: number, head: number): number {
 export interface BatchTTLReading {
   batchTTL: number
   source: Extract<BatchTTLSource, "chain" | "bee">
+  /** The batch's depth, when the contract was read (#1018) */
+  depth?: number
 }
 
 /**
