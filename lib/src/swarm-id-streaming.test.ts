@@ -21,7 +21,11 @@ import {
   type IframeToParentMessage,
 } from "./types"
 import { calculateChunkAddress } from "./chunk"
-import { CHUNK_SIZE, STREAM_PIECE_SIZE } from "./proxy/chunking"
+import {
+  CHUNK_SIZE,
+  STREAM_IDLE_TIMEOUT_MS,
+  STREAM_PIECE_SIZE,
+} from "./proxy/chunking"
 import { MockBee, MockChunkStore } from "./proxy/feeds/epochs/test-utils"
 
 const PARENT_ORIGIN = "https://dapp.example.com"
@@ -316,6 +320,50 @@ describe("streaming across the bridge", () => {
       await expect(upload).rejects.toMatchObject({ code: "aborted" })
       await settle()
       expectNothingLeftBehind()
+    })
+
+    describe("a source that goes silent", () => {
+      const silentStream = (cancel: () => void) =>
+        new ReadableStream<Uint8Array>(
+          { pull: () => new Promise(() => {}), cancel },
+          { highWaterMark: 0 },
+        )
+
+      afterEach(() => {
+        vi.useRealTimers()
+      })
+
+      it("makes the proxy give up and free the drive", async () => {
+        vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] })
+        const cancel = vi.fn()
+        const upload = client.uploadData(silentStream(cancel))
+        const settled = upload.catch((e: unknown) => e)
+
+        await vi.advanceTimersByTimeAsync(STREAM_IDLE_TIMEOUT_MS + 1)
+
+        expect(await settled).toMatchObject({ code: "timeout" })
+        await vi.advanceTimersByTimeAsync(SETTLE_MS)
+        expect(cancel).toHaveBeenCalledTimes(1)
+        expectNothingLeftBehind()
+      })
+
+      it("is waited for as long as a longer timeout asks", async () => {
+        vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] })
+        const longer = STREAM_IDLE_TIMEOUT_MS * 2
+        const upload = client.uploadData(silentStream(vi.fn()), undefined, {
+          timeout: longer,
+        })
+        const settled = vi.fn()
+        upload.then(settled, settled)
+
+        await vi.advanceTimersByTimeAsync(STREAM_IDLE_TIMEOUT_MS + 1)
+        expect(settled).not.toHaveBeenCalled()
+
+        await vi.advanceTimersByTimeAsync(longer)
+        expect(settled).toHaveBeenCalledWith(
+          expect.objectContaining({ code: "timeout" }),
+        )
+      })
     })
 
     it("fails the call when the source breaks, and stops the proxy", async () => {

@@ -7,6 +7,12 @@ export const PLAIN_REFS_PER_CHUNK = 128 // 4096 / 32 = 128 plain (unencrypted) r
 export const ENCRYPTED_REFS_PER_CHUNK = 64 // 4096 / 64 = 64 encrypted refs per intermediate chunk
 /** The most bytes one message of a streaming upload or download carries. */
 export const STREAM_PIECE_SIZE = 256 * 1024
+/**
+ * The silence either side of a streaming upload tolerates by default: the
+ * client waiting on the proxy, the proxy waiting on the source. A longer
+ * `requestOptions.timeout` raises both.
+ */
+export const STREAM_IDLE_TIMEOUT_MS = 120_000
 
 /**
  * Chunks a file of `span` bytes splits into, for upload progress and drive
