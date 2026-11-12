@@ -318,6 +318,32 @@ describe("stamper uploads honour deferred", () => {
  * `requestOptions` (#819). Without them an authenticated node answers 401,
  * which the batch-attach probe then misreads as "stampable".
  */
+/**
+ * A SOC is the one chunk that gets overwritten at its address. Bee replaces it
+ * only on a direct push; from 2.8.1 a `Swarm-Tag` on `/soc` makes the upload
+ * deferred, and a deferred overwrite reaches no node.
+ */
+describe("stamper SOC uploads are direct", () => {
+  it("unless the caller asks for a deferred one", async () => {
+    const fetchMock = stubFetch()
+    const target = stamperTarget(new MockBee())
+    await uploadSOC(target, signer, identifier, new Uint8Array(16), {
+      tag: TAG_UID,
+    })
+    await uploadSOC(target, signer, identifier, new Uint8Array(16), {
+      tag: TAG_UID,
+      deferred: true,
+    })
+    const sent = fetchMock.mock.calls.map(
+      ([, init]) =>
+        ((init as RequestInit).headers as Record<string, string>)[
+          "swarm-deferred-upload"
+        ],
+    )
+    expect(sent).toEqual(["false", "true"])
+  })
+})
+
 describe("stamper SOC uploads send the Bee headers", () => {
   const AUTH = { authorization: "Bearer node-token" }
   const CALL = { "x-call": "per-call" }

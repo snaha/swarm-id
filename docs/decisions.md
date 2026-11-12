@@ -7,6 +7,32 @@ present and may point at an issue or PR; the reasons live here.
 
 A PR that makes or changes a decision adds the entry in the same PR.
 
+## 2026-11-12 A SOC upload says it is direct
+
+**Context.** A stamper-mode SOC upload sent `Swarm-Tag` and, unless the caller
+set `deferred`, no `Swarm-Deferred-Upload`. Up to Bee 2.8.0 `/soc` ignored the
+tag and pushed directly. From 2.8.1 a tag alone makes the upload deferred
+(bee#5461), and a deferred write to an address the node already holds is
+answered 201 and never leaves it: Bee's upload store does not replace a chunk,
+only its reserve does. Measured on 2.8.3: after a deferred overwrite all four
+nodes of the local cluster still served the first version; after a direct one
+all four served the second within two seconds. The partition lock, its release
+sentinel and the state pointer are all overwrites, so none of them reached
+another device.
+
+**Decision.** A stamper-mode SOC upload always sends `Swarm-Deferred-Upload`,
+`false` unless the caller passes `deferred: true`.
+
+**Why.** A SOC is the one chunk that is written again at its address, and only
+a direct push replaces it. Stating the mode keeps the behaviour independent of
+what a Bee version infers from the other headers. The caller's `true` is still
+passed through, as for data and chunks (2026-09-21).
+
+**Not covered.** A node that holds no reserve copy and read the SOC with
+caching on keeps serving that version until its cache evicts it. A read with
+`Swarm-Cache: false` avoids it, but Bee's CORS policy does not allow that
+header, so a browser cannot send it.
+
 ## 2026-11-09 Dependency versions are exact
 
 **Context.** Dependencies were pinned once (#18); caret ranges crept back through
