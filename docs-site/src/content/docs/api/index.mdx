@@ -722,11 +722,17 @@ Uploads raw binary data to the Swarm network. The reference it returns is read b
 
 The data is uploaded using the authenticated user's postage stamp. Progress can be tracked via the `options.onProgress` callback.
 
+Pass a `Blob`, `File` or `ReadableStream<Uint8Array>` for a large file: it is read piece by piece, no faster than the node takes chunks, so it is never held whole on either side of the iframe. A `Uint8Array` is copied across the iframe in one go. The same bytes give the same reference through every input type (with `encrypt`, each upload uses fresh keys and so gets its own reference).
+
+For a stream or `Blob`, `requestOptions.timeout` does not bound the whole upload. It is how long the identity iframe may stay silent, restarted with every chunk it reports and paused while your source has nothing to give, and it defaults to at least 2 minutes. That includes the wait for the drive's write lock, so an upload queued behind another long one to the same drive can fail with `timeout` before it starts. `requestOptions.signal` also cancels a `ReadableStream` you passed in.
+
+The upload holds the drive's write lock for as long as it runs, and every writer to that drive on the device waits for it: other apps and the identity UI too. So your source may stay silent for 2 minutes, or for a longer `requestOptions.timeout`, before the upload fails with `timeout` and frees the drive.
+
 **Parameters:**
 
 | Parameter                       | Type                     | Required | Description                                                                                                                                                                                                                                                                              |
 | ------------------------------- | ------------------------ | -------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `data`                          | `Uint8Array`             | Yes      | The binary data to upload                                                                                                                                                                                                                                                                |
+| `data`                          | `UploadInput`            | Yes      | The bytes to upload: a `Uint8Array`, `Blob`, `File` or `ReadableStream<Uint8Array>`                                                                                                                                                                                                      |
 | `options`                       | `UploadOptions`          | No       | Upload configuration                                                                                                                                                                                                                                                                     |
 | `options.batchID`               | `string`                 | No       | The drive to write to, from [`getDrives()`](#getdrives). Defaults to the primary drive. Every writer takes it                                                                                                                                                                            |
 | `options.pin`                   | `boolean`                | No       | Whether to pin the data locally (defaults to `false`; ignored on a subsidised gateway)                                                                                                                                                                                                   |
@@ -805,6 +811,34 @@ Downloads raw binary data from the Swarm network: the counterpart of [`uploadDat
 const data = await client.downloadData('a1b2c3...') // 64 char hex reference
 const text = new TextDecoder().decode(data)
 console.log('Downloaded:', text)
+```
+
+---
+
+### `downloadDataStream(reference, options?, requestOptions?)`
+
+Reads raw binary data as it arrives, for a file too large to hold whole. Takes the same arguments as [`downloadData`](#downloaddatareference-options-requestoptions). The returned stream is pulled: nothing past the root chunk is fetched until it is read, and it fetches no further ahead of the reader than one small batch per tree level.
+
+Read the stream to the end, or cancel it, or abort `requestOptions.signal`, or the request stays open inside the identity iframe. `requestOptions.timeout` is how long the iframe may stay silent for each piece (default: at least 2 minutes), not a bound on the whole download.
+
+**Returns:** `Promise<DataDownload>`
+
+| Property | Type                         | Description                                                                           |
+| -------- | ---------------------------- | ------------------------------------------------------------------------------------- |
+| `stream` | `ReadableStream<Uint8Array>` | The content, in pieces of up to 256 KiB. A failure partway through errors this stream |
+| `size`   | `number`                     | The content's length in bytes                                                         |
+
+**Throws:**
+
+- `Error` if the client is not initialized
+- `Error` if the reference is not found, before any stream exists
+
+**Example:**
+
+```typescript
+const { stream, size } = await client.downloadDataStream('a1b2c3...')
+console.log(`Saving ${size} bytes`)
+await stream.pipeTo(writable)
 ```
 
 ---
@@ -1576,11 +1610,13 @@ Uploads encrypted data to the Swarm network with access control for specific gra
 
 The data is encrypted using ACT (Access Control Tries) and can only be downloaded by users who have one of the grantee public keys.
 
+A `Blob`, `File` or `ReadableStream<Uint8Array>` is read piece by piece, with the same streaming behaviour and `timeout` meaning as [`uploadData`](#uploaddatadata-options-requestoptions).
+
 **Parameters:**
 
 | Parameter                       | Type                     | Required | Description                                                                                                                            |
 | ------------------------------- | ------------------------ | -------- | -------------------------------------------------------------------------------------------------------------------------------------- |
-| `data`                          | `Uint8Array`             | Yes      | The binary data to upload                                                                                                              |
+| `data`                          | `UploadInput`            | Yes      | The bytes to upload: a `Uint8Array`, `Blob`, `File` or `ReadableStream<Uint8Array>`                                                    |
 | `grantees`                      | `string[]`               | Yes      | Array of compressed public keys (66 hex chars each)                                                                                    |
 | `options`                       | `ActUploadOptions`       | No       | Upload configuration                                                                                                                   |
 | `options.pin`                   | `boolean`                | No       | Whether to pin the data locally (defaults to `false`; ignored on a subsidised gateway)                                                 |
@@ -1676,6 +1712,12 @@ const data = await client.actDownloadData(encryptedReference, historyReference, 
 const text = new TextDecoder().decode(data)
 console.log('Decrypted:', text)
 ```
+
+---
+
+### `actDownloadDataStream(encryptedReference, historyReference, publisherPubKey, timestamp?, requestOptions?)`
+
+Reads ACT-protected data as it arrives. Takes the same arguments as [`actDownloadData`](#actdownloaddataencryptedreference-historyreference-publisherpubkey-timestamp-requestoptions) and returns a `DataDownload`, with the contract of [`downloadDataStream`](#downloaddatastreamreference-options-requestoptions). A caller who is not a grantee is refused before any stream exists.
 
 ---
 
@@ -1862,7 +1904,7 @@ try {
 | `lease-lost`          | This device's partition was reclaimed mid-write                                                                                                                                                                        |                               |
 | `bee-rejected`        | Bee or the gateway answered with a non-2xx status. A `404` on `/bzz` and on a chunk mean different things; `url` — the request's path, never the node's host — says which                                              | `status`, `beeMessage`, `url` |
 | `network`             | The request never got a response: DNS, a refused connection, or a CORS preflight the gateway rejected                                                                                                                  |                               |
-| `timeout`             | A deadline ran out: the proxy's on a Bee request, or the client's on the whole round trip (`requestOptions.timeout`)                                                                                                   |                               |
+| `timeout`             | A deadline ran out: the proxy's on a Bee request, the client's on the whole round trip (`requestOptions.timeout`), the iframe staying silent during a stream or `Blob` transfer, or an upload's source staying silent  |                               |
 | `aborted`             | The call's `requestOptions.signal` aborted. Chunks already sent stay on the network and keep the stamps they used                                                                                                      |                               |
 | `invalid-request`     | The message or an argument failed validation                                                                                                                                                                           |                               |
 | `invalid-state`       | The client cannot take the call in its current state: `initialize()` has not resolved, was already called, or `destroy()` ran. A call, or an `initialize()`, still pending when `destroy()` runs rejects with this too |                               |
@@ -1900,7 +1942,9 @@ import type {
 
   // Upload/Download
   UploadOptions,
+  UploadInput,
   DownloadOptions,
+  DataDownload,
   UploadResult,
   FileData,
   Reference,

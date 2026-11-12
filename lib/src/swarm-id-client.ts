@@ -17,6 +17,9 @@ import type {
   UploadProgress,
   ActUploadOptions,
   DownloadOptions,
+  DataDownload,
+  PulledSource,
+  UploadInput,
   RequestOptions,
   Reference,
   SOCReader,
@@ -101,11 +104,11 @@ import { uint8ArrayToHex } from "./utils/hex"
 import { collectionPath } from "./utils/collection"
 import { PERMISSIONS_POPUP_MAX_MS, untilPopupClosed } from "./utils/popup"
 import { buildAuthUrl } from "./utils/url"
-import { TimeoutError, withTimeout } from "./utils/promise"
+import { MAX_TIMER_DELAY_MS, TimeoutError, withTimeout } from "./utils/promise"
+import { openPieceSource, type PieceSource } from "./utils/piece-source"
+import { STREAM_IDLE_TIMEOUT_MS } from "./proxy/chunking"
 
 const DEFAULT_TIMEOUT_MS = 30000
-/** The largest delay `setTimeout` honours; past it, it fires almost at once. */
-const MAX_TIMER_DELAY_MS = 2 ** 31 - 1
 const DEFAULT_INITIALIZATION_TIMEOUT_MS = 30000
 /**
  * The round trip of a `requestPermissions` message: the proxy answers it
@@ -119,7 +122,13 @@ const PERMISSIONS_REQUEST_TIMEOUT_MS =
 /** A request the client awaits an answer to; these two get none. */
 type AwaitedRequest = Exclude<
   ParentToIframeMessage,
-  { type: "parentIdentify" | "abortRequest" }
+  {
+    type:
+      | "parentIdentify"
+      | "abortRequest"
+      | "uploadSourcePiece"
+      | "downloadStreamPull"
+  }
 >
 
 /**
@@ -238,8 +247,22 @@ export class SwarmIdClient {
       resolve: (value: any) => void
       reject: (error: Error) => void
       timeoutId: NodeJS.Timeout
+      /** Set on a streaming upload: where the proxy's pulls are answered from */
+      source?: PieceSource
+      /** Waiting on `source`, which is not the proxy's time to be charged for */
+      readingSource?: boolean
+      /** Restart the wait, on a streaming upload */
+      rearm?: () => void
     }
   > = new Map()
+  /** Streaming downloads the proxy is still answering, by request id. */
+  private downloadStreams = new Map<
+    string,
+    {
+      deliver: (data: Uint8Array | undefined) => void
+      fail: (error: Error) => void
+    }
+  >()
   /**
    * Progress callbacks of in-flight uploads, by request id. Dispatched from
    * the one window listener, so progress passes the same source and origin
@@ -641,17 +664,31 @@ export class SwarmIdClient {
           this.pendingRequests.delete(message.requestId)
           pending.reject(SwarmIdError.fromWire(message))
         }
+        this.downloadStreams
+          .get(message.requestId)
+          ?.fail(SwarmIdError.fromWire(message))
         break
       }
 
-      case "uploadProgress":
+      case "uploadSourcePull":
+        void this.answerSourcePull(message.requestId)
+        break
+
+      case "downloadStreamPiece":
+        this.downloadStreams.get(message.requestId)?.deliver(message.data)
+        break
+
+      case "uploadProgress": {
         // Report to the upload's callback, if it registered one. Don't resolve
         // the pending request - the response does that
         this.progressListeners.get(message.requestId)?.({
           total: message.total,
           processed: message.processed,
         })
+        const pending = this.pendingRequests.get(message.requestId)
+        if (pending && !pending.readingSource) pending.rearm?.()
         break
+      }
 
       default:
         // Handle response messages with requestId
@@ -664,7 +701,10 @@ export class SwarmIdClient {
   /**
    * Send message to iframe
    */
-  private sendMessage(message: ParentToIframeMessage): void {
+  private sendMessage(
+    message: ParentToIframeMessage,
+    transfer?: Transferable[],
+  ): void {
     if (!this.iframe || !this.iframe.contentWindow) {
       throw new SwarmIdError("invalid-state", "Iframe not initialized")
     }
@@ -680,7 +720,15 @@ export class SwarmIdClient {
       )
     }
 
-    this.iframe.contentWindow.postMessage(message, this.iframeOrigin)
+    if (transfer) {
+      this.iframe.contentWindow.postMessage(
+        message,
+        this.iframeOrigin,
+        transfer,
+      )
+    } else {
+      this.iframe.contentWindow.postMessage(message, this.iframeOrigin)
+    }
   }
 
   /**
@@ -691,7 +739,7 @@ export class SwarmIdClient {
     TRequest extends AwaitedRequest & { requestId: string } = AwaitedRequest & {
       requestId: string
     },
-  >(message: TRequest): Promise<TResponse> {
+  >(message: TRequest, source?: PieceSource): Promise<TResponse> {
     const options = (message as { requestOptions?: RequestOptions })
       .requestOptions
     const signal = options?.signal
@@ -699,10 +747,14 @@ export class SwarmIdClient {
     // A per-call `requestOptions.timeout` bounds this whole round trip, not
     // only the Bee request the proxy makes with it: a caller raising it for a
     // large upload must not be cut off at the constructor default (#775).
-    const timeout = this.roundTripTimeout(options?.timeout)
+    // A streaming upload has no whole round trip to bound, so there it is how
+    // long the proxy may stay silent.
+    const timeout = source
+      ? this.streamIdleTimeout(options?.timeout)
+      : this.roundTripTimeout(options?.timeout)
     return new Promise((resolve, reject) => {
       const onAbort = () => {
-        clearTimeout(timeoutId)
+        clearTimeout(pending.timeoutId)
         this.pendingRequests.delete(message.requestId)
         reject(abortedError(signal!))
         this.sendAbort(message.requestId)
@@ -710,27 +762,38 @@ export class SwarmIdClient {
       const stopWatchingSignal = () =>
         signal?.removeEventListener("abort", onAbort)
 
-      const timeoutId = setTimeout(() => {
+      const expire = () => {
         stopWatchingSignal()
         this.pendingRequests.delete(message.requestId)
         reject(
           new SwarmIdError("timeout", `Request timeout after ${timeout}ms`),
         )
-      }, timeout)
+        // Nothing else would ever end the proxy's pulling.
+        if (source) this.sendAbort(message.requestId)
+      }
 
-      this.pendingRequests.set(message.requestId, {
+      const pending = {
         requestType: message.type,
         responseType: responseTypeFor(message.type),
-        resolve: (value) => {
+        resolve: (value: TResponse) => {
           stopWatchingSignal()
           resolve(value)
         },
-        reject: (error) => {
+        reject: (error: Error) => {
           stopWatchingSignal()
           reject(error)
         },
-        timeoutId,
-      })
+        timeoutId: setTimeout(expire, timeout),
+        source,
+        readingSource: false,
+        rearm: source
+          ? () => {
+              clearTimeout(pending.timeoutId)
+              pending.timeoutId = setTimeout(expire, timeout)
+            }
+          : undefined,
+      }
+      this.pendingRequests.set(message.requestId, pending)
       signal?.addEventListener("abort", onAbort, { once: true })
 
       try {
@@ -746,11 +809,135 @@ export class SwarmIdClient {
         )
       } catch (error) {
         stopWatchingSignal()
-        clearTimeout(timeoutId)
+        clearTimeout(pending.timeoutId)
         this.pendingRequests.delete(message.requestId)
         throw error
       }
     })
+  }
+
+  /** Read the next piece of a streaming upload for the proxy's pull. */
+  private async answerSourcePull(requestId: string): Promise<void> {
+    const pending = this.pendingRequests.get(requestId)
+    if (!pending?.source) return
+    const isStillWaiting = () => this.pendingRequests.get(requestId) === pending
+    pending.readingSource = true
+    clearTimeout(pending.timeoutId)
+    try {
+      const data = await pending.source.next()
+      if (!isStillWaiting()) return
+      this.sendMessage(
+        { type: "uploadSourcePiece", requestId, data },
+        data ? [data.buffer as ArrayBuffer] : undefined,
+      )
+      pending.readingSource = false
+      pending.rearm?.()
+    } catch (error) {
+      if (!isStillWaiting()) return
+      this.pendingRequests.delete(requestId)
+      pending.reject(
+        error instanceof SwarmIdError
+          ? error
+          : new SwarmIdError(
+              "invalid-request",
+              `Reading the upload failed: ${error instanceof Error ? error.message : String(error)}`,
+              { cause: error },
+            ),
+      )
+      this.sendAbort(requestId)
+    }
+  }
+
+  /** The bytes for the wire, and the source when they are to be pulled. */
+  private toWireInput(input: UploadInput): {
+    data: Uint8Array | PulledSource
+    source?: PieceSource
+  } {
+    const source = openPieceSource(input)
+    if (!source) return { data: new Uint8Array(input as Uint8Array) }
+    return { data: { pulled: true, size: source.size }, source }
+  }
+
+  /**
+   * Wire up the stream the proxy answers once it has resolved a streaming
+   * download. Nothing is asked of the proxy until the reader wants a piece.
+   */
+  private openDownloadStream(
+    requestId: string,
+    requestOptions: RequestOptions,
+  ): ReadableStream<Uint8Array> {
+    const signal = requestOptions?.signal
+    const idleTimeout = this.streamIdleTimeout(requestOptions?.timeout)
+    let controller: ReadableStreamDefaultController<Uint8Array>
+    let pullDone: (() => void) | undefined
+    let timer: ReturnType<typeof setTimeout> | undefined
+
+    const settlePull = () => {
+      clearTimeout(timer)
+      pullDone?.()
+      pullDone = undefined
+    }
+    const finish = () => {
+      settlePull()
+      this.downloadStreams.delete(requestId)
+      signal?.removeEventListener("abort", onAbort)
+    }
+    const fail = (error: Error) => {
+      controller.error(error)
+      finish()
+    }
+    const failAndStopProxy = (error: Error) => {
+      fail(error)
+      this.sendAbort(requestId)
+    }
+    const onAbort = () => failAndStopProxy(abortedError(signal!))
+
+    const stream = new ReadableStream<Uint8Array>(
+      {
+        start: (c) => {
+          controller = c
+        },
+        pull: () =>
+          new Promise<void>((resolve) => {
+            pullDone = resolve
+            timer = setTimeout(
+              () =>
+                failAndStopProxy(
+                  new SwarmIdError(
+                    "timeout",
+                    `Request timeout after ${idleTimeout}ms`,
+                  ),
+                ),
+              idleTimeout,
+            )
+            try {
+              this.sendMessage({ type: "downloadStreamPull", requestId })
+            } catch (error) {
+              fail(error as Error)
+            }
+          }),
+        cancel: () => {
+          finish()
+          this.sendAbort(requestId)
+        },
+      },
+      { highWaterMark: 0 },
+    )
+
+    this.downloadStreams.set(requestId, {
+      deliver: (data) => {
+        if (data) {
+          controller.enqueue(data)
+          settlePull()
+        } else {
+          controller.close()
+          finish()
+        }
+      },
+      fail,
+    })
+    signal?.addEventListener("abort", onAbort, { once: true })
+    return stream
   }
 
   /** Tell the proxy to stop `requestId`, already rejected here. */
@@ -798,6 +985,20 @@ export class SwarmIdClient {
   private roundTripTimeout(perCall: number | undefined): number {
     if (perCall === undefined || perCall <= 0) {
       return this.timeout
+    }
+    return Math.min(perCall, MAX_TIMER_DELAY_MS)
+  }
+
+  /**
+   * How long a streaming transfer lets the proxy stay silent, from the call's
+   * own `requestOptions.timeout` as {@link roundTripTimeout} reads it. The
+   * default is at least {@link STREAM_IDLE_TIMEOUT_MS}: before its first pull
+   * the proxy queues for the drive's write lock and may wait for a partition
+   * lease.
+   */
+  private streamIdleTimeout(perCall: number | undefined): number {
+    if (perCall === undefined || perCall <= 0) {
+      return Math.max(this.timeout, STREAM_IDLE_TIMEOUT_MS)
     }
     return Math.min(perCall, MAX_TIMER_DELAY_MS)
   }
@@ -1570,7 +1771,14 @@ export class SwarmIdClient {
    * The data is uploaded using the authenticated user's postage stamp.
    * Progress can be tracked via the optional callback.
    *
-   * @param data - The binary data to upload as a Uint8Array
+   * Pass a `Blob`, `File` or `ReadableStream` for a large file: it is read
+   * piece by piece, as fast as the node takes it, so it is never held whole.
+   * `requestOptions.timeout` then bounds the proxy's silence (default: at
+   * least 2 minutes), not the whole upload. The source may stay silent for 2
+   * minutes, or a longer timeout, before the upload fails with `timeout`: it
+   * holds the drive's write lock for every other writer meanwhile.
+   *
+   * @param data - The bytes to upload: a Uint8Array, Blob, File or ReadableStream
    * @param options - Optional upload configuration
    * @param options.pin - Whether to pin the data locally (defaults to false; ignored on a subsidised gateway)
    * @param options.encrypt - Whether to encrypt the data (defaults to false)
@@ -1598,7 +1806,7 @@ export class SwarmIdClient {
    * ```
    */
   async uploadData(
-    data: Uint8Array,
+    data: UploadInput,
     options?: UploadOptions,
     requestOptions?: RequestOptions,
   ): Promise<UploadResult> {
@@ -1613,6 +1821,7 @@ export class SwarmIdClient {
       ...serializableOptions
     } = options ?? {}
 
+    const { data: wireData, source } = this.toWireInput(data)
     const stopProgress = this.listenForProgress(requestId, onProgress)
     try {
       const response = await this.sendRequest<{
@@ -1621,18 +1830,22 @@ export class SwarmIdClient {
         reference: Reference
         tagUid?: number
         stampedChunks?: number
-      }>({
-        type: "uploadData",
-        requestId,
-        data: new Uint8Array(data),
-        options: serializableOptions,
-        requestOptions,
-        enableProgress: !!onProgress,
-        useWebSocket,
-        useWorkers,
-        workerCount,
-        concurrency,
-      })
+      }>(
+        {
+          type: "uploadData",
+          requestId,
+          data: wireData,
+          options: serializableOptions,
+          requestOptions,
+          // A streaming upload always wants it: progress is its sign of life.
+          enableProgress: !!onProgress || source !== undefined,
+          useWebSocket,
+          useWorkers,
+          workerCount,
+          concurrency,
+        },
+        source,
+      )
 
       return {
         reference: response.reference,
@@ -1641,7 +1854,13 @@ export class SwarmIdClient {
       }
     } finally {
       stopProgress()
+      this.releaseSource(source)
     }
+  }
+
+  /** Not awaited: a caller's `cancel()` may take as long as it likes. */
+  private releaseSource(source: PieceSource | undefined): void {
+    void source?.cancel().catch(() => {})
   }
 
   /**
@@ -1692,6 +1911,47 @@ export class SwarmIdClient {
     })
 
     return response.data
+  }
+
+  /**
+   * {@link downloadData} for reading as the bytes arrive, so a large file is
+   * never held whole on either side of the iframe. The returned stream is
+   * pulled: it fetches nothing until read. Read it to the end, or cancel it
+   * or abort `requestOptions.signal` to stop the proxy.
+   *
+   * `requestOptions.timeout` is how long the proxy may stay silent per piece
+   * (default: at least 2 minutes), not a bound on the whole download.
+   *
+   * @param reference - The Swarm reference of the data, 64 or 128 hex chars
+   * @param options - Optional download configuration
+   * @param requestOptions - Optional request configuration
+   * @returns The content's stream and length in bytes
+   * @throws {Error} If the reference is not found: before any stream exists
+   *
+   * @example
+   * ```typescript
+   * const { stream, size } = await client.downloadDataStream(reference)
+   * await stream.pipeTo(writable)
+   * ```
+   */
+  async downloadDataStream(
+    reference: Reference,
+    options?: DownloadOptions,
+    requestOptions?: RequestOptions,
+  ): Promise<DataDownload> {
+    this.ensureReady()
+    const requestId = this.generateRequestId()
+    const { size } = await this.sendRequest<{ size: number }>({
+      type: "downloadDataStream",
+      requestId,
+      reference,
+      options,
+      requestOptions,
+    })
+    return {
+      size,
+      stream: this.openDownloadStream(requestId, requestOptions),
+    }
   }
 
   /**
@@ -3537,7 +3797,7 @@ export class SwarmIdClient {
    * This method encrypts the data and creates an ACT that controls who can decrypt it.
    * Only the specified grantees (and the publisher) can decrypt and access the data.
    *
-   * @param data - The binary data to upload as a Uint8Array
+   * @param data - The bytes to upload: a Uint8Array, Blob, File or ReadableStream
    * @param grantees - Array of grantee public keys as compressed hex strings (33 bytes = 66 hex chars).
    *   A grantee is either another user's `appKey.publicKey` (that user in this app origin only) or
    *   their `identity.sharingPublicKey` (that user in every app they connect, #519)
@@ -3575,7 +3835,7 @@ export class SwarmIdClient {
    * ```
    */
   async actUploadData(
-    data: Uint8Array,
+    data: UploadInput,
     grantees: string[],
     options?: ActUploadOptions,
     requestOptions?: RequestOptions,
@@ -3591,6 +3851,7 @@ export class SwarmIdClient {
     this.ensureReady()
     const requestId = this.generateRequestId()
     const { onProgress, ...serializableOptions } = options ?? {}
+    const { data: wireData, source } = this.toWireInput(data)
 
     const stopProgress = this.listenForProgress(requestId, onProgress)
     try {
@@ -3604,15 +3865,18 @@ export class SwarmIdClient {
         actReference: string
         tagUid?: number
         stampedChunks?: number
-      }>({
-        type: "actUploadData",
-        requestId,
-        data: new Uint8Array(data),
-        grantees,
-        options: serializableOptions,
-        requestOptions,
-        enableProgress: !!onProgress,
-      })
+      }>(
+        {
+          type: "actUploadData",
+          requestId,
+          data: wireData,
+          grantees,
+          options: serializableOptions,
+          requestOptions,
+          enableProgress: !!onProgress || source !== undefined,
+        },
+        source,
+      )
 
       return {
         encryptedReference: response.encryptedReference,
@@ -3625,6 +3889,7 @@ export class SwarmIdClient {
       }
     } finally {
       stopProgress()
+      this.releaseSource(source)
     }
   }
 
@@ -3683,6 +3948,42 @@ export class SwarmIdClient {
     })
 
     return response.data
+  }
+
+  /**
+   * {@link actDownloadData} for reading as the bytes arrive. The same contract
+   * as {@link downloadDataStream}.
+   *
+   * @param encryptedReference - The encrypted reference from actUploadData
+   * @param historyReference - The history reference from actUploadData
+   * @param publisherPubKey - The publisher's compressed public key from actUploadData
+   * @param timestamp - Optional timestamp to look up a specific ACT version
+   * @param requestOptions - Optional request configuration
+   * @returns The content's stream and length in bytes
+   * @throws {Error} If the user is not authorized to decrypt the ACT: before any stream exists
+   */
+  async actDownloadDataStream(
+    encryptedReference: string,
+    historyReference: string,
+    publisherPubKey: string,
+    timestamp?: number,
+    requestOptions?: RequestOptions,
+  ): Promise<DataDownload> {
+    this.ensureReady()
+    const requestId = this.generateRequestId()
+    const { size } = await this.sendRequest<{ size: number }>({
+      type: "actDownloadDataStream",
+      requestId,
+      encryptedReference,
+      historyReference,
+      publisherPubKey,
+      timestamp,
+      requestOptions,
+    })
+    return {
+      size,
+      stream: this.openDownloadStream(requestId, requestOptions),
+    }
   }
 
   /**
@@ -3913,6 +4214,7 @@ export class SwarmIdClient {
     })
     this.pendingRequests.clear()
     this.progressListeners.clear()
+    this.downloadStreams.forEach((download) => download.fail(destroyed()))
 
     // Remove message listener
     if (this.messageListener) {

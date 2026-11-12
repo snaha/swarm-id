@@ -5,6 +5,14 @@
 export const CHUNK_SIZE = 4096
 export const PLAIN_REFS_PER_CHUNK = 128 // 4096 / 32 = 128 plain (unencrypted) refs per intermediate chunk
 export const ENCRYPTED_REFS_PER_CHUNK = 64 // 4096 / 64 = 64 encrypted refs per intermediate chunk
+/** The most bytes one message of a streaming upload or download carries. */
+export const STREAM_PIECE_SIZE = 256 * 1024
+/**
+ * The silence either side of a streaming upload tolerates by default: the
+ * client waiting on the proxy, the proxy waiting on the source. A longer
+ * `requestOptions.timeout` raises both.
+ */
+export const STREAM_IDLE_TIMEOUT_MS = 120_000
 
 /**
  * Chunks a file of `span` bytes splits into, for upload progress and drive
@@ -36,17 +44,29 @@ export function estimateTotalChunks(
 }
 
 /**
- * Split data into 4096-byte chunks
+ * Re-cut a stream of byte pieces into blocks of exactly `size`, the last one
+ * shorter if the bytes run out. Holds at most one block, and yields one the
+ * caller may keep. Nothing in, nothing out.
  */
-export function splitDataIntoChunks(data: Uint8Array): Uint8Array[] {
-  // Zero-length content is a single empty chunk (span 0) — Bee's canonical
-  // representation of an empty file.
-  if (data.length === 0) {
-    return [new Uint8Array(0)]
+export async function* rechunk(
+  source: AsyncIterable<Uint8Array>,
+  size: number,
+): AsyncGenerator<Uint8Array> {
+  let block = new Uint8Array(size)
+  let filled = 0
+  for await (const piece of source) {
+    let offset = 0
+    while (offset < piece.length) {
+      const taken = Math.min(size - filled, piece.length - offset)
+      block.set(piece.subarray(offset, offset + taken), filled)
+      filled += taken
+      offset += taken
+      if (filled === size) {
+        yield block
+        block = new Uint8Array(size)
+        filled = 0
+      }
+    }
   }
-  const chunks: Uint8Array[] = []
-  for (let i = 0; i < data.length; i += CHUNK_SIZE) {
-    chunks.push(data.slice(i, Math.min(i + CHUNK_SIZE, data.length)))
-  }
-  return chunks
+  if (filled > 0) yield block.slice(0, filled)
 }

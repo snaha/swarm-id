@@ -1,6 +1,9 @@
 // Copyright 2026 The Swarm Authors. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+/** The largest delay `setTimeout` honours; past it, it fires almost at once. */
+export const MAX_TIMER_DELAY_MS = 2 ** 31 - 1
+
 /**
  * Rejection type for {@link withTimeout}. Callers classify a timed-out read
  * (INCONCLUSIVE — the target may exist behind a slow gateway) apart from a

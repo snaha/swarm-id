@@ -10,14 +10,14 @@ Two package entries, one build: `@snaha/swarm-id` (`src/index.ts`) is the dApp A
 All cross-origin communication via `postMessage` with Zod validation.
 
 The full unions live in `types.ts` (`ParentToIframeMessageSchema`, `IframeToParentMessageSchema`,
-`PopupToIframeMessageSchema`) — 45 and 49 members, one `…Response` per request (`abortRequest` gets none). The ones worth
+`PopupToIframeMessageSchema`) — 49 and 53 members, one `…Response` per request (`abortRequest` and the pull-and-piece messages of a streaming transfer get none). The ones worth
 knowing by name:
 
 - **Parent → Iframe**: `parentIdentify`, `checkAuth`, `connect`, `requestPermissions` (#711), `getPermissions` (#885),
-  `disconnect`, `uploadData`, `downloadData`, `deriveAppSecret`, `abortRequest`
+  `disconnect`, `uploadData`, `downloadData`, `downloadDataStream`, `deriveAppSecret`, `abortRequest`, `uploadSourcePiece`, `downloadStreamPull`
 - **Iframe → Parent**: `proxyReady`, `initError`, `authStatusResponse`, `authSuccess`,
   `connectResponse`, `connectionInfoChanged` (what `initialize()` awaits; `drivesChanged: true` on it when the app's drives moved, #933), `uploadDataResponse`,
-  `error`
+  `uploadSourcePull`, `downloadStreamPiece`, `error`
 - **Popup → Iframe**: `setSecret` — the partitioned handover, below — and `grantUpdated`, the
   permissions popup handing a partitioned session its new grant as an account delta (#711)
 
