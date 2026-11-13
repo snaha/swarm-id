@@ -46,7 +46,7 @@ export function manifestRanges(manifest: Manifest): [string, string][] {
  */
 export function lockfileOverrides(text: string, file: string): Record<string, string> {
   const overrides: Record<string, string> = {}
-  const lines = text.split('\n')
+  const lines = text.split(/\r?\n/)
   const start = lines.indexOf('overrides:')
   if (start === -1) return overrides
   for (let index = start + 1; index < lines.length && lines[index] !== ''; index++) {

@@ -3,9 +3,11 @@
 
 // Fails when a dependency or override names a range instead of an exact version
 // (AGENTS.md, "Dependency versions are exact"): `pnpm check:versions`. Reads every
-// package.json git does not ignore and the overrides of every pnpm lockfile.
-// `packageExtensions` are not checked: they extend third-party packages, and the
-// lockfile pins what they resolve to.
+// package.json git tracks and the overrides of every tracked pnpm lockfile.
+// Untracked files are left alone, so a scratch package in a working tree does not
+// fail `check:all`; a new package is checked once it is added, and CI's checkout
+// has nothing untracked. `packageExtensions` are not checked: they extend
+// third-party packages, and the lockfile pins what they resolve to.
 
 import { execFileSync } from 'node:child_process'
 import { existsSync, readFileSync } from 'node:fs'
@@ -18,7 +20,7 @@ import {
   manifestRanges,
 } from './exact-versions.ts'
 
-const LIST_FILES = ['ls-files', '-z', '--cached', '--others', '--exclude-standard']
+const LIST_FILES = ['ls-files', '-z', '--cached']
 const files = execFileSync('git', LIST_FILES, { encoding: 'utf8' })
   .split('\0')
   .filter((path) => path !== '' && existsSync(path))

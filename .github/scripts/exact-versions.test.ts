@@ -82,6 +82,10 @@ describe('lockfileOverrides', () => {
       'ws@^8': '8.22.1',
     })
   })
+  it('reads a lockfile with CRLF line endings', () => {
+    const text = ['overrides:', '  ws@^8: ^8.22.1', '', 'importers:'].join('\r\n')
+    assert.deepEqual(lockfileOverrides(text, LOCKFILE), { 'ws@^8': '^8.22.1' })
+  })
   it('reads nothing from a lockfile without overrides', () => {
     assert.deepEqual(lockfileOverrides("lockfileVersion: '9.0'\n", LOCKFILE), {})
   })
