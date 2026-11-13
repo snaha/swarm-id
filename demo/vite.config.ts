@@ -18,7 +18,7 @@ export default defineConfig(({ command }) => ({
       adapter: staticAdapter({ fallback: 'index.html' }),
       preprocess: vitePreprocess(),
       // SvelteKit 3 generates no `$lib`; its replacement, `#lib`, requires file
-      // extensions on every import, which the repo's import style omits.
+      // extensions on every import, which the repo's import style omits (#1025).
       alias: { $lib: 'src/lib' },
       paths: { base: (process.env.BASE_PATH || '') as '' | `/${string}` },
       prerender: { handleUnseenRoutes: 'warn' },

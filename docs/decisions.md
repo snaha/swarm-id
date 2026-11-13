@@ -24,10 +24,10 @@ deprecated `alias` option.
 **Why.** Moving everything together keeps one TypeScript and one vite across
 the monorepo, which is what the pin is for. `$lib` stays because `#lib` would
 rewrite some 800 import lines and add the extensions the import style omits;
-that is its own change, due before SvelteKit drops `alias`. TypeScript 6
-types a `Uint8Array` by its buffer, and a Web API takes only one over an
-`ArrayBuffer`: the lib casts at those calls (`webBytes`) rather than narrow
-its public byte types here.
+that is its own change (#1025), due before SvelteKit drops `alias`. TypeScript 6
+types a `Uint8Array` by its buffer, and neither a Web API nor a message schema
+takes one that may sit on shared memory: the lib casts where it hands bytes to
+either (`webBytes`), so the byte types it publishes stay as they were.
 
 ## 2026-11-11 A dependency audit gates the release and the production deploys
 
