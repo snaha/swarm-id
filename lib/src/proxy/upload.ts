@@ -172,7 +172,8 @@ export interface UploadSOCOptions {
   encryptionKey?: Uint8Array | true
   /** Pin the uploaded SOC (stamper mode only; a subsidised gateway never sees it, #752) */
   pin?: boolean
-  /** Use deferred upload mode */
+  /** Use deferred upload mode. Stamper mode sends `false` when unset; a
+   *  subsidised gateway is left to its own default. */
   deferred?: boolean
   /** Tag for tracking */
   tag?: number
@@ -1035,9 +1036,12 @@ export async function uploadSOC(
       "swarm-postage-stamp": stampHex,
     }
     if (tag) headers["swarm-tag"] = tag.toString()
-    if (options?.deferred !== undefined) {
-      headers["swarm-deferred-upload"] = options.deferred.toString()
-    }
+    // Always sent, direct unless the caller asks otherwise, as a chunk upload
+    // is. Bee reads a missing header as deferred, and a deferred SOC cannot be
+    // rewritten: the node keeps serving the first chunk it stored at the
+    // address, so a lease lock, its release sentinel or a re-published beacon
+    // would never read back.
+    headers["swarm-deferred-upload"] = (options?.deferred ?? false).toString()
     if (options?.pin !== undefined) {
       headers["swarm-pin"] = options.pin.toString()
     }
