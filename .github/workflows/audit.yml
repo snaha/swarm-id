@@ -3,7 +3,8 @@ name: Dependency audit
 # `pnpm audit` over the whole lockfile, dev dependencies included: the apps
 # bundle theirs, and a build tool runs beside what is published. It passes
 # while every reported advisory is on the `auditConfig.ignoreGhsas` list in
-# pnpm-workspace.yaml and fails on one that is not.
+# pnpm-workspace.yaml and fails on one that is not, or on a listed one that is
+# no longer reported.
 #
 # Called by release.yml before the npm publish and by deploy-do.yml and
 # deploy-main-pages.yml before a production deploy. PR previews are not gated.
@@ -40,3 +41,20 @@ jobs:
       # No install: the audit reads the lockfile. A registry error fails the
       # job rather than passing it; re-run it.
       - run: pnpm audit
+
+      # The list only shrinks if a fix taken also deletes its entries: audit
+      # again without the list and fail on an entry nothing reports. A registry
+      # error reports nothing, so it fails here too.
+      - name: Every ignored advisory is still reported
+        run: |
+          block='/^auditConfig:/{on=1;next} /^[^ #]/{on=0}'
+          listed=$(awk "$block on" pnpm-workspace.yaml | grep -oE 'GHSA(-[a-z0-9]{4}){3}' | sort -u)
+          awk "$block !on" pnpm-workspace.yaml > unlisted.yaml
+          mv unlisted.yaml pnpm-workspace.yaml
+          reported=$( (pnpm audit --json || true) | jq -r '.advisories[].github_advisory_id' | sort -u)
+          stale=$(comm -23 <(echo "$listed") <(echo "$reported"))
+          if [ -n "$stale" ]; then
+            echo "No longer reported, delete from auditConfig.ignoreGhsas:"
+            echo "$stale"
+            exit 1
+          fi

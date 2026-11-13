@@ -17,7 +17,9 @@ shipping a dependency with a published advisory.
 production deploys (DigitalOcean and the `main` build on GitHub Pages), and a
 red run stops them. PR previews are not gated. It covers dev dependencies too,
 at every severity. An advisory that is accepted is listed with its reason
-under `auditConfig.ignoreGhsas` in `pnpm-workspace.yaml`.
+under `auditConfig.ignoreGhsas` in `pnpm-workspace.yaml`. Each group names
+the issue that clears it, and the audit fails on a listed advisory that is no
+longer reported, so the list shrinks as fixes are taken.
 
 **Why.** The exact pins and the release-age gate cover a release nobody has
 reported yet; the audit covers one that has been. Dev dependencies are in
