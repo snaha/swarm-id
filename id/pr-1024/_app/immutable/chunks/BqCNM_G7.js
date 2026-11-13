@@ -1,0 +1,1 @@
+import"./DLAPimam.js";import{Y as e,Z as t,s as n}from"./o_ve2145.js";var r=4e3;function i(){let i=t(void 0),a;return{get message(){return n(i)},show:t=>{e(i,t,!0),clearTimeout(a),a=setTimeout(()=>e(i,void 0),r)}}}var a=i();export{a as t};
