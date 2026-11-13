@@ -146,7 +146,7 @@ test.describe('three devices on two partitions', () => {
     // holder yields, and the upload completes on the freshly acquired slot.
     // (A holder idle past IDLE_YIELD_MS may already have let go by itself; C
     // then takes the free slot cold. Either way one holder ends up empty.)
-    const pC = await C.uploadAndHoldOrSkip()
+    const pC = await C.uploadAndHoldOrSkip(all())
     // Whoever held C's partition before has let go of it — or had already
     // let go before C asked. Either way at most one of A and B still holds.
     const previousHolder = [...before].find(([, p]) => p === pC)?.[0]
@@ -167,7 +167,7 @@ test.describe('three devices on two partitions', () => {
 
     // Its upload blocks on a slot wait, asks the room, and an idle holder gives
     // one up — the upload itself completes on the freshly acquired partition.
-    const held = await waiting.uploadAndHoldOrSkip()
+    const held = await waiting.uploadAndHoldOrSkip(all())
     expect(held).toBeDefined()
     await expectNoDualHold(all())
   })
@@ -198,7 +198,7 @@ test.describe('three devices on two partitions', () => {
   test('a reload keeps the lease: the fresh page adopts it from the cache without a cold acquire', async () => {
     for (const device of all()) await device.ensureConnected()
     // Hold something first; an upload acquires when nothing is held.
-    const before = await A.uploadAndHoldOrSkip()
+    const before = await A.uploadAndHoldOrSkip(all())
 
     await A.page.reload()
     // Adopted from local state alone: the partition is back well inside a
@@ -211,7 +211,7 @@ test.describe('three devices on two partitions', () => {
   test('a second tab of one device shares its partition, and both tabs upload', async () => {
     for (const device of all()) await device.ensureConnected()
     // Hold something first; an upload acquires when nothing is held.
-    const held = await A.uploadAndHoldOrSkip()
+    const held = await A.uploadAndHoldOrSkip(all())
 
     const sibling = await A.openSiblingTab()
     try {
@@ -235,13 +235,17 @@ test.describe('three devices on two partitions', () => {
     for (const device of all()) await device.ensureConnected()
     // Fill both slots: B takes a free one, then C's request makes an idle
     // holder yield. The holder that yields may be B rather than A — then B
-    // holds nothing to release, and the scenario has no subject (#798).
-    // One more
-    // upload puts B back: C, just served, is inside the peer-yield window,
-    // so the idle holder that yields is A.
-    await B.uploadAndHoldOrSkip()
-    await C.uploadAndHoldOrSkip()
-    if ((await B.partition()) === undefined) await B.uploadAndHoldOrSkip()
+    // holds nothing to release, and the scenario has no subject (#798). One
+    // more upload puts B back: C, just served, is inside the peer-yield
+    // window, so the idle holder that yields is A. B's acquire takes longer
+    // than that window, so C uploads once more to be inside it again when A
+    // asks below.
+    await B.uploadAndHoldOrSkip(all())
+    await C.uploadAndHoldOrSkip(all())
+    if ((await B.partition()) === undefined) {
+      await B.uploadAndHoldOrSkip(all())
+      await C.upload()
+    }
     const before = await expectNoDualHold(all())
     const pB = before.get('B')
     if (pB === undefined || before.get('C') === undefined) {
@@ -269,7 +273,7 @@ test.describe('three devices on two partitions', () => {
     // B reconnects and is served in turn: C or A yields on request.
     await B.connect()
     await sleep(PEER_YIELD_MIN_IDLE_MS)
-    await B.uploadAndHoldOrSkip()
+    await B.uploadAndHoldOrSkip(all())
     await expectNoDualHold(all())
   })
 
@@ -278,7 +282,7 @@ test.describe('three devices on two partitions', () => {
     test.setTimeout(TTL_LAPSE_MS + UPLOAD_TIMEOUT_MS * 5)
     // C holds a partition and then goes away without a teardown — no release
     // sentinel, no `lease-released`, only a socket close the room notices.
-    await C.uploadAndHoldOrSkip()
+    await C.uploadAndHoldOrSkip(all())
     await C.close()
 
     // Nothing A or B does brings C's slot back sooner, so wait the lapse out

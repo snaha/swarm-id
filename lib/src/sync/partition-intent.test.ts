@@ -189,10 +189,8 @@ describe("readPartitionIntent / writePartitionIntent round-trip", () => {
     expect(read).toBeUndefined()
   })
 
-  // Note: no "non-deferred" assertion — Bee's /soc handler hardcodes
-  // Deferred:false and ignores the Swarm-Deferred-Upload header (bee 2.8.0
-  // pkg/api/soc.go), so SOC writes are always synchronous regardless of the
-  // client flag. The deferred flag is only meaningful for /bytes data uploads.
+  // Note: no "non-deferred" assertion here — `uploadSOC` sends a stamped SOC
+  // direct by default, which `proxy/upload.modes.test.ts` covers.
 })
 
 describe("readPartitionIntent — a transient 5xx is not 'no intent'", () => {
