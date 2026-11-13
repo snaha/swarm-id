@@ -7,7 +7,7 @@ import {
   createNetworkSettingsStorageManager,
 } from '@snaha/swarm-id/internal'
 
-import { browser } from '$app/environment'
+import { browser } from '$app/env'
 
 /**
  * Read through the getters, written only through `updateSettings` (pin these

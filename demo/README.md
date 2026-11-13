@@ -11,8 +11,7 @@ This demo shows how to integrate the Swarm ID library into a dApp for authentica
 - **src/routes/** - SvelteKit pages (main demo, account, feeds, SOC, storage, access control, Safari check)
 - **src/lib/stores/** - Svelte 5 stores (client, log, sidebar)
 - **src/lib/components/** - Shared UI components
-- **svelte.config.js** - SvelteKit config with `@sveltejs/adapter-static`
-- **vite.config.ts** - Vite configuration
+- **vite.config.ts** - Vite and SvelteKit config (`sveltekit({ … })` with `@sveltejs/adapter-static`)
 
 ## Using the Library
 

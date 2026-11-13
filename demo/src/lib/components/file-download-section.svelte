@@ -47,7 +47,7 @@
       )
 
       // Trigger browser download
-      const blob = new Blob([fileData.data])
+      const blob = new Blob([fileData.data as Uint8Array<ArrayBuffer>])
       const url = URL.createObjectURL(blob)
       const a = document.createElement('a')
       a.href = url

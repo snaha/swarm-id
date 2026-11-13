@@ -32,7 +32,7 @@ import { stampAmountForSeconds, ttlSecondsFor } from './purchase'
 // The accounts store reads `browser` and (via the lib storage manager)
 // `window.localStorage` at import time; every account here is built directly
 // from the class, so nothing is persisted.
-vi.mock('$app/environment', () => ({ browser: false }))
+vi.mock('$app/env', () => ({ browser: false }))
 
 vi.hoisted(() => {
   const backing = new Map<string, string>()

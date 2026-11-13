@@ -3,10 +3,9 @@
 import type { KnipConfig } from 'knip'
 
 const config: KnipConfig = {
-  entry: ['src/app.html', 'src/routes/**/*', 'src/**/*.{test,spec}.ts'],
+  entry: ['src/app.html', 'src/env.ts', 'src/routes/**/*', 'src/**/*.{test,spec}.ts'],
   paths: {
     '$app/*': ['node_modules/@sveltejs/kit/src/runtime/app/*'],
-    '$env/*': ['.svelte-kit/ambient.d.ts'],
     '$lib/*': ['src/lib/*'],
   },
   // Knip cannot resolve the workspace package through its exports map, so it

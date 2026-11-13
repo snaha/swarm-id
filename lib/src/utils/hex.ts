@@ -17,7 +17,7 @@ import type { Address } from "../schemas"
  * @throws {Error} If the input has odd length or non-hex characters — a
  *   malformed value must fail loudly, not silently decode to zero bytes
  */
-export function hexToUint8Array(hexString: string): Uint8Array {
+export function hexToUint8Array(hexString: string): Uint8Array<ArrayBuffer> {
   const hex = hexString.replace(/^0x/i, "")
   if (hex.length % 2 !== 0 || !/^[0-9a-fA-F]*$/.test(hex)) {
     throw new Error("Invalid hex string.")
@@ -29,6 +29,17 @@ export function hexToUint8Array(hexString: string): Uint8Array {
   }
 
   return bytes
+}
+
+/**
+ * Bytes as a Web API takes them. `fetch`, `crypto.subtle` and `WebSocket.send`
+ * accept a `BufferSource`, which excludes a view over a `SharedArrayBuffer`;
+ * a plain `Uint8Array`, as bee-js and cafe-utility return it, admits one.
+ * Nothing in the library is backed by shared memory, and this is the one
+ * place that says so.
+ */
+export function webBytes(bytes: Uint8Array): Uint8Array<ArrayBuffer> {
+  return bytes as Uint8Array<ArrayBuffer>
 }
 
 /**

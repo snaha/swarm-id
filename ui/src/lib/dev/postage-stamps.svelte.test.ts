@@ -26,7 +26,7 @@ import { postageStampsStore } from './postage-stamps.svelte'
 // `getStamper` refuses to build the IndexedDB-backed utilization store outside
 // the browser, so the store module has to load as if it were in one — which in
 // turn makes the accounts store read `window.localStorage` at import time.
-vi.mock('$app/environment', () => ({ browser: true }))
+vi.mock('$app/env', () => ({ browser: true }))
 
 // Node has no IndexedDB; stub the utilization cache the stamper opens at
 // construction so it starts from fresh counters (`create()` would otherwise

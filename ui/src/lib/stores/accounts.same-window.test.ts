@@ -18,7 +18,7 @@ import { accountsStore, setAccountsSyncHook } from './accounts.svelte'
 
 // `browser: true`, unlike the sibling suites: the listener under test is the
 // one the store installs at boot.
-vi.mock('$app/environment', () => ({ browser: true }))
+vi.mock('$app/env', () => ({ browser: true }))
 
 vi.hoisted(() => {
   const backing = new Map<string, string>()

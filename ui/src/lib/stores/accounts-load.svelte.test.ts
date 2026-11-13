@@ -9,7 +9,7 @@ import { describe, expect, it, vi } from 'vitest'
 
 import { accountsStore } from './accounts.svelte'
 
-vi.mock('$app/environment', () => ({ browser: true }))
+vi.mock('$app/env', () => ({ browser: true }))
 
 const MARKED_AT = 1700000000500
 

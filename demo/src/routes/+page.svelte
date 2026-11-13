@@ -4,10 +4,11 @@
 -->
 
 <script lang="ts">
-  import { base } from '$app/paths'
+  import { resolve } from '$app/paths'
+  import type { RouteId } from '$app/types'
   import { Card, CardHeader, CardTitle, CardDescription } from '$lib/components/ui/card'
 
-  const features = [
+  const features: { href: RouteId; title: string; description: string }[] = [
     {
       href: '/storage',
       title: 'Storage',
@@ -46,9 +47,8 @@
   </div>
 
   <div class="grid gap-4 md:grid-cols-2">
-    <!-- eslint-disable svelte/no-navigation-without-resolve -- static routes with base path -->
     {#each features as feature (feature.href)}
-      <a href="{base}{feature.href}" class="group block">
+      <a href={resolve(feature.href)} class="group block">
         <Card class="h-full transition-shadow group-hover:shadow-md">
           <CardHeader>
             <CardTitle>{feature.title}</CardTitle>

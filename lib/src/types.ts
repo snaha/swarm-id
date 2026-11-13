@@ -125,6 +125,13 @@ export const DriveTargetSchema = z
   )
   .optional()
 
+/**
+ * Bytes crossing the bridge. `z.instanceof(Uint8Array)` infers
+ * `Uint8Array<ArrayBuffer>`, which the `Uint8Array` that bee-js and
+ * cafe-utility return is not assignable to.
+ */
+const BytesSchema = z.custom<Uint8Array>((value) => value instanceof Uint8Array)
+
 const UploadOptionsObjectSchema = z.object({
   batchID: DriveTargetSchema,
   pin: z.boolean().optional(),
@@ -160,10 +167,8 @@ export const DownloadOptionsSchema = z
       .optional(),
     fallback: z.boolean().optional(),
     timeoutMs: z.number().optional(),
-    actPublisher: z.union([z.instanceof(Uint8Array), z.string()]).optional(),
-    actHistoryAddress: z
-      .union([z.instanceof(Uint8Array), z.string()])
-      .optional(),
+    actPublisher: z.union([BytesSchema, z.string()]).optional(),
+    actHistoryAddress: z.union([BytesSchema, z.string()]).optional(),
     actTimestamp: z.union([z.number(), z.string()]).optional(),
   })
   .optional()
@@ -251,7 +256,7 @@ const UploadFilesOptionsSchema = UploadOptionsObjectSchema.extend({
 /** One file of a folder, as it crosses the bridge */
 export const CollectionFileSchema = z.object({
   path: z.string().min(1),
-  data: z.instanceof(Uint8Array),
+  data: BytesSchema,
   contentType: z.string().optional(),
 })
 export type CollectionFile = z.infer<typeof CollectionFileSchema>
@@ -306,7 +311,7 @@ export const SocRawUploadResultSchema = UploadResultSchema.extend({
 
 export const FileDataSchema = z.object({
   name: z.string(),
-  data: z.instanceof(Uint8Array),
+  data: BytesSchema,
 })
 
 /** Where a `batchTTL` came from: exact from the chain or Bee, a guess otherwise */
@@ -1108,7 +1113,7 @@ export const DisconnectMessageSchema = z.object({
 export const UploadDataMessageSchema = z.object({
   type: z.literal("uploadData"),
   requestId: z.string(),
-  data: z.instanceof(Uint8Array),
+  data: BytesSchema,
   options: UploadOptionsSchema,
   requestOptions: RequestOptionsSchema,
   enableProgress: z.boolean().optional(),
@@ -1137,7 +1142,7 @@ export const DeriveAppSecretMessageSchema = z.object({
 export const UploadFileMessageSchema = z.object({
   type: z.literal("uploadFile"),
   requestId: z.string(),
-  data: z.instanceof(Uint8Array),
+  data: BytesSchema,
   name: z.string().optional(),
   options: UploadOptionsSchema,
   requestOptions: RequestOptionsSchema,
@@ -1178,7 +1183,7 @@ export const ListFilesMessageSchema = z.object({
 export const UploadChunkMessageSchema = z.object({
   type: z.literal("uploadChunk"),
   requestId: z.string(),
-  data: z.instanceof(Uint8Array),
+  data: BytesSchema,
   options: UploadOptionsSchema,
   requestOptions: RequestOptionsSchema,
 })
@@ -1214,7 +1219,7 @@ export const GsocSendMessageSchema = z.object({
   requestId: z.string(),
   signer: z.string(),
   identifier: z.string(),
-  data: z.instanceof(Uint8Array),
+  data: BytesSchema,
   options: UploadOptionsSchema,
   requestOptions: RequestOptionsSchema,
 })
@@ -1224,7 +1229,7 @@ export const SocUploadMessageSchema = z.object({
   type: z.literal("socUpload"),
   requestId: z.string(),
   identifier: IdentifierSchema,
-  data: z.instanceof(Uint8Array),
+  data: BytesSchema,
   signer: PrivateKeySchema.optional(),
   options: UploadOptionsSchema,
   requestOptions: RequestOptionsSchema,
@@ -1234,7 +1239,7 @@ export const SocRawUploadMessageSchema = z.object({
   type: z.literal("socRawUpload"),
   requestId: z.string(),
   identifier: IdentifierSchema,
-  data: z.instanceof(Uint8Array),
+  data: BytesSchema,
   signer: PrivateKeySchema.optional(),
   options: UploadOptionsSchema,
   requestOptions: RequestOptionsSchema,
@@ -1354,7 +1359,7 @@ export const SequentialFeedUploadPayloadMessageSchema = z.object({
   requestId: z.string(),
   topic: IdentifierSchema,
   signer: PrivateKeySchema.optional(),
-  data: z.instanceof(Uint8Array),
+  data: BytesSchema,
   index: FeedIndexSchema.optional(),
   at: TimestampSchema.optional(),
   hasTimestamp: z.boolean().optional(),
@@ -1368,7 +1373,7 @@ export const SequentialFeedUploadRawPayloadMessageSchema = z.object({
   requestId: z.string(),
   topic: IdentifierSchema,
   signer: PrivateKeySchema.optional(),
-  data: z.instanceof(Uint8Array),
+  data: BytesSchema,
   index: FeedIndexSchema.optional(),
   at: TimestampSchema.optional(),
   hasTimestamp: z.boolean().optional(),
@@ -1407,7 +1412,7 @@ export const CreateFeedManifestMessageSchema = z.object({
 export const ActUploadDataMessageSchema = z.object({
   type: z.literal("actUploadData"),
   requestId: z.string(),
-  data: z.instanceof(Uint8Array),
+  data: BytesSchema,
   grantees: z.array(z.string()), // Compressed public keys (33 bytes = 66 hex chars)
   options: ActUploadOptionsSchema,
   requestOptions: RequestOptionsSchema,
@@ -1687,13 +1692,13 @@ export const UploadDataResponseMessageSchema = z.object({
 export const DownloadDataResponseMessageSchema = z.object({
   type: z.literal("downloadDataResponse"),
   requestId: z.string(),
-  data: z.instanceof(Uint8Array),
+  data: BytesSchema,
 })
 
 export const DeriveAppSecretResponseMessageSchema = z.object({
   type: z.literal("deriveAppSecretResponse"),
   requestId: z.string(),
-  secret: z.instanceof(Uint8Array),
+  secret: BytesSchema,
 })
 
 export const UploadFileResponseMessageSchema = z.object({
@@ -1708,7 +1713,7 @@ export const DownloadFileResponseMessageSchema = z.object({
   type: z.literal("downloadFileResponse"),
   requestId: z.string(),
   name: z.string(),
-  data: z.instanceof(Uint8Array),
+  data: BytesSchema,
 })
 
 export const UploadFilesResponseMessageSchema = z.object({
@@ -1735,7 +1740,7 @@ export const UploadChunkResponseMessageSchema = z.object({
 export const DownloadChunkResponseMessageSchema = z.object({
   type: z.literal("downloadChunkResponse"),
   requestId: z.string(),
-  data: z.instanceof(Uint8Array),
+  data: BytesSchema,
 })
 
 export const UploadProgressMessageSchema = z.object({
@@ -1911,11 +1916,11 @@ export const SocRawUploadResponseMessageSchema = z.object({
 export const SocDownloadResponseMessageSchema = z.object({
   type: z.literal("socDownloadResponse"),
   requestId: z.string(),
-  data: z.instanceof(Uint8Array),
+  data: BytesSchema,
   identifier: IdentifierSchema,
   signature: SignatureSchema,
   span: z.number(),
-  payload: z.instanceof(Uint8Array),
+  payload: BytesSchema,
   address: ReferenceSchema,
   owner: AddressSchema,
 })
@@ -1923,11 +1928,11 @@ export const SocDownloadResponseMessageSchema = z.object({
 export const SocRawDownloadResponseMessageSchema = z.object({
   type: z.literal("socRawDownloadResponse"),
   requestId: z.string(),
-  data: z.instanceof(Uint8Array),
+  data: BytesSchema,
   identifier: IdentifierSchema,
   signature: SignatureSchema,
   span: z.number(),
-  payload: z.instanceof(Uint8Array),
+  payload: BytesSchema,
   address: ReferenceSchema,
   owner: AddressSchema,
 })
@@ -1973,7 +1978,7 @@ export const SequentialFeedGetOwnerResponseMessageSchema = z.object({
 export const SequentialFeedDownloadPayloadResponseMessageSchema = z.object({
   type: z.literal("seqFeedDownloadPayloadResponse"),
   requestId: z.string(),
-  payload: z.instanceof(Uint8Array),
+  payload: BytesSchema,
   timestamp: z.number().optional(),
   feedIndex: z.string(),
   feedIndexNext: z.string(),
@@ -1982,7 +1987,7 @@ export const SequentialFeedDownloadPayloadResponseMessageSchema = z.object({
 export const SequentialFeedDownloadRawPayloadResponseMessageSchema = z.object({
   type: z.literal("seqFeedDownloadRawPayloadResponse"),
   requestId: z.string(),
-  payload: z.instanceof(Uint8Array),
+  payload: BytesSchema,
   timestamp: z.number().optional(),
   feedIndex: z.string(),
   feedIndexNext: z.string(),
@@ -2053,7 +2058,7 @@ export const ActUploadDataResponseMessageSchema = z.object({
 export const ActDownloadDataResponseMessageSchema = z.object({
   type: z.literal("actDownloadDataResponse"),
   requestId: z.string(),
-  data: z.instanceof(Uint8Array),
+  data: BytesSchema,
 })
 
 export const ActAddGranteesResponseMessageSchema = z.object({

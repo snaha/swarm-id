@@ -40,7 +40,9 @@
     try {
       const data = await clientStore.client!.downloadData(entry.reference)
       logStore.log(`Downloaded ${entry.path} (${formatBytes(data.length)})`)
-      const url = URL.createObjectURL(new Blob([data], { type: entry.contentType }))
+      const url = URL.createObjectURL(
+        new Blob([data as Uint8Array<ArrayBuffer>], { type: entry.contentType }),
+      )
       const a = document.createElement('a')
       a.href = url
       a.download = entry.path.split('/').pop() ?? entry.path

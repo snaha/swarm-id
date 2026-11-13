@@ -9,7 +9,7 @@
  * too, where /dev is not shipped: set the `dev-card-payment-enabled` key to
  * `true` in local storage by hand (snaha/swarm-id#858).
  */
-import { browser } from '$app/environment'
+import { browser } from '$app/env'
 
 export type MockStampResult = 'success' | 'error'
 

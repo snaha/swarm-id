@@ -55,9 +55,7 @@ overrides:
   # Scoped: a bare zod@^4 also rewrites abitype's zod peer range.
   '@ethersphere/bee-js>zod': 4.6.7
   # Dev tooling only (`pnpm audit`, not --prod), same rule. Not overridden:
-  # vite 7 (pinned monorepo toolchain, bumped as one change),
-  # minimatch 10 and cookie 0.6 (fix only in the next major), @sveltejs/kit
-  # (fix only in 3.x).
+  # minimatch 10 (fix only in the next major).
   '@humanfs/node@^0.16': 0.16.8
   brace-expansion@^1: 1.1.21
   brace-expansion@^2: 2.1.7
@@ -104,23 +102,6 @@ auditConfig:
     - GHSA-phwv-c562-gvmh
     - GHSA-pr6f-5x2q-rwfp
     - GHSA-rcqx-6q8c-2c42
-    # Vite's dev server and its launch-editor. Neither is deployed. #1020
-    - GHSA-587h-7wmj-h5pm
-    - GHSA-p9ff-h696-f583
-    - GHSA-v2wj-q39q-566r
-    - GHSA-9jrq-w75r-8gcw
-    - GHSA-4w7w-66w2-5vf9
-    - GHSA-698v-4r3x-3vcv
-    - GHSA-fx2h-pf6j-xcff
-    - GHSA-r825-w8mm-5pxw
-    - GHSA-rq7h-c2jc-7f22
-    - GHSA-v6wh-96g9-6wx3
-    # SvelteKit, fixed only in 3.x: `setHeaders` on a prerendered page and
-    # `use:enhance` form actions, neither of which the apps use. cookie 0.6
-    # comes with it and parses no cookie here. #1021
-    - GHSA-27mw-82g8-phjj
-    - GHSA-pfhg-q3qv-9q6r
-    - GHSA-pxg6-pf52-xh8x
     # minimatch 10 under eslint and prettier plugins: lint tooling, fed only
     # this repo's own globs. #1023
     - GHSA-g3hv-75wg-m249

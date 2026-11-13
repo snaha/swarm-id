@@ -22,7 +22,7 @@ import {
   stampClocks,
 } from '@snaha/swarm-id/internal'
 
-import { browser } from '$app/environment'
+import { browser } from '$app/env'
 
 import { drivesNeedingAttention, soonestDriveExpiry } from '$lib/drives'
 import { daysToMs } from '$lib/duration'
