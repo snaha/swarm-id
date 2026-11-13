@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { Binary } from "cafe-utility"
+import { webBytes } from "../utils/hex"
 
 export const KEY_LENGTH = 32
 export const REFERENCE_SIZE = 64
@@ -150,7 +151,7 @@ function getRandomValues(buffer: Uint8Array): void {
   if (buffer.length === 0) return
 
   // Use Web Crypto API for secure random bytes
-  crypto.getRandomValues(buffer)
+  crypto.getRandomValues(webBytes(buffer))
 }
 
 /**

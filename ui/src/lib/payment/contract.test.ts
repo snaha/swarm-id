@@ -6,7 +6,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { fetchExistingBatchFromChain } from './contract'
 
-vi.mock('$app/environment', () => ({ browser: false }))
+vi.mock('$app/env', () => ({ browser: false }))
 
 const internal = vi.hoisted(() => ({ fetchOnChainBatchStateResult: vi.fn() }))
 vi.mock('@snaha/swarm-id/internal', async (importOriginal) => ({

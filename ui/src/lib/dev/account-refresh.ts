@@ -14,7 +14,7 @@
  */
 import { runCoalescedAcrossTabs } from '@snaha/swarm-id/internal'
 
-import { browser } from '$app/environment'
+import { browser } from '$app/env'
 
 import { refreshAccountFromSwarm } from '$lib/dev/refresh-account-from-swarm'
 import { accountsStore } from '$lib/stores/accounts.svelte'

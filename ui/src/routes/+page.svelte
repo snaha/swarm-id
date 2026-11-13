@@ -61,7 +61,6 @@
   function selectTab(value: string) {
     tab = value
     target = []
-    // eslint-disable-next-line svelte/no-navigation-without-resolve -- hash only, same page
     replaceState(`#${value}`, page.state)
   }
   /** Signed-out account being unlocked to sign back in. */

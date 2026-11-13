@@ -7,6 +7,28 @@ present and may point at an issue or PR; the reasons live here.
 
 A PR that makes or changes a decision adds the entry in the same PR.
 
+## 2026-11-13 SvelteKit 3, with `$lib` kept as an alias
+
+**Context.** SvelteKit 2 carried two advisories fixed only in 3.0 and pinned
+the apps to vite 7, whose dev-server advisories were accepted on the audit
+list (#1020, #1021). SvelteKit 3 requires vite 8, vite-plugin-svelte 7 and
+TypeScript 6, and no longer generates `$lib`: its replacement is the `#lib`
+subpath import, which requires a file extension on every import.
+
+**Decision.** The whole pinned toolchain moves at once: SvelteKit 3,
+adapter-static 4, vite 8, vite-plugin-svelte 7, TypeScript 6 in every package.
+The SvelteKit config lives in each app's `vite.config.ts`, and public
+variables are declared in `src/env.ts`. `$lib` stays, through SvelteKit's
+deprecated `alias` option.
+
+**Why.** Moving everything together keeps one TypeScript and one vite across
+the monorepo, which is what the pin is for. `$lib` stays because `#lib` would
+rewrite some 800 import lines and add the extensions the import style omits;
+that is its own change (#1025), due before SvelteKit drops `alias`. TypeScript 6
+types a `Uint8Array` by its buffer, and neither a Web API nor a message schema
+takes one that may sit on shared memory: the lib casts where it hands bytes to
+either (`webBytes`), so the byte types it publishes stay as they were.
+
 ## 2026-11-11 A dependency audit gates the release and the production deploys
 
 **Context.** `pnpm audit` was run by hand, when someone thought of it, and its

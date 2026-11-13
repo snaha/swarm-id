@@ -7,7 +7,7 @@ import {
   UtilizationStoreDB,
 } from '@snaha/swarm-id/internal'
 
-import { browser } from '$app/environment'
+import { browser } from '$app/env'
 
 import { accountsStore } from '$lib/stores/accounts.svelte'
 

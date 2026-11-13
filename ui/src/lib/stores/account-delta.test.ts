@@ -28,7 +28,7 @@ import { toastStore } from './toast.svelte'
 // Same harness as `accounts.svelte.test.ts`: the store reads `browser` and
 // `window.localStorage` at import time, and `browser: false` keeps the
 // boot-time load and the cross-tab listener out of the way.
-vi.mock('$app/environment', () => ({ browser: false }))
+vi.mock('$app/env', () => ({ browser: false }))
 
 vi.hoisted(() => {
   const backing = new Map<string, string>()

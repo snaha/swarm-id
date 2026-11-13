@@ -97,7 +97,7 @@ import {
 } from "./types"
 import { EthAddress, Identifier, PrivateKey, Topic } from "@ethersphere/bee-js"
 import { generatedAvatar } from "./utils/avatar"
-import { uint8ArrayToHex } from "./utils/hex"
+import { uint8ArrayToHex, webBytes } from "./utils/hex"
 import { collectionPath } from "./utils/collection"
 import { PERMISSIONS_POPUP_MAX_MS, untilPopupClosed } from "./utils/popup"
 import { buildAuthUrl } from "./utils/url"
@@ -1821,7 +1821,7 @@ export class SwarmIdClient {
       }>({
         type: "uploadFile",
         requestId,
-        data,
+        data: webBytes(data),
         name: fileName,
         options: serializableOptions,
         requestOptions,
@@ -2106,7 +2106,7 @@ export class SwarmIdClient {
     }>({
       type: "uploadChunk",
       requestId,
-      data: data as Uint8Array,
+      data: webBytes(data),
       options: serializableOptions,
       requestOptions,
     })
@@ -3231,7 +3231,7 @@ export class SwarmIdClient {
         requestId,
         topic,
         signer: signerKey,
-        data: this.normalizePayload(data),
+        data: webBytes(this.normalizePayload(data)),
         index:
           options?.index !== undefined
             ? this.normalizeFeedIndex(options.index as bigint | number | string)
@@ -3273,7 +3273,7 @@ export class SwarmIdClient {
         requestId,
         topic,
         signer: signerKey,
-        data: this.normalizePayload(data),
+        data: webBytes(this.normalizePayload(data)),
         index:
           options?.index !== undefined
             ? this.normalizeFeedIndex(options.index as bigint | number | string)

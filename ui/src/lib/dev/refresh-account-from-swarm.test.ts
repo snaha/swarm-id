@@ -16,7 +16,7 @@ import { toastStore } from '$lib/stores/toast.svelte'
 
 import { refreshAccountFromSwarm } from './refresh-account-from-swarm'
 
-vi.mock('$app/environment', () => ({ browser: false }))
+vi.mock('$app/env', () => ({ browser: false }))
 
 // The fold is network I/O — stub it; everything else in the lib stays real.
 vi.mock('@snaha/swarm-id/internal', async (importOriginal) => ({

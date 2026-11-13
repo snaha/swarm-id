@@ -1,7 +1,7 @@
 // Copyright 2026 The Swarm Authors. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { PUBLIC_ID_DOMAIN } from '$env/static/public'
+import { PUBLIC_ID_DOMAIN } from '$app/env/public'
 
 export function resolveProxyOrigin(): string {
   const urlParams = new URLSearchParams(window.location.search)
