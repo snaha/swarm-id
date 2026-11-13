@@ -68,7 +68,8 @@ export const UNANSWERED_WAIT = /No partition available|Partition lease timed out
  *  both marked at their source as what this suite keys on. */
 export const PUBLISHED_LINE = 'Published device state'
 export const YIELDED_LINE = 'Released idle partition'
-/** Device-state publishes inside one idle window that say a holder was never idle (#707). */
+/** Device-state publishes inside one idle window, or one slot wait, that say a
+ *  holder was never idle (#707). */
 export const BUSY_PUBLISHES = 3
 
 export const PARTITION_LINE = /^Partition: /
@@ -339,19 +340,27 @@ export class Device {
 
   /**
    * `uploadAndHold` for a device that has to be handed a slot by a holder.
-   * While the two holders keep publishing device state to each other (#707)
-   * neither is ever idle, no `lease-request` is answered, and the slot wait
-   * times out with "No partition available". That is the bug, not this
-   * scenario's subject, so the scenario is skipped with the pointer rather
-   * than failed — and passes on its own once the holders go quiet.
+   * While the holders keep publishing device state to each other (#707) none
+   * is ever idle, no `lease-request` is answered, and the slot wait times out
+   * with "No partition available". That is the bug, not this scenario's
+   * subject, so the scenario is skipped with the pointer — but only on that
+   * evidence: one of `others` published through the wait. A wait that idle
+   * holders left unanswered is a lease failure, and fails the scenario.
    */
-  async uploadAndHoldOrSkip(page: Page = this.page): Promise<number> {
+  async uploadAndHoldOrSkip(others: Device[], page: Page = this.page): Promise<number> {
+    const asked = Date.now()
     try {
       return await this.uploadAndHold(page)
     } catch (error) {
       const shown = error instanceof Error ? error.message : String(error)
-      if (UNANSWERED_WAIT.test(shown)) {
-        skipScenario(`${this.label}'s slot wait was never answered: holders stayed busy (#707)`)
+      const busy = others.find(
+        (device) => device !== this && device.publishesSince(asked) >= BUSY_PUBLISHES,
+      )
+      if (UNANSWERED_WAIT.test(shown) && busy) {
+        skipScenario(
+          `${this.label}'s slot wait was never answered: ${busy.label} published ` +
+            `${busy.publishesSince(asked)}× through it (#707)`,
+        )
       }
       throw error
     }
