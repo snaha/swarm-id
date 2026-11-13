@@ -9,11 +9,13 @@ name: Release & Publish
 #      publish is skipped
 #   2. Push to main (release PR merged) → release-please detects the merged PR,
 #      creates a GitHub release + tag → the three-device suite runs against a
-#      real cluster → publish runs and publishes to npm only if it passed
+#      real cluster and the dependency audit runs → publish runs and publishes
+#      to npm only if both passed
 #   3. Manual workflow_dispatch → release-please and the suite are skipped,
 #      and the package is built and published without them (the override for a
 #      release whose suite run was judged and found wanting for reasons that
-#      are not the release's). It still waits on the npm-publish environment.
+#      are not the release's). The audit still runs, and the publish still
+#      waits on the npm-publish environment.
 #
 # Only the publish job holds the OIDC token npm trusts, so it runs no
 # dependency code: the build job installs, builds and packs, and publish
@@ -52,16 +54,29 @@ jobs:
     permissions:
       contents: read
 
+  # Known advisories in the lockfile (`audit.yml`). Unlike the suite it also
+  # runs on a manual dispatch: it is quick, and a red run is the release's own.
+  audit:
+    needs: release-please
+    if: |
+      !failure() &&
+      (github.event_name == 'workflow_dispatch' ||
+      needs.release-please.outputs.release_created == 'true')
+    uses: ./.github/workflows/audit.yml
+    permissions:
+      contents: read
+
   build:
-    needs: [release-please, three-devices]
-    # Runs on manual dispatch OR when release-please created a release and the
-    # suite passed. !failure() is required because GitHub Actions skips
+    needs: [release-please, three-devices, audit]
+    # Runs once the audit passed, on manual dispatch OR when release-please
+    # created a release and the suite passed. !failure() is required because GitHub Actions skips
     # dependent jobs when their dependency is skipped — without it,
     # workflow_dispatch would never reach this job's condition. Unlike
     # always(), !failure() still respects workflow cancellation and won't run
     # if release-please or the suite fails.
     if: |
       !failure() &&
+      needs.audit.result == 'success' &&
       (github.event_name == 'workflow_dispatch' ||
       (needs.release-please.outputs.release_created == 'true' &&
       needs.three-devices.result == 'success'))

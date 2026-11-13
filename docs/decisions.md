@@ -7,6 +7,28 @@ present and may point at an issue or PR; the reasons live here.
 
 A PR that makes or changes a decision adds the entry in the same PR.
 
+## 2026-11-11 A dependency audit gates the release and the production deploys
+
+**Context.** `pnpm audit` was run by hand, when someone thought of it, and its
+findings went into `overrides`. Nothing stopped a release or a deploy from
+shipping a dependency with a published advisory.
+
+**Decision.** `pnpm audit` runs before the npm publish and before both
+production deploys (DigitalOcean and the `main` build on GitHub Pages), and a
+red run stops them. PR previews are not gated. It covers dev dependencies too,
+at every severity. An advisory that is accepted is listed with its reason
+under `auditConfig.ignoreGhsas` in `pnpm-workspace.yaml`. Each group names
+the issue that clears it, and the audit fails on a listed advisory that is no
+longer reported, so the list shrinks as fixes are taken.
+
+**Why.** The exact pins and the release-age gate cover a release nobody has
+reported yet; the audit covers one that has been. Dev dependencies are in
+scope because the apps bundle theirs: `svelte` and `@sveltejs/kit` are
+`devDependencies` of `ui/` and ship in every page, which `--prod` would skip.
+No severity floor, because the list is what makes a clean run possible, and a
+floor would hide the next moderate advisory in code that does ship. Previews
+stay open so that a new advisory does not stop review of unrelated work.
+
 ## 2026-11-09 Dependency versions are exact
 
 **Context.** Dependencies were pinned once (#18); caret ranges crept back through

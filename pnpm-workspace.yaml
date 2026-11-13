@@ -55,7 +55,7 @@ overrides:
   # Scoped: a bare zod@^4 also rewrites abitype's zod peer range.
   '@ethersphere/bee-js>zod': 4.6.7
   # Dev tooling only (`pnpm audit`, not --prod), same rule. Not overridden:
-  # vite 7 and svelte 5.48 (pinned monorepo toolchain, bumped as one change),
+  # vite 7 (pinned monorepo toolchain, bumped as one change),
   # minimatch 10 and cookie 0.6 (fix only in the next major), @sveltejs/kit
   # (fix only in 3.x).
   '@humanfs/node@^0.16': 0.16.8
@@ -77,3 +77,50 @@ overrides:
   source-map-js@^1: 1.2.2
   tar@^7: 7.5.22
   yaml@^1: 1.10.3
+
+# What `pnpm audit` still reports once the overrides above are applied, each
+# accepted for the reason beside it. The audit gates the npm publish and both
+# production deploys (.github/workflows/audit.yml), so an advisory missing from
+# this list stops them: override it above, or add it here with why it does not
+# reach what ships. Each group names the issue that clears it, and the audit
+# job fails on an entry that is no longer reported, so a fix taken deletes its
+# entries in the same PR.
+auditConfig:
+  ignoreGhsas:
+    # Inside @web3-onboard/core and @relayprotocol/relay-sdk, with no fix in
+    # the major they need (see above): zod 3, deepmerge, esbuild 0.19. #1022
+    - GHSA-mrhx-c7xc-m3w5
+    - GHSA-gcqx-w48m-w2h4
+    - GHSA-67mh-4wv8-2f99
+    # The svelte 3 runtime compiled into @web3-onboard/core, which has no fixed
+    # release in its major. The apps' own svelte is past every one of these.
+    # All but the first and last are server-side rendering, which the wallet
+    # modal never does; the last (DOM clobbering) needs attributes spread onto
+    # a form, and the modal renders no form. #1022
+    - GHSA-8266-84wp-wv5c
+    - GHSA-crpf-4hrx-3jrp
+    - GHSA-f7gr-6p89-r883
+    - GHSA-m56q-vw4c-c2cp
+    - GHSA-phwv-c562-gvmh
+    - GHSA-pr6f-5x2q-rwfp
+    - GHSA-rcqx-6q8c-2c42
+    # Vite's dev server and its launch-editor. Neither is deployed. #1020
+    - GHSA-587h-7wmj-h5pm
+    - GHSA-p9ff-h696-f583
+    - GHSA-v2wj-q39q-566r
+    - GHSA-9jrq-w75r-8gcw
+    - GHSA-4w7w-66w2-5vf9
+    - GHSA-698v-4r3x-3vcv
+    - GHSA-fx2h-pf6j-xcff
+    - GHSA-r825-w8mm-5pxw
+    - GHSA-rq7h-c2jc-7f22
+    - GHSA-v6wh-96g9-6wx3
+    # SvelteKit, fixed only in 3.x: `setHeaders` on a prerendered page and
+    # `use:enhance` form actions, neither of which the apps use. cookie 0.6
+    # comes with it and parses no cookie here. #1021
+    - GHSA-27mw-82g8-phjj
+    - GHSA-pfhg-q3qv-9q6r
+    - GHSA-pxg6-pf52-xh8x
+    # minimatch 10 under eslint and prettier plugins: lint tooling, fed only
+    # this repo's own globs. #1023
+    - GHSA-g3hv-75wg-m249
