@@ -82,8 +82,8 @@ pnpm clean            # Clean build outputs
 
 ## IMPORTANT: Pre-commit Requirements
 
-Before committing, you MUST pass `pnpm check:all`. It runs the repo-wide `format:check`, then each
-package's own `check:all` in order:
+Before committing, you MUST pass `pnpm check:all`. It runs the repo-wide `format:check` and
+`check:versions`, then each package's own `check:all` in order:
 
 - **`@swarm-id/eslint-rules`**: `typecheck`
 - **`@snaha/swarm-id`**, **`@swarm-id/multichain`**, **`@swarm-id/signaling`**: `format:check`, `lint`, `typecheck`, `test`
@@ -110,7 +110,7 @@ Chain-backed suites are NOT in `check:all` — they need a chain running. `pnpm 
   range (`^13.0.0`, `~13.0.0`). `pnpm-workspace.yaml` sets `savePrefix: ''` so `pnpm add`
   complies; a bump is a deliberate edit of the version plus `pnpm install`, with the lockfile diff
   read. A release younger than pnpm's `minimumReleaseAge` needs a `minimumReleaseAgeExclude`
-  entry in the same PR
+  entry in the same PR. `pnpm check:versions` enforces it, in CI and in `check:all`
 - **Monorepo version pinning**: toolchain versions are pinned across the monorepo (eslint 10,
   vite 7, svelte 5.57, vite-plugin-svelte 6) — do NOT bump these in one package independently
   of the rest of the monorepo
