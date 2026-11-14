@@ -1,5 +1,22 @@
 # Changelog
 
+## [0.8.1](https://github.com/snaha/swarm-id/compare/v0.8.0...v0.8.1) (2026-11-13)
+
+
+### Features
+
+* delete a synced account everywhere, diluting the drives it does not keep ([#897](https://github.com/snaha/swarm-id/issues/897)) ([b9cff60](https://github.com/snaha/swarm-id/commit/b9cff609a954f64af6f02b4713435393e716fdf8))
+* **lib:** abort a request across the iframe with an AbortSignal ([#975](https://github.com/snaha/swarm-id/issues/975)) ([d3281cc](https://github.com/snaha/swarm-id/commit/d3281cc3f4234e9dbb395803fb1cca01de1e1695))
+
+
+### Bug Fixes
+
+* clear the dev tooling's fixable audit advisories ([#997](https://github.com/snaha/swarm-id/issues/997)) ([2b4e17e](https://github.com/snaha/swarm-id/commit/2b4e17e60db2d936f627a15183d409766bbe4524))
+* clear the production audit's fixable advisories ([#994](https://github.com/snaha/swarm-id/issues/994)) ([01e4c81](https://github.com/snaha/swarm-id/commit/01e4c81a9b97acfa5431ce128ed92bdcea823421))
+* **lib:** report a failed WebSocket connect as likely causes ([#995](https://github.com/snaha/swarm-id/issues/995)) ([8da43d5](https://github.com/snaha/swarm-id/commit/8da43d5ed2c83fc804277debf0c440d8f9a849e5))
+* **lib:** run WebSocket uploads against a Bee that accepts them ([#980](https://github.com/snaha/swarm-id/issues/980)) ([4d77091](https://github.com/snaha/swarm-id/commit/4d77091624b8d11a40a6ada02a9837ca222b4636))
+* pin every dependency to an exact version ([#982](https://github.com/snaha/swarm-id/issues/982)) ([f9e9750](https://github.com/snaha/swarm-id/commit/f9e97504191da2d4813e1cdd65071949b68dfea8))
+
 ## [0.8.0](https://github.com/snaha/swarm-id/compare/v0.7.0...v0.8.0) (2026-11-04)
 
 
