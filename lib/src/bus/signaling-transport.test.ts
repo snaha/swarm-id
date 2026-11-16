@@ -635,3 +635,133 @@ describe("SignalingTransport — WebRTC upgrade", () => {
     }
   })
 })
+
+const FAST_TICK_MS = 20
+/** Longer than a few pings, short enough to keep the suite quick. */
+const SETTLE_MS = 120
+const settle = () => new Promise((resolve) => setTimeout(resolve, SETTLE_MS))
+
+// What the partition lease asks of a transport (models/bus-lease): whether
+// this context's own connection is confirmed, and how long the service has
+// shown a device absent.
+describe("SignalingTransport — liveness", () => {
+  it("confirms its own connection by a round trip with the server", async () => {
+    const transport = makeTransport()
+    try {
+      expect(transport.confirmedAgoMs()).toBe(Infinity)
+      await vi.waitFor(() =>
+        expect(transport.confirmedAgoMs()).toBeLessThan(SETTLE_MS),
+      )
+    } finally {
+      transport.close()
+    }
+  })
+
+  it("stays confirmed for as long as the server keeps asking", async () => {
+    const ticking = await createSignalingServer({
+      port: 0,
+      tickIntervalMs: FAST_TICK_MS,
+    })
+    const transport = makeTransport({ url: `ws://127.0.0.1:${ticking.port}` })
+    try {
+      await settle()
+      await settle()
+      expect(transport.confirmedAgoMs()).toBeLessThan(SETTLE_MS)
+    } finally {
+      transport.close()
+      await ticking.close()
+    }
+  })
+
+  it("is unconfirmed again once the socket is gone", async () => {
+    const ownServer = await createSignalingServer({ port: 0 })
+    const transport = makeTransport({
+      url: `ws://127.0.0.1:${ownServer.port}`,
+    })
+    try {
+      await vi.waitFor(() =>
+        expect(transport.confirmedAgoMs()).toBeLessThan(SETTLE_MS),
+      )
+      await ownServer.close()
+      await vi.waitFor(() => expect(transport.confirmedAgoMs()).toBe(Infinity))
+      expect(transport.absentForMs("device-b")).toBe(0)
+    } finally {
+      transport.close()
+      await ownServer.close()
+    }
+  })
+
+  it("counts a device absent from the moment this context joined", async () => {
+    const transport = makeTransport()
+    try {
+      expect(transport.absentForMs("device-b")).toBe(0)
+      await settle()
+      await vi.waitFor(() =>
+        expect(transport.absentForMs("device-b")).toBeGreaterThan(0),
+      )
+    } finally {
+      transport.close()
+    }
+  })
+
+  // A peer that has not said which device it is could be any device.
+  it("counts no device absent while an unnamed peer is in the room", async () => {
+    const transport = makeTransport()
+    const other = makeTransport()
+    try {
+      await waitForPeers(transport, 1)
+      await settle()
+      expect(transport.absentForMs("device-b")).toBe(0)
+      expect(transport.absentForMs("device-c")).toBe(0)
+    } finally {
+      transport.close()
+      other.close()
+    }
+  })
+
+  it("counts a named device present, and absent from when its last peer left", async () => {
+    const transport = makeTransport()
+    const other = makeTransport()
+    const senders: string[] = []
+    try {
+      transport.subscribe((_raw, from) => {
+        if (from !== undefined) senders.push(from)
+      })
+      await waitForPeers(transport, 1)
+      await waitForPeers(other, 1)
+      other.publish(UTILIZATION_MESSAGE)
+      await vi.waitFor(() => expect(senders.length).toBe(1))
+      transport.notePeerDevice(senders[0], "device-b")
+
+      await settle()
+      expect(transport.absentForMs("device-b")).toBe(0)
+      const absentC = transport.absentForMs("device-c")
+      expect(absentC).toBeGreaterThanOrEqual(SETTLE_MS)
+
+      other.close()
+      await waitForPeers(transport, 0)
+      const absentB = transport.absentForMs("device-b")
+      expect(absentB).toBeLessThan(SETTLE_MS)
+      // Another device's absence is not restarted by this departure.
+      expect(transport.absentForMs("device-c")).toBeGreaterThanOrEqual(absentC)
+    } finally {
+      transport.close()
+      other.close()
+    }
+  })
+
+  it("restarts every device's absence when an unnamed peer leaves", async () => {
+    const transport = makeTransport()
+    const other = makeTransport()
+    try {
+      await waitForPeers(transport, 1)
+      await settle()
+      other.close()
+      await waitForPeers(transport, 0)
+      expect(transport.absentForMs("device-b")).toBeLessThan(SETTLE_MS)
+    } finally {
+      transport.close()
+      other.close()
+    }
+  })
+})

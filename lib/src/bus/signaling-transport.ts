@@ -88,6 +88,22 @@ export class SignalingTransport implements BusTransport {
    *  announcement published in the closing tick still reaches the wire. */
   private pendingDeliveries = new Set<Promise<void>>()
 
+  // Liveness, all of it scoped to one socket's stay in the room: a reconnect
+  // is a new session and starts every clock again. Times are
+  // `performance.now()`, which a change to the system clock cannot move.
+  /** When this session's `welcome` arrived. */
+  private sessionStartedAt: number | undefined
+  /** When the newest ping the server has answered was SENT: the server
+   *  counted this socket a room member no earlier than that. */
+  private confirmedAt: number | undefined
+  private pingNonce = 0
+  private pingsSentAt = new Map<number, number>()
+  /** Which device each room peer has been heard to speak for. */
+  private peerDevices = new Map<string, string>()
+  private deviceLeftAt = new Map<string, number>()
+  /** When a peer last left without having named its device. */
+  private unnamedLeftAt: number | undefined
+
   constructor(options: SignalingTransportOptions) {
     this.options = options
     this.connect()
@@ -125,6 +141,36 @@ export class SignalingTransport implements BusTransport {
     return () => this.peerLeftHandlers.delete(handler)
   }
 
+  confirmedAgoMs(): number {
+    if (this.confirmedAt === undefined) return Infinity
+    return performance.now() - this.confirmedAt
+  }
+
+  notePeerDevice(peerId: string, deviceId: string): void {
+    if (this.peers.has(peerId)) this.peerDevices.set(peerId, deviceId)
+  }
+
+  /**
+   * The server's room is the authority: a device is absent while no peer in
+   * the room speaks for it, counted from the latest of this context joining,
+   * the device's last peer leaving, and an unnamed peer leaving. A peer that
+   * has not yet named its device could be any device, so nobody is absent
+   * while one is in the room.
+   */
+  absentForMs(deviceId: string): number {
+    if (this.sessionStartedAt === undefined) return 0
+    for (const peerId of this.peers.keys()) {
+      const device = this.peerDevices.get(peerId)
+      if (device === undefined || device === deviceId) return 0
+    }
+    const since = Math.max(
+      this.sessionStartedAt,
+      this.deviceLeftAt.get(deviceId) ?? 0,
+      this.unnamedLeftAt ?? 0,
+    )
+    return performance.now() - since
+  }
+
   /**
    * Stops reconnecting at once, but lets in-flight publishes reach the wire
    * first: `deliver` awaits envelope encryption, and callers announce a
@@ -157,7 +203,24 @@ export class SignalingTransport implements BusTransport {
       peer.connection?.close()
     }
     this.peers.clear()
+    this.endSession()
     this.socket?.close()
+  }
+
+  private endSession(): void {
+    this.sessionStartedAt = undefined
+    this.confirmedAt = undefined
+    this.pingsSentAt.clear()
+    this.peerDevices.clear()
+    this.deviceLeftAt.clear()
+    this.unnamedLeftAt = undefined
+  }
+
+  /** One round trip with the server; the answer is handled in `pong`. */
+  private ping(): void {
+    this.pingNonce += 1
+    this.pingsSentAt.set(this.pingNonce, performance.now())
+    this.sendToServer({ type: "ping", nonce: this.pingNonce })
   }
 
   // ==========================================================================
@@ -188,6 +251,7 @@ export class SignalingTransport implements BusTransport {
       void this.handleServerMessage(String(event.data))
     })
     socket.addEventListener("close", (event) => {
+      this.endSession()
       // A policy close is permanent for this topic (the server only sends it
       // for a topic it will reject identically next time); retrying is a hot
       // loop against an answer that will not change.
@@ -280,6 +344,8 @@ export class SignalingTransport implements BusTransport {
 
     switch (message.type) {
       case "welcome":
+        this.sessionStartedAt = performance.now()
+        this.ping()
         for (const peerId of message.peers) {
           this.peers.set(peerId, newPeerState())
           // The newcomer (us) initiates toward every existing peer.
@@ -294,6 +360,10 @@ export class SignalingTransport implements BusTransport {
         const peer = this.peers.get(message.peerId)
         peer?.connection?.close()
         this.peers.delete(message.peerId)
+        const device = this.peerDevices.get(message.peerId)
+        this.peerDevices.delete(message.peerId)
+        if (device === undefined) this.unnamedLeftAt = performance.now()
+        else this.deviceLeftAt.set(device, performance.now())
         // Reported, not just cleaned up: this is the only departure signal a
         // closing tab produces (why, in `PresenceTracker`'s header). The
         // server's reaper closes a dead socket too, so a crash and a dropped
@@ -309,6 +379,21 @@ export class SignalingTransport implements BusTransport {
       case "signal":
         await this.handleSignal(message.from, message.payload)
         return
+      case "tick":
+        this.ping()
+        return
+      case "pong": {
+        // Answers arrive in the order the pings were sent, so everything up
+        // to this nonce is settled. A nonce from an earlier session is not in
+        // the map.
+        const sentAt = this.pingsSentAt.get(message.nonce)
+        if (sentAt === undefined) return
+        this.confirmedAt = sentAt
+        for (const nonce of this.pingsSentAt.keys()) {
+          if (nonce <= message.nonce) this.pingsSentAt.delete(nonce)
+        }
+        return
+      }
     }
   }
 

@@ -21,6 +21,8 @@ Every frame is a JSON object with a `type`:
 | server → room   | `{ type: "peer-joined", peerId }` / `{ type: "peer-left", peerId }` | Membership changes.                                                                  |
 | client → server | `{ type: "signal", to, payload }`                                   | Forwarded as `{ type: "signal", from, payload }`.                                    |
 | client → server | `{ type: "relay", to, payload }`                                    | Forwarded as `{ type: "relay", from, payload }`. `payload` is ciphertext.            |
+| server → room   | `{ type: "tick" }`                                                  | "Ping me now", every 2 s. A hidden page's own timers are too slow to set the pace.   |
+| client → server | `{ type: "ping", nonce }`                                           | Answered with `{ type: "pong", nonce }`, only to a socket that is in a room.         |
 
 Topics are 16–128 lower-case hex characters, derived per account by the clients
 (`deriveBusContext` in the lib); the server treats them as opaque room names.
