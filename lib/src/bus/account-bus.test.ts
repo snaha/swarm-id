@@ -347,3 +347,90 @@ describe("AccountBus over BroadcastChannelTransport", () => {
     }
   })
 })
+
+const PRESENCE_MESSAGE: BusMessageInput = {
+  type: "presence",
+  accountId: "aa".repeat(20),
+  fromDeviceId: "device-remote",
+}
+
+interface FakeLiveness {
+  confirmedAgoMs: number
+  absentForMs: number
+}
+
+/** A remote transport whose liveness answers are set by the test. */
+function fakeRemote(liveness: FakeLiveness) {
+  let deliver: (raw: unknown, from?: string) => void = () => {}
+  const named: [string, string][] = []
+  const transport: BusTransport = {
+    local: false,
+    publish: () => {},
+    subscribe: (handler) => {
+      deliver = handler
+      return () => {}
+    },
+    confirmedAgoMs: () => liveness.confirmedAgoMs,
+    absentForMs: () => liveness.absentForMs,
+    notePeerDevice: (peerId, deviceId) => named.push([peerId, deviceId]),
+    close: () => {},
+  }
+  return {
+    transport,
+    named,
+    deliver: (raw: unknown, from?: string) => deliver(raw, from),
+  }
+}
+
+describe("AccountBus — liveness", () => {
+  it("is unconfirmed, and sees nobody absent, without a remote transport", () => {
+    const bus = makeBus()
+    try {
+      expect(bus.confirmedAgoMs()).toBe(Infinity)
+      expect(bus.absentForMs("device-remote")).toBe(0)
+    } finally {
+      bus.close()
+    }
+  })
+
+  it("answers from its remote transport", () => {
+    const remote = fakeRemote({ confirmedAgoMs: 40, absentForMs: 900 })
+    const bus = new AccountBus([
+      new BroadcastChannelTransport(TOPIC),
+      remote.transport,
+    ])
+    try {
+      expect(bus.confirmedAgoMs()).toBe(40)
+      expect(bus.absentForMs("device-remote")).toBe(900)
+    } finally {
+      bus.close()
+    }
+  })
+
+  // Each remote transport is its own authority, so the bus believes the more
+  // cautious of them on both questions.
+  it("takes the more cautious answer of several remote transports", () => {
+    const first = fakeRemote({ confirmedAgoMs: 40, absentForMs: 900 })
+    const second = fakeRemote({ confirmedAgoMs: 700, absentForMs: 100 })
+    const bus = new AccountBus([first.transport, second.transport])
+    try {
+      expect(bus.confirmedAgoMs()).toBe(700)
+      expect(bus.absentForMs("device-remote")).toBe(100)
+    } finally {
+      bus.close()
+    }
+  })
+
+  it("tells a transport which device a peer speaks for", () => {
+    const remote = fakeRemote({ confirmedAgoMs: 0, absentForMs: 0 })
+    const bus = new AccountBus([remote.transport])
+    try {
+      remote.deliver(PRESENCE_MESSAGE, "peer-1")
+      remote.deliver(UTILIZATION_MESSAGE, "peer-2")
+      remote.deliver({ type: "nonsense", fromDeviceId: "device-x" }, "peer-3")
+      expect(remote.named).toEqual([["peer-1", "device-remote"]])
+    } finally {
+      bus.close()
+    }
+  })
+})

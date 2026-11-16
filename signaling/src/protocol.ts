@@ -14,6 +14,13 @@ export const ClientMessageSchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal('join'), topic: z.string() }),
   z.object({ type: z.literal('relay'), to: z.string(), payload: z.string() }),
   z.object({ type: z.literal('signal'), to: z.string(), payload: z.unknown() }),
+  /**
+   * Answered with a `pong` carrying the same nonce, and only to a socket that
+   * is in a room. The round trip is how a client knows its own connection
+   * works: the server's protocol-level pings are invisible to browser code.
+   * A client sends one for each `tick`.
+   */
+  z.object({ type: z.literal('ping'), nonce: z.number().int().nonnegative() }),
 ])
 export type ClientMessage = z.infer<typeof ClientMessageSchema>
 
@@ -23,6 +30,13 @@ export const ServerMessageSchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal('peer-left'), peerId: z.string() }),
   z.object({ type: z.literal('relay'), from: z.string(), payload: z.string() }),
   z.object({ type: z.literal('signal'), from: z.string(), payload: z.unknown() }),
+  z.object({ type: z.literal('pong'), nonce: z.number() }),
+  /**
+   * "Ping me now", sent to every room member at the server's cadence. The
+   * clock is the server's because a hidden page's own timers are throttled to
+   * about one a minute, while a message event still runs at once.
+   */
+  z.object({ type: z.literal('tick') }),
 ])
 export type ServerMessage = z.infer<typeof ServerMessageSchema>
 

@@ -43,6 +43,24 @@ export interface BusTransport {
    * departures to report, which is a truthful answer rather than a gap.
    */
   onPeerLeft?(handler: (peerId: string) => void): () => void
+  /**
+   * The two things the partition lease needs from a transport that crosses
+   * devices (models/bus-lease, #1017), and the whole of what it may assume
+   * about how the transport knows:
+   *
+   * - `confirmedAgoMs`: how long ago this context's own connection to the
+   *   service was last confirmed, `Infinity` when it is not.
+   * - `absentForMs`: for how long the service has shown no context of that
+   *   device, `0` when one is present or the transport cannot tell.
+   *
+   * They must come from one authority: if a device is shown absent over some
+   * span, its own connection was not confirmed within that span.
+   */
+  confirmedAgoMs?(): number
+  absentForMs?(deviceId: string): number
+  /** A message from `peerId` was signed off by `deviceId`; a transport whose
+   *  peers are not devices needs telling. */
+  notePeerDevice?(peerId: string, deviceId: string): void
   close(): void
 }
 
@@ -124,7 +142,12 @@ export class AccountBus {
   /** Both subscriptions a transport offers, as one list of removers. */
   private listenTo(transport: BusTransport): (() => void)[] {
     const removers = [
-      transport.subscribe((raw, from) => this.dispatch(raw, from)),
+      transport.subscribe((raw, from) => {
+        const message = this.dispatch(raw, from)
+        if (message && from !== undefined && "fromDeviceId" in message) {
+          transport.notePeerDevice?.(from, message.fromDeviceId)
+        }
+      }),
     ]
     const onPeerLeft = transport.onPeerLeft?.((peerId) => {
       for (const handler of this.peerLeftHandlers) {
@@ -204,6 +227,26 @@ export class AccountBus {
     return () => this.peerLeftHandlers.delete(handler)
   }
 
+  /**
+   * How long ago this context's connection was confirmed by every transport
+   * that crosses devices; `Infinity` with none attached. A context for which
+   * this is too old is read-only on its partitions.
+   */
+  confirmedAgoMs(): number {
+    const answers = this.transports.flatMap((transport) =>
+      transport.confirmedAgoMs ? [transport.confirmedAgoMs()] : [],
+    )
+    return answers.length === 0 ? Infinity : Math.max(...answers)
+  }
+
+  /** How long every such transport has shown the device absent; `0` with none. */
+  absentForMs(deviceId: string): number {
+    const answers = this.transports.flatMap((transport) =>
+      transport.absentForMs ? [transport.absentForMs(deviceId)] : [],
+    )
+    return answers.length === 0 ? 0 : Math.min(...answers)
+  }
+
   /** Idempotent, and terminal: a closed bus neither publishes nor attaches. */
   close(): void {
     this.closed = true
@@ -219,9 +262,10 @@ export class AccountBus {
     this.transports = []
   }
 
-  private dispatch(raw: unknown, from?: string): void {
+  /** Returns the message when it was well-formed. */
+  private dispatch(raw: unknown, from?: string): BusMessage | undefined {
     const result = BusMessageSchema.safeParse(raw)
-    if (!result.success) return
+    if (!result.success) return undefined
     for (const handler of this.handlers) {
       try {
         handler(result.data, from)
@@ -229,5 +273,6 @@ export class AccountBus {
         console.error("[AccountBus] Handler error:", error)
       }
     }
+    return result.data
   }
 }
