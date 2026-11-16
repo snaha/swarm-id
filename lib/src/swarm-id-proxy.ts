@@ -240,6 +240,7 @@ import {
 } from "./schemas"
 import {
   DEFAULT_REQUEST_TIMEOUT_MS,
+  PROGRESS_INTERVAL_MS,
   REQUEST_ALIVE_INTERVAL_MS,
   appSessionDuration,
 } from "./utils/constants"
@@ -377,6 +378,17 @@ function deltaFoldView(snapshot: AccountStateSnapshot): DeviceStateSnapshot {
 /** A parent message as its handler gets it, the request's abort signal on it. */
 type Abortable<M> = M & {
   requestOptions: NonNullable<RequestOptions> & { signal: AbortSignal }
+}
+
+/** An upload's progress on its way to the parent, throttled. */
+interface ProgressReporter {
+  report: (progress: UploadProgress) => void
+  /**
+   * Post the latest report held back, before the upload's answer. Not every
+   * last report says `processed >= total`: a stream of unknown length counts
+   * what it has seen, so its total keeps pace with what has landed.
+   */
+  flush: () => void
 }
 
 /** The parent's request a write answers: where its `requestAlive` goes. */
@@ -2265,22 +2277,38 @@ export class SwarmIdProxy {
   }
 
   /**
-   * Create an onProgress callback for upload operations.
-   * Returns undefined if progress reporting is disabled.
+   * Post an upload's progress to the parent, at most once per
+   * {@link PROGRESS_INTERVAL_MS}. Undefined if progress reporting is disabled.
    */
-  private createProgressCallback(
+  private createProgressReporter(
     event: MessageEvent,
     requestId: string,
     enableProgress: boolean | undefined,
-  ): ((progress: UploadProgress) => void) | undefined {
+  ): ProgressReporter | undefined {
     if (!enableProgress) return undefined
-    return (progress: UploadProgress) => {
+    let lastPostedAt: number | undefined
+    let heldBack: UploadProgress | undefined
+    const post = (progress: UploadProgress) => {
+      lastPostedAt = Date.now()
+      heldBack = undefined
       this.postMessage(event, {
         type: "uploadProgress",
         requestId,
         total: progress.total,
         processed: progress.processed,
       })
+    }
+    return {
+      report: (progress) => {
+        const recent =
+          lastPostedAt !== undefined &&
+          Date.now() - lastPostedAt < PROGRESS_INTERVAL_MS
+        if (recent) heldBack = progress
+        else post(progress)
+      },
+      flush: () => {
+        if (heldBack) post(heldBack)
+      },
     }
   }
 
@@ -4661,8 +4689,7 @@ export class SwarmIdProxy {
       const batchID = options?.batchID
       this.ensureCanUpload(batchID)
 
-      // Create progress callback if enabled (works in both modes)
-      const onProgress = this.createProgressCallback(
+      const progress = this.createProgressReporter(
         event,
         requestId,
         enableProgress,
@@ -4685,7 +4712,7 @@ export class SwarmIdProxy {
                 tag: options?.tag,
                 webSocket: useWebSocket ? { concurrency } : undefined,
                 httpConcurrency: concurrency,
-                onProgress,
+                onProgress: progress?.report,
                 requestOptions,
               },
             )
@@ -4694,7 +4721,7 @@ export class SwarmIdProxy {
           batchID,
         )
 
-      // Send response
+      progress?.flush()
       this.postMessage(event, {
         type: "uploadDataResponse",
         requestId,
@@ -4883,8 +4910,7 @@ export class SwarmIdProxy {
       const batchID = options?.batchID
       this.ensureCanUpload(batchID)
 
-      // Create progress callback if enabled
-      const onProgress = this.createProgressCallback(
+      const progress = this.createProgressReporter(
         event,
         requestId,
         enableProgress,
@@ -4909,7 +4935,7 @@ export class SwarmIdProxy {
               tag: uploadTag,
               webSocket: useWebSocket ? { concurrency } : undefined,
               httpConcurrency: concurrency,
-              onProgress,
+              onProgress: progress?.report,
               requestOptions,
             })
 
@@ -4947,7 +4973,7 @@ export class SwarmIdProxy {
           batchID,
         )
 
-      // Send response
+      progress?.flush()
       this.postMessage(event, {
         type: "uploadFileResponse",
         requestId,
@@ -5046,7 +5072,7 @@ export class SwarmIdProxy {
     try {
       const batchID = options?.batchID
       this.ensureCanUpload(batchID)
-      const onProgress = this.createProgressCallback(
+      const progress = this.createProgressReporter(
         event,
         requestId,
         enableProgress,
@@ -5059,12 +5085,13 @@ export class SwarmIdProxy {
           uploadCollection(target, files, {
             ...options,
             tag,
-            onProgress,
+            onProgress: progress?.report,
             requestOptions,
           }),
         batchID,
       )
 
+      progress?.flush()
       this.postMessage(event, {
         type: "uploadFilesResponse",
         requestId,
@@ -6457,8 +6484,7 @@ export class SwarmIdProxy {
         parseCompressedPublicKey(hex),
       )
 
-      // Progress callback (if enabled)
-      const onProgress = this.createProgressCallback(
+      const progress = this.createProgressReporter(
         event,
         requestId,
         enableProgress,
@@ -6498,7 +6524,7 @@ export class SwarmIdProxy {
               pin: options?.pin,
               deferred: options?.deferred,
               tag: options?.tag,
-              onProgress,
+              onProgress: progress?.report,
               requestOptions,
             },
           )
@@ -6554,7 +6580,7 @@ export class SwarmIdProxy {
         batchID,
       )
 
-      // Send final response
+      progress?.flush()
       this.postMessage(event, {
         type: "actUploadDataResponse",
         requestId,

@@ -26,6 +26,7 @@ import {
   STREAM_IDLE_TIMEOUT_MS,
   STREAM_PIECE_SIZE,
 } from "./proxy/chunking"
+import { PROGRESS_INTERVAL_MS } from "./utils/constants"
 import { MockBee, MockChunkStore } from "./proxy/feeds/epochs/test-utils"
 import { DriveWritePath } from "./proxy/drive-write-path"
 import type { UploadTarget } from "./proxy/upload"
@@ -266,6 +267,67 @@ describe("streaming across the bridge", () => {
       await settle()
       expect(progress[0].total).toBeGreaterThanOrEqual(6)
       expect(progress.at(-1)).toEqual({ total: 6, processed: 6 })
+    })
+
+    describe("progress", () => {
+      /** 200 leaves, the two intermediates over them, and the root. */
+      const LEAVES = 200
+      const CHUNKS = LEAVES + 2 + 1
+
+      afterEach(() => {
+        vi.useRealTimers()
+      })
+
+      it("posts one report an interval at most, and always the last one", async () => {
+        vi.useFakeTimers({ toFake: ["Date"] })
+        const progress: Array<{ total: number; processed: number }> = []
+
+        await client.uploadData(new Blob([makeData(CHUNK_SIZE * LEAVES)]), {
+          onProgress: (p) => progress.push(p),
+        })
+
+        expect(progress.length).toBeLessThanOrEqual(2)
+        expect(progress.at(-1)).toEqual({ total: CHUNKS, processed: CHUNKS })
+      })
+
+      it("posts the last report of a stream of unknown length too", async () => {
+        vi.useFakeTimers({ toFake: ["Date"] })
+        const progress: Array<{ total: number; processed: number }> = []
+
+        await client.uploadData(
+          streamOf(makeData(CHUNK_SIZE * LEAVES), CHUNK_SIZE),
+          { onProgress: (p) => progress.push(p) },
+        )
+
+        expect(progress.length).toBeLessThanOrEqual(2)
+        expect(progress.at(-1)).toEqual({ total: CHUNKS, processed: CHUNKS })
+      })
+
+      it("posts a report every interval while the upload goes on", async () => {
+        vi.useFakeTimers({ toFake: ["Date"] })
+        const progress: Array<{ total: number; processed: number }> = []
+        let offset = 0
+        const data = makeData(CHUNK_SIZE * LEAVES)
+        // Each chunk takes a whole interval to arrive.
+        const slowStream = new ReadableStream<Uint8Array>(
+          {
+            pull(controller) {
+              if (offset >= data.length) return controller.close()
+              vi.setSystemTime(Date.now() + PROGRESS_INTERVAL_MS)
+              controller.enqueue(data.slice(offset, offset + CHUNK_SIZE))
+              offset += CHUNK_SIZE
+            },
+          },
+          { highWaterMark: 0 },
+        )
+
+        await client.uploadData(slowStream, {
+          onProgress: (p) => progress.push(p),
+        })
+
+        expect(progress.length).toBeGreaterThanOrEqual(LEAVES)
+        expect(progress.at(-1)).toEqual({ total: CHUNKS, processed: CHUNKS })
+      })
     })
 
     it("holds only a bounded part of a stream while the node is stuck", async () => {

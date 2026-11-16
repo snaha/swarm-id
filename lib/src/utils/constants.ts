@@ -30,6 +30,13 @@ export const DEFAULT_REQUEST_TIMEOUT_MS = 30 * SECOND
  */
 export const REQUEST_ALIVE_INTERVAL_MS = 5 * SECOND
 
+/**
+ * The proxy posts an upload's progress at most this often: a report per chunk
+ * would be hundreds of thousands of messages for a large file, each parsed on
+ * the dApp's main thread. The last report is always posted.
+ */
+export const PROGRESS_INTERVAL_MS = 250
+
 // ============================================================================
 // Session Defaults
 // ============================================================================
