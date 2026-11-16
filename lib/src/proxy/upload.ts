@@ -471,14 +471,14 @@ class SendWindow {
       await Promise.race([...this.inFlight, this.failed])
     }
     if (this.failure) throw this.failure.error
+    // A throwing `onSent` fails the upload as a failed send does, and `sending`
+    // itself never rejects: nothing is bound to observe it.
     const sending: Promise<void> = this.send(chunkData, address)
-      .then(
-        () => this.onSent(address),
-        (error: unknown) => {
-          this.failure ??= { error }
-          this.reject(error)
-        },
-      )
+      .then(() => this.onSent(address))
+      .catch((error: unknown) => {
+        this.failure ??= { error }
+        this.reject(error)
+      })
       .finally(() => this.inFlight.delete(sending))
     this.inFlight.add(sending)
   }

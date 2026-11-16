@@ -421,6 +421,37 @@ describe("uploadDataStream", () => {
       expect(progress.at(-1)).toEqual({ total: CHUNKS, processed: CHUNKS })
     })
 
+    it("ends with the callback's failure while the source is silent, and sends no more", async () => {
+      const { target, uploaded } = stamperSetup()
+      const thrown = new Error("progress display went away")
+      let openGate!: () => void
+      const gate = new Promise<void>((resolve) => {
+        openGate = resolve
+      })
+      async function* waitsForTheGate(): AsyncGenerator<Uint8Array> {
+        yield makeData(CHUNK_SIZE)
+        await gate
+        yield* piecesOf(makeData(CHUNK_SIZE * 3), CHUNK_SIZE)
+      }
+      let calls = 0
+      let failure: unknown
+
+      uploadDataStream(target, waitsForTheGate(), {
+        onProgress: () => {
+          calls++
+          throw thrown
+        },
+      }).catch((error: unknown) => {
+        failure = error
+      })
+
+      await vi.waitFor(() => expect(failure).toBe(thrown))
+      openGate()
+      await new Promise((resolve) => setTimeout(resolve, 20))
+      expect(uploaded()).toHaveLength(1)
+      expect(calls).toBe(1)
+    })
+
     it("counts what it has seen when it does not", async () => {
       const { target } = stamperSetup()
       const progress: UploadProgress[] = []

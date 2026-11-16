@@ -2693,7 +2693,7 @@ export class SwarmIdProxy {
         return
       }
       if (message.type === "uploadSourcePiece") {
-        this.uploadSources.get(message.requestId)?.push(message.data)
+        this.receiveUploadPiece(message.requestId, message.data)
         return
       }
       if (message.type === "downloadStreamPull") {
@@ -2721,6 +2721,8 @@ export class SwarmIdProxy {
         }
         this.sendErrorToParent(event, message.requestId, error, "Unknown error")
       } finally {
+        // A pull nobody will read settles at once rather than at its deadline.
+        this.uploadSources.get(message.requestId)?.close()
         this.inFlightRequests.delete(message.requestId)
         this.uploadSources.delete(message.requestId)
         this.downloadPulls.delete(message.requestId)
@@ -4703,6 +4705,24 @@ export class SwarmIdProxy {
   }
 
   /**
+   * Hand a piece to the upload that pulled it. The proxy waits right after
+   * posting each pull, so one that finds nobody waiting was not asked for, and
+   * holding it would let the parent fill the iframe's memory.
+   */
+  private receiveUploadPiece(
+    requestId: string,
+    data: Uint8Array | undefined,
+  ): void {
+    const source = this.uploadSources.get(requestId)
+    if (!source) return
+    if (!source.waiting) {
+      console.warn("[Proxy] Dropped an upload piece not asked for:", requestId)
+      return
+    }
+    source.push(data)
+  }
+
+  /**
    * The parent's pieces, one per pull. The drive's write lock is held for every
    * other writer on the device meanwhile, so a source silent past its deadline
    * ends the upload rather than holding it indefinitely.
@@ -4726,6 +4746,12 @@ export class SwarmIdProxy {
         throw new SwarmIdError("timeout", error.message, { cause: error })
       })
       if (!piece) return
+      if (piece.length > STREAM_PIECE_SIZE) {
+        throw new SwarmIdError(
+          "invalid-request",
+          `An upload piece of ${piece.length} bytes is over the ${STREAM_PIECE_SIZE}-byte limit`,
+        )
+      }
       yield piece
     }
   }

@@ -102,6 +102,8 @@ describe("streaming across the bridge", () => {
   let fetchSpy: ReturnType<typeof vi.fn>
   /** Set to make the gateway hold every chunk until the signal aborts. */
   let gatewayHangs: boolean
+  /** Hands a message to the proxy as if the parent posted it. */
+  let sendToProxy: (data: unknown) => Promise<void>
 
   beforeEach(async () => {
     vi.restoreAllMocks()
@@ -160,6 +162,7 @@ describe("streaming across the bridge", () => {
     const toProxy = listeners["message"] as (event: unknown) => Promise<void>
     const send = (data: unknown) =>
       toProxy({ data, origin: PARENT_ORIGIN, source: parentWindow })
+    sendToProxy = send
 
     await send({
       type: "parentIdentify",
@@ -363,6 +366,109 @@ describe("streaming across the bridge", () => {
         expect(settled).toHaveBeenCalledWith(
           expect.objectContaining({ code: "timeout" }),
         )
+      })
+
+      it("is let go of at once when a chunk fails", async () => {
+        vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] })
+        fetchSpy.mockImplementation(
+          async () => new Response("no", { status: 402 }),
+        )
+        let delivered = false
+        const stream = new ReadableStream<Uint8Array>(
+          {
+            pull(c) {
+              if (delivered) return new Promise<void>(() => {})
+              delivered = true
+              c.enqueue(makeData(CHUNK_SIZE))
+              return undefined
+            },
+          },
+          { highWaterMark: 0 },
+        )
+
+        await expect(
+          client.uploadData(stream, undefined, {
+            timeout: STREAM_IDLE_TIMEOUT_MS * 2,
+          }),
+        ).rejects.toMatchObject({ code: "bee-rejected" })
+        await vi.advanceTimersByTimeAsync(SETTLE_MS)
+
+        // The proxy's deadline for the outstanding pull is the timer left.
+        expect(vi.getTimerCount()).toBe(0)
+        expectNothingLeftBehind()
+      })
+    })
+
+    describe("a piece the proxy did not ask for", () => {
+      it("is dropped while no pull is outstanding", async () => {
+        gatewayHangs = true
+        const warn = vi.spyOn(console, "warn").mockImplementation(() => {})
+        const controller = new AbortController()
+        const stream = new ReadableStream<Uint8Array>(
+          {
+            pull(c) {
+              c.enqueue(makeData(STREAM_PIECE_SIZE))
+            },
+          },
+          { highWaterMark: 0 },
+        )
+        const upload = client
+          .uploadData(stream, undefined, { signal: controller.signal })
+          .catch((e: unknown) => e)
+        await vi.waitFor(() => expect(fetchSpy).toHaveBeenCalled())
+        await settle()
+        const [requestId] = proxy.uploadSources.keys()
+        const source = proxy.uploadSources.get(requestId) as {
+          waiting: boolean
+          queue: unknown[]
+        }
+        expect(source.waiting).toBe(false)
+
+        await sendToProxy({
+          type: "uploadSourcePiece",
+          requestId,
+          data: makeData(STREAM_PIECE_SIZE),
+        })
+
+        expect(source.queue).toHaveLength(0)
+        expect(warn).toHaveBeenCalledWith(
+          expect.stringContaining("not asked for"),
+          requestId,
+        )
+        controller.abort()
+        expect(await upload).toMatchObject({ code: "aborted" })
+      })
+
+      it("fails the upload when larger than a piece may be", async () => {
+        ;(client as unknown as ClientInternals).iframe = {
+          contentWindow: {
+            postMessage: (
+              message: unknown,
+              _origin: string,
+              transfer?: Transferable[],
+            ) => {
+              const cloned = structuredClone(message, { transfer }) as {
+                type: string
+                data?: Uint8Array
+              }
+              if (cloned.type === "uploadSourcePiece" && cloned.data) {
+                cloned.data = makeData(STREAM_PIECE_SIZE + 1)
+              }
+              void sendToProxy(cloned)
+            },
+          },
+        }
+
+        const error = await client
+          .uploadData(streamOf(makeData(CHUNK_SIZE), CHUNK_SIZE))
+          .catch((e: unknown) => e)
+
+        expect(error).toMatchObject({
+          code: "invalid-request",
+          message: expect.stringContaining(String(STREAM_PIECE_SIZE)),
+        })
+        await settle()
+        expectNothingLeftBehind()
       })
     })
 
