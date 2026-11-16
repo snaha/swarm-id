@@ -640,6 +640,8 @@ const FAST_TICK_MS = 20
 /** Longer than a few pings, short enough to keep the suite quick. */
 const SETTLE_MS = 120
 const settle = () => new Promise((resolve) => setTimeout(resolve, SETTLE_MS))
+const NOBODY: ReadonlySet<string> = new Set()
+const ONLY_B: ReadonlySet<string> = new Set(["device-b"])
 
 // What the partition lease asks of a transport (models/bus-lease): whether
 // this context's own connection is confirmed, and how long the service has
@@ -684,20 +686,38 @@ describe("SignalingTransport — liveness", () => {
       )
       await ownServer.close()
       await vi.waitFor(() => expect(transport.confirmedAgoMs()).toBe(Infinity))
-      expect(transport.absentForMs("device-b")).toBe(0)
+      expect(transport.absentExceptMs(NOBODY)).toBe(0)
     } finally {
       transport.close()
       await ownServer.close()
     }
   })
 
-  it("counts a device absent from the moment this context joined", async () => {
+  it("reports each confirmation with the gap before it", async () => {
+    const ticking = await createSignalingServer({
+      port: 0,
+      tickIntervalMs: FAST_TICK_MS,
+    })
+    const transport = makeTransport({ url: `ws://127.0.0.1:${ticking.port}` })
+    const gaps: number[] = []
+    try {
+      transport.onConfirmed((unconfirmedForMs) => gaps.push(unconfirmedForMs))
+      await vi.waitFor(() => expect(gaps.length).toBeGreaterThanOrEqual(3))
+      expect(gaps[0]).toBe(Infinity)
+      expect(gaps[1]).toBeLessThan(SETTLE_MS)
+    } finally {
+      transport.close()
+      await ticking.close()
+    }
+  })
+
+  it("counts everyone absent from the moment this context joined", async () => {
     const transport = makeTransport()
     try {
-      expect(transport.absentForMs("device-b")).toBe(0)
+      expect(transport.absentExceptMs(NOBODY)).toBe(0)
       await settle()
       await vi.waitFor(() =>
-        expect(transport.absentForMs("device-b")).toBeGreaterThan(0),
+        expect(transport.absentExceptMs(NOBODY)).toBeGreaterThan(0),
       )
     } finally {
       transport.close()
@@ -705,14 +725,14 @@ describe("SignalingTransport — liveness", () => {
   })
 
   // A peer that has not said which device it is could be any device.
-  it("counts no device absent while an unnamed peer is in the room", async () => {
+  it("counts nobody absent while an unnamed peer is in the room", async () => {
     const transport = makeTransport()
     const other = makeTransport()
     try {
       await waitForPeers(transport, 1)
       await settle()
-      expect(transport.absentForMs("device-b")).toBe(0)
-      expect(transport.absentForMs("device-c")).toBe(0)
+      expect(transport.absentExceptMs(NOBODY)).toBe(0)
+      expect(transport.absentExceptMs(ONLY_B)).toBe(0)
     } finally {
       transport.close()
       other.close()
@@ -734,23 +754,23 @@ describe("SignalingTransport — liveness", () => {
       transport.notePeerDevice(senders[0], "device-b")
 
       await settle()
-      expect(transport.absentForMs("device-b")).toBe(0)
-      const absentC = transport.absentForMs("device-c")
-      expect(absentC).toBeGreaterThanOrEqual(SETTLE_MS)
+      // Device B is in the room: nobody is absent unless B is set aside.
+      expect(transport.absentExceptMs(NOBODY)).toBe(0)
+      const exceptB = transport.absentExceptMs(ONLY_B)
+      expect(exceptB).toBeGreaterThanOrEqual(SETTLE_MS)
 
       other.close()
       await waitForPeers(transport, 0)
-      const absentB = transport.absentForMs("device-b")
-      expect(absentB).toBeLessThan(SETTLE_MS)
-      // Another device's absence is not restarted by this departure.
-      expect(transport.absentForMs("device-c")).toBeGreaterThanOrEqual(absentC)
+      expect(transport.absentExceptMs(NOBODY)).toBeLessThan(SETTLE_MS)
+      // With B set aside, its departure restarts nothing.
+      expect(transport.absentExceptMs(ONLY_B)).toBeGreaterThanOrEqual(exceptB)
     } finally {
       transport.close()
       other.close()
     }
   })
 
-  it("restarts every device's absence when an unnamed peer leaves", async () => {
+  it("restarts everyone's absence when an unnamed peer leaves", async () => {
     const transport = makeTransport()
     const other = makeTransport()
     try {
@@ -758,10 +778,29 @@ describe("SignalingTransport — liveness", () => {
       await settle()
       other.close()
       await waitForPeers(transport, 0)
-      expect(transport.absentForMs("device-b")).toBeLessThan(SETTLE_MS)
+      expect(transport.absentExceptMs(ONLY_B)).toBeLessThan(SETTLE_MS)
     } finally {
       transport.close()
       other.close()
+    }
+  })
+
+  // The room view can be behind: a message from a device it does not contain
+  // says the device was here a moment ago.
+  it("restarts a device's absence when it is heard from outside the room", async () => {
+    const transport = makeTransport()
+    try {
+      await settle()
+      await vi.waitFor(() =>
+        expect(transport.absentExceptMs(NOBODY)).toBeGreaterThanOrEqual(
+          SETTLE_MS,
+        ),
+      )
+      transport.notePeerDevice("not-in-the-room", "device-b")
+      expect(transport.absentExceptMs(NOBODY)).toBeLessThan(SETTLE_MS)
+      expect(transport.absentExceptMs(ONLY_B)).toBeGreaterThanOrEqual(SETTLE_MS)
+    } finally {
+      transport.close()
     }
   })
 })
