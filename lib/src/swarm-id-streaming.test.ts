@@ -27,6 +27,15 @@ import {
   STREAM_PIECE_SIZE,
 } from "./proxy/chunking"
 import { MockBee, MockChunkStore } from "./proxy/feeds/epochs/test-utils"
+import { DriveWritePath } from "./proxy/drive-write-path"
+import type { UploadTarget } from "./proxy/upload"
+import type {
+  BatchWriteCoordinator,
+  WithWriteOptions,
+} from "./sync/batch-write-coordinator"
+import type { UtilizationAwareStamper } from "./utils/batch-utilization"
+import { withBatchWriteLock } from "./utils/batch-write-lock"
+import { FakeLockManager } from "./utils/fake-web-locks"
 
 const PARENT_ORIGIN = "https://dapp.example.com"
 const IFRAME_ORIGIN = "https://id.example.com"
@@ -48,6 +57,8 @@ type ProxyInternals = {
   inFlightRequests: Map<string, AbortController>
   uploadSources: Map<string, unknown>
   downloadPulls: Map<string, unknown>
+  drives: Map<string, DriveWritePath>
+  primaryBatchId: string | undefined
 }
 
 function makeData(length: number): Uint8Array<ArrayBuffer> {
@@ -513,6 +524,124 @@ describe("streaming across the bridge", () => {
     })
   })
 
+  describe("a write queued behind a streaming upload to the same drive", () => {
+    const BATCH_ID = "cd".repeat(32)
+    const SIGNER_KEY = "ef".repeat(32)
+    const QUEUED_TIMEOUT_MS = 10_000
+    const HELD_MS = STREAM_IDLE_TIMEOUT_MS / 2
+
+    /** A stream that gives one chunk, then holds the drive until released. */
+    const holdingStream = () => {
+      let release: () => void = () => {}
+      const released = new Promise<void>((resolve) => (release = resolve))
+      let gaveAChunk = false
+      const stream = new ReadableStream<Uint8Array>(
+        {
+          async pull(controller) {
+            if (!gaveAChunk) {
+              gaveAChunk = true
+              controller.enqueue(makeData(CHUNK_SIZE))
+              return
+            }
+            await released
+            controller.close()
+          },
+        },
+        { highWaterMark: 0 },
+      )
+      return { stream, release }
+    }
+
+    beforeEach(() => {
+      vi.stubGlobal("navigator", { locks: new FakeLockManager() })
+      // A drive whose writes queue on its cross-tab lock, as a coordinator's
+      // do, and land on the stand-in node.
+      const drive = new DriveWritePath(BATCH_ID, SIGNER_KEY, { createdAt: 0 })
+      const coordinator = {
+        withWrite: <T>(
+          op: (target: UploadTarget) => Promise<T>,
+          opts?: WithWriteOptions,
+        ) =>
+          withBatchWriteLock(
+            BATCH_ID,
+            () => op({ mode: "subsidised", gatewayUrl: GATEWAY_URL }),
+            opts?.signal,
+          ),
+      }
+      drive.attach(
+        {} as UtilizationAwareStamper,
+        "test-fingerprint",
+        coordinator as unknown as BatchWriteCoordinator,
+      )
+      proxy.drives.set(BATCH_ID, drive)
+      proxy.primaryBatchId = BATCH_ID
+    })
+
+    afterEach(() => {
+      vi.useRealTimers()
+    })
+
+    it("waits its turn past its own timeout, and lands after it", async () => {
+      vi.useFakeTimers({
+        toFake: ["setTimeout", "clearTimeout", "setInterval", "clearInterval"],
+      })
+      const holder = holdingStream()
+      const finished: string[] = []
+      const first = client.uploadData(holder.stream).then((result) => {
+        finished.push("stream")
+        return result
+      })
+      await vi.advanceTimersByTimeAsync(SETTLE_MS)
+      const second = client
+        .uploadData(makeData(CHUNK_SIZE + 1), undefined, {
+          timeout: QUEUED_TIMEOUT_MS,
+        })
+        .then((result) => {
+          finished.push("queued")
+          return result
+        })
+      const secondSettled = vi.fn()
+      second.then(secondSettled, secondSettled)
+
+      await vi.advanceTimersByTimeAsync(HELD_MS)
+      expect(secondSettled).not.toHaveBeenCalled()
+
+      holder.release()
+      await vi.advanceTimersByTimeAsync(SETTLE_MS)
+      await Promise.all([first, second])
+      expect(finished).toEqual(["stream", "queued"])
+      // The heartbeat stopped with the wait.
+      expect(vi.getTimerCount()).toBe(0)
+      expectNothingLeftBehind()
+    })
+
+    it("leaves the queue at once when aborted, and spends nothing", async () => {
+      vi.useFakeTimers({
+        toFake: ["setTimeout", "clearTimeout", "setInterval", "clearInterval"],
+      })
+      const holder = holdingStream()
+      const first = client.uploadData(holder.stream)
+      await vi.waitFor(() => expect(fetchSpy).toHaveBeenCalledTimes(1))
+      const controller = new AbortController()
+      const second = client.uploadData(makeData(CHUNK_SIZE), undefined, {
+        signal: controller.signal,
+      })
+      await vi.advanceTimersByTimeAsync(SETTLE_MS)
+
+      controller.abort()
+      await expect(second).rejects.toMatchObject({ code: "aborted" })
+      await vi.advanceTimersByTimeAsync(SETTLE_MS)
+      expect(proxy.inFlightRequests.size).toBe(1)
+
+      holder.release()
+      await first
+      // The stream's leaf only: the aborted write sent no chunk of its own.
+      expect(fetchSpy).toHaveBeenCalledTimes(1)
+      expect(vi.getTimerCount()).toBe(0)
+      expectNothingLeftBehind()
+    })
+  })
+
   describe("actUploadData", () => {
     it("takes a Blob and a stream, and they read back", async () => {
       const data = makeData(CHUNK_SIZE * 3 + 1)
@@ -764,10 +893,13 @@ describe("the wait for a streaming upload", () => {
     await expect(upload).resolves.toBeDefined()
   })
 
-  it("keeps the round-trip bound for plain bytes", async () => {
+  it("keeps the round-trip bound for plain bytes, and stops the proxy at it", async () => {
     await expect(
       client.uploadData(makeData(8), undefined, { timeout: SHORT_MS }),
     ).rejects.toMatchObject({ code: "timeout" })
-    expect(posted().map(({ type }) => type)).toEqual(["uploadData"])
+    expect(posted().map(({ type }) => type)).toEqual([
+      "uploadData",
+      "abortRequest",
+    ])
   })
 })

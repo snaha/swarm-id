@@ -107,8 +107,7 @@ import { buildAuthUrl } from "./utils/url"
 import { MAX_TIMER_DELAY_MS, TimeoutError, withTimeout } from "./utils/promise"
 import { openPieceSource, type PieceSource } from "./utils/piece-source"
 import { STREAM_IDLE_TIMEOUT_MS } from "./proxy/chunking"
-
-const DEFAULT_TIMEOUT_MS = 30000
+import { DEFAULT_REQUEST_TIMEOUT_MS } from "./utils/constants"
 const DEFAULT_INITIALIZATION_TIMEOUT_MS = 30000
 /**
  * The round trip of a `requestPermissions` message: the proxy answers it
@@ -117,7 +116,7 @@ const DEFAULT_INITIALIZATION_TIMEOUT_MS = 30000
  * `timeout` while the proxy is still watching the popup.
  */
 const PERMISSIONS_REQUEST_TIMEOUT_MS =
-  PERMISSIONS_POPUP_MAX_MS + DEFAULT_TIMEOUT_MS
+  PERMISSIONS_POPUP_MAX_MS + DEFAULT_REQUEST_TIMEOUT_MS
 
 /** A request the client awaits an answer to; these two get none. */
 type AwaitedRequest = Exclude<
@@ -251,8 +250,8 @@ export class SwarmIdClient {
       source?: PieceSource
       /** Waiting on `source`, which is not the proxy's time to be charged for */
       readingSource?: boolean
-      /** Restart the wait, on a streaming upload */
-      rearm?: () => void
+      /** Restart the wait at its full timeout */
+      rearm: () => void
     }
   > = new Map()
   /** Streaming downloads the proxy is still answering, by request id. */
@@ -316,7 +315,7 @@ export class SwarmIdClient {
     }
     this.iframeOrigin = options.iframeOrigin
     this.iframePath = options.iframePath || "/proxy"
-    this.timeout = options.timeout ?? DEFAULT_TIMEOUT_MS
+    this.timeout = options.timeout ?? DEFAULT_REQUEST_TIMEOUT_MS
     this.initializationTimeout =
       options.initializationTimeout ?? DEFAULT_INITIALIZATION_TIMEOUT_MS
     this.onConnectionChange = options.onConnectionChange
@@ -674,6 +673,10 @@ export class SwarmIdClient {
         void this.answerSourcePull(message.requestId)
         break
 
+      case "requestAlive":
+        this.keepAlive(message.requestId)
+        break
+
       case "downloadStreamPiece":
         this.downloadStreams.get(message.requestId)?.deliver(message.data)
         break
@@ -685,8 +688,11 @@ export class SwarmIdClient {
           total: message.total,
           processed: message.processed,
         })
-        const pending = this.pendingRequests.get(message.requestId)
-        if (pending && !pending.readingSource) pending.rearm?.()
+        // A streaming upload's sign of life. For plain bytes the timeout
+        // stays a cap on the round trip.
+        if (this.pendingRequests.get(message.requestId)?.source) {
+          this.keepAlive(message.requestId)
+        }
         break
       }
 
@@ -748,7 +754,8 @@ export class SwarmIdClient {
     // only the Bee request the proxy makes with it: a caller raising it for a
     // large upload must not be cut off at the constructor default (#775).
     // A streaming upload has no whole round trip to bound, so there it is how
-    // long the proxy may stay silent.
+    // long the proxy may stay silent. Neither counts the time a write waits
+    // for its drive behind another: the proxy's `requestAlive` restarts it.
     const timeout = source
       ? this.streamIdleTimeout(options?.timeout)
       : this.roundTripTimeout(options?.timeout)
@@ -768,8 +775,10 @@ export class SwarmIdClient {
         reject(
           new SwarmIdError("timeout", `Request timeout after ${timeout}ms`),
         )
-        // Nothing else would ever end the proxy's pulling.
-        if (source) this.sendAbort(message.requestId)
+        // The proxy may still be at it, or queued to be: a write that ran
+        // after its caller was told it failed would spend stamps for nothing,
+        // and nothing else ends a streaming upload's pulling.
+        this.sendAbort(message.requestId)
       }
 
       const pending = {
@@ -786,12 +795,10 @@ export class SwarmIdClient {
         timeoutId: setTimeout(expire, timeout),
         source,
         readingSource: false,
-        rearm: source
-          ? () => {
-              clearTimeout(pending.timeoutId)
-              pending.timeoutId = setTimeout(expire, timeout)
-            }
-          : undefined,
+        rearm: () => {
+          clearTimeout(pending.timeoutId)
+          pending.timeoutId = setTimeout(expire, timeout)
+        },
       }
       this.pendingRequests.set(message.requestId, pending)
       signal?.addEventListener("abort", onAbort, { once: true })
@@ -831,7 +838,7 @@ export class SwarmIdClient {
         data ? [data.buffer] : undefined,
       )
       pending.readingSource = false
-      pending.rearm?.()
+      pending.rearm()
     } catch (error) {
       if (!isStillWaiting()) return
       this.pendingRequests.delete(requestId)
@@ -938,6 +945,16 @@ export class SwarmIdClient {
     })
     signal?.addEventListener("abort", onAbort, { once: true })
     return stream
+  }
+
+  /**
+   * Restart a request's wait at its full timeout: the proxy says it is still
+   * on it. Not while a streaming upload's source is being read, which is not
+   * the proxy's time.
+   */
+  private keepAlive(requestId: string): void {
+    const pending = this.pendingRequests.get(requestId)
+    if (pending && !pending.readingSource) pending.rearm()
   }
 
   /** Tell the proxy to stop `requestId`, already rejected here. */

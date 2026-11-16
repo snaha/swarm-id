@@ -17,6 +17,20 @@ export const HOUR = 60 * MINUTE
 export const DAY = 24 * HOUR
 
 // ============================================================================
+// Request Timing
+// ============================================================================
+
+/** How long the client waits for the proxy's answer to a request, by default */
+export const DEFAULT_REQUEST_TIMEOUT_MS = 30 * SECOND
+
+/**
+ * How often, at most, the proxy says a write waiting for its drive is still
+ * there (`requestAlive`). The proxy knows a call's own `requestOptions.timeout`
+ * and the default above, not a client built with a shorter default of its own.
+ */
+export const REQUEST_ALIVE_INTERVAL_MS = 5 * SECOND
+
+// ============================================================================
 // Session Defaults
 // ============================================================================
 

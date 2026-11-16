@@ -115,7 +115,7 @@ export interface WithWriteOptions {
   workerCount?: number
   /** Override the mode default: persistent → "block", oneshot → "skip". */
   wait?: "block" | "skip"
-  /** A write aborted while it queued for the lock stops there. */
+  /** A write aborted while it queues for the lock leaves the queue at once. */
   signal?: AbortSignal
 }
 
@@ -383,7 +383,7 @@ export class BatchWriteCoordinator {
         this.activeUploadCount--
         this.lastLeaseActivityAt = Date.now()
       }
-    })
+    }, opts?.signal)
   }
 
   /** Persistent mode: eagerly acquire a partition + start the refresh timer in
@@ -1336,15 +1336,25 @@ export class BatchWriteCoordinator {
     }
   }
 
-  /** Take the cross-tab Web Lock, run `op`, then flush stamper state. */
-  private async lockAndFlush<T>(op: () => Promise<T>): Promise<T> {
-    return withBatchWriteLock(this.deps.batchId, async () => {
-      try {
-        return await op()
-      } finally {
-        await this.deps.flushStamperState?.()
-      }
-    })
+  /**
+   * Take the cross-tab Web Lock, run `op`, then flush stamper state. A
+   * `signal` that aborts while the lock is queued for ends the wait there.
+   */
+  private async lockAndFlush<T>(
+    op: () => Promise<T>,
+    signal?: AbortSignal,
+  ): Promise<T> {
+    return withBatchWriteLock(
+      this.deps.batchId,
+      async () => {
+        try {
+          return await op()
+        } finally {
+          await this.deps.flushStamperState?.()
+        }
+      },
+      signal,
+    )
   }
 
   /** Take the cross-tab Web Lock without the stamper flush (lease mutations). */

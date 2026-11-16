@@ -797,7 +797,7 @@ describe("SwarmIdClient request seam", () => {
       expect(postMessage).toHaveBeenCalledTimes(1)
     })
 
-    it("says nothing to the proxy once the request timed out", async () => {
+    it("says nothing more to the proxy once the request timed out", async () => {
       const controller = new AbortController()
       const error = await rejectionOf(
         client.downloadData(REFERENCE, undefined, {
@@ -806,10 +806,11 @@ describe("SwarmIdClient request seam", () => {
         }),
       )
       expect(error).toMatchObject({ code: "timeout" })
+      const postedBeforeAbort = postMessage.mock.calls.length
 
       controller.abort()
 
-      expect(postMessage).toHaveBeenCalledTimes(1)
+      expect(postMessage).toHaveBeenCalledTimes(postedBeforeAbort)
     })
 
     it.each([
@@ -888,6 +889,84 @@ describe("SwarmIdClient request seam", () => {
       code: "upload-unavailable",
       reason: "stamp-expired",
     })
+  })
+
+  describe("requestAlive", () => {
+    const TIMEOUT_MS = 1000
+    const BEAT_MS = 400
+    const BEATS = 5
+    const REPLY_REFERENCE = "ab".repeat(32)
+
+    afterEach(() => {
+      vi.useRealTimers()
+    })
+
+    const queuedWrite = () => {
+      const promise = client.uploadChunk(new Uint8Array(1), undefined, {
+        timeout: TIMEOUT_MS,
+      })
+      const settled = vi.fn()
+      promise.then(settled, settled)
+      return { promise, settled, requestId: lastPostedMessage().requestId }
+    }
+
+    it("keeps a request alive for as long as the proxy says it is queued", async () => {
+      vi.useFakeTimers()
+      const { promise, settled, requestId } = queuedWrite()
+
+      for (let i = 0; i < BEATS; i++) {
+        await vi.advanceTimersByTimeAsync(BEAT_MS)
+        deliver({ type: "requestAlive", requestId })
+      }
+      expect(settled).not.toHaveBeenCalled()
+
+      deliver({
+        type: "uploadChunkResponse",
+        requestId,
+        reference: REPLY_REFERENCE,
+      })
+      await expect(promise).resolves.toMatchObject({
+        reference: REPLY_REFERENCE,
+      })
+    })
+
+    it("gives the request its whole timeout from the proxy's last word", async () => {
+      vi.useFakeTimers()
+      const { settled, requestId } = queuedWrite()
+      await vi.advanceTimersByTimeAsync(BEAT_MS)
+      deliver({ type: "requestAlive", requestId })
+
+      await vi.advanceTimersByTimeAsync(TIMEOUT_MS - 1)
+      expect(settled).not.toHaveBeenCalled()
+
+      await vi.advanceTimersByTimeAsync(1)
+      expect(settled).toHaveBeenCalledWith(
+        expect.objectContaining({ code: "timeout" }),
+      )
+    })
+
+    it("still times out a request the proxy says nothing about", async () => {
+      vi.useFakeTimers()
+      const { settled } = queuedWrite()
+
+      await vi.advanceTimersByTimeAsync(TIMEOUT_MS)
+
+      expect(settled).toHaveBeenCalledWith(
+        expect.objectContaining({ code: "timeout" }),
+      )
+    })
+  })
+
+  // A write queued in the proxy would otherwise still run, and spend stamps,
+  // after the dApp was told it failed.
+  it("stops the proxy when a request times out", async () => {
+    const error = await client
+      .uploadChunk(new Uint8Array(1), undefined, { timeout: 1 })
+      .catch((e: unknown) => e)
+    const { requestId } = postMessage.mock.calls[0][0]
+
+    expect(error).toMatchObject({ code: "timeout" })
+    expect(lastPostedMessage()).toEqual({ type: "abortRequest", requestId })
   })
 
   it("times the round trip out with a SwarmIdError of code timeout", async () => {

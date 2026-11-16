@@ -1772,6 +1772,16 @@ export const UploadSourcePullMessageSchema = z.object({
   requestId: z.string(),
 })
 
+/**
+ * The proxy is still on `requestId`: a write says so while it waits for its
+ * drive (the write path, the cross-tab lock, the partition lease) and once
+ * more as it starts. Restarts the client's wait for the answer
+ */
+export const RequestAliveMessageSchema = z.object({
+  type: z.literal("requestAlive"),
+  requestId: z.string(),
+})
+
 /** One piece of a streaming download. No `data` means the content has ended */
 export const DownloadStreamPieceMessageSchema = z.object({
   type: z.literal("downloadStreamPiece"),
@@ -2225,6 +2235,7 @@ export const IframeToParentMessageSchema = z.discriminatedUnion("type", [
   DownloadDataStreamResponseMessageSchema,
   UploadSourcePullMessageSchema,
   DownloadStreamPieceMessageSchema,
+  RequestAliveMessageSchema,
   DeriveAppSecretResponseMessageSchema,
   UploadFileResponseMessageSchema,
   DownloadFileResponseMessageSchema,

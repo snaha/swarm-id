@@ -69,6 +69,7 @@ import {
 } from "../utils/batch-utilization"
 import type { UtilizationStoreDB } from "../storage/utilization-store"
 import { uploadData } from "../proxy/upload"
+import { withBatchWriteLock } from "../utils/batch-write-lock"
 import { CHUNK_SIZE } from "../proxy/chunking"
 import { MockBee } from "../proxy/feeds/epochs/test-utils"
 
@@ -330,6 +331,19 @@ describe("BatchWriteCoordinator.withWrite — aborted while queued", () => {
     expect(lease.acquire).not.toHaveBeenCalled()
     expect(getWorkerPool).not.toHaveBeenCalled()
     expect(op).not.toHaveBeenCalled()
+  })
+
+  it("queues with the write's signal, so an abort ends the wait itself", async () => {
+    const coordinator = new BatchWriteCoordinator(makeDeps({ mode: "oneshot" }))
+    const signal = AbortSignal.abort()
+
+    await coordinator.withWrite(vi.fn(), { signal }).catch(() => {})
+
+    expect(withBatchWriteLock).toHaveBeenLastCalledWith(
+      BATCH_ID,
+      expect.any(Function),
+      signal,
+    )
   })
 })
 
