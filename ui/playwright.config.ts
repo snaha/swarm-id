@@ -50,6 +50,11 @@ const POPUP_BLOCKER_SPEC = '**/popup-blocker.test.ts'
  * design, so they run only through `playwright.devices.config.ts`.
  */
 const DEVICES_SPEC = '**/three-devices.test.ts'
+/**
+ * Streaming transfers through the demo: a drive bought and megabytes uploaded,
+ * on the device rig, so they run only through `playwright.devices.config.ts`.
+ */
+const STREAMING_SPEC = '**/streaming-transfer.test.ts'
 
 const CHROMIUM_ARGS = [
   '--disable-dev-shm-usage',
@@ -109,7 +114,7 @@ export default defineConfig({
   projects: [
     {
       name: 'chromium',
-      testIgnore: [SERIAL_SPEC, PARTITIONED_SPEC, DEVICES_SPEC, POPUP_BLOCKER_SPEC],
+      testIgnore: [SERIAL_SPEC, PARTITIONED_SPEC, DEVICES_SPEC, STREAMING_SPEC, POPUP_BLOCKER_SPEC],
       use: CHROMIUM,
     },
     {
