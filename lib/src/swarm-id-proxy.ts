@@ -16,6 +16,7 @@ import type {
   DeriveAppSecretMessage,
   UploadFileMessage,
   DownloadFileMessage,
+  DownloadFileStreamMessage,
   UploadFilesMessage,
   ListFilesMessage,
   UploadChunkMessage,
@@ -2987,6 +2988,10 @@ export class SwarmIdProxy {
         await this.handleDownloadFile(message, event)
         break
 
+      case "downloadFileStream":
+        await this.handleDownloadFileStream(message, event)
+        break
+
       case "uploadFiles":
         await this.handleUploadFiles(message, event)
         break
@@ -4775,7 +4780,10 @@ export class SwarmIdProxy {
   private async streamDownload(
     event: MessageEvent,
     requestId: string,
-    answerType: "downloadDataStreamResponse" | "actDownloadDataStreamResponse",
+    answer:
+      | { type: "downloadDataStreamResponse" }
+      | { type: "actDownloadDataStreamResponse" }
+      | { type: "downloadFileStreamResponse"; name: string },
     requestOptions: Abortable<object>["requestOptions"],
     download: DataStream,
   ): Promise<void> {
@@ -4784,11 +4792,7 @@ export class SwarmIdProxy {
     const deadline = sourceIdleTimeout(requestOptions.timeout)
     const pieces = rechunk(download.leaves, STREAM_PIECE_SIZE)
     try {
-      this.postMessage(event, {
-        type: answerType,
-        requestId,
-        size: download.size,
-      })
+      this.postMessage(event, { ...answer, requestId, size: download.size })
       while (true) {
         await nextWithin(
           pulls,
@@ -4821,7 +4825,7 @@ export class SwarmIdProxy {
       await this.streamDownload(
         event,
         requestId,
-        "downloadDataStreamResponse",
+        { type: "downloadDataStreamResponse" },
         requestOptions,
         download,
       )
@@ -5005,6 +5009,53 @@ export class SwarmIdProxy {
     }
   }
 
+  /**
+   * The file a manifest holds at `path`, or at its index document: its name
+   * and the reference of its content.
+   */
+  private async resolveManifestFile(
+    reference: string,
+    path: string | undefined,
+    requestOptions: RequestOptions,
+  ): Promise<{ name: string; reference: string }> {
+    // Always load the manifest first - file uploads create manifests
+    const manifest = await loadMantarayTreeWithChunkAPI(
+      this.bee,
+      reference,
+      requestOptions,
+    )
+
+    let targetPath: string
+    if (path) {
+      // Use provided path
+      targetPath = path
+    } else {
+      // No path: get index document from manifest metadata
+      const { indexDocument } = new BeeMantarayNode(manifest).getDocsMetadata()
+      if (!indexDocument) {
+        throw new Error("Manifest does not contain an index document reference")
+      }
+      targetPath = indexDocument
+    }
+
+    // Find the content node at the target path
+    const contentNode = manifest.find(targetPath)
+    if (!contentNode) {
+      throw new Error(`Path not found in manifest: ${targetPath}`)
+    }
+    if (!contentNode.targetAddress) {
+      throw new Error(`Path "${targetPath}" does not have a target address`)
+    }
+
+    // Get filename from metadata or use the path
+    const name =
+      contentNode.metadata?.["Filename"] ||
+      targetPath.split("/").pop() ||
+      "file"
+
+    return { name, reference: uint8ArrayToHex(contentNode.targetAddress) }
+  }
+
   private async handleDownloadFile(
     message: DownloadFileMessage,
     event: MessageEvent,
@@ -5012,51 +5063,14 @@ export class SwarmIdProxy {
     const { requestId, reference, path, options, requestOptions } = message
 
     try {
-      // Always load the manifest first - file uploads create manifests
-      const manifest = await loadMantarayTreeWithChunkAPI(
-        this.bee,
+      const file = await this.resolveManifestFile(
         reference,
+        path,
         requestOptions,
       )
-
-      let targetPath: string
-      if (path) {
-        // Use provided path
-        targetPath = path
-      } else {
-        // No path: get index document from manifest metadata
-        const { indexDocument } = new BeeMantarayNode(
-          manifest,
-        ).getDocsMetadata()
-        if (!indexDocument) {
-          throw new Error(
-            "Manifest does not contain an index document reference",
-          )
-        }
-        targetPath = indexDocument
-      }
-
-      // Find the content node at the target path
-      const contentNode = manifest.find(targetPath)
-      if (!contentNode) {
-        throw new Error(`Path not found in manifest: ${targetPath}`)
-      }
-      if (!contentNode.targetAddress) {
-        throw new Error(`Path "${targetPath}" does not have a target address`)
-      }
-
-      // Get filename from metadata or use the path
-      const name =
-        contentNode.metadata?.["Filename"] ||
-        targetPath.split("/").pop() ||
-        "file"
-
-      // Download actual content from the target address
-      const targetRef = uint8ArrayToHex(contentNode.targetAddress)
-
       const data = await downloadDataWithChunkAPI(
         this.bee,
-        targetRef,
+        file.reference,
         options,
         undefined,
         requestOptions,
@@ -5065,9 +5079,37 @@ export class SwarmIdProxy {
       this.postMessage(event, {
         type: "downloadFileResponse",
         requestId,
-        name,
+        name: file.name,
         data: webBytes(data),
       })
+    } catch (error) {
+      this.sendErrorToParent(event, requestId, error, "Download failed")
+    }
+  }
+
+  private async handleDownloadFileStream(
+    message: Abortable<DownloadFileStreamMessage>,
+    event: MessageEvent,
+  ): Promise<void> {
+    const { requestId, reference, path, requestOptions } = message
+    try {
+      const file = await this.resolveManifestFile(
+        reference,
+        path,
+        requestOptions,
+      )
+      const download = await openDataStream(
+        this.bee,
+        file.reference,
+        requestOptions,
+      )
+      await this.streamDownload(
+        event,
+        requestId,
+        { type: "downloadFileStreamResponse", name: file.name },
+        requestOptions,
+        download,
+      )
     } catch (error) {
       this.sendErrorToParent(event, requestId, error, "Download failed")
     }
@@ -6700,7 +6742,7 @@ export class SwarmIdProxy {
       await this.streamDownload(
         event,
         requestId,
-        "actDownloadDataStreamResponse",
+        { type: "actDownloadDataStreamResponse" },
         requestOptions,
         download,
       )

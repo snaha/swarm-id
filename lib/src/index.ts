@@ -39,6 +39,7 @@ export type {
   DownloadOptions,
   UploadInput,
   DataDownload,
+  FileDownload,
   UploadResult,
   UploadUnavailableReason,
   FileData,

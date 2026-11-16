@@ -18,6 +18,7 @@ import type {
   ActUploadOptions,
   DownloadOptions,
   DataDownload,
+  FileDownload,
   PulledSource,
   UploadInput,
   RequestOptions,
@@ -2219,6 +2220,52 @@ export class SwarmIdClient {
     return {
       name: response.name,
       data: new Uint8Array(response.data),
+    }
+  }
+
+  /**
+   * {@link downloadFile} for reading as the bytes arrive, so a large file is
+   * never held whole on either side of the iframe: the manifest and the path
+   * are resolved as there, then the content streams as from
+   * {@link downloadDataStream}, with the same contract.
+   *
+   * @param reference - The Swarm reference of the file's manifest
+   * @param path - Optional path within the manifest; its index document if not given
+   * @param options - Optional download configuration
+   * @param requestOptions - Optional request configuration; `timeout` is how long the proxy may stay silent per piece
+   * @returns The file's name, and its content's stream and length in bytes
+   * @throws {Error} If the reference or the path is not found: before any stream exists
+   *
+   * @example
+   * ```typescript
+   * const { name, stream } = await client.downloadFileStream(reference)
+   * const response = new Response(stream)
+   * const url = URL.createObjectURL(await response.blob())
+   * ```
+   */
+  async downloadFileStream(
+    reference: Reference,
+    path?: string,
+    options?: DownloadOptions,
+    requestOptions?: RequestOptions,
+  ): Promise<FileDownload> {
+    this.ensureReady()
+    const requestId = this.generateRequestId()
+    const { name, size } = await this.sendRequest<{
+      name: string
+      size: number
+    }>({
+      type: "downloadFileStream",
+      requestId,
+      reference,
+      path,
+      options,
+      requestOptions,
+    })
+    return {
+      name,
+      size,
+      stream: this.openDownloadStream(requestId, requestOptions),
     }
   }
 

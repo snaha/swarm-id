@@ -1064,6 +1064,54 @@ describe("streaming across the bridge", () => {
     })
   })
 
+  describe("downloadFileStream", () => {
+    const NAME = "report.pdf"
+
+    for (const encrypt of [false, true]) {
+      it(`reads back the bytes and name of ${encrypt ? "an encrypted" : "a plain"} uploadFile`, async () => {
+        const data = makeData(STREAM_PIECE_SIZE * 2 + CHUNK_SIZE + 5)
+        const { reference } = await client.uploadFile(data, NAME, { encrypt })
+
+        const file = await client.downloadFileStream(reference)
+
+        expect(file.name).toBe(NAME)
+        expect(file.size).toBe(data.length)
+        expect(await readAll(file.stream)).toEqual(data)
+        await settle()
+        expectNothingLeftBehind()
+      })
+    }
+
+    it("reads the file at the path it is given", async () => {
+      const wanted = makeData(CHUNK_SIZE * 3 + 1)
+      const { reference } = await client.uploadFiles([
+        { path: "index.html", file: new Blob([makeData(11)]) },
+        { path: "assets/wanted.bin", file: new Blob([wanted]) },
+      ])
+
+      const file = await client.downloadFileStream(
+        reference,
+        "assets/wanted.bin",
+      )
+
+      expect(file.name).toBe("wanted.bin")
+      expect(file.size).toBe(wanted.length)
+      expect(await readAll(file.stream)).toEqual(wanted)
+      await settle()
+      expectNothingLeftBehind()
+    })
+
+    it("rejects before any stream for a path that is not there", async () => {
+      const { reference } = await client.uploadFile(makeData(8), NAME)
+
+      await expect(
+        client.downloadFileStream(reference, "missing.bin"),
+      ).rejects.toThrow("missing.bin")
+      await settle()
+      expectNothingLeftBehind()
+    })
+  })
+
   describe("actDownloadDataStream", () => {
     it("reads ACT content back as a stream", async () => {
       const data = makeData(CHUNK_SIZE * 3 + 1)

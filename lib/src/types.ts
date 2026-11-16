@@ -230,6 +230,12 @@ export interface DataDownload {
   size: number
 }
 
+/** A file read as it arrives: a {@link DataDownload} with the file's name */
+export interface FileDownload extends DataDownload {
+  /** The file's name, from the manifest */
+  name: string
+}
+
 /**
  * Options for `uploadFiles` (#750). Content is encrypted unless `encrypt` is
  * `false`; the manifest — and so the root reference — is encrypted unless
@@ -1215,6 +1221,15 @@ export const DownloadFileMessageSchema = z.object({
   requestOptions: RequestOptionsSchema,
 })
 
+export const DownloadFileStreamMessageSchema = z.object({
+  type: z.literal("downloadFileStream"),
+  requestId: z.string(),
+  reference: ReferenceSchema,
+  path: z.string().optional(),
+  options: DownloadOptionsSchema,
+  requestOptions: RequestOptionsSchema,
+})
+
 export const UploadFilesMessageSchema = z.object({
   type: z.literal("uploadFiles"),
   requestId: z.string(),
@@ -1590,6 +1605,7 @@ export const ParentToIframeMessageSchema = z.discriminatedUnion("type", [
   DeriveAppSecretMessageSchema,
   UploadFileMessageSchema,
   DownloadFileMessageSchema,
+  DownloadFileStreamMessageSchema,
   UploadFilesMessageSchema,
   ListFilesMessageSchema,
   UploadChunkMessageSchema,
@@ -1643,6 +1659,9 @@ export type DeriveAppSecretMessage = z.infer<
 >
 export type UploadFileMessage = z.infer<typeof UploadFileMessageSchema>
 export type DownloadFileMessage = z.infer<typeof DownloadFileMessageSchema>
+export type DownloadFileStreamMessage = z.infer<
+  typeof DownloadFileStreamMessageSchema
+>
 export type UploadFilesMessage = z.infer<typeof UploadFilesMessageSchema>
 export type ListFilesMessage = z.infer<typeof ListFilesMessageSchema>
 export type UploadChunkMessage = z.infer<typeof UploadChunkMessageSchema>
@@ -1819,6 +1838,14 @@ export const DownloadFileResponseMessageSchema = z.object({
   requestId: z.string(),
   name: z.string(),
   data: z.instanceof(Uint8Array),
+})
+
+/** The file exists; its bytes follow as they are pulled */
+export const DownloadFileStreamResponseMessageSchema = z.object({
+  type: z.literal("downloadFileStreamResponse"),
+  requestId: z.string(),
+  name: z.string(),
+  size: z.number().int().nonnegative(),
 })
 
 export const UploadFilesResponseMessageSchema = z.object({
@@ -2250,6 +2277,7 @@ export const IframeToParentMessageSchema = z.discriminatedUnion("type", [
   DeriveAppSecretResponseMessageSchema,
   UploadFileResponseMessageSchema,
   DownloadFileResponseMessageSchema,
+  DownloadFileStreamResponseMessageSchema,
   UploadFilesResponseMessageSchema,
   ListFilesResponseMessageSchema,
   UploadChunkResponseMessageSchema,
