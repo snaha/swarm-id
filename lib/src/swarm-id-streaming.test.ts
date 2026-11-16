@@ -730,6 +730,111 @@ describe("streaming across the bridge", () => {
     })
   })
 
+  /**
+   * Record what the client posts to the proxy, still delivering it: each
+   * message's type, and how many bytes of content it carries.
+   */
+  const recordPosted = () => {
+    const posted: Array<{ type: string; index?: number; bytes: number }> = []
+    ;(client as unknown as ClientInternals).iframe = {
+      contentWindow: {
+        postMessage: (
+          message: {
+            type: string
+            index?: number
+            data?: unknown
+            files?: Array<{ data: unknown }>
+          },
+          _origin: string,
+          transfer?: Transferable[],
+        ) => {
+          const contents = [
+            message.data,
+            ...(message.files ?? []).map((file) => file.data),
+          ]
+          const bytes = contents.reduce<number>(
+            (sum, data) => sum + (data instanceof Uint8Array ? data.length : 0),
+            0,
+          )
+          posted.push({ type: message.type, index: message.index, bytes })
+          void sendToProxy(structuredClone(message, { transfer }))
+        },
+      },
+    }
+    return posted
+  }
+
+  describe("uploadFile", () => {
+    const NAME = "report.pdf"
+    const PLAIN = { encrypt: false }
+
+    for (const size of [0, CHUNK_SIZE + 1, STREAM_PIECE_SIZE * 2 + 3]) {
+      it(`gives ${size} bytes one reference through every input type`, async () => {
+        const data = makeData(size)
+
+        const fromBytes = await client.uploadFile(data, NAME, PLAIN)
+        const fromBlob = await client.uploadFile(new Blob([data]), NAME, PLAIN)
+        const fromFile = await client.uploadFile(
+          new File([data], NAME),
+          undefined,
+          PLAIN,
+        )
+        const fromStream = await client.uploadFile(
+          streamOf(data, 1000),
+          NAME,
+          PLAIN,
+        )
+
+        expect(fromBlob.reference).toBe(fromBytes.reference)
+        expect(fromFile.reference).toBe(fromBytes.reference)
+        expect(fromStream.reference).toBe(fromBytes.reference)
+        expect(fromStream.stampedChunks).toBe(fromBytes.stampedChunks)
+        expectNothingLeftBehind()
+      })
+    }
+
+    it("pulls a large file in bounded pieces, never posting it whole", async () => {
+      const data = makeData(STREAM_PIECE_SIZE * 3 + 1)
+      const posted = recordPosted()
+
+      await client.uploadFile(new File([data], NAME))
+
+      const pieces = posted.filter(({ type }) => type === "uploadSourcePiece")
+      expect(posted[0]).toMatchObject({ type: "uploadFile", bytes: 0 })
+      expect(pieces.length).toBeGreaterThan(1)
+      for (const { bytes } of posted) {
+        expect(bytes).toBeLessThanOrEqual(STREAM_PIECE_SIZE)
+      }
+      expect(pieces.reduce((sum, { bytes }) => sum + bytes, 0)).toBe(
+        data.length,
+      )
+    })
+
+    it("hands a stream back unlocked once read, and cancels it on failure", async () => {
+      const read = streamOf(makeData(CHUNK_SIZE), 1000)
+      await client.uploadFile(read, NAME)
+      expect(read.locked).toBe(false)
+
+      fetchSpy.mockImplementation(
+        async () => new Response("no", { status: 402 }),
+      )
+      const cancel = vi.fn()
+      const failing = new ReadableStream<Uint8Array>(
+        {
+          pull: (controller) => controller.enqueue(makeData(CHUNK_SIZE)),
+          cancel,
+        },
+        { highWaterMark: 0 },
+      )
+      await expect(client.uploadFile(failing, NAME)).rejects.toMatchObject({
+        code: "bee-rejected",
+      })
+      await settle()
+      expect(cancel).toHaveBeenCalledTimes(1)
+      expectNothingLeftBehind()
+    })
+  })
+
   describe("actUploadData", () => {
     it("takes a Blob and a stream, and they read back", async () => {
       const data = makeData(CHUNK_SIZE * 3 + 1)

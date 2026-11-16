@@ -2035,17 +2035,20 @@ export class SwarmIdClient {
    * {@link downloadFile}. A gateway's `/bzz/<reference>/` is only for a plain
    * reference, uploaded with `encrypt: false`.
    *
-   * Accepts either a File object (from file input) or raw Uint8Array data.
-   * When using a File object, the filename is automatically extracted unless
-   * explicitly overridden.
+   * Takes what {@link uploadData} takes: a `File` (from a file input), a
+   * `Blob` or `ReadableStream`, read piece by piece and never held whole, or
+   * plain bytes. A `File`'s name is used unless `name` overrides it. A
+   * stream is handed back once read to the end; on failure or abort the
+   * stream is cancelled. `requestOptions.timeout` means what it does for
+   * {@link uploadData}.
    *
    * Content is encrypted unless `options.encrypt` is `false`, and the
    * manifest too — a 64-byte reference that carries the key — unless
    * `options.encrypt` or `options.encryptManifest` is `false`. The same rule
    * as {@link uploadFiles}.
    *
-   * @param file - The file to upload (File object or Uint8Array)
-   * @param name - Optional filename (extracted from File object if not provided)
+   * @param file - The file to upload: a File, Blob, ReadableStream or Uint8Array
+   * @param name - Optional filename (a File's own name if not provided)
    * @param options - Optional upload configuration
    * @param options.pin - Whether to pin the file locally (defaults to false; ignored on a subsidised gateway)
    * @param options.encrypt - Whether to encrypt the file content (defaults to true); `false` also leaves the manifest plain
@@ -2073,7 +2076,7 @@ export class SwarmIdClient {
    * ```
    */
   async uploadFile(
-    file: File | Uint8Array,
+    file: UploadInput,
     name?: string,
     options?: UploadOptions,
     requestOptions?: RequestOptions,
@@ -2089,21 +2092,8 @@ export class SwarmIdClient {
       ...serializableOptions
     } = options ?? {}
 
-    let data: Uint8Array
-    let fileName: string | undefined = name
-
-    if (file instanceof File) {
-      const buffer = await file.arrayBuffer()
-      data = new Uint8Array(buffer)
-      fileName = fileName || file.name
-    } else {
-      data = new Uint8Array(
-        file.buffer.slice(0),
-        file.byteOffset,
-        file.byteLength,
-      )
-    }
-
+    const fileName = name || (file instanceof File ? file.name : undefined)
+    const { data: wireData, source } = this.toWireInput(file)
     const stopProgress = this.listenForProgress(requestId, onProgress)
     try {
       const response = await this.sendRequest<{
@@ -2112,25 +2102,33 @@ export class SwarmIdClient {
         reference: Reference
         tagUid?: number
         stampedChunks?: number
-      }>({
-        type: "uploadFile",
-        requestId,
-        data: webBytes(data),
-        name: fileName,
-        options: serializableOptions,
-        requestOptions,
-        enableProgress: !!onProgress,
-        useWebSocket,
-        useWorkers,
-        workerCount,
-        concurrency,
-      })
+      }>(
+        {
+          type: "uploadFile",
+          requestId,
+          data: wireData,
+          name: fileName,
+          options: serializableOptions,
+          requestOptions,
+          // A streaming upload always wants it: progress is its sign of life.
+          enableProgress: !!onProgress || source !== undefined,
+          useWebSocket,
+          useWorkers,
+          workerCount,
+          concurrency,
+        },
+        source,
+      )
+      source?.release()
 
       return {
         reference: response.reference,
         tagUid: response.tagUid,
         stampedChunks: response.stampedChunks,
       }
+    } catch (error) {
+      this.cancelSource(source, error)
+      throw error
     } finally {
       stopProgress()
     }

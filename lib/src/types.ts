@@ -214,9 +214,9 @@ export type RequestOptions =
 export type DownloadOptions = z.infer<typeof DownloadOptionsSchema>
 
 /**
- * What `uploadData` and `actUploadData` take. A `Blob` or `ReadableStream` is
- * read piece by piece as the upload goes, so it is never held whole; plain
- * bytes are copied across the iframe at once.
+ * What `uploadData`, `actUploadData` and `uploadFile` take. A `Blob` or
+ * `ReadableStream` is read piece by piece as the upload goes, so it is never
+ * held whole; plain bytes are copied across the iframe at once.
  */
 export type UploadInput = Uint8Array | Blob | ReadableStream<Uint8Array>
 
@@ -1185,7 +1185,7 @@ export const DeriveAppSecretMessageSchema = z.object({
 export const UploadFileMessageSchema = z.object({
   type: z.literal("uploadFile"),
   requestId: z.string(),
-  data: z.instanceof(Uint8Array),
+  data: z.union([z.instanceof(Uint8Array), PulledSourceSchema]),
   name: z.string().optional(),
   options: UploadOptionsSchema,
   requestOptions: RequestOptionsSchema,

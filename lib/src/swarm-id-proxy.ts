@@ -4928,16 +4928,22 @@ export class SwarmIdProxy {
             // manifest below (the rule is `manifestEncryption`)
             const encryption = manifestEncryption(options)
 
-            const contentUpload = await uploadData(target, data, {
-              encryptionKey: encryption.content ? true : undefined,
-              pin: options?.pin,
-              deferred: options?.deferred,
-              tag: uploadTag,
-              webSocket: useWebSocket ? { concurrency } : undefined,
-              httpConcurrency: concurrency,
-              onProgress: progress?.report,
-              requestOptions,
-            })
+            const contentUpload = await this.uploadWireData(
+              event,
+              message,
+              target,
+              data,
+              {
+                encryptionKey: encryption.content ? true : undefined,
+                pin: options?.pin,
+                deferred: options?.deferred,
+                tag: uploadTag,
+                webSocket: useWebSocket ? { concurrency } : undefined,
+                httpConcurrency: concurrency,
+                onProgress: progress?.report,
+                requestOptions,
+              },
+            )
 
             // Step 2: Build manifest
             const manifest = new MantarayNode()
