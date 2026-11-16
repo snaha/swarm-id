@@ -8,8 +8,9 @@
  * The partition lease stands on this: its lock, the release sentinel that
  * frees a lane at once, and the beacons a holder re-publishes all rewrite one
  * address. A deferred upload does not give it: the node keeps the first chunk
- * it stored there and goes on serving that one. Bee's `/soc` handler takes the
- * upload as deferred unless told otherwise, from 2.8.1 on.
+ * it stored there and goes on serving that one. From 2.8.1 Bee's `/soc` handler
+ * takes a tagged upload as deferred unless `Swarm-Deferred-Upload` says
+ * otherwise, and `uploadSOC` tags every stamped upload.
  */
 
 import { describe, it, expect, inject } from "vitest"

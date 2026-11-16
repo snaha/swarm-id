@@ -1138,8 +1138,9 @@ export async function uploadSOC(
     }
     if (tag) headers["swarm-tag"] = tag.toString()
     // Always sent, direct unless the caller asks otherwise, as a chunk upload
-    // is. Bee reads a missing header as deferred, and a deferred SOC cannot be
-    // rewritten: the node keeps serving the first chunk it stored at the
+    // is. Bee takes a tagged SOC upload as deferred unless this header says
+    // otherwise, and a stamped one always carries a tag. A deferred SOC cannot
+    // be rewritten: the node keeps serving the first chunk it stored at the
     // address, so a lease lock, its release sentinel or a re-published beacon
     // would never read back.
     headers["swarm-deferred-upload"] = (options?.deferred ?? false).toString()

@@ -324,8 +324,8 @@ describe("stamper uploads honour deferred", () => {
     expect(init.headers).toMatchObject({ "swarm-deferred-upload": "true" })
   })
 
-  // Bee reads a missing header as deferred, and since 2.8.1 its /soc handler
-  // acts on it: the node keeps the first chunk it stored at the address and
+  // From 2.8.1 Bee's /soc handler takes a tagged upload without the header as
+  // deferred: the node keeps the first chunk it stored at the address and
   // serves that, so a lock, beacon or pointer rewritten there never reads back.
   it("sends a SOC direct when the caller does not say", async () => {
     const fetchMock = stubFetch()
