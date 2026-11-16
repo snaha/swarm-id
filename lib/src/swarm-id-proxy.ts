@@ -4661,7 +4661,7 @@ export class SwarmIdProxy {
         this.postMessage(
           event,
           { type: "downloadStreamPiece", requestId, data: value },
-          [value.buffer as ArrayBuffer],
+          [value.buffer],
         )
       }
     } finally {

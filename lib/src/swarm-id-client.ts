@@ -828,7 +828,7 @@ export class SwarmIdClient {
       if (!isStillWaiting()) return
       this.sendMessage(
         { type: "uploadSourcePiece", requestId, data },
-        data ? [data.buffer as ArrayBuffer] : undefined,
+        data ? [data.buffer] : undefined,
       )
       pending.readingSource = false
       pending.rearm?.()
@@ -850,7 +850,7 @@ export class SwarmIdClient {
 
   /** The bytes for the wire, and the source when they are to be pulled. */
   private toWireInput(input: UploadInput): {
-    data: Uint8Array | PulledSource
+    data: Uint8Array<ArrayBuffer> | PulledSource
     source?: PieceSource
   } {
     const source = openPieceSource(input)

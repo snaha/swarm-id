@@ -50,7 +50,7 @@ type ProxyInternals = {
   downloadPulls: Map<string, unknown>
 }
 
-function makeData(length: number): Uint8Array {
+function makeData(length: number): Uint8Array<ArrayBuffer> {
   const data = new Uint8Array(length)
   for (let i = 0; i < length; i++) data[i] = (i * 31 + (i >> 12)) & 0xff
   return data

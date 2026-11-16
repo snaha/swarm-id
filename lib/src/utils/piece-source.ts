@@ -14,7 +14,7 @@ export interface PieceSource {
   /** The total in bytes, when the input knows it */
   readonly size: number | undefined
   /** The next piece, or undefined at the end */
-  next: () => Promise<Uint8Array | undefined>
+  next: () => Promise<Uint8Array<ArrayBuffer> | undefined>
   cancel: (reason?: unknown) => Promise<void>
 }
 

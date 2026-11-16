@@ -51,7 +51,7 @@ export function estimateTotalChunks(
 export async function* rechunk(
   source: AsyncIterable<Uint8Array>,
   size: number,
-): AsyncGenerator<Uint8Array> {
+): AsyncGenerator<Uint8Array<ArrayBuffer>> {
   let block = new Uint8Array(size)
   let filled = 0
   for await (const piece of source) {
