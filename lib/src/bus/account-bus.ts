@@ -50,14 +50,20 @@ export interface BusTransport {
    *
    * - `confirmedAgoMs`: how long ago this context's own connection to the
    *   service was last confirmed, `Infinity` when it is not.
-   * - `absentForMs`: for how long the service has shown no context of that
-   *   device, `0` when one is present or the transport cannot tell.
+   * - `absentExceptMs`: for how long the service has shown no device other
+   *   than the given ones, known to this context or not; `0` when another is
+   *   present or the transport cannot tell.
    *
    * They must come from one authority: if a device is shown absent over some
    * span, its own connection was not confirmed within that span.
+   *
+   * `onConfirmed` reports each confirmation with how long the context had
+   * been unconfirmed just before it (`Infinity` for the first of a
+   * connection), so a gap is seen even when nothing asked during it.
    */
   confirmedAgoMs?(): number
-  absentForMs?(deviceId: string): number
+  absentExceptMs?(deviceIds: ReadonlySet<string>): number
+  onConfirmed?(handler: (unconfirmedForMs: number) => void): () => void
   /** A message from `peerId` was signed off by `deviceId`; a transport whose
    *  peers are not devices needs telling. */
   notePeerDevice?(peerId: string, deviceId: string): void
@@ -129,6 +135,7 @@ export class AccountBus {
   private transports: BusTransport[]
   private handlers = new Set<(message: BusMessage, from?: string) => void>()
   private peerLeftHandlers = new Set<(peerId: string) => void>()
+  private confirmedHandlers = new Set<(unconfirmedForMs: number) => void>()
   private transportUnsubscribers: (() => void)[]
   private closed = false
 
@@ -159,6 +166,16 @@ export class AccountBus {
       }
     })
     if (onPeerLeft) removers.push(onPeerLeft)
+    const onConfirmed = transport.onConfirmed?.((unconfirmedForMs) => {
+      for (const handler of this.confirmedHandlers) {
+        try {
+          handler(unconfirmedForMs)
+        } catch (error) {
+          console.error("[AccountBus] Confirmed handler error:", error)
+        }
+      }
+    })
+    if (onConfirmed) removers.push(onConfirmed)
     return removers
   }
 
@@ -239,12 +256,20 @@ export class AccountBus {
     return answers.length === 0 ? Infinity : Math.max(...answers)
   }
 
-  /** How long every such transport has shown the device absent; `0` with none. */
-  absentForMs(deviceId: string): number {
+  /** How long every such transport has shown nobody but the given devices;
+   *  `0` with none attached. */
+  absentExceptMs(deviceIds: ReadonlySet<string>): number {
     const answers = this.transports.flatMap((transport) =>
-      transport.absentForMs ? [transport.absentForMs(deviceId)] : [],
+      transport.absentExceptMs ? [transport.absentExceptMs(deviceIds)] : [],
     )
     return answers.length === 0 ? 0 : Math.min(...answers)
+  }
+
+  /** Each confirmation of a transport that crosses devices, with how long it
+   *  had been unconfirmed just before. */
+  onConfirmed(handler: (unconfirmedForMs: number) => void): () => void {
+    this.confirmedHandlers.add(handler)
+    return () => this.confirmedHandlers.delete(handler)
   }
 
   /** Idempotent, and terminal: a closed bus neither publishes nor attaches. */
@@ -256,6 +281,7 @@ export class AccountBus {
     this.transportUnsubscribers = []
     this.handlers.clear()
     this.peerLeftHandlers.clear()
+    this.confirmedHandlers.clear()
     for (const transport of this.transports) {
       transport.close()
     }
