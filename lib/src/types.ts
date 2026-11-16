@@ -222,7 +222,8 @@ export type UploadInput = Uint8Array | Blob | ReadableStream<Uint8Array>
 
 /**
  * A download read as it arrives. Read `stream` to the end or cancel it: until
- * then the proxy keeps the request open.
+ * then the proxy keeps the request open, and ends it with `timeout` once the
+ * stream has gone unread for the idle deadline.
  */
 export interface DataDownload {
   stream: ReadableStream<Uint8Array>

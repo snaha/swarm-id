@@ -28,6 +28,44 @@ the server take turns), it sleeps after 15 idle minutes, and an account open in 
 preview and in another preview does not see itself live, since the two sit on different
 servers.
 
+## 2026-11-16 Streaming transfers are pulled over `postMessage`
+
+**Context.** `uploadData` and `actUploadData` took only a `Uint8Array`, so a
+caller read a whole file into memory and the iframe bridge copied it again
+(#930, #523). Measured on Safari 26.5.2: posting a transferred
+`ReadableStream` throws `DataCloneError`, and `Blob.stream()` handed a 5 MB
+blob back as one piece.
+
+**Decision.** A `Blob`, `File` or `ReadableStream` crosses the bridge as
+pieces of up to 256 KiB, one per pull from the receiving side, buffers
+transferred; a `Blob` is read with `slice()`. `uploadFile`, `uploadFiles` and
+`downloadFileStream` use the same transport, and a folder's files are pulled
+one at a time, each pull naming its file. Every upload, plain bytes included,
+goes through one pipeline that builds the Merkle tree level by level, and
+plain uploads honour `concurrency`. For a streamed input,
+`requestOptions.timeout` bounds silence rather than the whole call, which
+narrows "A per-call timeout bounds the whole round trip" below: the client
+lets the proxy stay silent for it, at least 2 minutes by default, and the
+proxy lets the source, or a download's reader, stay silent for at least 2
+minutes or a longer `timeout`, then fails the transfer. No request's timeout
+counts the time a write waits behind another on the same drive: while it
+waits for the drive's lock and lease, the proxy says `requestAlive` on a
+heartbeat, and the client restarts the wait. Every request that expires on
+the client is aborted in the proxy. (#979)
+
+**Why.** One transport that works on every engine beats a fast path plus a
+Safari fallback, and a pull costs under 0.25 ms against a node that takes
+milliseconds per chunk. Pulling is the backpressure: nothing is read faster
+than the node takes chunks. A whole-call bound cannot fit an upload of
+unknown length, so silence is what is bounded. The source's own deadline
+exists because the upload holds the drive's cross-tab write lock: without
+it, one app's stalled source blocks every writer to that drive on the
+device, the identity UI included. That lock is also why the queue is not
+counted: behind a long upload, a write waiting its turn would time out while
+nothing was wrong, and a proxy that has died still says nothing, so it is
+still caught. A write its caller was told had failed must not run later and
+spend stamps, so an expired request is stopped where it is, queue included.
+
 ## 2026-11-13 SvelteKit 3, with `$lib` kept as an alias
 
 **Context.** SvelteKit 2 carried two advisories fixed only in 3.0 and pinned
@@ -49,34 +87,6 @@ that is its own change (#1025), due before SvelteKit drops `alias`. TypeScript 6
 types a `Uint8Array` by its buffer, and neither a Web API nor a message schema
 takes one that may sit on shared memory: the lib casts where it hands bytes to
 either (`webBytes`), so the byte types it publishes stay as they were.
-
-## 2026-11-12 Streaming transfers are pulled over `postMessage`
-
-**Context.** `uploadData` and `actUploadData` took only a `Uint8Array`, so a
-caller read a whole file into memory and the iframe bridge copied it again
-(#930, #523). Measured on Safari 26.5.2: posting a transferred
-`ReadableStream` throws `DataCloneError`, and `Blob.stream()` handed a 5 MB
-blob back as one piece.
-
-**Decision.** A `Blob`, `File` or `ReadableStream` crosses the bridge as
-pieces of up to 256 KiB, one per pull from the receiving side, buffers
-transferred; a `Blob` is read with `slice()`. Every upload, plain bytes
-included, goes through one pipeline that builds the Merkle tree level by
-level, and plain uploads honour `concurrency`. For a streamed input,
-`requestOptions.timeout` bounds silence rather than the whole call, which
-narrows "A per-call timeout bounds the whole round trip" below: the client
-lets the proxy stay silent for it, at least 2 minutes by default, and the
-proxy lets the source stay silent for at least 2 minutes or a longer
-`timeout`, then fails the upload. (#979)
-
-**Why.** One transport that works on every engine beats a fast path plus a
-Safari fallback, and a pull costs under 0.25 ms against a node that takes
-milliseconds per chunk. Pulling is the backpressure: nothing is read faster
-than the node takes chunks. A whole-call bound cannot fit an upload of
-unknown length, so silence is what is bounded. The source's own deadline
-exists because the upload holds the drive's cross-tab write lock: without
-it, one app's stalled source blocks every writer to that drive on the
-device, the identity UI included.
 
 ## 2026-11-11 A dependency audit gates the release and the production deploys
 
