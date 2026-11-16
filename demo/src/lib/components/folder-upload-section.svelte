@@ -14,6 +14,8 @@
   import { clientStore } from '$lib/stores/client.svelte'
   import { logStore } from '$lib/stores/log.svelte'
   import { formatBytes } from '$lib/utils/format'
+  import { describeUpload, watchBridgeTraffic } from '$lib/utils/bridge-traffic'
+  import { resolveProxyOrigin } from '$lib/utils/environment'
   import { collectionPath } from '@snaha/swarm-id'
 
   interface Props {
@@ -48,6 +50,8 @@
     isUploading = true
     const startTime = Date.now()
 
+    // Each file is pulled across the iframe in turn; the log says how many pieces.
+    const stopWatching = watchBridgeTraffic(resolveProxyOrigin())
     try {
       logStore.log(`Uploading folder: ${files.length} files, ${formatBytes(totalBytes)}...`)
       const uploadResult = await clientStore.client!.uploadFiles(files, {
@@ -58,6 +62,7 @@
         onProgress: (p) => (progress = p),
       })
       const elapsed = (Date.now() - startTime) / 1000
+      logStore.log(describeUpload(stopWatching()))
       logStore.log(`Folder uploaded! Reference: ${uploadResult.reference}`)
       result = {
         title: `Folder uploaded (${encrypt ? 'Encrypted' : 'Not Encrypted'}):`,
@@ -77,6 +82,7 @@
       logStore.log(`Folder upload failed: ${msg}`, 'error')
       error = msg
     } finally {
+      stopWatching()
       isUploading = false
     }
   }
