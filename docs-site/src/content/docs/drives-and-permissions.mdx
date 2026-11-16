@@ -118,9 +118,12 @@ and `onConnectionChange` fire, `getDrives()` reflects it, and an upload in fligh
 away is aborted. Both fire when a drive expires while the page is open too, whether or not the
 app has written to it, with `uploadUnavailableReason: "stamp-expired"` once it was the primary, so
 an app that caches `canUpload` need not poll. The session re-reads each drive's remaining lifetime
-from the chain halfway to its stored expiry, at least every six hours, and again at the expiry
-before it refuses the drive, so a storage price change or a top-up made elsewhere moves the moment
-rather than the refusal being wrong in either direction. Each drive's `batchTTL` comes with where it
+and depth from the chain halfway to its stored expiry, at least every six hours, on every
+`getDrives()` and `getPostageBatch()`, and again at the expiry before it refuses the drive, so a
+storage price change or a top-up made elsewhere moves the moment rather than the refusal being
+wrong in either direction. A drive resized elsewhere is reported at its new `depth`, fills to its
+new capacity, and fires both callbacks; an upload in flight on it when the resize is noticed is
+aborted. Each drive's `batchTTL` comes with where it
 was read from (`batchTTLSource`) and when (`batchTTLMeasuredAt`), so an estimate can be shown as one
 and an exact reading aged. A drive bought moments ago is held back as `stamp-warming-up` for the
 ten blocks Bee waits before stamping with a new batch, under a minute on Gnosis; `usable` is

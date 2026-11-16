@@ -1467,6 +1467,84 @@ describe("SwarmIdProxy partitioned write enablement", () => {
         )
       })
 
+      // A resize made elsewhere reaches the session from the chain (#1018),
+      // not only once the identity site writes it back.
+      describe("follows a depth the chain reports", () => {
+        const STORED_DEPTH = stampOf(BATCH_ID_HEX).depth
+        const RESIZED_DEPTH = STORED_DEPTH + 1
+        const chainDepth = (depth: number) =>
+          vi
+            .mocked(fetchAuthoritativeBatchTTL)
+            .mockImplementation(async (_rpc, _bee, batchId) => ({
+              batchTTL: 3600,
+              source: "chain",
+              ...(batchId === BATCH_ID_HEX ? { depth } : {}),
+            }))
+        const stamperDepthsFor = (batchId: string) =>
+          vi
+            .mocked(UtilizationAwareStamper.create)
+            .mock.calls.filter(([, batch]) => batch.toHex() === batchId)
+            .map(([, , depth]) => depth)
+        const getDrives = async (requestId: string): Promise<Drive> => {
+          const before = messagesOfType("getDrivesResponse").length
+          await dispatch(
+            { type: "getDrives", requestId },
+            PARENT_ORIGIN,
+            parentWindow,
+          )
+          await vi.waitFor(() =>
+            expect(messagesOfType("getDrivesResponse")).toHaveLength(
+              before + 1,
+            ),
+          )
+          return messagesOfType("getDrivesResponse")
+            .at(-1)!
+            .drives.find(
+              (candidate: Drive) => candidate.batchID === BATCH_ID_HEX,
+            )
+        }
+
+        it("reports it, announces it, and rebuilds the write path at it", async () => {
+          await connectWithTwoDrives()
+          await vi.waitFor(() =>
+            expect(coordinatorFor(BATCH_ID_HEX)).toBeDefined(),
+          )
+          expect(stamperDepthsFor(BATCH_ID_HEX)).toEqual([STORED_DEPTH])
+          const drivesBefore = drivesAnnounced()
+
+          chainDepth(RESIZED_DEPTH)
+          expect(await getDrives("g-depth")).toMatchObject({
+            depth: RESIZED_DEPTH,
+          })
+          await vi.waitFor(() =>
+            expect(stamperDepthsFor(BATCH_ID_HEX)).toEqual([
+              STORED_DEPTH,
+              RESIZED_DEPTH,
+            ]),
+          )
+          expect(drivesAnnounced()).toBe(drivesBefore + 1)
+        })
+
+        it("keeps the deeper reading over a shallower one", async () => {
+          await connectWithTwoDrives()
+          await vi.waitFor(() =>
+            expect(coordinatorFor(BATCH_ID_HEX)).toBeDefined(),
+          )
+          chainDepth(RESIZED_DEPTH)
+          await getDrives("g-deeper")
+          await vi.waitFor(() =>
+            expect(stamperDepthsFor(BATCH_ID_HEX)).toHaveLength(2),
+          )
+          // An RPC behind the one read before: depth only grows on chain.
+          chainDepth(STORED_DEPTH)
+          expect(await getDrives("g-behind")).toMatchObject({
+            depth: RESIZED_DEPTH,
+          })
+          await flushBus()
+          expect(stamperDepthsFor(BATCH_ID_HEX)).toHaveLength(2)
+        })
+      })
+
       it("re-reads a drive the record says has run out at the six-hour cap, and revives it (#927)", async () => {
         await withFakeTimers(async () => {
           // The record says it ran out ten seconds ago; a top-up made
