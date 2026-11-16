@@ -118,7 +118,10 @@ const DEFAULT_INITIALIZATION_TIMEOUT_MS = 30000
 const PERMISSIONS_REQUEST_TIMEOUT_MS =
   PERMISSIONS_POPUP_MAX_MS + DEFAULT_REQUEST_TIMEOUT_MS
 
-/** A request the client awaits an answer to; these two get none. */
+/**
+ * A request the client awaits an answer to: every parent message but the
+ * four that get none.
+ */
 type AwaitedRequest = Exclude<
   ParentToIframeMessage,
   {
@@ -867,7 +870,8 @@ export class SwarmIdClient {
 
   /**
    * Wire up the stream the proxy answers once it has resolved a streaming
-   * download. Nothing is asked of the proxy until the reader wants a piece.
+   * download. Nothing is asked of the proxy until the reader wants a piece,
+   * and each piece asked for is waited on for the idle timeout at most.
    */
   private openDownloadStream(
     requestId: string,
@@ -876,20 +880,22 @@ export class SwarmIdClient {
     const signal = requestOptions?.signal
     const idleTimeout = this.streamIdleTimeout(requestOptions?.timeout)
     let controller: ReadableStreamDefaultController<Uint8Array>
-    let pullDone: (() => void) | undefined
-    let timer: ReturnType<typeof setTimeout> | undefined
+    /** The pull waiting on the proxy's next piece */
+    let waiting:
+      | {
+          resolve: (data: Uint8Array | undefined) => void
+          reject: (error: Error) => void
+        }
+      | undefined
 
-    const settlePull = () => {
-      clearTimeout(timer)
-      pullDone?.()
-      pullDone = undefined
-    }
     const finish = () => {
-      settlePull()
+      waiting = undefined
       this.downloadStreams.delete(requestId)
       signal?.removeEventListener("abort", onAbort)
     }
+    // Erroring an errored stream does nothing, so a failure may land twice.
     const fail = (error: Error) => {
+      waiting?.reject(error)
       controller.error(error)
       finish()
     }
@@ -898,31 +904,41 @@ export class SwarmIdClient {
       this.sendAbort(requestId)
     }
     const onAbort = () => failAndStopProxy(abortedError(signal!))
+    const nextPiece = () =>
+      new Promise<Uint8Array | undefined>((resolve, reject) => {
+        waiting = { resolve, reject }
+        this.sendMessage({ type: "downloadStreamPull", requestId })
+      })
 
     const stream = new ReadableStream<Uint8Array>(
       {
         start: (c) => {
           controller = c
         },
-        pull: () =>
-          new Promise<void>((resolve) => {
-            pullDone = resolve
-            timer = setTimeout(
-              () =>
-                failAndStopProxy(
-                  new SwarmIdError(
-                    "timeout",
-                    `Request timeout after ${idleTimeout}ms`,
-                  ),
-                ),
+        pull: async () => {
+          try {
+            const data = await withTimeout(
+              nextPiece(),
               idleTimeout,
+              `Request timeout after ${idleTimeout}ms`,
             )
-            try {
-              this.sendMessage({ type: "downloadStreamPull", requestId })
-            } catch (error) {
+            waiting = undefined
+            if (data) {
+              controller.enqueue(data)
+            } else {
+              controller.close()
+              finish()
+            }
+          } catch (error) {
+            if (error instanceof TimeoutError) {
+              failAndStopProxy(
+                new SwarmIdError("timeout", error.message, { cause: error }),
+              )
+            } else {
               fail(error as Error)
             }
-          }),
+          }
+        },
         cancel: () => {
           finish()
           this.sendAbort(requestId)
@@ -932,15 +948,7 @@ export class SwarmIdClient {
     )
 
     this.downloadStreams.set(requestId, {
-      deliver: (data) => {
-        if (data) {
-          controller.enqueue(data)
-          settlePull()
-        } else {
-          controller.close()
-          finish()
-        }
-      },
+      deliver: (data) => waiting?.resolve(data),
       fail,
     })
     signal?.addEventListener("abort", onAbort, { once: true })
@@ -1793,7 +1801,9 @@ export class SwarmIdClient {
    * `requestOptions.timeout` then bounds the proxy's silence (default: at
    * least 2 minutes), not the whole upload. The source may stay silent for 2
    * minutes, or a longer timeout, before the upload fails with `timeout`: it
-   * holds the drive's write lock for every other writer meanwhile.
+   * holds the drive's write lock for every other writer meanwhile. A stream
+   * is locked while the upload reads it and handed back once read to the
+   * end; on failure or abort the stream is cancelled.
    *
    * @param data - The bytes to upload: a Uint8Array, Blob, File or ReadableStream
    * @param options - Optional upload configuration
@@ -1863,21 +1873,28 @@ export class SwarmIdClient {
         },
         source,
       )
+      source?.release()
 
       return {
         reference: response.reference,
         tagUid: response.tagUid,
         stampedChunks: response.stampedChunks,
       }
+    } catch (error) {
+      this.cancelSource(source, error)
+      throw error
     } finally {
       stopProgress()
-      this.releaseSource(source)
     }
   }
 
-  /** Not awaited: a caller's `cancel()` may take as long as it likes. */
-  private releaseSource(source: PieceSource | undefined): void {
-    void source?.cancel().catch(() => {})
+  /**
+   * Stop the caller's source after a failed or aborted upload, `reason` the
+   * error the call rejects with. Not awaited: a caller's `cancel()` may take
+   * as long as it likes.
+   */
+  private cancelSource(source: PieceSource | undefined, reason: unknown): void {
+    void source?.cancel(reason).catch(() => {})
   }
 
   /**
@@ -3814,7 +3831,7 @@ export class SwarmIdClient {
    * This method encrypts the data and creates an ACT that controls who can decrypt it.
    * Only the specified grantees (and the publisher) can decrypt and access the data.
    *
-   * @param data - The bytes to upload: a Uint8Array, Blob, File or ReadableStream
+   * @param data - The bytes to upload: a Uint8Array, Blob, File or ReadableStream, read as {@link uploadData} reads it; on failure or abort the stream is cancelled
    * @param grantees - Array of grantee public keys as compressed hex strings (33 bytes = 66 hex chars).
    *   A grantee is either another user's `appKey.publicKey` (that user in this app origin only) or
    *   their `identity.sharingPublicKey` (that user in every app they connect, #519)
@@ -3894,6 +3911,7 @@ export class SwarmIdClient {
         },
         source,
       )
+      source?.release()
 
       return {
         encryptedReference: response.encryptedReference,
@@ -3904,9 +3922,11 @@ export class SwarmIdClient {
         tagUid: response.tagUid,
         stampedChunks: response.stampedChunks,
       }
+    } catch (error) {
+      this.cancelSource(source, error)
+      throw error
     } finally {
       stopProgress()
-      this.releaseSource(source)
     }
   }
 

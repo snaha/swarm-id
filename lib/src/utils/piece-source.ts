@@ -13,9 +13,12 @@ import type { UploadInput } from "../types"
 export interface PieceSource {
   /** The total in bytes, when the input knows it */
   readonly size: number | undefined
-  /** The next piece, or undefined at the end */
+  /** The next piece, or undefined at the end, where a stream is handed back */
   next: () => Promise<Uint8Array<ArrayBuffer> | undefined>
+  /** Stop the input: a stream is cancelled with `reason`, then handed back */
   cancel: (reason?: unknown) => Promise<void>
+  /** Hand a stream back to its owner, unlocked and not cancelled */
+  release: () => void
 }
 
 function isStream(input: UploadInput): input is ReadableStream<Uint8Array> {
@@ -39,6 +42,7 @@ function blobSource(blob: Blob): PieceSource {
       return piece
     },
     cancel: async () => {},
+    release: () => {},
   }
 }
 
@@ -51,12 +55,22 @@ function streamSource(stream: ReadableStream<Uint8Array>): PieceSource {
   }
   const reader = stream.getReader()
   let rest: Uint8Array | undefined
+  let released = false
+  const release = () => {
+    if (released) return
+    released = true
+    reader.releaseLock()
+  }
   return {
     size: undefined,
     next: async () => {
       while (!rest?.length) {
+        if (released) return undefined
         const { done, value } = await reader.read()
-        if (done) return undefined
+        if (done) {
+          release()
+          return undefined
+        }
         if (!(value instanceof Uint8Array)) {
           throw new SwarmIdError(
             "invalid-request",
@@ -69,7 +83,15 @@ function streamSource(stream: ReadableStream<Uint8Array>): PieceSource {
       rest = rest.subarray(STREAM_PIECE_SIZE)
       return piece
     },
-    cancel: (reason) => reader.cancel(reason),
+    cancel: async (reason) => {
+      if (released) return
+      try {
+        await reader.cancel(reason)
+      } finally {
+        release()
+      }
+    },
+    release,
   }
 }
 

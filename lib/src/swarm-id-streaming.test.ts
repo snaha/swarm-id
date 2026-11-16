@@ -243,6 +243,29 @@ describe("streaming across the bridge", () => {
       })
     }
 
+    it("hands a stream it read to the end back unlocked, and uncancelled", async () => {
+      const cancel = vi.fn()
+      const data = makeData(CHUNK_SIZE * 3)
+      let offset = 0
+      const stream = new ReadableStream<Uint8Array>(
+        {
+          pull(controller) {
+            if (offset >= data.length) return controller.close()
+            controller.enqueue(data.slice(offset, offset + CHUNK_SIZE))
+            offset += CHUNK_SIZE
+          },
+          cancel,
+        },
+        { highWaterMark: 0 },
+      )
+
+      await client.uploadData(stream)
+      await settle()
+
+      expect(stream.locked).toBe(false)
+      expect(cancel).not.toHaveBeenCalled()
+    })
+
     it("still posts plain bytes as bytes", async () => {
       const data = makeData(32)
       const { reference } = await client.uploadData(data)
@@ -997,6 +1020,24 @@ describe("the wait for a streaming upload", () => {
 
     deliver({ ...REPLY, requestId: requestIdOf() })
     await expect(upload).resolves.toBeDefined()
+  })
+
+  it("rejects a download's read the proxy leaves unanswered, and stops it", async () => {
+    const download = client.downloadDataStream("ab".repeat(32), undefined, {
+      timeout: SHORT_MS,
+    })
+    const requestId = requestIdOf()
+    deliver({ type: "downloadDataStreamResponse", requestId, size: 8 })
+    const { stream } = await download
+
+    await expect(stream.getReader().read()).rejects.toMatchObject({
+      code: "timeout",
+    })
+    expect(posted().map(({ type }) => type)).toEqual([
+      "downloadDataStream",
+      "downloadStreamPull",
+      "abortRequest",
+    ])
   })
 
   it("keeps the round-trip bound for plain bytes, and stops the proxy at it", async () => {

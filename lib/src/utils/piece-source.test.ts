@@ -149,6 +149,26 @@ describe("openPieceSource", () => {
       expect(pulled).toBe(1)
     })
 
+    it("hands the stream back once it is read to the end", async () => {
+      const stream = streamOf([makeData(3)])
+      const source = openPieceSource(stream)!
+
+      await drain(source)
+
+      expect(stream.locked).toBe(false)
+    })
+
+    it("hands the stream back uncancelled when released early", async () => {
+      const cancel = vi.fn()
+      const stream = new ReadableStream<Uint8Array>({ cancel })
+      const source = openPieceSource(stream)!
+
+      source.release()
+
+      expect(stream.locked).toBe(false)
+      expect(cancel).not.toHaveBeenCalled()
+    })
+
     it("cancels the stream, passing the reason on", async () => {
       const cancel = vi.fn()
       const source = openPieceSource(
