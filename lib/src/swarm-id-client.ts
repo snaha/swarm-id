@@ -105,7 +105,11 @@ import { collectionPath } from "./utils/collection"
 import { PERMISSIONS_POPUP_MAX_MS, untilPopupClosed } from "./utils/popup"
 import { buildAuthUrl } from "./utils/url"
 import { MAX_TIMER_DELAY_MS, TimeoutError, withTimeout } from "./utils/promise"
-import { openPieceSource, type PieceSource } from "./utils/piece-source"
+import {
+  openBlobSource,
+  openPieceSource,
+  type PieceSource,
+} from "./utils/piece-source"
 import { STREAM_IDLE_TIMEOUT_MS } from "./proxy/chunking"
 import { DEFAULT_REQUEST_TIMEOUT_MS } from "./utils/constants"
 const DEFAULT_INITIALIZATION_TIMEOUT_MS = 30000
@@ -249,9 +253,13 @@ export class SwarmIdClient {
       resolve: (value: any) => void
       reject: (error: Error) => void
       timeoutId: NodeJS.Timeout
-      /** Set on a streaming upload: where the proxy's pulls are answered from */
-      source?: PieceSource
-      /** Waiting on `source`, which is not the proxy's time to be charged for */
+      /**
+       * Where a streaming upload's pulls are answered from, by the index a
+       * pull names: one source, or one per file of `uploadFiles`. Empty for
+       * a request that streams nothing.
+       */
+      sources: readonly PieceSource[]
+      /** Waiting on a source, which is not the proxy's time to be charged for */
       readingSource?: boolean
       /** Restart the wait at its full timeout */
       rearm: () => void
@@ -673,7 +681,7 @@ export class SwarmIdClient {
       }
 
       case "uploadSourcePull":
-        void this.answerSourcePull(message.requestId)
+        void this.answerSourcePull(message.requestId, message.index)
         break
 
       case "requestAlive":
@@ -693,7 +701,7 @@ export class SwarmIdClient {
         })
         // A streaming upload's sign of life. For plain bytes the timeout
         // stays a cap on the round trip.
-        if (this.pendingRequests.get(message.requestId)?.source) {
+        if (this.pendingRequests.get(message.requestId)?.sources.length) {
           this.keepAlive(message.requestId)
         }
         break
@@ -741,27 +749,34 @@ export class SwarmIdClient {
   }
 
   /**
-   * Send request and wait for response
+   * Send request and wait for response. `source` is what a streaming upload's
+   * pulls are answered from: one source, or one per file of `uploadFiles`.
    */
   private async sendRequest<
     TResponse,
     TRequest extends AwaitedRequest & { requestId: string } = AwaitedRequest & {
       requestId: string
     },
-  >(message: TRequest, source?: PieceSource): Promise<TResponse> {
+  >(
+    message: TRequest,
+    source?: PieceSource | readonly PieceSource[],
+  ): Promise<TResponse> {
     const options = (message as { requestOptions?: RequestOptions })
       .requestOptions
     const signal = options?.signal
     if (signal?.aborted) throw abortedError(signal)
+    const sources =
+      source === undefined ? [] : "next" in source ? [source] : source
     // A per-call `requestOptions.timeout` bounds this whole round trip, not
     // only the Bee request the proxy makes with it: a caller raising it for a
     // large upload must not be cut off at the constructor default (#775).
     // A streaming upload has no whole round trip to bound, so there it is how
     // long the proxy may stay silent. Neither counts the time a write waits
     // for its drive behind another: the proxy's `requestAlive` restarts it.
-    const timeout = source
-      ? this.streamIdleTimeout(options?.timeout)
-      : this.roundTripTimeout(options?.timeout)
+    const timeout =
+      sources.length > 0
+        ? this.streamIdleTimeout(options?.timeout)
+        : this.roundTripTimeout(options?.timeout)
     return new Promise((resolve, reject) => {
       const onAbort = () => {
         clearTimeout(pending.timeoutId)
@@ -796,7 +811,7 @@ export class SwarmIdClient {
           reject(error)
         },
         timeoutId: setTimeout(expire, timeout),
-        source,
+        sources,
         readingSource: false,
         rearm: () => {
           clearTimeout(pending.timeoutId)
@@ -826,18 +841,25 @@ export class SwarmIdClient {
     })
   }
 
-  /** Read the next piece of a streaming upload for the proxy's pull. */
-  private async answerSourcePull(requestId: string): Promise<void> {
+  /**
+   * Read the next piece of a streaming upload for the proxy's pull, from the
+   * source `index` names: a folder's file, or the request's only source.
+   */
+  private async answerSourcePull(
+    requestId: string,
+    index: number | undefined,
+  ): Promise<void> {
     const pending = this.pendingRequests.get(requestId)
-    if (!pending?.source) return
+    const source = pending?.sources[index ?? 0]
+    if (!pending || !source) return
     const isStillWaiting = () => this.pendingRequests.get(requestId) === pending
     pending.readingSource = true
     clearTimeout(pending.timeoutId)
     try {
-      const data = await pending.source.next()
+      const data = await source.next()
       if (!isStillWaiting()) return
       this.sendMessage(
-        { type: "uploadSourcePiece", requestId, data },
+        { type: "uploadSourcePiece", requestId, index, data },
         data ? [data.buffer] : undefined,
       )
       pending.readingSource = false
@@ -2216,9 +2238,8 @@ export class SwarmIdClient {
    * {@link listFiles} and {@link downloadData} per entry, or one file with
    * {@link downloadFile} and its path.
    *
-   * Every file is read into memory before the upload starts; for folders
-   * larger than that, upload the files with {@link uploadData} and build the
-   * manifest with `@ethersphere/core-sdk`.
+   * Each file is read piece by piece when the upload gets to it, one file at
+   * a time, so a folder is never held whole on either side of the iframe.
    *
    * @param files - The folder's files
    * @param options - Optional upload configuration; `onProgress` counts files, `useWorkers` / `workerCount` stamp in a pool as with {@link uploadData}
@@ -2251,19 +2272,11 @@ export class SwarmIdClient {
     const { onProgress, useWorkers, workerCount, ...serializableOptions } =
       options ?? {}
 
-    const entries = await Promise.all(
-      Array.from(files, async (item) => {
-        const { path, file } =
-          item instanceof File
-            ? { path: collectionPath(item), file: item }
-            : item
-        return {
-          path,
-          data: new Uint8Array(await file.arrayBuffer()),
-          contentType: file.type || undefined,
-        }
-      }),
+    const entries = Array.from(files, (item) =>
+      item instanceof File ? { path: collectionPath(item), file: item } : item,
     )
+    // One source per file, by its position: the proxy's pulls name it.
+    const sources = entries.map(({ file }) => openBlobSource(file))
 
     const stopProgress = this.listenForProgress(requestId, onProgress)
     try {
@@ -2273,16 +2286,23 @@ export class SwarmIdClient {
         reference: Reference
         tagUid?: number
         stampedChunks?: number
-      }>({
-        type: "uploadFiles",
-        requestId,
-        files: entries,
-        options: serializableOptions,
-        requestOptions,
-        enableProgress: !!onProgress,
-        useWorkers,
-        workerCount,
-      })
+      }>(
+        {
+          type: "uploadFiles",
+          requestId,
+          files: entries.map(({ path, file }) => ({
+            path,
+            data: { pulled: true, size: file.size },
+            contentType: file.type || undefined,
+          })),
+          options: serializableOptions,
+          requestOptions,
+          enableProgress: !!onProgress,
+          useWorkers,
+          workerCount,
+        },
+        sources,
+      )
       return {
         reference: response.reference,
         tagUid: response.tagUid,

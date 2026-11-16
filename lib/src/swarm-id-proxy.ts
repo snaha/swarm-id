@@ -472,8 +472,15 @@ export class SwarmIdProxy {
   private drives = new Map<string, DriveWritePath>()
   /** The parent's requests being handled, for `abortRequest` to stop. */
   private inFlightRequests = new Map<string, AbortController>()
-  /** Pulled uploads waiting on their next piece, by request id. */
-  private uploadSources = new Map<string, Inbox<Uint8Array | undefined>>()
+  /**
+   * Pulled uploads waiting on their next piece, by request id: the source
+   * being pulled, and which of a folder's files it is. A folder's files are
+   * pulled one at a time, so one request has one source here at most.
+   */
+  private uploadSources = new Map<
+    string,
+    { index: number | undefined; inbox: Inbox<Uint8Array | undefined> }
+  >()
   /** Streaming downloads waiting to be asked for their next piece. */
   private downloadPulls = new Map<string, Inbox<undefined>>()
   /**
@@ -2824,7 +2831,7 @@ export class SwarmIdProxy {
         return
       }
       if (message.type === "uploadSourcePiece") {
-        this.receiveUploadPiece(message.requestId, message.data)
+        this.receiveUploadPiece(message.requestId, message.index, message.data)
         return
       }
       if (message.type === "downloadStreamPull") {
@@ -2853,7 +2860,7 @@ export class SwarmIdProxy {
         this.sendErrorToParent(event, message.requestId, error, "Unknown error")
       } finally {
         // A pull nobody will read settles at once rather than at its deadline.
-        this.uploadSources.get(message.requestId)?.close()
+        this.uploadSources.get(message.requestId)?.inbox.close()
         this.inFlightRequests.delete(message.requestId)
         this.uploadSources.delete(message.requestId)
         this.downloadPulls.delete(message.requestId)
@@ -4841,37 +4848,43 @@ export class SwarmIdProxy {
 
   /**
    * Hand a piece to the upload that pulled it. The proxy waits right after
-   * posting each pull, so one that finds nobody waiting was not asked for, and
-   * holding it would let the parent fill the iframe's memory.
+   * posting each pull, so one that finds nobody waiting, or names a file
+   * other than the one being pulled, was not asked for, and holding it would
+   * let the parent fill the iframe's memory.
    */
   private receiveUploadPiece(
     requestId: string,
+    index: number | undefined,
     data: Uint8Array | undefined,
   ): void {
     const source = this.uploadSources.get(requestId)
     if (!source) return
-    if (!source.waiting) {
+    if (!source.inbox.waiting || source.index !== index) {
       console.warn("[Proxy] Dropped an upload piece not asked for:", requestId)
       return
     }
-    source.push(data)
+    source.inbox.push(data)
   }
 
   /**
-   * The parent's pieces, one per pull. The drive's write lock is held for every
-   * other writer on the device meanwhile, so a source silent past its deadline
-   * ends the upload rather than holding it indefinitely.
+   * The parent's pieces, one per pull, of its only source or of the folder's
+   * file at `index`. Nothing is pulled before the first `next()`, so a
+   * folder's files are pulled as the upload gets to them. The drive's write
+   * lock is held for every other writer on the device meanwhile, so a source
+   * silent past its deadline ends the upload rather than holding it
+   * indefinitely.
    */
   private async *pullPieces(
     event: MessageEvent,
     requestId: string,
     requestOptions: Abortable<object>["requestOptions"],
+    index?: number,
   ): AsyncGenerator<Uint8Array> {
     const inbox = new Inbox<Uint8Array | undefined>(requestOptions.signal)
-    this.uploadSources.set(requestId, inbox)
+    this.uploadSources.set(requestId, { index, inbox })
     const deadline = sourceIdleTimeout(requestOptions.timeout)
     while (true) {
-      this.postMessage(event, { type: "uploadSourcePull", requestId })
+      this.postMessage(event, { type: "uploadSourcePull", requestId, index })
       const piece = await nextWithin(
         inbox,
         deadline,
@@ -5085,10 +5098,19 @@ export class SwarmIdProxy {
       )
       const tag = options?.tag ?? (await tryCreateTag(this.bee))
 
+      // A pulled file's generator pulls nothing until the upload reaches it.
+      const entries = files.map(({ path, data, contentType }, index) => ({
+        path,
+        contentType,
+        data:
+          data instanceof Uint8Array
+            ? data
+            : this.pullPieces(event, requestId, requestOptions, index),
+      }))
       const { result, stampedChunks } = await this.withCountedWrite(
         { event, message, useWorkers, workerCount },
         (target) =>
-          uploadCollection(target, files, {
+          uploadCollection(target, entries, {
             ...options,
             tag,
             onProgress: progress?.report,

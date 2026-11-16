@@ -29,8 +29,11 @@ function isBlob(input: UploadInput): input is Blob {
   return typeof (input as Blob).arrayBuffer === "function"
 }
 
-/** Sliced by hand: Safari's `Blob.stream()` yields a blob as one piece. */
-function blobSource(blob: Blob): PieceSource {
+/**
+ * A source for a `Blob` or `File`. Sliced by hand: Safari's `Blob.stream()`
+ * yields a blob as one piece.
+ */
+export function openBlobSource(blob: Blob): PieceSource {
   let offset = 0
   return {
     size: blob.size,
@@ -98,6 +101,6 @@ function streamSource(stream: ReadableStream<Uint8Array>): PieceSource {
 /** A source for a `Blob` or `ReadableStream`; undefined for plain bytes. */
 export function openPieceSource(input: UploadInput): PieceSource | undefined {
   if (isStream(input)) return streamSource(input)
-  if (isBlob(input)) return blobSource(input)
+  if (isBlob(input)) return openBlobSource(input)
   return undefined
 }

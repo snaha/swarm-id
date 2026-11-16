@@ -265,10 +265,23 @@ const UploadFilesOptionsSchema = UploadOptionsObjectSchema.extend({
   errorDocument: z.string().optional(),
 }).optional()
 
-/** One file of a folder, as it crosses the bridge */
+/**
+ * In place of an upload's bytes: the proxy pulls them with `uploadSourcePull`,
+ * and each answer is an `uploadSourcePiece`. Pulled rather than transferred as
+ * a stream, which Safari cannot do.
+ */
+export const PulledSourceSchema = z.object({
+  pulled: z.literal(true),
+  size: z.number().int().nonnegative().optional(),
+})
+
+/**
+ * One file of a folder, as it crosses the bridge: its bytes, or a source the
+ * proxy pulls them from when it gets to the file
+ */
 export const CollectionFileSchema = z.object({
   path: z.string().min(1),
-  data: z.instanceof(Uint8Array),
+  data: z.union([z.instanceof(Uint8Array), PulledSourceSchema]),
   contentType: z.string().optional(),
 })
 export type CollectionFile = z.infer<typeof CollectionFileSchema>
@@ -1122,16 +1135,6 @@ export const DisconnectMessageSchema = z.object({
   requestId: z.string(),
 })
 
-/**
- * In place of an upload's bytes: the proxy pulls them with `uploadSourcePull`,
- * and each answer is an `uploadSourcePiece`. Pulled rather than transferred as
- * a stream, which Safari cannot do.
- */
-export const PulledSourceSchema = z.object({
-  pulled: z.literal(true),
-  size: z.number().int().nonnegative().optional(),
-})
-
 export const UploadDataMessageSchema = z.object({
   type: z.literal("uploadData"),
   requestId: z.string(),
@@ -1161,10 +1164,17 @@ export const DownloadDataStreamMessageSchema = z.object({
   requestOptions: RequestOptionsSchema,
 })
 
+/**
+ * The position of a folder's file among `uploadFiles`' files, on the pull and
+ * piece messages of one; absent for a request with a single source
+ */
+const SourceIndexSchema = z.number().int().nonnegative().optional()
+
 /** One piece of a pulled upload. No `data` means the source has ended */
 export const UploadSourcePieceMessageSchema = z.object({
   type: z.literal("uploadSourcePiece"),
   requestId: z.string(),
+  index: SourceIndexSchema,
   data: z.instanceof(Uint8Array).optional(),
 })
 
@@ -1770,6 +1780,7 @@ export const DownloadDataStreamResponseMessageSchema = z.object({
 export const UploadSourcePullMessageSchema = z.object({
   type: z.literal("uploadSourcePull"),
   requestId: z.string(),
+  index: SourceIndexSchema,
 })
 
 /**

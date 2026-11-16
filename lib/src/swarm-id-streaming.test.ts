@@ -29,6 +29,7 @@ import {
 import { PROGRESS_INTERVAL_MS } from "./utils/constants"
 import { MockBee, MockChunkStore } from "./proxy/feeds/epochs/test-utils"
 import { DriveWritePath } from "./proxy/drive-write-path"
+import { uploadCollection } from "./proxy/collection"
 import type { UploadTarget } from "./proxy/upload"
 import type {
   BatchWriteCoordinator,
@@ -517,9 +518,8 @@ describe("streaming across the bridge", () => {
         await vi.waitFor(() => expect(fetchSpy).toHaveBeenCalled())
         await settle()
         const [requestId] = proxy.uploadSources.keys()
-        const source = proxy.uploadSources.get(requestId) as {
-          waiting: boolean
-          queue: unknown[]
+        const { inbox: source } = proxy.uploadSources.get(requestId) as {
+          inbox: { waiting: boolean; queue: unknown[] }
         }
         expect(source.waiting).toBe(false)
 
@@ -832,6 +832,79 @@ describe("streaming across the bridge", () => {
       await settle()
       expect(cancel).toHaveBeenCalledTimes(1)
       expectNothingLeftBehind()
+    })
+  })
+
+  describe("uploadFiles", () => {
+    const PLAIN = { encrypt: false }
+    const FOLDER = [
+      { path: "index.html", size: 11, contentType: "text/html" },
+      { path: "assets/big.bin", size: STREAM_PIECE_SIZE * 2 + 3 },
+      { path: "empty.txt", size: 0, contentType: "text/plain" },
+      { path: "assets/small.bin", size: CHUNK_SIZE + 1 },
+    ].map(({ path, size, contentType }, index) => ({
+      path,
+      contentType,
+      data: makeData(size).map((byte) => byte ^ index),
+    }))
+    const asBlobs = () =>
+      FOLDER.map(({ path, data, contentType }) => ({
+        path,
+        file: new Blob([data], { type: contentType }),
+      }))
+
+    it("gives the root an in-memory upload of the same files gives", async () => {
+      const { reference: inMemory } = await uploadCollection(
+        { mode: "subsidised", gatewayUrl: GATEWAY_URL },
+        FOLDER,
+        PLAIN,
+      )
+
+      const { reference } = await client.uploadFiles(asBlobs(), PLAIN)
+
+      expect(reference).toBe(inMemory)
+      for (const { path, data } of FOLDER) {
+        expect((await client.downloadFile(reference, path)).data).toEqual(data)
+      }
+      expectNothingLeftBehind()
+    })
+
+    it("pulls one file at a time, in bounded pieces, each to its end before the next", async () => {
+      const posted = recordPosted()
+
+      await client.uploadFiles(asBlobs())
+
+      expect(posted[0]).toMatchObject({ type: "uploadFiles", bytes: 0 })
+      const pieces = posted.filter(({ type }) => type === "uploadSourcePiece")
+      // No piece of a file comes after one of the next: a piece only ever
+      // answers a pull, so no file was pulled before the one ahead ended.
+      pieces.forEach(({ index }, at) => {
+        expect(index).toBeGreaterThanOrEqual(pieces[at - 1]?.index ?? 0)
+      })
+      FOLDER.forEach(({ data }, index) => {
+        const ofFile = pieces.filter((piece) => piece.index === index)
+        expect(ofFile.reduce((sum, { bytes }) => sum + bytes, 0)).toBe(
+          data.length,
+        )
+        expect(ofFile.at(-1)?.bytes).toBe(0)
+        for (const { bytes } of ofFile) {
+          expect(bytes).toBeLessThanOrEqual(STREAM_PIECE_SIZE)
+        }
+      })
+      expectNothingLeftBehind()
+    })
+
+    it("counts files in its progress", async () => {
+      const progress: Array<{ total: number; processed: number }> = []
+
+      await client.uploadFiles(asBlobs(), {
+        onProgress: (p) => progress.push(p),
+      })
+
+      expect(progress.at(-1)).toEqual({
+        total: FOLDER.length,
+        processed: FOLDER.length,
+      })
     })
   })
 
