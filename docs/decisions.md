@@ -37,9 +37,12 @@ is a likely second, and it has no join or leave notices and no acknowledgement
 of a publish.
 
 **Decision.** A transport that crosses devices answers `confirmedAgoMs()` and
-`absentForMs(deviceId)`, and the lease asks nothing else about liveness. Both
-must come from one authority: a device shown absent over a span had no
-confirmation within it. On the signaling server the confirmation is a
+`absentExceptMs(deviceIds)`: how recently this context's connection was
+confirmed, and for how long nobody but the named devices has been present.
+The lease asks nothing else about liveness. Both must come from one
+authority: a device shown absent over a span had no confirmation within it.
+The second question is asked about everyone outside a set, so that a device
+this context has never heard of counts too. On the signaling server the confirmation is a
 `ping`/`pong` round trip, timed from when the ping was sent, and the server
 asks for one with a `tick` every 2 s.
 

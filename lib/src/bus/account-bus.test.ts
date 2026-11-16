@@ -356,12 +356,13 @@ const PRESENCE_MESSAGE: BusMessageInput = {
 
 interface FakeLiveness {
   confirmedAgoMs: number
-  absentForMs: number
+  absentExceptMs: number
 }
 
 /** A remote transport whose liveness answers are set by the test. */
 function fakeRemote(liveness: FakeLiveness) {
   let deliver: (raw: unknown, from?: string) => void = () => {}
+  let confirm: (unconfirmedForMs: number) => void = () => {}
   const named: [string, string][] = []
   const transport: BusTransport = {
     local: false,
@@ -371,7 +372,11 @@ function fakeRemote(liveness: FakeLiveness) {
       return () => {}
     },
     confirmedAgoMs: () => liveness.confirmedAgoMs,
-    absentForMs: () => liveness.absentForMs,
+    absentExceptMs: () => liveness.absentExceptMs,
+    onConfirmed: (handler) => {
+      confirm = handler
+      return () => {}
+    },
     notePeerDevice: (peerId, deviceId) => named.push([peerId, deviceId]),
     close: () => {},
   }
@@ -379,6 +384,7 @@ function fakeRemote(liveness: FakeLiveness) {
     transport,
     named,
     deliver: (raw: unknown, from?: string) => deliver(raw, from),
+    confirm: (unconfirmedForMs: number) => confirm(unconfirmedForMs),
   }
 }
 
@@ -387,21 +393,21 @@ describe("AccountBus — liveness", () => {
     const bus = makeBus()
     try {
       expect(bus.confirmedAgoMs()).toBe(Infinity)
-      expect(bus.absentForMs("device-remote")).toBe(0)
+      expect(bus.absentExceptMs(new Set())).toBe(0)
     } finally {
       bus.close()
     }
   })
 
   it("answers from its remote transport", () => {
-    const remote = fakeRemote({ confirmedAgoMs: 40, absentForMs: 900 })
+    const remote = fakeRemote({ confirmedAgoMs: 40, absentExceptMs: 900 })
     const bus = new AccountBus([
       new BroadcastChannelTransport(TOPIC),
       remote.transport,
     ])
     try {
       expect(bus.confirmedAgoMs()).toBe(40)
-      expect(bus.absentForMs("device-remote")).toBe(900)
+      expect(bus.absentExceptMs(new Set())).toBe(900)
     } finally {
       bus.close()
     }
@@ -410,19 +416,33 @@ describe("AccountBus — liveness", () => {
   // Each remote transport is its own authority, so the bus believes the more
   // cautious of them on both questions.
   it("takes the more cautious answer of several remote transports", () => {
-    const first = fakeRemote({ confirmedAgoMs: 40, absentForMs: 900 })
-    const second = fakeRemote({ confirmedAgoMs: 700, absentForMs: 100 })
+    const first = fakeRemote({ confirmedAgoMs: 40, absentExceptMs: 900 })
+    const second = fakeRemote({ confirmedAgoMs: 700, absentExceptMs: 100 })
     const bus = new AccountBus([first.transport, second.transport])
     try {
       expect(bus.confirmedAgoMs()).toBe(700)
-      expect(bus.absentForMs("device-remote")).toBe(100)
+      expect(bus.absentExceptMs(new Set())).toBe(100)
+    } finally {
+      bus.close()
+    }
+  })
+
+  it("passes on each confirmation with the gap before it", () => {
+    const remote = fakeRemote({ confirmedAgoMs: 0, absentExceptMs: 0 })
+    const bus = new AccountBus([remote.transport])
+    const gaps: number[] = []
+    try {
+      bus.onConfirmed((unconfirmedForMs) => gaps.push(unconfirmedForMs))
+      remote.confirm(Infinity)
+      remote.confirm(2000)
+      expect(gaps).toEqual([Infinity, 2000])
     } finally {
       bus.close()
     }
   })
 
   it("tells a transport which device a peer speaks for", () => {
-    const remote = fakeRemote({ confirmedAgoMs: 0, absentForMs: 0 })
+    const remote = fakeRemote({ confirmedAgoMs: 0, absentExceptMs: 0 })
     const bus = new AccountBus([remote.transport])
     try {
       remote.deliver(PRESENCE_MESSAGE, "peer-1")

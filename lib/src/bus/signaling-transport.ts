@@ -98,9 +98,12 @@ export class SignalingTransport implements BusTransport {
   private confirmedAt: number | undefined
   private pingNonce = 0
   private pingsSentAt = new Map<number, number>()
+  private confirmedHandlers = new Set<(unconfirmedForMs: number) => void>()
   /** Which device each room peer has been heard to speak for. */
   private peerDevices = new Map<string, string>()
-  private deviceLeftAt = new Map<string, number>()
+  /** When each device was last known present: its last peer leaving, or a
+   *  message from it that arrived while none of its peers was in our room. */
+  private deviceLastPresentAt = new Map<string, number>()
   /** When a peer last left without having named its device. */
   private unnamedLeftAt: number | undefined
 
@@ -146,28 +149,38 @@ export class SignalingTransport implements BusTransport {
     return performance.now() - this.confirmedAt
   }
 
+  onConfirmed(handler: (unconfirmedForMs: number) => void): () => void {
+    this.confirmedHandlers.add(handler)
+    return () => this.confirmedHandlers.delete(handler)
+  }
+
   notePeerDevice(peerId: string, deviceId: string): void {
-    if (this.peers.has(peerId)) this.peerDevices.set(peerId, deviceId)
+    if (this.peers.has(peerId)) {
+      this.peerDevices.set(peerId, deviceId)
+      return
+    }
+    // Heard from a device our view of the room does not contain: the view is
+    // behind, and the device was present a moment ago.
+    this.deviceLastPresentAt.set(deviceId, performance.now())
   }
 
   /**
-   * The server's room is the authority: a device is absent while no peer in
-   * the room speaks for it, counted from the latest of this context joining,
-   * the device's last peer leaving, and an unnamed peer leaving. A peer that
-   * has not yet named its device could be any device, so nobody is absent
-   * while one is in the room.
+   * The server's room is the authority. Everyone outside `deviceIds` is
+   * absent while every peer in the room speaks for a device in the set,
+   * counted from the latest of: this context joining, a peer of a device
+   * outside the set leaving, and a peer leaving before it named its device.
+   * A peer that has not named its device could be any device.
    */
-  absentForMs(deviceId: string): number {
+  absentExceptMs(deviceIds: ReadonlySet<string>): number {
     if (this.sessionStartedAt === undefined) return 0
     for (const peerId of this.peers.keys()) {
       const device = this.peerDevices.get(peerId)
-      if (device === undefined || device === deviceId) return 0
+      if (device === undefined || !deviceIds.has(device)) return 0
     }
-    const since = Math.max(
-      this.sessionStartedAt,
-      this.deviceLeftAt.get(deviceId) ?? 0,
-      this.unnamedLeftAt ?? 0,
-    )
+    let since = Math.max(this.sessionStartedAt, this.unnamedLeftAt ?? 0)
+    for (const [device, at] of this.deviceLastPresentAt) {
+      if (!deviceIds.has(device)) since = Math.max(since, at)
+    }
     return performance.now() - since
   }
 
@@ -204,6 +217,7 @@ export class SignalingTransport implements BusTransport {
     }
     this.peers.clear()
     this.endSession()
+    this.confirmedHandlers.clear()
     this.socket?.close()
   }
 
@@ -212,7 +226,7 @@ export class SignalingTransport implements BusTransport {
     this.confirmedAt = undefined
     this.pingsSentAt.clear()
     this.peerDevices.clear()
-    this.deviceLeftAt.clear()
+    this.deviceLastPresentAt.clear()
     this.unnamedLeftAt = undefined
   }
 
@@ -363,7 +377,7 @@ export class SignalingTransport implements BusTransport {
         const device = this.peerDevices.get(message.peerId)
         this.peerDevices.delete(message.peerId)
         if (device === undefined) this.unnamedLeftAt = performance.now()
-        else this.deviceLeftAt.set(device, performance.now())
+        else this.deviceLastPresentAt.set(device, performance.now())
         // Reported, not just cleaned up: this is the only departure signal a
         // closing tab produces (why, in `PresenceTracker`'s header). The
         // server's reaper closes a dead socket too, so a crash and a dropped
@@ -388,10 +402,12 @@ export class SignalingTransport implements BusTransport {
         // the map.
         const sentAt = this.pingsSentAt.get(message.nonce)
         if (sentAt === undefined) return
+        const unconfirmedForMs = this.confirmedAgoMs()
         this.confirmedAt = sentAt
         for (const nonce of this.pingsSentAt.keys()) {
           if (nonce <= message.nonce) this.pingsSentAt.delete(nonce)
         }
+        for (const handler of this.confirmedHandlers) handler(unconfirmedForMs)
         return
       }
     }
