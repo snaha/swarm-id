@@ -138,7 +138,8 @@ puts there, so anything that depends on older chunks being present is at risk:
 - **Sequential feeds** look updates up from index 0. Once early updates are evicted the feed can
   read as empty.
 - **Epoch feeds** find the latest update through older nodes of the epoch tree.
-- **ACT** keeps its grantee history as a feed, with the same exposure.
+- **ACT** keeps its history as a manifest whose older entries can be evicted, with the same
+  exposure: a version read at an older entry's `timestamp` can stop reading back.
 
 Write data that must last to a regular drive, and keep only what can be lost on a scratch one.
 

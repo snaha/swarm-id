@@ -1,0 +1,138 @@
+---
+title: Access Control (ACT)
+description: How Swarm ID shares encrypted data with chosen grantees, and what a revoke, a timestamp and Bee compatibility guarantee
+---
+
+An ACT (Access Control Trie) shares one Swarm reference with chosen people: whoever holds the
+encrypted reference reads nothing unless they are a grantee. Swarm ID builds ACTs inside the proxy
+iframe, with keys that never leave it, in Bee's format. This page explains what each part protects
+and where the limits are. The calls themselves are in the
+[API reference](../api/#act-methods).
+
+## Who publishes
+
+Every ACT has one publisher key, and only that key can add or revoke grantees or publish a new
+version into the history. It is one of the two keys a session holds:
+
+- the **app key**, the [app secret](../key-derivation/#app-secret) of one app origin, by default;
+- the account-wide **sharing key** ([Key Derivation](../key-derivation/#sharing-key)), with
+  `publisher: "identity"`, so that any of the user's apps can manage the share. The user decides
+  which apps may ([Permissions](../drives-and-permissions/#permissions)).
+
+A grantee is a compressed public key: someone's app key or sharing key. A reader passes the
+publisher's public key (`publisherPubKey`) and tries both of their own keys.
+
+## What one upload writes
+
+An ACT upload writes five things:
+
+1. **The content**, encrypted under a fresh random key unless `encrypt: false`.
+2. **A manifest** pointing at the content. Its reference is what the ACT protects.
+3. **The ACT**: one entry for each grantee, and one for the publisher itself, each handing out the
+   **access key**.
+4. **The grantee list**, encrypted so that only the publisher reads it. Adding and revoking start
+   from it.
+5. **A history entry**, keyed by its `timestamp`, naming the ACT and the grantee list. The
+   history's own reference is the `historyReference`.
+
+The encrypted reference is not stored anywhere: the app keeps it with `historyReference`,
+`publisherPubKey` and `timestamp`, and hands them to its readers. In a native history (the
+default) the manifest, the ACT and the history are encrypted chunks too, so their references carry
+a key.
+
+## How an entry hands out the access key
+
+The publisher and a grantee compute the same ECDH shared secret, each from their own private key
+and the other's public key. Two keys follow from it:
+
+```text
+lookup key = keccak256(shared ‖ 0x00)
+entry key  = keccak256(shared ‖ 0x01)
+```
+
+The lookup key says whose entry it is; the entry key encrypts the access key in it. The
+publisher's own entry is the one made out to its own public key.
+
+Both are fixed for one publisher and one grantee, and the encryption is counter mode without a
+nonce. Used as they are, every ACT one publisher writes for one grantee would share a keystream,
+and any two ACTs that hold an entry for the same pair (every ACT holds the publisher's own) would
+differ there by exactly their two access keys: whoever knows one would learn the other. So in a
+native history each access key gets a random 32-byte **salt**, kept in its history entry, and the
+entry key is mixed with it:
+
+```text
+entry key = keccak256( keccak256(shared ‖ 0x01) ‖ salt )
+```
+
+The lookup key stays unsalted. It reveals nothing about any access key, and it lets the publisher
+and readers find their entry the same way in every ACT. What it does show: someone holding two ACTs
+by one publisher can tell that the same grantee is in both.
+
+The grantee list is encrypted with a key derived from the publisher key and the same salt.
+
+## How the access key protects the reference
+
+The encrypted reference is the reference XORed with a keystream derived from the access key, in
+Bee's counter mode. A grantee who decrypts their entry gets the access key, and with it the
+reference, the manifest and the content.
+
+## Continuing, adding, revoking
+
+A history holds many versions of one share.
+
+- **Continuing** (`historyReference` on `actUploadData`) encrypts a new reference with the latest
+  entry's access key. Nothing is added to the history, and the latest entry's grantees read the
+  new version.
+- **Adding** grantees keeps the access key and its salt: the existing entries are copied byte for
+  byte, and each new grantee gets an entry under the same key. A new grantee reads every version
+  under that key, earlier ones included.
+- **Revoking** draws a fresh access key and, in a native history, a fresh salt. The new ACT names
+  the publisher and the remaining grantees, and versions continued from then on are encrypted
+  under the new key. No existing reference is re-encrypted, so a revoked grantee keeps what they
+  could already read, and only that.
+
+Adding and revoking each append an entry and return a new `historyReference` and the entry's
+`timestamp`.
+
+## Reading
+
+A read decrypts with the entry its `timestamp` names, or with the latest entry when it names none.
+
+- After a revoke the latest key no longer opens an older version. Read it by passing the
+  `timestamp` its upload returned. Without one, nothing tells a wrong key from a right one: the
+  reference decrypts to one that leads nowhere, and the download fails with a hint to pass the
+  timestamp.
+- A grantee added after a version is not named in that version's entry. The read then walks the
+  later entries, oldest first, as long as each keeps the salt and holds one of that entry's ACT
+  entries byte for byte, as an add copies them. It stops at the first that does not, which is a
+  revoke. So one `timestamp` opens a version for every grantee of its key, and never for a grantee
+  added after the next revoke.
+
+## Bee-compatible mode
+
+`beeCompatible: true` writes a history that a Bee node's own ACT endpoints read: plain 32-byte
+references, plain manifests, ACTs and history, and Bee's entries, which carry no salt. What it
+gives up:
+
+- **A revoke holds only as long as the new history reference stays away from the revoked
+  grantees.** The remaining grantees' and the publisher's entries keep their keystreams across the
+  rotation, so a revoked grantee who reads the new ACT computes the new key from the old one, and
+  every remaining reader holds the reference that leads to it.
+- **Histories by one key are not separate.** A grantee of any Bee-compatible ACT by a key reads
+  any other Bee-compatible ACT by that key whose history reference and encrypted reference they
+  obtain, through the publisher's entry in both. The grantee lists are likewise unsalted.
+- **`encrypt: false` is refused.** With the manifest plain too, the reference would follow from
+  the file's bytes.
+
+## Caveats
+
+- **Continue from the latest history reference**, and add or revoke from it too. A history does
+  not point to its successors. An upload from a reference saved before a revoke encrypts under the
+  old key, which the revoked grantees hold; a grantee change from an older reference forks the
+  history, and from one saved before a revoke it undoes the revoke.
+- **Never hand out a decrypted reference.** Every version under one access key shares one
+  keystream, so a reference in the clear beside its encrypted form exposes every other version
+  under that key.
+- **Older entries can be evicted** like any other data. On a scratch drive a version read at an
+  old `timestamp` can stop reading back
+  ([Scratch drives](../drives-and-permissions/#scratch-drives)).

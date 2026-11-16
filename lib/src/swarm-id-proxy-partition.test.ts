@@ -223,19 +223,18 @@ vi.mock("./proxy/act", async (importActual) => {
         historyReference: "h",
         granteeListReference: "g",
         actReference: "a",
+        timestamp: 1,
       }
     }),
-    revokeGranteesFromAct: vi.fn(
-      async (_t, _b, _h, _e, keys: ActKeyCandidates) => {
-        publishedByIdentity(keys)
-        return {
-          encryptedReference: "e",
-          historyReference: "h",
-          granteeListReference: "g",
-          actReference: "a",
-        }
-      },
-    ),
+    revokeGranteesFromAct: vi.fn(async (_t, _b, _h, keys: ActKeyCandidates) => {
+      publishedByIdentity(keys)
+      return {
+        historyReference: "h",
+        granteeListReference: "g",
+        actReference: "a",
+        timestamp: 1,
+      }
+    }),
     getGranteesFromAct: vi.fn(async (_b, _h, keys: ActKeyCandidates) => {
       publishedByIdentity(keys)
       return []
@@ -1763,7 +1762,6 @@ describe("SwarmIdProxy partitioned write enablement", () => {
       {
         type: "actRevokeGrantees",
         historyReference: HEX_32,
-        encryptedReference: HEX_32,
         revokeGrantees: [],
         batchID: SECOND_BATCH_ID_HEX,
       },
@@ -1876,7 +1874,6 @@ describe("SwarmIdProxy partitioned write enablement", () => {
             type: "actRevokeGrantees",
             requestId: "revoke",
             historyReference: history,
-            encryptedReference: "ef".repeat(32),
             revokeGrantees: [grantee],
           },
           PARENT_ORIGIN,
@@ -1964,7 +1961,7 @@ describe("SwarmIdProxy partitioned write enablement", () => {
         expect(lastInfo().identity.sharingPublicKey).toBeUndefined()
       })
 
-      it("refuse to publish as the identity without write access", async () => {
+      it("refuse to publish as the identity without write access, into a new history or an existing one", async () => {
         await connectWith({ writeAccess: false })
 
         await dispatch(
@@ -1978,16 +1975,32 @@ describe("SwarmIdProxy partitioned write enablement", () => {
           PARENT_ORIGIN,
           parentWindow,
         )
-
-        await vi.waitFor(() =>
-          expect(messagesOfType("error")).toContainEqual(
-            expect.objectContaining({
-              requestId: "a1",
-              code: "permission-denied",
-              permission: "writeAccess",
-            }),
-          ),
+        await dispatch(
+          {
+            type: "actUploadData",
+            requestId: "a2",
+            data: new Uint8Array([1]),
+            grantees: [],
+            options: {
+              publisher: "identity",
+              historyReference: "ab".repeat(32),
+            },
+          },
+          PARENT_ORIGIN,
+          parentWindow,
         )
+
+        await vi.waitFor(() => {
+          for (const requestId of ["a1", "a2"]) {
+            expect(messagesOfType("error")).toContainEqual(
+              expect.objectContaining({
+                requestId,
+                code: "permission-denied",
+                permission: "writeAccess",
+              }),
+            )
+          }
+        })
       })
 
       it("take effect when the user flips a switch, as a storage event", async () => {

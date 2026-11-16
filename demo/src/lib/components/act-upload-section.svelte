@@ -82,6 +82,7 @@
       logStore.log(`History Reference: ${actResult.historyReference}`)
       logStore.log(`Publisher Key: ${actResult.publisherPubKey}`)
       logStore.log(`ACT Reference: ${actResult.actReference}`)
+      logStore.log(`Timestamp: ${actResult.timestamp}`)
 
       onUploadResult?.({
         encryptedReference: actResult.encryptedReference,
@@ -97,6 +98,7 @@
           { label: 'Publisher Key', value: actResult.publisherPubKey },
           { label: 'ACT Ref', value: actResult.actReference },
           { label: 'Grantee List Ref', value: actResult.granteeListReference },
+          { label: 'Timestamp', value: String(actResult.timestamp) },
         ],
         ...(beeCompatible
           ? {

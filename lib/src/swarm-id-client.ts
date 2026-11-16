@@ -1651,7 +1651,8 @@ export class SwarmIdClient {
    *
    * @param reference - The Swarm reference (hash) of the data to download.
    *                    Can be 64 hex chars (32 bytes) or 128 hex chars (64 bytes for encrypted)
-   * @param options - Optional download configuration
+   * @param options - Optional download configuration. Accepted but not applied yet: the proxy reads
+   *   through the chunk API and ignores every field; redundancy waits on erasure coding (#928)
    * @param options.redundancyStrategy - Strategy for handling redundancy (0-3)
    * @param options.fallback - Whether to use fallback retrieval
    * @param options.timeoutMs - Download timeout in milliseconds
@@ -1854,7 +1855,8 @@ export class SwarmIdClient {
    *
    * @param reference - The Swarm reference (hash) of the file to download
    * @param path - Optional path within a manifest to retrieve a specific file
-   * @param options - Optional download configuration
+   * @param options - Optional download configuration. Accepted but not applied yet: the proxy reads
+   *   through the chunk API and ignores every field; redundancy waits on erasure coding (#928)
    * @param options.redundancyStrategy - Strategy for handling redundancy (0-3)
    * @param options.fallback - Whether to use fallback retrieval
    * @param options.timeoutMs - Download timeout in milliseconds
@@ -3537,13 +3539,34 @@ export class SwarmIdClient {
    * This method encrypts the data and creates an ACT that controls who can decrypt it.
    * Only the specified grantees (and the publisher) can decrypt and access the data.
    *
+   * With `options.historyReference` the upload continues that history instead (#931), as
+   * Bee's upload with a history address does: the new version is encrypted with the latest
+   * entry's access key, so that entry's grantees read it, and the same history reference
+   * comes back. Nothing is added to the history. Every version under one access key shares
+   * one keystream, so never hand out a decrypted reference: beside its encrypted form it
+   * exposes every other version under that key.
+   *
    * @param data - The binary data to upload as a Uint8Array
    * @param grantees - Array of grantee public keys as compressed hex strings (33 bytes = 66 hex chars).
    *   A grantee is either another user's `appKey.publicKey` (that user in this app origin only) or
-   *   their `identity.sharingPublicKey` (that user in every app they connect, #519)
+   *   their `identity.sharingPublicKey` (that user in every app they connect, #519).
+   *   Empty when continuing a history: its grantees are managed with {@link actAddGrantees} and
+   *   {@link actRevokeGrantees}, and a non-empty list rejects with `invalid-request`
    * @param options - Optional upload configuration
+   * @param options.historyReference - A history to continue, from an earlier upload or grantee change.
+   *   Continue from the one the latest grantee change returned: a reference saved before a revoke
+   *   encrypts under the key the revoked grantees still hold, and a history does not point to its
+   *   successors, so the upload cannot tell. The same goes for {@link actAddGrantees} and
+   *   {@link actRevokeGrantees}
+   * @param options.encrypt - Encrypt the content (defaults to `true`). `false` is refused with
+   *   `invalid-request` for a Bee-compatible history: its manifest is plain, so the reference would
+   *   follow from the content, and every version in a history shares one keystream
    * @param options.publisher - `"app"` (default) publishes with this origin's app key; `"identity"`
-   *   publishes with the account-wide sharing key, so any of the user's apps can manage the grantees later
+   *   publishes with the account-wide sharing key, so any of the user's apps can manage the grantees later.
+   *   When continuing a history, unset means whichever of the two published it; a key that did not rejects
+   * @param options.beeCompatible - Keep the history readable by a Bee node's own ACT endpoints (32-byte
+   *   references). When continuing it follows the history, and a value that contradicts it rejects with
+   *   `invalid-request`
    * @param options.pin - Whether to pin the data locally (defaults to false; ignored on a subsidised gateway)
    * @param options.tag - Tag ID for tracking upload progress
    * @param options.deferred - Whether to use deferred upload (defaults to false)
@@ -3555,6 +3578,8 @@ export class SwarmIdClient {
    * @returns return.historyReference - The Swarm reference of the history manifest (use for future operations)
    * @returns return.granteeListReference - The Swarm reference of the encrypted grantee list
    * @returns return.publisherPubKey - The publisher's compressed public key (share with grantees)
+   * @returns return.timestamp - The history entry whose access key encrypted this version. A revoke
+   *   rotates the key; pass it to {@link actDownloadData} to read this version after one
    * @returns return.tagUid - The tag UID if a tag was created
    * @throws {Error} If the client is not initialized
    * @throws {Error} If the user is not authenticated or cannot upload
@@ -3572,6 +3597,11 @@ export class SwarmIdClient {
    * console.log('History Reference:', result.historyReference)
    * console.log('Encrypted Reference:', result.encryptedReference)
    * console.log('Publisher Public Key:', result.publisherPubKey)
+   *
+   * // A new version, readable by the same grantees
+   * const next = await client.actUploadData(newData, [], {
+   *   historyReference: result.historyReference,
+   * })
    * ```
    */
   async actUploadData(
@@ -3585,6 +3615,8 @@ export class SwarmIdClient {
     granteeListReference: string
     publisherPubKey: string
     actReference: string
+    /** The history entry whose access key encrypted `encryptedReference` */
+    timestamp: number
     tagUid?: number
     stampedChunks?: number
   }> {
@@ -3602,6 +3634,7 @@ export class SwarmIdClient {
         granteeListReference: string
         publisherPubKey: string
         actReference: string
+        timestamp: number
         tagUid?: number
         stampedChunks?: number
       }>({
@@ -3620,6 +3653,7 @@ export class SwarmIdClient {
         granteeListReference: response.granteeListReference,
         publisherPubKey: response.publisherPubKey,
         actReference: response.actReference,
+        timestamp: response.timestamp,
         tagUid: response.tagUid,
         stampedChunks: response.stampedChunks,
       }
@@ -3638,7 +3672,11 @@ export class SwarmIdClient {
    * @param encryptedReference - The encrypted reference from actUploadData
    * @param historyReference - The history reference from actUploadData
    * @param publisherPubKey - The publisher's compressed public key from actUploadData
-   * @param timestamp - Optional timestamp to look up a specific ACT version
+   * @param timestamp - Optional: the history entry to read with, the latest when unset. A revoke
+   *   rotates the access key, so a version from before one is read with its own `timestamp`
+   *   from actUploadData; without it the latest key is used and decryption fails. That one
+   *   `timestamp` opens the version for every grantee of the key it was encrypted under,
+   *   including one added later, until the next revoke rotates the key
    * @param requestOptions - Optional request configuration (timeout, headers, endlesslyRetry). `timeout` replaces the client default for this call's whole round trip, not only the Bee request
    * @returns A promise resolving to the decrypted data as a Uint8Array
    * @throws {Error} If the client is not initialized
@@ -3692,6 +3730,11 @@ export class SwarmIdClient {
    * Only the publisher (original uploader) can add grantees.
    * Returns new references since Swarm content is immutable.
    *
+   * Pass the latest history reference: a history does not point to its
+   * successors, so a grantee change from an older one forks the history, and
+   * from one saved before a revoke it builds on the entry that still hands the
+   * revoked grantees the old key, undoing the revoke.
+   *
    * @param historyReference - The current history reference
    * @param grantees - Array of new grantee public keys as compressed hex strings
    * @param options - Optional `batchID`: the drive the new history and grantee list go to (#862)
@@ -3700,6 +3743,7 @@ export class SwarmIdClient {
    * @returns return.historyReference - The new history reference after adding grantees
    * @returns return.granteeListReference - The new grantee list reference
    * @returns return.actReference - The new ACT reference
+   * @returns return.timestamp - The new history entry's timestamp
    * @throws {Error} If the client is not initialized
    * @throws {Error} If the user is not the publisher
    * @throws {Error} If the request times out
@@ -3721,6 +3765,8 @@ export class SwarmIdClient {
     historyReference: string
     granteeListReference: string
     actReference: string
+    /** The new history entry's */
+    timestamp: number
     /** Chunks this write sent (#932) */
     stampedChunks?: number
   }> {
@@ -3733,6 +3779,7 @@ export class SwarmIdClient {
       historyReference: string
       granteeListReference: string
       actReference: string
+      timestamp: number
       stampedChunks?: number
     }>({
       type: "actAddGrantees",
@@ -3747,6 +3794,7 @@ export class SwarmIdClient {
       historyReference: response.historyReference,
       granteeListReference: response.granteeListReference,
       actReference: response.actReference,
+      timestamp: response.timestamp,
       stampedChunks: response.stampedChunks,
     }
   }
@@ -3754,26 +3802,37 @@ export class SwarmIdClient {
   /**
    * Revokes grantees from an existing ACT.
    *
-   * This method removes public keys from the ACT's access list, producing a new
-   * ACT/history without the revoked entries.
+   * Rotates the access key, as Bee does: a new ACT under a fresh key names the
+   * publisher and the remaining grantees, and becomes the history's latest
+   * entry. A version uploaded afterwards (continuing the history) is encrypted
+   * under the new key. In a native history that keeps it out of the revoked
+   * grantees' reach: the new key comes with a fresh salt (#408). In a
+   * Bee-compatible history it does only while they never get the new history
+   * reference: its ACT entries are unsalted, as Bee writes them, so a revoked
+   * grantee who reads the new ACT computes the new key from the old one.
    *
    * IMPORTANT: Revocation cannot un-share already-published content. A former
-   * grantee kept the access key while granted and the reference lives in
-   * immutable history, so they can still decrypt content published before
-   * revocation. Revocation only stops access to content published afterwards.
-   * The returned `encryptedReference` is unchanged — it is NOT re-encrypted, as
-   * that would leak the keystream to former grantees (#496).
+   * grantee kept the old key while granted, and the earlier entries live in
+   * immutable history, so they can still decrypt every version published
+   * before the revoke. No existing reference is re-encrypted under the new key,
+   * which would leak its keystream to the revoked grantees (#496).
+   *
+   * After a revoke the latest entry carries the new key: a version from before
+   * it is read by passing its `timestamp` to {@link actDownloadData}.
+   *
+   * Pass the latest history reference: a revoke from an older one forks the
+   * history, and a later grantee change or upload from the other branch
+   * undoes it.
    *
    * @param historyReference - The current history reference
-   * @param encryptedReference - The current encrypted reference
    * @param revokeGrantees - Array of grantee public keys to revoke as compressed hex strings
    * @param options - Optional `batchID`: the drive the rotated history goes to (#862)
    * @param requestOptions - Optional request configuration (timeout, headers, endlesslyRetry). `timeout` replaces the client default for this call's whole round trip, not only the Bee request
    * @returns A promise resolving to the new references after revocation
-   * @returns return.encryptedReference - The content reference, unchanged
    * @returns return.historyReference - The new history reference after revocation
    * @returns return.granteeListReference - The new grantee list reference
    * @returns return.actReference - The new ACT reference after revocation
+   * @returns return.timestamp - The new history entry's timestamp, the first under the rotated key
    * @throws {Error} If the client is not initialized
    * @throws {Error} If the user is not the publisher
    * @throws {Error} If the request times out
@@ -3781,22 +3840,23 @@ export class SwarmIdClient {
    * @example
    * ```typescript
    * const revokeKeys = ['03a1b2c3...'] // Public keys to revoke
-   * const result = await client.actRevokeGrantees(historyReference, encryptedReference, revokeKeys)
+   * const result = await client.actRevokeGrantees(historyReference, revokeKeys)
    * console.log('New History Reference:', result.historyReference)
-   * // encryptedReference is unchanged; historyReference/actReference are new
+   * // A version from before the revoke is read at its own timestamp
+   * await client.actDownloadData(encryptedReference, result.historyReference, publisherPubKey, timestamp)
    * ```
    */
   async actRevokeGrantees(
     historyReference: string,
-    encryptedReference: string,
     revokeGrantees: string[],
     options?: DriveTargetOptions,
     requestOptions?: RequestOptions,
   ): Promise<{
-    encryptedReference: string
     historyReference: string
     granteeListReference: string
     actReference: string
+    /** The new history entry's, the first under the rotated key */
+    timestamp: number
     /** Chunks this write sent (#932) */
     stampedChunks?: number
   }> {
@@ -3806,26 +3866,25 @@ export class SwarmIdClient {
     const response = await this.sendRequest<{
       type: "actRevokeGranteesResponse"
       requestId: string
-      encryptedReference: string
       historyReference: string
       granteeListReference: string
       actReference: string
+      timestamp: number
       stampedChunks?: number
     }>({
       type: "actRevokeGrantees",
       requestId,
       historyReference,
-      encryptedReference,
       revokeGrantees,
       batchID: options?.batchID,
       requestOptions,
     })
 
     return {
-      encryptedReference: response.encryptedReference,
       historyReference: response.historyReference,
       granteeListReference: response.granteeListReference,
       actReference: response.actReference,
+      timestamp: response.timestamp,
       stampedChunks: response.stampedChunks,
     }
   }

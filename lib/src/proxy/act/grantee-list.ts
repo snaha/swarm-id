@@ -24,13 +24,21 @@ export interface UncompressedPublicKey {
 /**
  * Derive the encryption key for the grantee list
  *
- * This is different from the legacy format key derivation.
- * The grantee list is encrypted with a key derived from the publisher's private key.
+ * The grantee list is encrypted with a key derived from the publisher's
+ * private key, and in a native history from the salt of the access key beside
+ * it too (#408). Without the salt every list one publisher writes shares one
+ * keystream, and a grantee who knows their own place in one list reads that
+ * place in the others. With it, the lists of one run of an access key share
+ * one: an add only appends, so each place holds the same grantee in all of
+ * them, and a revoke, which drops grantees, draws a new salt.
  */
 export function deriveGranteeListEncryptionKey(
   publisherPrivKey: Uint8Array,
+  salt?: Uint8Array,
 ): Uint8Array {
-  const input = Binary.concatBytes(publisherPrivKey, GRANTEE_LIST_KEY_SUFFIX)
+  const input = salt
+    ? Binary.concatBytes(publisherPrivKey, GRANTEE_LIST_KEY_SUFFIX, salt)
+    : Binary.concatBytes(publisherPrivKey, GRANTEE_LIST_KEY_SUFFIX)
   return Binary.keccak256(input)
 }
 
@@ -116,13 +124,15 @@ export function deserializeGranteeList(
  *
  * @param granteeList - Serialized grantee list
  * @param publisherPrivKey - Publisher's private key for key derivation
+ * @param salt - The access key's salt, in a native history
  * @returns Encrypted grantee list
  */
 export function encryptGranteeList(
   granteeList: Uint8Array,
   publisherPrivKey: Uint8Array,
+  salt?: Uint8Array,
 ): Uint8Array {
-  const encryptionKey = deriveGranteeListEncryptionKey(publisherPrivKey)
+  const encryptionKey = deriveGranteeListEncryptionKey(publisherPrivKey, salt)
   return counterModeEncrypt(granteeList, encryptionKey)
 }
 
@@ -131,13 +141,15 @@ export function encryptGranteeList(
  *
  * @param encryptedList - Encrypted grantee list
  * @param publisherPrivKey - Publisher's private key for key derivation
+ * @param salt - The access key's salt, in a native history
  * @returns Decrypted serialized grantee list
  */
 export function decryptGranteeList(
   encryptedList: Uint8Array,
   publisherPrivKey: Uint8Array,
+  salt?: Uint8Array,
 ): Uint8Array {
-  const encryptionKey = deriveGranteeListEncryptionKey(publisherPrivKey)
+  const encryptionKey = deriveGranteeListEncryptionKey(publisherPrivKey, salt)
   return counterModeDecrypt(encryptedList, encryptionKey)
 }
 
@@ -146,14 +158,16 @@ export function decryptGranteeList(
  *
  * @param grantees - Array of public keys
  * @param publisherPrivKey - Publisher's private key
+ * @param salt - The access key's salt, in a native history
  * @returns Encrypted serialized grantee list ready for upload
  */
 export function serializeAndEncryptGranteeList(
   grantees: UncompressedPublicKey[],
   publisherPrivKey: Uint8Array,
+  salt?: Uint8Array,
 ): Uint8Array {
   const serialized = serializeGranteeList(grantees)
-  return encryptGranteeList(serialized, publisherPrivKey)
+  return encryptGranteeList(serialized, publisherPrivKey, salt)
 }
 
 /**
@@ -161,13 +175,15 @@ export function serializeAndEncryptGranteeList(
  *
  * @param encryptedList - Encrypted serialized grantee list
  * @param publisherPrivKey - Publisher's private key
+ * @param salt - The access key's salt, in a native history
  * @returns Array of public keys
  */
 export function decryptAndDeserializeGranteeList(
   encryptedList: Uint8Array,
   publisherPrivKey: Uint8Array,
+  salt?: Uint8Array,
 ): UncompressedPublicKey[] {
-  const decrypted = decryptGranteeList(encryptedList, publisherPrivKey)
+  const decrypted = decryptGranteeList(encryptedList, publisherPrivKey, salt)
   return deserializeGranteeList(decrypted)
 }
 

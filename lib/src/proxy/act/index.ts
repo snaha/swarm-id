@@ -12,6 +12,8 @@
  */
 
 import type { Bee, BeeRequestOptions, UploadOptions } from "@ethersphere/bee-js"
+import type { MantarayNode } from "@ethersphere/core-sdk"
+import { Binary } from "cafe-utility"
 import type { UploadProgress } from "../types"
 import { uploadData, type UploadTarget } from "../upload"
 import { downloadDataWithChunkAPI } from "../download-data"
@@ -24,6 +26,8 @@ import {
   generateRandomKey,
   publicKeyFromCompressed,
   compressPublicKey,
+  entryEncryptionKey,
+  generateAccessKeySalt,
 } from "./crypto"
 
 type ActUploadOptions = UploadOptions & { beeCompatible?: boolean }
@@ -34,10 +38,10 @@ type ActUploadOptions = UploadOptions & { beeCompatible?: boolean }
  * not know which one a share was made out to, so every reader/publisher entry
  * point takes candidates and uses the one the ACT names.
  *
- * A candidate may be **denied** (#885): it is still tried, and when it is the
- * one the ACT names the call fails with that error instead of succeeding. So
- * a share made out to a key the user has switched off reads as a permission
- * problem, not as "not a grantee".
+ * A candidate may be **denied** (#885): it is still tried, and when the ACT
+ * names it and no allowed candidate, the call fails with that error instead
+ * of succeeding. So a share made out to a key the user has switched off reads
+ * as a permission problem, not as "not a grantee".
  */
 export type ActKeyCandidate =
   | Uint8Array
@@ -93,14 +97,26 @@ import {
   addHistoryEntry,
   getLatestEntry,
   getEntryAtTimestamp,
+  getAllEntries,
   saveHistoryTreeRecursively,
   deserializeHistory,
   loadHistoryEntries,
   getCurrentTimestamp,
+  type HistoryEntry,
 } from "./history"
 
 // Reference size constants
 const REFERENCE_SIZE = 32
+/** A plain 32-byte reference in hex */
+const PLAIN_REFERENCE_HEX_LENGTH = REFERENCE_SIZE * 2
+
+/**
+ * Whether a history is Bee-compatible: addressed by a plain 32-byte reference
+ * that Bee's own ACT endpoints can read, not an encrypted 64-byte one.
+ */
+export function isBeeCompatibleHistory(historyReference: string): boolean {
+  return historyReference.length === PLAIN_REFERENCE_HEX_LENGTH
+}
 
 /**
  * Result of ACT upload operation
@@ -111,25 +127,62 @@ export interface ActUploadResult {
   granteeListReference: string // Encrypted grantee list reference
   publisherPubKey: string // Compressed public key for sharing with grantees
   actReference: string // Latest ACT reference (for convenience)
+  /**
+   * The history entry whose access key encrypted `encryptedReference`. A
+   * revoke rotates the key, so reading this version after one takes it.
+   */
+  timestamp: number
   tagUid?: number
 }
 
 /**
- * Result of ACT grantee modification
+ * Result of ACT grantee modification, adding or revoking
  */
 export interface ActGranteeModifyResult {
   historyReference: string
   granteeListReference: string
   actReference: string
+  timestamp: number // The new history entry's
   tagUid?: number
 }
 
 /**
- * Result of ACT revocation. `encryptedReference` is returned unchanged (#496):
- * revocation drops the revoked entries but must not re-encrypt the reference.
+ * The latest entry of an existing history, opened by the candidate that
+ * published it: what adding or revoking grantees builds on, and what an
+ * upload continuing the history encrypts under (#931).
  */
-export interface ActRevocationResult extends ActGranteeModifyResult {
-  encryptedReference: string // Unchanged content reference (see #496)
+export interface ActHistoryHead {
+  historyReference: string
+  /** Every entry loaded; a new version is appended to it */
+  historyManifest: MantarayNode
+  latestEntry: HistoryEntry
+  /** The latest entry's ACT */
+  entries: ActEntry[]
+  publisherPrivateKey: Uint8Array
+  /** The latest entry's access key */
+  accessKey: Uint8Array
+  /**
+   * The latest entry's salt (#408), which an add keeps with the key; absent
+   * in a Bee-compatible history and in an entry written unsalted
+   */
+  accessKeySalt?: Uint8Array
+}
+
+/** A new ACT for the history: its entries and the grantee list beside it */
+interface ActVersion {
+  entries: ActEntry[]
+  grantees: UncompressedPublicKey[]
+  publisherPrivateKey: Uint8Array
+  /** The salt the entries and the grantee list are encrypted with, if any */
+  accessKeySalt?: Uint8Array
+}
+
+/** How the chunks of a new ACT version are uploaded */
+interface ActVersionUpload {
+  beeCompatible: boolean
+  options?: ActUploadOptions
+  requestOptions?: BeeRequestOptions
+  onProgress?: (progress: UploadProgress) => void
 }
 
 /**
@@ -148,6 +201,183 @@ function formatDecryptedReference(decryptedRef: Uint8Array): string {
     return uint8ArrayToHex(decryptedRef.slice(0, REFERENCE_SIZE))
   }
   return uint8ArrayToHex(decryptedRef)
+}
+
+/**
+ * The ACT entry that hands `accessKey` to `grantee`, keyed and encrypted by
+ * the ECDH of the publisher's key with theirs, the encryption key mixed with
+ * the access key's salt when it has one (#408). The lookup key stays unsalted,
+ * so a reader and the publisher find their entry without it. The publisher's
+ * own entry is the one made out to its own public key.
+ */
+function actEntryFor(
+  publisherPrivateKey: Uint8Array,
+  grantee: UncompressedPublicKey,
+  accessKey: Uint8Array,
+  salt: Uint8Array | undefined,
+): ActEntry {
+  const keys = deriveKeys(publisherPrivateKey, grantee.x, grantee.y)
+  return {
+    lookupKey: keys.lookupKey,
+    encryptedAccessKey: counterModeEncrypt(
+      accessKey,
+      entryEncryptionKey(keys.accessKeyDecryptionKey, salt),
+    ),
+  }
+}
+
+/**
+ * A fresh salt for a new access key in a native history, none in a
+ * Bee-compatible one: Bee decrypts its entries unsalted (#408).
+ */
+function newAccessKeySalt(beeCompatible: boolean): Uint8Array | undefined {
+  return beeCompatible ? undefined : generateAccessKeySalt()
+}
+
+/** The salt a history entry keeps for its access key, if it keeps one */
+function saltOf(entry: HistoryEntry): Uint8Array | undefined {
+  const { accessKeySalt } = entry.metadata
+  return accessKeySalt === undefined
+    ? undefined
+    : hexToUint8Array(accessKeySalt)
+}
+
+/**
+ * Now, or just after the latest entry when that one is stamped ahead of this
+ * clock, as a device whose clock runs fast leaves it. The new entry has to
+ * be the latest: readers and later uploads take the latest entry's ACT, and
+ * after a revoke the one before it still names the revoked grantees.
+ */
+function nextEntryTimestamp(historyManifest: MantarayNode): number {
+  const now = getCurrentTimestamp()
+  const latest = getLatestEntry(historyManifest)
+  return latest && latest.timestamp >= now ? latest.timestamp + 1 : now
+}
+
+/**
+ * Upload an ACT and its encrypted grantee list, and save the history with
+ * them as its new latest entry.
+ */
+async function appendActVersion(
+  target: UploadTarget,
+  historyManifest: MantarayNode,
+  version: ActVersion,
+  { beeCompatible, options, requestOptions, onProgress }: ActVersionUpload,
+): Promise<ActGranteeModifyResult> {
+  // ACT manifest (JSON Simple Manifest format)
+  const actResult = await uploadData(target, serializeAct(version.entries), {
+    encryptionKey: beeCompatible ? undefined : true,
+    pin: options?.pin,
+    deferred: options?.deferred,
+    tag: options?.tag,
+    requestOptions,
+  })
+
+  const encryptedGranteeList = serializeAndEncryptGranteeList(
+    version.grantees,
+    version.publisherPrivateKey,
+    version.accessKeySalt,
+  )
+  const granteeListResult = await uploadData(target, encryptedGranteeList, {
+    encryptionKey: true,
+    pin: options?.pin,
+    deferred: options?.deferred,
+    requestOptions,
+  })
+
+  const timestamp = nextEntryTimestamp(historyManifest)
+  addHistoryEntry(
+    historyManifest,
+    timestamp,
+    actResult.reference,
+    granteeListResult.reference,
+    version.accessKeySalt && uint8ArrayToHex(version.accessKeySalt),
+  )
+
+  // Save history tree bottom-up using Bee's actual returned references
+  // This ensures parent nodes reference children by their actual storage addresses
+  const historyResult = await saveHistoryTreeRecursively(
+    historyManifest,
+    async (data, isRoot) => {
+      return uploadData(target, data, {
+        encryptionKey: beeCompatible ? undefined : true,
+        pin: options?.pin,
+        deferred: options?.deferred,
+        tag: options?.tag,
+        onProgress: isRoot ? onProgress : undefined,
+        requestOptions,
+      })
+    },
+  )
+
+  return {
+    historyReference: historyResult.rootReference,
+    granteeListReference: granteeListResult.reference,
+    actReference: actResult.reference,
+    timestamp,
+    tagUid: historyResult.tagUid,
+  }
+}
+
+/** A history manifest with every entry loaded */
+async function loadHistory(
+  bee: Bee,
+  historyReference: string,
+  requestOptions?: BeeRequestOptions,
+): Promise<MantarayNode> {
+  const download = (reference: string) =>
+    downloadDataWithChunkAPI(
+      bee,
+      reference,
+      undefined,
+      undefined,
+      requestOptions,
+    )
+  const historyManifest = deserializeHistory(
+    await download(historyReference),
+    hexToUint8Array(historyReference),
+  )
+  // Load child nodes to populate entry data
+  await loadHistoryEntries(historyManifest, download)
+  return historyManifest
+}
+
+/** An ACT manifest's entries (JSON Simple Manifest) */
+async function downloadAct(
+  bee: Bee,
+  actReference: string,
+  requestOptions?: BeeRequestOptions,
+): Promise<ActEntry[]> {
+  const actData = await downloadDataWithChunkAPI(
+    bee,
+    actReference,
+    undefined,
+    undefined,
+    requestOptions,
+  )
+  return deserializeAct(actData)
+}
+
+/** The grantees of a history's latest entry, decrypted with the publisher's key */
+async function downloadGranteeList(
+  bee: Bee,
+  head: ActHistoryHead,
+  requestOptions?: BeeRequestOptions,
+): Promise<UncompressedPublicKey[]> {
+  const reference = head.latestEntry.metadata.encryptedGranteeListRef
+  if (!reference) return []
+  const encryptedList = await downloadDataWithChunkAPI(
+    bee,
+    reference,
+    undefined,
+    undefined,
+    requestOptions,
+  )
+  return decryptAndDeserializeGranteeList(
+    encryptedList,
+    head.publisherPrivateKey,
+    head.accessKeySalt,
+  )
 }
 
 /**
@@ -171,122 +401,120 @@ export async function createActForContent(
   target: UploadTarget,
   contentReference: Uint8Array,
   publisherPrivateKey: Uint8Array,
-  granteePublicKeys: Array<{ x: Uint8Array; y: Uint8Array }>,
+  granteePublicKeys: UncompressedPublicKey[],
   options?: ActUploadOptions,
   requestOptions?: BeeRequestOptions,
   onProgress?: (progress: UploadProgress) => void,
 ): Promise<ActUploadResult> {
-  // Generate random access key
-  const accessKey = generateRandomKey()
-
-  // Encrypt the content reference with the access key
-  // CTR mode preserves input length - 32-byte ref → 32-byte encrypted
-  const encryptedRef = counterModeEncrypt(contentReference, accessKey)
-
-  // Get publisher's public key
-  const publisherPubKey = publicKeyFromPrivate(publisherPrivateKey)
-
-  // Create entries for publisher and all grantees
-  const entries: ActEntry[] = []
-
-  // Entry for publisher (so they can decrypt their own content)
-  const publisherKeys = deriveKeys(
-    publisherPrivateKey,
-    publisherPubKey.x,
-    publisherPubKey.y,
-  )
-  entries.push({
-    lookupKey: publisherKeys.lookupKey,
-    encryptedAccessKey: counterModeEncrypt(
-      accessKey,
-      publisherKeys.accessKeyDecryptionKey,
-    ),
-  })
-
-  // Entry for each grantee
-  for (const granteePubKey of granteePublicKeys) {
-    const granteeKeys = deriveKeys(
-      publisherPrivateKey,
-      granteePubKey.x,
-      granteePubKey.y,
-    )
-    entries.push({
-      lookupKey: granteeKeys.lookupKey,
-      encryptedAccessKey: counterModeEncrypt(
-        accessKey,
-        granteeKeys.accessKeyDecryptionKey,
-      ),
-    })
-  }
-
-  // 1. Serialize and upload ACT manifest (JSON Simple Manifest format)
-  const actJson = serializeAct(entries)
-
   const beeCompatible = options?.beeCompatible === true
+  const accessKey = generateRandomKey()
+  const accessKeySalt = newAccessKeySalt(beeCompatible)
 
-  const actResult = await uploadData(target, actJson, {
-    encryptionKey: beeCompatible ? undefined : true,
-    pin: options?.pin,
-    deferred: options?.deferred,
-    tag: options?.tag,
-    requestOptions,
-  })
-
-  // 2. Serialize and upload encrypted grantee list
-  const encryptedGranteeList = serializeAndEncryptGranteeList(
-    granteePublicKeys,
-    publisherPrivateKey,
-  )
-
-  const granteeListResult = await uploadData(target, encryptedGranteeList, {
-    encryptionKey: true,
-    pin: options?.pin,
-    deferred: options?.deferred,
-    requestOptions,
-  })
-
-  // 3. Create and upload history manifest
-  const timestamp = getCurrentTimestamp()
-  const historyManifest = createHistoryManifest()
-  addHistoryEntry(
-    historyManifest,
-    timestamp,
-    actResult.reference,
-    granteeListResult.reference,
-  )
-
-  // Save history tree bottom-up using Bee's actual returned references
-  // This ensures parent nodes reference children by their actual storage addresses
-  const historyResult = await saveHistoryTreeRecursively(
-    historyManifest,
-    async (data, isRoot) => {
-      return uploadData(target, data, {
-        encryptionKey: beeCompatible ? undefined : true,
-        pin: options?.pin,
-        deferred: options?.deferred,
-        tag: options?.tag,
-        onProgress: isRoot ? onProgress : undefined,
-        requestOptions,
-      })
+  // Entries for the publisher (so they can decrypt their own content) and
+  // every grantee
+  const publisherPubKey = publicKeyFromPrivate(publisherPrivateKey)
+  const version = await appendActVersion(
+    target,
+    createHistoryManifest(),
+    {
+      entries: [publisherPubKey, ...granteePublicKeys].map((grantee) =>
+        actEntryFor(publisherPrivateKey, grantee, accessKey, accessKeySalt),
+      ),
+      grantees: granteePublicKeys,
+      publisherPrivateKey,
+      accessKeySalt,
+    },
+    {
+      beeCompatible,
+      options,
+      requestOptions,
+      onProgress,
     },
   )
 
-  const historyReference = historyResult.rootReference
-  const historyTagUid = historyResult.tagUid
-
-  // Compress publisher public key for API response
-  const compressedPubKey = compressPublicKey(
-    publisherPubKey.x,
-    publisherPubKey.y,
-  )
-
   return {
-    encryptedReference: uint8ArrayToHex(encryptedRef),
+    // CTR mode preserves input length - 32-byte ref → 32-byte encrypted
+    encryptedReference: uint8ArrayToHex(
+      counterModeEncrypt(contentReference, accessKey),
+    ),
+    publisherPubKey: uint8ArrayToHex(
+      compressPublicKey(publisherPubKey.x, publisherPubKey.y),
+    ),
+    ...version,
+  }
+}
+
+/**
+ * Open an existing history at its latest entry, with whichever candidate
+ * published it, and recover that entry's access key with its salt.
+ */
+export async function openActHistory(
+  bee: Bee,
+  historyReference: string,
+  publisherCandidates: ActKeyCandidates,
+  requestOptions?: BeeRequestOptions,
+): Promise<ActHistoryHead> {
+  const historyManifest = await loadHistory(
+    bee,
     historyReference,
-    granteeListReference: granteeListResult.reference,
-    publisherPubKey: uint8ArrayToHex(compressedPubKey),
-    actReference: actResult.reference,
-    tagUid: historyTagUid,
+    requestOptions,
+  )
+  const latestEntry = getLatestEntry(historyManifest)
+  if (!latestEntry) {
+    throw new Error("History manifest is empty")
+  }
+  const entries = await downloadAct(
+    bee,
+    latestEntry.metadata.actReference,
+    requestOptions,
+  )
+  const { privateKey, derived, entry } = findPublisherKey(
+    entries,
+    publisherCandidates,
+  )
+  const accessKeySalt = saltOf(latestEntry)
+  return {
+    historyReference,
+    historyManifest,
+    latestEntry,
+    entries,
+    publisherPrivateKey: privateKey,
+    accessKey: counterModeDecrypt(
+      entry.encryptedAccessKey,
+      entryEncryptionKey(derived.accessKeyDecryptionKey, accessKeySalt),
+    ),
+    accessKeySalt,
+  }
+}
+
+/**
+ * Protect a new content reference with an existing history, as Bee's upload
+ * to a history address does: the reference is encrypted with the latest
+ * entry's access key, and the history comes back as it is. Nothing is
+ * uploaded (no ACT, grantee list or history entry), so the latest entry's
+ * grantees read it; they are managed with `addGranteesToAct` and
+ * `revokeGranteesFromAct`.
+ */
+export function continueActForContent(
+  head: ActHistoryHead,
+  contentReference: Uint8Array,
+): ActUploadResult {
+  const { encryptedGranteeListRef } = head.latestEntry.metadata
+  if (!encryptedGranteeListRef) {
+    throw new Error("The history's latest entry names no grantee list")
+  }
+  const publisherPubKey = publicKeyFromPrivate(head.publisherPrivateKey)
+  return {
+    encryptedReference: uint8ArrayToHex(
+      counterModeEncrypt(contentReference, head.accessKey),
+    ),
+    historyReference: head.historyReference,
+    granteeListReference: encryptedGranteeListRef,
+    publisherPubKey: uint8ArrayToHex(
+      compressPublicKey(publisherPubKey.x, publisherPubKey.y),
+    ),
+    actReference: head.latestEntry.metadata.actReference,
+    timestamp: head.latestEntry.timestamp,
   }
 }
 
@@ -298,8 +526,13 @@ export async function createActForContent(
  * @param historyReference - History manifest reference
  * @param publisherPubKeyHex - Publisher's compressed public key (hex)
  * @param readerPrivateKeys - Reader's private key(s), 32 bytes each; the first
- *   one the ACT names (as a grantee, or as the publisher itself) decrypts
- * @param timestamp - Optional timestamp to look up specific ACT version
+ *   allowed one the ACT names (as a grantee, or as the publisher itself)
+ *   decrypts, and a denied one's error is thrown when no allowed one is named
+ * @param timestamp - The history entry whose access key encrypted the
+ *   reference, as its upload returned it; the latest entry when omitted. A
+ *   reader that entry does not name is looked up in the later entries that
+ *   carry the same key, up to the next rotation, so the one timestamp opens
+ *   the version for every grantee of its key, including one added later
  * @param requestOptions - Bee request options
  * @returns Decrypted content reference (hex string)
  */
@@ -316,419 +549,287 @@ export async function decryptActReference(
   const compressedPubKey = hexToUint8Array(publisherPubKeyHex)
   const publisherPubKey = publicKeyFromCompressed(compressedPubKey)
 
-  // Download history manifest
-  const historyData = await downloadDataWithChunkAPI(
+  const historyManifest = await loadHistory(
     bee,
     historyReference,
-    undefined,
-    undefined,
     requestOptions,
   )
-  const historyManifest = deserializeHistory(
-    historyData,
-    hexToUint8Array(historyReference),
-  )
 
-  // Load child nodes to populate entry data
-  await loadHistoryEntries(historyManifest, async (ref) => {
-    return downloadDataWithChunkAPI(
-      bee,
-      ref,
-      undefined,
-      undefined,
-      requestOptions,
-    )
-  })
-
-  // Get the appropriate entry
-  const entry = timestamp
+  const anchor = timestamp
     ? getEntryAtTimestamp(historyManifest, timestamp)
     : getLatestEntry(historyManifest)
 
-  if (!entry) {
+  if (!anchor) {
     throw new Error("No ACT entry found in history")
   }
 
-  const actReference = entry.metadata.actReference
-
-  // Download ACT manifest (JSON Simple Manifest)
-  const actData = await downloadDataWithChunkAPI(
+  const accessKey = await accessKeyOfRun(
     bee,
-    actReference,
-    undefined,
-    undefined,
+    historyManifest,
+    anchor,
+    readerLookups(publisherPubKey, readerPrivateKeys),
     requestOptions,
   )
-  const entries = deserializeAct(actData)
-
-  // Each candidate key, first as a grantee (ECDH with the publisher), then as
-  // the publisher itself (ECDH with its own key) — all local, the manifest is
-  // already here.
-  for (const { privateKey: readerPrivateKey, denied } of candidateKeys(
-    readerPrivateKeys,
-  )) {
-    const readerPubKey = publicKeyFromPrivate(readerPrivateKey)
-    for (const peer of [publisherPubKey, readerPubKey]) {
-      const keys = deriveKeys(readerPrivateKey, peer.x, peer.y)
-      const entry = findEntryByLookupKey(entries, keys.lookupKey)
-      if (!entry) continue
-      if (denied) throw denied
-      const accessKey = counterModeDecrypt(
-        entry.encryptedAccessKey,
-        keys.accessKeyDecryptionKey,
-      )
-      const decryptedRef = counterModeDecrypt(
-        hexToUint8Array(encryptedReference),
-        accessKey,
-      )
-      return formatDecryptedReference(decryptedRef)
-    }
-  }
-
-  throw new Error("Access denied: no ACT entry found for this key")
+  return formatDecryptedReference(
+    counterModeDecrypt(hexToUint8Array(encryptedReference), accessKey),
+  )
 }
 
 /**
- * Add grantees to an existing ACT
+ * What a reader finds its entry in an ACT by, and decrypts it with once mixed
+ * with the history entry's salt
+ */
+interface ReaderLookup {
+  lookupKey: Uint8Array
+  accessKeyDecryptionKey: Uint8Array
+  denied?: Error
+}
+
+/**
+ * Each candidate key, first as a grantee (ECDH with the publisher), then as
+ * the publisher itself (ECDH with its own key), in the order an ACT is
+ * searched.
+ */
+function readerLookups(
+  publisherPubKey: UncompressedPublicKey,
+  readerPrivateKeys: ActKeyCandidates,
+): ReaderLookup[] {
+  return candidateKeys(readerPrivateKeys).flatMap(({ privateKey, denied }) => {
+    const readerPubKey = publicKeyFromPrivate(privateKey)
+    return [publisherPubKey, readerPubKey].map((peer) => {
+      const { lookupKey, accessKeyDecryptionKey } = deriveKeys(
+        privateKey,
+        peer.x,
+        peer.y,
+      )
+      return { lookupKey, accessKeyDecryptionKey, denied }
+    })
+  })
+}
+
+/** One history entry: its ACT's entries, and the salt they are encrypted with */
+interface ActOfEntry {
+  entries: ActEntry[]
+  salt: Uint8Array | undefined
+}
+
+/**
+ * The anchor entry's access key, handed to the reader by the anchor's ACT or
+ * by a later entry's under the same key: an add keeps the key, so a grantee
+ * added after a version is named only further on. The later ACTs are
+ * downloaded one at a time, oldest first, and only while no earlier one hands
+ * the reader the key; the walk stops at the first rotation, so it never hands
+ * out a key the reader was not granted.
+ *
+ * A denied candidate an ACT names is passed over, so a share also made out to
+ * an allowed one, in that ACT or a later one under the same key, still reads.
+ * When none hands out the key, the first denial is thrown, or "access denied"
+ * when no candidate was named at all.
+ */
+async function accessKeyOfRun(
+  bee: Bee,
+  historyManifest: MantarayNode,
+  anchor: HistoryEntry,
+  lookups: ReaderLookup[],
+  requestOptions?: BeeRequestOptions,
+): Promise<Uint8Array> {
+  let denial: Error | undefined
+  const accessKeyIn = ({ entries, salt }: ActOfEntry) => {
+    for (const { lookupKey, accessKeyDecryptionKey, denied } of lookups) {
+      const entry = findEntryByLookupKey(entries, lookupKey)
+      if (!entry) continue
+      if (denied) {
+        denial ??= denied
+        continue
+      }
+      return counterModeDecrypt(
+        entry.encryptedAccessKey,
+        entryEncryptionKey(accessKeyDecryptionKey, salt),
+      )
+    }
+    return undefined
+  }
+  const actOf = async (entry: HistoryEntry): Promise<ActOfEntry> => ({
+    entries: await downloadAct(
+      bee,
+      entry.metadata.actReference,
+      requestOptions,
+    ),
+    salt: saltOf(entry),
+  })
+
+  const anchorAct = await actOf(anchor)
+  const named = accessKeyIn(anchorAct)
+  if (named) return named
+
+  const laterEntries = getAllEntries(historyManifest)
+    .filter((entry) => entry.timestamp > anchor.timestamp)
+    .reverse()
+  for (const entry of laterEntries) {
+    // A new salt is a rotation, told before its ACT is downloaded
+    if (!sameSalt(saltOf(entry), anchorAct.salt)) break
+    const act = await actOf(entry)
+    if (!holdsSameAccessKey(anchorAct, act)) break
+    const accessKey = accessKeyIn(act)
+    if (accessKey) return accessKey
+  }
+  throw denial ?? new Error("Access denied: no ACT entry found for this key")
+}
+
+/** Whether two entries carry the same salt, or both none */
+function sameSalt(
+  a: Uint8Array | undefined,
+  b: Uint8Array | undefined,
+): boolean {
+  return a === undefined || b === undefined ? a === b : Binary.equals(a, b)
+}
+
+/**
+ * Whether `later` holds the same access key as `anchor`. An add keeps the key
+ * and its salt and copies every entry byte for byte; a rotation draws a fresh
+ * key, and in a native history a fresh salt (#408), and re-encrypts every
+ * entry. So `later` holds the key when it keeps the salt, or the absence of
+ * one, and holds one of `anchor`'s entries byte for byte: under one salt, a
+ * lookup key and the key encrypting its entry both follow from one ECDH. The
+ * publisher's own entry is in every ACT of a history, so two of them always
+ * share a lookup key.
+ */
+function holdsSameAccessKey(anchor: ActOfEntry, later: ActOfEntry): boolean {
+  return (
+    sameSalt(anchor.salt, later.salt) &&
+    anchor.entries.some((entry) => {
+      const copy = findEntryByLookupKey(later.entries, entry.lookupKey)
+      return (
+        copy !== undefined &&
+        Binary.equals(copy.encryptedAccessKey, entry.encryptedAccessKey)
+      )
+    })
+  )
+}
+
+/**
+ * Add grantees to an existing ACT. The access key stays: a new grantee reads
+ * every version published under it.
  */
 export async function addGranteesToAct(
   target: UploadTarget,
   bee: Bee,
   historyReference: string,
   publisherCandidates: ActKeyCandidates,
-  newGranteePublicKeys: Array<{ x: Uint8Array; y: Uint8Array }>,
+  newGranteePublicKeys: UncompressedPublicKey[],
   options?: ActUploadOptions,
   requestOptions?: BeeRequestOptions,
   onProgress?: (progress: UploadProgress) => void,
 ): Promise<ActGranteeModifyResult> {
-  const beeCompatible = historyReference.length === 64
-
-  // Download history manifest
-  const historyData = await downloadDataWithChunkAPI(
+  const head = await openActHistory(
     bee,
     historyReference,
-    undefined,
-    undefined,
+    publisherCandidates,
     requestOptions,
   )
-  const historyManifest = deserializeHistory(
-    historyData,
-    hexToUint8Array(historyReference),
-  )
+  const existingGrantees = await downloadGranteeList(bee, head, requestOptions)
 
-  // Load child nodes to populate entry data
-  await loadHistoryEntries(historyManifest, async (ref) => {
-    return downloadDataWithChunkAPI(
-      bee,
-      ref,
-      undefined,
-      undefined,
+  // The existing entries, plus one per new grantee under the same key and
+  // salt (#408): the grantee list only grows, so it may keep its keystream
+  return appendActVersion(
+    target,
+    head.historyManifest,
+    {
+      entries: [
+        ...head.entries,
+        ...newGranteePublicKeys.map((grantee) =>
+          actEntryFor(
+            head.publisherPrivateKey,
+            grantee,
+            head.accessKey,
+            head.accessKeySalt,
+          ),
+        ),
+      ],
+      grantees: [...existingGrantees, ...newGranteePublicKeys],
+      publisherPrivateKey: head.publisherPrivateKey,
+      accessKeySalt: head.accessKeySalt,
+    },
+    {
+      beeCompatible: isBeeCompatibleHistory(historyReference),
+      options,
       requestOptions,
-    )
-  })
-
-  // Get latest entry
-  const latestEntry = getLatestEntry(historyManifest)
-  if (!latestEntry) {
-    throw new Error("History manifest is empty")
-  }
-
-  // Download current ACT (JSON Simple Manifest)
-  const actData = await downloadDataWithChunkAPI(
-    bee,
-    latestEntry.metadata.actReference,
-    undefined,
-    undefined,
-    requestOptions,
-  )
-  const entries = deserializeAct(actData)
-
-  // Recover the access key with whichever candidate published the ACT
-  const {
-    privateKey: publisherPrivateKey,
-    derived: publisherKeys,
-    entry: publisherEntry,
-  } = findPublisherKey(entries, publisherCandidates)
-  const accessKey = counterModeDecrypt(
-    publisherEntry.encryptedAccessKey,
-    publisherKeys.accessKeyDecryptionKey,
-  )
-
-  // Create new ACT manifest with existing entries plus new grantees
-  const newEntries: ActEntry[] = [...entries]
-  for (const granteePubKey of newGranteePublicKeys) {
-    const granteeKeys = deriveKeys(
-      publisherPrivateKey,
-      granteePubKey.x,
-      granteePubKey.y,
-    )
-    newEntries.push({
-      lookupKey: granteeKeys.lookupKey,
-      encryptedAccessKey: counterModeEncrypt(
-        accessKey,
-        granteeKeys.accessKeyDecryptionKey,
-      ),
-    })
-  }
-
-  // Download and update grantee list
-  let existingGrantees: UncompressedPublicKey[] = []
-  if (latestEntry.metadata.encryptedGranteeListRef) {
-    const encryptedList = await downloadDataWithChunkAPI(
-      bee,
-      latestEntry.metadata.encryptedGranteeListRef,
-      undefined,
-      undefined,
-      requestOptions,
-    )
-    existingGrantees = decryptAndDeserializeGranteeList(
-      encryptedList,
-      publisherPrivateKey,
-    )
-  }
-  const updatedGrantees = [...existingGrantees, ...newGranteePublicKeys]
-
-  // Upload new ACT manifest (JSON Simple Manifest format)
-  const newActJson = serializeAct(newEntries)
-
-  const actResult = await uploadData(target, newActJson, {
-    encryptionKey: beeCompatible ? undefined : true,
-    pin: options?.pin,
-    deferred: options?.deferred,
-    tag: options?.tag,
-    requestOptions,
-  })
-
-  // Upload updated grantee list
-  const encryptedGranteeList = serializeAndEncryptGranteeList(
-    updatedGrantees,
-    publisherPrivateKey,
-  )
-  const granteeListResult = await uploadData(target, encryptedGranteeList, {
-    encryptionKey: true,
-    pin: options?.pin,
-    deferred: options?.deferred,
-    requestOptions,
-  })
-
-  // Add new history entry
-  const timestamp = getCurrentTimestamp()
-  addHistoryEntry(
-    historyManifest,
-    timestamp,
-    actResult.reference,
-    granteeListResult.reference,
-  )
-
-  // Save history tree bottom-up using Bee's actual returned references
-  const historyResult = await saveHistoryTreeRecursively(
-    historyManifest,
-    async (data, isRoot) => {
-      return uploadData(target, data, {
-        encryptionKey: beeCompatible ? undefined : true,
-        pin: options?.pin,
-        deferred: options?.deferred,
-        tag: options?.tag,
-        onProgress: isRoot ? onProgress : undefined,
-        requestOptions,
-      })
+      onProgress,
     },
   )
-
-  const newHistoryReference = historyResult.rootReference
-  const historyTagUid = historyResult.tagUid
-
-  return {
-    historyReference: newHistoryReference,
-    granteeListReference: granteeListResult.reference,
-    actReference: actResult.reference,
-    tagUid: historyTagUid,
-  }
 }
 
 /**
- * Revoke grantees from an ACT by dropping their entries. The content reference is
- * returned unchanged — revocation must not re-encrypt it (#496).
+ * Revoke grantees by rotating the access key, as Bee's ACT update does: a new
+ * ACT under a fresh key, with a fresh salt in a native history, names the
+ * publisher and the remaining grantees, and becomes the history's latest
+ * entry. No content reference is re-encrypted.
  */
 export async function revokeGranteesFromAct(
   target: UploadTarget,
   bee: Bee,
   historyReference: string,
-  encryptedReference: string,
   publisherCandidates: ActKeyCandidates,
-  revokePublicKeys: Array<{ x: Uint8Array; y: Uint8Array }>,
+  revokePublicKeys: UncompressedPublicKey[],
   options?: ActUploadOptions,
   requestOptions?: BeeRequestOptions,
   onProgress?: (progress: UploadProgress) => void,
-): Promise<ActRevocationResult> {
-  const beeCompatible = historyReference.length === 64
-
-  // Download history manifest
-  const historyData = await downloadDataWithChunkAPI(
+): Promise<ActGranteeModifyResult> {
+  const head = await openActHistory(
     bee,
     historyReference,
-    undefined,
-    undefined,
+    publisherCandidates,
     requestOptions,
   )
-  const historyManifest = deserializeHistory(
-    historyData,
-    hexToUint8Array(historyReference),
+  const remainingGrantees = (
+    await downloadGranteeList(bee, head, requestOptions)
+  ).filter(
+    (grantee) =>
+      !revokePublicKeys.some((revoked) => publicKeysEqual(grantee, revoked)),
   )
 
-  // Load child nodes to populate entry data
-  await loadHistoryEntries(historyManifest, async (ref) => {
-    return downloadDataWithChunkAPI(
-      bee,
-      ref,
-      undefined,
-      undefined,
-      requestOptions,
-    )
-  })
-
-  // Get latest entry
-  const latestEntry = getLatestEntry(historyManifest)
-  if (!latestEntry) {
-    throw new Error("History manifest is empty")
-  }
-
-  // Download current ACT (JSON Simple Manifest)
-  const actData = await downloadDataWithChunkAPI(
-    bee,
-    latestEntry.metadata.actReference,
-    undefined,
-    undefined,
-    requestOptions,
-  )
-  const entries = deserializeAct(actData)
-
-  // Recover the access key with whichever candidate published the ACT
-  const {
-    privateKey: publisherPrivateKey,
-    derived: publisherKeys,
-    entry: publisherEntry,
-  } = findPublisherKey(entries, publisherCandidates)
-
-  // Keep the existing access key. Rotating it and re-encrypting the SAME content
-  // reference under the new key was a revocation bypass (#496): counterModeEncrypt
-  // is nonce-free CTR, so two ciphertexts of the same reference expose the new
-  // keystream to any former grantee, who read both from immutable history. Re-keying
-  // is also pointless — immutability keeps the old ciphertext readable forever, so
-  // it can never un-share. Revocation only drops the revoked entries from the ACT.
-  const accessKey = counterModeDecrypt(
-    publisherEntry.encryptedAccessKey,
-    publisherKeys.accessKeyDecryptionKey,
-  )
-
-  // Get current grantee list and filter out revoked
-  let currentGrantees: UncompressedPublicKey[] = []
-  if (latestEntry.metadata.encryptedGranteeListRef) {
-    const encryptedList = await downloadDataWithChunkAPI(
-      bee,
-      latestEntry.metadata.encryptedGranteeListRef,
-      undefined,
-      undefined,
-      requestOptions,
-    )
-    currentGrantees = decryptAndDeserializeGranteeList(
-      encryptedList,
-      publisherPrivateKey,
-    )
-  }
-
-  const remainingGrantees = currentGrantees.filter((grantee) => {
-    return !revokePublicKeys.some((revoked) =>
-      publicKeysEqual(grantee, revoked),
-    )
-  })
-
-  // Rebuild the ACT with the surviving entries under the same access key.
-  const newEntries: ActEntry[] = []
-
-  // Entry for publisher
-  newEntries.push({
-    lookupKey: publisherKeys.lookupKey,
-    encryptedAccessKey: counterModeEncrypt(
-      accessKey,
-      publisherKeys.accessKeyDecryptionKey,
-    ),
-  })
-
-  // Entry for each remaining grantee
-  for (const granteePubKey of remainingGrantees) {
-    const granteeKeys = deriveKeys(
-      publisherPrivateKey,
-      granteePubKey.x,
-      granteePubKey.y,
-    )
-    newEntries.push({
-      lookupKey: granteeKeys.lookupKey,
-      encryptedAccessKey: counterModeEncrypt(
-        accessKey,
-        granteeKeys.accessKeyDecryptionKey,
+  // A fresh key, which encrypts nothing here but the new ACT's own entries.
+  // Every earlier entry stays in the immutable history, so a revoked grantee
+  // keeps the old key and every version published under it. Keeping the old
+  // key would hand them every later version too, from any earlier entry.
+  // counterModeEncrypt is nonce-free CTR, one keystream per key, so the new
+  // key must never encrypt a reference they already know: two ciphertexts of
+  // one reference expose the keystream (#496). It only ever encrypts
+  // references uploaded after the revoke.
+  //
+  // The entries of the remaining grantees and the publisher are fixed per
+  // pair but for the salt, and a revoked grantee who obtains the history
+  // reference every remaining reader holds reads this ACT too. In a native
+  // history a fresh salt gives those entries new keystreams, so the old key
+  // tells nothing about the new one (#408). A Bee-compatible history has no
+  // salt: there the old key XORed with the two ACTs' entries for one pair is
+  // the new key, and the revoke keeps out only a grantee who never reads this
+  // ACT.
+  const beeCompatible = isBeeCompatibleHistory(historyReference)
+  const accessKey = generateRandomKey()
+  const accessKeySalt = newAccessKeySalt(beeCompatible)
+  const { publisherPrivateKey } = head
+  return appendActVersion(
+    target,
+    head.historyManifest,
+    {
+      entries: [
+        publicKeyFromPrivate(publisherPrivateKey),
+        ...remainingGrantees,
+      ].map((grantee) =>
+        actEntryFor(publisherPrivateKey, grantee, accessKey, accessKeySalt),
       ),
-    })
-  }
-
-  // Upload new ACT manifest (JSON Simple Manifest format)
-  const newActJson = serializeAct(newEntries)
-
-  const actResult = await uploadData(target, newActJson, {
-    encryptionKey: beeCompatible ? undefined : true,
-    pin: options?.pin,
-    deferred: options?.deferred,
-    tag: options?.tag,
-    requestOptions,
-  })
-
-  // Upload updated grantee list
-  const encryptedGranteeList = serializeAndEncryptGranteeList(
-    remainingGrantees,
-    publisherPrivateKey,
-  )
-  const granteeListResult = await uploadData(target, encryptedGranteeList, {
-    encryptionKey: true,
-    pin: options?.pin,
-    deferred: options?.deferred,
-    requestOptions,
-  })
-
-  // Add new history entry
-  const timestamp = getCurrentTimestamp()
-  addHistoryEntry(
-    historyManifest,
-    timestamp,
-    actResult.reference,
-    granteeListResult.reference,
-  )
-
-  // Save history tree bottom-up using Bee's actual returned references
-  const historyResult = await saveHistoryTreeRecursively(
-    historyManifest,
-    async (data, isRoot) => {
-      return uploadData(target, data, {
-        encryptionKey: beeCompatible ? undefined : true,
-        pin: options?.pin,
-        deferred: options?.deferred,
-        tag: options?.tag,
-        onProgress: isRoot ? onProgress : undefined,
-        requestOptions,
-      })
+      grantees: remainingGrantees,
+      publisherPrivateKey,
+      accessKeySalt,
+    },
+    {
+      beeCompatible,
+      options,
+      requestOptions,
+      onProgress,
     },
   )
-
-  const newHistoryReference = historyResult.rootReference
-  const historyTagUid = historyResult.tagUid
-
-  return {
-    // Unchanged — see #496: revocation must not re-encrypt the reference.
-    encryptedReference,
-    historyReference: newHistoryReference,
-    granteeListReference: granteeListResult.reference,
-    actReference: actResult.reference,
-    tagUid: historyTagUid,
-  }
 }
 
 /**
@@ -740,29 +841,11 @@ export async function getGranteesFromAct(
   publisherCandidates: ActKeyCandidates,
   requestOptions?: BeeRequestOptions,
 ): Promise<string[]> {
-  // Download history manifest
-  const historyData = await downloadDataWithChunkAPI(
+  const historyManifest = await loadHistory(
     bee,
     historyReference,
-    undefined,
-    undefined,
     requestOptions,
   )
-  const historyManifest = deserializeHistory(
-    historyData,
-    hexToUint8Array(historyReference),
-  )
-
-  // Load child nodes to populate entry data
-  await loadHistoryEntries(historyManifest, async (ref) => {
-    return downloadDataWithChunkAPI(
-      bee,
-      ref,
-      undefined,
-      undefined,
-      requestOptions,
-    )
-  })
 
   // Get latest entry
   const latestEntry = getLatestEntry(historyManifest)
@@ -773,15 +856,8 @@ export async function getGranteesFromAct(
   // The ACT manifest says which candidate published it. Decrypting the list
   // with the wrong key yields garbage that only a 0x04 prefix check would
   // catch, so it is not used to tell the keys apart.
-  const actData = await downloadDataWithChunkAPI(
-    bee,
-    latestEntry.metadata.actReference,
-    undefined,
-    undefined,
-    requestOptions,
-  )
   const { privateKey: publisherPrivateKey } = findPublisherKey(
-    deserializeAct(actData),
+    await downloadAct(bee, latestEntry.metadata.actReference, requestOptions),
     publisherCandidates,
   )
 
@@ -797,6 +873,7 @@ export async function getGranteesFromAct(
   const grantees = decryptAndDeserializeGranteeList(
     encryptedList,
     publisherPrivateKey,
+    saltOf(latestEntry),
   )
 
   // Return as compressed hex strings

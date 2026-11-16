@@ -38,6 +38,7 @@ import type {
   SequentialFeedUploadRawPayloadMessage,
   SequentialFeedUploadReferenceMessage,
   ActUploadDataMessage,
+  ActPublisher,
   ActDownloadDataMessage,
   ActAddGranteesMessage,
   ActRevokeGranteesMessage,
@@ -227,10 +228,17 @@ import {
 import { appSessionDuration } from "./utils/constants"
 import { PERMISSIONS_POPUP_MAX_MS, untilPopupClosed } from "./utils/popup"
 import { effectivePermissions } from "./permissions"
-import type { ActKeyCandidate } from "./proxy/act"
+import type {
+  ActKeyCandidate,
+  ActUploadResult,
+  UncompressedPublicKey,
+} from "./proxy/act"
 import { buildAuthUrl } from "./utils/url"
 import {
   createActForContent,
+  continueActForContent,
+  openActHistory,
+  isBeeCompatibleHistory,
   decryptActReference,
   addGranteesToAct,
   revokeGranteesFromAct,
@@ -359,6 +367,49 @@ function deltaFoldView(snapshot: AccountStateSnapshot): DeviceStateSnapshot {
 /** A parent message as its handler gets it, the request's abort signal on it. */
 type Abortable<M> = M & {
   requestOptions: NonNullable<RequestOptions> & { signal: AbortSignal }
+}
+
+/** How an ACT upload protects its manifest, settled before anything is written */
+interface ManifestProtection {
+  /** The manifest, and so the protected reference, stays unencrypted */
+  beeCompatible: boolean
+  protect: (
+    target: UploadTarget,
+    manifestReference: Uint8Array,
+  ) => Promise<ActUploadResult>
+}
+
+/** What an ACT download that names no `timestamp` adds when its manifest fails */
+const PRE_REVOKE_HINT =
+  "If this version was uploaded before a revoke, pass the timestamp its upload returned."
+
+/**
+ * The failure to load the manifest an ACT reference decrypted to, for a
+ * download that named no `timestamp`. Nothing checks a decrypted reference,
+ * so a version from before a revoke, decrypted with the latest entry's key,
+ * gives one that leads nowhere, and the hint names what to pass. The failure
+ * keeps its code and details. An abort or a timeout says nothing about the
+ * key and is left as it is.
+ */
+function withPreRevokeHint(error: unknown, signal: AbortSignal): unknown {
+  const {
+    error: message,
+    code,
+    ...details
+  } = toWireError(error, "Loading the manifest failed")
+  if (
+    signal.aborted ||
+    code === "aborted" ||
+    code === "timeout" ||
+    (error instanceof Error && error.name === "AbortError")
+  ) {
+    return error
+  }
+  return new SwarmIdError(
+    code,
+    `Loading the manifest failed: ${message.replace(/\.$/, "")}. ${PRE_REVOKE_HINT}`,
+    { ...details, cause: error },
+  )
 }
 
 /**
@@ -6144,6 +6195,90 @@ export class SwarmIdProxy {
         ]
   }
 
+  /**
+   * The key that publishes as `publisher`: the app key by default, or the
+   * account-wide sharing key, which the user may have switched off for this
+   * app (#885).
+   */
+  private actPublisherKey(publisher: ActPublisher | undefined): Uint8Array {
+    if (publisher !== "identity") return hexToUint8Array(this.appSecret!)
+    if (!this.sessionPermissions().writeAccess) {
+      throw this.permissionDenied("writeAccess")
+    }
+    const sharing = this.sharingSecret()
+    if (!sharing) {
+      throw new Error("No sharing key: this session carries no account")
+    }
+    return sharing
+  }
+
+  /** A new history for an ACT upload, published by the key `publisher` names */
+  private newActHistory(
+    granteePublicKeys: UncompressedPublicKey[],
+    options: ActUploadDataMessage["options"],
+    requestOptions: BeeRequestOptions,
+  ): ManifestProtection {
+    const publisherPrivateKey = this.actPublisherKey(options?.publisher)
+    return {
+      beeCompatible: options?.beeCompatible === true,
+      protect: (target, manifestReference) =>
+        createActForContent(
+          target,
+          manifestReference,
+          publisherPrivateKey,
+          granteePublicKeys,
+          options,
+          requestOptions,
+        ),
+    }
+  }
+
+  /**
+   * The history an ACT upload continues (#931), opened by the key that
+   * published it: whichever of the session's two did, unless `publisher`
+   * names one. Its grantees are managed with `actAddGrantees` /
+   * `actRevokeGrantees`, and the history reference says whether it is
+   * Bee-compatible, so the upload may not say otherwise on either.
+   */
+  private async continuedActHistory(
+    historyReference: string,
+    grantees: string[],
+    options: ActUploadDataMessage["options"],
+    requestOptions: BeeRequestOptions,
+  ): Promise<ManifestProtection> {
+    if (grantees.length > 0) {
+      throw new SwarmIdError(
+        "invalid-request",
+        "An upload that continues a history takes no grantees: add or revoke them with actAddGrantees and actRevokeGrantees",
+      )
+    }
+    const beeCompatible = isBeeCompatibleHistory(historyReference)
+    if (
+      options?.beeCompatible !== undefined &&
+      options.beeCompatible !== beeCompatible
+    ) {
+      throw new SwarmIdError(
+        "invalid-request",
+        `beeCompatible: ${options.beeCompatible} contradicts the history, which is ${beeCompatible ? "" : "not "}Bee-compatible`,
+      )
+    }
+    const publisherCandidates =
+      options?.publisher === undefined
+        ? this.actKeys("writeAccess")
+        : this.actPublisherKey(options.publisher)
+    const head = await openActHistory(
+      this.bee,
+      historyReference,
+      publisherCandidates,
+      requestOptions,
+    )
+    return {
+      beeCompatible,
+      protect: async (_target, manifestReference) =>
+        continueActForContent(head, manifestReference),
+    }
+  }
+
   private async handleActUploadData(
     message: Abortable<ActUploadDataMessage>,
     event: MessageEvent,
@@ -6173,22 +6308,28 @@ export class SwarmIdProxy {
         enableProgress,
       )
 
-      // The app key publishes unless the dApp asked for the identity-level
-      // key, which the user may have switched off for this app (#885)
-      if (
-        options?.publisher === "identity" &&
-        !this.sessionPermissions().writeAccess
-      ) {
-        throw this.permissionDenied("writeAccess")
+      // A history to continue is opened before anything is written, so a
+      // key that did not publish it spends no stamps
+      const { beeCompatible, protect } =
+        options?.historyReference === undefined
+          ? this.newActHistory(granteePublicKeys, options, requestOptions)
+          : await this.continuedActHistory(
+              options.historyReference,
+              grantees,
+              options,
+              requestOptions,
+            )
+      // Every version of a history is encrypted under one access key, a
+      // single keystream, so one reference known in the clear exposes the
+      // rest. A Bee-compatible history keeps its manifest plain, which leaves
+      // the content's own encryption the only thing that keeps the reference
+      // unguessable, in the first version as much as in a continued one.
+      if (beeCompatible && options?.encrypt === false) {
+        throw new SwarmIdError(
+          "invalid-request",
+          "encrypt: false is refused for a Bee-compatible ACT upload: its plain manifest would make the reference guessable, and every version in the history shares one keystream",
+        )
       }
-      const publisherPrivateKey =
-        options?.publisher === "identity"
-          ? this.sharingSecret()
-          : hexToUint8Array(this.appSecret!)
-      if (!publisherPrivateKey) {
-        throw new Error("No sharing key: this session carries no account")
-      }
-      const beeCompatible = options?.beeCompatible === true
 
       const {
         result: { actResult, contentUpload },
@@ -6234,19 +6375,11 @@ export class SwarmIdProxy {
             { encrypt: !beeCompatible },
           )
 
-          // Step 4: Use manifest reference for ACT encryption
-          const manifestReferenceBytes = hexToUint8Array(
-            manifestResult.rootReference,
-          )
-
-          // Create ACT for the manifest (which points to the content)
-          const actResultValue = await createActForContent(
+          // Step 4: Protect the manifest reference (the manifest points to
+          // the content) with the ACT
+          const actResultValue = await protect(
             target,
-            manifestReferenceBytes,
-            publisherPrivateKey,
-            granteePublicKeys,
-            options,
-            requestOptions,
+            hexToUint8Array(manifestResult.rootReference),
           )
 
           return {
@@ -6267,6 +6400,7 @@ export class SwarmIdProxy {
         granteeListReference: actResult.granteeListReference,
         publisherPubKey: actResult.publisherPubKey,
         actReference: actResult.actReference,
+        timestamp: actResult.timestamp,
         tagUid: contentUpload.tagUid,
       })
     } catch (error) {
@@ -6275,7 +6409,7 @@ export class SwarmIdProxy {
   }
 
   private async handleActDownloadData(
-    message: ActDownloadDataMessage,
+    message: Abortable<ActDownloadDataMessage>,
     event: MessageEvent,
   ): Promise<void> {
     const {
@@ -6311,7 +6445,11 @@ export class SwarmIdProxy {
         this.bee,
         contentReference,
         requestOptions,
-      )
+      ).catch((error: unknown) => {
+        throw timestamp === undefined
+          ? withPreRevokeHint(error, requestOptions.signal)
+          : error
+      })
 
       // Step 2: Get the index document path from manifest metadata
       const { indexDocument } = new BeeMantarayNode(manifest).getDocsMetadata()
@@ -6393,6 +6531,7 @@ export class SwarmIdProxy {
         historyReference: result.historyReference,
         granteeListReference: result.granteeListReference,
         actReference: result.actReference,
+        timestamp: result.timestamp,
       })
     } catch (error) {
       this.sendErrorToParent(event, requestId, error, "ACT add grantees failed")
@@ -6406,7 +6545,6 @@ export class SwarmIdProxy {
     const {
       requestId,
       historyReference,
-      encryptedReference,
       revokeGrantees,
       batchID,
       requestOptions,
@@ -6422,7 +6560,7 @@ export class SwarmIdProxy {
         parseCompressedPublicKey(hex),
       )
 
-      // Revoke grantees from ACT (drops their entries; reference unchanged, #496)
+      // Revoke grantees from ACT (rotates the access key, re-encrypts nothing)
       const { result, stampedChunks } = await this.withCountedWrite(
         { signal: message.requestOptions.signal, useWorkers: true },
         async (target) => {
@@ -6430,7 +6568,6 @@ export class SwarmIdProxy {
             target,
             this.bee,
             historyReference,
-            encryptedReference,
             publisherPrivateKey,
             revokePublicKeys,
             undefined,
@@ -6444,10 +6581,10 @@ export class SwarmIdProxy {
         type: "actRevokeGranteesResponse",
         requestId,
         stampedChunks,
-        encryptedReference: result.encryptedReference,
         historyReference: result.historyReference,
         granteeListReference: result.granteeListReference,
         actReference: result.actReference,
+        timestamp: result.timestamp,
       })
     } catch (error) {
       this.sendErrorToParent(

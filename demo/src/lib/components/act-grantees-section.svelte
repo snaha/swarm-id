@@ -87,6 +87,7 @@
           { label: 'New History Ref', value: addResult.historyReference },
           { label: 'New ACT Ref', value: addResult.actReference },
           { label: 'Grantee List Ref', value: addResult.granteeListReference },
+          { label: 'Timestamp', value: String(addResult.timestamp) },
         ],
         status: 'Use the new History Reference for future downloads/modifications',
         statusVariant: 'success',

@@ -38,6 +38,7 @@ export default defineConfig({
             { label: 'Quick Start', slug: 'getting-started' },
             { label: 'Architecture', slug: 'architecture' },
             { label: 'Key Derivation', slug: 'key-derivation' },
+            { label: 'Access Control (ACT)', slug: 'access-control' },
             { label: 'Storage Layout', slug: 'storage-layout' },
             { label: 'Subsidised Gateway', slug: 'subsidised-gateway' },
             { label: 'Drives & Permissions', slug: 'drives-and-permissions' },

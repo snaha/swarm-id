@@ -778,7 +778,7 @@ Downloads raw binary data from the Swarm network: the counterpart of [`uploadDat
 | Parameter                       | Type                     | Required | Description                                                                                                                            |
 | ------------------------------- | ------------------------ | -------- | -------------------------------------------------------------------------------------------------------------------------------------- |
 | `reference`                     | `string`                 | Yes      | The Swarm reference (64 or 128 hex chars)                                                                                              |
-| `options`                       | `DownloadOptions`        | No       | Download configuration                                                                                                                 |
+| `options`                       | `DownloadOptions`        | No       | Download configuration. Accepted but not applied yet: the proxy reads through the chunk API; redundancy waits on erasure coding (#928) |
 | `options.redundancyStrategy`    | `0-3`                    | No       | Strategy for handling redundancy                                                                                                       |
 | `options.fallback`              | `boolean`                | No       | Whether to use fallback retrieval                                                                                                      |
 | `options.timeoutMs`             | `number`                 | No       | Download timeout in milliseconds, carried in the download options. Not the call's bound — that is `requestOptions.timeout` below       |
@@ -1045,7 +1045,7 @@ Retrieves a chunk by its reference hash. This method is useful for low-level ope
 | Parameter                       | Type                     | Required | Description                                                                                                                            |
 | ------------------------------- | ------------------------ | -------- | -------------------------------------------------------------------------------------------------------------------------------------- |
 | `reference`                     | `string`                 | Yes      | The Swarm reference of the chunk                                                                                                       |
-| `options`                       | `DownloadOptions`        | No       | Download configuration (see `downloadData`)                                                                                            |
+| `options`                       | `DownloadOptions`        | No       | Download configuration (fields as in `downloadData`), sent to Bee as headers of the chunk request                                      |
 | `requestOptions`                | `RequestOptions`         | No       | Request configuration                                                                                                                  |
 | `requestOptions.timeout`        | `number`                 | No       | Request timeout in milliseconds for this call. Replaces the client's default (30 s) for the whole round trip, not only the Bee request |
 | `requestOptions.headers`        | `Record<string, string>` | No       | Custom headers                                                                                                                         |
@@ -1555,7 +1555,7 @@ console.log('Message sent with reference:', result.reference)
 
 ## ACT Methods
 
-ACT (Access Control Tries) methods enable encrypted data sharing with specific grantees. Data is encrypted and only users with the appropriate public key can decrypt it.
+ACT (Access Control Tries) methods enable encrypted data sharing with specific grantees. Data is encrypted and only users with the appropriate public key can decrypt it. [Access Control (ACT)](../access-control/) explains how it works and what a revoke, a `timestamp` and Bee compatibility guarantee.
 
 #### Which key do I grant to?
 
@@ -1576,6 +1576,17 @@ Uploads encrypted data to the Swarm network with access control for specific gra
 
 The data is encrypted using ACT (Access Control Tries) and can only be downloaded by users who have one of the grantee public keys.
 
+**Continuing a history.** Pass `options.historyReference` to publish a new version into an existing history instead of starting one, as Bee's upload with a history address does. The new version is encrypted with the latest entry's access key, so that entry's grantees read it, and the same `historyReference` comes back. Nothing is added to the history. `grantees` must be empty: an existing history's grantees are managed with [`actAddGrantees`](#actaddgranteeshistoryreference-grantees-options-requestoptions) and [`actRevokeGrantees`](#actrevokegranteeshistoryreference-revokegrantees-options-requestoptions), and a non-empty list rejects with `invalid-request`. The upload is published by whichever of the session's keys published the history, unless `options.publisher` names one; a key that did not publish it is refused. Every version under one access key shares one keystream, so never hand out a decrypted reference: beside its encrypted form it exposes every other version under that key.
+
+:::caution[Continue from the latest history reference]
+Keep the `historyReference` the latest grantee change returned, and continue from that one. An
+upload continues whatever history it is given: from a reference saved before a revoke, it encrypts
+the new version under the old key, which the revoked grantees still hold. A history does not point
+to its successors, so the upload cannot tell. The same goes for `actAddGrantees` and
+`actRevokeGrantees`: a grantee change from an older reference forks the history, and from one saved
+before a revoke it builds on the entry that still names the revoked grantees, undoing the revoke.
+:::
+
 **Parameters:**
 
 | Parameter                       | Type                     | Required | Description                                                                                                                            |
@@ -1586,8 +1597,11 @@ The data is encrypted using ACT (Access Control Tries) and can only be downloade
 | `options.pin`                   | `boolean`                | No       | Whether to pin the data locally (defaults to `false`; ignored on a subsidised gateway)                                                 |
 | `options.tag`                   | `number`                 | No       | Tag ID for tracking upload progress (ignored on a subsidised gateway)                                                                  |
 | `options.deferred`              | `boolean`                | No       | Whether to use deferred upload (defaults to `false`)                                                                                   |
+| `options.encrypt`               | `boolean`                | No       | Encrypt the content (defaults to `true`). `false` is refused in a Bee-compatible history, where it makes the reference guessable       |
 | `options.onProgress`            | `(progress) => void`     | No       | Callback for tracking upload progress                                                                                                  |
 | `options.publisher`             | `"app" \| "identity"`    | No       | Key that publishes: this origin's app key (default) or the account-wide sharing key                                                    |
+| `options.historyReference`      | `string`                 | No       | A history to continue rather than start one (see above)                                                                                |
+| `options.beeCompatible`         | `boolean`                | No       | Keep the history readable by a Bee node's own ACT endpoints. When continuing it follows the history; a contradicting value rejects     |
 | `requestOptions`                | `RequestOptions`         | No       | Request configuration                                                                                                                  |
 | `requestOptions.timeout`        | `number`                 | No       | Request timeout in milliseconds for this call. Replaces the client's default (30 s) for the whole round trip, not only the Bee request |
 | `requestOptions.headers`        | `Record<string, string>` | No       | Custom headers                                                                                                                         |
@@ -1603,6 +1617,7 @@ The data is encrypted using ACT (Access Control Tries) and can only be downloade
 | `granteeListReference` | `string`              | Reference to the grantee list                                                             |
 | `publisherPubKey`      | `string`              | Publisher's compressed public key (pass to actDownloadData)                               |
 | `actReference`         | `string`              | The ACT reference                                                                         |
+| `timestamp`            | `number`              | The history entry whose key encrypted this version; reads it back after a revoke          |
 | `tagUid`               | `number \| undefined` | The tag UID if a tag was created                                                          |
 | `stampedChunks`        | `number \| undefined` | Chunks this write sent, the ACT, history and grantee list included, as for `uploadData()` |
 
@@ -1634,7 +1649,13 @@ console.log('Encrypted Reference:', result.encryptedReference)
 console.log('Publisher Public Key:', result.publisherPubKey)
 
 // Save these for later download:
-// - encryptedReference, historyReference, publisherPubKey
+// - encryptedReference, historyReference, publisherPubKey, timestamp
+
+// A new version, readable by the same grantees, in the same history
+const next = await client.actUploadData(newData, [], {
+  historyReference: result.historyReference,
+})
+console.log(next.historyReference === result.historyReference) // true
 ```
 
 ---
@@ -1645,6 +1666,8 @@ Downloads and decrypts ACT-protected data from the Swarm network.
 
 The user must have access (their public key must be in the grantee list) to decrypt the data.
 
+A revoke rotates the access key, so after one the latest history entry no longer opens a version uploaded before it. Pass that version's `timestamp` to read it with the entry it was encrypted under; without it, decryption uses the latest key and fails. That one `timestamp` opens the version for every grantee of the key it was encrypted under, including one added later, until the next revoke rotates the key.
+
 **Parameters:**
 
 | Parameter                       | Type                     | Required | Description                                                                                                                            |
@@ -1652,7 +1675,7 @@ The user must have access (their public key must be in the grantee list) to decr
 | `encryptedReference`            | `string`                 | Yes      | The encrypted reference from actUploadData                                                                                             |
 | `historyReference`              | `string`                 | Yes      | The history reference from actUploadData                                                                                               |
 | `publisherPubKey`               | `string`                 | Yes      | Publisher's compressed public key from actUploadData                                                                                   |
-| `timestamp`                     | `number`                 | No       | Unix timestamp for historical access (optional)                                                                                        |
+| `timestamp`                     | `number`                 | No       | The history entry to read with, the latest when unset. A version from before a revoke needs its own `timestamp` from `actUploadData`   |
 | `requestOptions`                | `RequestOptions`         | No       | Request configuration                                                                                                                  |
 | `requestOptions.timeout`        | `number`                 | No       | Request timeout in milliseconds for this call. Replaces the client's default (30 s) for the whole round trip, not only the Bee request |
 | `requestOptions.headers`        | `Record<string, string>` | No       | Custom headers                                                                                                                         |
@@ -1683,7 +1706,7 @@ console.log('Decrypted:', text)
 
 Adds new grantees to an existing ACT.
 
-This method adds new public keys to the ACT's access list. The encrypted reference remains the same, but a new history reference is returned that should be used for future operations.
+This method adds new public keys to the ACT's access list. The encrypted reference remains the same, but a new history reference is returned that should be used for future operations. Pass the latest history reference: a grantee change from an older one forks the history and can undo a revoke (see [Continue from the latest history reference](#actuploaddatadata-grantees-options-requestoptions)).
 
 **Parameters:**
 
@@ -1704,6 +1727,7 @@ This method adds new public keys to the ACT's access list. The encrypted referen
 | `historyReference`     | `string`              | New history reference (use for future ops)    |
 | `granteeListReference` | `string`              | Reference to the updated grantee list         |
 | `actReference`         | `string`              | The ACT reference                             |
+| `timestamp`            | `number`              | The new history entry's timestamp             |
 | `stampedChunks`        | `number \| undefined` | Chunks this write sent, as for `uploadData()` |
 
 **Throws:**
@@ -1727,22 +1751,30 @@ console.log('New History Reference:', result.historyReference)
 
 ---
 
-### `actRevokeGrantees(historyReference, encryptedReference, revokeGrantees, options?, requestOptions?)`
+### `actRevokeGrantees(historyReference, revokeGrantees, options?, requestOptions?)`
 
-Revokes access from grantees by removing them from the ACT.
+Revokes access from grantees by rotating the access key, as Bee does. A new ACT under a fresh key names the publisher and the remaining grantees, and becomes the history's latest entry. A version published into the history afterwards is encrypted under the new key. In a native history that keeps it out of the revoked grantees' reach. In a Bee-compatible history it does only while they never get the new history reference (see the caution below). Pass the latest history reference: a revoke from an older one forks the history, and an upload or grantee change from the other branch undoes it.
 
 :::caution[Revocation is forward-only]
 Revoking a grantee **does not take back access to content already published**. While they were
-granted, they held the access key, and the reference lives in immutable history — so a former
-grantee can still decrypt everything published before the revocation. What revocation stops is
-access to content published _after_ it.
+granted, they held the access key, and the earlier entries live in immutable history, so a former
+grantee can still decrypt every version published before the revocation. What revocation stops is
+access to versions published _after_ it.
 
-The `encryptedReference` is deliberately **not** re-encrypted and comes back unchanged. Rotating it
-would mean re-encrypting the same content under a new key, which leaks the keystream to exactly the
-people being revoked ([#496](https://github.com/snaha/swarm-id/issues/496)).
+No existing reference is re-encrypted under the new key, which is why the call takes none. Two
+ciphertexts of one reference under two keys would leak the new keystream to exactly the people
+being revoked ([#496](https://github.com/snaha/swarm-id/issues/496)); the new key only ever
+encrypts references uploaded after the revoke.
 
-If content must become unreadable to a former grantee, it has to be re-uploaded as new content
-under a new ACT.
+After a revoke the latest entry carries the new key, so a version from before it is read by passing
+its `timestamp` to [`actDownloadData`](#actdownloaddataencryptedreference-historyreference-publisherpubkey-timestamp-requestoptions).
+
+In a **Bee-compatible** history the revoke is weaker. Its ACT entries are unsalted, as Bee writes
+them, so the remaining grantees' and the publisher's entries keep their keystreams across the
+rotation: a revoked grantee who reads the new ACT computes the new key from the old one. Every
+remaining reader holds the new history reference, and that reference is all that keeps the revoked
+grantees out of later versions. A native history salts each access key and has no such gap
+([Access Control](../access-control/#bee-compatible-mode)).
 :::
 
 **Parameters:**
@@ -1750,7 +1782,6 @@ under a new ACT.
 | Parameter                       | Type                     | Required | Description                                                                                                                            |
 | ------------------------------- | ------------------------ | -------- | -------------------------------------------------------------------------------------------------------------------------------------- |
 | `historyReference`              | `string`                 | Yes      | The current history reference                                                                                                          |
-| `encryptedReference`            | `string`                 | Yes      | The current encrypted reference                                                                                                        |
 | `revokeGrantees`                | `string[]`               | Yes      | Array of compressed public keys to revoke (66 hex chars)                                                                               |
 | `requestOptions`                | `RequestOptions`         | No       | Request configuration                                                                                                                  |
 | `requestOptions.timeout`        | `number`                 | No       | Request timeout in milliseconds for this call. Replaces the client's default (30 s) for the whole round trip, not only the Bee request |
@@ -1760,13 +1791,13 @@ under a new ACT.
 
 **Returns:** `Promise<ActRevokeGranteesResult>`
 
-| Property               | Type                  | Description                                                  |
-| ---------------------- | --------------------- | ------------------------------------------------------------ |
-| `encryptedReference`   | `string`              | The content reference, **unchanged** — see the caution above |
-| `historyReference`     | `string`              | **New** history reference, without the revoked entries       |
-| `granteeListReference` | `string`              | Reference to the updated grantee list                        |
-| `actReference`         | `string`              | The ACT reference                                            |
-| `stampedChunks`        | `number \| undefined` | Chunks this write sent, as for `uploadData()`                |
+| Property               | Type                  | Description                                                    |
+| ---------------------- | --------------------- | -------------------------------------------------------------- |
+| `historyReference`     | `string`              | **New** history reference, its latest entry under the new key  |
+| `granteeListReference` | `string`              | Reference to the updated grantee list                          |
+| `actReference`         | `string`              | The new ACT reference                                          |
+| `timestamp`            | `number`              | The new history entry's timestamp, the first under the new key |
+| `stampedChunks`        | `number \| undefined` | Chunks this write sent, as for `uploadData()`                  |
 
 **Throws:**
 
@@ -1781,13 +1812,18 @@ const revokeKeys = [
   '02abc123...', // Alice's public key (revoke access)
 ]
 
-const result = await client.actRevokeGrantees(historyReference, encryptedReference, revokeKeys)
+const result = await client.actRevokeGrantees(historyReference, revokeKeys)
 
 // The history reference is new — store it, and use it for everything from here on.
 console.log('New history reference:', result.historyReference)
 
-// The content reference is the same one you passed in. It is not re-encrypted.
-console.log('Content reference unchanged:', result.encryptedReference === encryptedReference) // true
+// A version from before the revoke is read at its own timestamp
+const data = await client.actDownloadData(
+  encryptedReference,
+  result.historyReference,
+  publisherPubKey,
+  timestamp, // from the actUploadData that published this version
+)
 ```
 
 ---

@@ -7,6 +7,116 @@ present and may point at an issue or PR; the reasons live here.
 
 A PR that makes or changes a decision adds the entry in the same PR.
 
+## 2026-11-16 Native ACT entries are salted per access key
+
+**Context.** An ACT entry hands the access key to one grantee, or to the
+publisher itself, encrypted under a key that follows from the ECDH of the
+publisher's key with theirs and nothing else, in nonce-free CTR. So every ACT
+one publisher writes for one grantee encrypts under the same keystream, and
+any two ACTs that hold an entry for the same pair differ there by exactly their
+two access keys: whoever knows one learns the other (#408). The publisher's
+own entry is in every ACT, so this leaked in two ways. Across a revoke: the
+fresh key went into entries whose keystreams the remaining grantees and the
+publisher kept, and the revoked grantee, who reads the new ACT through the
+history reference every remaining reader holds, computed the new key from the
+old one and read every version continued after the revoke. Across histories:
+a grantee of one history who obtained another history's reference and an
+encrypted reference from it, by the same publisher, read it without ever
+being granted it. The grantee list had the same flaw: its key is fixed per
+publisher, so every list shared a keystream, and a grantee who knows their
+place in one list read that place in the others. Bee has the same
+construction (`pkg/accesscontrol`), and a Bee-compatible history has to stay
+readable by a Bee node. Upstream, no Bee issue or PR discusses it;
+`pkg/accesscontrol` has had no functional change since `feat: introduce act`
+(ethersphere/bee#4692, 2024); SWIP-ACT has no security analysis of
+revocation; the draft SWIP-88 (PQACT, ethersphere/SWIPs#123) keeps
+"revocation as in v1".
+
+**Decision.** In a native history, one that is not Bee-compatible, each access
+key gets a random 32-byte salt, kept in hex in its history entry's metadata
+under `accesskeysalt`, beside `encryptedglref`. An entry's encryption key is
+`keccak256(accessKeyDecryptionKey ‖ salt)`; the lookup key stays unsalted. A
+new history and a revoke draw a fresh salt with their fresh key. An add keeps
+the latest entry's key and salt, copies its entries byte for byte and
+encrypts the new ones under the same salt; an upload continuing a history
+uses the latest entry's key as before. The grantee list's key is derived from
+the publisher key and the same salt. A reader decrypts each entry's ACT with
+that entry's salt, and the walk to later entries under the same key also
+requires the salt to be kept. An entry without a salt reads as unsalted, so a
+Bee-compatible history is written and read as before: no salt, Bee's entries,
+and the grantee-list key derived from the publisher key alone. (#408)
+
+**Why.** Random rather than what #408 and its comment suggest, a timestamp or
+the feed index: the ACT history here is a history manifest, not a feed, so
+there is no feed index, and a timestamp repeats across histories one publisher
+writes in the same second. A fresh publisher key per history or per rotation
+would also give each ACT its own keystreams, but readers pass
+`publisherPubKey` to `actDownloadData`, so it would change after every revoke,
+and the publisher would have to recover every such key to manage its
+histories. The lookup key reveals nothing about any access key, so salting it
+buys no confidentiality; unsalted it stays the handle the publisher and every
+reader find their entry by, and what lets two ACTs be compared entry by entry.
+What it does show is that the same grantee is in two ACTs by one publisher,
+which is accepted. The grantee list can keep one keystream within a run of
+one key: an add only appends, so each place holds the same grantee in every
+list of the run, and every removal is a revoke, which draws a new salt.
+Bee-compatible histories keep both leaks, because Bee reads its entries
+unsalted: a Bee-compatible ACT is only as private as its history reference,
+after a revoke as before, and a grantee of any Bee-compatible ACT by a key
+reads any other one by that key whose references they obtain.
+
+## 2026-11-16 Uploads continue an ACT history, and a revoke rotates the key
+
+**Context.** Every `actUploadData` started a new history, so a dApp that keeps
+one history per shared file (the File Manager) could not publish a new version
+to the grantees it already had. Revocation kept the access key (#496): the
+code before it had rotated the key and re-encrypted the same content reference
+under the new one, and with nonce-free CTR those two ciphertexts of one
+reference hand any former grantee the new keystream.
+
+**Decision.** `actUploadData` takes a `historyReference` and continues that
+history the way Bee's upload with a history address does: the new reference is
+encrypted with the latest entry's access key, nothing is added to the history,
+and the same history reference comes back. A revoke rotates the access key, as
+Bee's ACT update does: a new ACT under a fresh key names the publisher and the
+remaining grantees, and becomes the latest entry. No existing reference is
+re-encrypted, so the revoke takes no content reference at all. A new entry is
+stamped after the latest one, even one written by a device whose clock runs
+ahead, so the rotated ACT is the one readers and later uploads take. Every
+upload and grantee change returns the `timestamp` of its entry, and a version
+from before a revoke is read by passing its own. That one timestamp opens the
+version for every grantee of its key, one added later included: a reader the
+entry does not name is looked up in the later entries, oldest first, as long
+as each still holds one of that entry's ACT entries byte for byte, as an add
+copies them, and never past the first that does not, which is a rotation. A
+Bee-compatible ACT upload refuses `encrypt: false`. (#931)
+
+**Why.** Continuation without rotation cannot hide anything: the history is
+immutable, so a revoked grantee re-derives the old key from any earlier entry
+and reads every version published under it, later ones included. Rotation
+without re-encryption does not reopen #496, which needed two ciphertexts of one
+reference under two keys: the new key only ever encrypts references uploaded
+after the revoke, which the revoked grantee has never seen. The ACT entries
+are another matter: the remaining grantees' and the publisher's are fixed per
+pair, so a revoked grantee who reads the new ACT would compute the new key
+from the old one. Rotation keeps them out of versions continued after the
+revoke in a native history because each access key there has its own salt
+(see "Native ACT entries are salted per access key"), and not in a
+Bee-compatible one, where only keeping the new history reference from them
+does. The versions in a history do share one key, though, and nonce-free CTR
+makes that one keystream, so one reference known in the clear, beside its
+encrypted form, exposes every other one. References stay unguessable because a
+manifest, or the content under it, is encrypted with a fresh random key. A
+Bee-compatible history keeps its manifest plain, so with `encrypt: false` the
+reference follows from the file's bytes; a Bee-compatible ACT upload therefore
+refuses `encrypt: false`, whether it starts the history or continues it. A
+revoke protects only versions continued from the history reference it
+returned or a later one: an upload from a reference saved before it encrypts
+under the old key, a grantee change from one forks the history and can undo
+the revoke, and since a history does not point to its successors (in Bee
+neither), only the dApp can keep the latest. In a native history, what the
+revoked grantee keeps is what they could already read.
+
 ## 2026-11-13 SvelteKit 3, with `$lib` kept as an alias
 
 **Context.** SvelteKit 2 carried two advisories fixed only in 3.0 and pinned
