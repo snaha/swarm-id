@@ -48,7 +48,7 @@ import {
 import type { ChunkReference, UploadProgress } from "./types"
 import type { StampWorkerPool } from "./stamp-worker-pool"
 import { tryCreateTag } from "../utils/tag"
-import { uint8ArrayToHex } from "../utils/hex"
+import { uint8ArrayToHex, webBytes } from "../utils/hex"
 import { normalizeUrl } from "../utils/url"
 
 // ============================================================================
@@ -350,7 +350,7 @@ async function uploadChunkViaSubsidisedGatewayInternal(
   const response = await fetch(url, {
     method: "POST",
     headers,
-    body: chunkData,
+    body: webBytes(chunkData),
     signal: options?.signal,
   })
 
@@ -998,7 +998,7 @@ export async function uploadSOC(
     const response = await fetch(url, {
       method: "POST",
       headers,
-      body: socBody,
+      body: webBytes(socBody),
       signal: target.signal,
     })
 
@@ -1045,7 +1045,7 @@ export async function uploadSOC(
     const response = await fetch(url, {
       method: "POST",
       headers,
-      body: socBody,
+      body: webBytes(socBody),
       signal,
     })
 

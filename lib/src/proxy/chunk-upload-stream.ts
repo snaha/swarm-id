@@ -15,6 +15,7 @@
  */
 
 import { abortedError } from "../errors"
+import { webBytes } from "../utils/hex"
 
 const WS_CHUNK_STREAM_PATH = "/chunks/stream"
 const WS_DEFAULT_CONCURRENCY = 32
@@ -128,7 +129,7 @@ export class ChunkUploadStream {
 
       this.pendingAcks.push({ resolve, reject, timer })
       try {
-        this.ws!.send(stampedData)
+        this.ws!.send(webBytes(stampedData))
       } catch (err) {
         // send() failed (e.g. buffer full) — remove pending ack and reject
         this.pendingAcks.pop()

@@ -15,7 +15,7 @@ import { sessionStore } from '$lib/stores/session.svelte'
 import { deleteAccount, tearDownAccount } from './delete-account'
 import { derivePostageSigner } from './payment/purchase'
 
-vi.mock('$app/environment', () => ({ browser: false }))
+vi.mock('$app/env', () => ({ browser: false }))
 
 const sync = vi.hoisted(() => ({ syncAccount: vi.fn() }))
 vi.mock('$lib/dev/sync.svelte', () => ({ syncStore: sync }))

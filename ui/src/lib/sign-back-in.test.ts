@@ -17,7 +17,7 @@ import { NoSyncedDataError, signBackIn } from './sign-back-in'
 import { decryptSignOutSnapshot, encryptSignOutSnapshot } from './sign-out-snapshot'
 import { accountsStore } from './stores/accounts.svelte'
 
-vi.mock('$app/environment', () => ({ browser: false }))
+vi.mock('$app/env', () => ({ browser: false }))
 // Isolate from the dev sync/fold subsystems — signBackIn only pokes them.
 vi.mock('$lib/dev/sync-hooks', () => ({ triggerSync: vi.fn() }))
 vi.mock('$lib/dev/account-refresh', () => ({ noteAccountFolded: vi.fn() }))

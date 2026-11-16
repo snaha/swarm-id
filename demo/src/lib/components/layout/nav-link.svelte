@@ -5,12 +5,13 @@
 
 <script lang="ts">
   import { page } from '$app/state'
-  import { base } from '$app/paths'
+  import { resolve } from '$app/paths'
+  import type { RouteId } from '$app/types'
   import { cn } from '$lib/utils'
   import { sidebarStore } from '$lib/stores/sidebar.svelte'
 
   interface Props {
-    href: string
+    href: RouteId
     label: string
   }
 
@@ -21,9 +22,8 @@
   )
 </script>
 
-<!-- eslint-disable svelte/no-navigation-without-resolve -- static routes with base path -->
 <a
-  href="{base}{href}"
+  href={resolve(href)}
   onclick={() => sidebarStore.closeMobile()}
   class={cn(
     'block rounded-md px-3 py-2 text-sm font-medium transition-colors',

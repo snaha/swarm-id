@@ -54,7 +54,6 @@
 
   function open(appUrl: string | undefined) {
     openUrl = appUrl
-    // eslint-disable-next-line svelte/no-navigation-without-resolve -- hash only, same page
     replaceState(appUrl ? `#apps/${encodeURIComponent(appUrl)}` : '#apps', page.state)
   }
 

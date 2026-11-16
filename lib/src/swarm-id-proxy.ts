@@ -186,7 +186,7 @@ import {
   deriveSwarmEncryptionKey,
   BACKUP_KEY_LABEL,
 } from "./utils/key-derivation"
-import { hexToUint8Array, uint8ArrayToHex } from "./utils/hex"
+import { hexToUint8Array, uint8ArrayToHex, webBytes } from "./utils/hex"
 import { generatedAvatar } from "./utils/avatar"
 import { connectionInfoEqual } from "./utils/connection-info"
 import {
@@ -4563,7 +4563,7 @@ export class SwarmIdProxy {
       this.postMessage(event, {
         type: "downloadDataResponse",
         requestId,
-        data: data as Uint8Array,
+        data: webBytes(data),
       })
     } catch (error) {
       this.sendErrorToParent(event, requestId, error, "Download failed")
@@ -4730,7 +4730,7 @@ export class SwarmIdProxy {
         type: "downloadFileResponse",
         requestId,
         name,
-        data,
+        data: webBytes(data),
       })
     } catch (error) {
       this.sendErrorToParent(event, requestId, error, "Download failed")
@@ -4862,7 +4862,7 @@ export class SwarmIdProxy {
       this.postMessage(event, {
         type: "downloadChunkResponse",
         requestId,
-        data: data as Uint8Array,
+        data: webBytes(data),
       })
     } catch (error) {
       this.sendErrorToParent(event, requestId, error, "Download failed")
@@ -5046,11 +5046,11 @@ export class SwarmIdProxy {
       this.postMessage(event, {
         type: "socDownloadResponse",
         requestId,
-        data: soc.data,
+        data: webBytes(soc.data),
         identifier: soc.identifier,
         signature: soc.signature,
         span: soc.span,
-        payload: soc.payload,
+        payload: webBytes(soc.payload),
         address: soc.address,
         owner: soc.owner,
       })
@@ -5094,11 +5094,11 @@ export class SwarmIdProxy {
       this.postMessage(event, {
         type: "socRawDownloadResponse",
         requestId,
-        data: soc.data,
+        data: webBytes(soc.data),
         identifier: soc.identifier,
         signature: soc.signature,
         span: soc.span,
-        payload: soc.payload,
+        payload: webBytes(soc.payload),
         address: soc.address,
         owner: soc.owner,
       })
@@ -5629,7 +5629,7 @@ export class SwarmIdProxy {
       this.postMessage(event, {
         type: "seqFeedDownloadPayloadResponse",
         requestId,
-        payload: parsed.payload,
+        payload: webBytes(parsed.payload),
         timestamp: parsed.timestamp,
         feedIndex: resolvedIndex.toString(),
         feedIndexNext: nextIndex.toString(),
@@ -5698,7 +5698,7 @@ export class SwarmIdProxy {
       this.postMessage(event, {
         type: "seqFeedDownloadRawPayloadResponse",
         requestId,
-        payload: parsed.payload,
+        payload: webBytes(parsed.payload),
         timestamp: parsed.timestamp,
         feedIndex: resolvedIndex.toString(),
         feedIndexNext: nextIndex.toString(),
@@ -6345,7 +6345,7 @@ export class SwarmIdProxy {
       this.postMessage(event, {
         type: "actDownloadDataResponse",
         requestId,
-        data: data as Uint8Array,
+        data: webBytes(data),
       })
     } catch (error) {
       this.sendErrorToParent(event, requestId, error, "ACT download failed")

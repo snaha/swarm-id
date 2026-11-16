@@ -26,7 +26,7 @@ import { Account, accountsStore } from './accounts.svelte'
 // manager) `window.localStorage` at import time — install both before it loads.
 // `browser: false` keeps the boot-time load and the storage listener off; every
 // test builds its state explicitly through `accountsStore.add()`.
-vi.mock('$app/environment', () => ({ browser: false }))
+vi.mock('$app/env', () => ({ browser: false }))
 
 vi.hoisted(() => {
   const backing = new Map<string, string>()

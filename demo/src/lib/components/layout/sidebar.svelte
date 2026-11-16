@@ -31,7 +31,7 @@
     // The manual iOS/ITP smoke test (#584) — reachable on the deployed site,
     // which is the only cross-site rig that partitions at all.
     { href: '/safari-check', label: 'Safari check' },
-  ]
+  ] as const
 </script>
 
 <aside

@@ -8,7 +8,7 @@ import {
   createSyncAccount,
 } from '@snaha/swarm-id/internal'
 
-import { browser } from '$app/environment'
+import { browser } from '$app/env'
 
 import { getUtilizationStore, postageStampsStore } from '$lib/dev/postage-stamps.svelte'
 import { accountBusStore } from '$lib/stores/account-bus'

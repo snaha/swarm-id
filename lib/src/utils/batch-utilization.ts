@@ -37,7 +37,7 @@ import { uploadChunk, type UploadTarget } from "../proxy/upload"
 import { tryCreateTag } from "./tag"
 import { lockSocAddress } from "./lock-soc"
 import { deriveSecret, BACKUP_KEY_LABEL } from "./key-derivation"
-import { uint8ArrayToHex } from "./hex"
+import { uint8ArrayToHex, webBytes } from "./hex"
 
 // ============================================================================
 // Errors
@@ -492,12 +492,16 @@ export async function deriveUtilizationChunkKey(
 
   const cryptoKey = await crypto.subtle.importKey(
     "raw",
-    swarmEncryptionKey,
+    webBytes(swarmEncryptionKey),
     { name: "HMAC", hash: "SHA-256" },
     false,
     ["sign"],
   )
-  const signature = await crypto.subtle.sign("HMAC", cryptoKey, message)
+  const signature = await crypto.subtle.sign(
+    "HMAC",
+    cryptoKey,
+    webBytes(message),
+  )
   return new Uint8Array(signature)
 }
 

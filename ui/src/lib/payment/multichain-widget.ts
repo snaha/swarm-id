@@ -12,7 +12,7 @@
  * size and lifespan, are chosen inside the popup, and the `batch` event reports
  * what was actually bought.
  */
-import { env } from '$env/dynamic/public'
+import { PUBLIC_CARD_SHOP_URL } from '$app/env/public'
 
 import { strip0x } from '$lib/crypto/hex'
 
@@ -48,7 +48,7 @@ function parseCardShopUrl(raw: string | undefined): URL | undefined {
     return undefined
   }
 }
-const CARD_SHOP = parseCardShopUrl(env.PUBLIC_CARD_SHOP_URL)
+const CARD_SHOP = parseCardShopUrl(PUBLIC_CARD_SHOP_URL)
 /** Whether "Pay with card" can be offered at all. */
 export const CARD_SHOP_AVAILABLE = CARD_SHOP !== undefined
 /** The card shop's host as the UI names it, so copy cannot drift from the URL. */

@@ -20,7 +20,7 @@
     leaseCacheStorageKey,
   } from '@snaha/swarm-id/internal'
 
-  import { browser } from '$app/environment'
+  import { browser } from '$app/env'
 
   import CopyButton from '$lib/components/copy-button.svelte'
   import { Button } from '$lib/components/ui/button'

@@ -12,10 +12,9 @@ import Onboard, { type WalletState } from '@web3-onboard/core'
 import injectedModule from '@web3-onboard/injected-wallets'
 import walletConnectModule from '@web3-onboard/walletconnect'
 
-import { browser } from '$app/environment'
+import { browser } from '$app/env'
+import { PUBLIC_WALLETCONNECT_PROJECT_ID } from '$app/env/public'
 import { asset } from '$app/paths'
-
-import { env } from '$env/dynamic/public'
 
 import { SWARM_MARK_SVG } from '$lib/components/swarm-mark'
 import { forgetCoinbaseSmartWallet } from '$lib/crypto/coinbase-signer'
@@ -47,7 +46,7 @@ const injected = injectedModule()
 // shows the user as who is asking, and a build serving several origins
 // (deployments and per-PR previews alike) must name the one they are on.
 const walletConnect = walletConnectOptions(
-  env.PUBLIC_WALLETCONNECT_PROJECT_ID,
+  PUBLIC_WALLETCONNECT_PROJECT_ID,
   browser ? window.location.origin : undefined,
   walletChains,
 )
@@ -95,7 +94,7 @@ const appMetadata = {
   // only from here, and only by a wallet that reads past the first entry. The
   // URL cannot go in `icon` instead: Coinbase base64s that field into a data
   // URI, and a URL there makes a broken one.
-  logo: browser ? `${window.location.origin}${asset('/favicon.png')}` : undefined,
+  logo: browser ? `${window.location.origin}${asset('favicon.png')}` : undefined,
   recommendedInjectedWallets: [
     { name: 'Coinbase', url: 'https://wallet.coinbase.com/' },
     { name: 'MetaMask', url: 'https://metamask.io' },
