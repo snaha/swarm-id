@@ -11,6 +11,7 @@ import { describe, it, expect, vi, afterEach } from "vitest"
 import { SwarmIdError } from "../errors"
 import { downloadDataWithChunkAPI } from "./download-data"
 import {
+  SendWindow,
   uploadData,
   uploadDataStream,
   type ChunkCounter,
@@ -389,6 +390,20 @@ describe("uploadDataStream", () => {
       node.fail(new Error("batch is full"))
 
       await expect(upload).rejects.toThrow("batch is full")
+    })
+
+    it("drains to a failure recorded once nothing is left in flight", async () => {
+      const sends = new SendWindow(
+        CONCURRENCY,
+        async () => {
+          throw new Error("batch is full")
+        },
+        () => {},
+      )
+      await sends.submit(makeData(CHUNK_SIZE), new Uint8Array(32))
+      await sends.settled()
+
+      await expect(sends.drain()).rejects.toThrow("batch is full")
     })
 
     it("surfaces the source's own failure", async () => {

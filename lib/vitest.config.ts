@@ -44,6 +44,9 @@ export default defineConfig({
     // 2 s signing loop flaked under the full suite while every neighbour had
     // 30 s (#585). A test that needs a bound needs it above this one.
     testTimeout: 30000,
+    // `globalThis.gc`, for the tests that prove an upload lets go of what it
+    // has sent (`upload.memory.test.ts`): only a collection shows retention.
+    execArgv: ["--expose-gc"],
     coverage: {
       provider: "v8",
       reporter: ["text", "json", "html"],

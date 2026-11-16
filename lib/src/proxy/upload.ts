@@ -447,50 +447,72 @@ async function openChunkSender(
  * The chunks of one upload on their way to the node. `submit` waits for a free
  * slot, which is the whole of the upload's backpressure: nothing further is
  * read from the source until the node has taken something.
+ *
+ * Every wait here attaches only to promises that settle while the upload
+ * runs. One reaction per block on a promise that outlives them all would keep
+ * every block reachable until the upload ended.
  */
-class SendWindow {
+export class SendWindow {
   private readonly inFlight = new Set<Promise<void>>()
   private failure: { error: unknown } | undefined
-  private reject!: (error: unknown) => void
-  /** Rejects with the first failed send; never resolves. */
-  readonly failed = new Promise<never>((_resolve, reject) => {
-    this.reject = reject
-  })
+  /** The waits {@link orFailure} has open, each ended by the first failure. */
+  private readonly failureWaiters = new Set<(error: unknown) => void>()
 
   constructor(
     private readonly limit: number,
     private readonly send: ChunkSender["send"],
     private readonly onSent: (address: Uint8Array) => void,
-  ) {
-    // Observed only by a race, and there may be none left to observe it.
-    this.failed.catch(() => {})
-  }
+  ) {}
 
   async submit(chunkData: Uint8Array, address: Uint8Array): Promise<void> {
+    // A failed send settles its `sending` too, so this wait sees failures.
     while (this.inFlight.size >= this.limit && !this.failure) {
-      await Promise.race([...this.inFlight, this.failed])
+      await Promise.race(this.inFlight)
     }
-    if (this.failure) throw this.failure.error
+    this.throwIfFailed()
     // A throwing `onSent` fails the upload as a failed send does, and `sending`
     // itself never rejects: nothing is bound to observe it.
     const sending: Promise<void> = this.send(chunkData, address)
       .then(() => this.onSent(address))
-      .catch((error: unknown) => {
-        this.failure ??= { error }
-        this.reject(error)
-      })
+      .catch((error: unknown) => this.fail(error))
       .finally(() => this.inFlight.delete(sending))
     this.inFlight.add(sending)
   }
 
+  /** `work`, unless a send fails first: then that failure. */
+  async orFailure<T>(work: Promise<T>): Promise<T> {
+    this.throwIfFailed()
+    let stop: (error: unknown) => void = () => {}
+    const failed = new Promise<never>((_resolve, reject) => {
+      stop = reject
+    })
+    this.failureWaiters.add(stop)
+    try {
+      return await Promise.race([work, failed])
+    } finally {
+      this.failureWaiters.delete(stop)
+    }
+  }
+
   /** Wait for everything submitted to land, or for the first failure. */
   async drain(): Promise<void> {
-    await Promise.race([Promise.all(this.inFlight), this.failed])
+    await this.orFailure(Promise.all(this.inFlight))
+    this.throwIfFailed()
   }
 
   /** Wait for the sends still running, however they end. */
   async settled(): Promise<void> {
     await Promise.all(this.inFlight)
+  }
+
+  private fail(error: unknown): void {
+    this.failure ??= { error }
+    for (const stop of this.failureWaiters) stop(this.failure.error)
+    this.failureWaiters.clear()
+  }
+
+  private throwIfFailed(): void {
+    if (this.failure) throw this.failure.error
   }
 }
 
@@ -702,7 +724,7 @@ async function writeTree(
     let hasContent = false
     while (true) {
       // A send can fail while the source has nothing to give.
-      const next = await Promise.race([payloads.next(), sends.failed])
+      const next = await sends.orFailure(payloads.next())
       if (next.done) break
       hasContent = true
       await sendLeaf(next.value)
