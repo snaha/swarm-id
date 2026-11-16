@@ -584,6 +584,48 @@ describe('signaling server — heartbeat', () => {
 // Overload bounds (#575)
 // ============================================================================
 
+// A browser cannot see protocol-level pings, so the round trip a client uses to
+// know its own connection works is an ordinary message pair.
+describe('signaling server — client round trip', () => {
+  it('answers a ping from a joined peer with its nonce', async () => {
+    const client = await connect(randomTopic())
+    try {
+      client.socket.send(JSON.stringify({ type: 'ping', nonce: 7 }))
+      const pong = await client.next((m) => m.type === 'pong')
+      expect(pong.nonce).toBe(7)
+    } finally {
+      client.close()
+    }
+  })
+
+  it('asks every room member to ping at its own cadence', async () => {
+    const ticking = await createSignalingServer({ port: 0, tickIntervalMs: EVENT_SETTLE_MS })
+    const client = await connect(randomTopic(), ticking.port)
+    try {
+      await client.next((m) => m.type === 'tick')
+    } finally {
+      client.close()
+      await ticking.close()
+    }
+  })
+
+  // A pong says "the server counts you as a member of your room", which is
+  // what a peer's absence is later judged against.
+  it('does not answer a ping from a socket that joined no room', async () => {
+    const socket = new WebSocket(`ws://127.0.0.1:${server.port}/`)
+    const received: unknown[] = []
+    socket.addEventListener('message', (event) => received.push(event.data))
+    await new Promise((resolve) => socket.addEventListener('open', resolve))
+    try {
+      socket.send(JSON.stringify({ type: 'ping', nonce: 1 }))
+      await new Promise((resolve) => setTimeout(resolve, EVENT_SETTLE_MS))
+      expect(received).toEqual([])
+    } finally {
+      socket.close()
+    }
+  })
+})
+
 describe('signaling server — limits', () => {
   it('turns away a peer once the room is full, leaving the room intact', async () => {
     const capped = await createSignalingServer({ port: 0, maxPeersPerRoom: 2 })

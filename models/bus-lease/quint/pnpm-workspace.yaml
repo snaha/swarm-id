@@ -1,0 +1,5 @@
+packages: []
+savePrefix: ""
+# protobufjs only prints a version notice in its install script.
+allowBuilds:
+  protobufjs: false

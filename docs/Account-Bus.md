@@ -151,6 +151,13 @@ newcomer                         signaling server                       existing
   next tick, so a half-open peer (backgrounded mobile Safari, a laptop lid) is announced as
   `peer-left` within about a minute. The client's `close()` drains in-flight publishes first,
   so a teardown announcement made in the closing tick still reaches the wire.
+- **Liveness.** The server sends every room member a `tick` every 2 s; the client answers
+  each with a `ping` and the server with a `pong`. The send time of the newest answered ping
+  is how recently the context's own connection is known to have worked
+  (`AccountBus.confirmedAgoMs`), and the room, read together with which device each peer has
+  spoken for, is how long a device has been absent (`AccountBus.absentForMs`). These two
+  answers are all the partition lease may ask of a transport
+  ([`models/bus-lease`](../models/bus-lease/README.md), [#1017](https://github.com/snaha/swarm-id/issues/1017)).
 - **No mailbox.** A message reaches the peers that are in the room right now. That is the
   whole design: the bus makes live peers converge fast; it does not carry anything to a
   context that is closed (see Known gaps).

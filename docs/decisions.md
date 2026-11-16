@@ -28,6 +28,64 @@ the server take turns), it sleeps after 15 idle minutes, and an account open in 
 preview and in another preview does not see itself live, since the two sit on different
 servers.
 
+## 2026-11-16 A transport answers two liveness questions, at the server's pace
+
+**Context.** The bus lease (next entry) needs to know whether this context's
+own connection works and whether another device is gone. The signaling server
+is the first service to answer that; Swarm's pub/sub (BPS, bee#5626, SWIP-60)
+is a likely second, and it has no join or leave notices and no acknowledgement
+of a publish.
+
+**Decision.** A transport that crosses devices answers `confirmedAgoMs()` and
+`absentForMs(deviceId)`, and the lease asks nothing else about liveness. Both
+must come from one authority: a device shown absent over a span had no
+confirmation within it. On the signaling server the confirmation is a
+`ping`/`pong` round trip, timed from when the ping was sent, and the server
+asks for one with a `tick` every 2 s.
+
+**Why.** `peer-left` is a fact about sockets on one server; a contract in its
+terms could not be met by a broker that reports no departures. Stated as two
+durations, the signaling server meets it from its room and BPS can meet it
+from a context's own messages coming back in the broker's order. The server
+sets the pace because a hidden page's timers are throttled to about one a
+minute while its message events are not, and a holder that cannot confirm its
+connection stops writing.
+
+## 2026-11-16 The signaling server is a single instance
+
+**Context.** With the lease on the bus, the server's room is what says a
+device is absent.
+
+**Decision.** One instance serves all rooms. If it is ever scaled out, an
+account is routed to one instance by a value derived from its key.
+
+**Why.** Two instances with a room each for one account would show two devices
+each other's absence, and both could hold the same partition.
+
+## 2026-11-16 The partition lease is held over the account bus
+
+**Context.** The lease was a lock chunk overwritten in place on Swarm. That
+depends on several Bee behaviours holding at once: uploads being direct, no
+node or cache serving an older copy, a header browsers may not send (#1016,
+#1017). A stack of PRs built further on it (#918 to #1007).
+
+**Decision.** Devices agree on who holds a partition over the account bus,
+following the protocol checked in `models/bus-lease`. A context writes only
+while it holds the partition and its connection was confirmed recently; one
+that cannot reach the signaling server is read-only. A context waits after
+joining before it may treat a device it has not seen as absent; the starting
+values are a 2 s tick and a 6 s limit on an unconfirmed holder, which makes
+that wait 6 to 8 s. Several tabs of one device keep coordinating as they do.
+The utilization state stays on Swarm, at a new address on each publish. The
+stack is not continued: the work starts from `main` and takes from the stack
+only what does not depend on the lock chunk.
+
+**Why.** Mutual exclusion needs one answer to "who is here", and a chunk read
+through caches does not give one. The wait is paid once per page load and
+starts when the proxy loads, so it is mostly over before the first upload.
+Read-only without the server is the simple rule, and the one the model was
+checked with.
+
 ## 2026-11-13 SvelteKit 3, with `$lib` kept as an alias
 
 **Context.** SvelteKit 2 carried two advisories fixed only in 3.0 and pinned
