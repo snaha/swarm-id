@@ -50,6 +50,7 @@ type ClientInternals = {
   iframe: unknown
   handleIframeMessage: (message: IframeToParentMessage) => void
   pendingRequests: Map<string, unknown>
+  downloadStreams: Map<string, unknown>
 }
 type ProxyInternals = {
   authenticated: boolean
@@ -205,7 +206,9 @@ describe("streaming across the bridge", () => {
   })
 
   const expectNothingLeftBehind = () => {
-    expect((client as unknown as ClientInternals).pendingRequests.size).toBe(0)
+    const clientState = client as unknown as ClientInternals
+    expect(clientState.pendingRequests.size).toBe(0)
+    expect(clientState.downloadStreams.size).toBe(0)
     expect(proxy.inFlightRequests.size).toBe(0)
     expect(proxy.uploadSources.size).toBe(0)
     expect(proxy.downloadPulls.size).toBe(0)
@@ -744,6 +747,47 @@ describe("streaming across the bridge", () => {
       await expect(reader.read()).rejects.toMatchObject({ code: "aborted" })
       await settle()
       expectNothingLeftBehind()
+    })
+
+    describe("a stream nobody reads", () => {
+      afterEach(() => {
+        vi.useRealTimers()
+      })
+
+      it("is ended by the proxy once no pull comes for the idle deadline", async () => {
+        const reference = await upload(makeData(STREAM_PIECE_SIZE * 2))
+        vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] })
+        const { stream } = await client.downloadDataStream(reference)
+
+        await vi.advanceTimersByTimeAsync(STREAM_IDLE_TIMEOUT_MS + 1)
+
+        expect(proxy.downloadPulls.size).toBe(0)
+        expect(proxy.inFlightRequests.size).toBe(0)
+        await expect(stream.getReader().read()).rejects.toMatchObject({
+          code: "timeout",
+        })
+        expectNothingLeftBehind()
+      })
+
+      it("is waited for as long as a longer timeout asks", async () => {
+        const reference = await upload(makeData(STREAM_PIECE_SIZE * 2))
+        vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] })
+        const longer = STREAM_IDLE_TIMEOUT_MS * 2
+        const { stream } = await client.downloadDataStream(
+          reference,
+          undefined,
+          { timeout: longer },
+        )
+
+        await vi.advanceTimersByTimeAsync(STREAM_IDLE_TIMEOUT_MS + 1)
+        expect(proxy.downloadPulls.size).toBe(1)
+
+        await vi.advanceTimersByTimeAsync(longer)
+        expect(proxy.downloadPulls.size).toBe(0)
+        await expect(stream.getReader().read()).rejects.toMatchObject({
+          code: "timeout",
+        })
+      })
     })
 
     it("errors the stream on a chunk that cannot be fetched", async () => {

@@ -403,14 +403,33 @@ function requestAliveInterval(perCall: number | undefined): number {
 }
 
 /**
- * How long a streaming upload's source may stay silent: the default, or a
- * longer `requestOptions.timeout`. A shorter one bounds only the proxy's own
+ * How long the dApp's side of a streaming transfer may stay silent, an
+ * upload's source or a download's reader: the default, or a longer
+ * `requestOptions.timeout`. A shorter one bounds only the proxy's own
  * silence, on the client.
  */
 function sourceIdleTimeout(perCall: number | undefined): number {
   return Math.min(
     Math.max(perCall ?? 0, STREAM_IDLE_TIMEOUT_MS),
     MAX_TIMER_DELAY_MS,
+  )
+}
+
+/**
+ * The next value the dApp hands `inbox`, within `deadline` ms: a streaming
+ * transfer it leaves silent for longer ends with `timeout`, rather than
+ * holding the request, and the drive's write lock for an upload, for good.
+ */
+function nextWithin<T>(
+  inbox: Inbox<T>,
+  deadline: number,
+  message: string,
+): Promise<T> {
+  return withTimeout(inbox.next(), deadline, message).catch(
+    (error: unknown) => {
+      if (!(error instanceof TimeoutError)) throw error
+      throw new SwarmIdError("timeout", error.message, { cause: error })
+    },
   )
 }
 
@@ -4717,17 +4736,18 @@ export class SwarmIdProxy {
   /**
    * Answer a streaming download: its size now, then one piece per pull. A pull
    * is what lets the next piece be read, so a reader that stops stops the
-   * fetching too.
+   * fetching too, and one silent past the idle deadline ends the download.
    */
   private async streamDownload(
     event: MessageEvent,
     requestId: string,
     answerType: "downloadDataStreamResponse" | "actDownloadDataStreamResponse",
-    signal: AbortSignal,
+    requestOptions: Abortable<object>["requestOptions"],
     download: DataStream,
   ): Promise<void> {
-    const pulls = new Inbox<undefined>(signal)
+    const pulls = new Inbox<undefined>(requestOptions.signal)
     this.downloadPulls.set(requestId, pulls)
+    const deadline = sourceIdleTimeout(requestOptions.timeout)
     const pieces = rechunk(download.leaves, STREAM_PIECE_SIZE)
     try {
       this.postMessage(event, {
@@ -4736,7 +4756,11 @@ export class SwarmIdProxy {
         size: download.size,
       })
       while (true) {
-        await pulls.next()
+        await nextWithin(
+          pulls,
+          deadline,
+          `The download was not read for ${deadline}ms`,
+        )
         const { done, value } = await pieces.next()
         if (done) {
           this.postMessage(event, { type: "downloadStreamPiece", requestId })
@@ -4764,7 +4788,7 @@ export class SwarmIdProxy {
         event,
         requestId,
         "downloadDataStreamResponse",
-        requestOptions.signal,
+        requestOptions,
         download,
       )
     } catch (error) {
@@ -4821,14 +4845,11 @@ export class SwarmIdProxy {
     const deadline = sourceIdleTimeout(requestOptions.timeout)
     while (true) {
       this.postMessage(event, { type: "uploadSourcePull", requestId })
-      const piece = await withTimeout(
-        inbox.next(),
+      const piece = await nextWithin(
+        inbox,
         deadline,
         `The upload source sent nothing for ${deadline}ms`,
-      ).catch((error: unknown) => {
-        if (!(error instanceof TimeoutError)) throw error
-        throw new SwarmIdError("timeout", error.message, { cause: error })
-      })
+      )
       if (!piece) return
       if (piece.length > STREAM_PIECE_SIZE) {
         throw new SwarmIdError(
@@ -6626,7 +6647,7 @@ export class SwarmIdProxy {
         event,
         requestId,
         "actDownloadDataStreamResponse",
-        requestOptions.signal,
+        requestOptions,
         download,
       )
     } catch (error) {
