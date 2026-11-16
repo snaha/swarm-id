@@ -38,6 +38,7 @@ import type {
 import type { UtilizationAwareStamper } from "./utils/batch-utilization"
 import { withBatchWriteLock } from "./utils/batch-write-lock"
 import { FakeLockManager } from "./utils/fake-web-locks"
+import { Inbox } from "./utils/inbox"
 
 const PARENT_ORIGIN = "https://dapp.example.com"
 const IFRAME_ORIGIN = "https://id.example.com"
@@ -892,6 +893,30 @@ describe("streaming across the bridge", () => {
         }
       })
       expectNothingLeftBehind()
+    })
+
+    it("lets go of each file's inbox as the upload moves past it", async () => {
+      const opened: Inbox<unknown>[] = []
+      const closedBeforeNextPull: boolean[] = []
+      const next = Inbox.prototype.next
+      vi.spyOn(Inbox.prototype, "next").mockImplementation(function (
+        this: Inbox<unknown>,
+      ) {
+        if (!opened.includes(this)) {
+          if (opened.length > 0) {
+            closedBeforeNextPull.push(
+              (opened.at(-1) as unknown as { closed: boolean }).closed,
+            )
+          }
+          opened.push(this)
+        }
+        return next.call(this)
+      })
+
+      await client.uploadFiles(asBlobs())
+
+      expect(opened).toHaveLength(FOLDER.length)
+      expect(closedBeforeNextPull).toEqual(Array(FOLDER.length - 1).fill(true))
     })
 
     it("counts files in its progress", async () => {

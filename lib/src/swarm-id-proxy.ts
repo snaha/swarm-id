@@ -4887,21 +4887,27 @@ export class SwarmIdProxy {
     const inbox = new Inbox<Uint8Array | undefined>(requestOptions.signal)
     this.uploadSources.set(requestId, { index, inbox })
     const deadline = sourceIdleTimeout(requestOptions.timeout)
-    while (true) {
-      this.postMessage(event, { type: "uploadSourcePull", requestId, index })
-      const piece = await nextWithin(
-        inbox,
-        deadline,
-        `The upload source sent nothing for ${deadline}ms`,
-      )
-      if (!piece) return
-      if (piece.length > STREAM_PIECE_SIZE) {
-        throw new SwarmIdError(
-          "invalid-request",
-          `An upload piece of ${piece.length} bytes is over the ${STREAM_PIECE_SIZE}-byte limit`,
+    try {
+      while (true) {
+        this.postMessage(event, { type: "uploadSourcePull", requestId, index })
+        const piece = await nextWithin(
+          inbox,
+          deadline,
+          `The upload source sent nothing for ${deadline}ms`,
         )
+        if (!piece) return
+        if (piece.length > STREAM_PIECE_SIZE) {
+          throw new SwarmIdError(
+            "invalid-request",
+            `An upload piece of ${piece.length} bytes is over the ${STREAM_PIECE_SIZE}-byte limit`,
+          )
+        }
+        yield piece
       }
-      yield piece
+    } finally {
+      // A folder opens one per file: each stops listening to the request's
+      // signal once its file is done, not when the whole folder is.
+      inbox.close()
     }
   }
 
