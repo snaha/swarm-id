@@ -12,6 +12,7 @@
  */
 
 import type { BatchId, Bee, PrivateKey, Stamper } from "@ethersphere/bee-js"
+import type { CounterFrame } from "./counter-codec"
 import {
   NUM_BUCKETS,
   UtilizationAwareStamper,
@@ -26,8 +27,6 @@ import {
 export interface LaneStateOptions {
   bee: Bee
   batchId: BatchId
-  /** The depth the counters serialize at: wider on a scratch drive. */
-  batchDepth: number
   partition: number
   backupSigner: PrivateKey
   swarmEncryptionKey: Uint8Array
@@ -49,10 +48,16 @@ export class LaneState {
    * written twice.
    */
   private publishUnsettled = false
-  /** The last publish's refs and counter, so the next one re-uploads only the
-   *  chunks that changed. */
+  /**
+   * The newest published state as this context read or wrote it: its leaf
+   * refs, its frame and EXACTLY the counter they encode, so the next publish
+   * re-uploads only the leaves that changed. Exactly, because a retained leaf
+   * goes out under an exception list computed from the new counter, and a
+   * leaf that encodes some other counter is one no reader can decode.
+   */
   private publishedReferences: Uint8Array[] | undefined
   private publishedCounter: Uint32Array | undefined
+  private publishedFrame: CounterFrame | undefined
 
   constructor(private readonly opts: LaneStateOptions) {}
 
@@ -72,8 +77,7 @@ export class LaneState {
    * would re-issue used slots, so the caller must not write.
    */
   async resume(): Promise<Uint32Array | undefined> {
-    const { bee, batchId, batchDepth, partition, swarmEncryptionKey, stamper } =
-      this.opts
+    const { bee, batchId, partition, swarmEncryptionKey, stamper } = this.opts
     const cached = stamper instanceof UtilizationAwareStamper
     const trusted = this.known
     const lookup = await readStatePointer({
@@ -93,23 +97,25 @@ export class LaneState {
         swarmEncryptionKey,
         batchId,
         partition,
-        batchDepth,
         prefetchedPointer: lookup,
       },
       trusted,
     )
     if (state.readFailed) return undefined
 
-    const localCounter =
-      state.unchanged && cached
+    if (state.unchanged) {
+      // Nothing was published since this context last read or wrote the
+      // lane, so the baseline it kept is still the newest state. Its own
+      // counter can only be ahead of that (stamps of an upload that was never
+      // acknowledged), which re-issues nothing that was acked.
+      this.publishUnsettled = false
+      return cached
         ? stamper.buildLeaseLocalCounter()
-        : (state.localCounter ?? new Uint32Array(NUM_BUCKETS))
-    if (
-      !state.unchanged &&
-      state.referenceHex !== undefined &&
-      state.seq !== undefined &&
-      cached
-    ) {
+        : (this.publishedCounter?.slice() ?? new Uint32Array(NUM_BUCKETS))
+    }
+
+    const localCounter = state.localCounter ?? new Uint32Array(NUM_BUCKETS)
+    if (state.referenceHex !== undefined && state.seq !== undefined && cached) {
       await stamper.setSyncedPointer(partition, {
         seq: state.seq,
         referenceHex: state.referenceHex,
@@ -119,19 +125,13 @@ export class LaneState {
       }
     }
 
-    // Seed the publish baseline from the state just resumed, so the first
-    // publish is incremental. `publishedCounter` must be a COPY: the stamper
-    // mutates the bound counter as it stamps, which would empty the diff.
-    //
-    // On the unchanged branch the refs describe the last ACKED counter while
-    // the local counter can be ahead of it (a publish that failed after the
-    // counter advanced). Counters only grow, so a retained ref never
-    // describes a value above the counter, and a takeover resumes at or below
-    // the acked high-water: it re-issues only unacked slots.
-    // `writePartitionState` refuses a publish that breaks this.
+    // The publish baseline is the state just read, so the first publish is
+    // incremental. `publishedCounter` must be a COPY: the stamper mutates the
+    // bound counter as it stamps, which would empty the diff.
     this.published = { seq: state.seq ?? 0, referenceHex: state.referenceHex }
     this.publishUnsettled = false
     this.publishedReferences = state.references
+    this.publishedFrame = state.frame
     this.publishedCounter = localCounter.slice()
     return localCounter
   }
@@ -142,8 +142,7 @@ export class LaneState {
    * the lane next resumes at exactly this counter.
    */
   async publish(localCounter: Uint32Array): Promise<void> {
-    const { bee, batchId, batchDepth, partition, swarmEncryptionKey, stamper } =
-      this.opts
+    const { bee, batchId, partition, swarmEncryptionKey, stamper } = this.opts
     // The next entry is one past the newest. Not knowing the newest for sure
     // (a publish failed after it may have written its entry), look before
     // writing: writing an entry a second time is the one thing the sequence
@@ -171,7 +170,6 @@ export class LaneState {
       bee,
       stamper,
       batchId,
-      batchDepth,
       partition,
       localCounter,
       backupSigner: this.opts.backupSigner,
@@ -179,10 +177,12 @@ export class LaneState {
       seq: this.published.seq + 1,
       previousReferences: this.publishedReferences,
       previousCounter: this.publishedCounter,
+      previousFrame: this.publishedFrame,
     })
     this.publishUnsettled = false
     this.publishedReferences = published.references
     this.publishedCounter = published.publishedCounter
+    this.publishedFrame = published.frame
     this.published = {
       seq: published.seq,
       referenceHex: published.referenceHex,

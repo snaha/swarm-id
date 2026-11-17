@@ -109,16 +109,19 @@ Capacity is enforced per partition: a write is rejected when `j` would reach
 
 ## 5. Persistence of the counter
 
-The counter is a `Uint32Array(65536)` (one entry per bucket), serialised and split into
-chunks by `getChunkLayout(depth)`:
+The counter is a `Uint32Array(65536)` (one entry per bucket). On the wire it is packed
+with the SBU1 leaf encoding (`sync/counter-codec.ts`, #463): a per-publish frame (base + bit
+width chosen from the counters' spread), deltas packed to that width, outliers listed as
+exceptions in the reference chunk — typically 7–23 leaves instead of the fixed 32 or 64 the
+uint16/uint32 layout before it took, and independent of the batch depth, so a dilute changes
+nothing published. Topic domain `swarm-id-partition-state-v2`.
 
-- counter codec is uint16 for `depth ≤ UINT16_COUNTER_MAX_DEPTH`, else uint32;
-- `bucketsPerChunk = CHUNK_SIZE / counterByteSize`; `numUtilizationChunks = 65536 /
-bucketsPerChunk` (uint16 → 2,048 buckets/chunk → **32 chunks**).
+The stamper's local cache rows and its own utilisation backup keep the depth-dependent
+layout (`getChunkLayout(depth)`: uint16 up to depth 31, uint32 above).
 
 Persistence rules:
 
-- **Each counter chunk is routed to its bucket's reserved slot `p`** (mutable overwrite),
+- **Each leaf is routed to its bucket's reserved slot `p`** (mutable overwrite),
   so persisting the counter never consumes data capacity. Per-chunk keys are varied so a
   partition's chunks land in **distinct buckets**; each then occupies slot `p` of its
   bucket.
@@ -134,21 +137,27 @@ consuming capacity and eventually throwing "Bucket is full" — even on a fresh 
 `writePartitionState` (`partition-state.ts`) turns the live counter into durable Swarm
 state:
 
-1. Each non-zero counter chunk is uploaded with a random encryption key to a reserved slot,
+1. Each non-zero leaf is uploaded with a random encryption key to a reserved slot,
    yielding a 64-byte **encrypted reference** (`address ‖ key`).
-2. A single **reference chunk** lists those N references (`N·64 ≤ 4096` even at `N = 64`)
-   and is itself uploaded the same way. A chunk that is entirely zero (never written) is
-   not uploaded — the reference chunk carries an **all-zero sentinel** at that index and the
-   reader defaults it to a zero chunk (a sparse first publish).
+2. A single **reference chunk** carries the frame, the exceptions and those references
+   (within one chunk at the width cap) and is itself uploaded the same way. A leaf that is
+   entirely zero (never written) is not uploaded — the reference chunk carries an
+   **all-zero sentinel** at that index and the reader defaults it to a zero leaf (a sparse
+   first publish).
 3. The reference chunk's reference is published as the next state-pointer entry (§8).
 
-**Incremental.** Given the previous publish's references and the counter it published,
-only the chunks whose serialized bytes changed are re-uploaded; unchanged chunks reuse the
-retained reference. A typical upload changes the data SOC's bucket plus the previous
-publish's feed bucket → ~3–4 chunk writes in one `Promise.all`, not all 32. A context
-that takes a lane seeds this baseline from the resumed state, so even the **first** publish of a
-session is incremental, not a full re-publish. A genuinely fresh account (no recovered
-refs) falls back to the sparse-full path.
+**Incremental.** Given the previous publish's references, the counter it published and
+the frame it packed with — kept while it still fits, so leaf boundaries hold — only the
+leaves whose bytes changed are re-uploaded; unchanged leaves reuse the retained reference.
+A small upload changes a leaf or two → a few writes in one `Promise.all`, not every leaf.
+A context that takes a lane seeds this baseline from the state it read, so even its
+**first** publish is incremental.
+
+**The baseline must be exact.** A kept leaf goes out under an exception list computed
+from the new counter, so the publish must be diffed against exactly the counter the kept
+leaves encode. `LaneState` keeps that counter from its own last read or publish, apart
+from the stamper's live counter, which can run ahead of it (stamps of an upload that was
+never acknowledged). A lane with nothing published since keeps the baseline as it is.
 
 ## 7. Who holds a partition: lanes on the account bus
 
@@ -308,15 +317,14 @@ decided on the room's membership and the server round trip.
 - **`readFailed` degradation.** When the resume point exists but can't be read (transient
   network error, or a published chunk evicted from the reserve), acquire degrades to
   read-only and retries rather than resuming from zero — never re-issuing used slots.
-- **No cross-version transport migration (stale-tab window).** The state-pointer entries
-  replaced earlier pointer transports under the **same** topic domain
-  (`swarm-id-partition-state-v1`): earlier code neither writes nor reads the entries,
-  and current code never touches the earlier addresses, so a device running pre-pointer code
+- **No cross-version migration (stale-tab window).** The state lives under topic domain
+  `swarm-id-partition-state-v2`; a build from before it neither writes nor reads it, and
+  current code never touches the `v1` addresses, so a device running an earlier build
   against an account written by current code (or vice versa) resumes from stale/absent
   state. Accepted because the lib is bundled into the centrally-deployed UI apps — every
   device loads the current build fresh, so the exposure is one already-open tab spanning a
   deploy, and the data at risk overlaps the unclean-crash slots already accepted above. A
-  future wire-format change must bump the topic domain (`…-v2`) instead of reusing v1.
+  wire-format change bumps the topic domain.
 
 ## Key constants (in `lib/src/utils/batch-utilization.ts` unless noted)
 
@@ -351,3 +359,6 @@ decided on the room's membership and the server round trip.
   cache, a refresh timer, an idle-yield timer and a local lease cache. Rewriting one
   address proved unreliable (#1017). All of it was replaced by lanes on the account bus
   (§7); nothing on Swarm says who holds a partition.
+- The **fixed-width counter chunks** (uint16 or uint32 by batch depth, 32 or 64 chunks per
+  publish, topic domain `v1`) were replaced by SBU1 leaves under `v2` (§5–6). State under
+  `v1` is not read: a lane's first take under `v2` starts from zero.
