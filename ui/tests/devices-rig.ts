@@ -8,7 +8,15 @@
  * devices on one drive's two partitions) and `two-drives.test.ts` (two devices
  * on two drives, #882); both run under `playwright.devices.config.ts`.
  */
-import { type Browser, type BrowserContext, type Page, expect, test } from '@playwright/test'
+import {
+  type Browser,
+  type BrowserContext,
+  type Page,
+  type Request,
+  expect,
+  test,
+} from '@playwright/test'
+import { randomBytes } from 'node:crypto'
 
 import { DEVICES_RUN_BZZ_PLUR, stockedSlot } from './global-setup-devices'
 import {
@@ -46,6 +54,8 @@ export const PEER_YIELD_MIN_IDLE_MS = 3_000
 export const NEXT_LANE_AFTER_MS = 1_500
 /** The signaling server's tick: a pending claim is sent again at each. */
 export const TICK_MS = 2_000
+/** Unanswered ticks after which the server drops a member (`MAX_SILENT_TICKS`). */
+export const MAX_SILENT_TICKS = 4
 
 /** How long a disconnected session is watched for coming back on its own. */
 export const DISCONNECT_SETTLE_MS = 5_000
@@ -99,6 +109,12 @@ export function skipScenario(reason: string): never {
   test.skip(true, reason)
   throw new Error(reason) // unreachable: test.skip throws
 }
+
+/** A data chunk leaving for the node, as opposed to the state pointer (`/soc/…`). */
+export const isDataWrite = (request: Request): boolean =>
+  request.method() === 'POST' &&
+  request.url().startsWith(BEE_API_URL) &&
+  /\/(bytes|chunks)(\?|$)/.test(request.url())
 
 /**
  * One device: one context, one (or more) demo tabs on it. Everything is read
@@ -253,24 +269,20 @@ export class Device {
    * "Bucket is full" — a limit, not a lease event. Distinct content spreads
    * across buckets the way real uploads do.
    */
-  async upload(page: Page = this.page, batchHex?: string): Promise<string> {
+  async upload(page: Page = this.page, batchHex?: string, padBytes = 0): Promise<string> {
     // A named drive, else the primary: the sidebar's "Write to" select, shown
     // once the app holds more than one drive. It keeps its last choice, so an
     // unnamed upload sets it back rather than inheriting the previous target.
     const target = page.getByRole('combobox', { name: 'Write to' })
     if ((await target.count()) > 0) await target.selectOption(batchHex ?? '')
-    const payload = `${this.label} ${Date.now()} ${Math.random()}`
+    // Padded when the upload should span many chunks, so it has a middle.
+    const padding = padBytes > 0 ? ` ${randomBytes(padBytes / 2).toString('hex')}` : ''
+    const payload = `${this.label} ${Date.now()} ${Math.random()}${padding}`
     await page.getByPlaceholder('Enter data to upload...').fill(payload)
     // The upload has started once a write leaves for the node (from the proxy
     // iframe — the page-level wait covers frames).
     // The DATA write: the state pointer is a write of its own (`/soc/…`).
-    const started = page.waitForRequest(
-      (request) =>
-        request.method() === 'POST' &&
-        request.url().startsWith(BEE_API_URL) &&
-        /\/(bytes|chunks)(\?|$)/.test(request.url()),
-      { timeout: UPLOAD_TIMEOUT_MS },
-    )
+    const started = page.waitForRequest(isDataWrite, { timeout: UPLOAD_TIMEOUT_MS })
     // Enabled once the session will stamp with the primary: a freshly bought
     // drive is held back until the network has had its blocks to see the
     // batch (#924). A named drive has its own "Setting up" line meanwhile.
