@@ -11,7 +11,6 @@ import {
   createTestSigner,
   mockFetch,
 } from "../proxy/feeds/epochs/test-utils"
-import { makeDeviceTiebreaker, writePartitionLock } from "./partition-lock"
 import { writePartitionState } from "./partition-state"
 import { readPublishedCounter } from "./published-counter"
 
@@ -58,6 +57,7 @@ async function publish(counter: Uint32Array): Promise<void> {
     localCounter: counter,
     backupSigner: BACKUP_SIGNER,
     swarmEncryptionKey: ENCRYPTION_KEY,
+    seq: 1,
   })
 }
 
@@ -65,7 +65,7 @@ describe("readPublishedCounter", () => {
   it("reads a partition that never published as empty", async () => {
     expect(await read()).toEqual({
       dataCounters: new Uint32Array(NUM_BUCKETS),
-      referenceHex: undefined,
+      pointer: undefined,
     })
   })
 
@@ -78,31 +78,14 @@ describe("readPublishedCounter", () => {
     const published = await read()
 
     expect(published?.dataCounters).toEqual(counter)
-    expect(published?.referenceHex).toBeDefined()
+    expect(published?.pointer?.seq).toBe(1)
   })
 
-  it("finds a long-gone holder's counter through its lock", async () => {
+  it("finds a long-gone holder's counter", async () => {
     const counter = new Uint32Array(NUM_BUCKETS)
     counter[7] = 3
     vi.spyOn(Date, "now").mockReturnValue(PUBLISHED_AT)
     await publish(counter)
-    await writePartitionLock({
-      bee,
-      stamper: createMockStamper(),
-      backupSigner: BACKUP_SIGNER,
-      swarmEncryptionKey: ENCRYPTION_KEY,
-      batchId: BATCH_ID,
-      partition: PARTITION,
-      payload: {
-        holderDeviceId: "device-B",
-        generation: {
-          timestampMs: PUBLISHED_AT,
-          tiebreaker: makeDeviceTiebreaker("device-B"),
-        },
-        acquiredAt: PUBLISHED_AT,
-        leasedUntil: PUBLISHED_AT,
-      },
-    })
     vi.spyOn(Date, "now").mockReturnValue(PUBLISHED_AT + A_DAY_MS)
 
     expect((await read())?.dataCounters).toEqual(counter)

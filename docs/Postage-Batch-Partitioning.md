@@ -8,7 +8,7 @@ the release fencing. This is the current-state reference for the multi-device wr
 > **Status.** Implemented. The per-partition counter is the single counter of record;
 > counter/utilisation persistence routes to reserved slots; the cross-device handoff is
 > commit-ordered (ack-after-publish) and resumes at the exact published counter via a
-> rotating state-pointer SOC. The user-facing overview lives in
+> numbered, write-once state-pointer entry. The user-facing overview lives in
 > `docs-site/src/content/docs/multi-device-postage-batches.mdx`; the write-path lifecycle
 > layer is documented in [`BatchWriteCoordinator.md`](./BatchWriteCoordinator.md); the live
 > fast path that lets peers hand a partition over in one round trip, and the presence
@@ -92,7 +92,7 @@ short-circuit per kind (see `UtilizationAwareStamper.stamp`):
 - **Counter chunks** — the partition's per-bucket counter, chunked (§5–6). Address is
   **content-derived** and changes whenever the counter changes, so the stamper is told
   explicitly to route it to slot `p` (`markReservedUtilizationChunk`).
-- **State-pointer SOC** — the rotating per-epoch pointer to the latest counter
+- **State-pointer entry** — the numbered, write-once pointer to the latest counter
   reference-chunk (§8). Routed to slot `p` via the stamper's single intent-SOC reservation.
 - **Intent + occupancy beacons** — the per-device intent SOC and the deviceId-independent
   occupancy SOC (§7). Also routed to slot `p` via the same intent-SOC reservation.
@@ -149,7 +149,7 @@ state:
    and is itself uploaded the same way. A chunk that is entirely zero (never written) is
    not uploaded — the reference chunk carries an **all-zero sentinel** at that index and the
    reader defaults it to a zero chunk (a sparse first publish).
-3. The reference chunk's reference is published in the rotating state-pointer SOC (§8).
+3. The reference chunk's reference is published as the next state-pointer entry (§8).
 
 **Incremental.** Given the previous publish's references and the counter it published,
 only the chunks whose serialized bytes changed are re-uploaded; unchanged chunks reuse the
@@ -172,7 +172,7 @@ lease (`LEASE_TTL_MS`) refreshed every 10 s (`LEASE_REFRESH_MS`). `PartitionLeas
   **occupancy beacon** (fresh per-epoch addresses that stay retrievable on a gateway whose
   static lock-SOC cache is frozen), then claim the first free/expired partition from this
   device's deterministic home offset. All four read channels (locks, presence, occupancy,
-  plus a **speculative state-pointer read** for the home partition) fire **concurrently** —
+  plus a **speculative state-pointer search** for the home partition) fire **concurrently** —
   classification is ordered after the barrier — so a cold acquire pays ~one read-timeout,
   not four stacked ones. Every lock read on the acquire path is timeout-bounded
   (`SYNC_READ_TIMEOUT_MS`), and the claim (`acquirePartitionLock`) skips its pre-write
@@ -234,18 +234,29 @@ partition state covering them → _then_ resolve the upload's promise. Consequen
   (safe to overwrite); writes at/below it were acked and the published counter never lets
   the new holder touch them. No skew margin needed.
 
-**State-pointer transport.** The pointer to the latest reference chunk is published at a
-deterministic, time-bucketed **state-pointer SOC**:
-`identifier = keccak256(topic ‖ uint64(floor(now / STATE_POINTER_EPOCH_MS)))`. A reader
-**computes** the address directly — no epoch-tree walk — and the rotating address bypasses a
-gateway's frozen static cache. The holder heartbeats the pointer to the current bucket on
-every refresh, so an idle-but-alive holder keeps a fresh resume point. A taking-over device
-reads the current/previous bucket around `now` and, for a gone holder, scans the whole
-`leasedUntil − LEASE_TTL_MS … leasedUntil` span (plus a couple buckets of slack for dropped
-heartbeats), all concurrently — so the lookup costs ~one read timeout regardless of how long
-ago the holder stopped. No pointer found _and_ a clean (absent) lock ⇒ genuinely no state ⇒
-resume from zero; no pointer found but the lock was **unreadable** ⇒ fail safe (read-only +
-retry), never zero-seed.
+**State-pointer transport.** Each publish writes the pointer to the latest reference chunk
+as the next **state-pointer entry**: entry 1, 2, 3, …, each an encrypted SOC at
+`identifier = keccak256(topic ‖ uint64(seq) ‖ uint8(salt))`, written once and never
+rewritten. A reader **searches** for the highest entry (`state-pointer-search.ts`): it
+reads the powers of 8 to bracket the answer, then splits the bracket 8 ways until it is
+one entry wide, each round a handful of concurrent reads. A device that knows an entry
+(its own last publish, kept as the stamper's synced pointer) starts from it, and when
+nothing newer exists the lookup is one round. The lookup uses no clock and nothing from
+the lock SOC, so it finds a state however long ago it was written, and an idle holder
+writes nothing.
+
+Entries share the partition's reserved slot, so a later reserved-slot write in the same
+bucket replaces an earlier entry. Which entries a search reads depends only on the
+answer, which gives a small set (at most 60) that any later search depends on. The
+publish keeps its chunks out of their buckets (§10), and `salt` (one of 8 candidate
+addresses, the same choice for reader and writer) keeps those entries out of each
+other's. The intent and occupancy beacons are at fixed addresses and can still replace
+one (§12).
+
+A search whose read of a possibly newer entry timed out is **inconclusive**: fail safe
+(read-only + retry), never resume from what was found and never zero-seed. An entry is
+never written twice: a holder that does not know the newest entry for sure (a lease
+adopted from cache, or a publish that failed part-way) searches before it publishes.
 
 **Reverse-clobber guard.** Before acking, the held lease is re-validated (throttled to zero
 reads on the fast path; a long upload that outran the TTL re-reads the lock SOC). If the
@@ -293,11 +304,11 @@ partition 0's reserved slots.
 All reserved-slot writers for partition `p` stamp `slot = p` (§3), so two of them in the
 same bucket evict one another. Within a publish, `writePartitionState` already picks each
 counter/reference chunk in a bucket distinct from the lock-SOC bucket, the live utilisation
-chunks, and (incremental) the retained real chunks. It **also** excludes, for the current
-and previous epoch:
+chunks, and (incremental) the retained real chunks. It **also** excludes the buckets of
+the **state-pointer entries** a search depends on (§8), its own new entry included, and
+re-uploads a retained chunk that stands where that entry goes. For the current and
+previous epoch it excludes:
 
-- the **state-pointer SOC** it writes in the same `Promise.all` (otherwise an intra-publish
-  self-collision, possible on every publish at ~1/65536 per chunk);
 - the deviceId-independent **occupancy beacon** bucket;
 - this device's **intent beacon** bucket (when the holder's `deviceId` is known).
 
@@ -352,13 +363,20 @@ that feeds the rival set. The beacon is a correctness mechanism; the heartbeat i
   node can miss a peer's claim (frozen local store / no non-neighborhood convergence) → the
   fenced sentinel still physically lands → a third device may claim → dual-hold bounded by
   the ≤ 10 s displacement window (refresh + `isDisplaced` + breaker).
+- **A beacon can replace a state-pointer entry.** The intent and occupancy beacons are
+  written at fixed addresses in the same reserved slot, so the publish cannot steer them
+  away from the entries a search depends on (§8). A beacon write landing in such a bucket
+  (about 60 in 65,536) replaces the entry, and a later search from nothing then ends at an
+  older entry without noticing: the new holder resumes from an older counter and can
+  re-issue acked slots. A device that still remembers a newer entry is not affected.
+  Nothing repairs it, since an entry is never rewritten.
 - **`readFailed` degradation.** When the resume point exists but can't be read (transient
   network error, or a published chunk evicted from the reserve), acquire degrades to
   read-only and retries rather than resuming from zero — never re-issuing used slots.
-- **No cross-version transport migration (stale-tab window).** The rotating state-pointer
-  SOC replaced the walked epoch feed under the **same** topic domain
-  (`swarm-id-partition-state-v1`): pre-pointer code neither writes nor reads the pointer
-  buckets, and current code never touches the feed, so a device running pre-pointer code
+- **No cross-version transport migration (stale-tab window).** The state-pointer entries
+  replaced earlier pointer transports under the **same** topic domain
+  (`swarm-id-partition-state-v1`): earlier code neither writes nor reads the entries,
+  and current code never touches the earlier addresses, so a device running pre-pointer code
   against an account written by current code (or vice versa) resumes from stale/absent
   state. Accepted because the lib is bundled into the centrally-deployed UI apps — every
   device loads the current build fresh, so the exposure is one already-open tab spanning a
@@ -375,7 +393,7 @@ that feeds the rival set. The beacon is a correctness mechanism; the heartbeat i
 | `UTILIZATION_SLOTS_PER_BUCKET`      | 2           | reserved slots per bucket (one per partition)                                                                                   |
 | `LEASE_TTL_MS` / `LEASE_REFRESH_MS` | 30 s / 10 s | lock-SOC lease lifetime / heartbeat — `LEASE_TTL_MS` is defined in `lib/src/sync/timing-constants.ts` and only re-exported here |
 | `IDLE_YIELD_MS`                     | 30 s        | idle-before-yield, so peers can take a slot                                                                                     |
-| `STATE_POINTER_EPOCH_MS`            | 30 s        | rotation period of the state-pointer SOC — defined in `lib/src/sync/partition-state.ts` (`= INTENT_EPOCH_MS`)                   |
+| `FANOUT` / `SALTS`                  | 8 / 8       | state-pointer search width / candidate addresses per entry — `lib/src/sync/state-pointer-search.ts`                             |
 
 ## 13. History (so future readers aren't misled)
 
@@ -386,8 +404,8 @@ that feeds the rival set. The beacon is a correctness mechanism; the heartbeat i
   ~256 KB blob through the data path; replaced by the per-partition reserved-slot chunk
   persistence (§5–6).
 - The **walked epoch-feed** that pointed at the latest counter reference-chunk (a ~32-level
-  tree walk = ~27 slow gateway 404 probes on cold acquire) was replaced by the rotating
-  **state-pointer SOC** (§8).
+  tree walk = ~27 slow gateway 404 probes on cold acquire) was replaced by the
+  **state-pointer entries** (§8).
 - The **resume-skew** handoff (`computeResumeCounterSkew`, a probabilistic margin against the
   previous holder's un-published in-flight writes) was specified but never implemented; it is
   superseded by the commit-ordered ack-after-publish handoff (§8), which resumes at the exact

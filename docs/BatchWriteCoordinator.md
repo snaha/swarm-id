@@ -157,7 +157,7 @@ Methods and getters:
 - **Stale-tick guards.** Clearing the refresh interval cannot stop a `refreshTick` already in
   flight (and a slow tick can overlap the next one). Every tick therefore re-checks
   `disposed` / `partitionLease !== lease` at entry, before arming the displacement breaker,
-  inside the locked demote (mirroring the idle-yield guards), and before the tail heartbeat +
+  inside the locked demote (mirroring the idle-yield guards), and before the tail repair +
   cache write — a stale tick must not re-claim a released partition, demote a re-acquired
   lease, or resurrect a cleared lease cache that a later acquire would `adoptIfLive`.
 - **Failure unwind.** `acquire()`'s cleanup undoes a partial commit: if a consumer callback

@@ -18,6 +18,7 @@
  * tidy and dedup stays stable across re-saves.
  */
 
+import type { StatePointer } from "../sync/partition-state"
 import {
   type Stamper,
   BatchId,
@@ -1415,7 +1416,7 @@ export class UtilizationAwareStamper implements Stamper, SlotAssigner {
       batchId,
       lastSync: existing?.lastSync ?? Date.now(),
       chunkCount: existing?.chunkCount ?? 0,
-      syncedReferences: existing?.syncedReferences,
+      syncedPointers: existing?.syncedPointers,
       stateChunkBuckets: {
         ...(existing?.stateChunkBuckets ?? {}),
         [partition]: buckets,
@@ -1957,23 +1958,24 @@ export class UtilizationAwareStamper implements Stamper, SlotAssigner {
   }
 
   /**
-   * Read the cached "synced reference" for `partition` — the partition-state
-   * feed reference this device's local counter was last in sync with. Used by
-   * the acquire path to skip re-downloading unchanged counter chunks.
+   * Read the cached "synced pointer" for `partition` — the published
+   * partition state this device's local counter was last in sync with. Used
+   * by the acquire path to start the pointer search from it and to skip
+   * re-downloading unchanged counter chunks.
    */
-  async getSyncedReference(partition: number): Promise<string | undefined> {
+  async getSyncedPointer(partition: number): Promise<StatePointer | undefined> {
     const meta = await this.cache.getMetadata(this.batchId.toHex())
-    return meta?.syncedReferences?.[partition]
+    return meta?.syncedPointers?.[partition]
   }
 
   /**
-   * Record the partition-state feed reference this device's local counter is
-   * now in sync with (after a download or a publish). Merges into the existing
+   * Record the published partition state this device's local counter is now
+   * in sync with (after a download or a publish). Merges into the existing
    * batch metadata so other fields / partitions are preserved.
    */
-  async setSyncedReference(
+  async setSyncedPointer(
     partition: number,
-    referenceHex: string,
+    pointer: StatePointer,
   ): Promise<void> {
     const batchId = this.batchId.toHex()
     const existing = await this.cache.getMetadata(batchId)
@@ -1981,9 +1983,9 @@ export class UtilizationAwareStamper implements Stamper, SlotAssigner {
       batchId,
       lastSync: existing?.lastSync ?? Date.now(),
       chunkCount: existing?.chunkCount ?? 0,
-      syncedReferences: {
-        ...(existing?.syncedReferences ?? {}),
-        [partition]: referenceHex,
+      syncedPointers: {
+        ...(existing?.syncedPointers ?? {}),
+        [partition]: pointer,
       },
       stateChunkBuckets: existing?.stateChunkBuckets,
     })

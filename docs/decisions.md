@@ -7,6 +7,40 @@ present and may point at an issue or PR; the reasons live here.
 
 A PR that makes or changes a decision adds the entry in the same PR.
 
+## 2026-11-17 The state pointer is a numbered, write-once entry found by search
+
+**Context.** The partition's state pointer was written at an address derived
+from the current 30-second window and rewritten there by every publish and
+every refresh tick. A taking-over device found it through the lock chunk's
+`leasedUntil`. Rewriting an address is what proved unreliable for the lock
+(#1017): a deferred upload loses the new content and a node that cached the
+old content keeps serving it. The lock chunk is also going away (the partition
+lease moves to the account bus), and its timestamp with it.
+
+**Decision.** Each publish writes the pointer as the next numbered entry, at
+an address computed from the number, and no address is written twice. A reader
+searches for the highest number: the powers of 8, then 8-way splits. It starts
+from the last entry the device knows, kept with the stamper's synced
+reference. The search is fixed, so the entries any later search depends on are
+a small computable set, and the writer keeps every chunk it places in the
+reserved slot out of their buckets. An idle holder writes nothing. A holder
+that does not know the newest entry for sure searches before it publishes. A
+search with an unsettled read above its answer fails safe, also on a partition
+nothing was published on.
+
+**Why.** A fresh address per publish has no older version for a cache to
+serve, and the lookup needs neither a clock nor the lock. Numbers and not
+timestamps, because two devices whose clocks differ by more than a publish
+interval would order states wrongly. The entries stay in the reserved slot and
+do not move to a data slot, because a data slot would spend drive capacity on
+every publish and wrap away on a scratch drive. The price is that a later
+reserved-slot write can replace an entry, which is why the search must be
+fixed and its entries protected. Measured on the public gateway, a read of an
+absent chunk answers in about half a second, so the usual lookup is one such
+round and a cold one over 10,000 entries about eight. Not solved here: the
+intent and occupancy beacons sit at fixed addresses in the same slot and can
+still replace an entry, until the bus lease removes them.
+
 ## 2026-11-13 SvelteKit 3, with `$lib` kept as an alias
 
 **Context.** SvelteKit 2 carried two advisories fixed only in 3.0 and pinned
