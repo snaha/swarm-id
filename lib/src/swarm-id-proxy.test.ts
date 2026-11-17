@@ -1499,6 +1499,25 @@ describe("SwarmIdProxy subsidised-mode selection", () => {
         }
       },
     )
+
+    // The gateway stamps the chunks itself and takes no stream, so neither a
+    // pin nor a tag conflicts with anything there.
+    it("accepts in subsidised mode what only the stream would refuse", async () => {
+      for (const type of ["uploadData", "uploadFile"]) {
+        parentWindow.postMessage.mockClear()
+        await identify(GATEWAY_URL)
+        setAccountState({})
+        vi.spyOn(globalThis, "fetch").mockImplementation(
+          async () =>
+            new Response(JSON.stringify({ reference: "ab".repeat(32) })),
+        )
+
+        await send({ ...fileUpload({ pin: true, tag: CALLER_TAG }), type })
+
+        await vi.waitFor(() => expect(answer()).toBeDefined())
+        expect(answer()).toMatchObject({ type: `${type}Response` })
+      }
+    })
   })
 
   describe("a custom Bee node drops the dApp's gateway", () => {

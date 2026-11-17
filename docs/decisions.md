@@ -59,17 +59,21 @@ has a tag, and has no pinning.
 
 **Decision.** Plain uploads use the stream too, and a refused upgrade fails the
 upload instead of falling back to HTTP. A direct stream goes untagged, and
-`pin: true` or a `tag` without `deferred: true` is rejected, in either mode,
-before the write lock is taken. Subsidised mode keeps HTTP.
+`pin: true` or a `tag` without `deferred: true` is rejected before the write
+lock is taken, wherever the upload goes to a stamper. A deferred stream the
+node gives no tag for is rejected too, and tag 0 is no tag, as Bee reads it.
+Subsidised mode keeps HTTP and rejects none of these.
 
 **Why.** The transport has nothing to do with encryption, and the gateway
 argument for skipping it applied equally to encrypted uploads, which already
 fail there with an error naming the cause. An untagged direct stream keeps the
 `deferred` contract of 2026-09-21, at the cost of Bee handling direct chunks one
 at a time. A `tag` would defer the stream, so dropping it unannounced would be
-the same silent difference as the dropped option. A dApp cannot choose
-subsidised mode, and the data still lands, so that case is documented on the
-option rather than rejected.
+the same silent difference as the dropped option, and an untagged deferred
+stream would be a direct upload. A dApp cannot choose subsidised mode, and the
+data still lands, so that case is documented on the option rather than
+rejected: refusing there would make one call succeed or fail by the account's
+drive.
 
 ## 2026-11-09 Dependency versions are exact
 

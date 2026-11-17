@@ -97,6 +97,7 @@ import {
   uploadSOC,
   uploadChunk,
   refuseChunkStreamConflicts,
+  stamperUploadTag,
   type ChunkCounter,
   type UploadTarget,
 } from "./proxy/upload"
@@ -2519,6 +2520,12 @@ export class SwarmIdProxy {
     if (signal?.aborted) throw abortedError(signal)
     const operation = (target: UploadTarget) =>
       uncounted({ ...target, counter, signal })
+    if (this.writesSubsidised(batchId)) {
+      return operation({
+        mode: "subsidised",
+        gatewayUrl: this.subsidisedGatewayUrl!,
+      })
+    }
     if (batchId !== undefined) {
       const drive = await this.writePathFor(batchId)
       this.refuseDrive(drive)
@@ -2531,12 +2538,6 @@ export class SwarmIdProxy {
       }
       return drive.coordinator.withWrite(operation, targetOptions)
     }
-    if (this.isSubsidisedModeActive()) {
-      return operation({
-        mode: "subsidised",
-        gatewayUrl: this.subsidisedGatewayUrl!,
-      })
-    }
     const coordinator = this.drive?.coordinator
     if (!coordinator) {
       throw new SwarmIdError(
@@ -2545,6 +2546,15 @@ export class SwarmIdProxy {
       )
     }
     return coordinator.withWrite(operation, targetOptions)
+  }
+
+  /**
+   * Whether a write to `batchId` goes to the subsidised gateway, which stamps
+   * the chunks itself: a write that names no drive, while the session has no
+   * usable stamp of its own and a gateway to fall back on.
+   */
+  private writesSubsidised(batchId: string | undefined): boolean {
+    return batchId === undefined && this.isSubsidisedModeActive()
   }
 
   /**
@@ -4502,8 +4512,12 @@ export class SwarmIdProxy {
     } = message
 
     try {
-      if (useWebSocket) refuseChunkStreamConflicts(options)
       const batchID = options?.batchID
+      // A gateway takes no stream, so what the stream cannot honour is refused
+      // only where the write goes to a stamper.
+      if (useWebSocket && !this.writesSubsidised(batchID)) {
+        refuseChunkStreamConflicts(options)
+      }
       this.ensureCanUpload(batchID)
 
       // Create progress callback if enabled (works in both modes)
@@ -4591,7 +4605,6 @@ export class SwarmIdProxy {
     const fileName = name || "index.bin"
 
     try {
-      if (useWebSocket) refuseChunkStreamConflicts(options)
       const batchID = options?.batchID
       this.ensureCanUpload(batchID)
 
@@ -4602,12 +4615,16 @@ export class SwarmIdProxy {
         enableProgress,
       )
 
-      // One tag for the whole upload, unless the content goes over a direct
-      // stream: that goes untagged, and the tag would track the manifest alone.
-      const uploadTag =
-        !useWebSocket || options?.deferred
-          ? (options?.tag ?? (await tryCreateTag(this.bee)))
-          : undefined
+      // One tag for the content and the manifest, by the content's rule: none
+      // over a direct stream, which would otherwise track the manifest alone.
+      // The stream's refusals come with it, before the write lock is taken.
+      const uploadTag = await stamperUploadTag(this.bee, {
+        ...options,
+        webSocket:
+          useWebSocket && !this.writesSubsidised(batchID)
+            ? { concurrency }
+            : undefined,
+      })
 
       // Execute upload with mode-aware locking
       const { result: manifestResult, stampedChunks } =
