@@ -22,6 +22,7 @@
 import { withTimeout } from '@snaha/swarm-id'
 import {
   AccountBus,
+  BusLanes,
   PRESENCE_INTERVAL_MS,
   PresenceTracker,
   SignalingTransport,
@@ -52,6 +53,10 @@ const PEER_POLL_MS = 100
 const CLOSE_SEND_GRACE_MS = 500
 
 let bus: AccountBus | undefined
+/** This tab's part in who writes which partition. It answers every claim in
+ *  the room, also while this tab writes nothing: a claimant waits for an
+ *  answer from everyone present. */
+let lanes: BusLanes | undefined
 /** The room's transport, read for its peer count by `publishBeforeClose`. */
 let transport: SignalingTransport | undefined
 /** Who else is live in the room, from their `presence` beats — the same
@@ -87,6 +92,8 @@ function closeBus(): void {
   unsubscribe = undefined
   unsubscribePeerLeft?.()
   unsubscribePeerLeft = undefined
+  lanes?.closeAll()
+  lanes = undefined
   bus?.close()
   bus = undefined
   transport = undefined
@@ -111,6 +118,7 @@ async function attach(account: SyncedAccount, forGeneration: number): Promise<vo
       typeof RTCPeerConnection !== 'undefined' ? () => new RTCPeerConnection() : undefined,
   })
   bus = new AccountBus([transport])
+  lanes = new BusLanes(bus)
   // The account this room belongs to, captured rather than read back: the fold
   // below must be scoped to the join it was attached for, not to whatever this
   // tab has selected by the time a message lands.
@@ -188,6 +196,11 @@ export const accountBusStore = {
    */
   liveDeviceIds(): string[] {
     return presence.liveDeviceIds(Date.now())
+  },
+
+  /** This tab's lanes in the joined room; undefined while it is in none. */
+  lanes(): BusLanes | undefined {
+    return lanes
   },
 
   /**

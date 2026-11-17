@@ -26,8 +26,6 @@ import {
   updateAfterWrite,
   calculateUtilization,
   initializeBatchUtilization,
-  LEASE_SKEW_MARGIN_MS,
-  LEASE_TTL_MS,
   MIN_USABLE_BATCH_DEPTH,
   MIN_USABLE_PARTITION_CAPACITY,
   mergeChunk,
@@ -40,9 +38,6 @@ import type {
   ChunkCacheEntry,
   UtilizationStoreDB,
 } from "../storage/utilization-store"
-import { lockSocAddress } from "./lock-soc"
-import { deriveSecret, BACKUP_KEY_LABEL } from "./key-derivation"
-import { uint8ArrayToHex } from "./hex"
 
 const TEST_BATCH_ID = new BatchId("00".repeat(32))
 
@@ -721,8 +716,7 @@ describe("UtilizationAwareStamper partition awareness", () => {
   })
 
   it("reserved-slot stamps still work on an invalidated, unbound stamper", async () => {
-    // The teardown release publishes the partition state, and writes the lock
-    // SOC sentinel, through exactly this stamper.
+    // A publish that outlives the lane goes through exactly this stamper.
     const stamper = await UtilizationAwareStamper.create(
       TEST_SIGNER_KEY,
       TEST_BATCH_ID,
@@ -731,8 +725,6 @@ describe("UtilizationAwareStamper partition awareness", () => {
       TEST_OWNER,
       TEST_ENC_KEY,
     )
-    const lockSoc = makeAddressInBucket(0x9b, 0)
-    stamper.bindLockSocs([{ partition: 1, address: lockSoc }])
     stamper.bindPartition({
       partition: 1,
       partitionCount: PARTITION_COUNT,
@@ -744,8 +736,6 @@ describe("UtilizationAwareStamper partition awareness", () => {
     const stateChunk = makeAddressInBucket(0x9b, 1)
     stamper.markReservedUtilizationChunk(stateChunk, 1)
     expect(decodeIndex(stamper.stamp(stateChunk).index).slot).toBe(1)
-
-    expect(decodeIndex(stamper.stamp(lockSoc).index).slot).toBe(1)
 
     const pointerSoc = makeAddressInBucket(0x9b, 2)
     stamper.reserveIntentSocSlot(pointerSoc, 1)
@@ -768,12 +758,11 @@ describe("UtilizationAwareStamper partition awareness", () => {
     expect(env.slot).toBe(dataSlot(0, 0, 1))
   })
 
-  it("a locally-lapsed lease fences the next partition-bound stamp (skew margin applied)", async () => {
-    // Race B (Postage-Batch-Partitioning.md §12): a holder whose refresh tick
-    // can't renew must stop writing when its OWN clock says the lease lapsed —
-    // otherwise a mid-op chunk lands in a slot a peer legitimately took over.
-    // Local, no-network fence: `stamp()` throws once `Date.now()` is within the
-    // skew margin of `leaseValidUntil`, matching the ack guard's bound.
+  it("a passed deadline fences the next partition-bound stamp", async () => {
+    // A holder whose connection went unconfirmed must stop writing when its
+    // OWN clock passes the deadline — otherwise a mid-op chunk lands in a
+    // slot someone else legitimately took over. Local, no-network fence:
+    // `stamp()` throws once `Date.now()` reaches `leaseValidUntil`.
     const stamper = await UtilizationAwareStamper.create(
       TEST_SIGNER_KEY,
       TEST_BATCH_ID,
@@ -788,9 +777,7 @@ describe("UtilizationAwareStamper partition awareness", () => {
       localCounter: new Uint32Array(NUM_BUCKETS),
     })
 
-    // Valid until only 500ms out — inside the (2s) skew margin, so the lease is
-    // treated as lapsed NOW even though raw expiry hasn't strictly passed.
-    stamper.setLeaseValidUntil(Date.now() + 500)
+    stamper.setLeaseValidUntil(Date.now())
 
     expect(() => stamper.stamp(makeAddressInBucket(0xa1, 0))).toThrow(
       PartitionLeaseLostError,
@@ -814,7 +801,7 @@ describe("UtilizationAwareStamper partition awareness", () => {
       localCounter: new Uint32Array(NUM_BUCKETS),
     })
 
-    stamper.setLeaseValidUntil(Date.now() + LEASE_TTL_MS)
+    stamper.setLeaseValidUntil(Date.now() + 30_000)
 
     expect(() => stamper.stamp(makeAddressInBucket(0xa2, 0))).not.toThrow()
   })
@@ -870,88 +857,15 @@ describe("UtilizationAwareStamper partition awareness", () => {
       partitionCount: PARTITION_COUNT,
       localCounter: new Uint32Array(NUM_BUCKETS),
     })
-    // Lease valid until clock + 10s. Well clear of the skew margin → no fence.
+    // May stamp until clock + 10s → no fence yet.
     stamper.setLeaseValidUntil(clock + 10_000)
     expect(() => stamper.stamp(makeAddressInBucket(0xa4, 0))).not.toThrow()
 
-    // Advance to exactly the skew margin before expiry → now fenced.
-    clock = clock + 10_000 - LEASE_SKEW_MARGIN_MS
+    // Advance to the deadline → now fenced.
+    clock = clock + 10_000
     expect(() => stamper.stamp(makeAddressInBucket(0xa4, 1))).toThrow(
       PartitionLeaseLostError,
     )
-  })
-
-  it("lock-SOC short-circuit routes overstamps to the reserved slot", async () => {
-    const stamper = await UtilizationAwareStamper.create(
-      TEST_SIGNER_KEY,
-      TEST_BATCH_ID,
-      TEST_DEPTH,
-      makeEmptyCache(),
-      TEST_OWNER,
-      TEST_ENC_KEY,
-    )
-
-    const lockAddr0 = new Uint8Array(32)
-    lockAddr0[0] = 0xab
-    lockAddr0[1] = 0xcd
-    const lockAddr1 = new Uint8Array(32)
-    lockAddr1[0] = 0xee
-    lockAddr1[1] = 0xff
-
-    stamper.bindLockSocs([
-      { partition: 0, address: lockAddr0 },
-      { partition: 1, address: lockAddr1 },
-    ])
-
-    // Stamping the partition-0 lock SOC many times always lands at slot 0.
-    for (let i = 0; i < 8; i++) {
-      const env = decodeIndex(stamper.stamp(lockAddr0).index)
-      expect(env.bucket).toBe(0xabcd)
-      expect(env.slot).toBe(0)
-    }
-
-    // Partition-1 lock SOC always lands at slot 1.
-    const env1 = decodeIndex(stamper.stamp(lockAddr1).index)
-    expect(env1.bucket).toBe(0xeeff)
-    expect(env1.slot).toBe(1)
-  })
-
-  it("data chunks in a reserved lock-SOC bucket use slots ≥ DATA_COUNTER_START", async () => {
-    // The lock SOC sits at slot 0 (or 1) of its bucket. Data chunks in the
-    // same bucket must skip past the reserved headroom — DATA_COUNTER_START
-    // gives both rooms.
-    const stamper = await UtilizationAwareStamper.create(
-      TEST_SIGNER_KEY,
-      TEST_BATCH_ID,
-      TEST_DEPTH,
-      makeEmptyCache(),
-      TEST_OWNER,
-      TEST_ENC_KEY,
-    )
-    const BUCKET = 0x4242
-    const lockAddr = new Uint8Array(32)
-    lockAddr[0] = (BUCKET >> 8) & 0xff
-    lockAddr[1] = BUCKET & 0xff
-    // Tail bytes distinct from any plausible data chunk in this test.
-    lockAddr[31] = 0xa5
-
-    stamper.bindLockSocs([{ partition: 0, address: lockAddr }])
-    stamper.bindPartition({
-      partition: 0,
-      partitionCount: PARTITION_COUNT,
-      localCounter: new Uint32Array(NUM_BUCKETS),
-    })
-
-    // Overstamp the lock SOC a bunch.
-    for (let i = 0; i < 5; i++) {
-      stamper.stamp(lockAddr)
-    }
-
-    // Now a data chunk in the same bucket: must NOT collide with the lock
-    // SOC's reserved slot 0; slot must be ≥ DATA_COUNTER_START.
-    const env = decodeIndex(stamper.stamp(makeAddressInBucket(BUCKET, 1)).index)
-    expect(env.bucket).toBe(BUCKET)
-    expect(env.slot).toBeGreaterThanOrEqual(DATA_COUNTER_START)
   })
 
   it("marked utilisation chunks land in the reserved slot (= partition) and don't bump the counter", async () => {
@@ -1157,80 +1071,6 @@ describe("UtilizationAwareStamper partition awareness", () => {
     expect(slot).toBe(SLOT)
   })
 
-  it("auto-bind uses the BACKUP-signer address (derived from encryptionKey), not the `owner` arg", async () => {
-    // Regression: `writePartitionLock` writes the lock SOC to
-    // `keccak256(identifier || backupSigner.publicKey().address())`, where
-    // backupSigner is derived from `swarmEncryptionKey`. The stamper's
-    // `owner` parameter is set to different values by different call sites
-    // (account address, postage-signer address) and is NOT necessarily the
-    // backup signer's address. The auto-bind in `create` must ignore the
-    // `owner` arg and derive the backup signer itself, otherwise the
-    // short-circuit fails to fire in production and every lock-SOC stamp
-    // burns a slot until the bucket is exhausted.
-    const swarmEncryptionKey = TEST_ENC_KEY
-    const swarmEncryptionKeyHex = uint8ArrayToHex(swarmEncryptionKey)
-    const backupKeyHex = await deriveSecret(
-      swarmEncryptionKeyHex,
-      BACKUP_KEY_LABEL,
-    )
-    const backupOwner = new PrivateKey(backupKeyHex).publicKey().address()
-    const expectedLockSocAddr = lockSocAddress(TEST_BATCH_ID, 0, backupOwner)
-
-    // Deliberately wrong `owner` — a random unrelated address. If the bug
-    // resurfaced, the auto-bind would use this address and the synthetic
-    // chunk below would NOT match, causing the test to fail.
-    const wrongOwner = new EthAddress("de".repeat(20))
-
-    const stamper = await UtilizationAwareStamper.create(
-      TEST_SIGNER_KEY,
-      TEST_BATCH_ID,
-      TEST_DEPTH,
-      makeEmptyCache(),
-      wrongOwner,
-      swarmEncryptionKey,
-    )
-
-    const lockSocChunk = expectedLockSocAddr
-
-    // Two overstamps; if the short-circuit fires (which only happens when
-    // auto-bind used the BACKUP owner), both land at slot 0.
-    const env1 = decodeIndex(stamper.stamp(lockSocChunk).index)
-    const env2 = decodeIndex(stamper.stamp(lockSocChunk).index)
-    expect(env1.slot).toBe(0)
-    expect(env2.slot).toBe(0)
-    expect(env1.bucket).toBe(env2.bucket)
-  })
-
-  it("getLockSocBuckets reflects bound lock SOCs", async () => {
-    const stamper = await UtilizationAwareStamper.create(
-      TEST_SIGNER_KEY,
-      TEST_BATCH_ID,
-      TEST_DEPTH,
-      makeEmptyCache(),
-      TEST_OWNER,
-      TEST_ENC_KEY,
-    )
-    // `create` auto-binds lock SOCs for both partitions from the owner.
-    expect(stamper.getLockSocBuckets().size).toBe(PARTITION_COUNT)
-
-    // Explicit re-bind (e.g. for tests) replaces the auto-bound entries.
-    const a = new Uint8Array(32)
-    a[0] = 0x12
-    a[1] = 0x34
-    const b = new Uint8Array(32)
-    b[0] = 0x56
-    b[1] = 0x78
-    stamper.bindLockSocs([
-      { partition: 0, address: a },
-      { partition: 1, address: b },
-    ])
-
-    const buckets = stamper.getLockSocBuckets()
-    expect(buckets.has(0x1234)).toBe(true)
-    expect(buckets.has(0x5678)).toBe(true)
-    expect(buckets.size).toBe(2)
-  })
-
   it("seeds the local counter from the caller (Case B resume scenario)", async () => {
     // Simulates Case B: device 1 acquires partition 1 and resumes from a
     // non-zero per-bucket high-water published by a previous holder.
@@ -1379,10 +1219,6 @@ describe("UtilizationAwareStamper synced reference", () => {
     expect(protectedNow.has(7)).toBe(true)
     expect(protectedNow.has(99)).toBe(true)
     expect(protectedNow.has(1234)).toBe(true)
-    // Lock-SOC buckets stay included.
-    for (const bucket of stamper.getLockSocBuckets()) {
-      expect(protectedNow.has(bucket)).toBe(true)
-    }
 
     // A reload (fresh stamper over the same cache) keeps avoiding them.
     const reloaded = await makeStamper(cache)

@@ -171,7 +171,6 @@ vi.mock("../utils/batch-utilization", async (importOriginal) => ({
   }),
   saveUtilizationState: vi.fn().mockResolvedValue(undefined),
   calculateUtilization: vi.fn().mockReturnValue(0.01),
-  LEASE_TTL_MS: 30_000,
   UtilizationAwareStamper: MockUtilizationAwareStamper,
 }))
 
@@ -187,6 +186,7 @@ const coordinatorController = vi.hoisted(() => ({
 }))
 vi.mock("./batch-write-coordinator", () => ({
   BatchWriteCoordinator: class MockBatchWriteCoordinator {
+    teardown() {}
     withWrite(op: (target: unknown) => Promise<unknown>) {
       return coordinatorController.withWrite
         ? coordinatorController.withWrite(op)

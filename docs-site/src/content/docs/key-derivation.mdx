@@ -86,7 +86,7 @@ device of the account holds it, which is what lets them all write the same feeds
 ### swarmEncryptionKey and the backup signer
 
 `swarmEncryptionKey` encrypts everything the account writes to Swarm: the per-device account
-feeds, the partition lock chunks, the intent beacons, and the utilization counters. From it,
+feeds, the partitions' state pointers, and the utilization counters. From it,
 `backupKey` is turned into a secp256k1 private key, the **backup signer**. Its address is the
 owner of every feed and every single-owner chunk in the multi-device protocol. Two accounts
 with the same topic still write to different addresses, because the owner differs.

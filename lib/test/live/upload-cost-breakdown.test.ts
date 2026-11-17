@@ -23,6 +23,7 @@ import { randomBytes } from "node:crypto"
 import { describe, it, expect, beforeAll } from "vitest"
 import { Identifier, PrivateKey } from "@ethersphere/bee-js"
 import { BatchWriteCoordinator } from "../../src/sync/batch-write-coordinator"
+import { soloLanes } from "../../src/sync/bus-lease-test-utils"
 import {
   UtilizationAwareStamper,
   PARTITION_COUNT,
@@ -68,7 +69,7 @@ describe.skipIf(!liveEnv.configured)(
         stamper,
         deviceId: D,
         accountId: keys.accountId,
-        knownDeviceIds: () => [D],
+        lanes: soloLanes(),
         backupSigner: keys.accountKey,
         swarmEncryptionKey: encryptionKey,
         partitionCount: PARTITION_COUNT,

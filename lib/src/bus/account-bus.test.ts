@@ -39,12 +39,13 @@ const UTILIZATION_MESSAGE: BusMessageInput = {
   buckets: [{ index: 3, value: 7 }],
 }
 
-const LEASE_RELEASED_MESSAGE: BusMessageInput = {
-  type: "lease-released",
+const LANE_CLAIM_MESSAGE: BusMessageInput = {
+  type: "lane-claim",
   accountId: "aa".repeat(20),
   batchId: "ab".repeat(32),
   partition: 1,
-  fromDeviceId: "device-remote",
+  from: "peer-remote",
+  round: "0123456789abcdef",
 }
 
 function makeSnapshot(): AccountStateSnapshot {
@@ -277,8 +278,8 @@ describe("AccountBus over BroadcastChannelTransport", () => {
 
       // Everything else still fans out to both — the lease messages are the
       // reason the remote transport exists.
-      bus.publish(LEASE_RELEASED_MESSAGE)
-      expect(remoteSent).toEqual([LEASE_RELEASED_MESSAGE])
+      bus.publish(LANE_CLAIM_MESSAGE)
+      expect(remoteSent).toEqual([LANE_CLAIM_MESSAGE])
       expect(localSent).toHaveLength(2)
     } finally {
       bus.close()
@@ -355,6 +356,7 @@ const PRESENCE_MESSAGE: BusMessageInput = {
 }
 
 interface FakeLiveness {
+  selfId?: string
   confirmedAgoMs: number
   absentExceptMs: number
 }
@@ -363,7 +365,7 @@ interface FakeLiveness {
 function fakeRemote(liveness: FakeLiveness) {
   let deliver: (raw: unknown, from?: string) => void = () => {}
   let confirm: (unconfirmedForMs: number) => void = () => {}
-  const named: [string, string][] = []
+  const heard: string[] = []
   const transport: BusTransport = {
     local: false,
     publish: () => {},
@@ -377,12 +379,13 @@ function fakeRemote(liveness: FakeLiveness) {
       confirm = handler
       return () => {}
     },
-    notePeerDevice: (peerId, deviceId) => named.push([peerId, deviceId]),
+    selfId: () => liveness.selfId,
+    notePeer: (peerId) => heard.push(peerId),
     close: () => {},
   }
   return {
     transport,
-    named,
+    heard,
     deliver: (raw: unknown, from?: string) => deliver(raw, from),
     confirm: (unconfirmedForMs: number) => confirm(unconfirmedForMs),
   }
@@ -441,14 +444,31 @@ describe("AccountBus — liveness", () => {
     }
   })
 
-  it("tells a transport which device a peer speaks for", () => {
+  it("tells a transport which peers it heard a well-formed message from", () => {
     const remote = fakeRemote({ confirmedAgoMs: 0, absentExceptMs: 0 })
     const bus = new AccountBus([remote.transport])
     try {
       remote.deliver(PRESENCE_MESSAGE, "peer-1")
-      remote.deliver(UTILIZATION_MESSAGE, "peer-2")
-      remote.deliver({ type: "nonsense", fromDeviceId: "device-x" }, "peer-3")
-      expect(remote.named).toEqual([["peer-1", "device-remote"]])
+      remote.deliver({ type: "nonsense", fromDeviceId: "device-x" }, "peer-2")
+      remote.deliver(PRESENCE_MESSAGE)
+      expect(remote.heard).toEqual(["peer-1"])
+    } finally {
+      bus.close()
+    }
+  })
+
+  it("is named by its remote transport", () => {
+    const remote = fakeRemote({
+      selfId: "peer-self",
+      confirmedAgoMs: 0,
+      absentExceptMs: 0,
+    })
+    const bus = new AccountBus([
+      new BroadcastChannelTransport(TOPIC),
+      remote.transport,
+    ])
+    try {
+      expect(bus.selfId()).toBe("peer-self")
     } finally {
       bus.close()
     }

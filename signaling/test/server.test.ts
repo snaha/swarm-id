@@ -609,6 +609,30 @@ describe('signaling server — client round trip', () => {
     }
   })
 
+  // A member that answers nothing would keep every lane claim in its room
+  // waiting; one that answers stays.
+  it('drops a room member that stops answering its ticks, and keeps one that answers', async () => {
+    const ticking = await createSignalingServer({ port: 0, tickIntervalMs: EVENT_SETTLE_MS })
+    const topic = randomTopic()
+    const answering = await connect(topic, ticking.port)
+    const silent = await connect(topic, ticking.port)
+    let nonce = 0
+    answering.socket.addEventListener('message', (event) => {
+      if (JSON.parse(String(event.data)).type === 'tick') {
+        answering.socket.send(JSON.stringify({ type: 'ping', nonce: ++nonce }))
+      }
+    })
+    try {
+      const left = await answering.next((m) => m.type === 'peer-left')
+      expect(left.peerId).toBe(silent.peerId)
+      expect(answering.socket.readyState).toBe(WebSocket.OPEN)
+    } finally {
+      answering.close()
+      silent.close()
+      await ticking.close()
+    }
+  })
+
   // A pong says "the server counts you as a member of your room", which is
   // what a peer's absence is later judged against.
   it('does not answer a ping from a socket that joined no room', async () => {

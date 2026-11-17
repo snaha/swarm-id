@@ -21,7 +21,7 @@ export interface PublishedCounter {
 /**
  * A partition's per-bucket counter as its holder last published it, read
  * without claiming anything: the same state-pointer search a takeover makes
- * (`PartitionLease.claimPartition`), so it finds a long-gone holder's state
+ * (`LaneState.resume`), so it finds a long-gone holder's state
  * too. A partition that never published reads as empty. `undefined` when the
  * state may exist but could not be read.
  *

@@ -518,8 +518,8 @@ const INGEST_POLL_MS = 5_000
  *
  * A purchase settles on chain; the node only learns of it by watching, and
  * until it has, every stamped write is rejected with `invalid batch id` — the
- * partition-lock SOC included, so the failure surfaces as a lease that cannot
- * be acquired rather than as anything about the batch.
+ * partition's state pointer included, so the failure surfaces as an upload
+ * that cannot be acknowledged rather than as anything about the batch.
  */
 export async function waitForBatchIngestion(
   page: Page,

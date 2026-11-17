@@ -3,40 +3,9 @@
 
 import { describe, it, expect, vi } from "vitest"
 
-import { BusLane, LEASE_STOP_MS, LEASE_WAIT_MS } from "./bus-lease"
-import type { LaneLiveness, LaneMessage } from "./bus-lease"
-
-/** Liveness answers set by the test, standing in for the signaling room. */
-class FakeLiveness implements LaneLiveness {
-  confirmedAgo = 0
-  /** How long everybody outside `present` has been gone. */
-  absentFor = Infinity
-  /** Devices in the room right now. */
-  present = new Set<string>()
-  private handlers = new Set<(unconfirmedForMs: number) => void>()
-
-  confirmedAgoMs(): number {
-    return this.confirmedAgo
-  }
-
-  absentExceptMs(deviceIds: ReadonlySet<string>): number {
-    for (const device of this.present) {
-      if (!deviceIds.has(device)) return 0
-    }
-    return this.absentFor
-  }
-
-  onConfirmed(handler: (unconfirmedForMs: number) => void): () => void {
-    this.handlers.add(handler)
-    return () => this.handlers.delete(handler)
-  }
-
-  /** A round trip with the server completes after `gapMs` without one. */
-  confirm(gapMs = 0): void {
-    this.confirmedAgo = 0
-    for (const handler of this.handlers) handler(gapMs)
-  }
-}
+import { BusLane, BusLanes, LEASE_STOP_MS, LEASE_WAIT_MS } from "./bus-lease"
+import type { LaneMessage } from "./bus-lease"
+import { FakeLiveness, makeRoom } from "./bus-lease-test-utils"
 
 interface Device {
   lane: BusLane
@@ -50,16 +19,15 @@ interface Device {
 let roundCounter = 0
 
 function makeDevice(deviceId: string): Device {
-  const liveness = new FakeLiveness()
+  const liveness = new FakeLiveness(deviceId)
   const sent: LaneMessage[] = []
   const busy = { value: false }
   const handover = vi.fn<() => Promise<void>>(() => Promise.resolve())
   const lost = vi.fn<() => void>()
   const lane = new BusLane({
-    deviceId,
     liveness,
     send: (message) => sent.push(message),
-    isBusy: () => busy.value,
+    isBusy: (gentle) => gentle || busy.value,
     beforeHandover: handover,
     onLost: lost,
     newRound: () => `round-${++roundCounter}`,
@@ -303,5 +271,155 @@ describe("BusLane — rules the model depends on", () => {
     deliver(a, b)
     deliver(b, a)
     expect(a.lane.holds()).toBe(false)
+  })
+})
+
+describe("BusLane — a gentle claim", () => {
+  it("leaves an idle holder where it is, until the claimant insists", async () => {
+    const a = makeDevice("a")
+    const b = makeDevice("b")
+    holdAlone(a)
+    a.liveness.present.add("b")
+    b.liveness.present.add("a")
+    const asked: boolean[] = []
+
+    expect(b.lane.claim({ gentle: true })).toBe(true)
+    asked.push(b.sent[0].kind === "claim" && b.sent[0].gentle === true)
+    deliver(b, a)
+    await flush()
+    expect(a.lane.holds()).toBe(true)
+    expect(a.sent).toEqual([])
+
+    b.lane.insist()
+    asked.push(b.sent[0].kind === "claim" && b.sent[0].gentle === true)
+    deliver(b, a)
+    await flush()
+    deliver(a, b)
+
+    expect(asked).toEqual([true, false])
+    expect(a.lane.holds()).toBe(false)
+    expect(b.lane.holds()).toBe(true)
+  })
+
+  it("takes a lane nobody holds at once", () => {
+    const a = makeDevice("a")
+    const b = makeDevice("b")
+    a.liveness.present.add("b")
+    b.liveness.present.add("a")
+
+    expect(b.lane.claim({ gentle: true })).toBe(true)
+    deliver(b, a)
+    deliver(a, b)
+
+    expect(b.lane.holds()).toBe(true)
+  })
+})
+
+describe("BusLane — a connection that is replaced", () => {
+  it("holds nothing under a new name", () => {
+    const a = makeDevice("a")
+    holdAlone(a)
+
+    a.liveness.id = "a-again"
+
+    expect(a.lane.holds()).toBe(false)
+    expect(a.lost).toHaveBeenCalledTimes(1)
+  })
+
+  it("drops a claim made under its earlier name when an answer arrives", () => {
+    const a = makeDevice("a")
+    const b = makeDevice("b")
+    a.liveness.present.add("b")
+    b.liveness.present.add("a")
+    expect(a.lane.claim()).toBe(true)
+    deliver(a, b)
+
+    a.liveness.id = "a-again"
+    deliver(b, a)
+
+    // The claim was made on a connection that is gone: it is dropped.
+    expect(a.lane.holds()).toBe(false)
+    expect(a.lane.claiming).toBe(false)
+  })
+
+  it("cannot claim without a name", () => {
+    const a = makeDevice("a")
+    a.liveness.id = undefined
+    expect(a.lane.claim()).toBe(false)
+  })
+})
+
+const LANE = { accountId: "aa".repeat(20), batchId: "bb".repeat(32) }
+const idle = { isBusy: () => false }
+
+describe("BusLanes", () => {
+  it("answers a claim of a lane it never opened, so the claimant is not kept waiting", () => {
+    const { join } = makeRoom()
+    const lanes = new BusLanes(join("a"))
+    new BusLanes(join("b"))
+
+    const lane = lanes.open({ ...LANE, partition: 0 }, idle)
+    expect(lane.claim()).toBe(true)
+
+    expect(lane.holds()).toBe(true)
+  })
+
+  it("keeps the lanes of one bus apart", () => {
+    const { join } = makeRoom()
+    const a = new BusLanes(join("a"))
+    const b = new BusLanes(join("b"))
+    const held = b.open({ ...LANE, partition: 0 }, { isBusy: () => true })
+    b.open({ ...LANE, partition: 1 }, idle)
+    expect(held.claim()).toBe(true)
+    expect(held.holds()).toBe(true)
+
+    // Lane 0 is held by a busy context; lane 1 is not held.
+    const zero = a.open({ ...LANE, partition: 0 }, idle)
+    const one = a.open({ ...LANE, partition: 1 }, idle)
+    expect(zero.claim()).toBe(true)
+    expect(one.claim()).toBe(true)
+
+    expect(zero.holds()).toBe(false)
+    expect(one.holds()).toBe(true)
+    expect(held.holds()).toBe(true)
+  })
+
+  it("drops a message that names a sender other than the one that delivered it", () => {
+    const { join, deliverTo } = makeRoom()
+    const a = new BusLanes(join("a"))
+    new BusLanes(join("b"))
+    const held = a.open({ ...LANE, partition: 0 }, idle)
+    expect(held.claim()).toBe(true)
+    expect(held.holds()).toBe(true)
+
+    const claim = {
+      type: "lane-claim" as const,
+      ...LANE,
+      partition: 0,
+      from: "c",
+      round: "0".repeat(16),
+    }
+    // Delivered by B but naming C: A must not hand over for it.
+    deliverTo("a", claim, "b")
+    expect(held.holds()).toBe(true)
+
+    // The same claim from the context it names is answered.
+    deliverTo("a", claim, "c")
+    expect(held.holds()).toBe(false)
+  })
+
+  it("gives up a lane when it is closed", () => {
+    const { join } = makeRoom()
+    const a = new BusLanes(join("a"))
+    const b = new BusLanes(join("b"))
+    const key = { ...LANE, partition: 0 }
+    const held = a.open(key, { isBusy: () => true })
+    expect(held.claim()).toBe(true)
+
+    a.close(key)
+    const next = b.open(key, idle)
+    expect(next.claim()).toBe(true)
+
+    expect(next.holds()).toBe(true)
   })
 })
