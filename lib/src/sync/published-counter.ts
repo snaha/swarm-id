@@ -34,7 +34,6 @@ export async function readPublishedCounter(
     backupSigner: PrivateKey
     swarmEncryptionKey: Uint8Array
     batchId: BatchId
-    batchDepth: number
     partition: number
   },
   known?: PublishedCounter,
@@ -47,7 +46,6 @@ export async function readPublishedCounter(
       swarmEncryptionKey,
       batchId,
       partition,
-      batchDepth: opts.batchDepth,
     },
     known?.pointer,
   )

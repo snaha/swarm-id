@@ -376,7 +376,6 @@ export class BatchWriteCoordinator {
       state = new LaneState({
         bee: this.deps.bee,
         batchId: new BatchId(this.deps.batchId),
-        batchDepth: this.deps.stamper.counterDepth,
         partition,
         backupSigner: this.deps.backupSigner,
         swarmEncryptionKey: this.deps.swarmEncryptionKey,

@@ -28,6 +28,31 @@ the server take turns), it sleeps after 15 idle minutes, and an account open in 
 preview and in another preview does not see itself live, since the two sit on different
 servers.
 
+## 2026-11-17 Partition state is published as SBU1 leaves, with no depth on the wire
+
+**Context.** The counter was serialized as fixed uint16 or uint32 chunks chosen
+from the batch depth: 32 or 64 chunks, all of which a spread-out upload
+rewrote, and a layout that changed when a dilute crossed depth 31 to 32
+(#463). #918 fixed this on the lock-based stack, which is not continued.
+
+**Decision.** Taken over from #918: the counters are packed with the leaf
+encoding of Nectar's SBU1 usage snapshot, a frame (base and bit width) chosen
+per publish from the counters' spread, deltas packed to that width, outliers
+as exceptions. The frame rides in the reference chunk under topic domain `v2`.
+State under `v1` is not read. Not taken over: #918's changes to the local
+cache rows, which were built for tabs sharing one partition. The holder keeps
+its publish baseline in memory instead, as exactly the counter it last read or
+published.
+
+**Why.** Nothing published depends on the depth, and a takeover reads 8–24
+chunks instead of 33 or 65. Not reading `v1` means a lane's first take under
+`v2` resumes from zero; accepted while the version is `0.x`. The widest delta
+is 23 bits, so that the frame, 128 exceptions and a reference per leaf fit one
+chunk. The baseline lives in memory because each tab now holds its partition
+alone and reads the published counter when it takes one, so there are no
+shared rows to certify. The cache rows still depend on the depth, so a dilute
+across 31 to 32 on a live drive is not handled by this change.
+
 ## 2026-11-17 Each tab holds a partition for itself
 
 **Context.** The bus lease was decided with "several tabs of one device keep
