@@ -778,10 +778,12 @@ describe("readPartitionState — a state that cannot be read", () => {
   })
 
   it("resumes `unchanged` from the local synced pointer when a CLEAN search finds nothing newer", async () => {
-    // Same-device reclaim: every read of an entry above the synced one
-    // resolved cleanly absent (no timeouts), so "nothing newer" is
-    // authoritative and the local synced pointer stays trustworthy.
-    const knownRef = "aa".repeat(64)
+    // Same-device reclaim: the synced entry is there, and every read of an
+    // entry above it resolved cleanly absent (no timeouts), so "nothing
+    // newer" is authoritative.
+    const counter = new Uint32Array(NUM_BUCKETS)
+    counter[7] = 1
+    const { referenceHex } = await publishAsEarlierHolder(counter)
     const result = await partitionState.readPartitionState(
       {
         bee: bee,
@@ -790,11 +792,68 @@ describe("readPartitionState — a state that cannot be read", () => {
         batchId: TEST_BATCH_ID,
         partition: 0,
       },
-      { seq: 3, referenceHex: knownRef },
+      { seq: 1, referenceHex },
     )
     expect(result.readFailed).toBeUndefined()
     expect(result.unchanged).toBe(true)
-    expect(result.referenceHex).toBe(knownRef)
+    expect(result.referenceHex).toBe(referenceHex)
+  })
+
+  // What a browser remembers can outlive what it describes: a format change
+  // moves every entry to a new address, and a local chain can be reset. The
+  // remembered entry is a place to start, and only if it is still there.
+  it("does not resume from a remembered entry that is not there", async () => {
+    const remembered = { seq: 3, referenceHex: "aa".repeat(64) }
+
+    const lookup = await partitionState.readStatePointer({
+      bee: bee,
+      owner: OWNER,
+      swarmEncryptionKey: TEST_ENC_KEY,
+      batchId: TEST_BATCH_ID,
+      partition: 0,
+      known: remembered,
+    })
+    expect(lookup).toEqual({ pointer: undefined, inconclusive: false })
+
+    // And with a state published since: that one is found, from nothing.
+    const counter = new Uint32Array(NUM_BUCKETS)
+    counter[7] = 1
+    const { referenceHex } = await publishAsEarlierHolder(counter)
+    const result = await partitionState.readPartitionState(
+      {
+        bee: bee,
+        owner: OWNER,
+        swarmEncryptionKey: TEST_ENC_KEY,
+        batchId: TEST_BATCH_ID,
+        partition: 0,
+      },
+      remembered,
+    )
+    expect(result.unchanged).toBe(false)
+    expect(result.referenceHex).toBe(referenceHex)
+    expect(result.localCounter).toEqual(counter)
+  })
+
+  it("is inconclusive when the remembered entry cannot be read", async () => {
+    const counter = new Uint32Array(NUM_BUCKETS)
+    counter[7] = 1
+    const { referenceHex } = await publishAsEarlierHolder(counter)
+    const hang = vi
+      .spyOn(downloadData, "downloadEncryptedSOC")
+      .mockImplementationOnce((() => new Promise(() => {})) as never)
+    try {
+      const lookup = await partitionState.readStatePointer({
+        bee: bee,
+        owner: OWNER,
+        swarmEncryptionKey: TEST_ENC_KEY,
+        batchId: TEST_BATCH_ID,
+        partition: 0,
+        known: { seq: 1, referenceHex },
+      })
+      expect(lookup.inconclusive).toBe(true)
+    } finally {
+      hang.mockRestore()
+    }
   })
 
   it("rejects publishing a counter with the wrong length", async () => {

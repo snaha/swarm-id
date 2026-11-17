@@ -367,10 +367,11 @@ export async function writeStatePointer(opts: {
  * Find the newest state-pointer entry by search (`findLatestSeq`): each round
  * reads a handful of entry addresses in parallel.
  *
- * Pass `known`, an entry this device knows was written (its own last publish,
- * or the state it last read): when nothing newer exists the lookup is one
- * round and returns `known` itself. The hint only saves reads; the answer is
- * the one a search from nothing would give.
+ * Pass `known`, an entry this device remembers (its own last publish, or the
+ * state it last read): when it is still there and nothing newer exists, the
+ * lookup is one round and returns it. The hint only saves reads; the answer
+ * is the one a search from nothing would give, and an entry that is no longer
+ * there is not believed.
  *
  * `inconclusive` marks an answer that is NOT authoritative: a read that could
  * have shown a newer entry timed out, so a later publish may be hidden behind
@@ -410,15 +411,21 @@ export async function readStatePointer(opts: {
       return error instanceof TimeoutError ? undefined : false
     }
   }
-  const { seq, inconclusive } = await findLatestSeq({
-    known: opts.known?.seq ?? 0,
-    read: (seqs) => Promise.all(seqs.map(readEntry)),
-  })
-  const referenceHex =
-    seq === opts.known?.seq ? opts.known.referenceHex : references.get(seq)
+  const read = (seqs: number[]) => Promise.all(seqs.map(readEntry))
+  // The remembered entry is read too, alongside the search that starts from
+  // it: what a browser remembers can outlive what it describes (a format
+  // change moves every entry, a local chain is reset). Not there: search
+  // from nothing. Not settled: nothing found from it can be relied on.
+  const [remembered, fromKnown] = await Promise.all([
+    opts.known ? readEntry(opts.known.seq) : true,
+    findLatestSeq({ known: opts.known?.seq ?? 0, read }),
+  ])
+  const { seq, inconclusive } =
+    remembered === false ? await findLatestSeq({ known: 0, read }) : fromKnown
+  const referenceHex = references.get(seq)
   return {
     pointer: referenceHex === undefined ? undefined : { seq, referenceHex },
-    inconclusive,
+    inconclusive: inconclusive || remembered === undefined,
   }
 }
 
