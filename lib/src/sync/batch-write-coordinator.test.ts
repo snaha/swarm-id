@@ -30,6 +30,14 @@ vi.mock("./lane-state", () => ({
   },
 }))
 
+// The write lock is per browser. The contexts of these tests stand for
+// different browsers sharing one process, so each gets a lock of its own:
+// where the runtime has Web Locks, one context's upload in flight would
+// otherwise hold up another's on a different lane.
+vi.mock("../utils/batch-write-lock", () => ({
+  withBatchWriteLock: <T>(_batchId: string, op: () => Promise<T>) => op(),
+}))
+
 import {
   BatchWriteCoordinator,
   NEXT_LANE_AFTER_MS,
