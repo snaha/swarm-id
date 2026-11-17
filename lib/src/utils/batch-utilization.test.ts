@@ -1345,21 +1345,24 @@ describe("UtilizationAwareStamper synced reference", () => {
     )
   }
 
-  it("getSyncedReference round-trips through setSyncedReference (per partition, merge-preserving)", async () => {
+  it("getSyncedPointer round-trips through setSyncedPointer (per partition, merge-preserving)", async () => {
     const cache = makeRecordingCache()
     const stamper = await makeStamper(cache)
+    const zero = { seq: 1, referenceHex: "ref-zero" }
+    const one = { seq: 7, referenceHex: "ref-one" }
+    const zeroNext = { seq: 2, referenceHex: "ref-zero-v2" }
 
-    expect(await stamper.getSyncedReference(0)).toBeUndefined()
+    expect(await stamper.getSyncedPointer(0)).toBeUndefined()
 
-    await stamper.setSyncedReference(0, "ref-zero")
-    await stamper.setSyncedReference(1, "ref-one")
-    expect(await stamper.getSyncedReference(0)).toBe("ref-zero")
-    expect(await stamper.getSyncedReference(1)).toBe("ref-one")
+    await stamper.setSyncedPointer(0, zero)
+    await stamper.setSyncedPointer(1, one)
+    expect(await stamper.getSyncedPointer(0)).toEqual(zero)
+    expect(await stamper.getSyncedPointer(1)).toEqual(one)
 
     // Overwriting one partition preserves the other.
-    await stamper.setSyncedReference(0, "ref-zero-v2")
-    expect(await stamper.getSyncedReference(0)).toBe("ref-zero-v2")
-    expect(await stamper.getSyncedReference(1)).toBe("ref-one")
+    await stamper.setSyncedPointer(0, zeroNext)
+    expect(await stamper.getSyncedPointer(0)).toEqual(zeroNext)
+    expect(await stamper.getSyncedPointer(1)).toEqual(one)
   })
 
   it("persists protected state buckets and restores them on create", async () => {
@@ -1391,14 +1394,14 @@ describe("UtilizationAwareStamper synced reference", () => {
     expect(reloaded.getProtectedBuckets().has(1234)).toBe(true)
   })
 
-  it("scopes protection to the bound partition and survives setSyncedReference", async () => {
+  it("scopes protection to the bound partition and survives setSyncedPointer", async () => {
     const cache = makeRecordingCache()
     const stamper = await makeStamper(cache)
     await stamper.setProtectedStateBuckets(0, [11])
     await stamper.setProtectedStateBuckets(1, [22])
-    // Persisting a synced reference must not drop the protected buckets
+    // Persisting a synced pointer must not drop the protected buckets
     // (both live in the same metadata record).
-    await stamper.setSyncedReference(0, "ref-zero")
+    await stamper.setSyncedPointer(0, { seq: 1, referenceHex: "ref-zero" })
 
     const reloaded = await makeStamper(cache)
     reloaded.bindPartition({
@@ -1409,7 +1412,10 @@ describe("UtilizationAwareStamper synced reference", () => {
     expect(reloaded.getProtectedBuckets().has(11)).toBe(true)
     // Partition 1's set does not leak into partition 0's saves.
     expect(reloaded.getProtectedBuckets().has(22)).toBe(false)
-    expect(await reloaded.getSyncedReference(0)).toBe("ref-zero")
+    expect(await reloaded.getSyncedPointer(0)).toEqual({
+      seq: 1,
+      referenceHex: "ref-zero",
+    })
   })
 })
 

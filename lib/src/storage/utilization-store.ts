@@ -9,6 +9,8 @@
  * 2048 uint16 or 1024 uint32 bucket counters, depending on batch depth.
  */
 
+import type { StatePointer } from "../sync/partition-state"
+
 // ============================================================================
 // Types
 // ============================================================================
@@ -55,12 +57,13 @@ export interface BatchMetadata {
   lastSync: number
   chunkCount: number
   /**
-   * Per-partition "synced reference": the partition-state feed reference
-   * (hex) this device's local counter was last in sync with. On a cold
-   * acquire, if the feed still points here the counter-chunk download is
-   * skipped and the local counter reused. Keyed by partition index.
+   * Per-partition "synced pointer": the published partition state (its
+   * pointer entry number and reference) this device's local counter was last
+   * in sync with. On a cold acquire, if nothing newer was published the
+   * counter-chunk download is skipped and the local counter reused; either
+   * way the pointer search starts from it. Keyed by partition index.
    */
-  syncedReferences?: Record<number, string>
+  syncedPointers?: Record<number, StatePointer>
   /**
    * Per-partition buckets occupied by the LATEST published partition-state
    * chunks (counter chunks + reference chunk). Those chunks overstamp the

@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, it, expect, vi } from "vitest"
+import type { StatePointer } from "./partition-state"
 import { BatchId, EthAddress, PrivateKey } from "@ethersphere/bee-js"
 
 import { PartitionLease } from "./partition-lease"
@@ -58,7 +59,6 @@ import {
 } from "./batch-write-coordinator"
 import { NO_HOLDER_DEVICE_ID } from "./partition-lock"
 import type { LeaseRefreshOutcome } from "./partition-lease"
-import { STATE_POINTER_EPOCH_MS } from "./partition-state"
 import {
   LEASE_REFRESH_MS,
   LEASE_TTL_MS,
@@ -90,10 +90,12 @@ function makeStamper(calls: string[]) {
     setLeaseValidUntil: vi.fn(),
     buildLeaseLocalCounter: () => new Uint32Array(8),
     getLocalCounter: (): Uint32Array | undefined => new Uint32Array(8),
-    // Persisted per-partition synced reference; the adopt fast path reads it to
-    // seed the lease's heartbeat pointer. Default: none (fresh partition).
-    getSyncedReference: vi.fn(
-      async (_partition: number): Promise<string | undefined> => undefined,
+    // Persisted per-partition synced pointer; the adopt fast path reads it to
+    // tell the lease which published state it continues from. Default: none
+    // (fresh partition).
+    getSyncedPointer: vi.fn(
+      async (_partition: number): Promise<StatePointer | undefined> =>
+        undefined,
     ),
   }
 }
@@ -135,8 +137,8 @@ function makeLease(
     refresh: vi.fn(async () => opts.refreshResult ?? "held"),
     release: vi.fn(async () => {}),
     publishState: vi.fn(async () => {}),
-    heartbeatStatePointer: vi.fn(async () => {}),
-    seedReferenceHex: vi.fn(),
+    repairPublishedState: vi.fn(async () => {}),
+    seedPublished: vi.fn(),
     bumpLocalLease: vi.fn(),
     serialize: vi.fn(() => ({ v: 1 })),
     get currentPartition() {
@@ -273,7 +275,6 @@ type Internals = {
   lastLeaseValidatedAt: number
   activeUploadCount: number
   pendingAcquire: boolean
-  pointerHeartbeatFailingSince: number | undefined
   readOnly: boolean
   refreshTick: (lease: unknown) => Promise<void>
   ensureLeaseStillValid: () => Promise<void>
@@ -1060,19 +1061,19 @@ describe("BatchWriteCoordinator — idle-yield under the write lock", () => {
   })
 })
 
-describe("BatchWriteCoordinator — adopt fast path seeds the heartbeat pointer", () => {
-  it("seeds lastReferenceHex from the persisted synced reference on re-adopt", async () => {
+describe("BatchWriteCoordinator — adopt fast path seeds the published state", () => {
+  it("tells the lease which state it continues from, from the persisted synced pointer", async () => {
     // The cached-lease re-adopt path binds from local state and skips
-    // `claimPartition`, so without this seed an adopted-but-idle holder never
-    // heartbeats the inherited pointer forward (it ages out of the takeover
-    // lookup span → resume-from-zero). The coordinator must read the partition's
-    // persisted synced reference and seed it into the lease.
+    // `claimPartition`, so the lease does not know which pointer entry is the
+    // newest. The coordinator reads the partition's persisted synced pointer
+    // and seeds it into the lease, which saves the first publish a lookup.
+    const synced = { seq: 4, referenceHex: "deadbeef" }
     const lease = makeLease({ partition: 2 })
     lease.adoptIfLive = vi.fn(() => 2)
     leaseController.lease = lease
     const calls: string[] = []
     const stamper = makeStamper(calls)
-    stamper.getSyncedReference = vi.fn(async () => "deadbeef")
+    stamper.getSyncedPointer = vi.fn(async () => synced)
     const coordinator = new BatchWriteCoordinator(
       makeDeps({
         stamper: stamper as unknown as BatchWriteCoordinatorDeps["stamper"],
@@ -1082,19 +1083,19 @@ describe("BatchWriteCoordinator — adopt fast path seeds the heartbeat pointer"
 
     await coordinator.withWrite(async () => "ok", { wait: "block" })
 
-    expect(stamper.getSyncedReference).toHaveBeenCalledWith(2)
-    expect(lease.seedReferenceHex).toHaveBeenCalledWith("deadbeef")
+    expect(stamper.getSyncedPointer).toHaveBeenCalledWith(2)
+    expect(lease.seedPublished).toHaveBeenCalledWith(synced)
   })
 })
 
-describe("BatchWriteCoordinator — state-pointer heartbeat vs in-flight upload", () => {
-  // The refresh tick runs OFF the write lock; `withWrite`'s publish (which also
-  // calls `writeStatePointer`) holds it. Both go through the stamper's single
-  // `intentSoc` slot, so an off-lock heartbeat firing while an upload's publish
-  // is in flight clobbers that reservation and mis-stamps a pointer SOC into a
-  // data slot. The tick must skip the heartbeat while an upload is in flight —
-  // the concurrent publish already refreshes the pointer to the current bucket.
-  it("does NOT heartbeat the state pointer while an upload is in flight", async () => {
+describe("BatchWriteCoordinator — published-state repair vs in-flight upload", () => {
+  // The refresh tick runs OFF the write lock; `withWrite`'s publish holds it.
+  // The repair is a publish too, and both go through the stamper's single
+  // `intentSoc` slot, so a repair firing while an upload's publish is in
+  // flight clobbers that reservation and mis-stamps a pointer SOC into a data
+  // slot. The tick must skip the repair while an upload is in flight — the
+  // concurrent publish re-pins the state anyway.
+  it("does NOT repair the published state while an upload is in flight", async () => {
     const calls: string[] = []
     const stamper = makeStamper(calls)
     const coordinator = new BatchWriteCoordinator(
@@ -1110,10 +1111,10 @@ describe("BatchWriteCoordinator — state-pointer heartbeat vs in-flight upload"
 
     await internals.refreshTick(lease)
 
-    expect(lease.heartbeatStatePointer).not.toHaveBeenCalled()
+    expect(lease.repairPublishedState).not.toHaveBeenCalled()
   })
 
-  it("heartbeats the state pointer when alive and no upload is in flight", async () => {
+  it("checks the published state for repair when alive and no upload is in flight", async () => {
     const calls: string[] = []
     const stamper = makeStamper(calls)
     const coordinator = new BatchWriteCoordinator(
@@ -1129,15 +1130,15 @@ describe("BatchWriteCoordinator — state-pointer heartbeat vs in-flight upload"
 
     await internals.refreshTick(lease)
 
-    expect(lease.heartbeatStatePointer).toHaveBeenCalledTimes(1)
+    expect(lease.repairPublishedState).toHaveBeenCalledTimes(1)
   })
 
-  it("does NOT heartbeat when an upload slips in while the tick queues on the lock", async () => {
+  it("does NOT repair when an upload slips in while the tick queues on the lock", async () => {
     // The outer `activeUploadCount === 0` gate is a TOCTOU: an upload can start
     // AFTER the gate passes and run its publish concurrently with an off-lock
-    // heartbeat, clobbering the shared `intentSoc` slot. The heartbeat must run
+    // repair, clobbering the shared `intentSoc` slot. The repair must run
     // UNDER the write lock and re-check the count once granted, so an upload that
-    // slipped in aborts it (the concurrent publish already refreshes the pointer).
+    // slipped in aborts it (the concurrent publish re-pins the state anyway).
     const calls: string[] = []
     const stamper = makeStamper(calls)
     const coordinator = new BatchWriteCoordinator(
@@ -1149,10 +1150,10 @@ describe("BatchWriteCoordinator — state-pointer heartbeat vs in-flight upload"
     const lease = makeLease({ partition: 0 })
     internals.partitionLease = lease
     internals.activeUploadCount = 0 // passes the outer gate
-    internals.lastLeaseActivityAt = Date.now() // recent → reach the heartbeat tail
+    internals.lastLeaseActivityAt = Date.now() // recent → reach the repair tail
 
     // An upload enters `withWrite` (bumping the count) in the window between the
-    // tick's outer gate and the heartbeat winning the lock. Only an under-lock
+    // tick's outer gate and the repair winning the lock. Only an under-lock
     // re-check catches it.
     writeLockController.onGrant = () => {
       internals.activeUploadCount = 1
@@ -1163,7 +1164,7 @@ describe("BatchWriteCoordinator — state-pointer heartbeat vs in-flight upload"
       writeLockController.onGrant = undefined
     }
 
-    expect(lease.heartbeatStatePointer).not.toHaveBeenCalled()
+    expect(lease.repairPublishedState).not.toHaveBeenCalled()
   })
 })
 
@@ -1229,18 +1230,11 @@ describe("BatchWriteCoordinator — self-demote on un-renewed lease expiry", () 
   })
 })
 
-describe("BatchWriteCoordinator — self-demote on persistently failing pointer heartbeats", () => {
-  // The state-pointer heartbeat is what keeps a takeover able to FIND the
-  // resume point: the pointer lookup scans only ~(LEASE_TTL + slack) of buckets
-  // below the lock's `leasedUntil`, while lock renewals extend `leasedUntil`
-  // indefinitely and are independent of the (best-effort) heartbeat. A holder
-  // whose heartbeats keep failing while its lock keeps renewing walks its last
-  // durable pointer out of the lookup span — a takeover then finds NO pointer
-  // on a clean scan and zero-seeds, re-issuing every acked slot. Once the
-  // failure streak exceeds one pointer epoch the holder must stop holding
-  // (demote; the next upload re-acquires and re-publishes) instead of letting
-  // the gap grow toward the scan floor.
-  function setupFailingHeartbeat() {
+describe("BatchWriteCoordinator — a failing published-state repair", () => {
+  // The repair is best-effort: the published state is found by search however
+  // long ago it was written, so a holder that cannot repair it this tick has
+  // lost nothing a takeover depends on, and keeps its lease.
+  it("keeps the lease", async () => {
     const calls: string[] = []
     const stamper = makeStamper(calls)
     const coordinator = new BatchWriteCoordinator(
@@ -1250,93 +1244,19 @@ describe("BatchWriteCoordinator — self-demote on persistently failing pointer 
     )
     const internals = coordinator as unknown as Internals
     const lease = makeLease({ partition: 0, leasedUntil: Date.now() + 30_000 })
-    lease.heartbeatStatePointer = vi.fn(async () => {
+    lease.repairPublishedState = vi.fn(async () => {
       throw new Error("gateway 500")
-    }) as typeof lease.heartbeatStatePointer
+    }) as typeof lease.repairPublishedState
     internals.partitionLease = lease
-    internals.activeUploadCount = 0 // idle → the tick attempts the heartbeat
+    internals.activeUploadCount = 0 // idle → the tick attempts the repair
     internals.lastLeaseActivityAt = Date.now() // recent → no idle-yield
-    return { coordinator, internals, lease, stamper }
-  }
-
-  it("keeps the lease on a fresh heartbeat-failure streak", async () => {
-    const { coordinator, internals, lease, stamper } = setupFailingHeartbeat()
 
     await internals.refreshTick(lease)
 
+    expect(lease.repairPublishedState).toHaveBeenCalledTimes(1)
     expect(stamper.invalidateLease).not.toHaveBeenCalled()
     expect(coordinator.isReadOnly).toBe(false)
     expect(coordinator.currentPartition).toBe(0)
-    // The streak is armed so a persisting failure can demote later.
-    expect(internals.pointerHeartbeatFailingSince).toBeDefined()
-  })
-
-  it("demotes once the heartbeat-failure streak exceeds one pointer epoch", async () => {
-    const { coordinator, internals, lease, stamper } = setupFailingHeartbeat()
-
-    // The streak started more than one pointer epoch ago and the heartbeat is
-    // still failing on this tick.
-    internals.pointerHeartbeatFailingSince =
-      Date.now() - (STATE_POINTER_EPOCH_MS + 1)
-    await internals.refreshTick(lease)
-
-    expect(stamper.invalidateLease).toHaveBeenCalled() // in-flight stamp fence
-    expect(coordinator.isReadOnly).toBe(true) // demoted
-    expect(coordinator.currentPartition).toBeUndefined()
-  })
-
-  it("a successful heartbeat resets the failure streak", async () => {
-    const { coordinator, internals, lease } = setupFailingHeartbeat()
-    lease.heartbeatStatePointer = vi.fn(
-      async () => {},
-    ) as typeof lease.heartbeatStatePointer
-    // A previous tick's failure armed the streak; this tick's success must
-    // clear it so an unrelated later failure starts a fresh streak.
-    internals.pointerHeartbeatFailingSince = Date.now() - 10_000
-
-    await internals.refreshTick(lease)
-
-    expect(internals.pointerHeartbeatFailingSince).toBeUndefined()
-    expect(coordinator.isReadOnly).toBe(false)
-  })
-})
-
-describe("BatchWriteCoordinator — upload publish resets the heartbeat streak", () => {
-  // An upload's commit publish (`publishState`) durably re-writes the state
-  // pointer to the current bucket — exactly what a successful heartbeat does. A
-  // failure streak armed during an idle blip must therefore be cleared by a
-  // successful upload publish; otherwise the streak keeps counting from the old
-  // (now-stale) timestamp across the fresh publish and can demote a healthy
-  // holder prematurely (measuring drift the upload already repaired).
-  it("clears pointerHeartbeatFailingSince after a successful publish", async () => {
-    leaseController.lease = makeLease({
-      acquireResult: {
-        partition: 1,
-        partitionCount: 4,
-        localCounter: new Uint32Array(8),
-        isReadOnly: false,
-      },
-      leasedUntil: Date.now() + LEASE_TTL_MS, // stays throttled post-op
-    })
-    const stamper = makeStamper([])
-    const coordinator = new BatchWriteCoordinator(
-      makeDeps({
-        stamper: stamper as unknown as BatchWriteCoordinatorDeps["stamper"],
-        mode: "oneshot", // no refresh timer to leak
-      }),
-    )
-    const internals = coordinator as unknown as Internals
-
-    // First write establishes the held lease (acquire resets the streak).
-    await coordinator.withWrite(async () => "ok", { wait: "block" })
-    // An idle heartbeat blip armed the streak more than one epoch ago.
-    internals.pointerHeartbeatFailingSince =
-      Date.now() - (STATE_POINTER_EPOCH_MS + 1)
-
-    // A second write publishes the pointer afresh — this must clear the streak.
-    await coordinator.withWrite(async () => "ok", { wait: "block" })
-
-    expect(internals.pointerHeartbeatFailingSince).toBeUndefined()
   })
 })
 
