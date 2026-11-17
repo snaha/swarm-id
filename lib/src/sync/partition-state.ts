@@ -54,12 +54,6 @@ import {
   mergeChunk,
   toBucket,
 } from "../utils/batch-utilization"
-import { lockSocBucket } from "../utils/lock-soc"
-import {
-  intentEpochBucket,
-  intentSocAddress,
-  partitionOccupancyAddress,
-} from "./partition-intent"
 import {
   entrySalt,
   findLatestSeq,
@@ -250,9 +244,9 @@ export async function writeStatePointer(opts: {
     stamper: opts.stamper,
   }
   if (opts.stamper instanceof UtilizationAwareStamper) {
-    // Serialized against concurrent intent/occupancy SOC writes (the off-lock
-    // refresh-tick beacon vs. this under-lock publish) so neither clobbers the
-    // shared intent-SOC reservation and mis-stamps into a data slot.
+    // Serialized against another state-pointer write through this stamper,
+    // so neither clobbers the shared reservation and mis-stamps into a data
+    // slot.
     await opts.stamper.withIntentSocSlot(address, opts.partition, () =>
       uploadSOC(target, opts.backupSigner, identifier, data, {
         encryptionKey: opts.swarmEncryptionKey,
@@ -353,7 +347,7 @@ export async function readPartitionState(
     batchDepth: number
     /**
      * A `readStatePointer` result the caller already fetched (speculatively,
-     * overlapped with its lock/beacon scan) for this SAME
+     * ahead of the read) for this SAME
      * (owner, batch, partition) and the SAME `known`. When provided, the
      * pointer lookup is skipped.
      */
@@ -593,21 +587,6 @@ export async function writePartitionState(opts: {
   previousReferences?: Uint8Array[]
   /** The counter the previous publish wrote; diffed to find changed chunks. */
   previousCounter?: Uint32Array
-  /**
-   * This device's id. When provided, the publish also avoids the buckets of
-   * this device's current/previous-epoch intent beacons (the refresh tick
-   * writes them off-lock at the same reserved slot). Omit for read-only / the
-   * deviceId-independent paths — the pointer and occupancy buckets are avoided
-   * regardless.
-   */
-  deviceId?: string
-  /**
-   * Wall-clock ms the rotating beacon addresses are anchored to. The lease
-   * passes its own clock (`this.now()`, = `Date.now()` in production) so the
-   * writer and the collision detector agree (#385). Defaults to `Date.now()`
-   * for bare callers (direct unit tests).
-   */
-  nowMs?: number
 }): Promise<{
   /** Reference-chunk reference (hex) — the caller's "synced reference". */
   referenceHex: string
@@ -637,8 +616,6 @@ export async function writePartitionState(opts: {
     seq,
     previousReferences,
     previousCounter,
-    deviceId,
-    nowMs = Date.now(),
   } = opts
 
   PartitionStateSchemaV1.parse({ counters: localCounter })
@@ -667,7 +644,7 @@ export async function writePartitionState(opts: {
 
   // KEYSTONE tripwire (fail loud, never silent slot reuse). The counter is a
   // monotonic per-bucket high-water, so any publish is always >= the one the last
-  // publish recorded (see the SAFETY INVARIANT note in `PartitionLease.claimPartition`).
+  // publish recorded (see the note in `LaneState.resume`).
   // A regression means the stamper's counter/synced-ref persistence broke its
   // invariant. On the INCREMENTAL path it is actively dangerous — an unchanged-
   // looking chunk retains a ref ABOVE the live counter and a takeover resumes PAST
@@ -729,12 +706,10 @@ export async function writePartitionState(opts: {
     : allIndices.map(() => ZERO_CHUNK_REF.slice())
 
   // Every reserved chunk overstamps the partition's single reserved slot, so
-  // they must land in distinct buckets, clear of the lock-SOC bucket, the live
-  // utilisation chunks, the pointer entries a search depends on (this
+  // they must land in distinct buckets, clear of the live utilisation chunks, the pointer entries a search depends on (this
   // publish's own included), and (incremental) the buckets of the REAL chunks
   // we retain (sentinel/zero chunks occupy no bucket).
   const claimedBuckets = new Set<number>([
-    lockSocBucket(batchId, partition, owner),
     ...pathBuckets,
     ...(reserve?.getCleanChunkBuckets() ?? []),
   ])
@@ -742,43 +717,6 @@ export async function writePartitionState(opts: {
     for (let i = 0; i < numUtilizationChunks; i++) {
       if (!uploadSet.has(i) && !bytesAllZero(references[i]))
         claimedBuckets.add(toBucket(references[i].slice(0, 32)))
-    }
-  }
-
-  // Other reserved-slot writers for this partition also stamp slot = partition,
-  // so a counter/reference chunk sharing one of their buckets would evict — or
-  // be evicted by — them under Bee's newer-stamp-wins replacement. Exclude their
-  // buckets (current + previous epoch, covering the rotation boundary): the
-  // deviceId-independent occupancy beacon, and (when known) this device's
-  // intent beacon, both re-written off-lock by the refresh tick concurrently.
-  // A peer's intent beacon uses its own deviceId and can't be computed here; that
-  // residual stays fail-safe (an evicted beacon self-heals next tick). The
-  // converse — a beacon at a LATER epoch (beyond the two excluded here) evicting
-  // a RETAINED (incremental) counter/reference chunk — is healed by the holder's
-  // once-per-epoch FULL re-pin (`PartitionLease.flushState`), which re-uploads
-  // every non-zero chunk clear of the current epoch's beacons; a long-retained
-  // chunk is therefore exposed for ~1 epoch, not the whole session. The only
-  // unhealed case is an eviction in the final epoch before the holder vanishes:
-  // that stays fail-safe, not silent corruption — the reference chunk then fails
-  // to download on the next takeover and `readPartitionState` reports
-  // `readFailed` (→ read-only + retry), never a zero-counter resume that would
-  // re-issue acked slots. A beacon can replace a pointer entry the same way,
-  // and that one is not healed: nothing rewrites an entry.
-  // The lease's clock (`nowMs`), NOT a fresh `Date.now()`, so this is on the
-  // same clock as the caller's collision detection (#385).
-  const epoch = intentEpochBucket(nowMs)
-  for (const beaconBucket of [epoch, epoch - 1]) {
-    claimedBuckets.add(
-      toBucket(
-        partitionOccupancyAddress(batchId, partition, beaconBucket, owner),
-      ),
-    )
-    if (deviceId !== undefined) {
-      claimedBuckets.add(
-        toBucket(
-          intentSocAddress(batchId, partition, deviceId, beaconBucket, owner),
-        ),
-      )
     }
   }
 

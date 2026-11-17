@@ -43,13 +43,10 @@ import {
   BatchWriteCoordinator,
   PartitionContendedError,
 } from "./batch-write-coordinator"
+import type { BusLanes } from "./bus-lease"
 import { accountStateToDeviceView, publishDeviceState } from "./device-state"
 import { rosterRetryDelayMs } from "./device-roster"
 import { getOrCreateDeviceId, detectDeviceName } from "../utils/device-id"
-import {
-  activeDeviceIds,
-  KNOWN_DEVICE_MAX_AGE_MS,
-} from "../utils/active-devices"
 
 // Timeout for utilization upload in milliseconds
 const UTILIZATION_UPLOAD_TIMEOUT_MS = 30000
@@ -79,12 +76,11 @@ export interface SyncAccountOptions {
   utilizationUploader: DebouncedUtilizationUploader
 
   /**
-   * Devices heard live on the account bus (`PresenceTracker`), unioned into
-   * the partition rival set so this one-shot coordinator and the proxy's agree
-   * about who the rivals are. Optional: a caller with no bus has only the
-   * registry's recent sign-ins to go on.
+   * This context's lanes on the account bus. A batch split into partitions
+   * is written only by the context that holds one of its lanes, and a lane
+   * is taken by asking over the bus: without this the sync skips.
    */
-  liveDeviceIds?: () => string[]
+  lanes?: () => BusLanes | undefined
 }
 
 /**
@@ -131,7 +127,7 @@ export function createSyncAccount(
     postageStampsStore,
     utilizationStore,
     utilizationUploader,
-    liveDeviceIds,
+    lanes,
   } = options
 
   /**
@@ -345,7 +341,8 @@ export function createSyncAccount(
     const { snapshot: state, encryptionKey, defaultStamp } = snapshotResult
     const partitionCount = state.metadata.partitionCount ?? 1
 
-    // Derive the account feed key (also the lock-SOC backup signer) + owner.
+    // Derive the account feed key (also the owner of a lane's published
+    // state) + owner.
     const backupKeyHex = await deriveSecret(encryptionKey, BACKUP_KEY_LABEL)
     const accountKey = new PrivateKey(backupKeyHex)
     const owner = accountKey.publicKey().address()
@@ -371,34 +368,17 @@ export function createSyncAccount(
     }
 
     // Route the publish through the shared coordinator (same Web Lock + same
-    // partition acquire the proxy uses). One-off mode: no refresh timer — the
-    // lease lapses by TTL. `wait: "skip"` claims a free/expired partition once
-    // and throws `PartitionContendedError` when every partition is held by a
-    // live foreign device, so we skip rather than wait.
+    // lane protocol the proxy uses). One-off mode: `wait: "skip"` waits only
+    // as long as a context alone in the room needs and throws
+    // `PartitionContendedError` when no lane could be taken, so we skip rather
+    // than wait. The lane is given up as soon as the sync is done.
     const coordinator = new BatchWriteCoordinator({
       bee,
       batchId: defaultStamp.batchID.toHex(),
       stamper,
       deviceId: getOrCreateDeviceId(),
       accountId,
-      // Read fresh so the presence/intent rounds see the current device
-      // registry — without this the background-sync acquire has no rivals to
-      // check and can collide with a live holder on another device.
-      //
-      // Bounded the same way the proxy bounds it (`knownDeviceIdsForAccount`).
-      // This path listed every device the account had ever seen, tombstoned and
-      // long-dead alike, so the two coordinators disagreed about who the rivals
-      // were — and each dead entry costs an absent intent read on every acquire.
-      knownDeviceIds: () => [
-        ...new Set([
-          ...activeDeviceIds(
-            accountsStore.getAccount(new EthAddress(accountId))?.devices ?? [],
-            Date.now(),
-            KNOWN_DEVICE_MAX_AGE_MS,
-          ),
-          ...(liveDeviceIds?.() ?? []),
-        ]),
-      ],
+      lanes: lanes?.(),
       backupSigner: accountKey,
       swarmEncryptionKey: hexToUint8Array(encryptionKey),
       partitionCount,
@@ -492,6 +472,10 @@ export function createSyncAccount(
         status: "error",
         error: error instanceof Error ? error.message : String(error),
       }
+    } finally {
+      // The coordinator lives for this one sync: give its lane up, so a
+      // context that asks for it is answered at once.
+      coordinator.teardown()
     }
   }
 

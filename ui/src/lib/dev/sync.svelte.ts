@@ -54,7 +54,7 @@ const getSyncAccount = () => {
       postageStampsStore,
       utilizationStore: utilStore,
       utilizationUploader: utilUploader,
-      liveDeviceIds: () => accountBusStore.liveDeviceIds(),
+      lanes: () => accountBusStore.lanes(),
     })
   }
 

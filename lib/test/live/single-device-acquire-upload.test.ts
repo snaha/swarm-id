@@ -10,20 +10,18 @@
  * proxy does for the demo's "upload SOC" button. It prints the per-phase wall
  * times so we can see whether the acquire/upload latency work paid off:
  *
- *   - roster fold  : the device-registry read `acquire` fires NON-blocking
- *                    (`refreshKnownDeviceIds`); shown separately so its cost is
- *                    visibly OFF the acquire path.
- *   - acquire      : rotating state-pointer acquire from clean state.
+ *   - acquire      : taking a lane alone in the room, and the search for its
+ *                    published state from nothing.
  *   - upload       : the random SOC.
- *   - publish      : the incremental/parallel state-pointer publish (+ flush).
+ *   - publish      : the counter chunks and the next state-pointer entry (+ flush).
  *
  * BENCHMARK MODE: `ACQUIRE_RUNS=N` repeats the whole scenario N times, each run
- * on a FRESH throwaway account (so every acquire is genuinely cold — no lock,
- * no pointer, no counter state), and prints min/median/mean/max across runs.
+ * on a FRESH throwaway account (so every acquire is genuinely cold — no
+ * pointer, no counter state), and prints min/median/mean/max across runs.
  * Used to compare acquire-latency work before/after (see the plan/PR).
  *
- * Coordinator-level (not just `PartitionLease`) so it exercises everything the
- * demo exercises. Node-feasible: the util-aware stamper takes an in-memory
+ * Coordinator-level, so it exercises everything the demo exercises but the
+ * account bus: the lane comes from a room this process is alone in. Node-feasible: the util-aware stamper takes an in-memory
  * `UtilizationStoreDB` (no IndexedDB), the cross-tab lock no-ops without
  * `navigator.locks`. Opt-in; skips without a `.env` (see README).
  */
@@ -36,7 +34,7 @@ import {
   UtilizationAwareStamper,
   PARTITION_COUNT,
 } from "../../src/utils/batch-utilization"
-import { readRoster } from "../../src/sync/device-roster"
+import { soloLanes } from "../../src/sync/bus-lease-test-utils"
 import { uploadSOC, type UploadTarget } from "../../src/proxy/upload"
 import { hexToUint8Array } from "../../src/utils/hex"
 import {
@@ -54,7 +52,6 @@ interface RunTimings {
   uploadMs: number
   publishMs: number
   totalMs: number
-  rosterMs: number
 }
 
 /** Budget per run — matches the suite's single-scenario expectations. */
@@ -97,8 +94,6 @@ describe.skipIf(!liveEnv.configured)(
 
       let acquiredAt = 0
       let uploadMs = 0
-      let rosterMs = 0
-      let rosterDone: Promise<void> = Promise.resolve()
 
       const coordinator = new BatchWriteCoordinator({
         bee: ctx.bee,
@@ -106,23 +101,7 @@ describe.skipIf(!liveEnv.configured)(
         stamper,
         deviceId: D,
         accountId: keys.accountId,
-        knownDeviceIds: () => [D],
-        // Real device-registry fold — fired non-blocking by `acquire`. Timed so
-        // we can see it does NOT gate the acquire below.
-        refreshKnownDeviceIds: () => {
-          const r0 = Date.now()
-          rosterDone = readRoster({
-            bee: ctx.bee,
-            accountId: keys.accountId,
-            owner: keys.owner,
-          })
-            .then(() => undefined)
-            .catch(() => undefined)
-            .finally(() => {
-              rosterMs = Date.now() - r0
-            })
-          return rosterDone
-        },
+        lanes: soloLanes(),
         backupSigner: keys.accountKey,
         swarmEncryptionKey: encryptionKey,
         partitionCount: PARTITION_COUNT,
@@ -150,14 +129,12 @@ describe.skipIf(!liveEnv.configured)(
         { wait: "skip" },
       )
       const totalMs = Date.now() - t0
-      await rosterDone // let the non-blocking fold settle so nothing dangles
 
       const acquireMs = acquiredAt - t0
       const publishMs = totalMs - acquireMs - uploadMs
       console.log(
         `\n  ⏱  ${label}  acquire=${acquireMs}ms  upload=${uploadMs}ms  ` +
-          `publish≈${publishMs}ms  total=${totalMs}ms` +
-          `  |  roster-fold(non-blocking)=${rosterMs}ms\n`,
+          `publish≈${publishMs}ms  total=${totalMs}ms\n`,
       )
 
       expect(
@@ -168,11 +145,10 @@ describe.skipIf(!liveEnv.configured)(
         coordinator.currentPartition,
         "a partition was acquired (not read-only)",
       ).not.toBeUndefined()
-      // Regression guard: acquire must not crawl back toward a 45s
-      // feed-walk / lock-blocked stall.
+      // Regression guard: acquire must not crawl back toward a 45s stall.
       expect(acquireMs).toBeLessThan(45_000)
 
-      return { acquireMs, uploadMs, publishMs, totalMs, rosterMs }
+      return { acquireMs, uploadMs, publishMs, totalMs }
     }
 
     it(

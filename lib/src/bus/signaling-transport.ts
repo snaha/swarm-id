@@ -33,6 +33,9 @@ const SignalPayloadSchema = z.discriminatedUnion("kind", [
 const RECONNECT_BASE_DELAY_MS = 1000
 const RECONNECT_MAX_DELAY_MS = 30000
 const DATA_CHANNEL_LABEL = "bus"
+/** How long a departed peer is remembered. Only the last several seconds of
+ *  a departure matter to anyone asking who is absent. */
+const PRESENCE_MEMORY_MS = 60_000
 
 export interface SignalingTransportOptions {
   /** Signaling server URL, e.g. `wss://swarm-id.snaha.net/bus`. */
@@ -99,13 +102,12 @@ export class SignalingTransport implements BusTransport {
   private pingNonce = 0
   private pingsSentAt = new Map<number, number>()
   private confirmedHandlers = new Set<(unconfirmedForMs: number) => void>()
-  /** Which device each room peer has been heard to speak for. */
-  private peerDevices = new Map<string, string>()
-  /** When each device was last known present: its last peer leaving, or a
-   *  message from it that arrived while none of its peers was in our room. */
-  private deviceLastPresentAt = new Map<string, number>()
-  /** When a peer last left without having named its device. */
-  private unnamedLeftAt: number | undefined
+  /** This socket's name in the room, as the server gave it. */
+  private selfPeerId: string | undefined
+  /** When each peer that is not in our room was last known present: when it
+   *  left, or when a message from it arrived although our view of the room
+   *  did not contain it. */
+  private peerLastPresentAt = new Map<string, number>()
 
   constructor(options: SignalingTransportOptions) {
     this.options = options
@@ -154,42 +156,48 @@ export class SignalingTransport implements BusTransport {
     return () => this.confirmedHandlers.delete(handler)
   }
 
-  notePeerDevice(peerId: string, deviceId: string): void {
-    if (this.peers.has(peerId)) {
-      this.peerDevices.set(peerId, deviceId)
-      return
+  /** This context's name in the room for the current connection; a new one
+   *  after every reconnect. */
+  selfId(): string | undefined {
+    return this.selfPeerId
+  }
+
+  notePeer(peerId: string): void {
+    // Heard from a peer our view of the room does not contain: the view is
+    // behind, and the peer was present a moment ago.
+    if (!this.peers.has(peerId)) this.markPresent(peerId)
+  }
+
+  private markPresent(peerId: string): void {
+    const now = performance.now()
+    for (const [peer, at] of this.peerLastPresentAt) {
+      if (now - at > PRESENCE_MEMORY_MS) this.peerLastPresentAt.delete(peer)
     }
-    // Heard from a device our view of the room does not contain: the view is
-    // behind, and the device was present a moment ago.
-    this.deviceLastPresentAt.set(deviceId, performance.now())
+    this.peerLastPresentAt.set(peerId, now)
   }
 
   /**
-   * The server's room is the authority. Everyone outside `deviceIds` is
-   * absent while every peer in the room speaks for a device in the set,
-   * counted from the latest of: this context joining, a peer of a device
-   * outside the set leaving, and a peer leaving before it named its device.
-   * A peer that has not named its device could be any device.
+   * The server's room is the authority. Everyone outside `peerIds` is absent
+   * while every peer in the room is in the set, counted from the latest of:
+   * this context joining, and a peer outside the set last being present.
    */
-  absentExceptMs(deviceIds: ReadonlySet<string>): number {
+  absentExceptMs(peerIds: ReadonlySet<string>): number {
     if (this.sessionStartedAt === undefined) return 0
     for (const peerId of this.peers.keys()) {
-      const device = this.peerDevices.get(peerId)
-      if (device === undefined || !deviceIds.has(device)) return 0
+      if (!peerIds.has(peerId)) return 0
     }
-    let since = Math.max(this.sessionStartedAt, this.unnamedLeftAt ?? 0)
-    for (const [device, at] of this.deviceLastPresentAt) {
-      if (!deviceIds.has(device)) since = Math.max(since, at)
+    let since = this.sessionStartedAt
+    for (const [peerId, at] of this.peerLastPresentAt) {
+      if (!peerIds.has(peerId)) since = Math.max(since, at)
     }
     return performance.now() - since
   }
 
   /**
    * Stops reconnecting at once, but lets in-flight publishes reach the wire
-   * first: `deliver` awaits envelope encryption, and callers announce a
-   * teardown (`lease-released`) and close the bus in the same tick, so tearing
-   * the socket down synchronously would drop exactly the message a waiting
-   * peer is owed. Each pending delivery is a single encrypt plus synchronous
+   * first: `deliver` awaits envelope encryption, and callers publish a last
+   * message and close the bus in the same tick, so tearing the socket down
+   * synchronously would drop exactly the message a peer is owed. Each pending delivery is a single encrypt plus synchronous
    * sends, so this settles promptly — it is not a flush of a send queue.
    */
   close(): void {
@@ -225,9 +233,8 @@ export class SignalingTransport implements BusTransport {
     this.sessionStartedAt = undefined
     this.confirmedAt = undefined
     this.pingsSentAt.clear()
-    this.peerDevices.clear()
-    this.deviceLastPresentAt.clear()
-    this.unnamedLeftAt = undefined
+    this.selfPeerId = undefined
+    this.peerLastPresentAt.clear()
   }
 
   /** One round trip with the server; the answer is handled in `pong`. */
@@ -318,8 +325,7 @@ export class SignalingTransport implements BusTransport {
       // Per peer, and never fatal to the rest of the fan-out: a `send` that
       // throws (SCTP size limit, a channel torn down between the readyState
       // read and the call) must not escape this loop and starve every peer
-      // after it — for a teardown `lease-released` that costs the waiter its
-      // whole poll interval. A failed channel falls through to the relay.
+      // after it. A failed channel falls through to the relay.
       if (peer.dataChannel?.readyState === "open") {
         try {
           peer.dataChannel.send(ciphertext)
@@ -359,6 +365,7 @@ export class SignalingTransport implements BusTransport {
     switch (message.type) {
       case "welcome":
         this.sessionStartedAt = performance.now()
+        this.selfPeerId = message.peerId
         this.ping()
         for (const peerId of message.peers) {
           this.peers.set(peerId, newPeerState())
@@ -374,10 +381,7 @@ export class SignalingTransport implements BusTransport {
         const peer = this.peers.get(message.peerId)
         peer?.connection?.close()
         this.peers.delete(message.peerId)
-        const device = this.peerDevices.get(message.peerId)
-        this.peerDevices.delete(message.peerId)
-        if (device === undefined) this.unnamedLeftAt = performance.now()
-        else this.deviceLastPresentAt.set(device, performance.now())
+        this.markPresent(message.peerId)
         // Reported, not just cleaned up: this is the only departure signal a
         // closing tab produces (why, in `PresenceTracker`'s header). The
         // server's reaper closes a dead socket too, so a crash and a dropped

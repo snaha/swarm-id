@@ -2,22 +2,29 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Who may write on one lane — a (batch, partition) — decided between devices
- * over the account bus. This is the protocol of `models/bus-lease`
- * (`BusLease.tla`), action for action; the names in comments are the model's.
+ * Who may write on one lane — a (batch, partition) — decided between the
+ * contexts of an account over the account bus. This is the protocol of
+ * `models/bus-lease` (`BusLease.tla`), action for action; the names in
+ * comments are the model's.
  *
- * - A device writes only while it holds the lane AND its own connection was
+ * A participant (the model's "device") is one context's connection: a tab or
+ * an iframe, for as long as its socket lasts. Two tabs of one browser are two
+ * participants, and a context that reconnects is a new one, holding nothing.
+ *
+ * - A context writes only while it holds the lane AND its own connection was
  *   confirmed within `LEASE_STOP_MS` (`Holds`).
  * - To take the lane it asks everyone (`StartClaim`). It may take it once
- *   everybody except the devices that answered "free" for THIS claim has been
- *   absent for `LEASE_WAIT_MS` (`Acquire`).
- * - Two devices claiming at once: the lower device id wins.
+ *   everybody except the contexts that answered "free" for THIS claim has
+ *   been absent for `LEASE_WAIT_MS` (`Acquire`).
+ * - Two contexts claiming at once: the lower id wins.
  * - A holder that is asked hands over when idle and stays silent when busy.
  *
  * Messages may be lost, late, repeated or reordered. Nothing here stores or
  * reads Swarm: what the next holder must read is the caller's, through
  * `beforeHandover`.
  */
+
+import type { BusMessage, BusMessageInput } from "../bus/messages"
 
 /** How long a holder may go without a confirmed connection (`TStop`). */
 export const LEASE_STOP_MS = 6000
@@ -31,24 +38,42 @@ export const LEASE_WAIT_MS = 8000
 
 const ROUND_BYTES = 8
 
+/** What the lanes need from the account bus (`AccountBus` is one). */
+export interface LaneBus extends LaneLiveness {
+  publish(message: BusMessageInput): void
+  subscribe(handler: (message: BusMessage, from?: string) => void): () => void
+}
+
+/** A lane: one partition of one batch of one account. */
+export interface LaneKey {
+  accountId: string
+  batchId: string
+  partition: number
+}
+
 /** The two questions a lane asks about liveness (`BusTransport`). */
 export interface LaneLiveness {
+  /** This context's name for its current connection; undefined without one. */
+  selfId(): string | undefined
   confirmedAgoMs(): number
-  absentExceptMs(deviceIds: ReadonlySet<string>): number
+  absentExceptMs(ids: ReadonlySet<string>): number
   onConfirmed(handler: (unconfirmedForMs: number) => void): () => void
 }
 
 export type LaneMessage =
-  | { kind: "claim"; from: string; round: string }
+  | { kind: "claim"; from: string; round: string; gentle?: boolean }
   | { kind: "free"; from: string; to: string; round: string }
 
 export interface BusLaneOptions {
-  deviceId: string
   liveness: LaneLiveness
-  /** Best effort, to every device on the account. */
+  /** Best effort, to every context on the account. */
   send(message: LaneMessage): void
-  /** A write is in progress on this lane: a claim is not answered. */
-  isBusy(): boolean
+  /**
+   * Should a holder keep the lane when asked for it? True while a write is in
+   * progress. A `gentle` claim asks only whether the lane is held at all, so
+   * a holder keeps the lane however idle it is.
+   */
+  isBusy(gentle: boolean): boolean
   /**
    * Runs before the lane is handed to a claimant, and must leave on Swarm
    * what the next holder reads. A rejection keeps the lane.
@@ -73,8 +98,13 @@ function randomRound(): string {
 
 export class BusLane {
   private mode: Mode = "idle"
+  /** The name this context claimed or holds under. A different name now
+   *  means the connection it was made on is gone. */
+  private self = ""
   /** The current claim; an answer counts only if it names it (`MatchRound`). */
   private round = ""
+  /** The current claim takes the lane only if nobody holds it. */
+  private gentle = false
   private acks = new Set<string>()
   private stopListening: () => void
 
@@ -94,7 +124,9 @@ export class BusLane {
   /** May this device write on the lane right now (`Holds`)? */
   holds(): boolean {
     if (this.mode !== "holding") return false
-    if (this.confirmed()) return true
+    if (this.confirmed() && this.self === this.opts.liveness.selfId()) {
+      return true
+    }
     this.lapse()
     return false
   }
@@ -103,15 +135,43 @@ export class BusLane {
     return this.mode === "claiming"
   }
 
-  /** Ask for the lane (`StartClaim`). False when it cannot be asked for now. */
-  claim(): boolean {
-    if (this.mode !== "idle" || !this.confirmed()) return false
+  /**
+   * Ask for the lane (`StartClaim`). False when it cannot be asked for now.
+   * A `gentle` claim leaves a holder where it is; `insist()` turns it into
+   * one a holder that is not writing hands over for.
+   */
+  claim(options?: { gentle?: boolean }): boolean {
+    const self = this.opts.liveness.selfId()
+    if (this.mode !== "idle" || self === undefined || !this.confirmed()) {
+      return false
+    }
+    this.self = self
+    this.gentle = options?.gentle === true
     this.mode = "claiming"
     this.round = (this.opts.newRound ?? randomRound)()
     this.acks.clear()
     this.sendClaim()
     this.tryAcquire()
     return true
+  }
+
+  /**
+   * Everyone present has answered this claim "free": the lane goes to this
+   * context by itself once those who did not answer have been gone for the
+   * wait, and nobody needs to be asked to move.
+   */
+  get waitingOnAbsence(): boolean {
+    return (
+      this.mode === "claiming" &&
+      this.opts.liveness.absentExceptMs(this.acks) > 0
+    )
+  }
+
+  /** Ask a holder to hand over, for a claim that began gentle. */
+  insist(): void {
+    if (this.mode !== "claiming" || !this.gentle) return
+    this.gentle = false
+    this.sendClaim()
   }
 
   /** Stop holding, or give up a claim (`StandDown`). */
@@ -121,15 +181,16 @@ export class BusLane {
   }
 
   receive(message: LaneMessage): void {
-    if (message.from === this.opts.deviceId) return
+    const self = this.opts.liveness.selfId()
+    if (self === undefined || message.from === self) return
     if (message.kind === "claim") {
-      this.answerClaim(message.from, message.round)
+      this.answerClaim(message.from, message.round, message.gentle === true)
       return
     }
     // `HandleFree`
     if (
       this.mode !== "claiming" ||
-      message.to !== this.opts.deviceId ||
+      message.to !== this.self ||
       message.round !== this.round
     )
       return
@@ -149,28 +210,35 @@ export class BusLane {
   private sendClaim(): void {
     this.opts.send({
       kind: "claim",
-      from: this.opts.deviceId,
+      from: this.self,
       round: this.round,
+      ...(this.gentle ? { gentle: true } : {}),
     })
   }
 
   private sendFree(to: string, round: string): void {
-    this.opts.send({ kind: "free", from: this.opts.deviceId, to, round })
+    const from = this.opts.liveness.selfId()
+    if (from !== undefined) this.opts.send({ kind: "free", from, to, round })
   }
 
   /** `Acquire`: everybody but the devices that answered has been gone long
    *  enough, and our own connection is confirmed. */
   private tryAcquire(): void {
     if (this.mode !== "claiming" || !this.confirmed()) return
+    if (this.self !== this.opts.liveness.selfId()) {
+      // Claimed on a connection that is gone; its answers name nobody.
+      this.release()
+      return
+    }
     if (this.opts.liveness.absentExceptMs(this.acks) < LEASE_WAIT_MS) return
     this.mode = "holding"
     this.opts.onAcquired?.()
   }
 
   /** `HandleClaim` */
-  private answerClaim(claimant: string, round: string): void {
+  private answerClaim(claimant: string, round: string, gentle: boolean): void {
     // A holder whose connection lapsed is not writing: free.
-    if (this.mode === "holding" && !this.confirmed()) this.lapse()
+    if (this.mode === "holding") this.holds()
 
     switch (this.mode) {
       case "idle":
@@ -178,13 +246,13 @@ export class BusLane {
         return
       case "claiming":
         // Both claiming: the lower id wins, the other stands down.
-        if (claimant < this.opts.deviceId) {
+        if (claimant < this.self) {
           this.release()
           this.sendFree(claimant, round)
         }
         return
       case "holding":
-        if (this.opts.isBusy()) return
+        if (this.opts.isBusy(gentle)) return
         void this.handOver(claimant, round)
         return
       case "yielding":
@@ -217,5 +285,116 @@ export class BusLane {
     this.mode = "idle"
     this.acks.clear()
     if (wasWriting) this.opts.onLost?.()
+  }
+}
+
+function laneName(key: LaneKey): string {
+  return `${key.accountId}:${key.batchId}:${key.partition}`
+}
+
+/**
+ * A context's lanes on one account bus, and its answer to every claim.
+ *
+ * Every context in the room must have one, whether it writes or not: a
+ * claimant waits for an answer from everyone present, so a context that never
+ * answers keeps every lane from being taken for as long as it stays. A claim
+ * of a lane this context has not opened is answered "free" from here.
+ */
+export class BusLanes {
+  private lanes = new Map<string, BusLane>()
+  private stopListening: () => void
+
+  constructor(private readonly bus: LaneBus) {
+    this.stopListening = bus.subscribe((message, from) => {
+      if (message.type !== "lane-claim" && message.type !== "lane-free") return
+      // Named by the transport as someone else: not what it says it is.
+      if (from !== undefined && from !== message.from) return
+      const lane = this.lanes.get(laneName(message))
+      if (lane) {
+        lane.receive(
+          message.type === "lane-claim"
+            ? {
+                kind: "claim",
+                from: message.from,
+                round: message.round,
+                gentle: message.gentle,
+              }
+            : {
+                kind: "free",
+                from: message.from,
+                to: message.to,
+                round: message.round,
+              },
+        )
+        return
+      }
+      if (message.type !== "lane-claim") return
+      const self = bus.selfId()
+      if (self === undefined || self === message.from) return
+      bus.publish({
+        type: "lane-free",
+        accountId: message.accountId,
+        batchId: message.batchId,
+        partition: message.partition,
+        from: self,
+        to: message.from,
+        round: message.round,
+      })
+    })
+  }
+
+  /** How long ago this context's connection was confirmed. */
+  confirmedAgoMs(): number {
+    return this.bus.confirmedAgoMs()
+  }
+
+  onConfirmed(handler: (unconfirmedForMs: number) => void): () => void {
+    return this.bus.onConfirmed(handler)
+  }
+
+  /** Take part in a lane. One per lane; `close` it to stop. */
+  open(
+    key: LaneKey,
+    hooks: Pick<BusLaneOptions, "isBusy" | "onAcquired" | "onLost">,
+  ): BusLane {
+    const name = laneName(key)
+    if (this.lanes.has(name)) throw new Error(`Lane ${name} is already open`)
+    const lane = new BusLane({
+      ...hooks,
+      liveness: this.bus,
+      send: (message) =>
+        this.bus.publish(
+          message.kind === "claim"
+            ? {
+                type: "lane-claim",
+                ...key,
+                from: message.from,
+                round: message.round,
+                gentle: message.gentle,
+              }
+            : {
+                type: "lane-free",
+                ...key,
+                from: message.from,
+                to: message.to,
+                round: message.round,
+              },
+        ),
+    })
+    this.lanes.set(name, lane)
+    return lane
+  }
+
+  /** Stop taking part in a lane: held or claimed, it is given up. */
+  close(key: LaneKey): void {
+    const name = laneName(key)
+    this.lanes.get(name)?.close()
+    this.lanes.delete(name)
+  }
+
+  closeAll(): void {
+    this.stopListening()
+    for (const lane of this.lanes.values()) lane.close()
+    this.lanes.clear()
   }
 }

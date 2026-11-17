@@ -37,6 +37,11 @@ Not modelled: Swarm (finding and publishing the utilization state), clocks that
 run at different rates, a write in flight when a device stops, several tabs of
 one device, and more than one partition.
 
+In the implementation (`lib/src/sync/bus-lease.ts`) a "device" of the model is
+one context: a tab or an iframe, for as long as its connection lasts. Tabs of
+one browser are separate participants, and a context that reconnects is a new
+one. Partitions are independent instances of the protocol.
+
 ## Running it
 
 Needs Java and `tla2tools.jar` from the

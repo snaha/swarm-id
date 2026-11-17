@@ -54,71 +54,42 @@ export const AccountDeltaMessageSchema = z.object({
  *  defense in depth, not a trust boundary. */
 const DeviceIdSchema = z.string().min(1).max(100)
 
-/** One slot-wait round, as every holder must read it: lower-case hex of a
- *  fixed width, so `parseInt(_, 16)` is a number for all of them or the
- *  message never reaches a handler. */
-const LeaseRequestIdSchema = z.string().regex(/^[0-9a-f]{8}$/)
+/** A context's name on the transport that crosses devices. */
+const PeerIdSchema = z.string().min(1).max(100)
 
-/**
- * A context waiting for a batch-write partition (all slots held by live
- * peers) asks live holders to yield. An idle holder releases via the normal
- * Swarm lease protocol and answers with `lease-released`; holders mid-write
- * ignore it. Repeats are harmless (yield-if-idle is a guarded no-op).
- *
- * `batchId` scopes the ask, because the lock it is a fast path for is scoped
- * that way: lanes are per (batch, partition) since #589, so a holder on batch X
- * and a waiter on batch Y contend for nothing. Answering across batches would
- * drop a lease for a waiter it cannot help — the bus must not be broader than
- * the lock it front-runs, any more than it may be narrower.
- *
- * `requestId` is 8 hex chars, fresh per poll round, and exists so exactly one
- * holder answers: each derives the same permutation of the partitions from it
- * and yields at its own rank (`swarm-id-proxy.ts`, `yieldRankDelayMs`). It is
- * format-checked: the rank is `parseInt(requestId, 16)`, so an unconstrained
- * string reintroduces the very bug this fixes (`NaN` or a negative collapses
- * every holder onto the same rank), silently and with nothing to diagnose.
- */
-export const LeaseRequestMessageSchema = z.object({
-  type: z.literal("lease-request"),
-  accountId: z.string().length(40),
-  batchId: z.string().length(64),
-  fromDeviceId: DeviceIdSchema,
-  requestId: LeaseRequestIdSchema,
-})
+/** One claim of a lane: an answer counts only for the claim it names. */
+const LaneRoundSchema = z.string().regex(/^[0-9a-f]{16}$/)
 
-/**
- * The holder that drew the lowest rank for `requestId` is answering it. Sent
- * BEFORE the release starts, because the release itself is two stamped Swarm
- * writes — an order of magnitude longer than the rank step — so a signal sent
- * after it would reach the other holders only once they had all begun yielding
- * too, and every idle holder would yield for one waiter (#576). Holders further down
- * the order stand down on this;
- * the waiter ignores it (no slot is free yet).
- */
-export const LeaseClaimMessageSchema = z.object({
-  type: z.literal("lease-claim"),
-  accountId: z.string().length(40),
-  batchId: z.string().length(64),
-  fromDeviceId: DeviceIdSchema,
-  requestId: LeaseRequestIdSchema,
-})
-
-/**
- * A holder released its partition (on request or teardown) — waiting peers
- * wake their slot poll immediately instead of sleeping out the interval. The
- * lock SOCs on Swarm remain the authority; this is purely a wake-up.
- *
- * `requestId` echoes the `lease-request` this answers, so holders further down
- * the rank order can stand down. Absent on a teardown release, which answers
- * no request.
- */
-export const LeaseReleasedMessageSchema = z.object({
-  type: z.literal("lease-released"),
+const laneFields = {
   accountId: z.string().length(40),
   batchId: z.string().length(64),
   partition: z.number().int().min(0),
-  fromDeviceId: DeviceIdSchema,
-  requestId: LeaseRequestIdSchema.optional(),
+  /** The context that sent it. On a transport that names senders, a message
+   *  naming another is dropped. */
+  from: PeerIdSchema,
+  round: LaneRoundSchema,
+}
+
+/**
+ * A context asks for a lane, a (batch, partition), to write on it. Everyone
+ * else in the room answers `lane-free` unless it is writing there or claiming
+ * the lane itself under a lower name. The protocol is `sync/bus-lease.ts`.
+ */
+export const LaneClaimMessageSchema = z.object({
+  type: z.literal("lane-claim"),
+  ...laneFields,
+  /** Asks only whether the lane is held: a holder keeps it, idle or not. */
+  gentle: z.boolean().optional(),
+})
+
+/**
+ * "I am not writing on that lane", to the context whose claim `round` names.
+ * From a holder it is the handover: it has stopped writing first.
+ */
+export const LaneFreeMessageSchema = z.object({
+  type: z.literal("lane-free"),
+  ...laneFields,
+  to: PeerIdSchema,
 })
 
 /**
@@ -137,9 +108,8 @@ export const PresenceMessageSchema = z.object({
 export const BusMessageSchema = z.discriminatedUnion("type", [
   UtilizationUpdateMessageSchema,
   AccountDeltaMessageSchema,
-  LeaseRequestMessageSchema,
-  LeaseClaimMessageSchema,
-  LeaseReleasedMessageSchema,
+  LaneClaimMessageSchema,
+  LaneFreeMessageSchema,
   PresenceMessageSchema,
 ])
 

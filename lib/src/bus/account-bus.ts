@@ -50,23 +50,27 @@ export interface BusTransport {
    *
    * - `confirmedAgoMs`: how long ago this context's own connection to the
    *   service was last confirmed, `Infinity` when it is not.
-   * - `absentExceptMs`: for how long the service has shown no device other
+   * - `absentExceptMs`: for how long the service has shown no context other
    *   than the given ones, known to this context or not; `0` when another is
    *   present or the transport cannot tell.
    *
-   * They must come from one authority: if a device is shown absent over some
-   * span, its own connection was not confirmed within that span.
+   * They must come from one authority: if a context is shown absent over
+   * some span, its own connection was not confirmed within that span.
    *
    * `onConfirmed` reports each confirmation with how long the context had
    * been unconfirmed just before it (`Infinity` for the first of a
    * connection), so a gap is seen even when nothing asked during it.
+   *
+   * A context is named by `selfId`, the same name `subscribe` reports as
+   * `from`. A reconnect is a new context: its name changes, and whatever the
+   * old one held or was promised is void.
    */
+  selfId?(): string | undefined
   confirmedAgoMs?(): number
-  absentExceptMs?(deviceIds: ReadonlySet<string>): number
+  absentExceptMs?(peerIds: ReadonlySet<string>): number
   onConfirmed?(handler: (unconfirmedForMs: number) => void): () => void
-  /** A message from `peerId` was signed off by `deviceId`; a transport whose
-   *  peers are not devices needs telling. */
-  notePeerDevice?(peerId: string, deviceId: string): void
+  /** A message from `peerId` arrived, on whatever path. */
+  notePeer?(peerId: string): void
   close(): void
 }
 
@@ -151,9 +155,7 @@ export class AccountBus {
     const removers = [
       transport.subscribe((raw, from) => {
         const message = this.dispatch(raw, from)
-        if (message && from !== undefined && "fromDeviceId" in message) {
-          transport.notePeerDevice?.(from, message.fromDeviceId)
-        }
+        if (message && from !== undefined) transport.notePeer?.(from)
       }),
     ]
     const onPeerLeft = transport.onPeerLeft?.((peerId) => {
@@ -256,11 +258,21 @@ export class AccountBus {
     return answers.length === 0 ? Infinity : Math.max(...answers)
   }
 
-  /** How long every such transport has shown nobody but the given devices;
+  /** This context's name on the transport that crosses devices; undefined
+   *  while it has no confirmed place there. */
+  selfId(): string | undefined {
+    for (const transport of this.transports) {
+      const id = transport.selfId?.()
+      if (id !== undefined) return id
+    }
+    return undefined
+  }
+
+  /** How long every such transport has shown nobody but the given contexts;
    *  `0` with none attached. */
-  absentExceptMs(deviceIds: ReadonlySet<string>): number {
+  absentExceptMs(peerIds: ReadonlySet<string>): number {
     const answers = this.transports.flatMap((transport) =>
-      transport.absentExceptMs ? [transport.absentExceptMs(deviceIds)] : [],
+      transport.absentExceptMs ? [transport.absentExceptMs(peerIds)] : [],
     )
     return answers.length === 0 ? 0 : Math.min(...answers)
   }

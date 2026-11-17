@@ -36,8 +36,6 @@ import { Binary } from "cafe-utility"
 import type { UtilizationStoreDB } from "../storage/utilization-store"
 import { uploadChunk, type UploadTarget } from "../proxy/upload"
 import { tryCreateTag } from "./tag"
-import { lockSocAddress } from "./lock-soc"
-import { deriveSecret, BACKUP_KEY_LABEL } from "./key-derivation"
 import { uint8ArrayToHex, webBytes } from "./hex"
 
 // ============================================================================
@@ -79,38 +77,6 @@ export const PARTITION_COUNT = 2
 
 /** First data slot index; reserved slots `[0, PARTITION_COUNT)` precede it. */
 export const DATA_COUNTER_START = PARTITION_COUNT
-
-// Partition-lease lifetime — single source in `sync/timing-constants` (shared
-// with `partition-intent`'s epoch, which tracks it). Re-exported here so the
-// many `import { LEASE_TTL_MS } from "../utils/batch-utilization"` callers are
-// unchanged.
-export { LEASE_TTL_MS } from "../sync/timing-constants"
-
-/**
- * How often the holder re-writes its partition lock SOC to bump
- * `leasedUntil`. One third of the TTL gives three "safety net" refresh
- * attempts before a peer would consider the lease expired.
- */
-export const LEASE_REFRESH_MS = 10 * 1000 // 10 seconds
-
-/**
- * Local-clock margin for treating a lease as "could have lapsed". A holder must
- * stop writing (and re-validating before ack) once `now >= leasedUntil - margin`
- * so it ceases before a peer — reading the same `leasedUntil` from the lock SOC
- * — could validly take over. Bounds the write/ack exposure to NTP-level skew,
- * the same assumption the lock protocol already makes. Consumed by the stamper's
- * local-lapse fence and the coordinator's reverse-clobber guard.
- */
-export const LEASE_SKEW_MARGIN_MS = 2000
-
-/**
- * How long a holder may go without an upload before it voluntarily yields
- * its partition (writes the release sentinel + publishes its final counter)
- * so a waiting device can take the slot without waiting out the full TTL.
- * The yielded device re-acquires transparently on its next upload. Enables
- * turn-taking among 3+ devices sharing `PARTITION_COUNT` slots.
- */
-export const IDLE_YIELD_MS = 30 * 1000 // 30 seconds
 
 /** Size of each chunk in bytes */
 export const CHUNK_SIZE = 4096
@@ -775,8 +741,8 @@ export function hasBucketCapacity(
  * Physical slot index for partition `partition`'s `j`-th data chunk in a
  * bucket: `partitionCount + partition + partitionCount·j`. The first
  * `partitionCount` slots `[0, partitionCount)` are reserved (one per
- * partition, index = partition) for that partition's lock SOC / counter
- * chunk, so data starts at `partitionCount` and the partitions' data lanes
+ * partition, index = partition) for that partition's counter and
+ * state-pointer chunks, so data starts at `partitionCount` and the partitions' data lanes
  * interleave without ever colliding. Legacy single-device is `partitionCount
  * = 1, partition = 0` (reserved slot 0, data from slot 1).
  * See docs/Postage-Batch-Partitioning.md.
@@ -983,8 +949,8 @@ export async function saveUtilizationState(
   // Treat the buckets currently occupied by clean utilisation chunks as
   // already claimed — dirty chunks must avoid them so utilisation chunks
   // land in distinct buckets within a save. Also avoid `reservedBuckets`
-  // (e.g. per-partition lock SOCs) so utilisation chunks don't land on a
-  // slot the lock SOC overstamps every refresh.
+  // (the published partition state) so utilisation chunks don't land on a
+  // slot a published chunk occupies.
   const claimedBuckets = claimedBucketsForCleanChunks(state)
   if (reservedBuckets) {
     for (const bucket of reservedBuckets) {
@@ -1216,40 +1182,24 @@ export class UtilizationAwareStamper implements Stamper, SlotAssigner {
   private partitionCountValue: number = 1
 
   /**
-   * Per-account lock-SOC addresses (one per partition). When `stamp()` sees
-   * a chunk whose address matches one of these, it routes the write to the
-   * lock SOC's reserved slot (= the partition index) within the same bucket,
-   * bypassing the partition data-slot formula and the local counter bump.
-   * Overstamping the same SOC at the same slot does not consume new slot
-   * budget, so the heartbeat cadence is sustainable.
-   *
-   * Populated by `bindLockSocs()` once per stamper lifetime (deterministic
-   * from accountId + partitionCount + owner). Independent of `partition`
-   * binding so lock-SOC writes work both before and after `bindPartition`.
-   */
-  private lockSocs:
-    | ReadonlyArray<{ partition: number; address: Uint8Array }>
-    | undefined = undefined
-
-  /**
    * Hex addresses of the utilisation (counter) chunks for the in-flight save,
    * mapped to the reserved SLOT each must overstamp. `stamp()` routes these to
    * that slot instead of a data slot. The slot is recorded at marking time
-   * (not read from `this.partition` at stamp time) because the teardown
-   * release publishes through an UNBOUND stamper — `partition` is already
-   * undefined there, and falling back to slot 0 would overstamp the OTHER
-   * partition's reserved chunks. Unlike the lock SOC, a counter chunk's
-   * address changes whenever the counter changes, so writers register the
+   * (not read from `this.partition` at stamp time) because a publish can
+   * run through an UNBOUND stamper — `partition` is already undefined
+   * there, and falling back to slot 0 would overstamp the OTHER partition's
+   * reserved chunks. A counter chunk's address changes whenever the counter
+   * changes, so writers register the
    * current set via `markReservedUtilizationChunk` and clear it with
    * `clearReservedUtilizationChunks`.
    */
   private reservedUtilizationChunks: Map<string, number> | undefined = undefined
 
   /**
-   * The per-partition intent SOC for an in-flight intent round (Phase 2 —
-   * `partition-intent.ts`), mapped to the reserved SLOT it must overstamp (the
-   * contended partition index). Routed like the lock SOC / utilisation chunks:
-   * `stamp()` places it in the partition's reserved slot, so it NEVER lands in
+   * The SOC a partition's state pointer is being written as, mapped to the
+   * reserved SLOT it must be stamped at (the partition index). Routed like
+   * the utilisation chunks: `stamp()` places it in the partition's reserved
+   * slot, so it NEVER lands in
    * a data lane (`>= DATA_COUNTER_START`) and cannot overstamp user data.
    * Single-entry and self-clearing (set immediately before the upload, cleared
    * in a `finally`), so it stays isolated from the `reservedUtilizationChunks`
@@ -1260,10 +1210,10 @@ export class UtilizationAwareStamper implements Stamper, SlotAssigner {
 
   /**
    * Promise-chain mutex serializing {@link withIntentSocSlot} critical sections.
-   * The intent / occupancy / state-pointer SOC writes all share the single
-   * {@link intentSoc} reservation, but their callers run concurrently (the
-   * off-lock refresh-tick presence/occupancy beacon vs. an under-lock upload's
-   * state-pointer publish). Without this, the two reserve→stamp windows overlap:
+   * Every state-pointer SOC write shares the single {@link intentSoc}
+   * reservation, and two can be in flight at once (two drives' publishes go
+   * through different stampers, but nothing stops two on one). Without this,
+   * the two reserve→stamp windows overlap:
    * the second `reserveIntentSocSlot` clobbers the first's address, so the
    * first `stamp()` no longer matches `intentSoc` and falls through to a DATA
    * slot — consuming data budget and bumping the counter under the very publish
@@ -1273,9 +1223,8 @@ export class UtilizationAwareStamper implements Stamper, SlotAssigner {
   private intentSocLock: Promise<void> = Promise.resolve()
 
   /**
-   * Circuit breaker for in-flight uploads. Flipped to `true` when the proxy
-   * detects displacement on a refresh tick (or upload-start lease check), or
-   * tears the lease down; subsequent data `stamp()` calls throw
+   * Circuit breaker for in-flight uploads. Flipped to `true` when the
+   * coordinator stops holding the lane, or is torn down; subsequent data `stamp()` calls throw
    * `PartitionLeaseLostError` to abort the upload cleanly instead of silently
    * corrupting the peer's slot space. Outlives `unbindPartition` — an unbound
    * stamper would otherwise stamp the rest of that upload at legacy slots —
@@ -1284,12 +1233,11 @@ export class UtilizationAwareStamper implements Stamper, SlotAssigner {
   private leaseStale: boolean = false
 
   /**
-   * Wall-clock ms this device's lease is valid until (from the lock SOC's
-   * `leasedUntil`, pushed by the coordinator on bind and every renewal). While a
-   * multi-chunk upload runs, each `stamp()` re-checks it locally (no network) and
-   * throws once `Date.now()` passes it (minus a skew margin), so an un-renewable
-   * holder stops writing mid-op the instant its own clock says the lease lapsed —
-   * closing the "ack-safe, not write-safe" residual to the irreducible skew bound
+   * Wall-clock ms until which this context may stamp on its lane (pushed by
+   * the coordinator on bind and on every confirmation of the context's
+   * connection). While a multi-chunk upload runs, each `stamp()` re-checks it
+   * locally (no network) and throws once `Date.now()` passes it, so a holder
+   * whose connection went unconfirmed stops writing mid-op
    * (Postage-Batch-Partitioning.md §12). `undefined` = not fenced (legacy mode,
    * or between bind and the coordinator's first push).
    */
@@ -1297,10 +1245,8 @@ export class UtilizationAwareStamper implements Stamper, SlotAssigner {
 
   /**
    * This device's clock, injectable for tests (#385). The local-lapse fence
-   * compares it against `leaseValidUntil`, so a test MUST drive the stamper with
-   * the SAME clock it gives the `PartitionLease` (whose `leasedUntil` feeds
-   * `leaseValidUntil`) — otherwise the two disagree and the fence mis-fires.
-   * Defaults to `Date.now()` (production: one wall clock everywhere).
+   * compares it against `leaseValidUntil`. Defaults to `Date.now()`, which is
+   * what the coordinator that sets the deadline reads.
    */
   private readonly now: () => number
 
@@ -1358,21 +1304,7 @@ export class UtilizationAwareStamper implements Stamper, SlotAssigner {
   }
 
   /**
-   * Buckets that contain a per-partition lock SOC. External callers that
-   * persist utilisation chunks (e.g. `saveUtilizationState` from the sync
-   * path) should treat these as already claimed so utilisation-chunk key
-   * search avoids dropping a chunk on the lock SOC's bucket.
-   */
-  getLockSocBuckets(): ReadonlySet<number> {
-    const set = new Set<number>()
-    for (const soc of this.lockSocs ?? []) {
-      set.add(toBucket(soc.address))
-    }
-    return set
-  }
-
-  /**
-   * All buckets a utilisation save must avoid: the lock-SOC buckets plus the
+   * All buckets a utilisation save must avoid: the
    * buckets of the latest published partition-state chunks for the partition
    * this stamper writes reserved slots in (`partition ?? 0`). A utilisation
    * chunk landing in a published state chunk's bucket would overstamp the
@@ -1380,7 +1312,7 @@ export class UtilizationAwareStamper implements Stamper, SlotAssigner {
    * destroying the resume point a later takeover depends on.
    */
   getProtectedBuckets(): ReadonlySet<number> {
-    const set = new Set<number>(this.getLockSocBuckets())
+    const set = new Set<number>()
     const stateBuckets = this.protectedStateBuckets.get(this.partition ?? 0)
     for (const bucket of stateBuckets ?? []) {
       set.add(bucket)
@@ -1401,8 +1333,8 @@ export class UtilizationAwareStamper implements Stamper, SlotAssigner {
    * Record the buckets occupied by the latest published partition-state
    * chunks for `partition` (in memory + persisted in the batch metadata, so
    * a reload keeps avoiding them). Called after every successful publish
-   * (`PartitionLease.release`) and after every successful state read
-   * (`claimPartition`) — the set is replaced wholesale; only the latest
+   * (`LaneState.publish`) and after every successful state read
+   * (`LaneState.resume`) — the set is replaced wholesale; only the latest
    * publish needs protection, superseded chunks are dead.
    */
   async setProtectedStateBuckets(
@@ -1446,25 +1378,9 @@ export class UtilizationAwareStamper implements Stamper, SlotAssigner {
     // B/D) becomes the single counter of record for this held partition.
     this.utilizationState.dataCounters = opts.localCounter
     this.leaseStale = false
-    // Presumed valid until the coordinator pushes the real `leasedUntil` (it
-    // does so synchronously right after bind). Mirrors the `leaseStale` reset.
+    // Presumed valid until the coordinator pushes the deadline (it does so
+    // synchronously right after bind). Mirrors the `leaseStale` reset.
     this.leaseValidUntil = undefined
-  }
-
-  /**
-   * Bind the per-partition lock-SOC addresses. Called once per stamper
-   * lifetime (the addresses are deterministic from the account). Routes
-   * lock-SOC overstamps to a fixed reserved slot per partition so the tight
-   * heartbeat cadence doesn't consume new slot budget every refresh.
-   *
-   * Independent of `bindPartition` — can be called before the partition
-   * lease is acquired (the first lock-SOC write inside `acquirePartitionLock`
-   * needs this routing to already be in place).
-   */
-  bindLockSocs(
-    socs: ReadonlyArray<{ partition: number; address: Uint8Array }>,
-  ): void {
-    this.lockSocs = socs
   }
 
   /**
@@ -1491,11 +1407,10 @@ export class UtilizationAwareStamper implements Stamper, SlotAssigner {
   }
 
   /**
-   * Register the per-partition intent SOC so `stamp()` routes it to `slot`
-   * (the contended partition's reserved index) instead of a data slot — never
-   * consuming data budget or bumping the counter. `slot` is passed explicitly
-   * because the intent round runs BEFORE `bindPartition`, so `this.partition`
-   * is not yet set. Call immediately before the upload; pair with
+   * Register a state-pointer SOC so `stamp()` routes it to `slot` (the
+   * partition's reserved index) instead of a data slot — never consuming
+   * data budget or bumping the counter. `slot` is passed explicitly because
+   * a publish can run on an unbound stamper. Call immediately before the upload; pair with
    * `clearIntentSocSlot` in a `finally`.
    */
   reserveIntentSocSlot(address: Uint8Array, slot: number): void {
@@ -1563,9 +1478,9 @@ export class UtilizationAwareStamper implements Stamper, SlotAssigner {
   }
 
   /**
-   * Record the wall-clock ms this device's lease is valid until (the lock SOC's
-   * `leasedUntil`). The coordinator pushes it on bind and every successful
-   * renewal; `undefined` disables the local-lapse fence. See `leaseValidUntil`.
+   * Record the wall-clock ms until which this context may stamp on its lane.
+   * The coordinator pushes it on bind and on every confirmation of the
+   * context's connection; `undefined` disables the fence. See `leaseValidUntil`.
    */
   setLeaseValidUntil(ms: number | undefined): void {
     this.leaseValidUntil = ms
@@ -1578,8 +1493,7 @@ export class UtilizationAwareStamper implements Stamper, SlotAssigner {
    */
   private leaseLocallyLapsed(): boolean {
     return (
-      this.leaseValidUntil !== undefined &&
-      this.now() >= this.leaseValidUntil - LEASE_SKEW_MARGIN_MS
+      this.leaseValidUntil !== undefined && this.now() >= this.leaseValidUntil
     )
   }
 
@@ -1681,25 +1595,7 @@ export class UtilizationAwareStamper implements Stamper, SlotAssigner {
       )
     }
 
-    // Auto-bind lock SOCs for all partitions. The lock-SOC owner is the
-    // BACKUP signer's address — same value `writePartitionLock` derives
-    // internally — NOT the `owner` parameter callers pass (which is the
-    // account / postage-signer address depending on call site). Deriving
-    // here from `encryptionKey` (= swarmEncryptionKey at every call site)
-    // makes the routing self-consistent regardless of caller. Harmless for
-    // single-device legacy accounts (the lock SOCs are never written).
     void owner // currently unused; reserved for a future Swarm upload path.
-    const swarmEncryptionKeyHex = uint8ArrayToHex(encryptionKey)
-    const backupKeyHex = await deriveSecret(
-      swarmEncryptionKeyHex,
-      BACKUP_KEY_LABEL,
-    )
-    const backupSigner = new PrivateKey(backupKeyHex)
-    const backupOwner = backupSigner.publicKey().address()
-    instance.lockSocs = Array.from({ length: PARTITION_COUNT }, (_, p) => ({
-      partition: p,
-      address: lockSocAddress(batchId, p, backupOwner),
-    }))
 
     return instance
   }
@@ -1719,18 +1615,6 @@ export class UtilizationAwareStamper implements Stamper, SlotAssigner {
     // reserved slot is below `partitionCount`, so it always fits. A data slot
     // must never be returned from here — those take the bounded path at the end.
     //
-    // Lock-SOC short-circuit: when stamping our own per-partition lock SOC,
-    // overstamp the fixed reserved slot (= partition index, 0 or 1) within
-    // its bucket. Doesn't consume new slot budget, doesn't bump our local
-    // counter — the SOC address is the same on every refresh, so the slot
-    // it occupies stays the same too.
-    const lockSoc = this.lockSocs?.find((soc) =>
-      Binary.equals(soc.address, chunkAddress),
-    )
-    if (lockSoc) {
-      return lockSoc.partition
-    }
-
     // Utilisation-chunk short-circuit: a counter/state chunk overstamps its
     // bucket's reserved slot (recorded at marking time), just like the lock
     // SOC. Persisting the counter therefore never consumes a data slot or
@@ -1743,11 +1627,9 @@ export class UtilizationAwareStamper implements Stamper, SlotAssigner {
       return reservedSlot
     }
 
-    // Intent-SOC short-circuit: a partition-intent chunk (Phase 2) overstamps
-    // the contended partition's reserved slot — like the lock SOC, below the
-    // data lanes — so it can never collide with user data. Doesn't bump the
-    // counter. Not gated by `leaseStale`: the intent round runs before binding,
-    // while no lease is held.
+    // State-pointer short-circuit: the SOC is stamped at the partition's
+    // reserved slot, below the data lanes, so it can never collide with user
+    // data. Doesn't bump the counter.
     if (this.intentSoc?.addressHex === addressHex) {
       return this.intentSoc.slot
     }
@@ -1755,8 +1637,7 @@ export class UtilizationAwareStamper implements Stamper, SlotAssigner {
     // Partition lease was reclaimed — abort cleanly before the stamp lands in
     // slot space the peer now controls. Single-device legacy mode has no lease
     // to invalidate, so neither condition can hold there. Two conditions:
-    //  - `leaseStale`: the refresh tick CONFIRMED a peer took over (write-verify
-    //    failed / displacement beacon seen), or the coordinator tore the lease
+    //  - `leaseStale`: the coordinator stopped holding the lane, or was torn
     //    down. Holds across the unbind that follows, where the fall-through
     //    below would stamp at legacy slots.
     //  - `leaseLocallyLapsed()`: this device's own clock says the lease expired
@@ -1853,13 +1734,6 @@ export class UtilizationAwareStamper implements Stamper, SlotAssigner {
     // redundant re-upload of every flushed chunk on the next sync.
     try {
       const claimedBuckets = claimedBucketsForCleanChunks(this.utilizationState)
-      // Reserve each partition's lock-SOC bucket so utilisation-chunk key
-      // search picks a different nonce. Otherwise a utilisation chunk could
-      // land in the same bucket and try to claim slot 0/1 — the slot the
-      // lock SOC overstamps every refresh.
-      for (const soc of this.lockSocs ?? []) {
-        claimedBuckets.add(toBucket(soc.address))
-      }
       // Also reserve the latest published partition-state chunks' buckets —
       // they share this partition's reserved slot, and overstamping one
       // evicts the resume point a later takeover depends on.

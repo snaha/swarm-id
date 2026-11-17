@@ -28,6 +28,54 @@ the server take turns), it sleeps after 15 idle minutes, and an account open in 
 preview and in another preview does not see itself live, since the two sit on different
 servers.
 
+## 2026-11-17 Each tab holds a partition for itself
+
+**Context.** The bus lease was decided with "several tabs of one device keep
+coordinating as they do" (2026-11-16): tabs shared a held partition through a
+record in local storage, and a reloaded tab took it up again at once. Wiring
+the protocol showed this does not fit it. The model's participant is one
+process with one connection, and its safety rests on a participant that
+reconnects holding nothing. A tab that reconnects and reads the device's hold
+from a shared record holds again without asking, while another device that
+saw every tab of this one gone for the wait has taken the partition: both
+write.
+
+**Decision.** Every context (a tab, an iframe) is its own participant, named
+by its current connection to the signaling server. It asks for a partition
+like any other context and is handed one by whoever holds it and is not
+writing, a tab of the same browser included. The local lease record and the
+take-up on reload are removed. A new or reloaded context waits until it has
+been in the room for 8 s before it writes. This reverses the tab sentence of
+the 2026-11-16 entry and may be revisited.
+
+**Why.** It is the protocol exactly as checked, with no state shared between
+contexts to get wrong. The cost is the wait on every page load, and that two
+tabs of one browser hand a partition back and forth when both write and the
+other partition is taken. Sharing between tabs would need the model extended
+with tabs first; one way is a single tab per browser speaking for the others,
+which keeps the sharing but adds a hand-off when that tab closes. Revisit if
+the wait or the hand-offs between tabs show up in use.
+
+## 2026-11-17 Nothing on Swarm says who holds a partition
+
+**Context.** With the lease on the bus (2026-11-16) and the state pointer
+found by search (below), the lock chunk and the intent and occupancy beacons
+have no reader left.
+
+**Decision.** They are removed, with the refresh timer, the idle release, the
+release sentinel and the lease messages that sped them up. A claim first asks
+whether a partition is held at all, and only then asks a holder to hand over,
+so a newcomer takes a free partition before it disturbs anyone. The signaling
+server drops a room member that stops answering its ticks. A process without
+a bus (a script, a test) cannot write a partitioned batch.
+
+**Why.** Each removed piece was a write to a fixed address read through
+caches, or a timer covering for one. Removing the beacons also closes the gap
+the entry below left open: nothing is written to the reserved slot any more
+that the publish cannot steer away from the pointer entries. A member that
+answers nothing must go because a claimant waits for everyone present, and a
+frozen tab's browser keeps its socket open.
+
 ## 2026-11-17 The state pointer is a numbered, write-once entry found by search
 
 **Context.** The partition's state pointer was written at an address derived
