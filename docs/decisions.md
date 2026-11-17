@@ -32,12 +32,12 @@ servers.
 
 **Context.** `uploadData` and `actUploadData` took only a `Uint8Array`, so a
 caller read a whole file into memory and the iframe bridge copied it again
-(#930, #523). Measured on desktop Safari 26.5.2 (macOS 26.5.2) with the
-demo's `/safari-check` page on the #979 preview, 2026-11-17: posting a
-transferred `ReadableStream` throws `DataCloneError`, and `Blob.stream()`
-handed a 5 MB blob back as one piece. iOS Safari is not measured. The page
-re-runs both measurements, under Transport, in whichever browser opens it,
-with no connection needed.
+(#930, #523). Measured with the demo's `/safari-check` page on the #979
+preview, 2026-11-17: desktop Safari 26.5.2 throws `DataCloneError` on a
+transferred `ReadableStream`, while desktop Safari 27.2 and iOS 27.2 Safari
+(simulator) transfer it. All three hand a 5 MB blob back from `Blob.stream()`
+as one piece. The page re-runs both measurements, under Transport, in
+whichever browser opens it, with no connection needed.
 
 **Decision.** A `Blob`, `File` or `ReadableStream` crosses the bridge as
 pieces of up to 256 KiB, one per pull from the receiving side, buffers
@@ -59,7 +59,7 @@ queued for 10 minutes in all, or the call's longer timeout. Every request
 that expires on the client is aborted in the proxy. (#979)
 
 **Why.** One transport that works on every engine beats a fast path plus a
-Safari fallback, and a pull costs under 0.25 ms against a node that takes
+fallback for the Safari versions still without stream transfer, and a pull costs under 0.25 ms against a node that takes
 milliseconds per chunk. Pulling is the backpressure: nothing is read faster
 than the node takes chunks. A whole-call bound cannot fit an upload of
 unknown length, so silence is what is bounded. The source's own deadline
