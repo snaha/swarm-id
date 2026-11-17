@@ -6,11 +6,11 @@
  *
  * Every reserved-slot write for partition `p` lands at stamp index
  * `(bucket, slot=p)` on the shared batch: the lock SOC, the counter chunks, the
- * reference chunk, the rotating state-pointer SOC, and the intent/occupancy
+ * reference chunk, the state-pointer entries, and the intent/occupancy
  * beacons. Two different chunks at the same `(bucket, p)` make Bee's
  * newer-stamp-wins replacement evict one of them. The publish therefore must
  * pick its randomly-keyed counter/reference chunks in buckets distinct from the
- * pointer it writes in the same round AND the beacons the off-lock refresh tick
+ * pointer entry it writes in the same round AND the beacons the off-lock refresh tick
  * writes concurrently.
  *
  * The collision is a ~1/65536 random event in production, so these tests force
@@ -69,7 +69,7 @@ vi.mock("../proxy/upload", async (importOriginal) => {
   }
 })
 
-import { statePointerAddress, writePartitionState } from "./partition-state"
+import { writePartitionState } from "./partition-state"
 import { uploadChunk, uploadSOC } from "../proxy/upload"
 import {
   intentEpochBucket,
@@ -82,7 +82,6 @@ import {
   toBucket,
 } from "../utils/batch-utilization"
 import { lockSocBucket } from "../utils/lock-soc"
-import { uint8ArrayToHex } from "../utils/hex"
 import {
   MockBee,
   MockChunkStore,
@@ -150,31 +149,34 @@ async function publishOneChunk(
     localCounter,
     backupSigner: BACKUP_SIGNER,
     swarmEncryptionKey: TEST_ENC_KEY,
+    seq: 1,
     deviceId: DEVICE_ID,
   })
   return result.stateBuckets
 }
 
-// `writePartitionState` keeps its reserved-slot chunks out of this address's
-// bucket, so it must be exactly where the pointer SOC lands: pinned to bytes.
-describe("statePointerAddress", () => {
-  const POINTER_NOW_MS = 1_700_000_000_000
-
-  it("derives the state-pointer SOC address", () => {
-    expect(
-      uint8ArrayToHex(
-        statePointerAddress(TEST_BATCH_ID, PARTITION, OWNER, POINTER_NOW_MS),
-      ),
-    ).toBe("17461bbea226a1f86c59cc2c3eceb97ed6fabd35dc401152a34fb4e9c1caeb8d")
-  })
-})
+/** A store of its own, so a publish made only to learn an address leaves no trace. */
+async function inScratchStore<T>(work: () => Promise<T>): Promise<T> {
+  const kept = { store, bee }
+  store = new MockChunkStore()
+  bee = new MockBee(store)
+  mockFetch(store, OWNER)
+  try {
+    return await work()
+  } finally {
+    store = kept.store
+    bee = kept.bee
+    mockFetch(store, OWNER)
+  }
+}
 
 describe("writePartitionState — reserved-slot bucket-collision avoidance", () => {
-  it("does not place a counter chunk in the state-pointer's bucket", async () => {
+  it("does not place a counter chunk in its own pointer entry's bucket", async () => {
     const now = 1_000_000_000_000
-    const stamper = await makeBoundStamper()
-    const pointerBucket = toBucket(
-      statePointerAddress(TEST_BATCH_ID, PARTITION, OWNER, now),
+    // An entry's address depends only on its number: learn entry 1's bucket
+    // from a publish elsewhere. `stateBuckets` ends with the pointer entries.
+    const pointerBucket = await inScratchStore(async () =>
+      (await publishOneChunk(await makeBoundStamper(), now)).at(-1),
     )
     // Guard: a false green if the target happened to already be claimed.
     expect(pointerBucket).not.toBe(
@@ -182,12 +184,62 @@ describe("writePartitionState — reserved-slot bucket-collision avoidance", () 
     )
 
     force.bucket = pointerBucket // steer the first counter chunk onto the pointer
-    const stateBuckets = await publishOneChunk(stamper, now)
+    const stateBuckets = await publishOneChunk(await makeBoundStamper(), now)
 
-    // The pointer SOC occupies (pointerBucket, slot=PARTITION); a counter/
-    // reference chunk there would evict it (or vice versa). The publish must
-    // have re-picked a clear bucket.
-    expect(stateBuckets).not.toContain(pointerBucket)
+    // The pointer entry occupies (pointerBucket, slot=PARTITION); a counter/
+    // reference chunk there would be evicted when the entry is written. The
+    // publish must have re-picked a clear bucket: only the entry is there.
+    expect(stateBuckets.filter((b) => b === pointerBucket)).toHaveLength(1)
+    expect(new Set(stateBuckets).size).toBe(stateBuckets.length)
+  })
+
+  it("moves a retained chunk out of the bucket the next pointer entry is written to", async () => {
+    const publish = (
+      stamper: UtilizationAwareStamper,
+      localCounter: Uint32Array,
+      seq: number,
+      previous?: Awaited<ReturnType<typeof writePartitionState>>,
+    ) =>
+      writePartitionState({
+        bee: bee,
+        stamper,
+        batchId: TEST_BATCH_ID,
+        batchDepth: TEST_BATCH_DEPTH,
+        partition: PARTITION,
+        localCounter,
+        backupSigner: BACKUP_SIGNER,
+        swarmEncryptionKey: TEST_ENC_KEY,
+        deviceId: DEVICE_ID,
+        seq,
+        previousReferences: previous?.references,
+        previousCounter: previous?.publishedCounter,
+      })
+    const RETAINED_BUCKET = 1000 // counter chunk 0
+    const CHANGED_BUCKET = 5000 // counter chunk 2
+    const counter = new Uint32Array(NUM_BUCKETS)
+    counter[RETAINED_BUCKET] = 1
+
+    const entryTwoBucket = await inScratchStore(async () =>
+      (await publish(await makeBoundStamper(), counter, 2)).stateBuckets.at(-1),
+    )
+
+    // Entry 1's publish happens to put counter chunk 0 where entry 2 will go.
+    const stamper = await makeBoundStamper()
+    force.bucket = entryTwoBucket
+    const first = await publish(stamper, counter, 1)
+    expect(first.stateBuckets).toContain(entryTwoBucket)
+
+    // Entry 2's publish changes only chunk 2. Chunk 0 is unchanged, but left
+    // in place it would be replaced by the entry: it is uploaded again.
+    const next = counter.slice()
+    next[CHANGED_BUCKET] = 1
+    const second = await publish(stamper, next, 2, first)
+
+    expect(second.references[0]).not.toEqual(first.references[0])
+    expect(
+      second.stateBuckets.filter((b) => b === entryTwoBucket),
+    ).toHaveLength(1)
+    expect(new Set(second.stateBuckets).size).toBe(second.stateBuckets.length)
   })
 
   it("does not place a counter chunk in the occupancy beacon's bucket", async () => {
@@ -229,6 +281,7 @@ describe("writePartitionState — sparse sentinel refs are independent", () => {
       localCounter,
       backupSigner: BACKUP_SIGNER,
       swarmEncryptionKey: TEST_ENC_KEY,
+      seq: 1,
       deviceId: DEVICE_ID,
     })
 
@@ -259,6 +312,7 @@ describe("writePartitionState — distinct-bucket invariant guard", () => {
       localCounter,
       backupSigner: BACKUP_SIGNER,
       swarmEncryptionKey: TEST_ENC_KEY,
+      seq: 1,
       deviceId: DEVICE_ID,
     })
 
@@ -291,6 +345,7 @@ describe("writePartitionState — two-phase publish (pointer after chunks)", () 
         localCounter,
         backupSigner: BACKUP_SIGNER,
         swarmEncryptionKey: TEST_ENC_KEY,
+        seq: 1,
         deviceId: DEVICE_ID,
       }),
     ).rejects.toThrow()
@@ -316,6 +371,7 @@ describe("writePartitionState — counter monotonicity tripwire", () => {
       localCounter: baseline,
       backupSigner: BACKUP_SIGNER,
       swarmEncryptionKey: TEST_ENC_KEY,
+      seq: 1,
       deviceId: DEVICE_ID,
     })
 
@@ -334,6 +390,7 @@ describe("writePartitionState — counter monotonicity tripwire", () => {
         localCounter: regressed,
         backupSigner: BACKUP_SIGNER,
         swarmEncryptionKey: TEST_ENC_KEY,
+        seq: 1,
         deviceId: DEVICE_ID,
         previousReferences: first.references,
         previousCounter: first.publishedCounter,
@@ -355,6 +412,7 @@ describe("writePartitionState — counter monotonicity tripwire", () => {
       localCounter: baseline,
       backupSigner: BACKUP_SIGNER,
       swarmEncryptionKey: TEST_ENC_KEY,
+      seq: 1,
       deviceId: DEVICE_ID,
     })
 
@@ -374,6 +432,7 @@ describe("writePartitionState — counter monotonicity tripwire", () => {
         localCounter: regressed,
         backupSigner: BACKUP_SIGNER,
         swarmEncryptionKey: TEST_ENC_KEY,
+        seq: 1,
         deviceId: DEVICE_ID,
         // previousReferences intentionally omitted → full path.
         previousCounter: first.publishedCounter,
