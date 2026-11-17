@@ -161,7 +161,7 @@ and stores nothing: a room is a set of open sockets, and it disappears with the 
 <td>Folds the snapshot with the same last-writer-wins rules as a Swarm feed payload — collections on their tombstone clocks, scalars on per-field clocks. App secrets and session deadlines are stripped on send and again on receive. A revoke ends a live session at once.</td>
 </tr>
 <tr>
-<td><code dir="auto">lane-claim</code>, <code dir="auto">lane-free</code></td>
+<td><code dir="auto">lane-claim</code>, <code dir="auto">lane-free</code>, <code dir="auto">lane-held</code></td>
 <td>Who writes which partition: a context asks for a lane, everyone not writing on it answers “free”, and a holder that is not writing hands it over. Nothing on Swarm records the holder. See <a href="../multi-device-postage-batches/#who-holds-a-lane">Postage Batch Sharing</a>.</td>
 </tr>
 <tr>
