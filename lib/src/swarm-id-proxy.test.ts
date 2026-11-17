@@ -6,7 +6,9 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest"
 // Rollup-only virtual module (see rollup.config.js) — not resolvable in vitest
 vi.mock("virtual:stamp-worker-code", () => ({ default: "" }))
 
+import { PrivateKey } from "@ethersphere/bee-js"
 import { DEFAULT_BEE_NODE_URL } from "./schemas"
+import { calculateChunkAddress } from "./chunk"
 import { SwarmIdProxy, PUBLISH_DEBOUNCE_MS } from "./swarm-id-proxy"
 import { deriveSecret } from "./utils/key-derivation"
 import { uint8ArrayToHex } from "./utils/hex"
@@ -52,6 +54,8 @@ type ProxyInternals = {
     stampDepth: number,
   ) => Promise<void>
   lookupAccountForApp: () => Promise<unknown>
+  /** The account-wide ACT key, undefined when the session carries no account. */
+  sharingSecret: () => Uint8Array | undefined
   /** The Bee client the proxy reads (and subsidised-uploads) through now. */
   bee: { url: string }
 }
@@ -1414,6 +1418,287 @@ describe("SwarmIdProxy subsidised-mode selection", () => {
 
       expect(connectionInfo().uploadMode).toBe("unavailable")
       expect(internals(proxy).bee.url).toBe(clientUrl(DEFAULT_BEE_NODE_URL))
+    })
+  })
+
+  // #931: a new version of a shared file goes into the history its grantees
+  // already hold, against a gateway that keeps what it is sent.
+  describe("an ACT upload that continues a history", () => {
+    const SHARING_KEY = new Uint8Array(32).fill(0x55)
+    const GRANTEE = new PrivateKey("66".repeat(32))
+      .publicKey()
+      .toCompressedHex()
+    const encode = (text: string) => new TextEncoder().encode(text)
+
+    let chunkPosts: number
+
+    /** Every chunk it is sent, kept, and served back by its address. */
+    function contentAddressedGateway(): void {
+      const chunks = new Map<string, Uint8Array>()
+      chunkPosts = 0
+      vi.spyOn(globalThis, "fetch").mockImplementation(async (url, init) => {
+        const read = /\/chunks\/([0-9a-f]{64})$/.exec(String(url))
+        if (read) {
+          const chunk = chunks.get(read[1])
+          return chunk
+            ? new Response(chunk.slice())
+            : new Response("Not Found", { status: 404 })
+        }
+        if (init?.method === "POST" && /\/chunks$/.test(String(url))) {
+          const chunk = new Uint8Array(init.body as Uint8Array)
+          const address = calculateChunkAddress(chunk).toHex()
+          chunks.set(address, chunk)
+          chunkPosts++
+          return new Response(JSON.stringify({ reference: address }))
+        }
+        return new Response(JSON.stringify({ reference: "ab".repeat(32) }))
+      })
+    }
+
+    const send = (data: Record<string, unknown>) =>
+      messageListener({
+        data,
+        origin: PARENT_ORIGIN,
+        source: parentWindow,
+      } as unknown as MessageEvent)
+
+    /** The answer to one request, its response or its error. */
+    const answerTo = async (requestId: string) => {
+      const answers = () =>
+        parentWindow.postMessage.mock.calls
+          .map(([message]) => message)
+          .filter(
+            (message) =>
+              message?.requestId === requestId &&
+              (message.type === "error" || message.type.endsWith("Response")),
+          )
+      await vi.waitFor(() => expect(answers()).toHaveLength(1))
+      return answers()[0]
+    }
+
+    const upload = async (
+      requestId: string,
+      text: string,
+      options: Record<string, unknown>,
+      grantees: string[] = [],
+    ) => {
+      await send({
+        type: "actUploadData",
+        requestId,
+        data: encode(text),
+        grantees,
+        options,
+      })
+      return answerTo(requestId)
+    }
+
+    const download = async (
+      requestId: string,
+      version: Record<string, unknown>,
+      timestamp?: number,
+    ) => {
+      await send({
+        type: "actDownloadData",
+        requestId,
+        encryptedReference: version.encryptedReference,
+        historyReference: version.historyReference,
+        publisherPubKey: version.publisherPubKey,
+        timestamp,
+      })
+      return answerTo(requestId)
+    }
+
+    beforeEach(async () => {
+      await identify(GATEWAY_URL)
+      setAccountState({})
+      vi.spyOn(internals(proxy), "sharingSecret").mockReturnValue(SHARING_KEY)
+      contentAddressedGateway()
+    })
+
+    it("encrypts the new version under the history's latest ACT and returns that entry's timestamp", async () => {
+      const first = await upload("v1", "first", { publisher: "identity" })
+      expect(first).toMatchObject({
+        type: "actUploadDataResponse",
+        timestamp: expect.any(Number),
+      })
+
+      const next = await upload("v2", "second", {
+        historyReference: first.historyReference,
+      })
+
+      expect(next).toMatchObject({
+        type: "actUploadDataResponse",
+        historyReference: first.historyReference,
+        actReference: first.actReference,
+        granteeListReference: first.granteeListReference,
+        publisherPubKey: first.publisherPubKey,
+        timestamp: first.timestamp,
+      })
+      expect(await download("d2", next)).toMatchObject({
+        data: encode("second"),
+      })
+      expect(await download("d1", first)).toMatchObject({
+        data: encode("first"),
+      })
+    })
+
+    it("refuses with the app key a history the sharing key published", async () => {
+      const first = await upload("v1", "first", { publisher: "identity" })
+
+      const refused = await upload("v2", "second", {
+        historyReference: first.historyReference,
+        publisher: "app",
+      })
+
+      expect(refused).toMatchObject({
+        type: "error",
+        error: expect.stringContaining("Cannot find publisher entry"),
+      })
+    })
+
+    it("refuses grantees, before writing anything", async () => {
+      const first = await upload("v1", "first", {})
+      const posted = chunkPosts
+
+      const refused = await upload(
+        "v2",
+        "second",
+        { historyReference: first.historyReference },
+        [GRANTEE],
+      )
+
+      expect(refused).toMatchObject({
+        type: "error",
+        code: "invalid-request",
+        error: expect.stringContaining("actAddGrantees"),
+      })
+      expect(chunkPosts).toBe(posted)
+    })
+
+    it("follows the history's Bee compatibility, and refuses a beeCompatible that contradicts it", async () => {
+      const first = await upload("v1", "first", { beeCompatible: true })
+      expect(first.historyReference).toHaveLength(64)
+
+      const next = await upload("v2", "second", {
+        historyReference: first.historyReference,
+      })
+      const refused = await upload("v3", "third", {
+        historyReference: first.historyReference,
+        beeCompatible: false,
+      })
+
+      // A Bee-compatible history keeps producing 32-byte references
+      expect(next.encryptedReference).toHaveLength(64)
+      expect(await download("d2", next)).toMatchObject({
+        data: encode("second"),
+      })
+      expect(refused).toMatchObject({ type: "error", code: "invalid-request" })
+    })
+
+    // Every version of a history shares one keystream, and a Bee-compatible
+    // history keeps its manifest plain: with the content plain too, the
+    // reference follows from the file's bytes, and one guessed version opens
+    // every other one under that key.
+    describe("refuses encrypt: false in a Bee-compatible history, before writing anything", () => {
+      it("for the upload that starts it", async () => {
+        const refused = await upload("v1", "first", {
+          beeCompatible: true,
+          encrypt: false,
+        })
+
+        expect(refused).toMatchObject({
+          type: "error",
+          code: "invalid-request",
+          error: expect.stringContaining("encrypt: false"),
+        })
+        expect(chunkPosts).toBe(0)
+      })
+
+      it("for an upload that continues it", async () => {
+        const first = await upload("v1", "first", { beeCompatible: true })
+        const posted = chunkPosts
+
+        const refused = await upload("v2", "second", {
+          historyReference: first.historyReference,
+          encrypt: false,
+        })
+
+        expect(refused).toMatchObject({
+          type: "error",
+          code: "invalid-request",
+          error: expect.stringContaining("encrypt: false"),
+        })
+        expect(chunkPosts).toBe(posted)
+      })
+
+      it("and allows it in a history that is not Bee-compatible", async () => {
+        const first = await upload("v1", "first", { encrypt: false })
+        const next = await upload("v2", "second", {
+          historyReference: first.historyReference,
+          encrypt: false,
+        })
+
+        expect(first).toMatchObject({ type: "actUploadDataResponse" })
+        expect(next).toMatchObject({ type: "actUploadDataResponse" })
+        expect(await download("d2", next)).toMatchObject({
+          data: encode("second"),
+        })
+      })
+    })
+
+    it("revokes without the content reference, and the version before it reads at its timestamp", async () => {
+      const first = await upload("v1", "first", {}, [GRANTEE])
+
+      await send({
+        type: "actRevokeGrantees",
+        requestId: "r1",
+        historyReference: first.historyReference,
+        revokeGrantees: [GRANTEE],
+      })
+      const revoked = await answerTo("r1")
+
+      expect(revoked).toMatchObject({
+        type: "actRevokeGranteesResponse",
+        timestamp: expect.any(Number),
+      })
+      expect(revoked).not.toHaveProperty("encryptedReference")
+      expect(revoked.timestamp).toBeGreaterThan(first.timestamp)
+      const pastTheRevoke = {
+        ...first,
+        historyReference: revoked.historyReference,
+      }
+      expect(
+        await download("d1", pastTheRevoke, first.timestamp),
+      ).toMatchObject({ data: encode("first") })
+    })
+
+    // Nothing checks a decrypted reference: the latest entry's key turns an
+    // older version's into one that leads nowhere.
+    it("hints at the upload's timestamp when a version from before a revoke is read without one", async () => {
+      const first = await upload("v1", "first", {}, [GRANTEE])
+      await send({
+        type: "actRevokeGrantees",
+        requestId: "r1",
+        historyReference: first.historyReference,
+        revokeGrantees: [GRANTEE],
+      })
+      const revoked = await answerTo("r1")
+      const pastTheRevoke = {
+        ...first,
+        historyReference: revoked.historyReference,
+      }
+
+      const answer = await download("d1", pastTheRevoke)
+
+      // The gateway's not-found keeps its code and status
+      expect(answer).toMatchObject({
+        type: "error",
+        code: "bee-rejected",
+        status: 404,
+        error: expect.stringContaining(
+          "If this version was uploaded before a revoke, pass the timestamp its upload returned.",
+        ),
+      })
     })
   })
 

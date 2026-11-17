@@ -21,6 +21,9 @@ const UNCOMPRESSED_PREFIX = 0x04
 const KEY_SIZE = 32
 const COUNTER_SIZE = 4
 
+/** The size of the random salt each access key of a native history gets (#408) */
+const ACCESS_KEY_SALT_SIZE = 32
+
 /**
  * Derive public key from private key
  */
@@ -98,6 +101,28 @@ export function deriveKeys(
   const accessKeyDecryptionKey = Binary.keccak256(akdKeyInput)
 
   return { lookupKey, accessKeyDecryptionKey }
+}
+
+/** A fresh salt for a new access key of a native history (#408) */
+export function generateAccessKeySalt(): Uint8Array {
+  return generateRandomKey(ACCESS_KEY_SALT_SIZE)
+}
+
+/**
+ * The key an ACT entry's access key is encrypted with: the pair's
+ * `accessKeyDecryptionKey` mixed with the access key's salt (#408), or the
+ * pair's key itself, as Bee uses it, when there is no salt. The pair's key is
+ * fixed, so unsalted, every ACT one publisher writes for one grantee encrypts
+ * under the same keystream, and two of them differ by exactly their two access
+ * keys.
+ */
+export function entryEncryptionKey(
+  accessKeyDecryptionKey: Uint8Array,
+  salt?: Uint8Array,
+): Uint8Array {
+  return salt
+    ? Binary.keccak256(Binary.concatBytes(accessKeyDecryptionKey, salt))
+    : accessKeyDecryptionKey
 }
 
 /**

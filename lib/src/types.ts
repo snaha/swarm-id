@@ -143,6 +143,7 @@ export type ActPublisher = z.infer<typeof ActPublisherSchema>
 export const ActUploadOptionsSchema = UploadOptionsObjectSchema.extend({
   beeCompatible: z.boolean().optional(),
   publisher: ActPublisherSchema.optional(),
+  historyReference: ReferenceSchema.optional(),
 }).optional()
 
 export const RequestOptionsSchema = z
@@ -264,13 +265,34 @@ export const CollectionEntrySchema = z.object({
 })
 export type CollectionEntry = z.infer<typeof CollectionEntrySchema>
 export interface ActUploadOptions extends UploadOptions {
+  /**
+   * Leave the history and its ACT readable by a Bee node's own ACT endpoints
+   * (32-byte references). When continuing a history it is read off the
+   * history reference, and a value that contradicts it is refused.
+   */
   beeCompatible?: boolean
   /**
    * Which of the user's keys publishes the ACT (default `"app"`, the
    * origin-bound app key). `"identity"` publishes with the account-wide
    * sharing key, so any of the user's apps can manage the grantees later.
+   * When continuing a history, unset means whichever of the two published
+   * it.
    */
   publisher?: ActPublisher
+  /**
+   * Continue this history instead of starting one (#931), as Bee's upload
+   * with a history address does: the new version is encrypted with the
+   * latest entry's access key, so that entry's grantees read it, and the same
+   * history reference comes back. Nothing is added to the history. `grantees`
+   * must be empty: an existing history's grantees are managed with
+   * `actAddGrantees` and `actRevokeGrantees`.
+   *
+   * Continue from the history reference the latest grantee change returned.
+   * One saved before a revoke encrypts under the key the revoked grantees
+   * still hold, and a history does not point to its successors, so the upload
+   * cannot tell.
+   */
+  historyReference?: string
 }
 
 // ============================================================================
@@ -1437,7 +1459,6 @@ export const ActRevokeGranteesMessageSchema = z.object({
   type: z.literal("actRevokeGrantees"),
   requestId: z.string(),
   historyReference: ReferenceSchema,
-  encryptedReference: ReferenceSchema, // Needed for key rotation
   revokeGrantees: z.array(z.string()), // Compressed public keys to revoke
   batchID: DriveTargetSchema,
   requestOptions: RequestOptionsSchema,
@@ -2047,6 +2068,8 @@ export const ActUploadDataResponseMessageSchema = z.object({
   granteeListReference: ReferenceSchema,
   publisherPubKey: z.string(), // Compressed public key
   actReference: ReferenceSchema,
+  /** The history entry whose access key encrypted `encryptedReference` */
+  timestamp: z.number().int(),
   tagUid: z.number().optional(),
 })
 
@@ -2063,16 +2086,19 @@ export const ActAddGranteesResponseMessageSchema = z.object({
   historyReference: ReferenceSchema,
   granteeListReference: ReferenceSchema,
   actReference: ReferenceSchema,
+  /** The new history entry's */
+  timestamp: z.number().int(),
 })
 
 export const ActRevokeGranteesResponseMessageSchema = z.object({
   type: z.literal("actRevokeGranteesResponse"),
   requestId: z.string(),
   stampedChunks: StampedChunksSchema,
-  encryptedReference: ReferenceSchema,
   historyReference: ReferenceSchema,
   granteeListReference: ReferenceSchema,
   actReference: ReferenceSchema,
+  /** The new history entry's, the first under the rotated key */
+  timestamp: z.number().int(),
 })
 
 export const ActGetGranteesResponseMessageSchema = z.object({

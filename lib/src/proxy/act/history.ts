@@ -12,6 +12,7 @@
  * - Entries are keyed by reversed timestamp (MaxInt64 - timestamp)
  * - History enables looking up ACT state at any point in time
  * - Encrypted grantee list reference is stored in metadata
+ * - A native history's entries also keep their access key's salt there
  *
  * This implementation uses the MantarayNode class from bee-js to produce
  * Bee-compatible binary manifests with the proper version hash header.
@@ -32,6 +33,12 @@ const ENCODER = new TextEncoder()
 // Bee uses "encryptedglref" as the metadata key for encrypted grantee list reference
 const ENCRYPTED_GRANTEE_LIST_METADATA_KEY = "encryptedglref"
 
+// The salt of the entry's access key (#408), in hex. Only a native history
+// carries it: a Bee-compatible one is written for Bee's own ACT, which
+// encrypts its entries unsalted, so it never gets one, and a native history is
+// addressed by an encrypted reference that Bee's ACT endpoints do not read.
+const ACCESS_KEY_SALT_METADATA_KEY = "accesskeysalt"
+
 // Ensure monotonic seconds so multiple ACT updates within the same second
 // don't collide on the same history key (mantaray requires unique paths).
 let lastTimestamp = 0
@@ -42,6 +49,12 @@ let lastTimestamp = 0
 export interface HistoryEntryMetadata {
   actReference: string // Reference to the ACT manifest
   encryptedGranteeListRef?: string // Reference to encrypted grantee list (publisher only)
+  /**
+   * The salt of the entry's access key, in hex (#408). Absent in a
+   * Bee-compatible history, whose entries are unsalted, and in a native one
+   * written without it, which reads as unsalted too.
+   */
+  accessKeySalt?: string
 }
 
 /**
@@ -110,19 +123,42 @@ export function createHistoryManifest(): MantarayNode {
  * @param timestamp - Unix timestamp for this entry
  * @param actReference - Reference to the ACT manifest (hex string)
  * @param encryptedGranteeListRef - Optional reference to encrypted grantee list (hex string)
+ * @param accessKeySalt - Optional salt of the entry's access key (hex string)
  */
 export function addHistoryEntry(
   manifest: MantarayNode,
   timestamp: number,
   actReference: string,
   encryptedGranteeListRef?: string,
+  accessKeySalt?: string,
 ): void {
   const path = calculateReversedTimestamp(timestamp)
   const reference = hexToUint8Array(actReference)
-  const metadata = encryptedGranteeListRef
-    ? { [ENCRYPTED_GRANTEE_LIST_METADATA_KEY]: encryptedGranteeListRef }
-    : undefined
-  manifest.addFork(ENCODER.encode(path), reference, metadata)
+  const metadata: Record<string, string> = {}
+  if (encryptedGranteeListRef) {
+    metadata[ENCRYPTED_GRANTEE_LIST_METADATA_KEY] = encryptedGranteeListRef
+  }
+  if (accessKeySalt) {
+    metadata[ACCESS_KEY_SALT_METADATA_KEY] = accessKeySalt
+  }
+  manifest.addFork(
+    ENCODER.encode(path),
+    reference,
+    Object.keys(metadata).length > 0 ? metadata : undefined,
+  )
+}
+
+/** The entry a history manifest's leaf holds */
+function historyEntryOf(node: MantarayNode): HistoryEntry {
+  return {
+    timestamp: calculateOriginalTimestamp(node.fullPathString),
+    metadata: {
+      actReference: uint8ArrayToHex(node.targetAddress),
+      encryptedGranteeListRef:
+        node.metadata?.[ENCRYPTED_GRANTEE_LIST_METADATA_KEY],
+      accessKeySalt: node.metadata?.[ACCESS_KEY_SALT_METADATA_KEY],
+    },
+  }
 }
 
 /**
@@ -146,15 +182,7 @@ export function getLatestEntry(
   // Sort by path ascending (smallest = latest timestamp due to reversal)
   nodes.sort((a, b) => a.fullPathString.localeCompare(b.fullPathString))
 
-  const latest = nodes[0]
-  return {
-    timestamp: calculateOriginalTimestamp(latest.fullPathString),
-    metadata: {
-      actReference: uint8ArrayToHex(latest.targetAddress),
-      encryptedGranteeListRef:
-        latest.metadata?.[ENCRYPTED_GRANTEE_LIST_METADATA_KEY],
-    },
-  }
+  return historyEntryOf(nodes[0])
 }
 
 /**
@@ -184,28 +212,13 @@ export function getEntryAtTimestamp(
   // Find the first node with path >= targetPath (which corresponds to timestamp <= target)
   for (const node of nodes) {
     if (node.fullPathString >= targetPath) {
-      return {
-        timestamp: calculateOriginalTimestamp(node.fullPathString),
-        metadata: {
-          actReference: uint8ArrayToHex(node.targetAddress),
-          encryptedGranteeListRef:
-            node.metadata?.[ENCRYPTED_GRANTEE_LIST_METADATA_KEY],
-        },
-      }
+      return historyEntryOf(node)
     }
   }
 
   // If no entry at or before timestamp, return the oldest entry
   // (this is the "first" ACT state)
-  const oldest = nodes[nodes.length - 1]
-  return {
-    timestamp: calculateOriginalTimestamp(oldest.fullPathString),
-    metadata: {
-      actReference: uint8ArrayToHex(oldest.targetAddress),
-      encryptedGranteeListRef:
-        oldest.metadata?.[ENCRYPTED_GRANTEE_LIST_METADATA_KEY],
-    },
-  }
+  return historyEntryOf(nodes[nodes.length - 1])
 }
 
 /**
@@ -220,14 +233,7 @@ export function getAllEntries(manifest: MantarayNode): HistoryEntry[] {
   // Sort by path ascending (newest first due to reversed timestamps)
   nodes.sort((a, b) => a.fullPathString.localeCompare(b.fullPathString))
 
-  return nodes.map((node) => ({
-    timestamp: calculateOriginalTimestamp(node.fullPathString),
-    metadata: {
-      actReference: uint8ArrayToHex(node.targetAddress),
-      encryptedGranteeListRef:
-        node.metadata?.[ENCRYPTED_GRANTEE_LIST_METADATA_KEY],
-    },
-  }))
+  return nodes.map(historyEntryOf)
 }
 
 /**
