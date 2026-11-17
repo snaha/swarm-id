@@ -199,6 +199,16 @@ export class ChunkUploadStream {
     })
   }
 
+  /**
+   * Give the stream up after the upload failed: the acks still due are
+   * dropped rather than waited for, so the upload's own error is the one its
+   * caller sees.
+   */
+  abandon(): void {
+    if (this.closed) return
+    this.fail(new Error("The upload over this stream failed"))
+  }
+
   /** End the stream: the acks still due will never be waited for. */
   private fail(error: Error): void {
     this.closed = true

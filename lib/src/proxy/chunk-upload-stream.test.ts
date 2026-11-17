@@ -13,6 +13,8 @@ const ABNORMAL_CLOSURE = 1006
 /** Splits into three leaves under one parent, plain or encrypted */
 const THREE_LEAVES_SIZE = 9_000
 const THREE_LEAVES_AND_PARENT = 4
+/** Twenty leaves: far more chunks than a failure should let through */
+const MANY_LEAVES_SIZE = 4096 * 20
 /** Every wait below ends at once or never: a hang fails here, not at 5 s. */
 const HANG_MS = 500
 
@@ -23,6 +25,8 @@ class FakeWebSocket {
   static staysConnecting = false
   static refuses = false
   static acks = false
+  /** The send, counted from 1, that throws as a full buffer would */
+  static throwsOnSend: number | undefined
 
   readyState = 0
   binaryType = ""
@@ -47,6 +51,7 @@ class FakeWebSocket {
 
   send(): void {
     this.sent++
+    if (this.sent === FakeWebSocket.throwsOnSend) throw new Error("send failed")
     if (FakeWebSocket.acks) queueMicrotask(() => this.onmessage?.())
   }
 
@@ -68,6 +73,7 @@ beforeEach(() => {
   FakeWebSocket.staysConnecting = false
   FakeWebSocket.refuses = false
   FakeWebSocket.acks = false
+  FakeWebSocket.throwsOnSend = undefined
   vi.stubGlobal("WebSocket", FakeWebSocket)
 })
 
@@ -298,6 +304,102 @@ describe.each([
       expect(FakeWebSocket.last).toBeUndefined()
       expect(chunkUpload).not.toHaveBeenCalled()
       expect(tagCreate).not.toHaveBeenCalled()
+    },
+    HANG_MS,
+  )
+
+  it(
+    "refuses a deferred upload the node gives no tag for, before any stream",
+    async () => {
+      const { target, chunkUpload, tagCreate } = spiedStamperTarget()
+      tagCreate.mockRejectedValue(new Error("tags are down"))
+
+      await expect(
+        uploadData(target, new Uint8Array(1), {
+          ...encryption,
+          deferred: true,
+          webSocket: {},
+        }),
+      ).rejects.toMatchObject({ code: "invalid-request" })
+
+      expect(FakeWebSocket.last).toBeUndefined()
+      expect(chunkUpload).not.toHaveBeenCalled()
+    },
+    HANG_MS,
+  )
+
+  // Bee reads tag 0 as no tag: `Deferred: tag != 0`.
+  it(
+    "reads tag 0 as no tag, creating one for a deferred upload",
+    async () => {
+      FakeWebSocket.acks = true
+      const { target, tagCreate } = spiedStamperTarget()
+
+      const { tagUid } = await uploadData(target, new Uint8Array(1), {
+        ...encryption,
+        deferred: true,
+        tag: 0,
+        webSocket: {},
+      })
+
+      expect(tagCreate).toHaveBeenCalledOnce()
+      expect(tagUid).not.toBe(0)
+      expect(FakeWebSocket.last?.url).toContain(`swarm-tag=${tagUid}`)
+    },
+    HANG_MS,
+  )
+
+  it(
+    "reads tag 0 as no tag, refusing nothing on a direct upload",
+    async () => {
+      FakeWebSocket.acks = true
+      const { target } = spiedStamperTarget()
+
+      const { tagUid } = await uploadData(target, new Uint8Array(1), {
+        ...encryption,
+        tag: 0,
+        webSocket: {},
+      })
+
+      expect(tagUid).toBeUndefined()
+      expect(FakeWebSocket.last?.url).not.toContain("swarm-tag")
+    },
+    HANG_MS,
+  )
+
+  it(
+    "stops sending once a chunk fails",
+    async () => {
+      FakeWebSocket.acks = true
+      FakeWebSocket.throwsOnSend = 3
+      const { target } = spiedStamperTarget()
+
+      await expect(
+        uploadData(target, new Uint8Array(MANY_LEAVES_SIZE), {
+          ...encryption,
+          webSocket: { concurrency: 2 },
+        }),
+      ).rejects.toThrow("send failed")
+      await new Promise((resolve) => setTimeout(resolve, 0))
+
+      // The failed send and the one other worker's last.
+      expect(FakeWebSocket.last?.sent).toBeLessThanOrEqual(4)
+    },
+    HANG_MS,
+  )
+
+  it(
+    "rejects with the chunk's failure, not with the stream's closing",
+    async () => {
+      FakeWebSocket.throwsOnSend = 2
+      const { target } = spiedStamperTarget()
+
+      await expect(
+        uploadData(target, new Uint8Array(MANY_LEAVES_SIZE), {
+          ...encryption,
+          webSocket: { concurrency: 2 },
+        }),
+      ).rejects.toThrow("send failed")
     },
     HANG_MS,
   )
