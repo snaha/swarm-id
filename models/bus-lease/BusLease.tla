@@ -140,16 +140,15 @@ DeviceNotices(d) ==
   /\ acks' = [acks EXCEPT ![d] = {}]
   /\ UNCHANGED <<link, room, view, since, absent, round, msgs>>
 
-(* A heartbeat round trip with the server. A device whose last one is too
-   old has already stopped writing and must claim again. *)
+(* A heartbeat round trip with the server. A holder whose last one was too
+   old did not write meanwhile, and writes again from here: it stayed in the
+   room, and a claim it was handed in that time ended its hold (HandleClaim). *)
 Heartbeat(d) ==
   /\ online[d]
   /\ link[d] = "up"
   /\ d \in room
   /\ since' = [since EXCEPT ![d] = 0]
-  /\ mode' = [mode EXCEPT ![d] = IF since[d] >= TStop THEN "idle" ELSE @]
-  /\ acks' = [acks EXCEPT ![d] = IF since[d] >= TStop THEN {} ELSE @]
-  /\ UNCHANGED <<link, online, room, view, absent, round, msgs>>
+  /\ UNCHANGED <<mode, acks, link, online, room, view, absent, round, msgs>>
 
 (* One tick of every device's clock. *)
 Tick ==

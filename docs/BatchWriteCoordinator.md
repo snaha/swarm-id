@@ -128,8 +128,8 @@ take a lane nobody answers for until it has been there for 8 s.
 
 ## Losing the lane during an upload
 
-The lane can go while an upload is mid-`stamp()`: the context's connection went unconfirmed for
-`LEASE_STOP_MS`. Three things keep such an upload from doing harm:
+An upload mid-`stamp()` can find its context's connection unconfirmed for `LEASE_STOP_MS`, and
+the lane goes for good if a claim is answered meanwhile or the connection is replaced. Three things keep such an upload from doing harm:
 
 1. **The stamper's deadline.** `stamp()` throws `PartitionLeaseLostError` once it passes, whether
    or not anything has noticed the lapse yet.
