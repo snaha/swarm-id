@@ -251,7 +251,7 @@ describe("BatchWriteCoordinator — two contexts", () => {
     expect(b.coordinator.currentPartition).toBe(OTHER)
   })
 
-  it("with every lane held, an idle holder hands over once asked to, and stops stamping first", async () => {
+  it("with every lane held, an idle holder hands over, and stops stamping first", async () => {
     const a = makeContext("a")
     const b = makeContext("b")
     const c = makeContext("c")
@@ -260,14 +260,9 @@ describe("BatchWriteCoordinator — two contexts", () => {
     await advance(PEER_YIELD_MIN_IDLE_MS)
     a.calls.length = 0
 
-    const write = c.coordinator.withWrite(async () => "z")
-    // Asked gently at first: nobody moves.
-    await advance(NEXT_LANE_AFTER_MS - 500)
-    expect(a.coordinator.currentPartition).toBe(HOME)
-    expect(b.coordinator.currentPartition).toBe(OTHER)
-
-    await advance(1000)
-    expect(await write).toBe("z")
+    // Both lanes answer "held", so somebody has to move: the holder of C's
+    // home lane is asked first.
+    expect(await c.coordinator.withWrite(async () => "z")).toBe("z")
 
     expect(c.coordinator.currentPartition).toBe(HOME)
     expect(a.coordinator.currentPartition).toBeUndefined()
@@ -277,6 +272,50 @@ describe("BatchWriteCoordinator — two contexts", () => {
       currentPartition: undefined,
       isReadOnly: false,
     })
+  })
+
+  it("asks the next lane's holder when the home lane's holder is writing", async () => {
+    const a = makeContext("a")
+    const b = makeContext("b")
+    const c = makeContext("c")
+    let finish: () => void = () => {}
+    const upload = a.coordinator.withWrite(
+      () => new Promise<string>((resolve) => (finish = () => resolve("x"))),
+    )
+    await advance(0)
+    await b.coordinator.withWrite(async () => "y")
+    await advance(PEER_YIELD_MIN_IDLE_MS)
+
+    const write = c.coordinator.withWrite(async () => "z")
+    await advance(NEXT_LANE_AFTER_MS - 500)
+    expect(b.coordinator.currentPartition).toBe(OTHER)
+
+    await advance(1000)
+    expect(await write).toBe("z")
+    expect(c.coordinator.currentPartition).toBe(OTHER)
+    expect(a.coordinator.currentPartition).toBe(HOME)
+    expect(b.coordinator.currentPartition).toBeUndefined()
+
+    finish()
+    await upload
+  })
+
+  // A context that has only just joined the room has not answered yet. The
+  // lane it has said nothing about may well be free.
+  it("does not ask a holder to move while someone present has not answered for another lane", async () => {
+    const a = makeContext("a")
+    const b = makeContext("b")
+    await a.coordinator.withWrite(async () => "x")
+    await advance(PEER_YIELD_MIN_IDLE_MS)
+    // In the room, with nothing answering claims on its behalf.
+    join("newcomer")
+
+    const write = b.coordinator.withWrite(async () => "y")
+    const failure = expect(write).rejects.toThrow(PartitionContendedError)
+    await advance(SLOT_WAIT_TIMEOUT_MS + 1000)
+    await failure
+
+    expect(a.coordinator.currentPartition).toBe(HOME)
   })
 
   it("does not ask a holder to move while another lane is on its way", async () => {

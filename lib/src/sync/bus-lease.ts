@@ -17,7 +17,10 @@
  *   everybody except the contexts that answered "free" for THIS claim has
  *   been absent for `LEASE_WAIT_MS` (`Acquire`).
  * - Two contexts claiming at once: the lower id wins.
- * - A holder that is asked hands over when idle and stays silent when busy.
+ * - A holder that is asked hands over when idle and keeps the lane when busy.
+ *   It then says so ("held"). No rule reads that answer: it only tells the
+ *   claimant that waiting will not free this lane, so that it knows when
+ *   asking someone to move is the only way left.
  *
  * Messages may be lost, late, repeated or reordered. Nothing here stores or
  * reads Swarm: what the next holder must read is the caller's, through
@@ -63,6 +66,7 @@ export interface LaneLiveness {
 export type LaneMessage =
   | { kind: "claim"; from: string; round: string; gentle?: boolean }
   | { kind: "free"; from: string; to: string; round: string }
+  | { kind: "held"; from: string; to: string; round: string }
 
 export interface BusLaneOptions {
   liveness: LaneLiveness
@@ -106,6 +110,8 @@ export class BusLane {
   /** The current claim takes the lane only if nobody holds it. */
   private gentle = false
   private acks = new Set<string>()
+  /** Who answered the current claim "held". */
+  private refusals = new Set<string>()
   private stopListening: () => void
 
   constructor(private readonly opts: BusLaneOptions) {
@@ -147,6 +153,7 @@ export class BusLane {
     }
     this.self = self
     this.gentle = options?.gentle === true
+    this.refusals.clear()
     this.mode = "claiming"
     this.round = (this.opts.newRound ?? randomRound)()
     this.acks.clear()
@@ -156,14 +163,14 @@ export class BusLane {
   }
 
   /**
-   * Everyone present has answered this claim "free": the lane goes to this
-   * context by itself once those who did not answer have been gone for the
-   * wait, and nobody needs to be asked to move.
+   * Somebody answered the current claim "held" and is still there: the lane
+   * will not come to this context by waiting.
    */
-  get waitingOnAbsence(): boolean {
+  get knownHeld(): boolean {
     return (
       this.mode === "claiming" &&
-      this.opts.liveness.absentExceptMs(this.acks) > 0
+      this.refusals.size > 0 &&
+      this.opts.liveness.absentExceptMs(this.acks) === 0
     )
   }
 
@@ -178,6 +185,7 @@ export class BusLane {
   release(): void {
     this.mode = "idle"
     this.acks.clear()
+    this.refusals.clear()
   }
 
   receive(message: LaneMessage): void {
@@ -187,13 +195,18 @@ export class BusLane {
       this.answerClaim(message.from, message.round, message.gentle === true)
       return
     }
-    // `HandleFree`
     if (
       this.mode !== "claiming" ||
       message.to !== this.self ||
       message.round !== this.round
     )
       return
+    if (message.kind === "held") {
+      this.refusals.add(message.from)
+      return
+    }
+    // `HandleFree`
+    this.refusals.delete(message.from)
     this.acks.add(message.from)
     this.tryAcquire()
   }
@@ -252,7 +265,13 @@ export class BusLane {
         }
         return
       case "holding":
-        if (this.opts.isBusy(gentle)) return
+        if (this.opts.isBusy(gentle)) {
+          const from = this.opts.liveness.selfId()
+          if (from !== undefined) {
+            this.opts.send({ kind: "held", from, to: claimant, round })
+          }
+          return
+        }
         void this.handOver(claimant, round)
         return
       case "yielding":
@@ -284,6 +303,7 @@ export class BusLane {
     const wasWriting = this.mode === "holding" || this.mode === "yielding"
     this.mode = "idle"
     this.acks.clear()
+    this.refusals.clear()
     if (wasWriting) this.opts.onLost?.()
   }
 }
@@ -306,7 +326,12 @@ export class BusLanes {
 
   constructor(private readonly bus: LaneBus) {
     this.stopListening = bus.subscribe((message, from) => {
-      if (message.type !== "lane-claim" && message.type !== "lane-free") return
+      if (
+        message.type !== "lane-claim" &&
+        message.type !== "lane-free" &&
+        message.type !== "lane-held"
+      )
+        return
       // Named by the transport as someone else: not what it says it is.
       if (from !== undefined && from !== message.from) return
       const lane = this.lanes.get(laneName(message))
@@ -320,7 +345,7 @@ export class BusLanes {
                 gentle: message.gentle,
               }
             : {
-                kind: "free",
+                kind: message.type === "lane-free" ? "free" : "held",
                 from: message.from,
                 to: message.to,
                 round: message.round,
@@ -373,7 +398,7 @@ export class BusLanes {
                 gentle: message.gentle,
               }
             : {
-                type: "lane-free",
+                type: message.kind === "free" ? "lane-free" : "lane-held",
                 ...key,
                 from: message.from,
                 to: message.to,

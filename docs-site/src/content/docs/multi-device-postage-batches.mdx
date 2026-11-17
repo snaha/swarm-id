@@ -167,7 +167,7 @@ devices is the **published partition state** (below), not the cache.
 
 A **lane** is one partition of one batch. Nothing on Swarm says who holds it. The contexts
 of the account that are open right now (a tab, an embedded iframe) agree on it by exchanging
-two messages over the [account bus](../account-bus/). The protocol is small, and it was
+a few small messages over the [account bus](../account-bus/). The protocol is small, and it was
 model-checked before it was built
 ([`models/bus-lease`](https://github.com/snaha/swarm-id/tree/main/models/bus-lease)).
 
@@ -206,9 +206,10 @@ context that reconnects is a new participant and holds nothing.
    - Not holding and not claiming the lane: answer `lane-free`.
    - Claiming it too: the lower peer id keeps its claim; the higher one drops its own and
      answers `lane-free`.
-   - Holding it: stop stamping, then answer `lane-free` (a handover), or do not answer.
-     The reference holder does not answer while an upload is in flight, for 3 s after one,
-     or when the claim is marked `gentle`.
+   - Holding it: stop stamping, then answer `lane-free` (a handover), or keep the lane and
+     answer `lane-held`. The reference holder keeps it while an upload is in flight, for 3 s
+     after one, and when the claim is marked `gentle`. `lane-held` is a courtesy: no rule
+     reads it, and the lane is just as safe if it is lost.
 5. **Every context answers**, also for lanes of batches it never writes. A claimant waits
    for everyone present.
 
@@ -216,6 +217,8 @@ context that reconnects is a new participant and holds nothing.
 { "type": "lane-claim", "accountId": "<40 hex>", "batchId": "<64 hex>", "partition": 0,
   "from": "<peer id>", "round": "<16 hex>", "gentle": true }
 { "type": "lane-free",  "accountId": "<40 hex>", "batchId": "<64 hex>", "partition": 0,
+  "from": "<peer id>", "to": "<peer id>", "round": "<16 hex>" }
+{ "type": "lane-held",  "accountId": "<40 hex>", "batchId": "<64 hex>", "partition": 0,
   "from": "<peer id>", "to": "<peer id>", "round": "<16 hex>" }
 ```
 
@@ -225,8 +228,9 @@ whose `from` is not the peer that delivered it is dropped.
 ### Which lane
 
 The reference client asks for every lane with `gentle: true` first, so it takes a lane
-nobody holds and leaves holders alone. After 1.5 s it asks the holder of its home lane to
-hand over, and after each further 1.5 s the next lane. The home lane is
+nobody holds and leaves holders alone. Only once every lane has answered `lane-held` does
+it ask the holder of its home lane to hand over, and after each further 1.5 s the holder
+of the next lane. The home lane is
 
 ```text
 home = uint32_be( keccak256( utf8(deviceId) )[0:4] ) mod partitionCount
@@ -463,7 +467,7 @@ To interoperate with the reference implementation, an external client must:
    and `backupKey` via `deriveSecret` exactly as above (HMAC-SHA256, key-as-hex-bytes,
    context-as-UTF-8). The `backupSigner` address is the owner of everything.
 2. **Generate a stable per-install `deviceId`** (UUID).
-3. **Implement the lane protocol** on the account bus: the confirmed connection, the two
+3. **Implement the lane protocol** on the account bus: the confirmed connection, the
    messages, and all five rules. A port that writes without holding a lane, or that does not
    answer claims, breaks every other client of the account.
 4. **Implement the slot formula** `slot = K + p + K·j` and route the counter chunks and the

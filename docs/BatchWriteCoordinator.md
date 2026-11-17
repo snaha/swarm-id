@@ -100,8 +100,8 @@ take a lane nobody answers for until it has been there for 8 s.
 ## Lane lifecycle
 
 - **Taking a lane.** `claimAny` asks for every lane gently (a lane nobody holds is taken, a
-  holder is left alone), then insists on one more lane every `NEXT_LANE_AFTER_MS`, the device's
-  home lane first. The first lane held wins and the other claims are dropped. Then
+  holder keeps its lane and answers "held"). Once every lane has answered "held" it insists,
+  on the device's home lane first and on one more lane every `NEXT_LANE_AFTER_MS`. The first lane held wins and the other claims are dropped. Then
   `LaneState.resume()` reads the lane's published counter, the stamper gets `bindPartition`, and
   `onLeaseAcquired` fires. While the counter is being read the context does not hand the lane
   over; if its connection lapsed meanwhile it starts again.
@@ -112,8 +112,8 @@ take a lane nobody answers for until it has been there for 8 s.
   within `LEASE_STOP_MS`. No network read, no timer. Each confirmation moves the stamper's
   deadline forward (`setLeaseValidUntil`).
 - **Handing over.** A claim from another context is answered by `BusLane`: not while an upload
-  is in flight, nor within `PEER_YIELD_MIN_IDLE_MS` of the last one, nor to a gentle claim.
-  Otherwise the coordinator stops stamping (`invalidateLease`, unbind) and the lane answers
+  is in flight, nor within `PEER_YIELD_MIN_IDLE_MS` of the last one, nor to a gentle claim
+  (the lane then answers "held"). Otherwise the coordinator stops stamping (`invalidateLease`, unbind) and the lane answers
   "free". The upload count is raised with no `await` since the hold check, so a handover cannot
   land between the check and the upload.
 - **Disposed guard.** `teardown()` sets `disposed`; from then on the coordinator never takes a
