@@ -97,16 +97,28 @@ describe("BusLane — holding", () => {
     expect(a.lane.holds()).toBe(true)
     a.liveness.confirmedAgo = LEASE_STOP_MS
     expect(a.lane.holds()).toBe(false)
-    expect(a.lost).toHaveBeenCalledTimes(1)
+    expect(a.lane.suspended).toBe(true)
   })
 
-  // Nothing may have asked during the gap, and the connection is fine again
-  // by the time something does: the gap still ended the hold.
-  it("does not resume a hold after a gap nobody observed", () => {
+  // The same connection, so this device was in the room all along, and it
+  // gave no claim a "free": nobody can have taken the lane during the gap.
+  it("holds again once the same connection is confirmed after a gap", () => {
     const a = makeDevice("a")
     holdAlone(a)
-    a.liveness.confirm(LEASE_STOP_MS)
+    a.liveness.confirmedAgo = LEASE_STOP_MS
     expect(a.lane.holds()).toBe(false)
+    a.liveness.confirm(LEASE_STOP_MS)
+    expect(a.lane.holds()).toBe(true)
+    expect(a.lost).not.toHaveBeenCalled()
+  })
+
+  it("holds nothing on a new connection", () => {
+    const a = makeDevice("a")
+    holdAlone(a)
+    a.liveness.id = "a2"
+    a.liveness.confirm()
+    expect(a.lane.holds()).toBe(false)
+    expect(a.lane.suspended).toBe(false)
     expect(a.lost).toHaveBeenCalledTimes(1)
   })
 
@@ -231,6 +243,10 @@ describe("BusLane — two devices", () => {
     expect(a.sent.map((m) => m.kind)).toEqual(["free"])
     deliver(a, b)
     expect(b.lane.holds()).toBe(true)
+    // Having said "free", a confirmation does not bring the hold back.
+    a.liveness.confirm(LEASE_STOP_MS)
+    expect(a.lane.holds()).toBe(false)
+    expect(a.lost).toHaveBeenCalledTimes(1)
   })
 })
 

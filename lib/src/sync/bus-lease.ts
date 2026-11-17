@@ -115,10 +115,10 @@ export class BusLane {
   private stopListening: () => void
 
   constructor(private readonly opts: BusLaneOptions) {
-    this.stopListening = opts.liveness.onConfirmed((unconfirmedForMs) => {
-      // A gap that long means this device was not allowed to write during it,
-      // and others may have acted on that: start over (`Heartbeat`).
-      if (unconfirmedForMs >= LEASE_STOP_MS) this.lapse()
+    this.stopListening = opts.liveness.onConfirmed(() => {
+      // A new connection holds nothing. A late confirmation of the same one
+      // ends nothing: this device stayed in the room and freed no claim.
+      if (this.mode === "holding") this.holds()
       if (this.mode === "claiming") {
         // The claim may have been lost; asking again is harmless.
         this.sendClaim()
@@ -130,11 +130,24 @@ export class BusLane {
   /** May this device write on the lane right now (`Holds`)? */
   holds(): boolean {
     if (this.mode !== "holding") return false
-    if (this.confirmed() && this.self === this.opts.liveness.selfId()) {
-      return true
+    if (this.self !== this.opts.liveness.selfId()) {
+      this.lapse()
+      return false
     }
-    this.lapse()
-    return false
+    return this.confirmed()
+  }
+
+  /**
+   * Holding, but not allowed to write until the connection is confirmed
+   * again. The hold ends only if a claim arrives meanwhile (it is answered
+   * "free") or the connection is replaced.
+   */
+  get suspended(): boolean {
+    return (
+      this.mode === "holding" &&
+      this.self === this.opts.liveness.selfId() &&
+      !this.confirmed()
+    )
   }
 
   get claiming(): boolean {
@@ -251,7 +264,7 @@ export class BusLane {
   /** `HandleClaim` */
   private answerClaim(claimant: string, round: string, gentle: boolean): void {
     // A holder whose connection lapsed is not writing: free.
-    if (this.mode === "holding") this.holds()
+    if (this.mode === "holding" && !this.holds()) this.lapse()
 
     switch (this.mode) {
       case "idle":

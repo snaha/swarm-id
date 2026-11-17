@@ -140,15 +140,16 @@ module BusLease {
     msgs' = msgs,
   }
 
-  // A heartbeat round trip with the server. A device whose last one is too
-  // old has already stopped writing and must claim again.
+  // A heartbeat round trip with the server. A holder whose last one was too
+  // old did not write meanwhile, and writes again from here: it stayed in the
+  // room, and a claim it was handed in that time ended its hold (handleClaim).
   action heartbeat(d: int): bool = all {
     online.get(d),
     link.get(d),
     room.contains(d),
     since' = since.set(d, 0),
-    mode' = if (since.get(d) >= TStop) mode.set(d, "idle") else mode,
-    acks' = if (since.get(d) >= TStop) acks.set(d, Set()) else acks,
+    mode' = mode,
+    acks' = acks,
     keepConnection,
     absent' = absent,
     round' = round,

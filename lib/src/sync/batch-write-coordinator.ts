@@ -282,6 +282,11 @@ export class BatchWriteCoordinator {
       if (this.deps.partitionCount <= 1) return
       throw new Error("Partition lease was reclaimed by another device.")
     }
+    await withTimeout(
+      this.confirmedAgain(),
+      LANE_ACQUIRE_TIMEOUT_MS,
+      "The connection to the account's other devices was not confirmed",
+    )
     if (!this.mayWrite()) {
       throw new Error("Partition lease was reclaimed by another device.")
     }
@@ -431,7 +436,9 @@ export class BatchWriteCoordinator {
     }
     if (this.mayWrite()) return Promise.resolve()
     this.acquiring ??= withTimeout(
-      this.acquire(wait),
+      this.confirmedAgain().then(() =>
+        this.mayWrite() ? undefined : this.acquire(wait),
+      ),
       LANE_ACQUIRE_TIMEOUT_MS,
       `Taking a partition timed out after ${LANE_ACQUIRE_TIMEOUT_MS}ms`,
     ).finally(() => {
@@ -439,6 +446,28 @@ export class BatchWriteCoordinator {
       this.emitLeaseChange()
     })
     return this.acquiring
+  }
+
+  /**
+   * The held lane's confirmation is overdue (a busy tab answers the server
+   * late): wait for the next one. It keeps the lane, or the connection turns
+   * out to be a new one and the lane is gone.
+   */
+  private async confirmedAgain(): Promise<void> {
+    const lanes = this.deps.lanes
+    while (
+      lanes &&
+      !this.disposed &&
+      this.held !== undefined &&
+      this.lanes.get(this.held)?.suspended
+    ) {
+      await new Promise<void>((resolve) => {
+        const stop = lanes.onConfirmed(() => {
+          stop()
+          resolve()
+        })
+      })
+    }
   }
 
   /** Take a lane, read its published counter and bind it on the stamper. */

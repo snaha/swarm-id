@@ -485,10 +485,12 @@ describe("BatchWriteCoordinator — a lane whose state cannot be read", () => {
     const a = makeContext("a")
     let lapses = 1
     laneState.duringResume = () => {
-      if (lapses-- > 0) a.liveness.confirm(LEASE_STOP_MS)
+      if (lapses-- > 0) a.liveness.confirmedAgo = LEASE_STOP_MS
     }
 
     const write = a.coordinator.withWrite(async () => "x")
+    await advance(1000)
+    a.liveness.confirm(LEASE_STOP_MS)
     await advance(1000)
     expect(await write).toBe("x")
 
@@ -498,15 +500,16 @@ describe("BatchWriteCoordinator — a lane whose state cannot be read", () => {
 })
 
 describe("BatchWriteCoordinator — losing the connection", () => {
-  it("does not acknowledge an upload that outlived the hold", async () => {
+  it("does not acknowledge an upload that outlived the connection", async () => {
     const a = makeContext("a")
     await a.coordinator.withWrite(async () => "x")
     laneState.published = []
     a.calls.length = 0
 
     const write = a.coordinator.withWrite(async () => {
-      // No confirmation for too long while the upload runs.
+      // The connection went and came back as a new one while the upload ran.
       a.liveness.confirmedAgo = LEASE_STOP_MS
+      a.liveness.id = "a2"
       return "y"
     })
 
@@ -529,15 +532,48 @@ describe("BatchWriteCoordinator — losing the connection", () => {
     )
   })
 
-  it("holds nothing after a gap, and takes the lane again for the next write", async () => {
+  // A busy tab answers the server late. It was in the room throughout and
+  // freed nothing, so the lane is still its own.
+  it("keeps its lane across a gap on the same connection", async () => {
     const a = makeContext("a")
     await a.coordinator.withWrite(async () => "x")
 
     a.liveness.confirm(LEASE_STOP_MS)
-    expect(a.coordinator.currentPartition).toBeUndefined()
+    expect(a.coordinator.currentPartition).toBe(HOME)
 
     expect(await a.coordinator.withWrite(async () => "y")).toBe("y")
-    expect(laneState.resumed).toEqual([HOME, HOME])
+    expect(laneState.resumed).toEqual([HOME])
+  })
+
+  it("waits for the next confirmation when a write finds it overdue", async () => {
+    const a = makeContext("a")
+    await a.coordinator.withWrite(async () => "x")
+    a.liveness.confirmedAgo = LEASE_STOP_MS
+
+    let done = false
+    const write = a.coordinator
+      .withWrite(async () => "y")
+      .then((value) => ((done = true), value))
+    await advance(1000)
+    expect(done).toBe(false)
+
+    a.liveness.confirm(LEASE_STOP_MS)
+    expect(await write).toBe("y")
+    expect(laneState.resumed).toEqual([HOME])
+  })
+
+  it("acknowledges an upload that ended with the confirmation overdue, once it arrives", async () => {
+    const a = makeContext("a")
+    await a.coordinator.withWrite(async () => "x")
+
+    const write = a.coordinator.withWrite(async () => {
+      a.liveness.confirmedAgo = LEASE_STOP_MS
+      return "y"
+    })
+    await advance(1000)
+    a.liveness.confirm(LEASE_STOP_MS)
+    expect(await write).toBe("y")
+    expect(a.coordinator.currentPartition).toBe(HOME)
   })
 })
 
