@@ -51,9 +51,7 @@ function downloadBlob(blob: Blob, name: string): void {
  * proxy, and a picker opened after a slow lookup can be refused. A picker
  * that refuses for any reason but a cancel falls back to the Blob download.
  */
-export async function saveStream<
-  T extends { stream: ReadableStream<Uint8Array>; name?: string },
->(
+export async function saveStream<T extends { stream: ReadableStream<Uint8Array>; name?: string }>(
   name: string,
   open: () => Promise<T>,
 ): Promise<SaveOutcome<T>> {
@@ -89,7 +87,9 @@ export async function saveStream<
 }
 
 /** How a finished save went, as the demo logs it. */
-export function describeSave(outcome: Exclude<SaveOutcome<unknown>, { path: 'cancelled' }>): string {
+export function describeSave(
+  outcome: Exclude<SaveOutcome<unknown>, { path: 'cancelled' }>,
+): string {
   return outcome.path === 'picker'
     ? 'through the save picker'
     : `as a Blob download (${outcome.reason})`
