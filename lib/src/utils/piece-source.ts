@@ -82,7 +82,8 @@ function streamSource(stream: ReadableStream<Uint8Array>): PieceSource {
         }
         rest = value
       }
-      const piece = rest.slice(0, STREAM_PIECE_SIZE)
+      // Copied by construction: a subclass's `slice()` may be a view (`Buffer`)
+      const piece = new Uint8Array(rest.subarray(0, STREAM_PIECE_SIZE))
       rest = rest.subarray(STREAM_PIECE_SIZE)
       return piece
     },

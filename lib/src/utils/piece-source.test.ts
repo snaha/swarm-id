@@ -107,6 +107,23 @@ describe("openPieceSource", () => {
       expect(piece.buffer).not.toBe(shared.buffer)
     })
 
+    // Node's `Buffer` is one: its `slice()` returns a view, not a copy.
+    it("copies pieces of a Uint8Array subclass whose slice() is a view", async () => {
+      class ViewSlicing extends Uint8Array {
+        override slice(start?: number, end?: number): Uint8Array<ArrayBuffer> {
+          return this.subarray(start, end) as Uint8Array<ArrayBuffer>
+        }
+      }
+      const data = makeData(STREAM_PIECE_SIZE * 2)
+      const chunk = new ViewSlicing(data)
+      const source = openPieceSource(streamOf([chunk]))!
+
+      const piece = (await source.next())!
+
+      expect(piece.buffer).not.toBe(chunk.buffer)
+      expect(piece.buffer.byteLength).toBe(STREAM_PIECE_SIZE)
+    })
+
     it("skips empty pieces rather than ending early", async () => {
       const source = openPieceSource(
         streamOf([new Uint8Array(0), makeData(3), new Uint8Array(0)]),
