@@ -320,25 +320,31 @@ embedded key.
 
 ### The state pointer
 
-The reference chunk's address is published in a **state-pointer SOC** whose identifier
-rotates every epoch:
+Each publish writes the reference chunk's address as the next **state-pointer entry**:
+entry 1, 2, 3, …, each a SOC written once and never rewritten.
 
 ```text
-identifier = keccak256( topic ‖ uint64_be( floor(now / STATE_POINTER_EPOCH_MS) ) )
+identifier = keccak256( topic ‖ uint64_be( seq ) ‖ uint8( salt ) )
 owner      = backupSigner address
-STATE_POINTER_EPOCH_MS = 30 000
+payload    = { referenceHex, seq }   (encrypted)
 ```
 
-A reader computes the address directly, with no feed walk, and the rotating address cannot
-be served from a gateway's stale cache. The holder rewrites the pointer into the current
-epoch on every refresh, so an idle but live holder keeps a fresh resume point. A taking-over
-device reads the current and previous epoch around `now`; for a holder that is gone, it reads
-every epoch in the span `leasedUntil − LEASE_TTL_MS … leasedUntil` plus a little slack, all at
-once, so the lookup costs about one read timeout however long ago the holder stopped.
+A reader searches for the highest entry: it reads the powers of 8 to bracket the answer,
+then splits the bracket 8 ways until it is one entry wide. Each round is a handful of
+reads made at once. A device that remembers an entry starts from it, and when nothing
+newer was published the lookup is a single round. The lookup uses no clock, so it finds a
+state however long ago it was written.
 
-No pointer found **and** a clean lock means there is no state: resume from zero. No pointer
-found but an **unreadable** lock means fail safe: read-only, retry later, never seed a zero
-counter.
+Entries share the partition's reserved slot, so a later write in the same bucket replaces
+an earlier entry. The search is fixed (which entries it reads depends only on the
+answer), which leaves at most 60 entries that a later search depends on. A writer keeps
+its counter and reference chunks out of their buckets, and `salt` picks, by a rule the
+reader repeats, the first of 8 candidate addresses whose bucket is clear of the earlier
+entries on the entry's search path.
+
+A search in which the read of a possibly newer entry timed out is inconclusive: fail
+safe, read-only, retry later, never seed a zero counter. A holder never writes an entry
+twice: when it does not know the newest entry for sure, it searches before it publishes.
 
 ### Wire format (byte layout)
 
@@ -417,7 +423,6 @@ The reference orchestrator is `PartitionLease`. Constants:
 | `SLOT_WAIT_TIMEOUT_MS`    | 30 000 ms  | A device with no free partition polls this long for one to free up.       |
 | `INTENT_EPOCH_MS`         | 30 000 ms  | Epoch of the intent and occupancy beacons.                                |
 | `INTENT_GUARD_WINDOW_MS`  | 12 000 ms  | How long a contender watches for rival intents before binding.            |
-| `STATE_POINTER_EPOCH_MS`  | 30 000 ms  | Rotation period of the state-pointer SOC.                                 |
 | `SYNC_READ_TIMEOUT_MS`    | 2 500 ms   | Bound on every lock, beacon, and roster read on the acquire path.         |
 | `PRESENCE_INTERVAL_MS`    | 20 000 ms  | Account-bus liveness message; feeds the rival set, not the lock.          |
 | `PRESENCE_MAX_AGE_MS`     | 180 000 ms | A device unheard this long leaves the rival set (three throttled beats).  |
@@ -428,7 +433,7 @@ The reference orchestrator is `PartitionLease`. Constants:
 
 1. If `partitionCount ≤ 1` → legacy single-device, no lease.
 2. Read, **concurrently**: every partition's lock SOC, the per-device intent and presence
-   beacons, the device-independent occupancy beacon, and a speculative state pointer. The extra
+   beacons, the device-independent occupancy beacon, and a speculative state-pointer search. The extra
    channels catch a live peer that has not yet written a lock.
 3. Choose the partition we already hold, else the lowest free/expired one
    (`pickFreeOrExpired`). If every partition has a live foreign holder → **read-only**.
@@ -440,8 +445,7 @@ The reference orchestrator is `PartitionLease`. Constants:
 The whole call is bounded by `PARTITION_LEASE_ACQUIRE_TIMEOUT_MS` (45 s), within which a slot wait
 is bounded by `SLOT_WAIT_TIMEOUT_MS` (30 s).
 
-`refresh()` re-runs the lock protocol on the held partition to bump `leasedUntil` and heartbeats
-the state pointer. It returns a `LeaseRefreshOutcome`, not a boolean:
+`refresh()` re-runs the lock protocol on the held partition to bump `leasedUntil`. It returns a `LeaseRefreshOutcome`, not a boolean:
 
 - **`held`** — still ours.
 - **`lost`** — `blocked`, `lost-race` or `aborted`. (A refresh that overlaps an in-flight
@@ -587,7 +591,7 @@ To interoperate with the reference implementation, an external client must:
    stale-release claim-clobbering race (#349).
 4. **Implement the slot formula** `slot = K + p + K·j` and route lock-SOC/counter chunks to
    reserved slot `p`. Honour `PARTITION_COUNT = 2`, `DATA_COUNTER_START = 2`.
-5. **Implement the partition state**: the topic hash, the rotating state-pointer SOC, the
+5. **Implement the partition state**: the topic hash, the numbered state-pointer entries and their search, the
    reference-chunk → counter-chunks structure, publish-before-acknowledge, and the
    fail-safe (read-only, never zero-seed) handling of an unreadable published counter.
    Skipping the last one re-introduces silent slot-reuse data loss.

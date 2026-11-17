@@ -14,14 +14,12 @@
  * partition's reserved slot (never a data slot), and a single "reference chunk"
  * lists their 64-byte encrypted references (address‖key).
  *
- * The address of the latest reference chunk is published as a **rotating
- * per-epoch state-pointer SOC** (`writeStatePointer`/`readStatePointer`): the
- * identifier is `keccak256(topic ‖ uint64(floor(now / STATE_POINTER_EPOCH_MS)))`,
- * so a reader COMPUTES the address directly — no epoch-tree walk — and the
- * rotating address bypasses a gateway's frozen static-cache. The holder
- * heartbeats the pointer on every refresh, so a taking-over device finds it at
- * the current/previous bucket around `now` or the gone holder's `leasedUntil`.
- * Mirrors the occupancy beacon (`partition-intent.ts`). See
+ * The address of the latest reference chunk is published as a numbered,
+ * write-once **state-pointer entry** (`readStatePointer`): publish 1, 2, 3, …
+ * each write an encrypted SOC at an address computed from the number, and a
+ * reader searches for the highest number written
+ * (`state-pointer-search.ts`). No address is ever written twice, so a reader
+ * is never served an older version of one, and the lookup needs no clock. See
  * docs/Postage-Batch-Partitioning.md (§8 cross-device handoff).
  *
  * Topic = keccak256("swarm-id-partition-state-v1" ‖ batchId ‖ uint32(partition))
@@ -49,7 +47,6 @@ import { uploadChunk, uploadSOC, type UploadTarget } from "../proxy/upload"
 import { TimeoutError, withTimeout } from "../utils/promise"
 import { makeEncryptedContentAddressedChunk } from "../chunk"
 import {
-  LEASE_TTL_MS,
   NUM_BUCKETS,
   UtilizationAwareStamper,
   extractChunk,
@@ -59,11 +56,16 @@ import {
 } from "../utils/batch-utilization"
 import { lockSocBucket } from "../utils/lock-soc"
 import {
-  INTENT_EPOCH_MS,
   intentEpochBucket,
   intentSocAddress,
   partitionOccupancyAddress,
 } from "./partition-intent"
+import {
+  entrySalt,
+  findLatestSeq,
+  searchPath,
+  type Probe,
+} from "./state-pointer-search"
 import { SYNC_READ_TIMEOUT_MS } from "./timing-constants"
 
 /** Length of a Swarm encrypted reference: 32-byte address + 32-byte key. */
@@ -128,90 +130,102 @@ export function makePartitionStateTopic(
   return new Topic(hash)
 }
 
-/**
- * Granularity of the rotating state-pointer address — the SAME epoch the
- * intent/occupancy beacons rotate on: a reader computes a writer's bucket from
- * this shared constant, so the two must never drift apart (this module already
- * imports from partition-intent; there is no import cycle).
- *
- * COUPLING: the takeover lookup (`readStatePointer`) scans the whole
- * `LEASE_TTL_MS`-wide bucket span. The reads run CONCURRENTLY (each
- * timeout-bounded), so widening the span costs more parallel reads but not more
- * wall-clock — the lookup latency stays ~one read timeout regardless of the
- * `STATE_POINTER_EPOCH_MS` vs `LEASE_TTL_MS` ratio.
- */
-export const STATE_POINTER_EPOCH_MS = INTENT_EPOCH_MS
-
-/**
- * Extra epoch buckets the takeover lookup scans BELOW the lease-TTL span, to
- * tolerate a holder whose last few best-effort pointer heartbeats were dropped
- * (flaky gateway) while its lock SOC kept advancing `leasedUntil`. The lookup is
- * TTL-independent (see `readStatePointer`); this only sets how many dropped
- * final heartbeats it survives.
- */
-const POINTER_LOOKUP_SLACK_BUCKETS = 2
-
 /** Bound a single pointer read so an absent SOC doesn't block on peer exhaustion. */
 const STATE_POINTER_READ_TIMEOUT_MS = SYNC_READ_TIMEOUT_MS
 
-/**
- * Sentinel for a pointer-bucket read that TIMED OUT — distinct from `undefined`
- * (a clean miss / malformed blob). A timeout is INCONCLUSIVE: the bucket may hold
- * a pointer the slow gateway couldn't return, so "no pointer found" across the
- * scan is only authoritative when no candidate bucket timed out. Mirrors the
- * roster scan's `ROSTER_READ_TIMED_OUT`.
- */
-const POINTER_READ_TIMED_OUT = Symbol("state-pointer-read-timed-out")
-type PointerBucketRead =
-  | { referenceHex: string }
-  | undefined
-  | typeof POINTER_READ_TIMED_OUT
+/** A published state: its place in the sequence and its reference chunk. */
+export interface StatePointer {
+  seq: number
+  referenceHex: string
+}
 
 /** Result of a `readStatePointer` lookup (see its doc for `inconclusive`). */
 export interface StatePointerLookup {
-  pointer?: { referenceHex: string }
+  /** The newest entry; undefined when nothing was ever published. */
+  pointer?: StatePointer
   inconclusive: boolean
 }
 
-/** `floor(nowMs / STATE_POINTER_EPOCH_MS)` — the current state-pointer epoch bucket. */
-export function statePointerEpochBucket(nowMs: number): number {
-  return Math.floor(nowMs / STATE_POINTER_EPOCH_MS)
-}
-
 /**
- * The state-pointer payload: the 64-byte reference of the latest published
- * reference chunk (address‖key). The reader picks the highest-numbered present
- * bucket (a holder writes contiguous buckets up to its last heartbeat), so the
- * bucket index already orders writes — no in-payload timestamp is needed.
+ * A state-pointer entry: the reference of the published reference chunk
+ * (address‖key) and the entry's own number, which is what proves to a reader
+ * that the chunk at entry N's address is entry N.
  */
 const StatePointerPayloadSchemaV1 = z.object({
   referenceHex: z.string(),
+  seq: z.number().int().positive(),
 })
 
+const UINT64_BYTES = 8
+
 /**
- * SOC identifier for the partition's state pointer at `epochBucket`:
- * `keccak256(topic ‖ uint64(bucket))`. The address rotates every
- * `STATE_POINTER_EPOCH_MS`, so a reader computes it directly (no feed walk) and
- * the fresh address forces a network read that bypasses a gateway's frozen
- * static-cache — the same property the occupancy beacon relies on.
+ * Where a partition's state-pointer entries live. Entry `seq` is the SOC with
+ * identifier `keccak256(topic ‖ uint64(seq) ‖ uint8(salt))`, the salt chosen
+ * by `entrySalt` so the entries a search depends on never share a bucket.
+ * Addresses are memoised: one lookup or publish asks for the same few many
+ * times over.
  */
-function makeStatePointerIdentifier(
-  topic: Topic,
-  epochBucket: number,
-): Identifier {
-  const bucketBytes = new Uint8Array(8)
-  new DataView(bucketBytes.buffer).setBigUint64(0, BigInt(epochBucket), false)
-  return new Identifier(
-    Binary.keccak256(Binary.concatBytes(topic.toUint8Array(), bucketBytes)),
-  )
+function statePointerEntries(
+  batchId: BatchId,
+  partition: number,
+  owner: EthAddress,
+) {
+  const topic = makePartitionStateTopic(batchId, partition)
+  const identifierOf = (seq: number, salt: number): Identifier => {
+    const tail = new Uint8Array(UINT64_BYTES + 1)
+    const view = new DataView(tail.buffer)
+    view.setBigUint64(0, BigInt(seq), false)
+    view.setUint8(UINT64_BYTES, salt)
+    return new Identifier(
+      Binary.keccak256(Binary.concatBytes(topic.toUint8Array(), tail)),
+    )
+  }
+  const buckets = new Map<string, number>()
+  const bucketOf = (seq: number, salt: number): number => {
+    const key = `${seq}:${salt}`
+    let bucket = buckets.get(key)
+    if (bucket === undefined) {
+      bucket = toBucket(
+        makeSOCAddress(identifierOf(seq, salt), owner).toUint8Array(),
+      )
+      buckets.set(key, bucket)
+    }
+    return bucket
+  }
+  const salts = new Map<number, number>()
+  const saltOf = (seq: number): number => {
+    let salt = salts.get(seq)
+    if (salt === undefined) {
+      salt = entrySalt(seq, bucketOf)
+      salts.set(seq, salt)
+    }
+    return salt
+  }
+  return {
+    identifier: (seq: number): Identifier => identifierOf(seq, saltOf(seq)),
+    bucket: (seq: number): number => bucketOf(seq, saltOf(seq)),
+  }
 }
 
 /**
- * Publish the reference-chunk pointer at the current epoch bucket — a reserved-
- * slot, encrypted SOC (mirrors the occupancy beacon's `writeReservedPartitionSoc`).
- * Reserved-slot routed so it never consumes a data slot; overwrites within the
- * same 30 s bucket. Called per publish AND on the refresh-tick heartbeat so a
- * held partition always has a fresh pointer in the current bucket.
+ * The buckets of the pointer entries a search depends on once entry `seq` is
+ * the newest (`searchPath`), `seq` itself included. Nothing else written to
+ * the partition's reserved slot may land in them.
+ */
+function statePointerPathBuckets(
+  batchId: BatchId,
+  partition: number,
+  owner: EthAddress,
+  seq: number,
+): number[] {
+  const entries = statePointerEntries(batchId, partition, owner)
+  return searchPath(seq).map((entry) => entries.bucket(entry))
+}
+
+/**
+ * Publish entry `seq` of the partition's state pointer — a reserved-slot,
+ * encrypted SOC, so it never consumes a data slot. The caller has made the
+ * reference chunk it names durable first.
  */
 export async function writeStatePointer(opts: {
   bee: Bee
@@ -220,28 +234,25 @@ export async function writeStatePointer(opts: {
   swarmEncryptionKey: Uint8Array
   batchId: BatchId
   partition: number
-  referenceHex: string
-  nowMs: number
+  pointer: StatePointer
 }): Promise<void> {
-  const topic = makePartitionStateTopic(opts.batchId, opts.partition)
-  const epochBucket = statePointerEpochBucket(opts.nowMs)
-  const identifier = makeStatePointerIdentifier(topic, epochBucket)
   const owner = opts.backupSigner.publicKey().address()
+  const identifier = statePointerEntries(
+    opts.batchId,
+    opts.partition,
+    owner,
+  ).identifier(opts.pointer.seq)
   const address = makeSOCAddress(identifier, owner).toUint8Array()
-  const data = new TextEncoder().encode(
-    JSON.stringify({
-      referenceHex: opts.referenceHex,
-    }),
-  )
+  const data = new TextEncoder().encode(JSON.stringify(opts.pointer))
   const target: UploadTarget = {
     mode: "stamper",
     bee: opts.bee,
     stamper: opts.stamper,
   }
   if (opts.stamper instanceof UtilizationAwareStamper) {
-    // Serialized against concurrent intent/occupancy/pointer SOC writes (the
-    // off-lock refresh-tick beacon vs. this under-lock publish) so neither
-    // clobbers the shared intent-SOC reservation and mis-stamps into a data slot.
+    // Serialized against concurrent intent/occupancy SOC writes (the off-lock
+    // refresh-tick beacon vs. this under-lock publish) so neither clobbers the
+    // shared intent-SOC reservation and mis-stamps into a data slot.
     await opts.stamper.withIntentSocSlot(address, opts.partition, () =>
       uploadSOC(target, opts.backupSigner, identifier, data, {
         encryptionKey: opts.swarmEncryptionKey,
@@ -255,47 +266,17 @@ export async function writeStatePointer(opts: {
 }
 
 /**
- * The 32-byte state-pointer SOC address for `partition` at the epoch bucket
- * covering `nowMs`. Exposed so `writePartitionState` can exclude the pointer's
- * bucket from the reserved-slot buckets its counter/reference chunks may use
- * (both land at slot = partition; a collision would evict one). Same derivation
- * `writeStatePointer` writes at.
- */
-export function statePointerAddress(
-  batchId: BatchId,
-  partition: number,
-  owner: EthAddress,
-  nowMs: number,
-): Uint8Array {
-  const topic = makePartitionStateTopic(batchId, partition)
-  const identifier = makeStatePointerIdentifier(
-    topic,
-    statePointerEpochBucket(nowMs),
-  )
-  return makeSOCAddress(identifier, owner).toUint8Array()
-}
-
-/**
- * Read the latest state pointer by computing bucket addresses directly — no
- * feed walk. Checks (newest-first) the current/previous bucket around `now` and,
- * when given, the gone holder's lease span: every bucket from its last lock
- * refresh (`leasedUntil`) back through `leasedUntil - LEASE_TTL_MS` plus
- * {@link POINTER_LOOKUP_SLACK_BUCKETS} of slack. The holder heartbeats the
- * pointer at `floor(now / EPOCH)` on every refresh, so its last DURABLE pointer
- * lands somewhere in that span; scanning the whole span (rather than just the
- * `leasedUntil` bucket) makes the lookup independent of the
- * `STATE_POINTER_EPOCH_MS` vs `LEASE_TTL_MS` ratio AND tolerant of a couple of
- * dropped final heartbeats. Returns the freshest pointer found (`pointer`), or
- * `pointer: undefined` when none of the candidate buckets carry one.
- * `inconclusive` marks a verdict that is NOT authoritative: with no pointer, a
- * CLEAN scan (every candidate bucket read resolved) proves "no published state"
- * while ≥1 timed-out bucket leaves a pointer we couldn't fetch possible; with a
- * pointer found, a timed-out bucket NEWER than it may hide a fresher resume
- * point (a later acked publish), so the found pointer is only a stale
- * candidate. Either way the caller must fail safe on `inconclusive` rather
- * than resume. Ceiling: a holder dark for longer than
- * `LEASE_TTL_MS + POINTER_LOOKUP_SLACK_BUCKETS·EPOCH` past its last heartbeat
- * resumes from zero.
+ * Find the newest state-pointer entry by search (`findLatestSeq`): each round
+ * reads a handful of entry addresses in parallel.
+ *
+ * Pass `known`, an entry this device knows was written (its own last publish,
+ * or the state it last read): when nothing newer exists the lookup is one
+ * round and returns `known` itself. The hint only saves reads; the answer is
+ * the one a search from nothing would give.
+ *
+ * `inconclusive` marks an answer that is NOT authoritative: a read that could
+ * have shown a newer entry timed out, so a later publish may be hidden behind
+ * it. The caller must fail safe rather than resume from what was found.
  */
 export async function readStatePointer(opts: {
   bee: Bee
@@ -303,85 +284,48 @@ export async function readStatePointer(opts: {
   swarmEncryptionKey: Uint8Array
   batchId: BatchId
   partition: number
-  nowMs: number
-  holderLeasedUntilMs?: number
+  known?: StatePointer
 }): Promise<StatePointerLookup> {
-  const topic = makePartitionStateTopic(opts.batchId, opts.partition)
-  const buckets = new Set<number>()
-  const cur = statePointerEpochBucket(opts.nowMs)
-  buckets.add(cur)
-  buckets.add(cur - 1)
-  if (opts.holderLeasedUntilMs !== undefined) {
-    // Scan the whole lease span: from the final lock refresh (`leasedUntil`)
-    // back through the earliest this lease could have heartbeated
-    // (`leasedUntil - LEASE_TTL_MS`), minus slack for dropped final heartbeats.
-    const hi = statePointerEpochBucket(opts.holderLeasedUntilMs)
-    const lo =
-      statePointerEpochBucket(opts.holderLeasedUntilMs - LEASE_TTL_MS) -
-      POINTER_LOOKUP_SLACK_BUCKETS
-    for (let b = lo; b <= hi; b++) buckets.add(b)
-  }
-  // Read every candidate bucket CONCURRENTLY (each timeout-bounded), then pick
-  // the freshest present pointer. Parallel rather than a serial newest-first
-  // short-circuit: a cold takeover scanning the whole lease span pays ~one read
-  // timeout instead of N of them. A holder writes contiguous buckets up to its
-  // last heartbeat, so the highest-numbered present bucket is the freshest — and
-  // `ordered`/`Promise.all` preserve that newest-first order, so returning the
-  // first present entry yields the same pointer the serial scan would have.
-  const ordered = Array.from(buckets).sort((a, b) => b - a)
-  const found: PointerBucketRead[] = await Promise.all(
-    ordered.map(async (bucket) => {
-      const identifier = makeStatePointerIdentifier(topic, bucket)
-      try {
-        const soc = await withTimeout(
-          downloadEncryptedSOC(
-            opts.bee,
-            opts.owner,
-            identifier,
-            opts.swarmEncryptionKey,
-          ),
-          STATE_POINTER_READ_TIMEOUT_MS,
-          "state-pointer read timed out",
-        )
-        const parsed = StatePointerPayloadSchemaV1.safeParse(
-          JSON.parse(new TextDecoder().decode(soc.payload)),
-        )
-        return parsed.success ? parsed.data : undefined
-      } catch (error) {
-        // A timeout is INCONCLUSIVE (the slot may hold a pointer the slow gateway
-        // couldn't return); a clean miss / malformed blob is a conclusive absent.
-        return error instanceof TimeoutError
-          ? POINTER_READ_TIMED_OUT
-          : undefined
-      }
-    }),
-  )
-  // `ordered` is newest-first, so the first present entry is the freshest
-  // pointer — but only a pointer with NO timed-out bucket above it is
-  // authoritative. A newer bucket that timed out may hide a fresher pointer (a
-  // later acked publish); returning the older one as conclusive would resume
-  // below the acked high-water and re-issue acked slots. Surface that as
-  // `inconclusive` so the caller fails safe instead of trusting a stale
-  // candidate.
-  for (let i = 0; i < found.length; i++) {
-    const read = found[i]
-    if (read !== undefined && read !== POINTER_READ_TIMED_OUT) {
-      const newerTimedOut = found
-        .slice(0, i)
-        .some((newer) => newer === POINTER_READ_TIMED_OUT)
-      return { pointer: read, inconclusive: newerTimedOut }
+  const entries = statePointerEntries(opts.batchId, opts.partition, opts.owner)
+  const references = new Map<number, string>()
+  const readEntry = async (seq: number): Promise<Probe> => {
+    try {
+      const soc = await withTimeout(
+        downloadEncryptedSOC(
+          opts.bee,
+          opts.owner,
+          entries.identifier(seq),
+          opts.swarmEncryptionKey,
+        ),
+        STATE_POINTER_READ_TIMEOUT_MS,
+        "state-pointer read timed out",
+      )
+      const parsed = StatePointerPayloadSchemaV1.safeParse(
+        JSON.parse(new TextDecoder().decode(soc.payload)),
+      )
+      if (!parsed.success || parsed.data.seq !== seq) return false
+      references.set(seq, parsed.data.referenceHex)
+      return true
+    } catch (error) {
+      // A timeout leaves the entry unsettled (a slow gateway may hold it); a
+      // clean miss or a malformed blob is a conclusive absent.
+      return error instanceof TimeoutError ? undefined : false
     }
   }
-  // No pointer anywhere. Only a CLEAN scan (no bucket timed out) authoritatively
-  // means "no state was published"; a timed-out candidate leaves it ambiguous.
+  const { seq, inconclusive } = await findLatestSeq({
+    known: opts.known?.seq ?? 0,
+    read: (seqs) => Promise.all(seqs.map(readEntry)),
+  })
+  const referenceHex =
+    seq === opts.known?.seq ? opts.known.referenceHex : references.get(seq)
   return {
-    pointer: undefined,
-    inconclusive: found.some((read) => read === POINTER_READ_TIMED_OUT),
+    pointer: referenceHex === undefined ? undefined : { seq, referenceHex },
+    inconclusive,
   }
 }
 
 /**
- * Read the latest partition-state-feed entry and reconstruct the
+ * Read the latest published partition state and reconstruct the
  * `localCounter` array — the previous holder's per-bucket high-water.
  *
  * Returns a fresh zero-filled array when no prior snapshot exists — i.e.
@@ -392,12 +336,12 @@ export async function readStatePointer(opts: {
  * publish is not defended against — that data was never durably persisted
  * anyway, so overwriting those slots loses nothing of value.
  *
- * Pass `knownReferenceHex` (the feed reference this device's local counter was
- * last in sync with) to short-circuit: when the feed still points there,
- * returns `{ unchanged: true }` WITHOUT downloading the reference/counter
- * chunks, and the caller reuses its local counter. On a real read it returns
- * the reconstructed `localCounter` plus the current `referenceHex` for the
- * caller to cache.
+ * Pass `known` (the published state this device's local counter was last in
+ * sync with) to short-circuit: when nothing newer was published, returns
+ * `{ unchanged: true }` WITHOUT downloading the counter chunks, and the
+ * caller reuses its local counter. On a real read it returns the
+ * reconstructed `localCounter` plus the current `referenceHex` and `seq` for
+ * the caller to cache.
  */
 export async function readPartitionState(
   opts: {
@@ -407,59 +351,36 @@ export async function readPartitionState(
     batchId: BatchId
     partition: number
     batchDepth: number
-    /** Gone holder's `leasedUntil` (from the lock SOC) — locates the pointer of
-     *  a partition that's been free for a while at its last-heartbeat bucket.
-     *  A holder heartbeats the pointer up to its `leasedUntil`, so reading that
-     *  bucket (and the one before) finds a published pointer durably, however
-     *  long ago: "no pointer found" then reliably means "no state was published". */
-    holderLeasedUntilMs?: number
-    /**
-     * True when this partition's lock SOC could not be read conclusively (a
-     * transient/hanging read, NOT a clean 404). If we then find no published
-     * pointer we must NOT assume "no state" and resume from zero — the lock may
-     * be hiding an expired holder whose acked slots we'd re-issue. Treat that as
-     * `readFailed` (degrade to read-only + retry) instead. A genuinely fresh
-     * partition has a cleanly-absent lock (`false`) and still zero-seeds.
-     */
-    lockUnreadable?: boolean
-    /**
-     * Wall-clock ms to anchor the state-pointer lookup to — the reader half of
-     * the rendezvous. The lease passes its own clock (`this.now()`, = `Date.now()`
-     * in production) so the reader computes the same buckets the writer wrote at.
-     * Defaults to `Date.now()` for bare callers. Injectable for deterministic /
-     * per-device-skew tests (#385).
-     */
-    nowMs?: number
     /**
      * A `readStatePointer` result the caller already fetched (speculatively,
      * overlapped with its lock/beacon scan) for this SAME
-     * (owner, batch, partition) with the SAME `nowMs` and NO
-     * `holderLeasedUntilMs` span. Only valid when `holderLeasedUntilMs` is
-     * undefined here too — identical inputs make it exactly the lookup this
-     * function would perform, so all fail-safe classification below applies
-     * unchanged. When provided, the pointer lookup is skipped.
+     * (owner, batch, partition) and the SAME `known`. When provided, the
+     * pointer lookup is skipped.
      */
     prefetchedPointer?: StatePointerLookup
   },
-  knownReferenceHex?: string,
+  known?: StatePointer,
 ): Promise<{
   localCounter?: Uint32Array
   referenceHex?: string
+  /** The entry the state was read from; undefined when nothing was published. */
+  seq?: number
   unchanged: boolean
   /**
-   * True when the feed HAS an entry but the reference chunk or a counter
-   * chunk could not be read. The caller must NOT proceed with a zero
-   * counter — the partition has a real resume point we failed to learn,
-   * and stamping from zero would re-issue every used slot (each overstamp
-   * evicts the existing data chunk from the reserve). Degrade to read-only
-   * and retry instead.
+   * True when the partition may have a published state that could not be
+   * read: a pointer read that did not settle, or a pointer whose reference
+   * chunk or counter chunk could not be read. The caller must NOT proceed
+   * with a zero counter — stamping from zero would re-issue every used slot
+   * (each overstamp evicts the existing data chunk from the reserve).
+   * Degrade to read-only and retry instead.
    */
   readFailed?: boolean
   /**
-   * Buckets occupied by the published state chunks (counter chunks + the
-   * reference chunk) of the entry that was read. The caller hands these to
-   * the stamper so utilisation saves avoid overstamping (and evicting) the
-   * published resume point. Present only on a successful full read.
+   * Buckets occupied by the published state of the entry that was read: its
+   * counter chunks, its reference chunk, and the pointer entries a search
+   * for it depends on. The caller hands these to the stamper so utilisation
+   * saves avoid overstamping (and evicting) the published resume point.
+   * Present only on a successful full read.
    */
   stateBuckets?: number[]
   /**
@@ -472,108 +393,55 @@ export async function readPartitionState(
    */
   references?: Uint8Array[]
 }> {
-  const {
-    bee,
-    owner,
-    swarmEncryptionKey,
-    batchId,
-    partition,
-    batchDepth,
-    holderLeasedUntilMs,
-    lockUnreadable,
-    nowMs = Date.now(),
-  } = opts
+  const { bee, owner, swarmEncryptionKey, batchId, partition, batchDepth } =
+    opts
 
-  // A prefetched lookup is only equivalent when no lease span widens the
-  // bucket set — enforce rather than trust the caller.
-  const prefetched =
-    holderLeasedUntilMs === undefined ? opts.prefetchedPointer : undefined
-  const { pointer, inconclusive: pointerInconclusive } =
-    prefetched ??
+  const { pointer, inconclusive } =
+    opts.prefetchedPointer ??
     (await readStatePointer({
       bee,
       owner,
       swarmEncryptionKey,
       batchId,
       partition,
-      nowMs,
-      holderLeasedUntilMs,
+      known,
     }))
 
-  if (!pointer) {
-    // No pointer in any candidate bucket (around `now` or the holder's
-    // `leasedUntil`). "No pointer" is only proof of "no state" when the read
-    // was CONCLUSIVE. Fail safe (degrade to read-only + retry) rather than
-    // resume — which could re-issue a gone holder's acked slots, each overstamp
-    // evicting its data chunk — whenever the verdict is not authoritative:
-    //  - `lockUnreadable`: the lock read itself hung, so the lock may hide an
-    //    expired holder whose state we'd resume over; OR
-    //  - a candidate pointer-bucket read TIMED OUT (`pointerInconclusive`) on a
-    //    partition that DID have a holder (`holderLeasedUntilMs` set — expired or
-    //    released), so a real pointer may exist we just couldn't fetch. This is
-    //    the read the rest of the handoff path guards everywhere else; without it
-    //    a fast-but-empty lock read + all-slow pointer reads would silently
-    //    zero-resume.
-    // This guard runs BEFORE the local-synced-reference shortcut below: the
-    // synced reference is per-device and never cleared by a PEER's activity, so
-    // on an inconclusive scan it may be stale across a foreign holder's newer
-    // publish — resuming `unchanged` from it would re-issue that holder's acked
-    // slots just as surely as a zero-seed.
-    if (
-      lockUnreadable ||
-      (pointerInconclusive && holderLeasedUntilMs !== undefined)
-    ) {
-      console.warn(
-        `[partition-state] partition ${partition}: no pointer found but the read was inconclusive ` +
-          `(lockUnreadable=${lockUnreadable === true} pointerTimedOut=${pointerInconclusive}); ` +
-          "degrading to read-only instead of resuming.",
-      )
-      return { unchanged: false, readFailed: true }
-    }
-    // Conclusive no-pointer. A holder heartbeats its pointer up to
-    // `leasedUntil`, so this reliably means no state was published — resume
-    // from zero. (If we hold a local synced reference, keep it: same-device
-    // reclaim within the trail.)
-    if (knownReferenceHex !== undefined) {
-      return { referenceHex: knownReferenceHex, unchanged: true }
-    }
-    // A genuinely fresh partition (no holder ever → `holderLeasedUntilMs`
-    // undefined AND a cleanly-absent lock) still zero-seeds even if a pointer
-    // read was slow: there is no prior state to protect, so first-claim proceeds.
-    return { localCounter: new Uint32Array(NUM_BUCKETS), unchanged: false }
-  }
-
-  // A pointer WAS found but a bucket NEWER than it timed out: a fresher pointer
-  // (a later acked publish) may be hidden behind the slow read, so this one is a
-  // stale candidate, not the resume point. Resuming from it would re-issue the
-  // acked slots published after it. The partition demonstrably HAS state, so
-  // fail safe unconditionally (no fresh-partition exemption applies here).
-  if (pointerInconclusive) {
+  // A pointer read that could have shown a newer entry did not settle, so
+  // what was found (or that nothing was) is not the resume point for sure.
+  // Resuming from it would re-issue the slots a later publish acked. Fail
+  // safe: read-only and retry.
+  if (inconclusive) {
     console.warn(
-      `[partition-state] partition ${partition}: found a pointer but a newer ` +
-        "bucket read timed out (a fresher resume point may be hidden); " +
-        "degrading to read-only instead of resuming from a stale candidate.",
+      `[partition-state] partition ${partition}: a state-pointer read timed ` +
+        "out (a newer resume point may be hidden); degrading to read-only " +
+        "instead of resuming.",
     )
     return { unchanged: false, readFailed: true }
   }
 
-  const referenceHex = pointer.referenceHex
+  // Nothing was ever published: a fresh partition, seeded from zero.
+  if (!pointer) {
+    return { localCounter: new Uint32Array(NUM_BUCKETS), unchanged: false }
+  }
+
+  const { referenceHex, seq } = pointer
   const refBytes = new Reference(referenceHex).toUint8Array()
 
-  // Cache hit: the pointer still names the reference this device's local counter
-  // is already in sync with. Skip the COUNTER-chunk downloads — but still fetch
+  // Cache hit: nothing newer than the state this device's local counter is
+  // already in sync with. Skip the COUNTER-chunk downloads — but still fetch
   // the single reference chunk so we can return its per-chunk refs, letting the
   // caller's FIRST publish be incremental against the resumed state rather than a
   // full re-publish. Best-effort: on failure omit `references` (the first publish
   // then falls back to the sparse-full path).
-  if (knownReferenceHex !== undefined && referenceHex === knownReferenceHex) {
+  if (known !== undefined && seq === known.seq) {
     const { numUtilizationChunks } = getChunkLayout(batchDepth)
     const references = await downloadReferenceChunkRefs(
       bee,
       refBytes,
       numUtilizationChunks,
     ).catch(() => undefined)
-    return { referenceHex, unchanged: true, references }
+    return { referenceHex, seq, unchanged: true, references }
   }
 
   const localCounter = new Uint32Array(NUM_BUCKETS)
@@ -582,7 +450,10 @@ export async function readPartitionState(
   // caller can protect them from utilisation saves (an overstamp there would
   // evict the published resume point). The chunk address is the first 32
   // bytes of each 64-byte encrypted reference.
-  const stateBuckets: number[] = [toBucket(refBytes.slice(0, 32))]
+  const stateBuckets: number[] = [
+    toBucket(refBytes.slice(0, 32)),
+    ...statePointerPathBuckets(batchId, partition, owner, seq),
+  ]
 
   // The feed points to the reference chunk: a single chunk holding the
   // 64-byte encrypted references (address‖key) of this partition's counter
@@ -645,6 +516,7 @@ export async function readPartitionState(
   return {
     localCounter,
     referenceHex,
+    seq,
     unchanged: false,
     stateBuckets,
     references,
@@ -698,10 +570,9 @@ async function downloadReferenceChunkRefs(
  * publish is ~3-4 chunks instead of the whole counter. Omit them (release, or
  * the first publish of a session) for a full publish.
  *
- * PARALLEL: every chunk address is content-derived, so all PUTs (counter chunks
- * + reference chunk + state-pointer SOC) are computed first and fired in a
- * single `Promise.all`. The pointer is written at the current rotating epoch
- * bucket — no feed walk to publish, and the reader computes its address directly.
+ * PARALLEL: every chunk address is content-derived, so the counter chunks and
+ * the reference chunk are computed first and fired in a single `Promise.all`.
+ * The pointer entry `seq` that names them is written once they are durable.
  */
 export async function writePartitionState(opts: {
   bee: Bee
@@ -712,6 +583,12 @@ export async function writePartitionState(opts: {
   localCounter: Uint32Array
   backupSigner: PrivateKey
   swarmEncryptionKey: Uint8Array
+  /**
+   * This publish's place in the pointer sequence: one more than the newest
+   * entry written. The caller holds the partition, so it is the only writer
+   * of the sequence and knows that number.
+   */
+  seq: number
   /** Refs from the previous publish; with `previousCounter`, enables incremental. */
   previousReferences?: Uint8Array[]
   /** The counter the previous publish wrote; diffed to find changed chunks. */
@@ -725,22 +602,22 @@ export async function writePartitionState(opts: {
    */
   deviceId?: string
   /**
-   * Wall-clock ms the rotating pointer/beacon rendezvous addresses are anchored
-   * to. The lease passes its own clock (`this.now()`, = `Date.now()` in
-   * production) so writer, reader, and the collision detector all agree (#385);
-   * the reader anchors to the same clock. Defaults to `Date.now()` for bare
-   * callers (direct unit tests). Injectable so a test can drive rendezvous
-   * deterministically / model per-device skew.
+   * Wall-clock ms the rotating beacon addresses are anchored to. The lease
+   * passes its own clock (`this.now()`, = `Date.now()` in production) so the
+   * writer and the collision detector agree (#385). Defaults to `Date.now()`
+   * for bare callers (direct unit tests).
    */
   nowMs?: number
 }): Promise<{
   /** Reference-chunk reference (hex) — the caller's "synced reference". */
   referenceHex: string
+  /** The pointer entry this publish wrote. */
+  seq: number
   /**
-   * Buckets occupied by the current state chunks (retained + re-uploaded
-   * counter chunks + the reference chunk). The caller hands these to the
-   * stamper so subsequent utilisation saves avoid overstamping (evicting) the
-   * publish.
+   * Buckets occupied by the current state: the retained and re-uploaded
+   * counter chunks, the reference chunk, and the pointer entries a search
+   * depends on. The caller hands these to the stamper so subsequent
+   * utilisation saves avoid overstamping (evicting) the publish.
    */
   stateBuckets: number[]
   /** The full ref set after this publish, for the caller to cache. */
@@ -757,6 +634,7 @@ export async function writePartitionState(opts: {
     localCounter,
     backupSigner,
     swarmEncryptionKey,
+    seq,
     previousReferences,
     previousCounter,
     deviceId,
@@ -823,13 +701,19 @@ export async function writePartitionState(opts: {
   //    sparse instead of writing all `numUtilizationChunks` (mostly zero).
   //    Counters are monotonic high-water — a chunk never returns to zero — so a
   //    real-ref chunk stays real and only never-written chunks are sentinels.
+  //  - either way, a retained chunk standing in a pointer-entry bucket: this
+  //    publish's own entry is written there and would replace it.
+  const pathBuckets = statePointerPathBuckets(batchId, partition, owner, seq)
+  const onPointerPath = new Set(pathBuckets)
   const uploadIndices = incremental
     ? allIndices.filter(
         (i) =>
           !bytesEqual(
             extractChunk(localCounter, i, batchDepth),
             extractChunk(previousCounter, i, batchDepth),
-          ),
+          ) ||
+          (!bytesAllZero(previousReferences[i]) &&
+            onPointerPath.has(toBucket(previousReferences[i].slice(0, 32)))),
       )
     : allIndices.filter(
         (i) => !bytesAllZero(extractChunk(localCounter, i, batchDepth)),
@@ -846,10 +730,12 @@ export async function writePartitionState(opts: {
 
   // Every reserved chunk overstamps the partition's single reserved slot, so
   // they must land in distinct buckets, clear of the lock-SOC bucket, the live
-  // utilisation chunks, and (incremental) the buckets of the REAL chunks we
-  // retain (sentinel/zero chunks occupy no bucket).
+  // utilisation chunks, the pointer entries a search depends on (this
+  // publish's own included), and (incremental) the buckets of the REAL chunks
+  // we retain (sentinel/zero chunks occupy no bucket).
   const claimedBuckets = new Set<number>([
     lockSocBucket(batchId, partition, owner),
+    ...pathBuckets,
     ...(reserve?.getCleanChunkBuckets() ?? []),
   ])
   if (incremental) {
@@ -862,11 +748,9 @@ export async function writePartitionState(opts: {
   // Other reserved-slot writers for this partition also stamp slot = partition,
   // so a counter/reference chunk sharing one of their buckets would evict — or
   // be evicted by — them under Bee's newer-stamp-wins replacement. Exclude their
-  // buckets (current + previous epoch, covering the rotation boundary):
-  //  - the state-pointer SOC this publish writes (phase 2 below)
-  //    (an intra-publish self-collision otherwise);
-  //  - the deviceId-independent occupancy beacon, and (when known) this device's
-  //    intent beacon, both re-written off-lock by the refresh tick concurrently.
+  // buckets (current + previous epoch, covering the rotation boundary): the
+  // deviceId-independent occupancy beacon, and (when known) this device's
+  // intent beacon, both re-written off-lock by the refresh tick concurrently.
   // A peer's intent beacon uses its own deviceId and can't be computed here; that
   // residual stays fail-safe (an evicted beacon self-heals next tick). The
   // converse — a beacon at a LATER epoch (beyond the two excluded here) evicting
@@ -878,21 +762,11 @@ export async function writePartitionState(opts: {
   // that stays fail-safe, not silent corruption — the reference chunk then fails
   // to download on the next takeover and `readPartitionState` reports
   // `readFailed` (→ read-only + retry), never a zero-counter resume that would
-  // re-issue acked slots.
-  // The lease's clock (`nowMs`), NOT a fresh `Date.now()`: the rotating pointer /
-  // beacon addresses are a cross-device rendezvous, and a taking-over device
-  // computes the same buckets from its OWN clock. In production the lease clock
-  // IS `Date.now()`, so writer and reader still agree on wall-clock; threading it
-  // (rather than reading `Date.now()` here) lets a test drive the rendezvous
-  // deterministically and keeps this on the same clock as the caller's lease-
-  // validity + collision-detection logic (#385).
-  const now = nowMs
-  for (const ptrMs of [now, now - STATE_POINTER_EPOCH_MS]) {
-    claimedBuckets.add(
-      toBucket(statePointerAddress(batchId, partition, owner, ptrMs)),
-    )
-  }
-  const epoch = intentEpochBucket(now)
+  // re-issue acked slots. A beacon can replace a pointer entry the same way,
+  // and that one is not healed: nothing rewrites an entry.
+  // The lease's clock (`nowMs`), NOT a fresh `Date.now()`, so this is on the
+  // same clock as the caller's collision detection (#385).
+  const epoch = intentEpochBucket(nowMs)
   for (const beaconBucket of [epoch, epoch - 1]) {
     claimedBuckets.add(
       toBucket(
@@ -979,8 +853,7 @@ export async function writePartitionState(opts: {
     swarmEncryptionKey,
     batchId,
     partition,
-    referenceHex,
-    nowMs: now,
+    pointer: { seq, referenceHex },
   })
 
   // Diagnostic (visible in the browser console): how many chunks this publish
@@ -1000,10 +873,11 @@ export async function writePartitionState(opts: {
   const stateBuckets = references
     .filter((r) => !bytesAllZero(r))
     .map((r) => toBucket(r.slice(0, 32)))
-  stateBuckets.push(toBucket(refPicked.address))
+  stateBuckets.push(toBucket(refPicked.address), ...pathBuckets)
 
   return {
     referenceHex,
+    seq,
     stateBuckets,
     references,
     publishedCounter,
