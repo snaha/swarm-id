@@ -32,11 +32,12 @@ servers.
 
 **Context.** `uploadData` and `actUploadData` took only a `Uint8Array`, so a
 caller read a whole file into memory and the iframe bridge copied it again
-(#930, #523). Measured on Safari 26.5.2: posting a transferred
-`ReadableStream` throws `DataCloneError`, and `Blob.stream()` handed a 5 MB
-blob back as one piece. The demo's `/safari-check` page re-runs both
-measurements, under Transport, in whichever browser opens it, with no
-connection needed.
+(#930, #523). Measured on desktop Safari 26.5.2 (macOS 26.5.2) with the
+demo's `/safari-check` page on the #979 preview, 2026-11-17: posting a
+transferred `ReadableStream` throws `DataCloneError`, and `Blob.stream()`
+handed a 5 MB blob back as one piece. iOS Safari is not measured. The page
+re-runs both measurements, under Transport, in whichever browser opens it,
+with no connection needed.
 
 **Decision.** A `Blob`, `File` or `ReadableStream` crosses the bridge as
 pieces of up to 256 KiB, one per pull from the receiving side, buffers
