@@ -61,10 +61,10 @@ export const SLOT_WAIT_TIMEOUT_MS = 30000
  */
 const ONESHOT_WAIT_TIMEOUT_MS = LEASE_WAIT_MS + 2000
 /**
- * The step of a lane acquisition. For the first step every lane is asked for
- * gently: one nobody holds is taken, and a holder is left alone. After each
- * further step one more lane is insisted on, the device's home lane first:
- * its holder hands over unless it is writing.
+ * Every lane is asked for gently first: one nobody holds is taken, and a
+ * holder is left alone. Only when every lane has answered "held" is the
+ * holder of the device's home lane asked to hand over, and after each such
+ * step the holder of the next lane as well.
  */
 export const NEXT_LANE_AFTER_MS = 1500
 /** How often a pending claim is looked at when nothing else wakes it. */
@@ -511,22 +511,22 @@ export class BatchWriteCoordinator {
 
   /**
    * Ask for the lanes in `order` until one is held; the claims of the others
-   * are then dropped. Gently for all at first, then insisting on one more
-   * every `NEXT_LANE_AFTER_MS`. Undefined when none was held by `deadline`.
+   * are then dropped. Gently for all at first; once every lane is known to
+   * be held, insisting on one more every `NEXT_LANE_AFTER_MS`. Undefined when
+   * none was held by `deadline`.
    */
   private async claimAny(
     order: number[],
     lanes: BusLanes,
     deadline: number,
   ): Promise<number | undefined> {
-    const startedAt = Date.now()
     const standDown = (except?: number) => {
       for (const partition of order) {
         if (partition !== except) this.lanes.get(partition)?.release()
       }
     }
-    const comingFree = () =>
-      order.some((partition) => this.lanes.get(partition)?.waitingOnAbsence)
+    /** Since when every lane is known to be held by someone. */
+    let allHeldSince: number | undefined
     for (;;) {
       if (this.disposed) return undefined
       const held = () =>
@@ -537,13 +537,20 @@ export class BatchWriteCoordinator {
         const lane = this.lane(partition, lanes)
         if (!lane.holds() && !lane.claiming) lane.claim({ gentle: true })
       }
-      // Nobody is asked to move while a lane is held already or on its way:
-      // one whose last holder has just gone, or any lane for a context that
-      // has just come.
-      const insisted = Math.floor((Date.now() - startedAt) / NEXT_LANE_AFTER_MS)
-      for (const partition of order.slice(0, insisted)) {
-        if (held() !== undefined || comingFree()) break
-        this.lanes.get(partition)?.insist()
+      // Nobody is asked to move while a lane may still come by itself: one
+      // nobody holds, one whose last holder has just gone, or one a context
+      // that has just joined has not answered for yet.
+      const allHeld = order.every(
+        (partition) => this.lanes.get(partition)?.knownHeld,
+      )
+      if (!allHeld) allHeldSince = undefined
+      else {
+        allHeldSince ??= Date.now()
+        const insisted =
+          1 + Math.floor((Date.now() - allHeldSince) / NEXT_LANE_AFTER_MS)
+        for (const partition of order.slice(0, insisted)) {
+          this.lanes.get(partition)?.insist()
+        }
       }
       const partition = held()
       if (partition !== undefined) {

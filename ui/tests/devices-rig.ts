@@ -40,7 +40,7 @@ export const SIGNALING_HEALTH_URL = 'http://localhost:5520/healthz'
 export const LEASE_WAIT_MS = 8_000
 /** A holder that wrote within this does not hand its lane over. */
 export const PEER_YIELD_MIN_IDLE_MS = 3_000
-/** A lane is asked for gently this long before its holder is asked to move. */
+/** Once every lane is known to be held, one more holder is asked to move per step. */
 export const NEXT_LANE_AFTER_MS = 1_500
 /** The signaling server's tick: a pending claim is sent again at each. */
 export const TICK_MS = 2_000
@@ -56,8 +56,8 @@ export const UPLOAD_TIMEOUT_MS = 60_000
  *  stamping with it (#924): 50 s at anvil's 5 s block time, the proxy's
  *  per-block re-check, and margin. The demo's upload button follows `canUpload`. */
 export const WARM_UP_TIMEOUT_MS = 90_000
-/** A handover: the gentle step, the ask, a tick for a repeat, the new
- *  holder's read of the published counter, and margin. */
+/** A handover: the gentle ask and its answers, the ask to move, a tick for a
+ *  repeat, the new holder's read of the published counter, and margin. */
 export const HANDOVER_TIMEOUT_MS = NEXT_LANE_AFTER_MS + TICK_MS * 2 + 10_000
 /** A context that just joined takes a free lane once it has been in the room
  *  for the wait; the read of the published counter and margin on top. */
