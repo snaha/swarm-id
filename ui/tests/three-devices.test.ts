@@ -35,6 +35,7 @@ import {
   ACQUIRE_TIMEOUT_MS,
   Device,
   HANDOVER_TIMEOUT_MS,
+  LEASE_STOP_MS,
   LEASE_WAIT_MS,
   PEER_YIELD_MIN_IDLE_MS,
   type Seed,
@@ -260,6 +261,23 @@ test.describe('three devices on two partitions', () => {
     await B.connect()
     await sleep(PEER_YIELD_MIN_IDLE_MS)
     await B.uploadAndHoldOrSkip()
+    await expectNoDualHold(all())
+  })
+
+  test('a tab that could not answer for a while keeps its partition, and an upload asked for meanwhile completes', async () => {
+    for (const device of all()) await device.ensureConnected()
+    const held = await A.uploadAndHoldOrSkip()
+    const since = Date.now()
+
+    // Past the time a holder may go unconfirmed, short of the time after
+    // which the server drops a silent member.
+    const stalled = A.stall(LEASE_STOP_MS + 1_000)
+    await sleep(500)
+    await A.upload()
+    await stalled
+
+    expect(await A.partition(), 'A let go of its partition').toBe(held)
+    expect(A.lostLaneSince(since), 'A reported its partition gone').toBe(false)
     await expectNoDualHold(all())
   })
 

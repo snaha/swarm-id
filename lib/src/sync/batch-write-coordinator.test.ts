@@ -562,6 +562,27 @@ describe("BatchWriteCoordinator — losing the connection", () => {
     expect(laneState.resumed).toEqual([HOME])
   })
 
+  // What a starved tab does: the upload is under way, the thread comes back
+  // after too long, and the next stamp is due before the next confirmation.
+  it("holds a stamp back while the confirmation is overdue, instead of failing the upload", async () => {
+    const a = makeContext("a")
+    await a.coordinator.withWrite(async () => "x")
+
+    let stamped = false
+    const write = a.coordinator.withWrite(async (target) => {
+      a.liveness.confirmedAgo = LEASE_STOP_MS
+      if (target.mode === "stamper") await target.ready?.()
+      stamped = true
+      return "y"
+    })
+    await advance(1000)
+    expect(stamped).toBe(false)
+
+    a.liveness.confirm(LEASE_STOP_MS)
+    expect(await write).toBe("y")
+    expect(stamped).toBe(true)
+  })
+
   it("acknowledges an upload that ended with the confirmation overdue, once it arrives", async () => {
     const a = makeContext("a")
     await a.coordinator.withWrite(async () => "x")

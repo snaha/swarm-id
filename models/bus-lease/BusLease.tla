@@ -142,7 +142,7 @@ DeviceNotices(d) ==
 
 (* A heartbeat round trip with the server. A holder whose last one was too
    old did not write meanwhile, and writes again from here: it stayed in the
-   room, and a claim it was handed in that time ended its hold (HandleClaim). *)
+   room and answered no claim in that time (HandleClaim). *)
 Heartbeat(d) ==
   /\ online[d]
   /\ link[d] = "up"
@@ -194,10 +194,12 @@ HandleClaim(m) ==
      IN
      /\ absent' = Heard(p, c)
      /\ \/ \* not writing: free
-           /\ mode[p] = "idle" \/ (mode[p] = "holding" /\ ~Holds(p))
-           /\ mode' = [mode EXCEPT ![p] = "idle"]
-           /\ acks' = [acks EXCEPT ![p] = {}]
+           /\ mode[p] = "idle"
            /\ msgs' = msgs \cup {Reply(m, "free")}
+           /\ UNCHANGED <<mode, acks>>
+        \/ \* holding, its heartbeat overdue: no answer
+           /\ mode[p] = "holding" /\ ~Holds(p)
+           /\ UNCHANGED <<mode, acks, msgs>>
         \/ \* both claiming: the lower id wins
            /\ mode[p] = "claiming"
            /\ IF c < p
