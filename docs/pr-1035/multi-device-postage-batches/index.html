@@ -276,9 +276,8 @@ stops answering ticks is dropped.</li>
 <ol>
 <li><strong>Writing.</strong> A context stamps only while it holds the lane <strong>and</strong> its connection was
 confirmed less than <code dir="auto">LEASE_STOP_MS</code> ago. A context whose confirmation is overdue
-stops stamping and answers any claim “free”, which ends its hold. If no claim came and
-the same connection is confirmed again, it carries on with the lane; a new connection
-holds nothing.</li>
+stops stamping and leaves claims unanswered. Once the same connection is confirmed again
+it carries on with the lane; a new connection holds nothing.</li>
 <li><strong>Claiming.</strong> A context that wants a lane sends <code dir="auto">lane-claim</code> with a fresh random
 <code dir="auto">round</code>, to everyone, and again with every confirmation while the claim is open.</li>
 <li><strong>Taking.</strong> The claimant holds the lane once every other context has either answered
