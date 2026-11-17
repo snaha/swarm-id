@@ -196,8 +196,8 @@ bucket overwrites its oldest chunk in that lane.
 - **Counters stay monotonic.** Only the slot is reduced modulo the capacity. The
   partition-state publish refuses a counter that goes backwards (its "KEYSTONE tripwire",
   `lib/src/sync/partition-state.ts`), and a monotonic counter keeps it valid unchanged.
-- **Counters serialize as uint32** on a scratch drive. A uint16 counter is chosen today for
-  depth ≤ 31 because the counter is bounded by the lane; a wrapping one is not.
+- **Counters serialize as uint32**, as on every drive: a wrapping counter is not bounded by
+  the lane.
 - **The drive's own metadata is safe.** Lock SOCs, intent, partition state and utilization
   chunks stamp the reserved slots `[0, partitionCount)`, below the data lane, so the ring
   never evicts them.

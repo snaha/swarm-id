@@ -11,13 +11,10 @@ import {
   NUM_BUCKETS,
   PARTITION_COUNT,
   PartitionLeaseLostError,
-  UINT16_COUNTER_MAX_DEPTH,
   UtilizationAwareStamper,
-  counterLayoutDepth,
   dataSlot,
   partitionCapacity,
   deriveUtilizationChunkKey,
-  deserializeUint16Array,
   deserializeUint32Array,
   extractChunk,
   getChunkIndexForBucket,
@@ -29,7 +26,6 @@ import {
   MIN_USABLE_BATCH_DEPTH,
   MIN_USABLE_PARTITION_CAPACITY,
   mergeChunk,
-  serializeUint16Array,
   serializeUint32Array,
 } from "./batch-utilization"
 import { EthAddress, PrivateKey } from "@ethersphere/bee-js"
@@ -56,89 +52,19 @@ function makeAddressInBucket(bucket: number, indexSeed: number): Uint8Array {
 }
 
 describe("getChunkLayout", () => {
-  it("uses uint16 codec for depth <= UINT16_COUNTER_MAX_DEPTH", () => {
-    const layout = getChunkLayout(24)
-    expect(layout.counterByteSize).toBe(2)
-    expect(layout.bucketsPerChunk).toBe(2048)
-    expect(layout.numUtilizationChunks).toBe(32)
-  })
-
-  it("uses uint16 codec at the boundary (depth = UINT16_COUNTER_MAX_DEPTH)", () => {
-    expect(UINT16_COUNTER_MAX_DEPTH).toBe(31)
-    const layout = getChunkLayout(UINT16_COUNTER_MAX_DEPTH)
-    expect(layout.counterByteSize).toBe(2)
-    expect(layout.numUtilizationChunks).toBe(32)
-  })
-
-  it("falls back to uint32 codec for depth > UINT16_COUNTER_MAX_DEPTH", () => {
-    const layout = getChunkLayout(32)
-    expect(layout.counterByteSize).toBe(4)
+  it("is 64 rows of 1024 uint32 counters, for every batch", () => {
+    const layout = getChunkLayout()
     expect(layout.bucketsPerChunk).toBe(1024)
     expect(layout.numUtilizationChunks).toBe(64)
-  })
-
-  it("returns a chunk size that covers all NUM_BUCKETS in both layouts", () => {
-    expect(getChunkLayout(24).bucketsPerChunk * 32).toBe(NUM_BUCKETS)
-    expect(getChunkLayout(32).bucketsPerChunk * 64).toBe(NUM_BUCKETS)
-    expect(getChunkLayout(24).bucketsPerChunk * 2).toBe(CHUNK_SIZE)
-    expect(getChunkLayout(32).bucketsPerChunk * 4).toBe(CHUNK_SIZE)
-  })
-})
-
-describe("serializeUint16Array / deserializeUint16Array", () => {
-  it("round-trips representative values", () => {
-    const source = new Uint32Array([0, 1, 255, 256, 32768, 65535])
-    const bytes = serializeUint16Array(source)
-    expect(bytes.byteLength).toBe(source.length * 2)
-    const decoded = deserializeUint16Array(bytes)
-    expect(Array.from(decoded)).toEqual(Array.from(source))
-  })
-
-  it("round-trips a full-bucket random fill", () => {
-    const source = new Uint32Array(2048)
-    for (let i = 0; i < source.length; i++) {
-      source[i] = Math.floor(Math.random() * 0x10000)
-    }
-    const bytes = serializeUint16Array(source)
-    expect(bytes.byteLength).toBe(CHUNK_SIZE)
-    const decoded = deserializeUint16Array(bytes)
-    expect(Array.from(decoded)).toEqual(Array.from(source))
-  })
-
-  it("rejects values that exceed uint16 range", () => {
-    const source = new Uint32Array([0, 0x10000])
-    expect(() => serializeUint16Array(source)).toThrow(/uint16 range/)
-  })
-
-  it("rejects odd-length byte input on deserialize", () => {
-    expect(() => deserializeUint16Array(new Uint8Array(3))).toThrow(
-      /multiple of 2/,
+    expect(layout.bucketsPerChunk * layout.numUtilizationChunks).toBe(
+      NUM_BUCKETS,
     )
   })
 })
 
 describe("extractChunk / mergeChunk", () => {
-  it("round-trips a full dataCounters at depth 24 (uint16 layout)", () => {
-    const depth = 24
-    const { numUtilizationChunks } = getChunkLayout(depth)
-    const source = new Uint32Array(NUM_BUCKETS)
-    for (let i = 0; i < source.length; i++) {
-      source[i] = i % 0xffff
-    }
-
-    const target = new Uint32Array(NUM_BUCKETS)
-    for (let i = 0; i < numUtilizationChunks; i++) {
-      const chunk = extractChunk(source, i, depth)
-      expect(chunk.byteLength).toBe(CHUNK_SIZE)
-      mergeChunk(target, i, chunk, depth)
-    }
-
-    expect(Array.from(target)).toEqual(Array.from(source))
-  })
-
-  it("round-trips a full dataCounters at depth 32 (uint32 layout)", () => {
-    const depth = 32
-    const { numUtilizationChunks } = getChunkLayout(depth)
+  it("round-trips a full dataCounters", () => {
+    const { numUtilizationChunks } = getChunkLayout()
     const source = new Uint32Array(NUM_BUCKETS)
     for (let i = 0; i < source.length; i++) {
       source[i] = (i * 1664525 + 1013904223) >>> 0
@@ -146,9 +72,9 @@ describe("extractChunk / mergeChunk", () => {
 
     const target = new Uint32Array(NUM_BUCKETS)
     for (let i = 0; i < numUtilizationChunks; i++) {
-      const chunk = extractChunk(source, i, depth)
+      const chunk = extractChunk(source, i)
       expect(chunk.byteLength).toBe(CHUNK_SIZE)
-      mergeChunk(target, i, chunk, depth)
+      mergeChunk(target, i, chunk)
     }
 
     expect(Array.from(target)).toEqual(Array.from(source))
@@ -156,13 +82,12 @@ describe("extractChunk / mergeChunk", () => {
 
   it("rejects an out-of-range chunk index", () => {
     const counters = new Uint32Array(NUM_BUCKETS)
-    expect(() => extractChunk(counters, 32, 24)).toThrow(/Invalid chunk index/)
-    expect(() => extractChunk(counters, 64, 32)).toThrow(/Invalid chunk index/)
+    expect(() => extractChunk(counters, 64)).toThrow(/Invalid chunk index/)
   })
 
   it("rejects a chunk whose byte length is not CHUNK_SIZE", () => {
     const counters = new Uint32Array(NUM_BUCKETS)
-    expect(() => mergeChunk(counters, 0, new Uint8Array(100), 24)).toThrow(
+    expect(() => mergeChunk(counters, 0, new Uint8Array(100))).toThrow(
       /Invalid chunk data length/,
     )
   })
@@ -177,34 +102,21 @@ describe("initializeBatchUtilization", () => {
     // slot formula (`dataSlot`), not in the counter.
     expect(state.dataCounters[0]).toBe(0)
     expect(state.dataCounters[NUM_BUCKETS - 1]).toBe(0)
-    expect(state.chunks.length).toBe(32)
-  })
-
-  it("uses the 64-chunk layout at depth 32", () => {
-    const state = initializeBatchUtilization(TEST_BATCH_ID, 32)
-    expect(state.batchDepth).toBe(32)
     expect(state.chunks.length).toBe(64)
   })
 })
 
-describe("getChunkIndexForBucket (depth-dependent layout)", () => {
-  it("maps buckets to chunks using the uint16 layout at depth 24", () => {
-    expect(getChunkIndexForBucket(0, 24)).toBe(0)
-    expect(getChunkIndexForBucket(2047, 24)).toBe(0)
-    expect(getChunkIndexForBucket(2048, 24)).toBe(1)
-    expect(getChunkIndexForBucket(NUM_BUCKETS - 1, 24)).toBe(31)
-  })
-
-  it("maps buckets to chunks using the uint32 layout at depth 32", () => {
-    expect(getChunkIndexForBucket(0, 32)).toBe(0)
-    expect(getChunkIndexForBucket(1023, 32)).toBe(0)
-    expect(getChunkIndexForBucket(1024, 32)).toBe(1)
-    expect(getChunkIndexForBucket(NUM_BUCKETS - 1, 32)).toBe(63)
+describe("getChunkIndexForBucket", () => {
+  it("maps buckets to rows of 1024", () => {
+    expect(getChunkIndexForBucket(0)).toBe(0)
+    expect(getChunkIndexForBucket(1023)).toBe(0)
+    expect(getChunkIndexForBucket(1024)).toBe(1)
+    expect(getChunkIndexForBucket(NUM_BUCKETS - 1)).toBe(63)
   })
 
   it("rejects an out-of-range bucket index", () => {
-    expect(() => getChunkIndexForBucket(-1, 24)).toThrow(/Invalid bucket index/)
-    expect(() => getChunkIndexForBucket(NUM_BUCKETS, 24)).toThrow(
+    expect(() => getChunkIndexForBucket(-1)).toThrow(/Invalid bucket index/)
+    expect(() => getChunkIndexForBucket(NUM_BUCKETS)).toThrow(
       /Invalid bucket index/,
     )
   })
@@ -382,6 +294,103 @@ describe("UtilizationAwareStamper partition awareness", () => {
     }
   }
 
+  /** A cache that keeps what it is given, like the IndexedDB one. */
+  function makeMemoryCache(): UtilizationStoreDB {
+    const rows = new Map<number, unknown>()
+    return {
+      getAllChunks: async () => [...rows.values()],
+      putChunk: async (row: { chunkIndex: number }) => {
+        rows.set(row.chunkIndex, row)
+      },
+    } as unknown as UtilizationStoreDB
+  }
+
+  // #463. A dilute doubles a batch's slots and nothing else: no batch is
+  // bought and none is filled, the depth is what is injected.
+  describe("a batch diluted from depth 31 to 32", () => {
+    const BEFORE = 31
+    const AFTER = 32
+    const BUCKET = 0x1234
+
+    async function stamperAt(depth: number, cache: UtilizationStoreDB) {
+      return UtilizationAwareStamper.create(
+        TEST_SIGNER_KEY,
+        TEST_BATCH_ID,
+        depth,
+        cache,
+        TEST_OWNER,
+        TEST_ENC_KEY,
+      )
+    }
+
+    /** A lane with one free slot left in BUCKET at the old depth. */
+    function nearlyFullLane(): Uint32Array {
+      const counter = new Uint32Array(NUM_BUCKETS)
+      counter[BUCKET] = partitionCapacity(BEFORE, PARTITION_COUNT) - 1
+      return counter
+    }
+
+    it("keeps the counters its cache holds", async () => {
+      const cache = makeMemoryCache()
+      const before = await stamperAt(BEFORE, cache)
+      before.bindPartition({
+        partition: 0,
+        partitionCount: PARTITION_COUNT,
+        localCounter: nearlyFullLane(),
+      })
+      before.stamp(makeAddressInBucket(BUCKET, 1))
+      await before.flush()
+      const written = before.getUtilizationState().dataCounters[BUCKET]
+      expect(written).toBeGreaterThan(0)
+
+      const after = await stamperAt(AFTER, cache)
+      expect(after.getUtilizationState().dataCounters[BUCKET]).toBe(written)
+    })
+
+    it("stamps on in a lane that was full, without reusing a slot", async () => {
+      const before = await stamperAt(BEFORE, makeEmptyCache())
+      before.bindPartition({
+        partition: 0,
+        partitionCount: PARTITION_COUNT,
+        localCounter: nearlyFullLane(),
+      })
+      const last = decodeIndex(
+        before.stamp(makeAddressInBucket(BUCKET, 1)).index,
+      )
+      expect(() => before.stamp(makeAddressInBucket(BUCKET, 2))).toThrow(
+        "Bucket is full",
+      )
+
+      const after = await stamperAt(AFTER, makeEmptyCache())
+      after.bindPartition({
+        partition: 0,
+        partitionCount: PARTITION_COUNT,
+        localCounter: before.getLocalCounter()!,
+      })
+      const next = decodeIndex(
+        after.stamp(makeAddressInBucket(BUCKET, 2)).index,
+      )
+      expect(next.bucket).toBe(BUCKET)
+      expect(next.slot).toBeGreaterThan(last.slot)
+    })
+
+    // A peer that has not folded the new depth yet reads a counter past what
+    // it thinks the lane holds.
+    it("is full, not reset, for a device still on the old depth", async () => {
+      const counter = new Uint32Array(NUM_BUCKETS)
+      counter[BUCKET] = partitionCapacity(BEFORE, PARTITION_COUNT) + 5
+      const stale = await stamperAt(BEFORE, makeEmptyCache())
+      stale.bindPartition({
+        partition: 0,
+        partitionCount: PARTITION_COUNT,
+        localCounter: counter,
+      })
+      expect(() => stale.stamp(makeAddressInBucket(BUCKET, 3))).toThrow(
+        "Bucket is full",
+      )
+    })
+  })
+
   it("two partitions stamping the same bucket produce disjoint slots", async () => {
     const device0 = await UtilizationAwareStamper.create(
       TEST_SIGNER_KEY,
@@ -522,24 +531,13 @@ describe("UtilizationAwareStamper partition awareness", () => {
     expect(stamper.getLocalCounter()![BUCKET]).toBe(2 * cap + 1)
   })
 
-  it("serializes a scratch drive's counters as uint32 at a uint16 depth", () => {
-    const DEPTH = 20
-    expect(
-      getChunkLayout(counterLayoutDepth(DEPTH, false)).counterByteSize,
-    ).toBe(2)
-    expect(
-      getChunkLayout(counterLayoutDepth(DEPTH, true)).counterByteSize,
-    ).toBe(4)
-
-    // Past uint16: a wrapped counter a uint16 layout would refuse.
+  it("keeps a scratch drive's wrapped counter, which is past uint16", () => {
     const PAST_UINT16 = 70_000
     const counters = new Uint32Array(NUM_BUCKETS)
     counters[3] = PAST_UINT16
-    const layoutDepth = counterLayoutDepth(DEPTH, true)
     const restored = new Uint32Array(NUM_BUCKETS)
-    mergeChunk(restored, 0, extractChunk(counters, 0, layoutDepth), layoutDepth)
+    mergeChunk(restored, 0, extractChunk(counters, 0))
     expect(restored[3]).toBe(PAST_UINT16)
-    expect(() => extractChunk(counters, 0, DEPTH)).toThrow(/uint16/)
   })
 
   it("legacy mode (no partition bound) collapses to partition 0, K=1", async () => {

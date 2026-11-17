@@ -62,7 +62,6 @@ const OTHER = 1
 /** A controllable stand-in for the bound stamper, recording call order. */
 function makeStamper(calls: string[]) {
   return {
-    counterDepth: 20,
     invalidateLease: vi.fn(() => calls.push("invalidate")),
     unbindPartition: vi.fn(() => calls.push("unbind")),
     bindPartition: vi.fn((bound: { partition: number }) =>

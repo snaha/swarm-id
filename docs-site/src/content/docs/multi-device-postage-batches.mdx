@@ -128,13 +128,8 @@ always uint32 in memory regardless of how it is serialized.
 This is the layout of the device's own cache and utilization backup, not of the published
 partition state (see [Wire format](#wire-format-byte-layout) for that). The counter array
 is serialized into fixed `CHUNK_SIZE = 4096`-byte chunks. The per-bucket
-counter is **uint16** when it always fits (`D ≤ 31`, max `2^15`), else **uint32**
-(`D ≥ 32`). This sets the chunk layout (`getChunkLayout`):
-
-| Codec  | Applies when | `bucketsPerChunk` | `numUtilizationChunks` |
-| ------ | ------------ | ----------------- | ---------------------- |
-| uint16 | `D ≤ 31`     | 2 048             | 32                     |
-| uint32 | `D ≥ 32`     | 1 024             | 64                     |
+counter is **uint32** at every depth, so a batch that is diluted keeps the rows it has
+(`getChunkLayout`): 1 024 buckets per chunk, 64 chunks.
 
 Counters are little-endian in the serialized chunk. Chunk `i` covers buckets
 `[i·bucketsPerChunk, (i+1)·bucketsPerChunk)`.
@@ -507,7 +502,7 @@ To interoperate with the reference implementation, an external client must:
    reference chunk with its frame and exceptions, the SBU1 leaves, publish-before-acknowledge, and the
    fail-safe (read-only, never zero-seed) handling of an unreadable published counter.
    Skipping the last one re-introduces silent slot-reuse data loss.
-6. **Track per-bucket counters.** The uint16/uint32 codec and the `swarm-id-util-chunk-v1`
+6. **Track per-bucket counters.** The uint32 rows and the `swarm-id-util-chunk-v1`
    key derivation describe the reference client's own cache and backup; a port needs them
    only to read those.
 7. **Implement account-state sync**: the append-only roster feed, one device-state epoch
