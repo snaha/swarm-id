@@ -15,11 +15,12 @@ type SaveFilePicker = (options?: { suggestedName?: string }) => Promise<FileSyst
 
 /**
  * How a save went: written through the picker, downloaded as a Blob (with why
- * the picker was not used), or cancelled in the picker.
+ * the picker was not used), or cancelled in the picker before anything was
+ * asked of the proxy. `download` is what `open` resolved to.
  */
-export type SaveOutcome =
-  | { path: 'picker'; elapsedMs: number }
-  | { path: 'blob'; elapsedMs: number; reason: string }
+export type SaveOutcome<T> =
+  | { path: 'picker'; elapsedMs: number; download: T }
+  | { path: 'blob'; elapsedMs: number; reason: string; download: T }
   | { path: 'cancelled' }
 
 function savePicker(): SaveFilePicker | undefined {
@@ -43,15 +44,19 @@ function downloadBlob(blob: Blob, name: string): void {
 }
 
 /**
- * Save `stream` as `name`. A picker the user cancels cancels the stream too,
- * so the proxy stops serving it. The picker needs the click's user activation,
- * which a slow round trip before it can outlast: a picker that refuses for
- * that, or any other reason but a cancel, falls back to the Blob download.
+ * Save the stream `open` resolves to, suggesting `name` (a Blob download
+ * takes the download's own name when it has one). The picker opens
+ * first, while the click's user activation is fresh, and the download is
+ * asked for only once a file is chosen: a stream nobody reads is ended by the
+ * proxy, and a picker opened after a slow lookup can be refused. A picker
+ * that refuses for any reason but a cancel falls back to the Blob download.
  */
-export async function saveStream(
-  stream: ReadableStream<Uint8Array>,
+export async function saveStream<
+  T extends { stream: ReadableStream<Uint8Array>; name?: string },
+>(
   name: string,
-): Promise<SaveOutcome> {
+  open: () => Promise<T>,
+): Promise<SaveOutcome<T>> {
   const picker = savePicker()
   let reason = 'this browser has no save picker'
   if (picker) {
@@ -59,33 +64,32 @@ export async function saveStream(
     try {
       handle = await picker({ suggestedName: name })
     } catch (error) {
-      if (errorName(error) === 'AbortError') {
-        await stream.cancel()
-        return { path: 'cancelled' }
-      }
+      if (errorName(error) === 'AbortError') return { path: 'cancelled' }
       reason = `the save picker refused: ${error instanceof Error ? error.message : String(error)}`
     }
     if (handle) {
-      let writable: FileSystemWritableFileStream
+      const writable = await handle.createWritable()
+      let download: T
       try {
-        writable = await handle.createWritable()
+        download = await open()
       } catch (error) {
-        await stream.cancel(error)
+        await writable.abort(error)
         throw error
       }
       const startedAt = performance.now()
-      await stream.pipeTo(writable)
-      return { path: 'picker', elapsedMs: performance.now() - startedAt }
+      await download.stream.pipeTo(writable)
+      return { path: 'picker', elapsedMs: performance.now() - startedAt, download }
     }
   }
+  const download = await open()
   const startedAt = performance.now()
-  const blob = await new Response(stream).blob()
-  downloadBlob(blob, name)
-  return { path: 'blob', elapsedMs: performance.now() - startedAt, reason }
+  const blob = await new Response(download.stream).blob()
+  downloadBlob(blob, download.name ?? name)
+  return { path: 'blob', elapsedMs: performance.now() - startedAt, reason, download }
 }
 
 /** How a finished save went, as the demo logs it. */
-export function describeSave(outcome: Exclude<SaveOutcome, { path: 'cancelled' }>): string {
+export function describeSave(outcome: Exclude<SaveOutcome<unknown>, { path: 'cancelled' }>): string {
   return outcome.path === 'picker'
     ? 'through the save picker'
     : `as a Blob download (${outcome.reason})`

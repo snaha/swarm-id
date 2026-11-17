@@ -76,12 +76,12 @@
     const stopWatching = watchBridgeTraffic(resolveProxyOrigin())
     try {
       logStore.log(`Streaming data to disk from reference: ${ref}`)
-      const download = await clientStore.client!.downloadDataStream(ref)
-      const outcome = await saveStream(download.stream, name)
+      const outcome = await saveStream(name, () => clientStore.client!.downloadDataStream(ref))
       if (outcome.path === 'cancelled') {
-        logStore.log(`Save of ${name} cancelled in the picker; the download was stopped`)
+        logStore.log(`Save of ${name} cancelled in the picker; nothing was downloaded`)
         return
       }
+      const { download } = outcome
       const elapsedTime = outcome.elapsedMs / MS_PER_SECOND
       logStore.log(describeDownload(stopWatching()))
       logStore.log(

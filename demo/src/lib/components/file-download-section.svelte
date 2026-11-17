@@ -28,6 +28,8 @@
   const REFERENCE_LENGTH = 64
   const ENCRYPTED_REFERENCE_LENGTH = 128
   const MS_PER_SECOND = 1000
+  /** Hex characters of the reference in the name the save picker suggests */
+  const FILE_NAME_REFERENCE_CHARS = 8
 
   /** The trimmed reference, or undefined once the invalid one is reported. */
   function validReference(): string | undefined {
@@ -99,12 +101,17 @@
     const stopWatching = watchBridgeTraffic(resolveProxyOrigin())
     try {
       logStore.log(`Streaming file to disk from reference: ${ref}`)
-      const download = await clientStore.client!.downloadFileStream(ref)
-      const outcome = await saveStream(download.stream, download.name)
+      // The picker opens before the manifest is read, so it cannot suggest
+      // the file's own name.
+      const suggestedName = `swarm-${ref.slice(0, FILE_NAME_REFERENCE_CHARS)}`
+      const outcome = await saveStream(suggestedName, () =>
+        clientStore.client!.downloadFileStream(ref),
+      )
       if (outcome.path === 'cancelled') {
-        logStore.log(`Save of ${download.name} cancelled in the picker; the download was stopped`)
+        logStore.log('Save cancelled in the picker; nothing was downloaded')
         return
       }
+      const { download } = outcome
       const elapsedTime = outcome.elapsedMs / MS_PER_SECOND
       const speed = elapsedTime > 0 ? download.size / elapsedTime : 0
       logStore.log(describeDownload(stopWatching()))
