@@ -417,9 +417,9 @@ export interface DataStream {
 }
 
 /**
- * Yield a chunk's leaves in order, fetching one batch of children at a time
- * and only when the reader wants more: at most one batch per tree level is
- * held, so a file of any size stays bounded.
+ * Yield a chunk's leaves in order, fetching children a batch at a time, one
+ * batch ahead of the reader: at most two batches per tree level are held, so
+ * a file of any size stays bounded.
  */
 async function* walkLeaves(
   bee: ChunkDownloader,
@@ -438,12 +438,25 @@ async function* walkLeaves(
   }
 
   const signal = requestOptions?.signal
+  const fetchBatch = (start: number) => {
+    const batch = Promise.all(
+      childRefs
+        .slice(start, start + DEFAULT_DOWNLOAD_CONCURRENCY)
+        .map((ref) => downloadAndProcessChunk(bee, ref, requestOptions)),
+    )
+    // A batch the walk never reaches, once the reader stops, must not reject
+    // unhandled; the walk still sees the rejection when it awaits it.
+    batch.catch(() => {})
+    return batch
+  }
+  // The next batch is fetched while this one's leaves are read, so the walk
+  // does not idle through each piece's trip to the reader.
+  let next = fetchBatch(0)
   for (let i = 0; i < childRefs.length; i += DEFAULT_DOWNLOAD_CONCURRENCY) {
     if (signal?.aborted) throw abortedError(signal)
-    const batch = childRefs.slice(i, i + DEFAULT_DOWNLOAD_CONCURRENCY)
-    const children = await Promise.all(
-      batch.map((ref) => downloadAndProcessChunk(bee, ref, requestOptions)),
-    )
+    const children = await next
+    const following = i + DEFAULT_DOWNLOAD_CONCURRENCY
+    if (following < childRefs.length) next = fetchBatch(following)
     for (const child of children) {
       yield* walkLeaves(bee, child, isEncrypted, requestOptions)
     }

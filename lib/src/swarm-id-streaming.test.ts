@@ -1066,6 +1066,8 @@ describe("streaming across the bridge", () => {
       const reader = stream.getReader()
       await reader.read()
       vi.spyOn(bee.chunk, "download").mockReturnValue(new Promise(() => {}))
+      // Served by the batch fetched ahead; the third piece waits on the node.
+      await reader.read()
       const sendAbort = vi.spyOn(
         client as unknown as { sendAbort: (id: string) => void },
         "sendAbort",

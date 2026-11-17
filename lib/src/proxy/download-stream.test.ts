@@ -3,7 +3,8 @@
 
 /**
  * `openDataStream` walks the tree depth-first and fetches no further ahead of
- * the reader than one batch per level, so a large file is never held whole.
+ * the reader than the next batch of each level, so a large file is never held
+ * whole.
  */
 
 import { describe, it, expect, vi } from "vitest"
@@ -129,8 +130,24 @@ describe("openDataStream", () => {
     const opened = await openDataStream(bee, reference)
     await opened.leaves.next()
 
-    const ROOT_AND_TWO_LEVELS = 1 + DEFAULT_DOWNLOAD_CONCURRENCY * 2
+    // Each of the two levels: the batch being read and the next one.
+    const ROOT_AND_TWO_LEVELS = 1 + DEFAULT_DOWNLOAD_CONCURRENCY * 2 * 2
     expect(download.mock.calls.length).toBeLessThanOrEqual(ROOT_AND_TWO_LEVELS)
+  })
+
+  it("has a level's next batch on its way while the reader is on this one", async () => {
+    const { bee, target } = setup()
+    const { reference } = await uploadData(
+      target,
+      makeData(CHUNK_SIZE * PLAIN_REFS_PER_CHUNK),
+    )
+    const download = vi.spyOn(bee.chunk, "download")
+
+    const opened = await openDataStream(bee, reference)
+    await opened.leaves.next()
+
+    const ROOT_AND_TWO_BATCHES = 1 + DEFAULT_DOWNLOAD_CONCURRENCY * 2
+    expect(download).toHaveBeenCalledTimes(ROOT_AND_TWO_BATCHES)
   })
 
   it("stops fetching when it is aborted between batches", async () => {
