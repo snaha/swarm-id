@@ -1,27 +1,26 @@
-# Postage-Batch Partitioning — model, leasing, and cross-device handoff
+# Postage-Batch Partitioning — model, lanes, and cross-device handoff
 
 How a single Swarm postage batch is shared across a user's devices without chunk
 collisions: the slot-partitioning model, the per-partition utilisation counter and its
-persistence, the partition-lease lifecycle, the commit-ordered cross-device handoff, and
-the release fencing. This is the current-state reference for the multi-device write path.
+persistence, who may write a partition at a given moment, and the commit-ordered
+cross-device handoff. This is the current-state reference for the multi-device write path.
 
 > **Status.** Implemented. The per-partition counter is the single counter of record;
 > counter/utilisation persistence routes to reserved slots; the cross-device handoff is
 > commit-ordered (ack-after-publish) and resumes at the exact published counter via a
-> numbered, write-once state-pointer entry. The user-facing overview lives in
+> numbered, write-once state-pointer entry. Who holds a partition is agreed between live
+> contexts over the account bus and stored nowhere: a context with no confirmed connection
+> to the bus cannot write a partitioned batch. The user-facing overview lives in
 > `docs-site/src/content/docs/multi-device-postage-batches.mdx`; the write-path lifecycle
-> layer is documented in [`BatchWriteCoordinator.md`](./BatchWriteCoordinator.md); the live
-> fast path that lets peers hand a partition over in one round trip, and the presence
-> heartbeat that feeds the rival set, are in [`Account-Bus.md`](./Account-Bus.md). Everything
-> below works with no server at all — the bus only shortens the waits.
+> layer is documented in [`BatchWriteCoordinator.md`](./BatchWriteCoordinator.md); the bus
+> itself in [`Account-Bus.md`](./Account-Bus.md).
 
 Source of truth in code:
 `lib/src/utils/batch-utilization.ts` (the stamper + slot routing),
 `lib/src/sync/partition-state.ts` (counter publish + state pointer),
-`lib/src/sync/partition-lease.ts` (lease state machine),
-`lib/src/sync/partition-lock.ts` (the cross-device lock SOC + fencing),
-`lib/src/sync/partition-intent.ts` (intent round + occupancy beacon),
-`lib/src/sync/batch-write-coordinator.ts` (the write entry point + refresh tick).
+`lib/src/sync/lane-state.ts` (a holder's resume and publish),
+`lib/src/sync/bus-lease.ts` (who holds a partition; the protocol of `models/bus-lease`),
+`lib/src/sync/batch-write-coordinator.ts` (the write entry point).
 
 ---
 
@@ -49,12 +48,12 @@ so two devices writing into the same bucket never target the same slot.
 
 Per-bucket slot layout (`K = 2`, `slotsPerBucket = 16` shown):
 
-| Slot index      | Owner       | Holds                                                   |
-| --------------- | ----------- | ------------------------------------------------------- |
-| `0`             | partition 0 | **reserved**: partition 0's lock SOC / counter / beacon |
-| `1`             | partition 1 | **reserved**: partition 1's lock SOC / counter / beacon |
-| `2, 4, 6, … 14` | partition 0 | application data (`j = 0,1,2,…`)                        |
-| `3, 5, 7, … 15` | partition 1 | application data                                        |
+| Slot index      | Owner       | Holds                                                 |
+| --------------- | ----------- | ----------------------------------------------------- |
+| `0`             | partition 0 | **reserved**: partition 0's counter and state pointer |
+| `1`             | partition 1 | **reserved**: partition 1's counter and state pointer |
+| `2, 4, 6, … 14` | partition 0 | application data (`j = 0,1,2,…`)                      |
+| `3, 5, 7, … 15` | partition 1 | application data                                      |
 
 - Reserved slots are `[0, K)` — **one per partition**, at index = partition. They are
   mutable and overwritten freely; they do **not** count toward utilisation.
@@ -82,29 +81,21 @@ without per-device lane fragmentation. The design optimises the 2-partition mode
 
 ## 3. What lives in the reserved slots
 
-Everything below is a small, frequently-rewritten chunk, mutable-overwritten, kept out of
-the data slots, and stamped to **`slot = partition`** of its bucket. The stamper has a
-short-circuit per kind (see `UtilizationAwareStamper.stamp`):
+Everything below is a small chunk kept out of the data slots and stamped to
+**`slot = partition`** of its bucket. The stamper has a short-circuit per kind (see
+`UtilizationAwareStamper.assignSlot`):
 
-- **Partition lock SOC** — the per-partition lease record (who holds partition `p`, until
-  when). **Constant address** for a given `(partition, owner)`, so it overstamps the _same_
-  `(bucket, slot = p)` on every heartbeat.
 - **Counter chunks** — the partition's per-bucket counter, chunked (§5–6). Address is
   **content-derived** and changes whenever the counter changes, so the stamper is told
   explicitly to route it to slot `p` (`markReservedUtilizationChunk`).
 - **State-pointer entry** — the numbered, write-once pointer to the latest counter
-  reference-chunk (§8). Routed to slot `p` via the stamper's single intent-SOC reservation.
-- **Intent + occupancy beacons** — the per-device intent SOC and the deviceId-independent
-  occupancy SOC (§7). Also routed to slot `p` via the same intent-SOC reservation.
+  reference-chunk (§8). Routed to slot `p` via the stamper's single SOC reservation
+  (`withIntentSocSlot`).
 
-> Because the lock SOC, counter chunks, state pointer, and beacons **all** land at
-> `slot = p`, two of them in the **same bucket** would overwrite each other under the
-> mutable batch. The publish actively avoids that — see §10.
+> Because these **all** land at `slot = p`, two of them in the **same bucket** would
+> overwrite each other under the mutable batch. The publish actively avoids that — see §10.
 
-The intent / occupancy / state-pointer writes share the stamper's _single_ intent-SOC
-reservation; concurrent writers (the off-lock refresh-tick beacons vs. an under-lock
-publish) are serialised by `UtilizationAwareStamper.withIntentSocSlot` so one can't clobber
-the other's reservation and fall through to a data slot.
+Nothing in the reserved slots says who holds a partition (§7).
 
 ## 4. The per-partition counter
 
@@ -132,7 +123,7 @@ Persistence rules:
   partition's chunks land in **distinct buckets**; each then occupies slot `p` of its
   bucket.
 - Because the chunk address is content-derived, the stamper needs an explicit "reserved,
-  partition `p`" instruction for these chunks (contrast §3's constant-address lock SOC).
+  partition `p`" instruction for these chunks.
 
 This is why the naïve approach failed: serialising the whole counter as one ~256 KB blob
 and uploading it through the ordinary data path stamped ~64 chunks into **data** slots,
@@ -154,64 +145,51 @@ state:
 **Incremental.** Given the previous publish's references and the counter it published,
 only the chunks whose serialized bytes changed are re-uploaded; unchanged chunks reuse the
 retained reference. A typical upload changes the data SOC's bucket plus the previous
-publish's feed bucket → ~3–4 chunk writes in one `Promise.all`, not all 32. On acquire the
-lease seeds this baseline from the resumed state, so even the **first** publish of a
+publish's feed bucket → ~3–4 chunk writes in one `Promise.all`, not all 32. A context
+that takes a lane seeds this baseline from the resumed state, so even the **first** publish of a
 session is incremental, not a full re-publish. A genuinely fresh account (no recovered
 refs) falls back to the sparse-full path.
 
-## 7. The partition lock SOC and lease lifecycle
+## 7. Who holds a partition: lanes on the account bus
 
-The per-partition **lock SOC** (`partition-lock.ts`) is the cross-device authority: it
-names the current holder of partition `p` and its `leasedUntil`. A holder keeps a 30 s
-lease (`LEASE_TTL_MS`) refreshed every 10 s (`LEASE_REFRESH_MS`). `PartitionLease`
-(`partition-lease.ts`) is the in-code state machine; `BatchWriteCoordinator`
-(`batch-write-coordinator.ts`) drives it from the write path.
+A **lane** is one partition of one batch. Who may write on it is agreed between the live
+contexts of the account over the account bus (`bus-lease.ts`), by the protocol modelled
+and checked in `models/bus-lease`. Nothing is written to Swarm for it.
 
-- **Acquire.** Read every partition's lock SOC (`refreshFromSwarm`), union in holders
-  detected via the per-device **intent/presence beacons** and the deviceId-independent
-  **occupancy beacon** (fresh per-epoch addresses that stay retrievable on a gateway whose
-  static lock-SOC cache is frozen), then claim the first free/expired partition from this
-  device's deterministic home offset. All four read channels (locks, presence, occupancy,
-  plus a **speculative state-pointer search** for the home partition) fire **concurrently** —
-  classification is ordered after the barrier — so a cold acquire pays ~one read-timeout,
-  not four stacked ones. Every lock read on the acquire path is timeout-bounded
-  (`SYNC_READ_TIMEOUT_MS`), and the claim (`acquirePartitionLock`) skips its pre-write
-  re-read (`skipInitialRead`) — the scan just did it. **Solo-clean fast path:** when no
-  rival is known and no channel shows any trace of another device (no holder, no expired
-  lock, no sentinel, no unreadable lock), the claim's guard window is skipped; the residual
-  unknown-peer race stays backstopped by the refresh-tick displacement check. The claim-time
-  presence/occupancy beacon publish is detached from the acquire (best-effort, ordered
-  before the next `refresh()`/`release()`).
-- **Intent round.** Only a _fresh_ claim of a free/expired slot _with a known rival_ runs
-  the intent round (a short per-epoch announce + poll at `INTENT_GUARD_WINDOW_MS`) so two
-  disjoint-gateway contenders agree on one winner before binding. A re-acquire of our own
-  partition skips it.
-- **Displacement backstop.** On refresh, if a foreign beacon with an earlier generation
-  proves a peer holds the partition, the later-generation device yields (`"displaced"`),
-  resolving a dual-acquire that slipped past the acquire-time guard.
-- **TTL-optimism (the common case).** While `now < leasedUntil − skew`, the TTL contract
-  guarantees no peer has taken over, so the holder writes straight from its local counter
-  with no gateway reads and no guard round. A reload within the TTL re-adopts the cached
-  lease from local state alone (`adoptIfLive`).
-- **Cold re-entry.** If the local lease could have lapsed, the throttled freshness check
-  re-reads the lock SOC once before writing; still ours → write, taken → demote+re-acquire.
-- **Idle yield.** After `IDLE_YIELD_MS` (30 s) with no upload and none in flight, the holder
-  voluntarily releases so a waiting peer takes the slot without waiting out the TTL. Gated on
-  a **known rival**: a solo device keeps its lease (renewed each tick) so later uploads hit
-  the TTL-optimism fast path instead of re-paying the cold acquire after every pause. A
-  peer counts as a rival the moment its presence beat is heard on the account bus; the
-  roster's recent sign-ins are the bootstrap for a context with no bus. A waiting peer can
-  also ask for the slot outright (`lease-request`) and an idle holder yields on request —
-  [`Account-Bus.md`](./Account-Bus.md).
-- **Self-demote.** The refresh tick extends the local lease only on a _confirmed_ hold
-  (write-verified renewal, or a read-verified lock SOC still naming us). An unconfirmable
-  renewal tolerates a short blip but, once the lease lapses past skew, fences in-flight
-  stamps and demotes — a holder whose renewals keep failing must stop writing.
+- **The participants are contexts.** Every tab and iframe takes part for itself, under
+  the name the signaling server gave its current connection. Two tabs of one browser are
+  two participants, and a context that reconnects is a new one that holds nothing.
+- **Holding.** A context may stamp only while it holds the lane **and** its own connection
+  was confirmed by a round trip with the server within `LEASE_STOP_MS` (6 s). The server
+  asks every member to ping every 2 s. The stamper carries the deadline, so an upload in
+  flight stops by itself (§12).
+- **Taking a lane.** A context asks everyone in the room (`lane-claim`). It holds the
+  lane once every other context has either answered "free" for that claim (`lane-free`)
+  or has been absent from the room for `LEASE_WAIT_MS` (8 s). A context that has just
+  joined cannot know who left a moment before, so it waits until it has been in the room
+  that long. Two contexts claiming at once: the lower name wins.
+- **Answering.** A context that does not hold the lane answers "free" at once, also for
+  lanes of batches it never writes (`BusLanes`): a claimant waits for everyone present, so
+  a context that answered nothing would keep every lane taken for as long as it stayed.
+  The server drops a member that stops answering its ticks (a frozen tab).
+- **Handover.** A holder that is not writing hands the lane over when asked: it stops
+  stamping, then answers "free". A holder with an upload in flight, or one that wrote
+  within `PEER_YIELD_MIN_IDLE_MS` (3 s), does not answer; the claim is sent again with
+  every tick. Nothing is published at a handover: every acknowledged upload already
+  published the counter (§8).
+- **Which lane.** A context first asks for every lane **gently**: one nobody holds is
+  taken, and a holder is left where it is. After `NEXT_LANE_AFTER_MS` (1.5 s) it insists
+  on its device's home lane (`deviceHomePartition`), and after each further step on the
+  next one.
+- **No timers.** A holder keeps its lane for as long as its tab is open and connected. A
+  tab that closes, crashes or loses its connection is seen leaving by the room, and its
+  lane is free once it has been gone for the wait.
+- **Disconnect and sign-out.** The context gives its lanes up and stays in the room,
+  answering "free" to whoever asks.
 
-The refresh tick runs on a bare interval **off** the write lock so it can detect
-displacement mid-upload; the corrupting `stamp()` is aborted immediately via
-`invalidateLease()` (breaker → `PartitionLeaseLostError`), and the unbind/demote then runs
-under the write lock.
+The signaling server holds no lane state and grants nothing; it is the one authority for
+who is in the room. It must be a single instance per account
+([`decisions.md`](./decisions.md), 2026-11-16).
 
 ## 8. Cross-device handoff — commit-ordered (ack-after-publish)
 
@@ -241,79 +219,46 @@ rewritten. A reader **searches** for the highest entry (`state-pointer-search.ts
 reads the powers of 8 to bracket the answer, then splits the bracket 8 ways until it is
 one entry wide, each round a handful of concurrent reads. A device that knows an entry
 (its own last publish, kept as the stamper's synced pointer) starts from it, and when
-nothing newer exists the lookup is one round. The lookup uses no clock and nothing from
-the lock SOC, so it finds a state however long ago it was written, and an idle holder
-writes nothing.
+nothing newer exists the lookup is one round. The lookup uses no clock, so it finds a
+state however long ago it was written, and an idle holder writes nothing.
 
 Entries share the partition's reserved slot, so a later reserved-slot write in the same
 bucket replaces an earlier entry. Which entries a search reads depends only on the
 answer, which gives a small set (at most 60) that any later search depends on. The
 publish keeps its chunks out of their buckets (§10), and `salt` (one of 8 candidate
 addresses, the same choice for reader and writer) keeps those entries out of each
-other's. The intent and occupancy beacons are at fixed addresses and can still replace
-one (§12).
+other's.
 
 A search whose read of a possibly newer entry timed out is **inconclusive**: fail safe
 (read-only + retry), never resume from what was found and never zero-seed. An entry is
-never written twice: a holder that does not know the newest entry for sure (a lease
-adopted from cache, or a publish that failed part-way) searches before it publishes.
+never written twice: a holder that does not know the newest entry for sure (a publish
+that failed part-way) searches before it publishes.
 
-**Reverse-clobber guard.** Before acking, the held lease is re-validated (throttled to zero
-reads on the fast path; a long upload that outran the TTL re-reads the lock SOC). If the
-lease could have lapsed, the publish/ack is refused — a slept/throttled holder must not
-overwrite a **new** holder's already-acked data. Chunks are content-addressed, so the failed
-upload is a safe retry.
+**Hold check before the ack.** After the upload's chunks are written and before the
+counter is published, the context checks that it still holds the lane. If its connection
+went unconfirmed meanwhile, the publish and the ack are refused: an upload that outlived
+the hold must not publish slots someone else may be using. Chunks are content-addressed,
+so the failed upload is a safe retry.
 
-A device that reloads within its own lease TTL skips the read entirely and re-derives its
-counter from local state (the re-adopt fast path).
+A context that takes a lane it held before, with nothing published in between, reuses its
+own counter and reads only the pointer (one round). The first time a context takes a lane
+it reads the published counter in full, whatever the stamper's shared storage says:
+another tab of the same browser may have published since.
 
-## 9. Release fencing (#349)
+## 9. Giving a lane up
 
-`teardown()` releases the partition on sign-out/disconnect: it publishes the final counter,
-then writes a **release sentinel** (`holderDeviceId = ""`) to the lock SOC so peers see an
-immediate, authoritative free. Because the publish is slow and the sentinel's postage stamp
-is minted at `stamp()` time (Bee resolves same-address SOC conflicts by newer stamp), a
-naïve detached release could land its sentinel **after** a same-device re-acquire and
-clobber the successor's claim → two writers on one partition. Four layers fence this:
-
-- **L0 — lock-serialized teardown release.** The detached release runs under the batch write
-  lock (`withBatchWriteLock`), which the successor's acquire also queues on. The release
-  completes (sentinel minted) strictly before the successor reads/writes the lock SOC, so
-  last-writer-wins keeps the successor's claim. (Same-origin case — which #349 is.)
-- **L1 — released-claim generation.** The sentinel carries the **released claim's**
-  generation (captured before the slow publish), not a fresh one, so any later claim
-  (successor or peer) is logically newer. Also fixes a latent false `lost-race` in the
-  acquire verify step.
-- **L3 — generation-fenced sentinel write + ghost-claim guard.** `releasePartitionLock`
-  re-reads the lock and skips the write when it would clobber a successor or a peer (sentinel
-  already present, own newer-generation claim, or any foreign holder). `PartitionLease` sets
-  a `closed` flag at the top of `release()`; `refresh()` passes `shouldAbort: () =>
-this.closed` so a teardown-overlapping refresh tick can't mint a ghost claim that L3 would
-  then refuse to clear.
-- **L2 — sentinel re-assert at upload start (defense in depth).** If `ensureLeaseStillValid`
-  reads a sentinel while we believe we hold, it re-asserts via `refresh()` (a converging
-  stale sentinel / frozen-cache view); a peer that claimed after the sentinel demotes us.
-
-A fifth fix: `markReservedUtilizationChunk(address, partition)` records the slot at marking
-time, because the teardown release publishes through an **unbound** stamper whose
-`partition ?? 0` fallback would otherwise route a partition-1 release's chunks onto
-partition 0's reserved slots.
+`teardown()` (sign-out, disconnect, a drive leaving the grant) closes the context's lanes
+and unbinds the stamper. Nothing is written: the counter was published with the last
+acknowledged upload. An upload in flight at that moment fails at its next stamp.
 
 ## 10. Reserved-slot bucket-collision avoidance
 
 All reserved-slot writers for partition `p` stamp `slot = p` (§3), so two of them in the
-same bucket evict one another. Within a publish, `writePartitionState` already picks each
-counter/reference chunk in a bucket distinct from the lock-SOC bucket, the live utilisation
-chunks, and (incremental) the retained real chunks. It **also** excludes the buckets of
-the **state-pointer entries** a search depends on (§8), its own new entry included, and
-re-uploads a retained chunk that stands where that entry goes. For the current and
-previous epoch it excludes:
-
-- the deviceId-independent **occupancy beacon** bucket;
-- this device's **intent beacon** bucket (when the holder's `deviceId` is known).
-
-so a randomly-keyed chunk can't evict the pointer or a live beacon (or be evicted by them).
-A peer's _intent_ beacon uses its own deviceId and can't be computed here — see §12.
+same bucket evict one another. Within a publish, `writePartitionState` picks each
+counter/reference chunk in a bucket distinct from the live utilisation chunks, the
+retained real chunks (incremental), and the **state-pointer entries** a search depends on
+(§8), its own new entry included. A retained chunk that stands where that new entry goes
+is uploaded again elsewhere first.
 
 ## 11. Utilisation reporting over the account bus
 
@@ -326,50 +271,38 @@ A peer's _intent_ beacon uses its own deviceId and can't be computed here — se
   keyed per partition and folded only by a receiver bound to that partition of that batch, so
   one partition's progress never clobbers another's.
 
-Two unrelated things in this repository are called "presence". The **intent/presence beacon**
-of §7 is a per-epoch Swarm chunk a claimant writes so disjoint-gateway contenders can see each
-other; the **presence heartbeat** of the account bus is a 20 s message between live contexts
-that feeds the rival set. The beacon is a correctness mechanism; the heartbeat is advisory.
+The **presence heartbeat** of the account bus (a 20 s message naming the device) feeds
+the device list's "Online" badge only. It plays no part in who holds a lane: that is
+decided on the room's membership and the server round trip.
 
 ## 12. Remaining issues / accepted residuals
 
-- **Write-fenced to clock skew (was: ack-safe, not write-safe).** A lease lapsing _mid-`op`_
-  is fenced both for the **ack** (the reverse-clobber guard refuses to publish) and for the
-  **data write**: `stamp()` throws `PartitionLeaseLostError` when either `leaseStale` is set
-  (a refresh tick _confirmed_ a peer took over, or `teardown()` invalidated the lease; it
-  survives the unbind until the next bind) **or** the lease has lapsed by this device's
-  own clock — `Date.now() >= leaseValidUntil - LEASE_SKEW_MARGIN_MS`, a purely local check on
-  every chunk. So an un-renewable holder (e.g. a disjoint-gateway view its refresh can't
-  confirm by reading) stops writing the instant its own clock says the lease expired — before
-  a peer reading the same `leasedUntil` could validly take over. A long multi-chunk `op`
-  aborts mid-stream; the chunk is content-addressed, so the upload cleanly fails and retries.
-  The residual is now just the irreducible clock skew below, not a full refresh interval.
-  (Fence: `batch-utilization.ts` `leaseLocallyLapsed`; deadline pushed by
-  `batch-write-coordinator.ts` `syncStamperLeaseDeadline` on bind + every renewal.)
-- **Bounded clock skew.** A device with a slow clock can believe its lease is valid while
-  peers correctly took over. Irreducible; bounded by NTP-level skew + the TTL margin, the
-  same assumption the lock protocol already makes. The local-lapse fence relies on
-  `leaseValidUntil` (from the lease's `leasedUntil`) and the stamper's clock being the same —
-  which they are by construction: both the lease and the stamper take one injectable clock
-  (defaulting to `Date.now()`), so a test drives all of lease validity, rendezvous addresses,
-  and the fence from a single clock (#385).
-- **Peer intent-beacon reserved-slot collision.** §10 covers the pointer and the
-  deviceId-independent occupancy beacon, but a **peer's** per-device intent beacon sits at an
-  address keyed on the peer's deviceId, which we may not know (or can't enumerate). It can
-  only collide with our publish during a transient **same-partition dual-hold** (different
-  partitions write different slots), at ~1/65536 per chunk, and is fail-safe: an evicted
-  beacon self-heals next tick; an evicted counter chunk → `readFailed` → read-only + retry.
-- **Cross-node lease-expired race.** An expired holder's release re-read through its own
-  node can miss a peer's claim (frozen local store / no non-neighborhood convergence) → the
-  fenced sentinel still physically lands → a third device may claim → dual-hold bounded by
-  the ≤ 10 s displacement window (refresh + `isDisplaced` + breaker).
-- **A beacon can replace a state-pointer entry.** The intent and occupancy beacons are
-  written at fixed addresses in the same reserved slot, so the publish cannot steer them
-  away from the entries a search depends on (§8). A beacon write landing in such a bucket
-  (about 60 in 65,536) replaces the entry, and a later search from nothing then ends at an
-  older entry without noticing: the new holder resumes from an older counter and can
-  re-issue acked slots. A device that still remembers a newer entry is not affected.
-  Nothing repairs it, since an entry is never rewritten.
+- **No bus, no writes.** A context that cannot reach the signaling server, or runs where
+  none is configured, cannot write a partitioned batch. It stays read-only until its
+  connection is confirmed.
+- **A wait before the first write.** A context that has just joined the room waits until
+  it has been there for `LEASE_WAIT_MS` (8 s). This applies to every page load, reload and
+  new tab; the proxy starts asking as soon as it is connected, so the wait usually passes
+  before the first upload.
+- **Tabs of one browser do not share a lane.** Each takes its own or is handed one. Two
+  tabs writing alternately on a full account hand a lane back and forth, at about one
+  server round trip and one pointer read each time
+  ([`decisions.md`](./decisions.md), 2026-11-17).
+- **A context that is present but answers nothing blocks every lane.** A frozen tab is
+  dropped by the server after a few missed ticks. A context running a build from before
+  the bus lease has no answer to give and is dropped the same way, then reconnects and is
+  dropped again; while it is in the room, claims wait.
+- **A holder that stops mid-upload.** `stamp()` throws `PartitionLeaseLostError` once the
+  stamper's deadline passes (`LEASE_STOP_MS` after the last confirmation) or the
+  coordinator stopped holding the lane. A long multi-chunk upload aborts mid-stream; the
+  chunks are content-addressed, so the upload fails cleanly and can be retried. A chunk
+  whose request was already on the wire when the deadline passed is not modelled.
+- **Clocks that run at different rates.** The margin between `LEASE_STOP_MS` (6 s) and
+  `LEASE_WAIT_MS` (8 s) covers two machines whose clocks tick at slightly different
+  rates over those seconds. No wall clock is compared between devices.
+- **The server is trusted for membership.** Messages are end-to-end encrypted, but a
+  server that hid a present context from another, or kept answering for a dead one, could
+  make two contexts hold one lane or keep a lane taken.
 - **`readFailed` degradation.** When the resume point exists but can't be read (transient
   network error, or a published chunk evicted from the reserve), acquire degrades to
   read-only and retries rather than resuming from zero — never re-issuing used slots.
@@ -385,15 +318,16 @@ that feeds the rival set. The beacon is a correctness mechanism; the heartbeat i
 
 ## Key constants (in `lib/src/utils/batch-utilization.ts` unless noted)
 
-| Constant                            | Value       | Meaning                                                                                                                         |
-| ----------------------------------- | ----------- | ------------------------------------------------------------------------------------------------------------------------------- |
-| `BUCKET_DEPTH`                      | 16          | → 65,536 buckets                                                                                                                |
-| `PARTITION_COUNT` (`K`)             | 2           | partitions sharing each bucket's slots                                                                                          |
-| `DATA_COUNTER_START`                | `= K` (2)   | first data slot; reserved slots are `[0, K)`                                                                                    |
-| `UTILIZATION_SLOTS_PER_BUCKET`      | 2           | reserved slots per bucket (one per partition)                                                                                   |
-| `LEASE_TTL_MS` / `LEASE_REFRESH_MS` | 30 s / 10 s | lock-SOC lease lifetime / heartbeat — `LEASE_TTL_MS` is defined in `lib/src/sync/timing-constants.ts` and only re-exported here |
-| `IDLE_YIELD_MS`                     | 30 s        | idle-before-yield, so peers can take a slot                                                                                     |
-| `FANOUT` / `SALTS`                  | 8 / 8       | state-pointer search width / candidate addresses per entry — `lib/src/sync/state-pointer-search.ts`                             |
+| Constant                          | Value     | Meaning                                                                                                    |
+| --------------------------------- | --------- | ---------------------------------------------------------------------------------------------------------- |
+| `BUCKET_DEPTH`                    | 16        | → 65,536 buckets                                                                                           |
+| `PARTITION_COUNT` (`K`)           | 2         | partitions sharing each bucket's slots                                                                     |
+| `DATA_COUNTER_START`              | `= K` (2) | first data slot; reserved slots are `[0, K)`                                                               |
+| `UTILIZATION_SLOTS_PER_BUCKET`    | 2         | reserved slots per bucket (one per partition)                                                              |
+| `LEASE_STOP_MS` / `LEASE_WAIT_MS` | 6 s / 8 s | how long a holder may go unconfirmed / how long everyone else must be absent — `lib/src/sync/bus-lease.ts` |
+| `PEER_YIELD_MIN_IDLE_MS`          | 3 s       | a holder that wrote within this does not hand over — `lib/src/sync/batch-write-coordinator.ts`             |
+| `NEXT_LANE_AFTER_MS`              | 1.5 s     | the gentle step of a claim, then one more lane insisted on per step — same file                            |
+| `FANOUT` / `SALTS`                | 8 / 8     | state-pointer search width / candidate addresses per entry — `lib/src/sync/state-pointer-search.ts`        |
 
 ## 13. History (so future readers aren't misled)
 
@@ -410,3 +344,8 @@ that feeds the rival set. The beacon is a correctness mechanism; the heartbeat i
   previous holder's un-published in-flight writes) was specified but never implemented; it is
   superseded by the commit-ordered ack-after-publish handoff (§8), which resumes at the exact
   published counter and needs no margin.
+- A per-partition **lock SOC** on Swarm named the holder and a 30 s lease, with intent
+  and occupancy **beacons** beside it for gateways that served the lock from a stale
+  cache, a refresh timer, an idle-yield timer and a local lease cache. Rewriting one
+  address proved unreliable (#1017). All of it was replaced by lanes on the account bus
+  (§7); nothing on Swarm says who holds a partition.

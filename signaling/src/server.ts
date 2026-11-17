@@ -65,6 +65,13 @@ const DEFAULT_HEARTBEAT_INTERVAL_MS = 30_000
  */
 const DEFAULT_TICK_INTERVAL_MS = 2000
 /**
+ * How many ticks in a row a room member may leave unanswered before its socket
+ * is terminated. A member that answers nothing answers no lane claim either
+ * (a frozen tab, whose browser still keeps the socket open), and everyone
+ * claiming a lane waits for it for as long as it is in the room.
+ */
+const MAX_SILENT_TICKS = 4
+/**
  * Bounds for a single 1 vCPU / 0.5 GB instance with no autoscale. Deliberately
  * not per-IP: this service sits behind the platform's ingress, so the socket's
  * remote address is the proxy and the client address only exists in a
@@ -103,6 +110,8 @@ interface Peer {
    * laptops all produce them.
    */
   alive: boolean
+  /** Ticks sent since this peer's last `ping`. */
+  silentTicks: number
   /** Start of the current message-rate window, and its running count. */
   windowStartedAt: number
   messagesInWindow: number
@@ -235,6 +244,7 @@ export function createSignalingServer(options: SignalingServerOptions): Promise<
       id: randomUUID(),
       socket,
       alive: true,
+      silentTicks: 0,
       windowStartedAt: Date.now(),
       messagesInWindow: 0,
     }
@@ -345,6 +355,7 @@ export function createSignalingServer(options: SignalingServerOptions): Promise<
       // Reached only by a socket that is in its room, which is what the answer
       // asserts: a peer told this socket has left gets no more of them.
       if (message.type === 'ping') {
+        peer.silentTicks = 0
         send(peer, { type: 'pong', nonce: message.nonce })
         return
       }
@@ -412,6 +423,11 @@ export function createSignalingServer(options: SignalingServerOptions): Promise<
       const tick = setInterval(() => {
         for (const room of rooms.values()) {
           for (const peer of room.values()) {
+            if (peer.silentTicks >= MAX_SILENT_TICKS) {
+              peer.socket.terminate()
+              continue
+            }
+            peer.silentTicks += 1
             send(peer, { type: 'tick' })
           }
         }

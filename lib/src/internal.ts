@@ -90,10 +90,8 @@ export {
 
 export type { SyncAccountFunction, SyncResult } from "./sync"
 
-export { PartitionLease } from "./sync/partition-lease"
+export { BusLanes } from "./sync/bus-lease"
 export { mergeAccountSettings } from "./sync/merge-snapshot"
-
-export type { PartitionLeaseStateSnapshot } from "./sync/partition-lease"
 
 export {
   AuthDataSchema,
@@ -107,7 +105,6 @@ export {
   STORAGE_CHALLENGE_KEY,
   STORAGE_KEY_ACCOUNTS,
   STORAGE_KEY_NETWORK_SETTINGS,
-  leaseCacheStorageKey,
 } from "./types"
 
 export type { AccountStateSnapshot } from "./utils/account-state-snapshot"

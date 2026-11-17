@@ -39,7 +39,7 @@ That design is no longer needed. Since #537 was written:
 - [#683](https://github.com/snaha/swarm-id/pull/683): the lock, intent and occupancy SOCs
   hash the batch — a lane is `(batchId, partition)`.
 - [#684](https://github.com/snaha/swarm-id/issues/684): the lease cache is keyed per batch.
-- The bus `lease-request` / `lease-claim` / `lease-released` messages carry a `batchId`.
+- The bus lane messages (`lane-claim` / `lane-free`) carry a `batchId`.
 
 So two batches of one account no longer share any write state. Multi-drive is **N
 independent copies of the existing single-batch stack**, and `lib/src/sync/` does not

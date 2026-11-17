@@ -5,10 +5,10 @@
  *
  * An app granted every drive of the account (`'all'`) writes to two of them,
  * naming the drive on each write, and a second device of the same account
- * takes a lane on each. Each drive's lease is its own: the primary's comes
+ * takes a lane on each. Each drive's lanes are its own: the primary's comes
  * with the session and any other drive's with the first write that names it,
  * a write to one drive moves nothing on the other, one device's lanes are
- * released together on its disconnect while the other's stay, and a drive
+ * given up together on its disconnect while the other's stay, and a drive
  * leaving the grant tears down its lane on every device and nothing else. The lanes are
  * read off the demo's sidebar, one line per drive, from `getDrives()`'s
  * `partition`.
@@ -27,16 +27,15 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 
 import {
+  ACQUIRE_TIMEOUT_MS,
   Device,
+  HANDOVER_TIMEOUT_MS,
   LANE_PREFIX_LENGTH,
-  LEASE_REFRESH_MS,
   type Seed,
-  TTL_LAPSE_MS,
   UPLOAD_TIMEOUT_MS,
   createAccountWithDrives,
   drivesOf,
   rigUp,
-  sleep,
 } from './devices-rig'
 import { TWO_DRIVES_SEED_FILE } from './global-setup-devices'
 import { ID_ORIGIN } from './helpers'
@@ -44,8 +43,8 @@ import { ID_ORIGIN } from './helpers'
 /** Where a run keeps its account, so a worker restarted after a failure
  *  reuses the drives instead of buying two more. */
 /** A grant change reaches the other device over the account bus: one
- *  round trip, with the poll fallback as margin. */
-const GRANT_PROPAGATION_MS = LEASE_REFRESH_MS * 3
+ *  round trip, with margin. */
+const GRANT_PROPAGATION_MS = HANDOVER_TIMEOUT_MS
 
 /** The lanes held on one drive are pairwise distinct across devices. */
 async function expectNoDualHoldOn(
@@ -77,13 +76,11 @@ test.describe('two devices on two drives', () => {
   const all = () => [A, B]
 
   test.beforeAll(async ({ browser }) => {
-    test.setTimeout(TTL_LAPSE_MS * 2 + UPLOAD_TIMEOUT_MS * 3)
+    test.setTimeout(UPLOAD_TIMEOUT_MS * 5)
     const seedPath = join(test.info().project.outputDir, TWO_DRIVES_SEED_FILE)
     let seed: Seed
     if (existsSync(seedPath)) {
       seed = JSON.parse(readFileSync(seedPath, 'utf8')) as Seed
-      // The previous worker's locks and beacons outlive its contexts.
-      await sleep(TTL_LAPSE_MS)
       A = await Device.open(browser, 'A', seed, 'all')
     } else {
       A = await Device.open(browser, 'A', undefined, 'all')
@@ -124,14 +121,11 @@ test.describe('two devices on two drives', () => {
     await expect
       .poll(() => device.lane(batchHex), {
         message: `${device.label} holds no lane on ${batchHex.slice(0, LANE_PREFIX_LENGTH)}`,
-        timeout: LEASE_REFRESH_MS,
+        timeout: ACQUIRE_TIMEOUT_MS,
       })
       .not.toBeUndefined()
     return (await device.lane(batchHex))!
   }
-
-  // Holders idle past IDLE_YIELD_MS let go once a rival is known, so every
-  // comparison below follows an upload closely rather than a gap.
 
   test('A holds the primary from connect, and takes the second drive on its first write to it', async () => {
     await A.connect()
@@ -178,9 +172,9 @@ test.describe('two devices on two drives', () => {
     await expectNoDualHoldOn(D2, all())
   })
 
-  // Not proven here: that the disconnect RELEASES A's lanes. A reclaims its own
-  // lock either way, so that takes a third device waiting on the slot, as in
-  // three-devices' disconnect scenario.
+  // Not proven here: that the disconnect GIVES UP A's lanes. A comes back to
+  // the free lane either way, so that takes a third device waiting on it, as
+  // in three-devices' disconnect scenario.
   test("A's disconnect leaves B's lanes, and A comes back on its own", async () => {
     for (const device of all()) await device.ensureConnected()
     // Every lane held, freshly.

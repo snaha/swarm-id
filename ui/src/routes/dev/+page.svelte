@@ -728,48 +728,6 @@
   let readChecking = $state(false)
   let readLog = $state<string[]>([])
 
-  // Partition-coordination timing overrides (gateway propagation tuning). Read
-  // by the proxy from this localStorage key on connect; blank fields fall back
-  // to the lib defaults. Must match PARTITION_TUNING_KEY in swarm-id-proxy.ts.
-  const PARTITION_TUNING_KEY = 'swarm-id-partition-tuning'
-  function loadTuning(): {
-    guardWindowMs?: number
-    guardPollMs?: number
-    readTimeoutMs?: number
-  } {
-    if (typeof localStorage === 'undefined') return {}
-    try {
-      return JSON.parse(localStorage.getItem(PARTITION_TUNING_KEY) ?? '{}') ?? {}
-    } catch {
-      return {}
-    }
-  }
-  const initialTuning = loadTuning()
-  let tuningWindow = $state(initialTuning.guardWindowMs?.toString() ?? '')
-  let tuningPoll = $state(initialTuning.guardPollMs?.toString() ?? '')
-  let tuningTimeout = $state(initialTuning.readTimeoutMs?.toString() ?? '')
-  let tuningSaved = $state('')
-
-  function saveTuning() {
-    const obj: Record<string, number> = {}
-    const add = (key: string, raw: string) => {
-      const n = Number(raw)
-      if (raw.trim() !== '' && Number.isFinite(n) && n >= 0) obj[key] = n
-    }
-    add('guardWindowMs', tuningWindow)
-    add('guardPollMs', tuningPoll)
-    add('readTimeoutMs', tuningTimeout)
-    localStorage.setItem(PARTITION_TUNING_KEY, JSON.stringify(obj))
-    tuningSaved = `Saved ${JSON.stringify(obj)} — reload the app/proxy to apply.`
-  }
-  function resetTuning() {
-    localStorage.removeItem(PARTITION_TUNING_KEY)
-    tuningWindow = ''
-    tuningPoll = ''
-    tuningTimeout = ''
-    tuningSaved = 'Cleared — reload to use defaults (window 12000 / poll 2500 / read 2500 ms).'
-  }
-
   // Per-read timeout and the elapsed-since-upload checkpoints to poll at.
   const SELF_CHECK_READ_TIMEOUT_MS = 3000
   const SELF_CHECK_POLL_MS = [0, 2000, 5000, 10000, 20000]
@@ -797,7 +755,7 @@
       const bee = new Bee(nodeUrl)
       // Throwaway, fresh-per-run SOC: random owner key + identifier + encryption
       // key + payload. Postage is paid by the stamp's signerKey; the SOC is
-      // owned by the throwaway signer — the same split a real presence beacon
+      // owned by the throwaway signer — the same split a real state pointer
       // uses. A fresh address guarantees the read isn't served from a stale
       // local cache.
       const signer = new PrivateKey(randomBytes())
@@ -1486,36 +1444,6 @@ Check console logs for details:
         <p class="text-muted-foreground font-mono text-sm">
           • Open browser console to see detailed logs
         </p>
-      </div>
-
-      <div class="bg-border my-4 h-px"></div>
-
-      <h3 class="text-lg font-semibold">Partition tuning</h3>
-      <p class="text-muted-foreground text-sm">
-        Tune the multi-device intent-round timing for this gateway's propagation delay. Blank =
-        library default (window 12000 / poll 2500 / read 2500 ms). Reload the app after saving so
-        the proxy picks it up.
-      </p>
-      <div class="flex flex-col gap-2">
-        <label class={LABEL_CLASS}>
-          <span class={LABEL_TEXT_CLASS}>Guard window (ms)</span>
-          <Input bind:value={tuningWindow} />
-        </label>
-        <label class={LABEL_CLASS}>
-          <span class={LABEL_TEXT_CLASS}>Poll interval (ms)</span>
-          <Input bind:value={tuningPoll} />
-        </label>
-        <label class={LABEL_CLASS}>
-          <span class={LABEL_TEXT_CLASS}>Read timeout (ms)</span>
-          <Input bind:value={tuningTimeout} />
-        </label>
-        <div class="flex items-center gap-2">
-          <Button onclick={saveTuning}>Save tuning</Button>
-          <Button variant="secondary" onclick={resetTuning}>Reset to defaults</Button>
-        </div>
-        {#if tuningSaved}
-          <p class="text-muted-foreground text-sm">{tuningSaved}</p>
-        {/if}
       </div>
     </div>
   {/if}

@@ -170,10 +170,6 @@ vi.mock("./bus/signaling-transport", () => ({
     }
   }),
 }))
-/** How long the mocked `yieldForPeer` takes — past rank 1's step (250 ms), as
- *  the real one (two stamped Swarm writes) always is. */
-const SLOW_YIELD_MS = vi.hoisted(() => 400)
-
 /** Devices the mocked `readRoster` reports for the account's Swarm roster. */
 // Typed as the real `Device` so a test row that drifts from the schema —
 // a `name`, a `removedAt` — is a type error rather than a field Zod quietly
@@ -242,50 +238,27 @@ vi.mock("./proxy/act", async (importActual) => {
     }),
   }
 })
-vi.mock("./sync/batch-write-coordinator", () => ({
-  BatchWriteCoordinator: vi.fn(function (deps: {
-    accountId: string
-    batchId: string
-    onLeaseReleased?: (partition: number, requestId?: string) => void
-  }) {
-    const coordinator = {
-      deps,
-      accountId: deps.accountId,
-      batchId: deps.batchId,
-      startLease: vi.fn(),
-      // Like the real one: a held partition is announced on the way out.
-      teardown: vi.fn(() => {
-        if (coordinator.currentPartition !== undefined) {
-          deps.onLeaseReleased?.(coordinator.currentPartition)
-        }
-      }),
-      withWrite: vi.fn(),
-      // Deliberately NOT instant. The real yield is two stamped Swarm writes
-      // (`yieldIdleLease` → `release`), i.e. far longer than a rank step, so a
-      // mock that resolves in a microtask exercises the one timing production
-      // never has — and hides whether the election's cancel signal actually
-      // arrives before the other ranks fire.
-      yieldForPeer: vi.fn(
-        async (requestId?: string) =>
-          await new Promise<number>((resolve) =>
-            setTimeout(() => {
-              deps.onLeaseReleased?.(1, requestId)
-              resolve(1)
-            }, SLOW_YIELD_MS),
-          ),
-      ),
-      notifySlotMaybeFree: vi.fn(),
-      currentPartition: undefined as number | undefined,
-      // The modulus for the yield rank order; a test sets `currentPartition`
-      // to place this holder in it.
-      partitionCount: 4,
-      /** Whether this holder would presently yield — only such holders take a
-       *  rank. Mutable: a test can make the holder mid-burst. */
-      canYieldForPeer: true,
-    }
-    return coordinator
-  }),
-}))
+vi.mock("./sync/batch-write-coordinator", async (importActual) => {
+  const actual =
+    await importActual<typeof import("./sync/batch-write-coordinator")>()
+  return {
+    ...actual,
+    BatchWriteCoordinator: vi.fn(function (deps: {
+      accountId: string
+      batchId: string
+    }) {
+      return {
+        deps,
+        accountId: deps.accountId,
+        batchId: deps.batchId,
+        startLease: vi.fn(),
+        teardown: vi.fn(),
+        withWrite: vi.fn(),
+        currentPartition: undefined as number | undefined,
+      }
+    }),
+  }
+})
 
 import { BatchId, EthAddress, PrivateKey } from "@ethersphere/bee-js"
 
@@ -326,13 +299,11 @@ import {
   STORAGE_CHALLENGE_KEY,
   STORAGE_KEY_ACCOUNTS,
   STORAGE_KEY_NETWORK_SETTINGS,
-  leaseCacheStorageKey,
   partitionSessionStorageKey,
 } from "./types"
 import type { DriveCapacity } from "./types"
-import { deviceHomePartition } from "./sync/partition-lock"
-import { KNOWN_DEVICE_MAX_AGE_MS } from "./utils/active-devices"
-import { PRESENCE_INTERVAL_MS, PRESENCE_MAX_AGE_MS } from "./bus/presence"
+import { deviceHomePartition } from "./sync/batch-write-coordinator"
+import { PRESENCE_INTERVAL_MS } from "./bus/presence"
 import { mergeDevicesList } from "./sync/merge-snapshot"
 import { foldAccountFromSwarm } from "./sync/fold-account-from-swarm"
 import { RosterScanInconclusiveError } from "./sync/device-roster"
@@ -409,6 +380,23 @@ function makeSyncedAccount(): SyncedAccount {
     lastModified: 1_000_000,
     partitionCount: 2,
   }
+}
+
+type RosterPollDeps = { onLeaseAcquired: (partition: number) => void }
+
+/** A sign-in old enough that nothing counts it as recent. */
+const LONG_AGO_MS = 90 * 24 * 60 * 60 * 1000
+
+/** Run the roster poll the proxy makes when a lane is taken, to its end. */
+async function pollRoster(deps: RosterPollDeps): Promise<void> {
+  const before = vi.mocked(readRoster).mock.results.length
+  deps.onLeaseAcquired(0)
+  await vi.waitFor(() =>
+    expect(vi.mocked(readRoster).mock.results.length).toBeGreaterThan(before),
+  )
+  await vi.mocked(readRoster).mock.results.at(-1)?.value
+  // The fold and the save run in the continuation of that read.
+  await new Promise((resolve) => setTimeout(resolve, 0))
 }
 
 describe("SwarmIdProxy partitioned write enablement", () => {
@@ -645,39 +633,6 @@ describe("SwarmIdProxy partitioned write enablement", () => {
   // slot and overwrite each other. Safe — `hydrate` refuses a snapshot whose
   // `batchId` differs, so the loser cold-acquires — but a hint that stops
   // hinting exactly when there are two writers to hint for is no hint.
-  it("does not evict another batch's lease-cache entry", async () => {
-    const accountId = "aa".repeat(20)
-    const otherBatch = "dd".repeat(32)
-    const otherKey = leaseCacheStorageKey(accountId, otherBatch)
-    // What this account's OTHER coordinator has already cached.
-    localStorageFake.setItem(
-      otherKey,
-      JSON.stringify({ deviceId: "other-device", batchId: otherBatch }),
-    )
-
-    const challenge = await startPartitionedConnect()
-    await sendSetSecret(challenge, {
-      account: serializeSyncedAccount(makeSyncedAccount()),
-    })
-    const { deps } = vi.mocked(BatchWriteCoordinator).mock.results.at(-1)!
-      .value as {
-      deps: {
-        writeLeaseCache: (snap: unknown) => void
-        readLeaseCache: () => unknown
-      }
-    }
-
-    deps.writeLeaseCache({ deviceId: "self-device", batchId: BATCH_ID_HEX })
-
-    const other = JSON.parse(localStorageFake.getItem(otherKey)!) as {
-      deviceId: string
-    }
-    expect(other.deviceId).toBe("other-device")
-    // And ours does not read theirs back: a snapshot for another batch is not
-    // a hint this coordinator can use, and `hydrate` would only drop it.
-    expect(deps.readLeaseCache()).toMatchObject({ deviceId: "self-device" })
-  })
-
   // A dApp-initiated Disconnect is stated on the entry in the language the merge
   // ranks on: a `lastConnectedAt: 0` sentinel would lose every merge, and the
   // Disconnect would never reach a peer the way the identity UI's does (#682).
@@ -875,7 +830,6 @@ describe("SwarmIdProxy partitioned write enablement", () => {
   describe("each drive has its own write path", () => {
     const SECOND_BATCH_ID_HEX = "dd".repeat(32)
     const UNGRANTED_BATCH_ID_HEX = "ee".repeat(32)
-    const ACCOUNT_ID = "aa".repeat(20)
 
     type StamperFake = {
       batchId: unknown
@@ -2503,38 +2457,6 @@ describe("SwarmIdProxy partitioned write enablement", () => {
       expect(first.teardown).not.toHaveBeenCalled()
     })
 
-    it("routes a lease-request to the drive it names", async () => {
-      nextStamper()
-      await connectWithTwoDrives()
-      nextStamper()
-      await internals().withModeAwareWriteLock(
-        undefined,
-        async () => undefined,
-        SECOND_BATCH_ID_HEX,
-      )
-      await awaitBusJoin()
-      const busChannel = new BroadcastChannel(accountChannelName)
-      try {
-        busChannel.postMessage({
-          type: "lease-request",
-          accountId: ACCOUNT_ID,
-          batchId: SECOND_BATCH_ID_HEX,
-          fromDeviceId: "peer-device",
-          requestId: "00000000",
-        })
-        await vi.waitFor(() =>
-          expect(
-            coordinatorFor(SECOND_BATCH_ID_HEX)!.yieldForPeer,
-          ).toHaveBeenCalledTimes(1),
-        )
-        expect(
-          coordinatorFor(BATCH_ID_HEX)!.yieldForPeer,
-        ).not.toHaveBeenCalled()
-      } finally {
-        busChannel.close()
-      }
-    })
-
     it("folds a utilization delta into the drive it names", async () => {
       const first = nextStamper()
       await connectWithTwoDrives()
@@ -2563,42 +2485,6 @@ describe("SwarmIdProxy partitioned write enablement", () => {
       }
     })
 
-    /** Both drives built, each holder at rank 1 for a request id of 0: its
-     *  answer waits a rank step, long enough for a claim, a release or a
-     *  teardown to reach it first. */
-    const connectWithTwoHolders = async (): Promise<{
-      first: CoordinatorFake
-      second: CoordinatorFake
-    }> => {
-      nextStamper()
-      await connectWithTwoDrives()
-      nextStamper()
-      await internals().withModeAwareWriteLock(
-        undefined,
-        async () => undefined,
-        SECOND_BATCH_ID_HEX,
-      )
-      const first = coordinatorFor(BATCH_ID_HEX)!
-      const second = coordinatorFor(SECOND_BATCH_ID_HEX)!
-      first.currentPartition = 1
-      second.currentPartition = 1
-      await awaitBusJoin()
-      return { first, second }
-    }
-
-    const requestLeaseOf = (
-      channel: BroadcastChannel,
-      batchId: string,
-      requestId: string,
-    ): void =>
-      channel.postMessage({
-        type: "lease-request",
-        accountId: ACCOUNT_ID,
-        batchId,
-        fromDeviceId: "peer-device",
-        requestId,
-      })
-
     const laneUpdateFor = (channel: BroadcastChannel, batchId: string): void =>
       channel.postMessage({
         type: "utilization-updated",
@@ -2607,79 +2493,6 @@ describe("SwarmIdProxy partitioned write enablement", () => {
         partitionCount: 2,
         buckets: [{ index: 3, value: 4 }],
       })
-
-    /** Past rank 1's step, and past the mocked yield had it started. */
-    const PAST_RANK_1_AND_YIELD_MS = 300 + SLOW_YIELD_MS
-
-    it("routes a lease-claim to the drive it names", async () => {
-      const { second } = await connectWithTwoHolders()
-      const busChannel = new BroadcastChannel(accountChannelName)
-      try {
-        requestLeaseOf(busChannel, SECOND_BATCH_ID_HEX, "00000000")
-        busChannel.postMessage({
-          type: "lease-claim",
-          accountId: ACCOUNT_ID,
-          batchId: SECOND_BATCH_ID_HEX,
-          fromDeviceId: "peer-device",
-          requestId: "00000000",
-        })
-        await new Promise((resolve) =>
-          setTimeout(resolve, PAST_RANK_1_AND_YIELD_MS),
-        )
-        expect(second.yieldForPeer).not.toHaveBeenCalled()
-      } finally {
-        busChannel.close()
-      }
-    })
-
-    it("routes a lease-released to the drive it names", async () => {
-      const { first, second } = await connectWithTwoHolders()
-      const busChannel = new BroadcastChannel(accountChannelName)
-      try {
-        busChannel.postMessage({
-          type: "lease-released",
-          accountId: ACCOUNT_ID,
-          batchId: SECOND_BATCH_ID_HEX,
-          partition: 0,
-          fromDeviceId: "peer-device",
-        })
-        await vi.waitFor(() =>
-          expect(second.notifySlotMaybeFree).toHaveBeenCalledTimes(1),
-        )
-        expect(first.notifySlotMaybeFree).not.toHaveBeenCalled()
-      } finally {
-        busChannel.close()
-      }
-    })
-
-    it("cancels only the torn-down drive's scheduled answer", async () => {
-      const { first, second } = await connectWithTwoHolders()
-      const busChannel = new BroadcastChannel(accountChannelName)
-      try {
-        requestLeaseOf(busChannel, BATCH_ID_HEX, "00000000")
-        // Seed 1: rank 2, a step behind the first drive's answer.
-        requestLeaseOf(busChannel, SECOND_BATCH_ID_HEX, "00000001")
-        updateAccount((account) => ({
-          ...account,
-          connectedApps: account.connectedApps.map((app) => ({
-            ...app,
-            drives: [new BatchId(BATCH_ID_HEX)],
-            drivesAt: Date.now(),
-          })),
-        }))
-        await vi.waitFor(() => expect(second.teardown).toHaveBeenCalled())
-
-        await vi.waitFor(() =>
-          expect(first.yieldForPeer).toHaveBeenCalledTimes(1),
-        )
-        await new Promise((resolve) =>
-          setTimeout(resolve, PAST_RANK_1_AND_YIELD_MS),
-        )
-        expect(second.yieldForPeer).not.toHaveBeenCalled()
-      } finally {
-        busChannel.close()
-      }
-    })
 
     it("keeps another drive's buffered lanes when one drive binds", async () => {
       const first = nextStamper()
@@ -3167,7 +2980,7 @@ describe("SwarmIdProxy partitioned write enablement", () => {
           currentPartition?: number
           deps: {
             accountId: string
-            refreshKnownDeviceIds: () => Promise<void>
+            onLeaseAcquired: (partition: number) => void
           }
         }
         // A publish needs a held partition, and checks the snapshot's account
@@ -3184,7 +2997,7 @@ describe("SwarmIdProxy partitioned write enablement", () => {
         vi.setSystemTime(Date.now() + PAST_DRIVE_TTL_MS)
         try {
           expect(internals().bee.url).toBe(GATEWAY_NODE_URL)
-          await coordinator.deps.refreshKnownDeviceIds()
+          await pollRoster(coordinator.deps)
           await (
             proxy as unknown as {
               runAccountStatePublish(reason: "acquired"): Promise<void>
@@ -3383,409 +3196,6 @@ describe("SwarmIdProxy partitioned write enablement", () => {
     const reported = infos.map((info) => info.deviceId).filter(Boolean)
     expect(reported).not.toHaveLength(0)
     for (const id of reported) expect(id).toBe(storedId)
-  })
-
-  it("answers a bus lease-request by yielding and announcing the release", async () => {
-    const account = makeSyncedAccount()
-    const challenge = await startPartitionedConnect()
-    await sendSetSecret(challenge, { account: serializeSyncedAccount(account) })
-
-    const coordinator = vi.mocked(BatchWriteCoordinator).mock.results.at(-1)!
-      .value as {
-      yieldForPeer: ReturnType<typeof vi.fn>
-      notifySlotMaybeFree: ReturnType<typeof vi.fn>
-    }
-    await awaitBusJoin()
-    const busChannel = new BroadcastChannel(accountChannelName)
-    const published: Record<string, unknown>[] = []
-    busChannel.onmessage = (event) =>
-      published.push(event.data as Record<string, unknown>)
-    try {
-      busChannel.postMessage({
-        type: "lease-request",
-        accountId: "aa".repeat(20),
-        batchId: BATCH_ID_HEX,
-        fromDeviceId: "peer-device",
-        requestId: "00000000",
-      })
-      await vi.waitFor(() =>
-        expect(coordinator.yieldForPeer).toHaveBeenCalledTimes(1),
-      )
-      // The yielded partition (1, from the mock) is announced to peers.
-      await vi.waitFor(() =>
-        expect(
-          published.filter((m) => m.type === "lease-released"),
-        ).toHaveLength(1),
-      )
-      const released = published.find((m) => m.type === "lease-released")!
-      expect(released.partition).toBe(1)
-      expect(released.accountId).toBe("aa".repeat(20))
-
-      // A released announcement from a peer wakes the slot wait.
-      busChannel.postMessage({
-        type: "lease-released",
-        accountId: "aa".repeat(20),
-        batchId: BATCH_ID_HEX,
-        partition: 0,
-        fromDeviceId: "peer-device",
-      })
-      await vi.waitFor(() =>
-        expect(coordinator.notifySlotMaybeFree).toHaveBeenCalledTimes(1),
-      )
-    } finally {
-      busChannel.close()
-    }
-  })
-
-  // A waiter needs exactly ONE slot, but the request names no partition. Every
-  // idle holder used to answer, so a 4-partition account dropped all four
-  // leases at once and whoever lost the re-race got "Uploads are unavailable".
-  // The request id gives every holder the same rank order; only rank 0 answers
-  // at once, and the rest stand down when they see it claim the request.
-  describe("only one holder answers a lease-request", () => {
-    /** Seed 0, so rank == the holder's own partition index. */
-    const REQUEST_ID = "00000000"
-    const ACCOUNT_ID = "aa".repeat(20)
-    /** Past rank 1's step, but well inside the mocked yield. */
-    const PAST_RANK_1_MS = 300
-
-    type MockCoordinator = {
-      yieldForPeer: ReturnType<typeof vi.fn>
-      currentPartition: number | undefined
-      partitionCount: number
-      canYieldForPeer: boolean
-    }
-
-    async function hydrateHolder(partition: number): Promise<MockCoordinator> {
-      const challenge = await startPartitionedConnect()
-      await sendSetSecret(challenge, {
-        account: serializeSyncedAccount(makeSyncedAccount()),
-      })
-      const coordinator = vi.mocked(BatchWriteCoordinator).mock.results.at(-1)!
-        .value as MockCoordinator
-      coordinator.currentPartition = partition
-      coordinator.partitionCount = 4
-      coordinator.canYieldForPeer = true
-      coordinator.yieldForPeer.mockClear()
-      // The transports attach a few ticks after the auth event (the topic is
-      // derived), so a test that posts straight after `sendSetSecret` would
-      // race the channel into existence — and a negative assertion would pass
-      // for the wrong reason.
-      await awaitBusJoin()
-      return coordinator
-    }
-
-    function postRequest(channel: BroadcastChannel, requestId: string): void {
-      channel.postMessage({
-        type: "lease-request",
-        accountId: ACCOUNT_ID,
-        batchId: BATCH_ID_HEX,
-        fromDeviceId: "peer-device",
-        requestId,
-      })
-    }
-
-    /** Everything this proxy publishes on the bus, in order. */
-    function recordPublished(channel: BroadcastChannel): { type: string }[] {
-      const seen: { type: string }[] = []
-      channel.addEventListener("message", (event) => {
-        seen.push((event as MessageEvent).data as { type: string })
-      })
-      return seen
-    }
-
-    it("drops a lease-request that carries no id at parse", () => {
-      // Every holder takes a rank; there is no unranked answer.
-      const result = BusMessageSchema.safeParse({
-        type: "lease-request",
-        accountId: ACCOUNT_ID,
-        batchId: BATCH_ID_HEX,
-        fromDeviceId: "peer-device",
-      })
-      expect(result.success).toBe(false)
-    })
-
-    it("answers immediately at rank 0", async () => {
-      const coordinator = await hydrateHolder(0)
-      const busChannel = new BroadcastChannel(accountChannelName)
-      try {
-        postRequest(busChannel, REQUEST_ID)
-        // No step waited: the ordinary one-holder handover must not get slower.
-        await vi.waitFor(() =>
-          expect(coordinator.yieldForPeer).toHaveBeenCalledTimes(1),
-        )
-      } finally {
-        busChannel.close()
-      }
-    })
-
-    // The signal the other ranks stand down on must precede the release, not
-    // follow it: releasing is two stamped Swarm writes, so a signal sent after
-    // it arrives long after every later rank has started releasing too.
-    it("claims the request before its yield completes", async () => {
-      await hydrateHolder(0)
-      const busChannel = new BroadcastChannel(accountChannelName)
-      try {
-        const published = recordPublished(busChannel)
-        postRequest(busChannel, REQUEST_ID)
-        await vi.waitFor(() =>
-          expect(published).toContainEqual({
-            type: "lease-claim",
-            accountId: ACCOUNT_ID,
-            batchId: BATCH_ID_HEX,
-            fromDeviceId: expect.any(String),
-            requestId: REQUEST_ID,
-          }),
-        )
-        // Still mid-yield: no release announced yet.
-        expect(published.some((m) => m.type === "lease-released")).toBe(false)
-      } finally {
-        busChannel.close()
-      }
-    })
-
-    it("waits its step at a later rank, then answers if nobody else did", async () => {
-      const coordinator = await hydrateHolder(1)
-      const busChannel = new BroadcastChannel(accountChannelName)
-      try {
-        postRequest(busChannel, REQUEST_ID)
-        await new Promise((resolve) => setTimeout(resolve, 60))
-        expect(coordinator.yieldForPeer).not.toHaveBeenCalled()
-
-        // Rank 0 stayed silent (mid-write, say), so this holder still answers
-        // rather than costing the waiter a whole poll interval.
-        await vi.waitFor(
-          () => expect(coordinator.yieldForPeer).toHaveBeenCalledTimes(1),
-          { timeout: 2000 },
-        )
-      } finally {
-        busChannel.close()
-      }
-    })
-
-    it("stands down when a peer claims the same request first", async () => {
-      const coordinator = await hydrateHolder(1)
-      const busChannel = new BroadcastChannel(accountChannelName)
-      try {
-        postRequest(busChannel, REQUEST_ID)
-        busChannel.postMessage({
-          type: "lease-claim",
-          accountId: ACCOUNT_ID,
-          batchId: BATCH_ID_HEX,
-          fromDeviceId: "peer-device",
-          requestId: REQUEST_ID,
-        })
-        // Well past this holder's step — and past the winner's whole yield.
-        await new Promise((resolve) => setTimeout(resolve, SLOW_YIELD_MS + 200))
-        expect(coordinator.yieldForPeer).not.toHaveBeenCalled()
-      } finally {
-        busChannel.close()
-      }
-    })
-
-    it("stands down when a peer answers the same request first", async () => {
-      const coordinator = await hydrateHolder(1)
-      const busChannel = new BroadcastChannel(accountChannelName)
-      try {
-        postRequest(busChannel, REQUEST_ID)
-        busChannel.postMessage({
-          type: "lease-released",
-          accountId: ACCOUNT_ID,
-          batchId: BATCH_ID_HEX,
-          partition: 0,
-          fromDeviceId: "peer-device",
-          requestId: REQUEST_ID,
-        })
-        // Well past this holder's step.
-        await new Promise((resolve) => setTimeout(resolve, 500))
-        expect(coordinator.yieldForPeer).not.toHaveBeenCalled()
-      } finally {
-        busChannel.close()
-      }
-    })
-
-    // The rank timer only STARTS the answer; the yield's first Swarm write is
-    // still ahead of it. A claim landing in that window must still call it off,
-    // which needs a memory of answered ids — the timer handle is already gone.
-    it("stands down on a claim that arrives after its rank timer fired", async () => {
-      const coordinator = await hydrateHolder(1)
-      const busChannel = new BroadcastChannel(accountChannelName)
-      try {
-        postRequest(busChannel, REQUEST_ID)
-        await new Promise((resolve) => setTimeout(resolve, PAST_RANK_1_MS))
-        busChannel.postMessage({
-          type: "lease-claim",
-          accountId: ACCOUNT_ID,
-          batchId: BATCH_ID_HEX,
-          fromDeviceId: "peer-device",
-          requestId: REQUEST_ID,
-        })
-        // Same round, re-delivered (every transport, every re-broadcast): the
-        // claim we just saw must keep this holder out of it. Waited out past a
-        // full rank step, which is when a re-scheduled answer would fire.
-        postRequest(busChannel, REQUEST_ID)
-        await new Promise((resolve) => setTimeout(resolve, SLOW_YIELD_MS))
-        expect(coordinator.yieldForPeer).toHaveBeenCalledTimes(1)
-      } finally {
-        busChannel.close()
-      }
-    })
-
-    // A holder mid-burst declines in silence, so letting it hold a rank just
-    // delays every holder behind it. With a 3 s idle threshold that is the
-    // common case on an active account.
-    it("takes no rank while it would decline anyway", async () => {
-      const coordinator = await hydrateHolder(0)
-      coordinator.canYieldForPeer = false
-      const busChannel = new BroadcastChannel(accountChannelName)
-      try {
-        const published = recordPublished(busChannel)
-        postRequest(busChannel, REQUEST_ID)
-        await new Promise((resolve) => setTimeout(resolve, PAST_RANK_1_MS))
-        expect(coordinator.yieldForPeer).not.toHaveBeenCalled()
-        expect(published.some((m) => m.type === "lease-claim")).toBe(false)
-      } finally {
-        busChannel.close()
-      }
-    })
-
-    // The rank is `parseInt(requestId, 16)`. A nanoid parses to NaN and a
-    // leading minus parses negative — both would put every holder at rank 0, so
-    // every idle holder yields for one waiter (#576). The schema drops them instead.
-    it.each(["not-hex!", "-0000002", "00000000000000"])(
-      "ignores a request whose id is %s",
-      async (requestId) => {
-        const coordinator = await hydrateHolder(0)
-        const busChannel = new BroadcastChannel(accountChannelName)
-        try {
-          postRequest(busChannel, requestId)
-          await new Promise((resolve) => setTimeout(resolve, PAST_RANK_1_MS))
-          expect(coordinator.yieldForPeer).not.toHaveBeenCalled()
-        } finally {
-          busChannel.close()
-        }
-      },
-    )
-
-    it("schedules one answer however many times the request is delivered", async () => {
-      const coordinator = await hydrateHolder(1)
-      const busChannel = new BroadcastChannel(accountChannelName)
-      try {
-        // The same message reaches us over every attached transport, and the
-        // waiter re-broadcasts each round.
-        postRequest(busChannel, REQUEST_ID)
-        postRequest(busChannel, REQUEST_ID)
-        postRequest(busChannel, REQUEST_ID)
-        await new Promise((resolve) => setTimeout(resolve, 500))
-        expect(coordinator.yieldForPeer).toHaveBeenCalledTimes(1)
-      } finally {
-        busChannel.close()
-      }
-    })
-  })
-
-  it("announces the released partition when a teardown drops a held lease", async () => {
-    const account = makeSyncedAccount()
-    const challenge = await startPartitionedConnect()
-    await sendSetSecret(challenge, { account: serializeSyncedAccount(account) })
-
-    const coordinator = vi.mocked(BatchWriteCoordinator).mock.results.at(-1)!
-      .value as { currentPartition: number | undefined }
-    coordinator.currentPartition = 2
-
-    await awaitBusJoin()
-    const busChannel = new BroadcastChannel(accountChannelName)
-    const published: Record<string, unknown>[] = []
-    busChannel.onmessage = (event) =>
-      published.push(event.data as Record<string, unknown>)
-    try {
-      // A closing tab must wake waiters immediately; otherwise they sleep out
-      // the full poll interval the bus exists to skip.
-      proxy.destroy()
-      await vi.waitFor(() =>
-        expect(
-          published.filter((m) => m.type === "lease-released"),
-        ).toHaveLength(1),
-      )
-      expect(published[0].partition).toBe(2)
-      expect(published[0].accountId).toBe("aa".repeat(20))
-    } finally {
-      busChannel.close()
-    }
-  })
-
-  it("ignores its own lease messages, and other accounts' and batches'", async () => {
-    const account = makeSyncedAccount()
-    const challenge = await startPartitionedConnect()
-    await sendSetSecret(challenge, { account: serializeSyncedAccount(account) })
-
-    const coordinator = vi.mocked(BatchWriteCoordinator).mock.results.at(-1)!
-      .value as {
-      yieldForPeer: ReturnType<typeof vi.fn>
-      notifySlotMaybeFree: ReturnType<typeof vi.fn>
-    }
-    const ownDeviceId = localStorageFake.getItem("swarm-id-device-id")
-    expect(ownDeviceId).toBeTruthy()
-    await awaitBusJoin()
-    const busChannel = new BroadcastChannel(accountChannelName)
-    try {
-      // Own echo (same deviceId) and a foreign account: both ignored.
-      busChannel.postMessage({
-        type: "lease-request",
-        accountId: "aa".repeat(20),
-        batchId: BATCH_ID_HEX,
-        fromDeviceId: ownDeviceId,
-        requestId: "00000000",
-      })
-      busChannel.postMessage({
-        type: "lease-request",
-        accountId: "bb".repeat(20),
-        batchId: BATCH_ID_HEX,
-        fromDeviceId: "peer-device",
-        requestId: "00000000",
-      })
-      busChannel.postMessage({
-        type: "lease-released",
-        accountId: "bb".repeat(20),
-        batchId: BATCH_ID_HEX,
-        partition: 0,
-        fromDeviceId: "peer-device",
-      })
-      // A lane is one partition of ONE batch (#589), so a waiter on another
-      // batch contends with nothing this holder has. Answering it would drop a
-      // lease that helps neither side — and per-app stamp overrides make two
-      // live coordinators on two batches an ordinary account, not a
-      // multi-batch hypothetical.
-      busChannel.postMessage({
-        type: "lease-request",
-        accountId: "aa".repeat(20),
-        batchId: "dd".repeat(32),
-        fromDeviceId: "peer-device",
-        requestId: "00000000",
-      })
-      busChannel.postMessage({
-        type: "lease-released",
-        accountId: "aa".repeat(20),
-        batchId: "dd".repeat(32),
-        partition: 0,
-        fromDeviceId: "peer-device",
-      })
-      // A matching request afterwards proves the earlier ones were dropped
-      // (not merely still in flight).
-      busChannel.postMessage({
-        type: "lease-request",
-        accountId: "aa".repeat(20),
-        batchId: BATCH_ID_HEX,
-        fromDeviceId: "peer-device",
-        requestId: "00000000",
-      })
-      await vi.waitFor(() =>
-        expect(coordinator.yieldForPeer).toHaveBeenCalledTimes(1),
-      )
-      expect(coordinator.notifySlotMaybeFree).not.toHaveBeenCalled()
-    } finally {
-      busChannel.close()
-    }
   })
 
   // The handed-over session is persisted (#635), or a plain reload would log the user
@@ -5572,9 +4982,8 @@ describe("SwarmIdProxy partitioned write enablement", () => {
     })
   })
 
-  // The partition-intent round and the idle-yield both read `knownDeviceIds`.
   // In a partitioned iframe shared storage is invisible, so the roster has to
-  // fold into the hydrated account view or a Safari writer stays blind to every
+  // fold into the hydrated account view or a Safari session never lists a
   // peer that signs in after connect.
   it("folds the Swarm roster into the hydrated partition account", async () => {
     const peer = {
@@ -5591,30 +5000,27 @@ describe("SwarmIdProxy partitioned write enablement", () => {
     })
 
     const { deps } = vi.mocked(BatchWriteCoordinator).mock.results.at(-1)!
-      .value as {
-      deps: {
-        knownDeviceIds: () => string[]
-        refreshKnownDeviceIds: () => Promise<void>
-      }
-    }
-    expect(deps.knownDeviceIds()).not.toContain(peer.deviceId)
+      .value as { deps: RosterPollDeps }
+    const devices = () =>
+      (
+        proxy as unknown as { partitionAccount: { devices: Device[] } }
+      ).partitionAccount.devices.map((device) => device.deviceId)
+    expect(devices()).not.toContain(peer.deviceId)
 
-    await deps.refreshKnownDeviceIds()
+    await pollRoster(deps)
 
-    expect(deps.knownDeviceIds()).toContain(peer.deviceId)
+    expect(devices()).toContain(peer.deviceId)
   })
 
   /** Seed shared storage with an account already connected to the dApp.
    *  A different `derivationKey` makes it a different account — a different
    *  bus room — while staying connected to the same dApp, which is what an
    *  account switch looks like from in here. */
-  // The harm the length check caused: a peer ALREADY in the view, gone stale
-  // (`activeDeviceIds` prunes past `KNOWN_DEVICE_MAX_AGE_MS`), is refreshed by
-  // the roster — same list length, so the merge was discarded and the peer
-  // stayed pruned. It then never gets an intent read, which is the dual-acquire
-  // the refresh exists to prevent (#586).
+  // The harm the length check caused: a peer ALREADY in the view, with an old
+  // sign-in, is refreshed by the roster — same list length, so the merge was
+  // discarded and the view kept the old sign-in (#586).
   it("folds a refreshed sign-in for a peer already in the view", async () => {
-    const staleSignIn = Date.now() - 2 * KNOWN_DEVICE_MAX_AGE_MS
+    const staleSignIn = Date.now() - LONG_AGO_MS
     const peerId = "peer-device-already-known"
     // Our own device has to be in the list already, or `mergeDevices` adds it
     // and the length changes.
@@ -5639,18 +5045,17 @@ describe("SwarmIdProxy partitioned write enablement", () => {
     })
 
     const { deps } = vi.mocked(BatchWriteCoordinator).mock.results.at(-1)!
-      .value as {
-      deps: {
-        knownDeviceIds: () => string[]
-        refreshKnownDeviceIds: () => Promise<void>
-      }
-    }
-    // Aged out of the rival set, though the account view lists it.
-    expect(deps.knownDeviceIds()).not.toContain(peerId)
+      .value as { deps: RosterPollDeps }
+    const peerSignIn = () =>
+      (
+        proxy as unknown as { partitionAccount: { devices: Device[] } }
+      ).partitionAccount.devices.find((device) => device.deviceId === peerId)
+        ?.lastSignedInAt
+    expect(peerSignIn()).toBe(staleSignIn)
 
-    await deps.refreshKnownDeviceIds()
+    await pollRoster(deps)
 
-    expect(deps.knownDeviceIds()).toContain(peerId)
+    expect(peerSignIn()).toBeGreaterThan(staleSignIn)
   })
 
   // The same fold on the other branch. The guard is deliberately shared, so
@@ -5658,7 +5063,7 @@ describe("SwarmIdProxy partitioned write enablement", () => {
   // on a merge that reached memory and never reached storage, and then every
   // other context (and the next page load) keeps reading the stale copy.
   it("saves the refreshed registry to shared storage when unpartitioned", async () => {
-    const staleSignIn = Date.now() - 2 * KNOWN_DEVICE_MAX_AGE_MS
+    const staleSignIn = Date.now() - LONG_AGO_MS
     const refreshedSignIn = Date.now()
     const peerId = "peer-device-stored"
     const selfId = "self-device-stored"
@@ -5696,8 +5101,8 @@ describe("SwarmIdProxy partitioned write enablement", () => {
     )
 
     const { deps } = vi.mocked(BatchWriteCoordinator).mock.results.at(-1)!
-      .value as { deps: { refreshKnownDeviceIds: () => Promise<void> } }
-    await deps.refreshKnownDeviceIds()
+      .value as { deps: RosterPollDeps }
+    await pollRoster(deps)
 
     const stored = JSON.parse(
       localStorageFake.getItem(STORAGE_KEY_ACCOUNTS)!,
@@ -5742,8 +5147,8 @@ describe("SwarmIdProxy partitioned write enablement", () => {
     })
 
     const { deps } = vi.mocked(BatchWriteCoordinator).mock.results.at(-1)!
-      .value as { deps: { refreshKnownDeviceIds: () => Promise<void> } }
-    await deps.refreshKnownDeviceIds()
+      .value as { deps: RosterPollDeps }
+    await pollRoster(deps)
 
     const internals = proxy as unknown as {
       partitionAccount: { devices: Device[] }
@@ -5794,8 +5199,8 @@ describe("SwarmIdProxy partitioned write enablement", () => {
     )
 
     const { deps } = vi.mocked(BatchWriteCoordinator).mock.results.at(-1)!
-      .value as { deps: { refreshKnownDeviceIds: () => Promise<void> } }
-    await deps.refreshKnownDeviceIds()
+      .value as { deps: RosterPollDeps }
+    await pollRoster(deps)
 
     const stored = JSON.parse(
       localStorageFake.getItem(STORAGE_KEY_ACCOUNTS)!,
@@ -6150,12 +5555,6 @@ describe("SwarmIdProxy partitioned write enablement", () => {
   describe("presence", () => {
     const ACCOUNT_ID = "aa".repeat(20)
 
-    type Deps = { deps: { knownDeviceIds: () => string[] } }
-    const knownDeviceIds = () =>
-      (
-        vi.mocked(BatchWriteCoordinator).mock.results.at(-1)!.value as Deps
-      ).deps.knownDeviceIds()
-
     async function connect(): Promise<void> {
       const challenge = await startPartitionedConnect()
       await sendSetSecret(challenge, {
@@ -6205,113 +5604,16 @@ describe("SwarmIdProxy partitioned write enablement", () => {
       }
     })
 
-    it("counts a beating peer as a rival until its beats stop", async () => {
-      const busChannel = new BroadcastChannel(accountChannelName)
-      try {
-        await connect()
-        expect(knownDeviceIds()).not.toContain("peer-live")
-
-        busChannel.postMessage({
-          type: "presence",
-          accountId: ACCOUNT_ID,
-          fromDeviceId: "peer-live",
-        })
-        // Not rivals: a beat for another account's room, and this device's
-        // own id from a sibling tab.
-        busChannel.postMessage({
-          type: "presence",
-          accountId: "bb".repeat(20),
-          fromDeviceId: "peer-elsewhere",
-        })
-        busChannel.postMessage({
-          type: "presence",
-          accountId: ACCOUNT_ID,
-          fromDeviceId: localStorageFake.getItem("swarm-id-device-id"),
-        })
-        await flushBus()
-
-        const rivals = knownDeviceIds()
-        expect(rivals).toContain("peer-live")
-        expect(rivals).not.toContain("peer-elsewhere")
-        expect(rivals).not.toContain(
-          localStorageFake.getItem("swarm-id-device-id"),
-        )
-
-        // Only the clock moves; timers and channel delivery stay real.
-        const later = Date.now() + PRESENCE_MAX_AGE_MS + 1
-        vi.spyOn(Date, "now").mockReturnValue(later)
-        expect(knownDeviceIds()).not.toContain("peer-live")
-      } finally {
-        vi.restoreAllMocks()
-        busChannel.close()
-      }
-    })
-
     // Ageing is the backstop, not the mechanism: a closed tab would otherwise
     // stay a rival for PRESENCE_MAX_AGE_MS, costing every acquire in that
     // window an absent intent read. The room says who left — the signaling
     // server sends `peer-left` on socket close, and its reaper sends it for a
     // crash too — which is the only departure signal a dying page can produce,
     // since a leave published on unload never finishes encrypting (#572).
-    it("drops a peer from the rival set when the room says it left", async () => {
-      proxy.destroy()
-      signalingRoom.deliver.length = 0
-      signalingRoom.peerLeft.length = 0
-      mountProxy({ signalingUrl: "ws://signaling.test" })
-      await connect()
-
-      await vi.waitFor(() => expect(signalingRoom.deliver).not.toHaveLength(0))
-      for (const deliver of signalingRoom.deliver) {
-        deliver(
-          {
-            type: "presence",
-            accountId: ACCOUNT_ID,
-            fromDeviceId: "peer-live",
-          },
-          "socket-1",
-        )
-      }
-      expect(knownDeviceIds()).toContain("peer-live")
-
-      for (const left of signalingRoom.peerLeft) left("socket-1")
-      expect(knownDeviceIds()).not.toContain("peer-live")
-    })
-
     // A rival set is per account, so a switch must FORGET the old room's live
     // peers, not just stop hearing them: they are another account's devices,
     // and nothing would ever age them out of a tracker that survives the
     // switch. `destroy` clears the same tracker; this is the other caller.
-    it("forgets the previous room's live peers on a switch", async () => {
-      seedConnectedAccount()
-      await dispatch(
-        { type: "parentIdentify", requestId: "r1", metadata: { name: "dApp" } },
-        PARENT_ORIGIN,
-        parentWindow,
-      )
-      await awaitBusJoin()
-      const first = busTopicNow()
-
-      const previous = new BroadcastChannel(accountChannelName)
-      try {
-        previous.postMessage({
-          type: "presence",
-          accountId: ACCOUNT_ID,
-          fromDeviceId: "peer-live",
-        })
-        await flushBus()
-        expect(knownDeviceIds()).toContain("peer-live")
-
-        seedConnectedAccount({
-          account: { derivationKey: OTHER_DERIVATION_KEY },
-        })
-        rejoinBus()
-        await vi.waitFor(() => expect(busTopicNow()).not.toBe(first))
-
-        expect(knownDeviceIds()).not.toContain("peer-live")
-      } finally {
-        previous.close()
-      }
-    })
   })
 
   describe("account-bus signaling transport", () => {

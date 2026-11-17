@@ -5,13 +5,11 @@
  * Reserved-slot bucket-collision regression for `writePartitionState`.
  *
  * Every reserved-slot write for partition `p` lands at stamp index
- * `(bucket, slot=p)` on the shared batch: the lock SOC, the counter chunks, the
- * reference chunk, the state-pointer entries, and the intent/occupancy
- * beacons. Two different chunks at the same `(bucket, p)` make Bee's
- * newer-stamp-wins replacement evict one of them. The publish therefore must
- * pick its randomly-keyed counter/reference chunks in buckets distinct from the
- * pointer entry it writes in the same round AND the beacons the off-lock refresh tick
- * writes concurrently.
+ * `(bucket, slot=p)` on the shared batch: the counter chunks, the reference
+ * chunk and the state-pointer entries. Two different chunks at the same
+ * `(bucket, p)` make Bee's newer-stamp-wins replacement evict one of them. The
+ * publish therefore must pick its randomly-keyed counter/reference chunks in
+ * buckets distinct from the pointer entries a search depends on.
  *
  * The collision is a ~1/65536 random event in production, so these tests force
  * it deterministically by mocking the one randomness source
@@ -72,16 +70,10 @@ vi.mock("../proxy/upload", async (importOriginal) => {
 import { writePartitionState } from "./partition-state"
 import { uploadChunk, uploadSOC } from "../proxy/upload"
 import {
-  intentEpochBucket,
-  partitionOccupancyAddress,
-} from "./partition-intent"
-import {
   NUM_BUCKETS,
   PARTITION_COUNT,
   UtilizationAwareStamper,
-  toBucket,
 } from "../utils/batch-utilization"
-import { lockSocBucket } from "../utils/lock-soc"
 import {
   MockBee,
   MockChunkStore,
@@ -95,7 +87,6 @@ const TEST_ENC_KEY = new Uint8Array(32).map((_, i) => (i * 7 + 3) & 0xff)
 const BACKUP_SIGNER = createTestSigner() as PrivateKey
 const OWNER = BACKUP_SIGNER.publicKey().address()
 const PARTITION = 0
-const DEVICE_ID = "device-A"
 
 let store: MockChunkStore
 let bee: MockBee
@@ -150,7 +141,6 @@ async function publishOneChunk(
     backupSigner: BACKUP_SIGNER,
     swarmEncryptionKey: TEST_ENC_KEY,
     seq: 1,
-    deviceId: DEVICE_ID,
   })
   return result.stateBuckets
 }
@@ -178,11 +168,6 @@ describe("writePartitionState — reserved-slot bucket-collision avoidance", () 
     const pointerBucket = await inScratchStore(async () =>
       (await publishOneChunk(await makeBoundStamper(), now)).at(-1),
     )
-    // Guard: a false green if the target happened to already be claimed.
-    expect(pointerBucket).not.toBe(
-      lockSocBucket(TEST_BATCH_ID, PARTITION, OWNER),
-    )
-
     force.bucket = pointerBucket // steer the first counter chunk onto the pointer
     const stateBuckets = await publishOneChunk(await makeBoundStamper(), now)
 
@@ -209,7 +194,6 @@ describe("writePartitionState — reserved-slot bucket-collision avoidance", () 
         localCounter,
         backupSigner: BACKUP_SIGNER,
         swarmEncryptionKey: TEST_ENC_KEY,
-        deviceId: DEVICE_ID,
         seq,
         previousReferences: previous?.references,
         previousCounter: previous?.publishedCounter,
@@ -241,29 +225,6 @@ describe("writePartitionState — reserved-slot bucket-collision avoidance", () 
     ).toHaveLength(1)
     expect(new Set(second.stateBuckets).size).toBe(second.stateBuckets.length)
   })
-
-  it("does not place a counter chunk in the occupancy beacon's bucket", async () => {
-    const now = 1_000_000_000_000
-    const stamper = await makeBoundStamper()
-    const occupancyBucket = toBucket(
-      partitionOccupancyAddress(
-        TEST_BATCH_ID,
-        PARTITION,
-        intentEpochBucket(now),
-        OWNER,
-      ),
-    )
-    expect(occupancyBucket).not.toBe(
-      lockSocBucket(TEST_BATCH_ID, PARTITION, OWNER),
-    )
-
-    force.bucket = occupancyBucket
-    const stateBuckets = await publishOneChunk(stamper, now)
-
-    // The refresh-tick occupancy beacon writes (occupancyBucket, slot=PARTITION)
-    // off-lock during this publish; a chunk there would evict the beacon.
-    expect(stateBuckets).not.toContain(occupancyBucket)
-  })
 })
 
 describe("writePartitionState — sparse sentinel refs are independent", () => {
@@ -282,7 +243,6 @@ describe("writePartitionState — sparse sentinel refs are independent", () => {
       backupSigner: BACKUP_SIGNER,
       swarmEncryptionKey: TEST_ENC_KEY,
       seq: 1,
-      deviceId: DEVICE_ID,
     })
 
     const zeroRefs = references.filter((r) => r.every((b) => b === 0))
@@ -313,7 +273,6 @@ describe("writePartitionState — distinct-bucket invariant guard", () => {
       backupSigner: BACKUP_SIGNER,
       swarmEncryptionKey: TEST_ENC_KEY,
       seq: 1,
-      deviceId: DEVICE_ID,
     })
 
     // Every reserved-slot write lands at (bucket, slot=PARTITION); the parallel
@@ -346,7 +305,6 @@ describe("writePartitionState — two-phase publish (pointer after chunks)", () 
         backupSigner: BACKUP_SIGNER,
         swarmEncryptionKey: TEST_ENC_KEY,
         seq: 1,
-        deviceId: DEVICE_ID,
       }),
     ).rejects.toThrow()
 
@@ -372,7 +330,6 @@ describe("writePartitionState — counter monotonicity tripwire", () => {
       backupSigner: BACKUP_SIGNER,
       swarmEncryptionKey: TEST_ENC_KEY,
       seq: 1,
-      deviceId: DEVICE_ID,
     })
 
     // A regressed counter (bucket 1000 dropped 5 → 4) must fail loudly rather
@@ -391,7 +348,6 @@ describe("writePartitionState — counter monotonicity tripwire", () => {
         backupSigner: BACKUP_SIGNER,
         swarmEncryptionKey: TEST_ENC_KEY,
         seq: 1,
-        deviceId: DEVICE_ID,
         previousReferences: first.references,
         previousCounter: first.publishedCounter,
       }),
@@ -413,7 +369,6 @@ describe("writePartitionState — counter monotonicity tripwire", () => {
       backupSigner: BACKUP_SIGNER,
       swarmEncryptionKey: TEST_ENC_KEY,
       seq: 1,
-      deviceId: DEVICE_ID,
     })
 
     // A previous counter is known but the ref set is NOT (the reachable
@@ -433,7 +388,6 @@ describe("writePartitionState — counter monotonicity tripwire", () => {
         backupSigner: BACKUP_SIGNER,
         swarmEncryptionKey: TEST_ENC_KEY,
         seq: 1,
-        deviceId: DEVICE_ID,
         // previousReferences intentionally omitted → full path.
         previousCounter: first.publishedCounter,
       }),

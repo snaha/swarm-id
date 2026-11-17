@@ -1,2125 +1,559 @@
 // Copyright 2026 The Swarm Authors. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { describe, it, expect, vi } from "vitest"
-import type { StatePointer } from "./partition-state"
-import { BatchId, EthAddress, PrivateKey } from "@ethersphere/bee-js"
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
+import { PrivateKey } from "@ethersphere/bee-js"
 
-import { PartitionLease } from "./partition-lease"
+/** What each context's `LaneState` does, set by the test. */
+const laneState = vi.hoisted(() => ({
+  /** The counter `resume` returns; `undefined` = the state cannot be read. */
+  resume: (() => new Uint32Array(8)) as () => Uint32Array | undefined,
+  resumed: [] as number[],
+  published: [] as number[],
+  publishError: undefined as Error | undefined,
+  /** Runs inside `resume`, before it returns. */
+  duringResume: undefined as (() => void) | undefined,
+}))
 
-type MockLease = ReturnType<typeof makeLease>
-
-// The lease primitive and the lock-SOC read are mocked so the coordinator's
-// acquire / refresh / demote paths are unit-testable without a live Bee node.
-// Each test installs the lease the coordinator is to be handed; being asked
-// for one before that is a mistake in the test, so it fails loudly rather
-// than handing the coordinator `undefined`.
-const leaseController: { lease: MockLease | undefined } = { lease: undefined }
-vi.mock("./partition-lease", () => ({
-  PartitionLease: {
-    fromSwarmEncryptionKey: vi.fn(async () => {
-      if (!leaseController.lease) throw new Error("no mock lease installed")
-      return leaseController.lease
-    }),
+vi.mock("./lane-state", () => ({
+  LaneState: class {
+    constructor(private readonly opts: { partition: number }) {}
+    async resume(): Promise<Uint32Array | undefined> {
+      laneState.resumed.push(this.opts.partition)
+      laneState.duringResume?.()
+      return laneState.resume()
+    }
+    async publish(): Promise<void> {
+      if (laneState.publishError) throw laneState.publishError
+      laneState.published.push(this.opts.partition)
+    }
   },
 }))
-const lockController: {
-  payload: { holderDeviceId: string; leasedUntil: number } | undefined
-} = { payload: undefined }
-vi.mock("./partition-lock", async (importOriginal) => {
-  const actual = (await importOriginal()) as Record<string, unknown>
-  return {
-    ...actual,
-    readPartitionLock: vi.fn(async () => lockController.payload),
-  }
-})
-// The cross-tab Web Lock, with an interleaving hook: a test can run code at
-// the moment the lock is granted (i.e. after the caller decided to lock but
-// before the locked section runs) to simulate work that slipped in while the
-// caller queued on the lock. Default is straight pass-through.
-const writeLockController: { onGrant?: () => void } = {}
-vi.mock("../utils/batch-write-lock", () => ({
-  withBatchWriteLock: vi.fn(
-    async (_key: string, op: () => Promise<unknown>) => {
-      writeLockController.onGrant?.()
-      return op()
-    },
-  ),
-}))
 
 import {
-  ANNOUNCED_RESCAN_INTERVAL_MS,
-  ANNOUNCED_RESCAN_ROUNDS,
   BatchWriteCoordinator,
+  NEXT_LANE_AFTER_MS,
+  PEER_YIELD_MIN_IDLE_MS,
   PartitionContendedError,
   SLOT_WAIT_TIMEOUT_MS,
-  PEER_YIELD_MIN_IDLE_MS,
-  isDisplaced,
+  deviceHomePartition,
   type BatchWriteCoordinatorDeps,
 } from "./batch-write-coordinator"
-import { NO_HOLDER_DEVICE_ID } from "./partition-lock"
-import type { LeaseRefreshOutcome } from "./partition-lease"
-import {
-  LEASE_REFRESH_MS,
-  LEASE_TTL_MS,
-  NUM_BUCKETS,
-  PartitionLeaseLostError,
-  UtilizationAwareStamper,
-  dataSlot,
-} from "../utils/batch-utilization"
-import type { UtilizationStoreDB } from "../storage/utilization-store"
-import { uploadData } from "../proxy/upload"
-import { CHUNK_SIZE } from "../proxy/chunking"
-import { MockBee } from "../proxy/feeds/epochs/test-utils"
+import { BusLanes, LEASE_STOP_MS, LEASE_WAIT_MS } from "./bus-lease"
+import { makeRoom, type FakeLiveness } from "./bus-lease-test-utils"
+import { createTestSigner } from "../proxy/feeds/epochs/test-utils"
 
-const SELF = "self-device"
-const PEER = "peer-device"
-const NOW = 1_000_000
-// A valid 32-byte hex batch id (new BatchId(...) validates the hex).
+// Chosen so the home lane at two partitions is lane 0.
+const DEVICE = "device-alpha-1"
 const BATCH_ID = "ab".repeat(32)
+const ACCOUNT_ID = "aa".repeat(20)
+const PARTITION_COUNT = 2
+const HOME = 0
+const OTHER = 1
 
-/** A controllable stand-in for the bound stamper. Records the order of
- *  invalidate/unbind/bind so the race-fix ordering can be asserted. */
+/** A controllable stand-in for the bound stamper, recording call order. */
 function makeStamper(calls: string[]) {
   return {
-    depth: 20,
     counterDepth: 20,
     invalidateLease: vi.fn(() => calls.push("invalidate")),
     unbindPartition: vi.fn(() => calls.push("unbind")),
-    bindPartition: vi.fn(() => calls.push("bind")),
-    setLeaseValidUntil: vi.fn(),
-    buildLeaseLocalCounter: () => new Uint32Array(8),
-    getLocalCounter: (): Uint32Array | undefined => new Uint32Array(8),
-    // Persisted per-partition synced pointer; the adopt fast path reads it to
-    // tell the lease which published state it continues from. Default: none
-    // (fresh partition).
-    getSyncedPointer: vi.fn(
-      async (_partition: number): Promise<StatePointer | undefined> =>
-        undefined,
+    bindPartition: vi.fn((bound: { partition: number }) =>
+      calls.push(`bind ${bound.partition}`),
     ),
+    setLeaseValidUntil: vi.fn(),
+    getLocalCounter: (): Uint32Array | undefined => new Uint32Array(8),
   }
 }
 
-/** A controllable PartitionLease double. */
-function makeLease(
-  opts: {
-    partition?: number
-    acquireResult?: {
-      partition: number | undefined
-      partitionCount: number
-      localCounter?: Uint32Array
-      isReadOnly: boolean
-    }
-    /** Make `acquire` reject — an operational failure, not contention. */
-    acquireError?: Error
-    refreshResult?: LeaseRefreshOutcome
-    /** Local lease expiry, drives `leaseNearExpiry` in the reverse-clobber guard. */
-    leasedUntil?: number
-  } = {},
-) {
-  let partition = opts.partition
-  let leasedUntil = opts.leasedUntil
-  return {
-    hydrate: vi.fn(),
-    adoptIfLive: vi.fn((): number | undefined => undefined),
-    acquire: vi.fn(async () => {
-      if (opts.acquireError) throw opts.acquireError
-      const r = opts.acquireResult ?? {
-        partition: undefined,
-        partitionCount: 4,
-        isReadOnly: true,
-      }
-      // The real PartitionLease binds its current partition on a successful
-      // acquire; mirror that so `currentPartition` reflects the result.
-      if (r.partition !== undefined) partition = r.partition
-      return r
-    }),
-    refresh: vi.fn(async () => opts.refreshResult ?? "held"),
-    release: vi.fn(async () => {}),
-    publishState: vi.fn(async () => {}),
-    repairPublishedState: vi.fn(async () => {}),
-    seedPublished: vi.fn(),
-    bumpLocalLease: vi.fn(),
-    serialize: vi.fn(() => ({ v: 1 })),
-    get currentPartition() {
-      return partition
-    },
-    get leasedUntil() {
-      return leasedUntil
-    },
-    /** Test helper: simulate the lease lapsing mid-upload. */
-    setLeasedUntil(v: number) {
-      leasedUntil = v
-    },
-  }
+interface Context {
+  coordinator: BatchWriteCoordinator
+  liveness: FakeLiveness
+  lanes: BusLanes
+  stamper: ReturnType<typeof makeStamper>
+  calls: string[]
+  changes: { currentPartition: number | undefined; isReadOnly: boolean }[]
 }
 
-describe("isDisplaced", () => {
-  it("is true only for a different, live device", () => {
-    expect(
-      isDisplaced({ holderDeviceId: PEER, leasedUntil: NOW + 1 }, NOW, SELF),
-    ).toBe(true)
-  })
+let join: ReturnType<typeof makeRoom>["join"]
 
-  it("is false for our own id", () => {
-    expect(
-      isDisplaced({ holderDeviceId: SELF, leasedUntil: NOW + 1 }, NOW, SELF),
-    ).toBe(false)
-  })
-
-  it("is false for the release sentinel", () => {
-    expect(
-      isDisplaced(
-        { holderDeviceId: NO_HOLDER_DEVICE_ID, leasedUntil: NOW + 1 },
-        NOW,
-        SELF,
-      ),
-    ).toBe(false)
-  })
-
-  it("is false for an expired foreign holder", () => {
-    expect(
-      isDisplaced({ holderDeviceId: PEER, leasedUntil: NOW - 1 }, NOW, SELF),
-    ).toBe(false)
-  })
-
-  it("is false for a missing/unreadable payload", () => {
-    expect(isDisplaced(undefined, NOW, SELF)).toBe(false)
-  })
-})
-
-describe("PartitionContendedError", () => {
-  it("is an Error with a stable name and optional accountId", () => {
-    const err = new PartitionContendedError(undefined, "acct-1")
-    expect(err).toBeInstanceOf(Error)
-    expect(err.name).toBe("PartitionContendedError")
-    expect(err.accountId).toBe("acct-1")
-  })
-})
-
-// Minimal deps for the shell — the lease/write methods (Steps B/C) are not yet
-// exercised here, so the Swarm-touching deps can be opaque doubles.
-function makeDeps(
+/** A context in the room with a coordinator for the batch. */
+function makeContext(
+  id: string,
   overrides: Partial<BatchWriteCoordinatorDeps> = {},
-): BatchWriteCoordinatorDeps {
-  return {
+): Context {
+  const bus = join(id)
+  const lanes = new BusLanes(bus)
+  const calls: string[] = []
+  const stamper = makeStamper(calls)
+  const changes: Context["changes"] = []
+  const coordinator = new BatchWriteCoordinator({
     bee: {} as BatchWriteCoordinatorDeps["bee"],
     batchId: BATCH_ID,
-    stamper: {} as BatchWriteCoordinatorDeps["stamper"],
-    deviceId: SELF,
-    accountId: "acct-1",
-    backupSigner: {} as BatchWriteCoordinatorDeps["backupSigner"],
+    stamper: stamper as unknown as BatchWriteCoordinatorDeps["stamper"],
+    deviceId: DEVICE,
+    accountId: ACCOUNT_ID,
+    lanes,
+    backupSigner: createTestSigner() as PrivateKey,
     swarmEncryptionKey: new Uint8Array(32),
-    partitionCount: 4,
+    partitionCount: PARTITION_COUNT,
     mode: "persistent",
+    onLeaseChange: (info) => changes.push(info),
     ...overrides,
-  }
+  })
+  return { coordinator, liveness: bus.liveness, lanes, stamper, calls, changes }
 }
 
-describe("BatchWriteCoordinator (Step A shell)", () => {
-  it("starts with no held partition and not read-only", () => {
-    const coordinator = new BatchWriteCoordinator(makeDeps())
-    expect(coordinator.currentPartition).toBeUndefined()
-    expect(coordinator.isReadOnly).toBe(false)
+/** Let promise chains and the claim loop's timers run for `ms`. */
+const advance = (ms: number) => vi.advanceTimersByTimeAsync(ms)
+
+beforeEach(() => {
+  vi.useFakeTimers()
+  join = makeRoom().join
+  laneState.resume = () => new Uint32Array(8)
+  laneState.resumed = []
+  laneState.published = []
+  laneState.publishError = undefined
+  laneState.duringResume = undefined
+})
+
+afterEach(() => {
+  vi.useRealTimers()
+})
+
+describe("BatchWriteCoordinator — a context alone in the room", () => {
+  it("asks for its device's home lane first", () => {
+    expect(deviceHomePartition(DEVICE, PARTITION_COUNT)).toBe(HOME)
   })
 
-  it("exposes the injected stamper", () => {
-    const stamper = {
-      tag: "the-stamper",
-    } as unknown as BatchWriteCoordinatorDeps["stamper"]
-    const coordinator = new BatchWriteCoordinator(makeDeps({ stamper }))
-    expect(coordinator.stamperRef).toBe(stamper)
+  it("takes a lane, binds the resumed counter, and acknowledges only after publishing", async () => {
+    const a = makeContext("a")
+    const order: string[] = []
+    const resumed = new Uint32Array(8).fill(3)
+    laneState.resume = () => resumed
+
+    const result = await a.coordinator.withWrite(async () => {
+      order.push(`op on ${a.coordinator.currentPartition}`)
+      return "uploaded"
+    })
+    order.push(`published ${laneState.published.join()}`)
+
+    expect(result).toBe("uploaded")
+    expect(order).toEqual([`op on ${HOME}`, `published ${HOME}`])
+    expect(a.stamper.bindPartition).toHaveBeenCalledWith({
+      partition: HOME,
+      partitionCount: PARTITION_COUNT,
+      localCounter: resumed,
+    })
+    expect(a.changes.at(-1)).toEqual({
+      currentPartition: HOME,
+      isReadOnly: false,
+    })
   })
 
-  it("teardown clears the lease cache and notifies onLeaseChange", () => {
-    const writeLeaseCache = vi.fn()
-    const onLeaseChange = vi.fn()
-    const coordinator = new BatchWriteCoordinator(
-      makeDeps({ writeLeaseCache, onLeaseChange }),
+  it("reads the lane's counter once for writes that start together, and not again while it holds", async () => {
+    const a = makeContext("a")
+
+    await Promise.all([
+      a.coordinator.withWrite(async () => 1),
+      a.coordinator.withWrite(async () => 2),
+    ])
+    await a.coordinator.withWrite(async () => 3)
+
+    expect(laneState.resumed).toEqual([HOME])
+    expect(laneState.published).toEqual([HOME, HOME, HOME])
+  })
+
+  it("fails the upload, unacknowledged, when the counter cannot be published", async () => {
+    const a = makeContext("a")
+    laneState.publishError = new Error("publish failed")
+
+    await expect(a.coordinator.withWrite(async () => "x")).rejects.toThrow(
+      "publish failed",
     )
-    coordinator.teardown()
-    expect(writeLeaseCache).toHaveBeenCalledWith(undefined)
-    expect(onLeaseChange).toHaveBeenCalledWith({
+  })
+
+  it("takes a lane in the background when asked to warm up", async () => {
+    const acquired: number[] = []
+    const a = makeContext("a", { onLeaseAcquired: (p) => acquired.push(p) })
+
+    a.coordinator.startLease()
+    await advance(0)
+
+    expect(a.coordinator.currentPartition).toBe(HOME)
+    expect(acquired).toEqual([HOME])
+  })
+
+  it("waits for its connection to be confirmed before it writes", async () => {
+    const a = makeContext("a")
+    a.liveness.confirmedAgo = Infinity
+
+    const write = a.coordinator.withWrite(async () => "x")
+    await advance(1000)
+    expect(a.coordinator.currentPartition).toBeUndefined()
+
+    a.liveness.confirm(Infinity)
+    await advance(1000)
+    expect(await write).toBe("x")
+  })
+
+  it("waits out the time a newcomer must see everyone else absent", async () => {
+    const a = makeContext("a")
+    a.liveness.absentFor = 0
+
+    const write = a.coordinator.withWrite(async () => "x")
+    await advance(1000)
+    expect(a.coordinator.currentPartition).toBeUndefined()
+
+    a.liveness.absentFor = LEASE_WAIT_MS
+    a.liveness.confirm()
+    await advance(1000)
+    expect(await write).toBe("x")
+  })
+})
+
+describe("BatchWriteCoordinator — without lanes", () => {
+  it("writes a batch that is not split into partitions with nobody to ask", async () => {
+    const a = makeContext("a", { partitionCount: 1, lanes: undefined })
+
+    expect(await a.coordinator.withWrite(async () => "x")).toBe("x")
+    expect(a.stamper.bindPartition).not.toHaveBeenCalled()
+    expect(laneState.published).toEqual([])
+  })
+
+  it("cannot write a split batch from a context that is not on the bus", async () => {
+    const a = makeContext("a", { lanes: undefined })
+
+    await expect(a.coordinator.withWrite(async () => "x")).rejects.toThrow(
+      PartitionContendedError,
+    )
+    expect(a.coordinator.isReadOnly).toBe(true)
+  })
+})
+
+describe("BatchWriteCoordinator — two contexts", () => {
+  it("a newcomer takes the lane nobody holds, and leaves an idle holder where it is", async () => {
+    const a = makeContext("a")
+    const b = makeContext("b")
+    await a.coordinator.withWrite(async () => "x")
+    await advance(PEER_YIELD_MIN_IDLE_MS)
+
+    expect(await b.coordinator.withWrite(async () => "y")).toBe("y")
+
+    expect(a.coordinator.currentPartition).toBe(HOME)
+    expect(b.coordinator.currentPartition).toBe(OTHER)
+  })
+
+  it("with every lane held, an idle holder hands over once asked to, and stops stamping first", async () => {
+    const a = makeContext("a")
+    const b = makeContext("b")
+    const c = makeContext("c")
+    await a.coordinator.withWrite(async () => "x")
+    await b.coordinator.withWrite(async () => "y")
+    await advance(PEER_YIELD_MIN_IDLE_MS)
+    a.calls.length = 0
+
+    const write = c.coordinator.withWrite(async () => "z")
+    // Asked gently at first: nobody moves.
+    await advance(NEXT_LANE_AFTER_MS - 500)
+    expect(a.coordinator.currentPartition).toBe(HOME)
+    expect(b.coordinator.currentPartition).toBe(OTHER)
+
+    await advance(1000)
+    expect(await write).toBe("z")
+
+    expect(c.coordinator.currentPartition).toBe(HOME)
+    expect(a.coordinator.currentPartition).toBeUndefined()
+    expect(b.coordinator.currentPartition).toBe(OTHER)
+    expect(a.calls).toEqual(["invalidate", "unbind"])
+    expect(a.changes.at(-1)).toEqual({
       currentPartition: undefined,
       isReadOnly: false,
     })
   })
 
-  it("teardown announces the partition it held", () => {
-    const onLeaseReleased = vi.fn()
-    const coordinator = new BatchWriteCoordinator(
-      makeDeps({
-        stamper: makeStamper(
-          [],
-        ) as unknown as BatchWriteCoordinatorDeps["stamper"],
-        onLeaseReleased,
-      }),
-    )
-    ;(coordinator as unknown as Internals).partitionLease = makeLease({
-      partition: 2,
-    })
-    coordinator.teardown()
-    expect(onLeaseReleased).toHaveBeenCalledWith(2)
+  it("does not ask a holder to move while another lane is on its way", async () => {
+    const a = makeContext("a")
+    const b = makeContext("b")
+    await a.coordinator.withWrite(async () => "x")
+    await advance(PEER_YIELD_MIN_IDLE_MS)
+    // B has just joined: the lane nobody holds is not its to take yet.
+    b.liveness.absentFor = 1000
+
+    const write = b.coordinator.withWrite(async () => "y")
+    await advance(NEXT_LANE_AFTER_MS * 3)
+    expect(a.coordinator.currentPartition).toBe(HOME)
+    expect(b.coordinator.currentPartition).toBeUndefined()
+
+    b.liveness.absentFor = LEASE_WAIT_MS
+    b.liveness.confirm()
+    await advance(1000)
+    expect(await write).toBe("y")
+    expect(a.coordinator.currentPartition).toBe(HOME)
+    expect(b.coordinator.currentPartition).toBe(OTHER)
   })
 
-  it("teardown is safe with no optional hooks provided", () => {
-    const coordinator = new BatchWriteCoordinator(makeDeps())
-    expect(() => coordinator.teardown()).not.toThrow()
+  it("a holder between two uploads keeps its lane, and the claimant takes the other one", async () => {
+    const a = makeContext("a")
+    const b = makeContext("b")
+    await a.coordinator.withWrite(async () => "x")
+
+    const write = b.coordinator.withWrite(async () => "y")
+    await advance(NEXT_LANE_AFTER_MS + 500)
+
+    expect(await write).toBe("y")
+    expect(a.coordinator.currentPartition).toBe(HOME)
+    expect(b.coordinator.currentPartition).toBe(OTHER)
+  })
+
+  it("a holder with an upload in flight does not hand over", async () => {
+    const a = makeContext("a")
+    const b = makeContext("b")
+    let finish: () => void = () => {}
+    const upload = a.coordinator.withWrite(
+      () => new Promise<string>((resolve) => (finish = () => resolve("x"))),
+    )
+    await advance(PEER_YIELD_MIN_IDLE_MS + 1000)
+
+    const write = b.coordinator.withWrite(async () => "y")
+    await advance(NEXT_LANE_AFTER_MS + 500)
+    expect(await write).toBe("y")
+    expect(b.coordinator.currentPartition).toBe(OTHER)
+
+    finish()
+    expect(await upload).toBe("x")
+    expect(laneState.published).toContain(HOME)
+  })
+
+  it("takes a lane again on its next write after handing one over", async () => {
+    const a = makeContext("a")
+    const b = makeContext("b")
+    const c = makeContext("c")
+    await a.coordinator.withWrite(async () => "x")
+    await b.coordinator.withWrite(async () => "y")
+    await advance(PEER_YIELD_MIN_IDLE_MS)
+    const taken = c.coordinator.withWrite(async () => "z")
+    await advance(NEXT_LANE_AFTER_MS + 500)
+    await taken
+    expect(a.coordinator.currentPartition).toBeUndefined()
+    await advance(PEER_YIELD_MIN_IDLE_MS)
+
+    const back = a.coordinator.withWrite(async () => "w")
+    await advance(NEXT_LANE_AFTER_MS + 500)
+    expect(await back).toBe("w")
+
+    expect(a.coordinator.currentPartition).toBe(HOME)
+    expect(c.coordinator.currentPartition).toBeUndefined()
   })
 })
 
-/** Cast helper for poking at private state in the race-fix tests. */
-type Internals = {
-  partitionLease: unknown
-  lastLeaseActivityAt: number
-  lastLeaseValidatedAt: number
-  activeUploadCount: number
-  pendingAcquire: boolean
-  readOnly: boolean
-  refreshTick: (lease: unknown) => Promise<void>
-  ensureLeaseStillValid: () => Promise<void>
-  acquire: () => Promise<void>
-  acquireWithSlotWait: () => Promise<void>
-  pauseLeaseBackgroundWork: () => void
-  slotWait:
-    | {
-        wake?: () => void
-        maybeFree: boolean
-        rescansLeft: number
-        rescanWindowUsed: boolean
-      }
-    | undefined
-}
-
-describe("BatchWriteCoordinator.withWrite — aborted while queued", () => {
-  it("stops at the lock: no lease, no worker pool, no write", async () => {
-    const lease = makeLease({
-      acquireResult: {
-        partition: 1,
-        partitionCount: 4,
-        localCounter: new Uint32Array(8),
-        isReadOnly: false,
+describe("BatchWriteCoordinator — every lane held by a writer", () => {
+  /** Two contexts, each mid-upload on one of the two lanes. */
+  async function occupyBothLanes() {
+    const finish: (() => void)[] = []
+    const hold = (context: Context) =>
+      context.coordinator.withWrite(
+        () => new Promise<void>((resolve) => finish.push(resolve)),
+      )
+    const a = makeContext("a")
+    const b = makeContext("b")
+    const uploads = [hold(a)]
+    await advance(0)
+    uploads.push(hold(b))
+    await advance(NEXT_LANE_AFTER_MS + 500)
+    expect(a.coordinator.currentPartition).toBe(HOME)
+    expect(b.coordinator.currentPartition).toBe(OTHER)
+    return {
+      release: async () => {
+        for (const done of finish) done()
+        await Promise.all(uploads)
       },
-    })
-    leaseController.lease = lease
-    const getWorkerPool = vi.fn()
-    const coordinator = new BatchWriteCoordinator(
-      makeDeps({
-        stamper: makeStamper(
-          [],
-        ) as unknown as BatchWriteCoordinatorDeps["stamper"],
-        mode: "oneshot",
-        getWorkerPool,
-      }),
-    )
-    const controller = new AbortController()
-    writeLockController.onGrant = () => controller.abort()
-    const op = vi.fn()
-
-    try {
-      await expect(
-        coordinator.withWrite(op, {
-          wait: "block",
-          useWorkers: true,
-          signal: controller.signal,
-        }),
-      ).rejects.toMatchObject({ code: "aborted" })
-    } finally {
-      writeLockController.onGrant = undefined
     }
-
-    expect(lease.acquire).not.toHaveBeenCalled()
-    expect(getWorkerPool).not.toHaveBeenCalled()
-    expect(op).not.toHaveBeenCalled()
-  })
-})
-
-describe("BatchWriteCoordinator.withWrite — wait fork", () => {
-  it("block mode (proxy): acquires a free slot, runs op, flushes", async () => {
-    leaseController.lease = makeLease({
-      acquireResult: {
-        partition: 1,
-        partitionCount: 4,
-        localCounter: new Uint32Array(8),
-        isReadOnly: false,
-      },
-    })
-    const calls: string[] = []
-    const stamper = makeStamper(calls)
-    const flushStamperState = vi.fn(async () => {})
-    const onLeaseAcquired = vi.fn()
-    const coordinator = new BatchWriteCoordinator(
-      makeDeps({
-        stamper: stamper as unknown as BatchWriteCoordinatorDeps["stamper"],
-        mode: "oneshot", // no refresh timer to leak in the test
-        flushStamperState,
-        onLeaseAcquired,
-      }),
-    )
-
-    const op = vi.fn(async (target: { mode: string }) => {
-      expect(target.mode).toBe("stamper")
-      return "ok"
-    })
-    const result = await coordinator.withWrite(op, { wait: "block" })
-
-    expect(result).toBe("ok")
-    expect(op).toHaveBeenCalledTimes(1)
-    expect(stamper.bindPartition).toHaveBeenCalled()
-    expect(coordinator.currentPartition).toBe(1)
-    expect(onLeaseAcquired).toHaveBeenCalledWith(1)
-    expect(flushStamperState).toHaveBeenCalledTimes(1)
-  })
-
-  it("skip mode (sync-account): throws PartitionContendedError and never runs op", async () => {
-    leaseController.lease = makeLease({
-      acquireResult: {
-        partition: undefined,
-        partitionCount: 4,
-        isReadOnly: true,
-      },
-    })
-    const calls: string[] = []
-    const stamper = makeStamper(calls)
-    const coordinator = new BatchWriteCoordinator(
-      makeDeps({
-        stamper: stamper as unknown as BatchWriteCoordinatorDeps["stamper"],
-        mode: "oneshot",
-      }),
-    )
-
-    const op = vi.fn(async () => "ok")
-    await expect(
-      coordinator.withWrite(op, { wait: "skip" }),
-    ).rejects.toBeInstanceOf(PartitionContendedError)
-    expect(op).not.toHaveBeenCalled()
-  })
-
-  it("single-partition account: writes without a lease (no acquire)", async () => {
-    const calls: string[] = []
-    const stamper = makeStamper(calls)
-    const coordinator = new BatchWriteCoordinator(
-      makeDeps({
-        stamper: stamper as unknown as BatchWriteCoordinatorDeps["stamper"],
-        partitionCount: 1,
-        mode: "oneshot",
-      }),
-    )
-    const op = vi.fn(async () => "ok")
-    await expect(coordinator.withWrite(op, { wait: "skip" })).resolves.toBe(
-      "ok",
-    )
-    expect(op).toHaveBeenCalledTimes(1)
-    expect(stamper.bindPartition).not.toHaveBeenCalled()
-  })
-})
-
-describe("BatchWriteCoordinator.withWrite — commit-ordered ack", () => {
-  function held(partition: number) {
-    return makeLease({
-      acquireResult: {
-        partition,
-        partitionCount: 4,
-        localCounter: new Uint32Array(8),
-        isReadOnly: false,
-      },
-      // Comfortably valid so the post-op freshness check stays throttled.
-      leasedUntil: Date.now() + LEASE_TTL_MS,
-    })
   }
 
-  it("publishes partition state AFTER op resolves and BEFORE withWrite resolves", async () => {
-    const order: string[] = []
-    const lease = held(1)
-    lease.publishState = vi.fn(async (lc: Uint32Array) => {
-      order.push("publish")
-      // The publish carries the stamper's current counter (its resume point).
-      expect(lc).toBeInstanceOf(Uint32Array)
-    }) as typeof lease.publishState
-    leaseController.lease = lease
-    const stamper = makeStamper([])
-    const coordinator = new BatchWriteCoordinator(
-      makeDeps({
-        stamper: stamper as unknown as BatchWriteCoordinatorDeps["stamper"],
-        mode: "oneshot",
-      }),
-    )
+  it("a blocking write gives up after its wait, read-only until a lane is taken", async () => {
+    const { release } = await occupyBothLanes()
+    const c = makeContext("c")
 
-    const op = vi.fn(async () => {
-      order.push("op")
-      return "ref"
-    })
-    const result = await coordinator.withWrite(op, { wait: "block" })
+    const write = c.coordinator.withWrite(async () => "z")
+    const failure = expect(write).rejects.toThrow(PartitionContendedError)
+    await advance(SLOT_WAIT_TIMEOUT_MS + 1000)
+    await failure
 
-    expect(result).toBe("ref")
-    // Ack-after-publish: op's chunks are written, THEN the slot-reserving state
-    // is published, THEN the upload resolves durable.
-    expect(order).toEqual(["op", "publish"])
-    expect(lease.publishState).toHaveBeenCalledTimes(1)
-  })
-
-  it("a publish failure rejects the upload (never reported durable)", async () => {
-    const lease = held(1)
-    lease.publishState = vi.fn(async () => {
-      throw new Error("partition-state publish failed")
-    }) as typeof lease.publishState
-    leaseController.lease = lease
-    const stamper = makeStamper([])
-    const coordinator = new BatchWriteCoordinator(
-      makeDeps({
-        stamper: stamper as unknown as BatchWriteCoordinatorDeps["stamper"],
-        mode: "oneshot",
-      }),
-    )
-
-    const op = vi.fn(async () => "ref")
-    await expect(coordinator.withWrite(op, { wait: "block" })).rejects.toThrow(
-      "partition-state publish failed",
-    )
-    expect(op).toHaveBeenCalledTimes(1)
-  })
-
-  it("a held partition with no local counter rejects (never acks without publishing the slot reservation)", async () => {
-    const lease = held(1)
-    leaseController.lease = lease
-    const stamper = makeStamper([])
-    // Held a partition lease, but the stamper exposes no local counter — the
-    // commit publish would be silently skipped, acking an upload whose slots
-    // were never reserved on Swarm. The coordinator must fail loudly instead.
-    stamper.getLocalCounter = () => undefined
-    const coordinator = new BatchWriteCoordinator(
-      makeDeps({
-        stamper: stamper as unknown as BatchWriteCoordinatorDeps["stamper"],
-        mode: "oneshot",
-      }),
-    )
-
-    const op = vi.fn(async () => "ref")
-    await expect(coordinator.withWrite(op, { wait: "block" })).rejects.toThrow(
-      /local counter/,
-    )
-    expect(op).toHaveBeenCalledTimes(1)
-    expect(lease.publishState).not.toHaveBeenCalled()
-  })
-
-  it("reverse-clobber guard: a lease that lapsed mid-upload is re-read; the upload throws and does NOT publish", async () => {
-    const lease = held(0)
-    leaseController.lease = lease
-    const stamper = makeStamper([])
-    const coordinator = new BatchWriteCoordinator(
-      makeDeps({
-        stamper: stamper as unknown as BatchWriteCoordinatorDeps["stamper"],
-        mode: "oneshot",
-      }),
-    )
-    // No live foreign holder at the start-of-write check (it's throttled anyway).
-    lockController.payload = undefined
-
-    const op = vi.fn(async () => {
-      // The upload ran long enough that our lease lapsed AND a peer took the
-      // slot — the reverse hazard the commit rule cannot cover.
-      lease.setLeasedUntil(Date.now() - 1)
-      lockController.payload = {
-        holderDeviceId: PEER,
-        leasedUntil: Date.now() + 10_000,
-      }
-      return "ref"
-    })
-
-    await expect(coordinator.withWrite(op, { wait: "block" })).rejects.toThrow(
-      /reclaimed/,
-    )
-    expect(op).toHaveBeenCalledTimes(1)
-    // Never ack slots a new holder now owns.
-    expect(lease.publishState).not.toHaveBeenCalled()
-    expect(coordinator.isReadOnly).toBe(true)
-  })
-})
-
-describe("BatchWriteCoordinator — acquire does not block on the device-registry refresh", () => {
-  it("completes acquire while refreshKnownDeviceIds is still pending (non-blocking)", async () => {
-    leaseController.lease = makeLease({
-      acquireResult: {
-        partition: 1,
-        partitionCount: 4,
-        localCounter: new Uint32Array(8),
-        isReadOnly: false,
-      },
-    })
-    const stamper = makeStamper([])
-    // A refresh that never settles — modelling the slow gateway roster fold.
-    // If `acquire` awaited it, `withWrite` would hang to the 45s
-    // cap; non-blocking, the acquire binds the partition immediately.
-    let settleRefresh!: () => void
-    const refreshKnownDeviceIds = vi.fn(
-      () => new Promise<void>((resolve) => (settleRefresh = resolve)),
-    )
-    const coordinator = new BatchWriteCoordinator(
-      makeDeps({
-        stamper: stamper as unknown as BatchWriteCoordinatorDeps["stamper"],
-        mode: "oneshot",
-        refreshKnownDeviceIds,
-      }),
-    )
-
-    const op = vi.fn(async () => "ok")
-    await expect(coordinator.withWrite(op, { wait: "block" })).resolves.toBe(
-      "ok",
-    )
-    expect(refreshKnownDeviceIds).toHaveBeenCalledTimes(1)
-    expect(coordinator.currentPartition).toBe(1)
-    settleRefresh() // let the detached refresh resolve so no promise leaks
-  })
-})
-
-describe("BatchWriteCoordinator — displacement-during-upload race fix", () => {
-  it("invalidates the lease BEFORE unbinding, so an in-flight stamp aborts", async () => {
-    const calls: string[] = []
-    const stamper = makeStamper(calls)
-    const onLeaseChange = vi.fn()
-    const coordinator = new BatchWriteCoordinator(
-      makeDeps({
-        stamper: stamper as unknown as BatchWriteCoordinatorDeps["stamper"],
-        onLeaseChange,
-      }),
-    )
-    const internals = coordinator as unknown as Internals
-
-    // Seed a held lease on partition 0 that fails its refresh (so the tick
-    // falls back to the displacement read), and make the lock SOC name a live
-    // peer. Keep the lease "active" so the idle-yield branch is skipped.
-    const lease = makeLease({ partition: 0, refreshResult: "lost" })
-    internals.partitionLease = lease
-    internals.lastLeaseActivityAt = Date.now()
-    internals.activeUploadCount = 1
-    lockController.payload = {
-      holderDeviceId: PEER,
-      leasedUntil: Date.now() + 10_000,
-    }
-
-    await internals.refreshTick(lease)
-
-    // The fix: invalidateLease() fires first (arming the stamp() circuit
-    // breaker while the partition is still bound), THEN unbindPartition().
-    expect(calls).toEqual(["invalidate", "unbind"])
-    expect(stamper.invalidateLease).toHaveBeenCalledTimes(1)
-    expect(stamper.unbindPartition).toHaveBeenCalledTimes(1)
-    expect(coordinator.currentPartition).toBeUndefined()
-    expect(coordinator.isReadOnly).toBe(true)
-    expect(internals.pendingAcquire).toBe(true)
-    expect(onLeaseChange).toHaveBeenLastCalledWith({
+    expect(c.coordinator.isReadOnly).toBe(true)
+    expect(c.changes.at(-1)).toEqual({
       currentPartition: undefined,
       isReadOnly: true,
     })
+    await release()
   })
 
-  it("a live self-held lock SOC is NOT a displacement — keeps the lease", async () => {
-    const calls: string[] = []
-    const stamper = makeStamper(calls)
-    const coordinator = new BatchWriteCoordinator(
-      makeDeps({
-        stamper: stamper as unknown as BatchWriteCoordinatorDeps["stamper"],
-      }),
-    )
-    const internals = coordinator as unknown as Internals
-    const lease = makeLease({ partition: 0, refreshResult: "lost" })
-    internals.partitionLease = lease
-    internals.lastLeaseActivityAt = Date.now()
-    internals.activeUploadCount = 1
-    lockController.payload = {
-      holderDeviceId: SELF,
-      leasedUntil: Date.now() + 10_000,
-    }
+  it("a one-off write gives up much sooner", async () => {
+    const { release } = await occupyBothLanes()
+    const c = makeContext("c", { mode: "oneshot" })
 
-    await internals.refreshTick(lease)
+    const write = c.coordinator.withWrite(async () => "z")
+    const failure = expect(write).rejects.toThrow(PartitionContendedError)
+    await advance(LEASE_WAIT_MS + 3000)
+    await failure
 
-    expect(stamper.invalidateLease).not.toHaveBeenCalled()
-    expect(stamper.unbindPartition).not.toHaveBeenCalled()
-    expect(coordinator.currentPartition).toBe(0)
-    expect(lease.bumpLocalLease).toHaveBeenCalled()
+    await release()
   })
 
-  it("demotes on a beacon-confirmed displacement, even though the static lock SOC still shows us live", async () => {
-    // The refresh-time deconfliction backstop: `PartitionLease.refresh()` reads
-    // a rival's presence beacon at a fresh per-epoch address — the channel that
-    // stays readable on a disjoint gateway where the static lock SOC is frozen —
-    // and, finding an earlier-generation foreign holder, reports `"displaced"`.
-    //
-    // Regression guard for the no-op the backstop existed to avoid: `refresh()`
-    // ALSO just rewrote our own claim to the static lock SOC, so re-gating the
-    // demote on `readPartitionLock` would read SELF (live) and never confirm —
-    // and the device would keep a partition a peer already holds (dual-hold →
-    // silent overstamp). The coordinator must trust the beacon verdict directly.
-    const calls: string[] = []
-    const stamper = makeStamper(calls)
-    const onLeaseChange = vi.fn()
-    const coordinator = new BatchWriteCoordinator(
-      makeDeps({
-        stamper: stamper as unknown as BatchWriteCoordinatorDeps["stamper"],
-        onLeaseChange,
-      }),
-    )
-    const internals = coordinator as unknown as Internals
-    const lease = makeLease({ partition: 0, refreshResult: "displaced" })
-    internals.partitionLease = lease
-    internals.lastLeaseActivityAt = Date.now()
-    internals.activeUploadCount = 1
-    // The frozen-gateway view: the static lock SOC shows OURSELVES as the live
-    // holder (we just rewrote it on this very refresh). Pre-fix, the coordinator
-    // re-gated on this read and so kept the lease — the bug.
-    lockController.payload = {
-      holderDeviceId: SELF,
-      leasedUntil: Date.now() + 10_000,
-    }
+  it("a waiting write goes ahead as soon as a holder is done and idle", async () => {
+    const { release } = await occupyBothLanes()
+    const c = makeContext("c")
 
-    await internals.refreshTick(lease)
+    const write = c.coordinator.withWrite(async () => "z")
+    await advance(2000)
+    await release()
+    await advance(PEER_YIELD_MIN_IDLE_MS)
+    // The holders did not answer while they were writing. A claim is sent
+    // again with every confirmation of the claimant's connection.
+    c.liveness.confirm()
+    await advance(1000)
 
-    // Mirrors the displacement-race fix: invalidate the breaker, then unbind.
-    expect(calls).toEqual(["invalidate", "unbind"])
-    expect(coordinator.currentPartition).toBeUndefined()
-    expect(coordinator.isReadOnly).toBe(true)
-    expect(internals.pendingAcquire).toBe(true)
-    expect(onLeaseChange).toHaveBeenLastCalledWith({
-      currentPartition: undefined,
-      isReadOnly: true,
-    })
+    expect(await write).toBe("z")
   })
 })
 
-describe("BatchWriteCoordinator — sentinel re-assert at upload start", () => {
-  function setup(lease: ReturnType<typeof makeLease>) {
-    const calls: string[] = []
-    const stamper = makeStamper(calls)
-    const writeLeaseCache = vi.fn()
-    const coordinator = new BatchWriteCoordinator(
-      makeDeps({
-        stamper: stamper as unknown as BatchWriteCoordinatorDeps["stamper"],
-        writeLeaseCache,
-      }),
+describe("BatchWriteCoordinator — a lane whose state cannot be read", () => {
+  it("does not write, and gives the lane back at once", async () => {
+    const a = makeContext("a")
+    const b = makeContext("b")
+    laneState.resume = () => undefined
+
+    await expect(a.coordinator.withWrite(async () => "x")).rejects.toThrow(
+      /could not be read/,
     )
-    const internals = coordinator as unknown as Internals
-    internals.partitionLease = lease
-    internals.lastLeaseValidatedAt = 0 // age past the freshness throttle
-    lockController.payload = {
-      holderDeviceId: NO_HOLDER_DEVICE_ID,
-      leasedUntil: Date.now() - 1_000,
+    expect(a.stamper.bindPartition).not.toHaveBeenCalled()
+    expect(a.coordinator.isReadOnly).toBe(true)
+
+    // The lane is not held by A: B is answered without waiting.
+    laneState.resume = () => new Uint32Array(8)
+    expect(await b.coordinator.withWrite(async () => "y")).toBe("y")
+    expect(b.coordinator.currentPartition).toBe(HOME)
+  })
+
+  it("asks again when the lane went while its counter was being read", async () => {
+    const a = makeContext("a")
+    let lapses = 1
+    laneState.duringResume = () => {
+      if (lapses-- > 0) a.liveness.confirm(LEASE_STOP_MS)
     }
-    return { coordinator, internals, stamper, writeLeaseCache }
-  }
 
-  it("re-asserts the claim when a sentinel is visible while holding", async () => {
-    const lease = makeLease({ partition: 0, refreshResult: "held" })
-    const { internals, stamper, writeLeaseCache } = setup(lease)
+    const write = a.coordinator.withWrite(async () => "x")
+    await advance(1000)
+    expect(await write).toBe("x")
 
-    await internals.ensureLeaseStillValid()
-
-    expect(lease.refresh).toHaveBeenCalledTimes(1)
-    expect(stamper.invalidateLease).not.toHaveBeenCalled()
-    expect(internals.lastLeaseValidatedAt).toBeGreaterThan(0)
-    expect(writeLeaseCache).toHaveBeenCalled()
-  })
-
-  it("demotes and throws when the re-assert loses to a peer", async () => {
-    const lease = makeLease({ partition: 0, refreshResult: "lost" })
-    const { coordinator, internals, stamper } = setup(lease)
-
-    await expect(internals.ensureLeaseStillValid()).rejects.toThrow(/reclaimed/)
-    // Same breaker-before-unbind ordering as the displaced branch.
-    expect(stamper.invalidateLease).toHaveBeenCalledTimes(1)
-    expect(stamper.unbindPartition).toHaveBeenCalledTimes(1)
-    expect(coordinator.isReadOnly).toBe(true)
-  })
-
-  it("keeps the lease (and retries next upload) when the re-assert throws", async () => {
-    const lease = makeLease({ partition: 0 })
-    lease.refresh.mockRejectedValueOnce(new Error("bee hiccup"))
-    const { internals, stamper } = setup(lease)
-
-    await expect(internals.ensureLeaseStillValid()).resolves.toBeUndefined()
-
-    expect(stamper.invalidateLease).not.toHaveBeenCalled()
-    // lastLeaseValidatedAt NOT bumped — the next upload re-checks.
-    expect(internals.lastLeaseValidatedAt).toBe(0)
+    expect(laneState.resumed).toEqual([HOME, HOME])
+    expect(a.stamper.bindPartition).toHaveBeenCalledTimes(1)
   })
 })
 
-describe("BatchWriteCoordinator — teardown safety", () => {
-  it("invalidates the held lease BEFORE unbinding (off-lock teardown race)", () => {
-    const calls: string[] = []
-    const stamper = makeStamper(calls)
-    const coordinator = new BatchWriteCoordinator(
-      makeDeps({
-        stamper: stamper as unknown as BatchWriteCoordinatorDeps["stamper"],
-        mode: "oneshot",
-      }),
-    )
-    const internals = coordinator as unknown as Internals
-    internals.partitionLease = makeLease({ partition: 2 })
+describe("BatchWriteCoordinator — losing the connection", () => {
+  it("does not acknowledge an upload that outlived the hold", async () => {
+    const a = makeContext("a")
+    await a.coordinator.withWrite(async () => "x")
+    laneState.published = []
+    a.calls.length = 0
 
-    coordinator.teardown()
+    const write = a.coordinator.withWrite(async () => {
+      // No confirmation for too long while the upload runs.
+      a.liveness.confirmedAgo = LEASE_STOP_MS
+      return "y"
+    })
 
-    // Same ordering as the displacement fix: an in-flight stamp() aborts via
-    // the breaker instead of silently falling back to legacy slot-picking.
-    expect(calls).toEqual(["invalidate", "unbind"])
+    await expect(write).rejects.toThrow(/reclaimed/)
+    expect(laneState.published).toEqual([])
+    // Invalidated at once; unbound only when the upload was over.
+    expect(a.calls).toEqual(["invalidate", "unbind"])
+    expect(a.coordinator.currentPartition).toBeUndefined()
   })
 
-  it("runs the teardown release under the batch write lock (#349)", async () => {
-    const calls: string[] = []
-    const stamper = makeStamper(calls)
-    const lease = makeLease({ partition: 1 })
-    lease.release.mockImplementation(async () => {
-      calls.push("release")
-    })
-    writeLockController.onGrant = () => calls.push("lock-granted")
-    const coordinator = new BatchWriteCoordinator(
-      makeDeps({
-        stamper: stamper as unknown as BatchWriteCoordinatorDeps["stamper"],
-        mode: "oneshot",
-      }),
+  it("moves the stamper's deadline forward with every confirmation", async () => {
+    const a = makeContext("a")
+    await a.coordinator.withWrite(async () => "x")
+    a.stamper.setLeaseValidUntil.mockClear()
+
+    a.liveness.confirm()
+
+    expect(a.stamper.setLeaseValidUntil).toHaveBeenCalledWith(
+      Date.now() + LEASE_STOP_MS,
     )
-    ;(coordinator as unknown as Internals).partitionLease = lease
-
-    coordinator.teardown()
-    await vi.waitFor(() => expect(lease.release).toHaveBeenCalledTimes(1))
-    writeLockController.onGrant = undefined
-
-    // The release goes THROUGH the origin-wide lock — a successor's acquire
-    // (which queues on the same lock) cannot interleave with it, so the
-    // sentinel's stamp is always minted before the successor's claim stamp.
-    expect(calls.indexOf("lock-granted")).toBeGreaterThanOrEqual(0)
-    expect(calls.indexOf("lock-granted")).toBeLessThan(calls.indexOf("release"))
   })
 
-  it("a withWrite that resumes after teardown does NOT re-acquire and never runs op", async () => {
-    leaseController.lease = makeLease({
-      acquireResult: {
-        partition: 1,
-        partitionCount: 4,
-        localCounter: new Uint32Array(8),
-        isReadOnly: false,
-      },
-    })
-    const calls: string[] = []
-    const stamper = makeStamper(calls)
-    const coordinator = new BatchWriteCoordinator(
-      makeDeps({
-        stamper: stamper as unknown as BatchWriteCoordinatorDeps["stamper"],
-        mode: "persistent",
-      }),
-    )
+  it("holds nothing after a gap, and takes the lane again for the next write", async () => {
+    const a = makeContext("a")
+    await a.coordinator.withWrite(async () => "x")
 
-    // Simulate the disconnect/sign-out that lands before the in-flight write
-    // reaches its lease check.
-    coordinator.teardown()
+    a.liveness.confirm(LEASE_STOP_MS)
+    expect(a.coordinator.currentPartition).toBeUndefined()
 
-    const op = vi.fn(async () => "ok")
-    await expect(coordinator.withWrite(op, { wait: "block" })).rejects.toThrow(
+    expect(await a.coordinator.withWrite(async () => "y")).toBe("y")
+    expect(laneState.resumed).toEqual([HOME, HOME])
+  })
+})
+
+describe("BatchWriteCoordinator — teardown", () => {
+  it("gives its lane up without writing, so the next context is answered at once", async () => {
+    const a = makeContext("a")
+    const b = makeContext("b")
+    await a.coordinator.withWrite(async () => "x")
+    laneState.published = []
+    a.calls.length = 0
+
+    a.coordinator.teardown()
+
+    expect(a.calls).toEqual(["invalidate", "unbind"])
+    expect(laneState.published).toEqual([])
+    expect(await b.coordinator.withWrite(async () => "y")).toBe("y")
+    expect(b.coordinator.currentPartition).toBe(HOME)
+  })
+
+  it("never takes a lane again", async () => {
+    const a = makeContext("a")
+    a.coordinator.teardown()
+
+    await expect(a.coordinator.withWrite(async () => "x")).rejects.toThrow(
       /torn down/,
     )
-    expect(op).not.toHaveBeenCalled()
-    // No ghost lease: the disposed coordinator never re-binds a partition.
-    expect(stamper.bindPartition).not.toHaveBeenCalled()
-    expect(coordinator.currentPartition).toBeUndefined()
+    a.coordinator.startLease()
+    await advance(1000)
+    expect(a.coordinator.currentPartition).toBeUndefined()
   })
 
-  it("an upload that outlives teardown has its remaining data stamps refused", async () => {
-    const TWO_PARTITIONS = 2
-    const LEAF_CHUNKS = 3
-    const SLOT_OFFSET = 4
-    const stamper = await UtilizationAwareStamper.create(
-      new PrivateKey(new Uint8Array(32).fill(1)).toHex(),
-      new BatchId(BATCH_ID),
-      20,
-      {
-        getAllChunks: async () => [],
-        putChunk: async () => undefined,
-      } as unknown as UtilizationStoreDB,
-      new EthAddress("00".repeat(20)),
-      new Uint8Array(32),
-    )
-    leaseController.lease = makeLease({
-      acquireResult: {
-        partition: 0,
-        partitionCount: TWO_PARTITIONS,
-        localCounter: new Uint32Array(NUM_BUCKETS),
-        isReadOnly: false,
-      },
-      leasedUntil: Date.now() + LEASE_TTL_MS,
+  it("stops a write that was waiting for a lane", async () => {
+    const a = makeContext("a")
+    a.liveness.absentFor = 0
+    const write = a.coordinator.withWrite(async () => "x")
+    const failure = expect(write).rejects.toThrow()
+    await advance(500)
+
+    a.coordinator.teardown()
+    await advance(500)
+
+    await failure
+    expect(a.stamper.bindPartition).not.toHaveBeenCalled()
+  })
+
+  it("can open the same lanes again in a new coordinator", async () => {
+    const a = makeContext("a")
+    await a.coordinator.withWrite(async () => "x")
+    a.coordinator.teardown()
+
+    const again = new BatchWriteCoordinator({
+      bee: {} as BatchWriteCoordinatorDeps["bee"],
+      batchId: BATCH_ID,
+      stamper: a.stamper as unknown as BatchWriteCoordinatorDeps["stamper"],
+      deviceId: DEVICE,
+      accountId: ACCOUNT_ID,
+      lanes: a.lanes,
+      backupSigner: createTestSigner() as PrivateKey,
+      swarmEncryptionKey: new Uint8Array(32),
+      partitionCount: PARTITION_COUNT,
+      mode: "oneshot",
     })
-    const bee = new MockBee()
-    const coordinator = new BatchWriteCoordinator(
-      makeDeps({ bee, stamper, partitionCount: TWO_PARTITIONS }),
-    )
 
-    // The disconnect lands while the first chunk is on the wire — between two
-    // stamps of the same upload.
-    const stampedSlots: number[] = []
-    const upload = bee.chunk.upload
-    bee.chunk.upload = async (envelope, ...rest) => {
-      if (typeof envelope === "object" && "index" in envelope) {
-        const { index } = envelope
-        stampedSlots.push(
-          new DataView(index.buffer, index.byteOffset).getUint32(SLOT_OFFSET),
-        )
-      }
-      if (stampedSlots.length === 1) coordinator.teardown()
-      return upload(envelope, ...rest)
-    }
-
-    const data = new Uint8Array(CHUNK_SIZE * LEAF_CHUNKS).map((_, i) => i % 251)
-    await expect(
-      coordinator.withWrite((target) => uploadData(target, data), {
-        wait: "block",
-      }),
-    ).rejects.toBeInstanceOf(PartitionLeaseLostError)
-
-    // Only the pre-teardown chunk was stamped, in partition 0's own lane —
-    // nothing at a legacy `dataSlot(_, _, 1)` slot, which with two partitions
-    // is the other device's reserved slot and data lane.
-    expect(stampedSlots).toEqual([dataSlot(0, 0, TWO_PARTITIONS)])
-  })
-
-  it("startLease is a no-op after teardown", () => {
-    const coordinator = new BatchWriteCoordinator(
-      makeDeps({ mode: "persistent" }),
-    )
-    coordinator.teardown()
-    // Would otherwise warm up a lease + arm a refresh interval.
-    expect(() => coordinator.startLease()).not.toThrow()
-    expect(coordinator.currentPartition).toBeUndefined()
-  })
-})
-
-describe("BatchWriteCoordinator — error classification", () => {
-  it("skip mode: an operational acquire failure propagates as-is, NOT as contention", async () => {
-    const boom = new Error("Bee 500 during lock-SOC scan")
-    leaseController.lease = makeLease({ acquireError: boom })
-    const calls: string[] = []
-    const stamper = makeStamper(calls)
-    const coordinator = new BatchWriteCoordinator(
-      makeDeps({
-        stamper: stamper as unknown as BatchWriteCoordinatorDeps["stamper"],
-        mode: "oneshot",
-      }),
-    )
-
-    const op = vi.fn(async () => "ok")
-    // The caller (sync-account) must see the real error so it reports
-    // status:"error" — not PartitionContendedError, which it logs as a quiet
-    // "all partitions held" skip.
-    await expect(coordinator.withWrite(op, { wait: "skip" })).rejects.toBe(boom)
-    expect(op).not.toHaveBeenCalled()
-    expect(coordinator.currentPartition).toBeUndefined()
-  })
-
-  it("block mode: an operational acquire failure pauses and fails the upload", async () => {
-    leaseController.lease = makeLease({
-      acquireError: new Error("lock-SOC write failed"),
-    })
-    const calls: string[] = []
-    const stamper = makeStamper(calls)
-    const coordinator = new BatchWriteCoordinator(
-      makeDeps({
-        stamper: stamper as unknown as BatchWriteCoordinatorDeps["stamper"],
-        mode: "oneshot",
-      }),
-    )
-
-    const op = vi.fn(async () => "ok")
-    // The real cause propagates — not the generic "fully leased" message
-    // ensureHeldForUpload would emit for genuine contention.
-    await expect(coordinator.withWrite(op, { wait: "block" })).rejects.toThrow(
-      "lock-SOC write failed",
-    )
-    expect(op).not.toHaveBeenCalled()
-  })
-})
-
-describe("BatchWriteCoordinator — idle-yield under the write lock", () => {
-  // The idle-yield exists to hand the slot to a WAITING PEER; it is gated on a
-  // rival being known (a solo device re-paying the cold acquire after every
-  // 30s pause was pure UX cost). These tests declare one.
-  const RIVAL_DEPS = { knownDeviceIds: () => [SELF, "device-rival-1"] }
-
-  it("yields an idle lease: releases, unbinds, emits the transition, announces", async () => {
-    const calls: string[] = []
-    const stamper = makeStamper(calls)
-    const onLeaseChange = vi.fn()
-    const onLeaseReleased = vi.fn()
-    const coordinator = new BatchWriteCoordinator(
-      makeDeps({
-        stamper: stamper as unknown as BatchWriteCoordinatorDeps["stamper"],
-        onLeaseChange,
-        onLeaseReleased,
-        ...RIVAL_DEPS,
-      }),
-    )
-    const internals = coordinator as unknown as Internals
-    const lease = makeLease({ partition: 0 })
-    internals.partitionLease = lease
-    internals.activeUploadCount = 0
-    internals.lastLeaseActivityAt = 0 // idle for longer than IDLE_YIELD_MS
-
-    await internals.refreshTick(lease)
-
-    expect(lease.release).toHaveBeenCalledTimes(1)
-    expect(stamper.unbindPartition).toHaveBeenCalledTimes(1)
-    expect(coordinator.currentPartition).toBeUndefined()
-    expect(onLeaseChange).toHaveBeenLastCalledWith({
-      currentPartition: undefined,
-      isReadOnly: false,
-    })
-    // The timer yield answers no request, so a waiter learns of it only from
-    // this announcement (#590).
-    expect(onLeaseReleased).toHaveBeenCalledWith(0, undefined)
-  })
-
-  it("keeps an idle lease when no rival is known (solo device)", async () => {
-    const calls: string[] = []
-    const stamper = makeStamper(calls)
-    const coordinator = new BatchWriteCoordinator(
-      makeDeps({
-        stamper: stamper as unknown as BatchWriteCoordinatorDeps["stamper"],
-        // knownDeviceIds omitted — no rival could take the freed slot, so a
-        // yield would only force this device back through the cold acquire.
-      }),
-    )
-    const internals = coordinator as unknown as Internals
-    const lease = makeLease({ partition: 0 })
-    internals.partitionLease = lease
-    internals.activeUploadCount = 0
-    internals.lastLeaseActivityAt = 0 // idle for longer than IDLE_YIELD_MS
-
-    await internals.refreshTick(lease)
-
-    expect(lease.release).not.toHaveBeenCalled()
-    expect(stamper.unbindPartition).not.toHaveBeenCalled()
-    expect(coordinator.currentPartition).toBe(0)
-    // The tick fell through to the normal renewal instead.
-    expect(lease.refresh).toHaveBeenCalled()
-  })
-
-  it("aborts the yield when an upload slipped in while the tick queued on the lock", async () => {
-    const calls: string[] = []
-    const stamper = makeStamper(calls)
-    const coordinator = new BatchWriteCoordinator(
-      makeDeps({
-        stamper: stamper as unknown as BatchWriteCoordinatorDeps["stamper"],
-        ...RIVAL_DEPS,
-      }),
-    )
-    const internals = coordinator as unknown as Internals
-    const lease = makeLease({ partition: 0 })
-    internals.partitionLease = lease
-    internals.activeUploadCount = 0
-    internals.lastLeaseActivityAt = 0 // idle → tick decides to yield
-
-    // An upload finishes (bumping activity) in the window between the tick's
-    // off-lock idle check and the lock grant. The re-check inside the locked
-    // section must abort the yield — otherwise the release sentinel + unbind
-    // land underneath the next stamp() (the displacement-race corruption).
-    writeLockController.onGrant = () => {
-      internals.lastLeaseActivityAt = Date.now()
-    }
-    try {
-      await internals.refreshTick(lease)
-    } finally {
-      writeLockController.onGrant = undefined
-    }
-
-    expect(lease.release).not.toHaveBeenCalled()
-    expect(stamper.unbindPartition).not.toHaveBeenCalled()
-    expect(coordinator.currentPartition).toBe(0)
-  })
-
-  it("aborts the yield when the lease was demoted/replaced while queued on the lock", async () => {
-    const calls: string[] = []
-    const stamper = makeStamper(calls)
-    const coordinator = new BatchWriteCoordinator(
-      makeDeps({
-        stamper: stamper as unknown as BatchWriteCoordinatorDeps["stamper"],
-        ...RIVAL_DEPS,
-      }),
-    )
-    const internals = coordinator as unknown as Internals
-    const lease = makeLease({ partition: 0 })
-    internals.partitionLease = lease
-    internals.activeUploadCount = 0
-    internals.lastLeaseActivityAt = 0
-
-    writeLockController.onGrant = () => {
-      internals.partitionLease = undefined // demoted meanwhile
-    }
-    try {
-      await internals.refreshTick(lease)
-    } finally {
-      writeLockController.onGrant = undefined
-    }
-
-    expect(lease.release).not.toHaveBeenCalled()
-    expect(stamper.unbindPartition).not.toHaveBeenCalled()
-  })
-})
-
-describe("BatchWriteCoordinator — adopt fast path seeds the published state", () => {
-  it("tells the lease which state it continues from, from the persisted synced pointer", async () => {
-    // The cached-lease re-adopt path binds from local state and skips
-    // `claimPartition`, so the lease does not know which pointer entry is the
-    // newest. The coordinator reads the partition's persisted synced pointer
-    // and seeds it into the lease, which saves the first publish a lookup.
-    const synced = { seq: 4, referenceHex: "deadbeef" }
-    const lease = makeLease({ partition: 2 })
-    lease.adoptIfLive = vi.fn(() => 2)
-    leaseController.lease = lease
-    const calls: string[] = []
-    const stamper = makeStamper(calls)
-    stamper.getSyncedPointer = vi.fn(async () => synced)
-    const coordinator = new BatchWriteCoordinator(
-      makeDeps({
-        stamper: stamper as unknown as BatchWriteCoordinatorDeps["stamper"],
-        mode: "oneshot", // no refresh timer to leak in the test
-      }),
-    )
-
-    await coordinator.withWrite(async () => "ok", { wait: "block" })
-
-    expect(stamper.getSyncedPointer).toHaveBeenCalledWith(2)
-    expect(lease.seedPublished).toHaveBeenCalledWith(synced)
-  })
-})
-
-describe("BatchWriteCoordinator — published-state repair vs in-flight upload", () => {
-  // The refresh tick runs OFF the write lock; `withWrite`'s publish holds it.
-  // The repair is a publish too, and both go through the stamper's single
-  // `intentSoc` slot, so a repair firing while an upload's publish is in
-  // flight clobbers that reservation and mis-stamps a pointer SOC into a data
-  // slot. The tick must skip the repair while an upload is in flight — the
-  // concurrent publish re-pins the state anyway.
-  it("does NOT repair the published state while an upload is in flight", async () => {
-    const calls: string[] = []
-    const stamper = makeStamper(calls)
-    const coordinator = new BatchWriteCoordinator(
-      makeDeps({
-        stamper: stamper as unknown as BatchWriteCoordinatorDeps["stamper"],
-      }),
-    )
-    const internals = coordinator as unknown as Internals
-    const lease = makeLease({ partition: 0 })
-    internals.partitionLease = lease
-    internals.activeUploadCount = 1 // an upload is in flight (publish may run)
-    internals.lastLeaseActivityAt = Date.now() // recent → no idle-yield
-
-    await internals.refreshTick(lease)
-
-    expect(lease.repairPublishedState).not.toHaveBeenCalled()
-  })
-
-  it("checks the published state for repair when alive and no upload is in flight", async () => {
-    const calls: string[] = []
-    const stamper = makeStamper(calls)
-    const coordinator = new BatchWriteCoordinator(
-      makeDeps({
-        stamper: stamper as unknown as BatchWriteCoordinatorDeps["stamper"],
-      }),
-    )
-    const internals = coordinator as unknown as Internals
-    const lease = makeLease({ partition: 0 })
-    internals.partitionLease = lease
-    internals.activeUploadCount = 0
-    internals.lastLeaseActivityAt = Date.now() // recent → no idle-yield, reach tail
-
-    await internals.refreshTick(lease)
-
-    expect(lease.repairPublishedState).toHaveBeenCalledTimes(1)
-  })
-
-  it("does NOT repair when an upload slips in while the tick queues on the lock", async () => {
-    // The outer `activeUploadCount === 0` gate is a TOCTOU: an upload can start
-    // AFTER the gate passes and run its publish concurrently with an off-lock
-    // repair, clobbering the shared `intentSoc` slot. The repair must run
-    // UNDER the write lock and re-check the count once granted, so an upload that
-    // slipped in aborts it (the concurrent publish re-pins the state anyway).
-    const calls: string[] = []
-    const stamper = makeStamper(calls)
-    const coordinator = new BatchWriteCoordinator(
-      makeDeps({
-        stamper: stamper as unknown as BatchWriteCoordinatorDeps["stamper"],
-      }),
-    )
-    const internals = coordinator as unknown as Internals
-    const lease = makeLease({ partition: 0 })
-    internals.partitionLease = lease
-    internals.activeUploadCount = 0 // passes the outer gate
-    internals.lastLeaseActivityAt = Date.now() // recent → reach the repair tail
-
-    // An upload enters `withWrite` (bumping the count) in the window between the
-    // tick's outer gate and the repair winning the lock. Only an under-lock
-    // re-check catches it.
-    writeLockController.onGrant = () => {
-      internals.activeUploadCount = 1
-    }
-    try {
-      await internals.refreshTick(lease)
-    } finally {
-      writeLockController.onGrant = undefined
-    }
-
-    expect(lease.repairPublishedState).not.toHaveBeenCalled()
-  })
-})
-
-describe("BatchWriteCoordinator — self-demote on un-renewed lease expiry", () => {
-  // A refresh tick that could NOT renew on Swarm (transient throw, or a "lost"
-  // with no confirmable peer) must not extend the local lease forever. Once the
-  // lease lapses past skew the holder can no longer assert it holds the slot —
-  // it must fence in-flight writes (invalidate) and demote, or a stale holder's
-  // long upload keeps clobbering a new holder's acked slots (only the ack is
-  // guarded post-op, not the writes already made).
-  it("a lapsed lease whose renewal keeps failing fences writes and demotes", async () => {
-    const calls: string[] = []
-    const stamper = makeStamper(calls)
-    const coordinator = new BatchWriteCoordinator(
-      makeDeps({
-        stamper: stamper as unknown as BatchWriteCoordinatorDeps["stamper"],
-      }),
-    )
-    const internals = coordinator as unknown as Internals
-    const lease = makeLease({ partition: 0, leasedUntil: Date.now() - 1 })
-    lease.refresh = vi.fn(async () => {
-      throw new Error("gateway 500")
-    }) as typeof lease.refresh
-    internals.partitionLease = lease
-    internals.activeUploadCount = 1 // an upload is in flight; skip idle-yield
-    internals.lastLeaseActivityAt = Date.now()
-    lockController.payload = undefined // no confirmable foreign holder
-
-    await internals.refreshTick(lease)
-
-    expect(stamper.invalidateLease).toHaveBeenCalled() // in-flight stamp aborts
-    expect(coordinator.isReadOnly).toBe(true) // demoted
-    expect(lease.bumpLocalLease).not.toHaveBeenCalled() // never extended
-  })
-
-  it("a within-TTL transient blip keeps the lease but does NOT extend it", async () => {
-    const calls: string[] = []
-    const stamper = makeStamper(calls)
-    const coordinator = new BatchWriteCoordinator(
-      makeDeps({
-        stamper: stamper as unknown as BatchWriteCoordinatorDeps["stamper"],
-      }),
-    )
-    const internals = coordinator as unknown as Internals
-    // Lease still comfortably within TTL — a single failed renewal is tolerated.
-    const lease = makeLease({ partition: 0, leasedUntil: Date.now() + 10_000 })
-    lease.refresh = vi.fn(async () => {
-      throw new Error("gateway 500")
-    }) as typeof lease.refresh
-    internals.partitionLease = lease
-    internals.activeUploadCount = 1
-    internals.lastLeaseActivityAt = Date.now()
-    lockController.payload = undefined
-
-    await internals.refreshTick(lease)
-
-    expect(stamper.invalidateLease).not.toHaveBeenCalled()
-    expect(coordinator.isReadOnly).toBe(false)
-    expect(coordinator.currentPartition).toBe(0)
-    // Not renewed on Swarm → the local lease must NOT be bumped (it counts down
-    // from the last successful renewal until it genuinely lapses).
-    expect(lease.bumpLocalLease).not.toHaveBeenCalled()
-  })
-})
-
-describe("BatchWriteCoordinator — a failing published-state repair", () => {
-  // The repair is best-effort: the published state is found by search however
-  // long ago it was written, so a holder that cannot repair it this tick has
-  // lost nothing a takeover depends on, and keeps its lease.
-  it("keeps the lease", async () => {
-    const calls: string[] = []
-    const stamper = makeStamper(calls)
-    const coordinator = new BatchWriteCoordinator(
-      makeDeps({
-        stamper: stamper as unknown as BatchWriteCoordinatorDeps["stamper"],
-      }),
-    )
-    const internals = coordinator as unknown as Internals
-    const lease = makeLease({ partition: 0, leasedUntil: Date.now() + 30_000 })
-    lease.repairPublishedState = vi.fn(async () => {
-      throw new Error("gateway 500")
-    }) as typeof lease.repairPublishedState
-    internals.partitionLease = lease
-    internals.activeUploadCount = 0 // idle → the tick attempts the repair
-    internals.lastLeaseActivityAt = Date.now() // recent → no idle-yield
-
-    await internals.refreshTick(lease)
-
-    expect(lease.repairPublishedState).toHaveBeenCalledTimes(1)
-    expect(stamper.invalidateLease).not.toHaveBeenCalled()
-    expect(coordinator.isReadOnly).toBe(false)
-    expect(coordinator.currentPartition).toBe(0)
-  })
-})
-
-describe("BatchWriteCoordinator — acquire-epoch guard", () => {
-  it("a late-completing acquire does not resurrect a cleared lease", async () => {
-    const calls: string[] = []
-    const stamper = makeStamper(calls)
-    let resolveAcquire!: (r: {
-      partition: number
-      partitionCount: number
-      localCounter: Uint32Array
-      isReadOnly: boolean
-    }) => void
-    const lease = makeLease()
-    lease.acquire = vi.fn(
-      () =>
-        new Promise((resolve) => {
-          resolveAcquire = resolve
-        }),
-    ) as typeof lease.acquire
-    leaseController.lease = lease
-    const coordinator = new BatchWriteCoordinator(
-      makeDeps({
-        stamper: stamper as unknown as BatchWriteCoordinatorDeps["stamper"],
-        mode: "oneshot",
-      }),
-    )
-    const internals = coordinator as unknown as Internals
-
-    const inFlight = internals.acquire()
-    // Let the acquire get in flight (reach the pending lease.acquire call).
-    await vi.waitFor(() => expect(lease.acquire).toHaveBeenCalled())
-    // The acquire timeout fires: ensureLease pauses background work, which
-    // bumps the epoch. The still-running acquire must then discard its result.
-    internals.pauseLeaseBackgroundWork()
-    resolveAcquire({
-      partition: 1,
-      partitionCount: 4,
-      localCounter: new Uint32Array(8),
-      isReadOnly: false,
-    })
-    await inFlight
-
-    expect(stamper.bindPartition).not.toHaveBeenCalled()
-    expect(coordinator.currentPartition).toBeUndefined()
-    expect(coordinator.isReadOnly).toBe(false)
-  })
-
-  it("a late-failing acquire does not clobber a newer lease's state", async () => {
-    const calls: string[] = []
-    const stamper = makeStamper(calls)
-    let rejectAcquire!: (e: Error) => void
-    const staleLease = makeLease()
-    staleLease.acquire = vi.fn(
-      () =>
-        new Promise((_, reject) => {
-          rejectAcquire = reject
-        }),
-    ) as typeof staleLease.acquire
-    leaseController.lease = staleLease
-    const writeLeaseCache = vi.fn()
-    const coordinator = new BatchWriteCoordinator(
-      makeDeps({
-        stamper: stamper as unknown as BatchWriteCoordinatorDeps["stamper"],
-        mode: "oneshot",
-        writeLeaseCache,
-      }),
-    )
-    const internals = coordinator as unknown as Internals
-
-    const inFlight = internals.acquire()
-    await vi.waitFor(() => expect(staleLease.acquire).toHaveBeenCalled())
-    // The acquire timeout fires: ensureLease pauses background work, which
-    // bumps the epoch and detaches the still-pending acquire.
-    internals.pauseLeaseBackgroundWork()
-
-    // A later write re-acquires successfully — a new live lease owns the state.
-    const liveLease = makeLease({
-      acquireResult: {
-        partition: 1,
-        partitionCount: 4,
-        localCounter: new Uint32Array(8),
-        isReadOnly: false,
-      },
-    })
-    leaseController.lease = liveLease
-    await internals.acquire()
-    expect(coordinator.currentPartition).toBe(1)
-    writeLeaseCache.mockClear()
-
-    // The detached acquire finally rejects. The failure must propagate, but
-    // it must NOT clear the live lease's in-memory state or wipe its cache.
-    rejectAcquire(new Error("lock SOC scan failed"))
-    await expect(inFlight).rejects.toThrow("lock SOC scan failed")
-
-    expect(coordinator.currentPartition).toBe(1)
-    expect(internals.partitionLease).toBe(liveLease)
-    expect(writeLeaseCache).not.toHaveBeenCalledWith(undefined)
-  })
-})
-
-describe("BatchWriteCoordinator — stale refresh-tick guards", () => {
-  it("a tick whose refresh straddles teardown does not resurrect the lease cache", async () => {
-    const calls: string[] = []
-    const stamper = makeStamper(calls)
-    const writeLeaseCache = vi.fn()
-    const coordinator = new BatchWriteCoordinator(
-      makeDeps({
-        stamper: stamper as unknown as BatchWriteCoordinatorDeps["stamper"],
-        writeLeaseCache,
-      }),
-    )
-    const internals = coordinator as unknown as Internals
-
-    // Held lease whose refresh is pending when teardown lands.
-    let resolveRefresh!: (outcome: LeaseRefreshOutcome) => void
-    const lease = makeLease({ partition: 0 })
-    lease.refresh = vi.fn(
-      () =>
-        new Promise<LeaseRefreshOutcome>((resolve) => {
-          resolveRefresh = resolve
-        }),
-    ) as typeof lease.refresh
-    internals.partitionLease = lease
-    internals.lastLeaseActivityAt = Date.now()
-    internals.activeUploadCount = 1 // skip the idle-yield branch
-
-    const tick = internals.refreshTick(lease)
-    await vi.waitFor(() => expect(lease.refresh).toHaveBeenCalled())
-
-    // Sign-out mid-tick: clears state and the cache.
-    coordinator.teardown()
-    writeLeaseCache.mockClear()
-
-    resolveRefresh("held")
-    await tick
-
-    // The stale tick's tail must not re-write a live-looking snapshot into
-    // the cache (a future acquire would hydrate + adoptIfLive it without any
-    // Swarm round-trip) nor bump the local heartbeat.
-    expect(writeLeaseCache).not.toHaveBeenCalled()
-    expect(lease.bumpLocalLease).not.toHaveBeenCalled()
-  })
-
-  it("a displaced tick that lost the lock race does not demote a re-acquired lease", async () => {
-    const calls: string[] = []
-    const stamper = makeStamper(calls)
-    const writeLeaseCache = vi.fn()
-    const coordinator = new BatchWriteCoordinator(
-      makeDeps({
-        stamper: stamper as unknown as BatchWriteCoordinatorDeps["stamper"],
-        writeLeaseCache,
-      }),
-    )
-    const internals = coordinator as unknown as Internals
-
-    // Lease A on partition 0: refresh fails, lock SOC names a live peer →
-    // the tick confirms displacement and queues finalizeDemote on the lock.
-    const leaseA = makeLease({ partition: 0, refreshResult: "lost" })
-    internals.partitionLease = leaseA
-    internals.lastLeaseActivityAt = Date.now()
-    internals.activeUploadCount = 1 // skip the idle-yield branch
-    lockController.payload = {
-      holderDeviceId: PEER,
-      leasedUntil: Date.now() + 10_000,
-    }
-
-    // While the tick queues on the write lock, a withWrite already demoted and
-    // re-acquired lease B on another partition.
-    const leaseB = makeLease({ partition: 1 })
-    writeLockController.onGrant = () => {
-      internals.partitionLease = leaseB
-      internals.readOnly = false
-    }
-    try {
-      await internals.refreshTick(leaseA)
-    } finally {
-      writeLockController.onGrant = undefined
-    }
-
-    // The stale demote must be skipped: lease B keeps its partition, its
-    // stamper binding, and its cache; the coordinator does not flip read-only.
-    expect(stamper.unbindPartition).not.toHaveBeenCalled()
-    expect(coordinator.currentPartition).toBe(1)
-    expect(coordinator.isReadOnly).toBe(false)
-    expect(writeLeaseCache).not.toHaveBeenCalledWith(undefined)
-  })
-})
-
-describe("BatchWriteCoordinator — acquire failure cleanup", () => {
-  it("a consumer callback throwing after bind unwinds the stamper and the timer", async () => {
-    vi.useFakeTimers()
-    try {
-      const calls: string[] = []
-      const stamper = makeStamper(calls)
-      const lease = makeLease({
-        acquireResult: {
-          partition: 1,
-          partitionCount: 4,
-          localCounter: new Uint32Array(8),
-          isReadOnly: false,
-        },
-      })
-      leaseController.lease = lease
-      const coordinator = new BatchWriteCoordinator(
-        makeDeps({
-          stamper: stamper as unknown as BatchWriteCoordinatorDeps["stamper"],
-          mode: "persistent", // arms the refresh timer before onLeaseAcquired
-          onLeaseAcquired: () => {
-            throw new Error("consumer callback exploded")
-          },
-        }),
-      )
-      const internals = coordinator as unknown as Internals
-
-      await expect(internals.acquire()).rejects.toThrow(
-        "consumer callback exploded",
-      )
-
-      // The partial commit is unwound: breaker armed before unbind, no lease
-      // record left behind.
-      expect(calls).toEqual(["bind", "invalidate", "unbind"])
-      expect(coordinator.currentPartition).toBeUndefined()
-
-      // And the refresh interval armed before the throw must not leak.
-      await vi.advanceTimersByTimeAsync(LEASE_TTL_MS * 2)
-      expect(lease.refresh).not.toHaveBeenCalled()
-    } finally {
-      vi.useRealTimers()
-    }
-  })
-})
-
-describe("BatchWriteCoordinator — slot-wait epoch exit", () => {
-  it("does not claim again after the acquire timeout paused background work", async () => {
-    vi.useFakeTimers()
-    try {
-      const calls: string[] = []
-      const stamper = makeStamper(calls)
-      // Every acquire completes read-only (all partitions held by live peers),
-      // so the slot-wait loop polls.
-      const lease = makeLease()
-      leaseController.lease = lease
-      const coordinator = new BatchWriteCoordinator(
-        makeDeps({
-          stamper: stamper as unknown as BatchWriteCoordinatorDeps["stamper"],
-          mode: "oneshot",
-        }),
-      )
-      const internals = coordinator as unknown as Internals
-
-      const inFlight = internals.acquireWithSlotWait()
-      await vi.advanceTimersByTimeAsync(0)
-      expect(lease.acquire).toHaveBeenCalledTimes(1)
-
-      // The 45s race timeout fires while the loop sleeps between polls.
-      internals.pauseLeaseBackgroundWork()
-
-      // Wake the loop past its poll sleep: it must exit without another
-      // lock-SOC claim (a fresh acquire would commit under the new epoch).
-      await vi.advanceTimersByTimeAsync(LEASE_REFRESH_MS * 3)
-      await inFlight
-      expect(lease.acquire).toHaveBeenCalledTimes(1)
-    } finally {
-      vi.useRealTimers()
-    }
-  })
-})
-
-describe("BatchWriteCoordinator — bus-accelerated leases (docs/Account-Bus.md)", () => {
-  it("slot-wait fires onSlotWait and wakes early on notifySlotMaybeFree", async () => {
-    // First acquire: all partitions held → slot-wait. After the wake, the
-    // second acquire wins a freed slot.
-    const leaseOpts: Parameters<typeof makeLease>[0] = {
-      acquireResult: {
-        partition: undefined,
-        partitionCount: 4,
-        isReadOnly: true,
-      },
-    }
-    leaseController.lease = makeLease(leaseOpts)
-    const calls: string[] = []
-    const stamper = makeStamper(calls)
-    const onSlotWait = vi.fn()
-    const coordinator = new BatchWriteCoordinator(
-      makeDeps({
-        stamper: stamper as unknown as BatchWriteCoordinatorDeps["stamper"],
-        mode: "oneshot",
-        onSlotWait,
-      }),
-    )
-
-    const started = Date.now()
-    const op = vi.fn(async () => "ok")
-    const write = coordinator.withWrite(op, { wait: "block" })
-
-    // The loop is asleep for LEASE_REFRESH_MS once onSlotWait has fired.
-    await vi.waitFor(() => expect(onSlotWait).toHaveBeenCalled())
-    // A peer released its partition: free the slot and wake the waiter.
-    leaseOpts.acquireResult = {
-      partition: 2,
-      partitionCount: 4,
-      localCounter: new Uint32Array(8),
-      isReadOnly: false,
-    }
-    coordinator.notifySlotMaybeFree()
-
-    await expect(write).resolves.toBe("ok")
-    expect(coordinator.currentPartition).toBe(2)
-    // Woken by the bus, not by sleeping out the 10s poll interval.
-    expect(Date.now() - started).toBeLessThan(LEASE_REFRESH_MS)
-  })
-
-  // The announcement usually lands DURING `acquire()`, not during the sleep:
-  // the holder yields in reply to the request this waiter broadcast one line
-  // earlier. `slotWaitWake` only exists while the poll sleeps, so a live
-  // resolver alone drops exactly the wake the fast path is for.
-  it("remembers a release announced while it was mid-acquire", async () => {
-    vi.useFakeTimers()
-    try {
-      const leaseOpts: Parameters<typeof makeLease>[0] = {
-        acquireResult: {
-          partition: undefined,
-          partitionCount: 4,
-          isReadOnly: true,
-        },
-      }
-      leaseController.lease = makeLease(leaseOpts)
-      const calls: string[] = []
-      const stamper = makeStamper(calls)
-      const coordinator = new BatchWriteCoordinator(
-        makeDeps({
-          stamper: stamper as unknown as BatchWriteCoordinatorDeps["stamper"],
-          mode: "oneshot",
-        }),
-      )
-      const internals = coordinator as unknown as Internals
-
-      let settled = false
-      const inFlight = internals.acquireWithSlotWait().then(() => {
-        settled = true
-      })
-      // Announced before the loop ever reaches its sleep.
-      coordinator.notifySlotMaybeFree()
-      leaseController.lease = makeLease({
-        acquireResult: {
-          partition: 2,
-          partitionCount: 4,
-          localCounter: new Uint32Array(8),
-          isReadOnly: false,
-        },
-      })
-
-      // No poll interval advanced: the remembered wake short-circuits the sleep.
-      await vi.advanceTimersByTimeAsync(0)
-      expect(settled).toBe(true)
-      await inFlight
-      expect(coordinator.currentPartition).toBe(2)
-    } finally {
-      vi.useRealTimers()
-    }
-  })
-
-  it("still sleeps the poll interval when nothing was announced", async () => {
-    vi.useFakeTimers()
-    try {
-      const lease = makeLease()
-      leaseController.lease = lease
-      const calls: string[] = []
-      const stamper = makeStamper(calls)
-      const coordinator = new BatchWriteCoordinator(
-        makeDeps({
-          stamper: stamper as unknown as BatchWriteCoordinatorDeps["stamper"],
-          mode: "oneshot",
-        }),
-      )
-      const internals = coordinator as unknown as Internals
-
-      let settled = false
-      void internals.acquireWithSlotWait().then(() => {
-        settled = true
-      })
-      await vi.advanceTimersByTimeAsync(0)
-      expect(settled).toBe(false)
-      expect(lease.acquire).toHaveBeenCalledTimes(1)
-
-      // Only the timer moves it on — no stale flag skipped the wait.
-      await vi.advanceTimersByTimeAsync(LEASE_REFRESH_MS)
-      expect(lease.acquire).toHaveBeenCalledTimes(2)
-      coordinator.teardown()
-    } finally {
-      vi.useRealTimers()
-    }
-  })
-
-  it("teardown wakes a sleeping slot-wait and drops its resolver", async () => {
-    vi.useFakeTimers()
-    try {
-      leaseController.lease = makeLease()
-      const calls: string[] = []
-      const stamper = makeStamper(calls)
-      const coordinator = new BatchWriteCoordinator(
-        makeDeps({
-          stamper: stamper as unknown as BatchWriteCoordinatorDeps["stamper"],
-          mode: "oneshot",
-        }),
-      )
-      const internals = coordinator as unknown as Internals
-
-      const inFlight = internals.acquireWithSlotWait()
-      await vi.advanceTimersByTimeAsync(0)
-      expect(internals.slotWait?.wake).toBeDefined()
-
-      coordinator.teardown()
-      await vi.advanceTimersByTimeAsync(0)
-      await inFlight
-      // The state describes a sleep that is over; it must not outlive it.
-      expect(internals.slotWait).toBeUndefined()
-    } finally {
-      vi.useRealTimers()
-    }
-  })
-
-  /** A read-only lease whose `acquire` blocks until the returned `let go` is
-   *  called — the window where a peer's announcement actually lands. */
-  function makeGatedLease(): {
-    lease: ReturnType<typeof makeLease>
-    acquire: ReturnType<typeof vi.fn>
-    letGo: () => Promise<void>
-  } {
-    let pending: (() => void) | undefined
-    const acquire = vi.fn(async () => {
-      await new Promise<void>((resolve) => {
-        pending = resolve
-      })
-      return { partition: undefined, partitionCount: 4, isReadOnly: true }
-    })
-    const lease = makeLease()
-    ;(lease as unknown as { acquire: unknown }).acquire = acquire
-    return {
-      lease,
-      acquire,
-      letGo: async () => {
-        pending?.()
-        await vi.advanceTimersByTimeAsync(0)
-      },
-    }
-  }
-
-  // `ensureLease` races this loop against a timeout it cannot cancel, so a
-  // superseded wait keeps running. Its timer and its exit must not reach into
-  // the wait that replaced it — that re-loses exactly the wake this fast path
-  // adds, and leaves `notifySlotMaybeFree` calling a dead resolver.
-  it("a detached slot-wait cannot clear the live one's wake or flag", async () => {
-    vi.useFakeTimers()
-    try {
-      leaseController.lease = makeLease()
-      const coordinator = new BatchWriteCoordinator(
-        makeDeps({
-          stamper: makeStamper(
-            [],
-          ) as unknown as BatchWriteCoordinatorDeps["stamper"],
-          mode: "oneshot",
-        }),
-      )
-      const internals = coordinator as unknown as Internals
-
-      const detached = internals.acquireWithSlotWait()
-      await vi.advanceTimersByTimeAsync(0)
-      const stateA = internals.slotWait
-      expect(stateA?.wake).toBeDefined()
-
-      // The live wait starts while A is still asleep, and is mid-`acquire()`
-      // when the announcement lands.
-      const gate = makeGatedLease()
-      leaseController.lease = gate.lease
-      const live = internals.acquireWithSlotWait()
-      await vi.advanceTimersByTimeAsync(0)
-      const stateB = internals.slotWait
-      expect(stateB).toBeDefined()
-      expect(stateB).not.toBe(stateA)
-
-      coordinator.notifySlotMaybeFree()
-      expect(stateB?.maybeFree).toBe(true)
-
-      // A's poll timer fires, and A then returns on the bumped epoch.
-      internals.pauseLeaseBackgroundWork()
-      await vi.advanceTimersByTimeAsync(LEASE_REFRESH_MS)
-      await detached
-
-      expect(stateB?.maybeFree).toBe(true)
-      expect(internals.slotWait).toBe(stateB)
-      expect(stateB?.wake ?? (() => {})).toBeDefined()
-
-      await gate.letGo()
-      await live
-    } finally {
-      vi.useRealTimers()
-    }
-  })
-
-  // The answer to a request lands over the bus well before the released
-  // slot's sentinel write is readable, so the round it wakes often reads the
-  // OLD holder and ends read-only again (#724). Sleeping out the poll interval
-  // on that is the 17 s outlier; re-asking is worse — a fresh request id that
-  // nobody can stand down against, so a second holder yields too.
-  it("re-scans a stale read after an announced release without asking again", async () => {
-    vi.useFakeTimers()
-    try {
-      const leaseOpts: Parameters<typeof makeLease>[0] = {
-        acquireResult: {
-          partition: undefined,
-          partitionCount: 4,
-          isReadOnly: true,
-        },
-      }
-      const lease = makeLease(leaseOpts)
-      leaseController.lease = lease
-      const onSlotWait = vi.fn()
-      const coordinator = new BatchWriteCoordinator(
-        makeDeps({
-          stamper: makeStamper(
-            [],
-          ) as unknown as BatchWriteCoordinatorDeps["stamper"],
-          mode: "oneshot",
-          onSlotWait,
-        }),
-      )
-      const internals = coordinator as unknown as Internals
-
-      let settled = false
-      const inFlight = internals.acquireWithSlotWait().then(() => {
-        settled = true
-      })
-      await vi.advanceTimersByTimeAsync(0)
-      expect(lease.acquire).toHaveBeenCalledTimes(1)
-      expect(onSlotWait).toHaveBeenCalledTimes(1)
-
-      // A holder answered: the wake re-scans at once, and reads the old holder.
-      coordinator.notifySlotMaybeFree()
-      await vi.advanceTimersByTimeAsync(0)
-      expect(lease.acquire).toHaveBeenCalledTimes(2)
-      expect(settled).toBe(false)
-
-      // The sentinel is readable a moment later: the next short re-scan finds
-      // the slot, and no second request went out in between.
-      leaseOpts.acquireResult = {
-        partition: 2,
-        partitionCount: 4,
-        localCounter: new Uint32Array(8),
-        isReadOnly: false,
-      }
-      await vi.advanceTimersByTimeAsync(ANNOUNCED_RESCAN_INTERVAL_MS)
-      expect(lease.acquire).toHaveBeenCalledTimes(3)
-      expect(settled).toBe(true)
-      expect(onSlotWait).toHaveBeenCalledTimes(1)
-      await inFlight
-      expect(coordinator.currentPartition).toBe(2)
-    } finally {
-      vi.useRealTimers()
-    }
-  })
-
-  // The deadline guard sizes its headroom to the step that comes next. An
-  // announcement landing with less than a poll interval left — but more than
-  // a re-scan — must get its short re-scans, not a throw sized for the poll.
-  it("a late announcement still gets its short re-scans before the deadline", async () => {
-    vi.useFakeTimers()
-    try {
-      const leaseOpts: Parameters<typeof makeLease>[0] = {
-        acquireResult: {
-          partition: undefined,
-          partitionCount: 4,
-          isReadOnly: true,
-        },
-      }
-      const lease = makeLease(leaseOpts)
-      leaseController.lease = lease
-      const coordinator = new BatchWriteCoordinator(
-        makeDeps({
-          stamper: makeStamper(
-            [],
-          ) as unknown as BatchWriteCoordinatorDeps["stamper"],
-          mode: "oneshot",
-          onSlotWait: vi.fn(),
-        }),
-      )
-      const internals = coordinator as unknown as Internals
-
-      const inFlight = internals.acquireWithSlotWait()
-      await vi.advanceTimersByTimeAsync(0)
-      expect(lease.acquire).toHaveBeenCalledTimes(1)
-
-      // Two full polls in, the wait is mid-sleep with 8 s of budget left when
-      // the announcement lands: a full poll no longer fits, a re-scan does.
-      const lateBy =
-        SLOT_WAIT_TIMEOUT_MS - LEASE_REFRESH_MS + ANNOUNCED_RESCAN_INTERVAL_MS
-      await vi.advanceTimersByTimeAsync(lateBy)
-      expect(lease.acquire).toHaveBeenCalledTimes(3)
-      coordinator.notifySlotMaybeFree()
-      await vi.advanceTimersByTimeAsync(0)
-      expect(lease.acquire).toHaveBeenCalledTimes(4)
-
-      leaseOpts.acquireResult = {
-        partition: 2,
-        partitionCount: 4,
-        localCounter: new Uint32Array(8),
-        isReadOnly: false,
-      }
-      await vi.advanceTimersByTimeAsync(ANNOUNCED_RESCAN_INTERVAL_MS)
-      await inFlight
-      expect(coordinator.currentPartition).toBe(2)
-    } finally {
-      vi.useRealTimers()
-    }
-  })
-
-  // Each round re-broadcasts a `lease-request`, and its answer re-arms the
-  // wake — so a window per announcement would be one holder dropped per bus
-  // round-trip. One announcement buys one bounded window per wait; after it,
-  // only the poll interval (and its re-ask) moves the wait on.
-  it("the re-scan window is bounded and bought once per wait", async () => {
-    vi.useFakeTimers()
-    try {
-      const gate = makeGatedLease()
-      leaseController.lease = gate.lease
-      const onSlotWait = vi.fn()
-      const coordinator = new BatchWriteCoordinator(
-        makeDeps({
-          stamper: makeStamper(
-            [],
-          ) as unknown as BatchWriteCoordinatorDeps["stamper"],
-          mode: "oneshot",
-          onSlotWait,
-        }),
-      )
-      const internals = coordinator as unknown as Internals
-
-      const inFlight = internals.acquireWithSlotWait()
-      await vi.advanceTimersByTimeAsync(0)
-      expect(gate.acquire).toHaveBeenCalledTimes(1)
-
-      // Announced while mid-acquire — the scan that just ran was stale, so
-      // round 2 starts at once.
-      coordinator.notifySlotMaybeFree()
-      await gate.letGo()
-      expect(gate.acquire).toHaveBeenCalledTimes(2)
-      // Nothing was asked yet: the announcement pre-empted round 1's ask.
-      expect(onSlotWait).not.toHaveBeenCalled()
-
-      // Announced the same way again: this wait has spent its window, so the
-      // remaining short re-scans run out on the clock, then the poll resumes.
-      coordinator.notifySlotMaybeFree()
-      await gate.letGo()
-      expect(gate.acquire).toHaveBeenCalledTimes(2)
-      for (let round = 3; round <= 2 + ANNOUNCED_RESCAN_ROUNDS; round++) {
-        await vi.advanceTimersByTimeAsync(ANNOUNCED_RESCAN_INTERVAL_MS)
-        expect(gate.acquire).toHaveBeenCalledTimes(round)
-        await gate.letGo()
-      }
-      // The window ran out on a stale read: the poll resumes, ask included.
-      expect(onSlotWait).toHaveBeenCalledTimes(1)
-      const exhausted = 2 + ANNOUNCED_RESCAN_ROUNDS
-
-      // Only the poll interval moves it on now.
-      await vi.advanceTimersByTimeAsync(ANNOUNCED_RESCAN_INTERVAL_MS)
-      expect(gate.acquire).toHaveBeenCalledTimes(exhausted)
-      await vi.advanceTimersByTimeAsync(LEASE_REFRESH_MS)
-      expect(gate.acquire).toHaveBeenCalledTimes(exhausted + 1)
-
-      coordinator.teardown()
-      await gate.letGo()
-      await inFlight
-    } finally {
-      vi.useRealTimers()
-    }
-  })
-
-  it("notifySlotMaybeFree outside slot-wait is a no-op", () => {
-    const coordinator = new BatchWriteCoordinator(makeDeps())
-    expect(() => coordinator.notifySlotMaybeFree()).not.toThrow()
-  })
-
-  it("yieldForPeer releases a held idle lease and reports the partition", async () => {
-    vi.useFakeTimers()
-    try {
-      const lease = makeLease({
-        acquireResult: {
-          partition: 1,
-          partitionCount: 4,
-          localCounter: new Uint32Array(8),
-          isReadOnly: false,
-        },
-      })
-      leaseController.lease = lease
-      const calls: string[] = []
-      const stamper = makeStamper(calls)
-      const onLeaseChange = vi.fn()
-      const onLeaseReleased = vi.fn()
-      const writeLeaseCache = vi.fn()
-      const coordinator = new BatchWriteCoordinator(
-        makeDeps({
-          stamper: stamper as unknown as BatchWriteCoordinatorDeps["stamper"],
-          mode: "oneshot",
-          onLeaseChange,
-          onLeaseReleased,
-          writeLeaseCache,
-        }),
-      )
-      const op = vi.fn(async () => "ok")
-      await coordinator.withWrite(op, { wait: "block" })
-      expect(coordinator.currentPartition).toBe(1)
-
-      // Within the grace window right after the write: refuse to yield.
-      await expect(
-        coordinator.yieldForPeer("cafe0001"),
-      ).resolves.toBeUndefined()
-      expect(lease.release).not.toHaveBeenCalled()
-      expect(onLeaseReleased).not.toHaveBeenCalled()
-
-      // Once idle past the grace window: yield through the normal release path,
-      // and announce it with the requestId it answers — the proxy's bus reply
-      // is built from this echo, so the real coordinator must carry it.
-      await vi.advanceTimersByTimeAsync(PEER_YIELD_MIN_IDLE_MS)
-      await expect(coordinator.yieldForPeer("cafe0001")).resolves.toBe(1)
-      expect(lease.release).toHaveBeenCalledTimes(1)
-      expect(onLeaseReleased).toHaveBeenCalledTimes(1)
-      expect(onLeaseReleased).toHaveBeenCalledWith(1, "cafe0001")
-      expect(coordinator.currentPartition).toBeUndefined()
-      expect(writeLeaseCache).toHaveBeenLastCalledWith(undefined)
-      expect(onLeaseChange).toHaveBeenCalled()
-    } finally {
-      vi.useRealTimers()
-    }
-  })
-
-  it("teardown during an in-flight yield announces the partition once", async () => {
-    vi.useFakeTimers()
-    try {
-      const lease = makeLease({
-        acquireResult: {
-          partition: 1,
-          partitionCount: 4,
-          localCounter: new Uint32Array(8),
-          isReadOnly: false,
-        },
-      })
-      leaseController.lease = lease
-      // The yield's release is a stamped Swarm write that takes seconds; hold
-      // it open so teardown can land in the middle.
-      // Teardown issues its own detached release too, so hold every call.
-      const finishReleases: Array<() => void> = []
-      lease.release.mockImplementation(
-        () => new Promise<void>((resolve) => finishReleases.push(resolve)),
-      )
-      const stamper = makeStamper([])
-      const onLeaseReleased = vi.fn()
-      const coordinator = new BatchWriteCoordinator(
-        makeDeps({
-          stamper: stamper as unknown as BatchWriteCoordinatorDeps["stamper"],
-          mode: "oneshot",
-          onLeaseReleased,
-        }),
-      )
-      await coordinator.withWrite(
-        vi.fn(async () => "ok"),
-        { wait: "block" },
-      )
-      await vi.advanceTimersByTimeAsync(PEER_YIELD_MIN_IDLE_MS)
-
-      const yielding = coordinator.yieldForPeer("cafe0002")
-      await vi.advanceTimersByTimeAsync(0)
-      expect(lease.release).toHaveBeenCalledTimes(1)
-      // Teardown announces synchronously, then the yield's release completes.
-      coordinator.teardown()
-      expect(onLeaseReleased).toHaveBeenCalledTimes(1)
-      for (const finish of finishReleases) finish()
-      await yielding
-
-      expect(onLeaseReleased).toHaveBeenCalledTimes(1)
-    } finally {
-      vi.useRealTimers()
-    }
-  })
-
-  it("yieldForPeer refuses while an upload is in flight", async () => {
-    vi.useFakeTimers()
-    try {
-      const lease = makeLease({
-        acquireResult: {
-          partition: 3,
-          partitionCount: 4,
-          localCounter: new Uint32Array(8),
-          isReadOnly: false,
-        },
-      })
-      leaseController.lease = lease
-      const calls: string[] = []
-      const stamper = makeStamper(calls)
-      const coordinator = new BatchWriteCoordinator(
-        makeDeps({
-          stamper: stamper as unknown as BatchWriteCoordinatorDeps["stamper"],
-          mode: "oneshot",
-        }),
-      )
-      let finishOp: (() => void) | undefined
-      const op = vi.fn(
-        () =>
-          new Promise<string>((resolve) => (finishOp = () => resolve("ok"))),
-      )
-      const write = coordinator.withWrite(op, { wait: "block" })
-      await vi.waitFor(() => expect(op).toHaveBeenCalled())
-      await vi.advanceTimersByTimeAsync(PEER_YIELD_MIN_IDLE_MS)
-
-      await expect(coordinator.yieldForPeer()).resolves.toBeUndefined()
-      expect(lease.release).not.toHaveBeenCalled()
-
-      finishOp!()
-      await expect(write).resolves.toBe("ok")
-    } finally {
-      vi.useRealTimers()
-    }
-  })
-
-  it("yieldForPeer refuses after teardown", async () => {
-    const coordinator = new BatchWriteCoordinator(makeDeps())
-    coordinator.teardown()
-    await expect(coordinator.yieldForPeer()).resolves.toBeUndefined()
-  })
-})
-
-describe("BatchWriteCoordinator — scratch drive counter layout", () => {
-  it("builds the lease at the stamper's counterDepth, not the batch depth", async () => {
-    // A scratch drive's counters wrap within the lane, so they serialize as
-    // uint32 at a wider layout depth than the batch. The lease publishes and
-    // resumes partition state at that layout; on the batch depth a bucket's
-    // counter passing 65535 (an SOC rewritten once a second for ~18 hours)
-    // would make `serializeUint16Array` throw.
-    leaseController.lease = makeLease({
-      acquireResult: {
-        partition: 1,
-        partitionCount: 4,
-        localCounter: new Uint32Array(8),
-        isReadOnly: false,
-      },
-    })
-    const fromSwarmEncryptionKey = vi.mocked(
-      PartitionLease.fromSwarmEncryptionKey,
-    )
-    fromSwarmEncryptionKey.mockClear()
-    const stamper = { ...makeStamper([]), depth: 20, counterDepth: 24 }
-    const coordinator = new BatchWriteCoordinator(
-      makeDeps({
-        stamper: stamper as unknown as BatchWriteCoordinatorDeps["stamper"],
-        mode: "oneshot",
-      }),
-    )
-
-    await coordinator.withWrite(async () => "ok", { wait: "block" })
-
-    expect(fromSwarmEncryptionKey).toHaveBeenCalledTimes(1)
-    expect(fromSwarmEncryptionKey.mock.calls[0][0]).toMatchObject({
-      batchDepth: 24,
-    })
+    expect(await again.withWrite(async () => "y")).toBe("y")
   })
 })

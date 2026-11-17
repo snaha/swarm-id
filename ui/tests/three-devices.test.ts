@@ -7,19 +7,17 @@
  * the same account on three `BrowserContext`s — separate storage, separate
  * device ids, one signaling server — each driving the demo the way a person
  * does, with the partition read off the demo's own sidebar and every upload a
- * round trip through the demo's Safari-check harness. The lease protocol, the
- * account bus, the idle yield, the reload restore, the disconnect release and
- * the TTL reclaim of a closed tab all run for real, with production timings.
+ * round trip through the demo's Safari-check harness. Taking a partition
+ * over the account bus, the handover, the reload, the second tab, the
+ * disconnect and the closed tab all run for real, with production timings.
  *
- * Every step ends on the one invariant the lease exists for: no two devices
+ * Every step ends on the one invariant it all exists for: no two contexts
  * hold the same partition. The scenarios are ordered and share the devices —
- * each starts from where the previous one left the lease — so the file is
- * serial and runs on one worker (`playwright.devices.config.ts`).
+ * each starts from where the previous one left the partitions — so the file
+ * is serial and runs on one worker (`playwright.devices.config.ts`).
  *
- * Minutes per run, by design: the lease TTL, the idle yield and the beacon
- * grace are each 30 s and several steps wait them out. Not part of the
- * everyday e2e run: `.github/workflows/three-devices.yml` runs it on a PR that
- * touches the lease seams, nightly on main, before every npm publish (a red
+ * Not part of the everyday e2e run: `.github/workflows/three-devices.yml` runs it on a PR that
+ * touches the partition seams, nightly on main, before every npm publish (a red
  * run stops the publish), and on demand. Locally:
  *
  *   pnpm dev:local                                       # cluster, chain, solver, apps
@@ -33,14 +31,13 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 
 import {
-  BUSY_PUBLISHES,
+  ABSENCE_LAPSE_MS,
+  ACQUIRE_TIMEOUT_MS,
   Device,
   HANDOVER_TIMEOUT_MS,
-  IDLE_WAIT_MS,
-  LEASE_REFRESH_MS,
+  LEASE_WAIT_MS,
   PEER_YIELD_MIN_IDLE_MS,
   type Seed,
-  TTL_LAPSE_MS,
   UNANSWERED_WAIT,
   UPLOAD_TIMEOUT_MS,
   createAccountWithDrives,
@@ -53,7 +50,7 @@ import { THREE_DEVICES_SEED_FILE } from './global-setup-devices'
 
 // Not `serial`: a scenario that fails must not hide the ones after it — the
 // point of the run is a verdict per scenario. Each one re-establishes what it
-// needs (`ensureConnected`) and takes the lease state as it finds it.
+// needs (`ensureConnected`) and takes the partitions as it finds them.
 test.describe('three devices on two partitions', () => {
   test.skip(
     !rigUp,
@@ -66,18 +63,15 @@ test.describe('three devices on two partitions', () => {
   const all = () => [A, B, C]
 
   test.beforeAll(async ({ browser }) => {
-    test.setTimeout(TTL_LAPSE_MS * 2 + UPLOAD_TIMEOUT_MS * 3)
+    test.setTimeout(UPLOAD_TIMEOUT_MS * 5)
     // Playwright replaces the worker after a failed test and runs this hook
     // again; the drive bought the first time is reused rather than bought
     // again, which is what keeps a run with failures from draining the faucet.
     const seedPath = join(test.info().project.outputDir, THREE_DEVICES_SEED_FILE)
     if (existsSync(seedPath)) {
       const seed = JSON.parse(readFileSync(seedPath, 'utf8')) as Seed
-      // The previous worker's contexts are gone but their locks and beacons
-      // are not: a partition they held stays taken until the TTL and the
-      // beacon grace lapse. Three new devices arriving before that find both
-      // slots held and every scenario fails for the same reason.
-      await sleep(TTL_LAPSE_MS)
+      // The previous worker's contexts are gone, and what they held with
+      // them: nothing on Swarm says who holds a partition.
       A = await Device.open(browser, 'A', seed)
       B = await Device.open(browser, 'B', seed)
       C = await Device.open(browser, 'C', seed)
@@ -133,22 +127,20 @@ test.describe('three devices on two partitions', () => {
     await expectNoDualHold(all())
   })
 
-  test('C arrives with both partitions held: its first upload makes a holder give one up', async () => {
+  test('C arrives with both partitions held: its first upload makes a holder hand one over', async () => {
     for (const device of all()) await device.ensureConnected()
     // Both holders idle past the peer-yield threshold, so either may answer.
     await sleep(PEER_YIELD_MIN_IDLE_MS)
     const before = await expectNoDualHold([A, B])
 
     await C.connect()
-    // The eager acquire on connect finds both slots held and settles for
-    // read-only; it does not ask anyone to move. An UPLOAD does: its slot wait
-    // broadcasts a `lease-request` each poll round, the lowest-ranked idle
-    // holder yields, and the upload completes on the freshly acquired slot.
-    // (A holder idle past IDLE_YIELD_MS may already have let go by itself; C
-    // then takes the free slot cold. Either way one holder ends up empty.)
+    // C asks for every partition gently first, and nobody moves. Then it asks
+    // the holder of its home partition to hand over, then the other one; a
+    // holder that is not writing does, and the upload completes on the
+    // partition it was handed.
     const pC = await C.uploadAndHoldOrSkip()
-    // Whoever held C's partition before has let go of it — or had already
-    // let go before C asked. Either way at most one of A and B still holds.
+    // Whoever held C's partition before has let go of it: it stopped before
+    // it answered.
     const previousHolder = [...before].find(([, p]) => p === pC)?.[0]
     if (previousHolder) {
       const device = previousHolder === 'A' ? A : B
@@ -157,88 +149,86 @@ test.describe('three devices on two partitions', () => {
     await expectNoDualHold(all())
   })
 
-  test('the device that yielded is served on its next upload', async () => {
+  test('the device that handed over is served on its next upload', async () => {
     for (const device of all()) await device.ensureConnected()
     const before = await expectNoDualHold(all())
     const waiter = [...before].find(([, p]) => p === undefined)?.[0]
-    expect(waiter, 'every device holds a partition, nobody yielded').toBeDefined()
+    expect(waiter, 'every device holds a partition, nobody handed one over').toBeDefined()
     const waiting = all().find((d) => d.label === waiter)!
     await sleep(PEER_YIELD_MIN_IDLE_MS)
 
-    // Its upload blocks on a slot wait, asks the room, and an idle holder gives
-    // one up — the upload itself completes on the freshly acquired partition.
+    // Its upload asks the room, an idle holder hands a partition over, and the
+    // upload itself completes on it.
     const held = await waiting.uploadAndHoldOrSkip()
     expect(held).toBeDefined()
     await expectNoDualHold(all())
   })
 
-  test('holders idle past IDLE_YIELD_MS release their partitions, and re-acquire on the next upload', async () => {
+  test('an idle holder keeps its partition: nothing is given up on a timer', async () => {
     for (const device of all()) await device.ensureConnected()
-    test.setTimeout(IDLE_WAIT_MS + UPLOAD_TIMEOUT_MS * 2 + 60_000)
-    // A rival is known to every device by now, which is what arms the timer
-    // yield: a solo device keeps its lease across a pause instead.
-    const idleFrom = Date.now()
-    await sleep(IDLE_WAIT_MS)
-    for (const device of all()) {
-      const busy = device.publishesSince(idleFrom)
-      if ((await device.partition()) !== undefined && busy >= BUSY_PUBLISHES) {
-        // Not idle at all: it spent the window publishing device state to a
-        // peer (#707), and every publish is lease activity.
-        skipScenario(`${device.label} published ${busy}× during the idle window (#707)`)
-      }
-      await expect.poll(() => device.partition(), { timeout: LEASE_REFRESH_MS * 2 }).toBeUndefined()
-    }
+    const before = await expectNoDualHold(all())
+    const holders = all().filter((device) => before.get(device.label) !== undefined)
+    expect(holders.length, 'nobody holds a partition').toBeGreaterThan(0)
 
-    // Cold acquire, no contention: two free slots, one taker.
-    const pA = await A.uploadAndHold()
-    expect(pA).toBeDefined()
+    // Longer than anything that could lapse while the tabs stay open.
+    await sleep(LEASE_WAIT_MS * 2)
+
+    for (const device of holders) {
+      expect(await device.partition(), `${device.label} let go while idle`).toBe(
+        before.get(device.label),
+      )
+    }
     await expectNoDualHold(all())
   })
 
-  test('a reload keeps the lease: the fresh page adopts it from the cache without a cold acquire', async () => {
+  test('a reloaded page holds nothing at first, and takes a partition again by asking', async () => {
     for (const device of all()) await device.ensureConnected()
-    // Hold something first; an upload acquires when nothing is held.
-    const before = await A.uploadAndHoldOrSkip()
+    // Hold something first; an upload takes a partition when nothing is held.
+    await A.uploadAndHoldOrSkip()
 
     await A.page.reload()
-    // Adopted from local state alone: the partition is back well inside a
-    // refresh interval, with no lock-SOC scan or intent round in between.
-    await expect.poll(() => A.partition(), { timeout: LEASE_REFRESH_MS }).toBe(before)
+    // The fresh page is a new context in the room: it is owed nothing, and
+    // must have been there for the wait before it takes a partition nobody
+    // answers for. The one its predecessor held is free by then.
+    await expect
+      .poll(() => A.partition(), { timeout: ACQUIRE_TIMEOUT_MS + HANDOVER_TIMEOUT_MS })
+      .not.toBeUndefined()
     await A.upload()
     await expectNoDualHold(all())
   })
 
-  test('a second tab of one device shares its partition, and both tabs upload', async () => {
+  test('a second tab of one device asks for a partition like any other context, and both tabs upload', async () => {
     for (const device of all()) await device.ensureConnected()
-    // Hold something first; an upload acquires when nothing is held.
-    const held = await A.uploadAndHoldOrSkip()
+    // Hold something first; an upload takes a partition when nothing is held.
+    await A.uploadAndHoldOrSkip()
 
     const sibling = await A.openSiblingTab()
+    /** The partitions the two tabs of A hold are never the same one. */
+    const expectTabsApart = async () => {
+      const [first, second] = await Promise.all([A.partition(), A.partition(sibling)])
+      if (first !== undefined) expect(second, 'both tabs of A hold one partition').not.toBe(first)
+    }
     try {
-      // Same device id, same cache: the sibling adopts the same claim rather
-      // than contending for a slot of its own.
-      await expect.poll(() => A.partition(sibling), { timeout: LEASE_REFRESH_MS }).toBe(held)
+      // A context of its own: it takes a free partition or is handed one, by
+      // another device or by the first tab.
       await A.upload(sibling)
+      await expectTabsApart()
       await A.upload()
-      expect(await A.partition()).toBe(held)
-      expect(await A.partition(sibling)).toBe(held)
+      await expectTabsApart()
       await expectNoDualHold(all())
     } finally {
       await sibling.close()
     }
-    // The tab that stays keeps the lease.
-    await A.upload()
-    expect(await A.partition()).toBe(held)
+    // The tab that stays still writes.
+    await A.uploadAndHoldOrSkip()
+    await expectNoDualHold(all())
   })
 
-  test('a disconnect releases the partition at once, and a waiting device takes it', async () => {
+  test('a disconnect gives the partition up at once, and a waiting device takes it', async () => {
     for (const device of all()) await device.ensureConnected()
-    // Fill both slots: B takes a free one, then C's request makes an idle
-    // holder yield. The holder that yields may be B rather than A — then B
-    // holds nothing to release, and the scenario has no subject (#798).
-    // One more
-    // upload puts B back: C, just served, is inside the peer-yield window,
-    // so the idle holder that yields is A.
+    // Fill both partitions with B and C. Each upload may be handed its
+    // partition by whoever holds one, so check who holds afterwards: without
+    // B and C both holding, the scenario has no subject (#798).
     await B.uploadAndHoldOrSkip()
     await C.uploadAndHoldOrSkip()
     if ((await B.partition()) === undefined) await B.uploadAndHoldOrSkip()
@@ -250,48 +240,42 @@ test.describe('three devices on two partitions', () => {
       )
     }
 
-    // A waits for a slot while B disconnects. The mechanism under test is the
-    // teardown release: B's slot is freed at once and its `lease-released`
-    // wakes A's wait. The other way A could be served — C idle-yielding to
-    // A's request — is kept out by C having just uploaded (inside the
-    // peer-yield window when A asks), and is detected if it happens anyway:
-    // a yield is the one release that logs, a teardown release does not.
+    // A waits for a partition while B disconnects. The mechanism under test
+    // is the teardown: B gives its partition up at once and answers A's next
+    // claim "free". The other way A could be served — C handing over — is
+    // kept out by C having just uploaded (inside the peer-yield window when A
+    // asks), and is detected if it happens anyway: a handover is the one way
+    // of losing a partition that logs, a disconnect does not.
     const asked = Date.now()
     const aUpload = A.upload()
     await B.disconnect()
     await aUpload
-    if (C.yieldedSince(asked)) {
-      skipScenario('C yielded to the request before B’s release could be told apart')
+    if (C.lostLaneSince(asked)) {
+      skipScenario('C handed over before B’s disconnect could be told apart')
     }
-    expect(await A.partition(), 'A did not land on the slot B released').toBe(pB)
+    expect(await A.partition(), 'A did not land on the partition B gave up').toBe(pB)
     await expectNoDualHold([A, C])
 
-    // B reconnects and is served in turn: C or A yields on request.
+    // B reconnects and is served in turn: C or A hands over when asked.
     await B.connect()
     await sleep(PEER_YIELD_MIN_IDLE_MS)
     await B.uploadAndHoldOrSkip()
     await expectNoDualHold(all())
   })
 
-  test('a closed tab never releases: its partition comes back by TTL, and the others end up holding', async () => {
+  test('a closed tab says nothing: its partition is free once the room has seen it gone for the wait', async () => {
     for (const device of all()) await device.ensureConnected()
-    test.setTimeout(TTL_LAPSE_MS + UPLOAD_TIMEOUT_MS * 5)
-    // C holds a partition and then goes away without a teardown — no release
-    // sentinel, no `lease-released`, only a socket close the room notices.
+    test.setTimeout(ABSENCE_LAPSE_MS + UPLOAD_TIMEOUT_MS * 5)
+    // C holds a partition and then goes away without a teardown — only a
+    // socket close the room notices.
     await C.uploadAndHoldOrSkip()
     await C.close()
 
-    // Nothing A or B does brings C's slot back sooner, so wait the lapse out
-    // first. Uploading through it instead (#798) spent the budget on trading
-    // the one free slot: an idle release on one side and a cold re-claim on
-    // the other took longer than what was left once C's lock had lapsed — and
-    // when A and B share a home partition the re-claim contends for the same
-    // slot before the other is tried. A and B idle-release meanwhile; a cold
-    // acquire finding C's expired lock is what "comes back by TTL" means.
-    await sleep(TTL_LAPSE_MS)
-    // Each uploads: the first takes a free slot, the second finds the other one
-    // free. One round is the expectation; a second covers an acquire that read
-    // C's lock a beat before it lapsed and waited it out.
+    // Nobody answers for C's partition any more. It is taken once everyone
+    // who has not answered has been gone for the wait.
+    await sleep(ABSENCE_LAPSE_MS)
+    // Each uploads: whoever holds nothing finds a partition free. One round
+    // is the expectation; a second covers a claim that was a tick early.
     let held = new Map<string, number | undefined>()
     for (let round = 0; round < 2; round++) {
       for (const device of [A, B]) {
