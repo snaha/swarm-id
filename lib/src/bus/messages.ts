@@ -93,6 +93,17 @@ export const LaneFreeMessageSchema = z.object({
 })
 
 /**
+ * "I hold that lane and am keeping it", to the context whose claim `round`
+ * names. Nothing depends on it arriving: it tells a claimant that waiting
+ * will not free the lane.
+ */
+export const LaneHeldMessageSchema = z.object({
+  type: z.literal("lane-held"),
+  ...laneFields,
+  to: PeerIdSchema,
+})
+
+/**
  * "This device is live." Published on joining the room and every
  * `PRESENCE_INTERVAL_MS` (`presence.ts`); a receiver stamps its own clock, so
  * there is no timestamp to skew and a replay (#604) only refreshes a device it
@@ -110,6 +121,7 @@ export const BusMessageSchema = z.discriminatedUnion("type", [
   AccountDeltaMessageSchema,
   LaneClaimMessageSchema,
   LaneFreeMessageSchema,
+  LaneHeldMessageSchema,
   PresenceMessageSchema,
 ])
 

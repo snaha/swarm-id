@@ -174,13 +174,15 @@ and checked in `models/bus-lease`. Nothing is written to Swarm for it.
   The server drops a member that stops answering its ticks (a frozen tab).
 - **Handover.** A holder that is not writing hands the lane over when asked: it stops
   stamping, then answers "free". A holder with an upload in flight, or one that wrote
-  within `PEER_YIELD_MIN_IDLE_MS` (3 s), does not answer; the claim is sent again with
-  every tick. Nothing is published at a handover: every acknowledged upload already
+  within `PEER_YIELD_MIN_IDLE_MS` (3 s), keeps the lane and answers "held"
+  (`lane-held`); the claim is sent again with every tick. Nothing is published at a handover: every acknowledged upload already
   published the counter (§8).
 - **Which lane.** A context first asks for every lane **gently**: one nobody holds is
-  taken, and a holder is left where it is. After `NEXT_LANE_AFTER_MS` (1.5 s) it insists
-  on its device's home lane (`deviceHomePartition`), and after each further step on the
-  next one.
+  taken, and a holder keeps its lane and answers "held". Only when every lane has
+  answered "held" does the context insist, on its device's home lane first
+  (`deviceHomePartition`) and after each `NEXT_LANE_AFTER_MS` (1.5 s) on the next one.
+  While any lane may still come by itself (nobody holds it, its holder has just gone, or
+  a context that has just joined has not answered for it) nobody is asked to move.
 - **No timers.** A holder keeps its lane for as long as its tab is open and connected. A
   tab that closes, crashes or loses its connection is seen leaving by the room, and its
   lane is free once it has been gone for the wait.
@@ -326,7 +328,7 @@ decided on the room's membership and the server round trip.
 | `UTILIZATION_SLOTS_PER_BUCKET`    | 2         | reserved slots per bucket (one per partition)                                                              |
 | `LEASE_STOP_MS` / `LEASE_WAIT_MS` | 6 s / 8 s | how long a holder may go unconfirmed / how long everyone else must be absent — `lib/src/sync/bus-lease.ts` |
 | `PEER_YIELD_MIN_IDLE_MS`          | 3 s       | a holder that wrote within this does not hand over — `lib/src/sync/batch-write-coordinator.ts`             |
-| `NEXT_LANE_AFTER_MS`              | 1.5 s     | the gentle step of a claim, then one more lane insisted on per step — same file                            |
+| `NEXT_LANE_AFTER_MS`              | 1.5 s     | once every lane is known held, one more lane insisted on per step — same file                              |
 | `FANOUT` / `SALTS`                | 8 / 8     | state-pointer search width / candidate addresses per entry — `lib/src/sync/state-pointer-search.ts`        |
 
 ## 13. History (so future readers aren't misled)

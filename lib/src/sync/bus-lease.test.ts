@@ -188,7 +188,7 @@ describe("BusLane — two devices", () => {
     expect(a.lost).not.toHaveBeenCalled()
   })
 
-  it("stays silent while it is writing", async () => {
+  it("keeps the lane while it is writing, and says so", async () => {
     const { a, b } = pair()
     a.liveness.present.clear()
     holdAlone(a)
@@ -196,12 +196,16 @@ describe("BusLane — two devices", () => {
     a.busy.value = true
 
     b.lane.claim()
+    expect(b.lane.knownHeld).toBe(false)
     deliver(b, a)
     await flush()
 
-    expect(a.sent).toEqual([])
+    expect(a.sent.map((message) => message.kind)).toEqual(["held"])
     expect(a.lane.holds()).toBe(true)
+    deliver(a, b)
     expect(b.lane.holds()).toBe(false)
+    // The claimant now knows that waiting will not free this lane.
+    expect(b.lane.knownHeld).toBe(true)
   })
 
   it("lets the lower device id win when both claim at once", () => {
@@ -288,7 +292,8 @@ describe("BusLane — a gentle claim", () => {
     deliver(b, a)
     await flush()
     expect(a.lane.holds()).toBe(true)
-    expect(a.sent).toEqual([])
+    deliver(a, b)
+    expect(b.lane.knownHeld).toBe(true)
 
     b.lane.insist()
     asked.push(b.sent[0].kind === "claim" && b.sent[0].gentle === true)

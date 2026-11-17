@@ -202,7 +202,7 @@ transient and backs off with jitter.
   unpartitioned proxy answers every storage event with a delta and a stamped feed write, so it
   loops without settling, even on one device. Stale devices are therefore _ignored_ at read,
   never tombstoned; the roster grows per device, not per time, and needs no prune.
-- **Coordination (P2).** Who writes which partition (`lane-claim`, `lane-free`) and
+- **Coordination (P2).** Who writes which partition (`lane-claim`, `lane-free`, `lane-held`) and
   utilization deltas. A lane is one partition of one batch; a context asks the room for it,
   everyone not writing on it answers "free", and a holder that is not writing hands it over
   ([`Postage-Batch-Partitioning.md`](./Postage-Batch-Partitioning.md) §7, the protocol of
@@ -331,8 +331,9 @@ Each landed as its own PR chain, in this order:
    (#862), and a holder on batch X and a claimant on batch Y contend for nothing.
 
    **A claim is gentle first.** `gentle: true` asks only whether the lane is held at all, so a
-   newcomer takes a free lane before any holder is asked to move. A holder is asked to hand
-   over 1.5 s later.
+   newcomer takes a free lane before any holder is asked to move. A holder that keeps its
+   lane says so (`lane-held`), and a claimant asks one to hand over only once every lane has
+   answered that way: a peer that has merely not answered yet is not mistaken for a holder.
 
 5. **The SwarmID tab as a bus peer** (#608, #610, #631): it publishes a delta on every account
    mutation, and folds a peer's into **shared storage**
@@ -381,6 +382,7 @@ Each landed as its own PR chain, in this order:
   | --------------------- | ------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
   | `lane-claim`          | yes                | an idle holder hands its lane to a claimant that is no longer asking, and takes one again on its next upload: one claim and one pointer read. No Swarm write. |
   | `lane-free`           | yes                | nothing: an answer counts only for the claim round it names, and rounds are random                                                                            |
+  | `lane-held`           | yes                | nothing that matters: a claimant asks a holder to move a little earlier or later                                                                              |
   | `presence`            | yes                | the receiver stamps its own clock, so a replay keeps a departed device "Online" in the dev list for the 3-minute window                                       |
   | `account-delta`       | yes                | inert up to the one bounded echo described above\*                                                                                                            |
   | `utilization-updated` | **no**             | published `localOnly`, so it never leaves the device and a relay never sees it                                                                                |
