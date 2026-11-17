@@ -109,7 +109,6 @@ import {
 import {
   downloadDataWithChunkAPI,
   openDataStream,
-  type DataStream,
   downloadSOC,
   downloadEncryptedSOC,
 } from "./proxy/download-data"
@@ -4769,62 +4768,63 @@ export class SwarmIdProxy {
    * Answer a streaming download: its size now, then one piece per pull. A pull
    * is what lets the next piece be read, so a reader that stops stops the
    * fetching too, and one silent past the idle deadline ends the download.
+   * `resolve` finds the content and what the answer says beside its size.
    */
   private async streamDownload(
     event: MessageEvent,
-    requestId: string,
-    answer:
-      | { type: "downloadDataStreamResponse" }
-      | { type: "actDownloadDataStreamResponse" }
-      | { type: "downloadFileStreamResponse"; name: string },
-    requestOptions: Abortable<object>["requestOptions"],
-    download: DataStream,
+    message: Abortable<{ requestId: string }>,
+    failure: string,
+    resolve: () => Promise<{
+      answer:
+        | { type: "downloadDataStreamResponse" }
+        | { type: "actDownloadDataStreamResponse" }
+        | { type: "downloadFileStreamResponse"; name: string }
+      reference: string
+    }>,
   ): Promise<void> {
-    const pulls = new Inbox<undefined>(requestOptions.signal)
-    this.downloadPulls.set(requestId, pulls)
-    const deadline = sourceIdleTimeout(requestOptions.timeout)
-    const pieces = rechunk(download.leaves, STREAM_PIECE_SIZE)
+    const { requestId, requestOptions } = message
     try {
-      this.postMessage(event, { ...answer, requestId, size: download.size })
-      while (true) {
-        await nextWithin(
-          pulls,
-          deadline,
-          `The download was not read for ${deadline}ms`,
-        )
-        const { done, value } = await pieces.next()
-        if (done) {
-          this.postMessage(event, { type: "downloadStreamPiece", requestId })
-          return
+      const { answer, reference } = await resolve()
+      const download = await openDataStream(this.bee, reference, requestOptions)
+      const pulls = new Inbox<undefined>(requestOptions.signal)
+      this.downloadPulls.set(requestId, pulls)
+      const deadline = sourceIdleTimeout(requestOptions.timeout)
+      const pieces = rechunk(download.leaves, STREAM_PIECE_SIZE)
+      try {
+        this.postMessage(event, { ...answer, requestId, size: download.size })
+        while (true) {
+          await nextWithin(
+            pulls,
+            deadline,
+            `The download was not read for ${deadline}ms`,
+          )
+          const { done, value } = await pieces.next()
+          if (done) {
+            this.postMessage(event, { type: "downloadStreamPiece", requestId })
+            return
+          }
+          this.postMessage(
+            event,
+            { type: "downloadStreamPiece", requestId, data: value },
+            [value.buffer],
+          )
         }
-        this.postMessage(
-          event,
-          { type: "downloadStreamPiece", requestId, data: value },
-          [value.buffer],
-        )
+      } finally {
+        await pieces.return(undefined)
       }
-    } finally {
-      await pieces.return(undefined)
+    } catch (error) {
+      this.sendErrorToParent(event, requestId, error, failure)
     }
   }
 
-  private async handleDownloadDataStream(
+  private handleDownloadDataStream(
     message: Abortable<DownloadDataStreamMessage>,
     event: MessageEvent,
   ): Promise<void> {
-    const { requestId, reference, requestOptions } = message
-    try {
-      const download = await openDataStream(this.bee, reference, requestOptions)
-      await this.streamDownload(
-        event,
-        requestId,
-        { type: "downloadDataStreamResponse" },
-        requestOptions,
-        download,
-      )
-    } catch (error) {
-      this.sendErrorToParent(event, requestId, error, "Download failed")
-    }
+    return this.streamDownload(event, message, "Download failed", async () => ({
+      answer: { type: "downloadDataStreamResponse" },
+      reference: message.reference,
+    }))
   }
 
   /** Upload what the parent sent: bytes, or a source to pull them from. */
@@ -5086,32 +5086,22 @@ export class SwarmIdProxy {
     }
   }
 
-  private async handleDownloadFileStream(
+  private handleDownloadFileStream(
     message: Abortable<DownloadFileStreamMessage>,
     event: MessageEvent,
   ): Promise<void> {
-    const { requestId, reference, path, requestOptions } = message
-    try {
+    const { reference, path, requestOptions } = message
+    return this.streamDownload(event, message, "Download failed", async () => {
       const file = await this.resolveManifestFile(
         reference,
         path,
         requestOptions,
       )
-      const download = await openDataStream(
-        this.bee,
-        file.reference,
-        requestOptions,
-      )
-      await this.streamDownload(
-        event,
-        requestId,
-        { type: "downloadFileStreamResponse", name: file.name },
-        requestOptions,
-        download,
-      )
-    } catch (error) {
-      this.sendErrorToParent(event, requestId, error, "Download failed")
-    }
+      return {
+        answer: { type: "downloadFileStreamResponse", name: file.name },
+        reference: file.reference,
+      }
+    })
   }
 
   /** A folder as one manifest (#750); the Swarm-specific part is `uploadCollection`. */
@@ -6728,27 +6718,19 @@ export class SwarmIdProxy {
     return uint8ArrayToHex(contentNode.targetAddress)
   }
 
-  private async handleActDownloadDataStream(
+  private handleActDownloadDataStream(
     message: Abortable<ActDownloadDataStreamMessage>,
     event: MessageEvent,
   ): Promise<void> {
-    const { requestId, requestOptions } = message
-    try {
-      const download = await openDataStream(
-        this.bee,
-        await this.resolveActContent(message),
-        requestOptions,
-      )
-      await this.streamDownload(
-        event,
-        requestId,
-        { type: "actDownloadDataStreamResponse" },
-        requestOptions,
-        download,
-      )
-    } catch (error) {
-      this.sendErrorToParent(event, requestId, error, "ACT download failed")
-    }
+    return this.streamDownload(
+      event,
+      message,
+      "ACT download failed",
+      async () => ({
+        answer: { type: "actDownloadDataStreamResponse" },
+        reference: await this.resolveActContent(message),
+      }),
+    )
   }
 
   private async handleActDownloadData(

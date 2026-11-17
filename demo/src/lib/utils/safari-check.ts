@@ -16,7 +16,7 @@
  * the proxy (the `setSecret` handler), so a partitioned session reporting it is
  * proof the popup's postMessage arrived, whatever happens downstream.
  */
-import type { UploadUnavailableReason } from '@snaha/swarm-id'
+import { STREAM_PIECE_SIZE, type UploadUnavailableReason } from '@snaha/swarm-id'
 
 import { formatBytes } from './format'
 
@@ -293,8 +293,6 @@ function uploadPath(input: CheckInput): CheckResult {
  * that choice, first taken on Safari 26.5.2, can be re-run on any browser.
  */
 
-/** The bridge's bound on one piece of a transfer, as the proxy sets it (`STREAM_PIECE_SIZE`) */
-export const BRIDGE_PIECE_BYTES = 256 * 1024
 /** The blob `Blob.stream()` is probed with: the size Safari handed back as one piece */
 export const BLOB_PROBE_BYTES = 5 * 1024 * 1024
 /** How long a transferred stream may take to arrive before it counts as lost */
@@ -377,12 +375,12 @@ function blobStream(observation: BlobStreamObservation | undefined): TransportRe
   if (!observation) return { id, title, ...NOT_RUN }
   const { size, pieces, largestPiece } = observation
   const observed = `${pieces === 1 ? '1 piece' : `${pieces} pieces`} for ${formatBytes(size)}, the largest ${formatBytes(largestPiece)}.`
-  if (largestPiece <= BRIDGE_PIECE_BYTES) {
+  if (largestPiece <= STREAM_PIECE_SIZE) {
     return {
       id,
       title,
       observed,
-      meaning: `Blob.stream() keeps its pieces within the bridge’s ${formatBytes(BRIDGE_PIECE_BYTES)} here, though not in every browser (Safari 26.5.2 handed 5 MB back as one piece) → the bridge reads a Blob with slice() regardless.`,
+      meaning: `Blob.stream() keeps its pieces within the bridge’s ${formatBytes(STREAM_PIECE_SIZE)} here, though not in every browser (Safari 26.5.2 handed 5 MB back as one piece) → the bridge reads a Blob with slice() regardless.`,
     }
   }
   return {
@@ -392,7 +390,7 @@ function blobStream(observation: BlobStreamObservation | undefined): TransportRe
     meaning:
       pieces === 1
         ? `One piece for ${formatBytes(size)} → Blob.stream() does not bound its pieces, so a Blob must be read with slice(), which is what the bridge does.`
-        : `Pieces over the bridge’s ${formatBytes(BRIDGE_PIECE_BYTES)} → a Blob must be read with slice(), which is what the bridge does.`,
+        : `Pieces over the bridge’s ${formatBytes(STREAM_PIECE_SIZE)} → a Blob must be read with slice(), which is what the bridge does.`,
   }
 }
 

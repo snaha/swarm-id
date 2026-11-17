@@ -925,6 +925,38 @@ export class SwarmIdClient {
   }
 
   /**
+   * Send an upload whose input may stream, `message` built around the input's
+   * wire form. A stream read to the end is handed back to its owner; on
+   * failure the source is cancelled with the error the call rejects with.
+   */
+  private async sendUpload<TResponse>(
+    requestId: string,
+    input: UploadInput,
+    onProgress: UploadOptions["onProgress"],
+    message: (wire: {
+      data: Uint8Array<ArrayBuffer> | PulledSource
+      enableProgress: boolean
+    }) => AwaitedRequest & { requestId: string },
+  ): Promise<TResponse> {
+    const { data, source } = this.toWireInput(input)
+    const stopProgress = this.listenForProgress(requestId, onProgress)
+    try {
+      const response = await this.sendRequest<TResponse>(
+        // A streaming upload always wants progress: it is its sign of life.
+        message({ data, enableProgress: !!onProgress || source !== undefined }),
+        source,
+      )
+      source?.release()
+      return response
+    } catch (error) {
+      this.cancelSource(source, error)
+      throw error
+    } finally {
+      stopProgress()
+    }
+  }
+
+  /**
    * Wire up the stream the proxy answers once it has resolved a streaming
    * download. Nothing is asked of the proxy until the reader wants a piece,
    * and each piece asked for is waited on for the idle timeout at most.
@@ -1086,7 +1118,7 @@ export class SwarmIdClient {
     if (perCall === undefined || perCall <= 0) {
       return Math.max(this.timeout, STREAM_IDLE_TIMEOUT_MS)
     }
-    return Math.min(perCall, MAX_TIMER_DELAY_MS)
+    return this.roundTripTimeout(perCall)
   }
 
   /**
@@ -1909,43 +1941,27 @@ export class SwarmIdClient {
       ...serializableOptions
     } = options ?? {}
 
-    const { data: wireData, source } = this.toWireInput(data)
-    const stopProgress = this.listenForProgress(requestId, onProgress)
-    try {
-      const response = await this.sendRequest<{
-        type: "uploadDataResponse"
-        requestId: string
-        reference: Reference
-        tagUid?: number
-        stampedChunks?: number
-      }>(
-        {
-          type: "uploadData",
-          requestId,
-          data: wireData,
-          options: serializableOptions,
-          requestOptions,
-          // A streaming upload always wants it: progress is its sign of life.
-          enableProgress: !!onProgress || source !== undefined,
-          useWebSocket,
-          useWorkers,
-          workerCount,
-          concurrency,
-        },
-        source,
-      )
-      source?.release()
-
-      return {
-        reference: response.reference,
-        tagUid: response.tagUid,
-        stampedChunks: response.stampedChunks,
-      }
-    } catch (error) {
-      this.cancelSource(source, error)
-      throw error
-    } finally {
-      stopProgress()
+    const response = await this.sendUpload<{
+      type: "uploadDataResponse"
+      requestId: string
+      reference: Reference
+      tagUid?: number
+      stampedChunks?: number
+    }>(requestId, data, onProgress, (wire) => ({
+      type: "uploadData",
+      requestId,
+      ...wire,
+      options: serializableOptions,
+      requestOptions,
+      useWebSocket,
+      useWorkers,
+      workerCount,
+      concurrency,
+    }))
+    return {
+      reference: response.reference,
+      tagUid: response.tagUid,
+      stampedChunks: response.stampedChunks,
     }
   }
 
@@ -2154,44 +2170,28 @@ export class SwarmIdClient {
     } = options ?? {}
 
     const fileName = name || (file instanceof File ? file.name : undefined)
-    const { data: wireData, source } = this.toWireInput(file)
-    const stopProgress = this.listenForProgress(requestId, onProgress)
-    try {
-      const response = await this.sendRequest<{
-        type: "uploadFileResponse"
-        requestId: string
-        reference: Reference
-        tagUid?: number
-        stampedChunks?: number
-      }>(
-        {
-          type: "uploadFile",
-          requestId,
-          data: wireData,
-          name: fileName,
-          options: serializableOptions,
-          requestOptions,
-          // A streaming upload always wants it: progress is its sign of life.
-          enableProgress: !!onProgress || source !== undefined,
-          useWebSocket,
-          useWorkers,
-          workerCount,
-          concurrency,
-        },
-        source,
-      )
-      source?.release()
-
-      return {
-        reference: response.reference,
-        tagUid: response.tagUid,
-        stampedChunks: response.stampedChunks,
-      }
-    } catch (error) {
-      this.cancelSource(source, error)
-      throw error
-    } finally {
-      stopProgress()
+    const response = await this.sendUpload<{
+      type: "uploadFileResponse"
+      requestId: string
+      reference: Reference
+      tagUid?: number
+      stampedChunks?: number
+    }>(requestId, file, onProgress, (wire) => ({
+      type: "uploadFile",
+      requestId,
+      ...wire,
+      name: fileName,
+      options: serializableOptions,
+      requestOptions,
+      useWebSocket,
+      useWorkers,
+      workerCount,
+      concurrency,
+    }))
+    return {
+      reference: response.reference,
+      tagUid: response.tagUid,
+      stampedChunks: response.stampedChunks,
     }
   }
 
@@ -3988,48 +3988,32 @@ export class SwarmIdClient {
     this.ensureReady()
     const requestId = this.generateRequestId()
     const { onProgress, ...serializableOptions } = options ?? {}
-    const { data: wireData, source } = this.toWireInput(data)
-
-    const stopProgress = this.listenForProgress(requestId, onProgress)
-    try {
-      const response = await this.sendRequest<{
-        type: "actUploadDataResponse"
-        requestId: string
-        encryptedReference: string
-        historyReference: string
-        granteeListReference: string
-        publisherPubKey: string
-        actReference: string
-        tagUid?: number
-        stampedChunks?: number
-      }>(
-        {
-          type: "actUploadData",
-          requestId,
-          data: wireData,
-          grantees,
-          options: serializableOptions,
-          requestOptions,
-          enableProgress: !!onProgress || source !== undefined,
-        },
-        source,
-      )
-      source?.release()
-
-      return {
-        encryptedReference: response.encryptedReference,
-        historyReference: response.historyReference,
-        granteeListReference: response.granteeListReference,
-        publisherPubKey: response.publisherPubKey,
-        actReference: response.actReference,
-        tagUid: response.tagUid,
-        stampedChunks: response.stampedChunks,
-      }
-    } catch (error) {
-      this.cancelSource(source, error)
-      throw error
-    } finally {
-      stopProgress()
+    const response = await this.sendUpload<{
+      type: "actUploadDataResponse"
+      requestId: string
+      encryptedReference: string
+      historyReference: string
+      granteeListReference: string
+      publisherPubKey: string
+      actReference: string
+      tagUid?: number
+      stampedChunks?: number
+    }>(requestId, data, onProgress, (wire) => ({
+      type: "actUploadData",
+      requestId,
+      ...wire,
+      grantees,
+      options: serializableOptions,
+      requestOptions,
+    }))
+    return {
+      encryptedReference: response.encryptedReference,
+      historyReference: response.historyReference,
+      granteeListReference: response.granteeListReference,
+      publisherPubKey: response.publisherPubKey,
+      actReference: response.actReference,
+      tagUid: response.tagUid,
+      stampedChunks: response.stampedChunks,
     }
   }
 
