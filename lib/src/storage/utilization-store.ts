@@ -5,8 +5,8 @@
  * IndexedDB Cache for Batch Utilization Chunks
  *
  * Provides fast local caching of 4KB utilization chunks to avoid
- * repeated Swarm downloads. Each chunk is 4096 bytes containing either
- * 2048 uint16 or 1024 uint32 bucket counters, depending on batch depth.
+ * repeated Swarm downloads. Each chunk is 4096 bytes: 1024 uint32 bucket
+ * counters, whatever the batch's depth.
  */
 
 import type { StatePointer } from "../sync/partition-state"
@@ -86,7 +86,7 @@ const DB_NAME = "swarm-utilization-store"
  * stores rather than migrating them: this is a cache of utilisation counters
  * that re-derives itself on next use, and 0.x owes no migration (#661).
  */
-const DB_VERSION = 4
+const DB_VERSION = 5
 const CHUNKS_STORE = "chunks"
 const METADATA_STORE = "metadata"
 

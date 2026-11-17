@@ -116,8 +116,9 @@ exceptions in the reference chunk — typically 7–23 leaves instead of the fix
 uint16/uint32 layout before it took, and independent of the batch depth, so a dilute changes
 nothing published. Topic domain `swarm-id-partition-state-v2`.
 
-The stamper's local cache rows and its own utilisation backup keep the depth-dependent
-layout (`getChunkLayout(depth)`: uint16 up to depth 31, uint32 above).
+The stamper's local cache rows and its own utilisation backup have one layout for every
+batch (`getChunkLayout()`: 64 rows of 1024 uint32 counters), so a dilute changes nothing
+there either.
 
 Persistence rules:
 

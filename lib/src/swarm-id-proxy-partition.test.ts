@@ -4451,6 +4451,42 @@ describe("SwarmIdProxy partitioned write enablement", () => {
       }
     })
 
+    // #463: a dilute is recorded as one more depth and half the lifetime. A
+    // stamper keeps the depth it was built with, so the write path is built
+    // again, or the device goes on refusing uploads at the old capacity.
+    it("rebuilds the stamper at the new depth when a delta dilutes the drive", async () => {
+      const DILUTED_TTL_SECONDS = 1800
+      const busChannel = await hydratedSession()
+      try {
+        const before = vi.mocked(UtilizationAwareStamper.create).mock.calls
+          .length
+        const stamp = makeSyncedAccount().postageStamps[0]
+        busChannel.postMessage(
+          accountDelta({
+            postageStamps: [
+              {
+                ...stamp,
+                depth: stamp.depth + 1,
+                batchTTL: DILUTED_TTL_SECONDS,
+                updatedAt: Date.now(),
+              },
+            ],
+          }),
+        )
+        await vi.waitFor(() =>
+          expect(
+            vi.mocked(UtilizationAwareStamper.create).mock.calls.length,
+          ).toBeGreaterThan(before),
+        )
+        const lastCall = vi
+          .mocked(UtilizationAwareStamper.create)
+          .mock.calls.at(-1)!
+        expect(lastCall[2]).toBe(stamp.depth + 1)
+      } finally {
+        busChannel.close()
+      }
+    })
+
     // A `safeParse` failure is silent by design, so a serializer that drifts
     // from the schema would kill revoke propagation with no signal anywhere.
     it("publishes a wire form the receive schema accepts", async () => {

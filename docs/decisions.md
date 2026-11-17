@@ -28,6 +28,18 @@ the server take turns), it sleeps after 15 idle minutes, and an account open in 
 preview and in another preview does not see itself live, since the two sit on different
 servers.
 
+## 2026-11-17 The local counter cache has one layout for every depth
+
+**Context.** The IndexedDB rows were uint16 up to depth 31 and uint32 above. A dilute from
+31 to 32 read the old rows under the new layout and got zeros (#463).
+
+**Decision.** Rows are always uint32: 64 rows of 1024 counters. The cache version is bumped,
+which drops existing rows; they re-derive on next use.
+
+**Why.** Deleting the switch removes the crossing, where invalidating the cache at dilute
+time would only handle it, and every device would have to notice the dilute. The cost is
+128 KB more per batch in IndexedDB below depth 32.
+
 ## 2026-11-17 A late confirmation does not end a hold
 
 **Context.** A holder that went `LEASE_STOP_MS` without a confirmed round trip with the
