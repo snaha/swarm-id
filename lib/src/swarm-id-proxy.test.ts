@@ -1229,10 +1229,14 @@ describe("SwarmIdProxy subsidised-mode selection", () => {
       await send({ type: "abortRequest", requestId: "u1" })
       await first
 
-      expect(signals.map((signal) => signal?.aborted)).toEqual([true, false])
+      // One of the two, whichever reached the gateway first: preparing the
+      // chunks gives way to other tasks, so the order is not the requests'.
+      const aborted = () => signals.filter((signal) => signal?.aborted).length
+      expect(aborted()).toBe(1)
 
       await send({ type: "abortRequest", requestId: "u2" })
       await second
+      expect(aborted()).toBe(2)
     })
 
     it("answers nothing for a write it aborted", async () => {

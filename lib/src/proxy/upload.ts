@@ -47,6 +47,7 @@ import {
 } from "@ethersphere/core-sdk"
 import type { ChunkReference, UploadProgress } from "./types"
 import type { StampWorkerPool } from "./stamp-worker-pool"
+import { yieldToEventLoop } from "../utils/promise"
 import { createTagIfSupported, tryCreateTag } from "../utils/tag"
 import { uint8ArrayToHex, webBytes } from "../utils/hex"
 import { normalizeUrl } from "../utils/url"
@@ -273,28 +274,49 @@ interface EncryptedChunkRef {
  * impossible and substituting random keys would silently break the caller's
  * expectation of a key-addressed reference.
  */
-function encryptChunkPayloads(
+/**
+ * How long chunk preparation runs before it gives way. Encrypting and
+ * addressing a chunk is over a millisecond of CPU, so a large payload in one
+ * stretch keeps the thread from answering anything for seconds: a write-path
+ * holder that cannot confirm its connection for six loses its partition.
+ */
+const PREPARE_SLICE_MS = 30
+
+/** `make` for every payload, giving way to other tasks between slices. */
+async function prepareChunks<T>(
+  payloads: Uint8Array[],
+  make: (payload: Uint8Array) => T,
+): Promise<T[]> {
+  const prepared: T[] = []
+  let sliceStartedAt = performance.now()
+  for (const payload of payloads) {
+    prepared.push(make(payload))
+    if (performance.now() - sliceStartedAt >= PREPARE_SLICE_MS) {
+      await yieldToEventLoop()
+      sliceStartedAt = performance.now()
+    }
+  }
+  return prepared
+}
+
+async function encryptChunkPayloads(
   payloads: Uint8Array[],
   encryptionKey?: Uint8Array,
-): { chunks: EncryptedChunk[]; refs: EncryptedChunkRef[] } {
+): Promise<{ chunks: EncryptedChunk[]; refs: EncryptedChunkRef[] }> {
   if (encryptionKey && payloads.length > 1) {
     throw new Error(
       `Explicit encryption key is only supported for single-chunk data (up to ${CHUNK_SIZE} bytes), got ${payloads.length} chunks — pass encryptionKey: true to auto-generate per-chunk keys`,
     )
   }
 
-  const chunks: EncryptedChunk[] = []
-  const refs: EncryptedChunkRef[] = []
-
-  for (const payload of payloads) {
-    const chunk = makeEncryptedContentAddressedChunk(payload, encryptionKey)
-    chunks.push(chunk)
-    refs.push({
-      address: chunk.address.toUint8Array(),
-      key: chunk.encryptionKey,
-      span: BigInt(payload.length),
-    })
-  }
+  const chunks = await prepareChunks(payloads, (payload) =>
+    makeEncryptedContentAddressedChunk(payload, encryptionKey),
+  )
+  const refs = chunks.map((chunk, i) => ({
+    address: chunk.address.toUint8Array(),
+    key: chunk.encryptionKey,
+    span: BigInt(payloads[i].length),
+  }))
 
   return { chunks, refs }
 }
@@ -722,17 +744,11 @@ async function uploadDataPlain(
   const chunkPayloads = splitDataIntoChunks(data)
 
   // Create CAC for each payload
-  const chunks: ContentAddressedChunk[] = []
-  const chunkRefs: ChunkReference[] = []
-
-  for (const payload of chunkPayloads) {
-    const chunk = makeContentAddressedChunk(payload)
-    chunks.push(chunk)
-    chunkRefs.push({
-      address: chunk.address.toUint8Array(),
-      span: BigInt(payload.length),
-    })
-  }
+  const chunks = await prepareChunks(chunkPayloads, makeContentAddressedChunk)
+  const chunkRefs: ChunkReference[] = chunks.map((chunk, i) => ({
+    address: chunk.address.toUint8Array(),
+    span: BigInt(chunkPayloads[i].length),
+  }))
 
   // Progress tracking
   let totalChunks = chunks.length
@@ -869,7 +885,7 @@ async function uploadDataEncrypted(
   // Split and encrypt
   const payloads = splitDataIntoChunks(data)
   const { chunks: encryptedChunks, refs: encryptedChunkRefs } =
-    encryptChunkPayloads(payloads, encryptionKey)
+    await encryptChunkPayloads(payloads, encryptionKey)
 
   // Prepare chunk data for upload
   const chunksToUpload = encryptedChunks.map((chunk) => ({

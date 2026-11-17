@@ -80,3 +80,22 @@ export function withIdleTimeout<T>(
     clearTimeout(timer)
   })
 }
+
+/**
+ * Let the tasks that queued up meanwhile run — messages, socket frames,
+ * timers that are due — and come back. For long CPU work on a thread that
+ * also has to answer something.
+ *
+ * A message port and not `setTimeout(0)`: a hidden tab's timers are clamped
+ * to once a second, which would stretch the work a hundredfold.
+ */
+export function yieldToEventLoop(): Promise<void> {
+  return new Promise((resolve) => {
+    const channel = new MessageChannel()
+    channel.port1.onmessage = () => {
+      channel.port1.close()
+      resolve()
+    }
+    channel.port2.postMessage(undefined)
+  })
+}
