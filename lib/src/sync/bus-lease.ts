@@ -139,8 +139,8 @@ export class BusLane {
 
   /**
    * Holding, but not allowed to write until the connection is confirmed
-   * again. The hold ends only if a claim arrives meanwhile (it is answered
-   * "free") or the connection is replaced.
+   * again. Claims go unanswered meanwhile; the hold ends only when the
+   * connection is replaced.
    */
   get suspended(): boolean {
     return (
@@ -263,8 +263,10 @@ export class BusLane {
 
   /** `HandleClaim` */
   private answerClaim(claimant: string, round: string, gentle: boolean): void {
-    // A holder whose connection lapsed is not writing: free.
-    if (this.mode === "holding" && !this.holds()) this.lapse()
+    // Overdue, on the same connection: say nothing. The claimant asks again
+    // with every confirmation, and takes the lane unanswered only from a
+    // context that has left the room. (`holds()` ends it on a new connection.)
+    if (this.mode === "holding" && !this.holds() && this.suspended) return
 
     switch (this.mode) {
       case "idle":

@@ -231,7 +231,9 @@ describe("BusLane — two devices", () => {
     expect(b.lane.claiming).toBe(false)
   })
 
-  it("answers a claim as free once its own hold has lapsed", () => {
+  // A starved tab wakes to the claims that queued up, before the answer
+  // from the server that it is still connected.
+  it("leaves a claim unanswered while its confirmation is overdue, and keeps the lane", () => {
     const { a, b } = pair()
     a.liveness.present.clear()
     holdAlone(a)
@@ -240,12 +242,23 @@ describe("BusLane — two devices", () => {
 
     b.lane.claim()
     deliver(b, a)
-    expect(a.sent.map((m) => m.kind)).toEqual(["free"])
-    deliver(a, b)
-    expect(b.lane.holds()).toBe(true)
-    // Having said "free", a confirmation does not bring the hold back.
+    expect(a.sent).toEqual([])
+    expect(b.lane.holds()).toBe(false)
     a.liveness.confirm(LEASE_STOP_MS)
-    expect(a.lane.holds()).toBe(false)
+    expect(a.lane.holds()).toBe(true)
+    expect(a.lost).not.toHaveBeenCalled()
+  })
+
+  it("answers a claim as free on a new connection", () => {
+    const { a, b } = pair()
+    a.liveness.present.clear()
+    holdAlone(a)
+    a.liveness.present.add("b")
+    a.liveness.id = "a2"
+
+    b.lane.claim()
+    deliver(b, a)
+    expect(a.sent.map((m) => m.kind)).toEqual(["free"])
     expect(a.lost).toHaveBeenCalledTimes(1)
   })
 })

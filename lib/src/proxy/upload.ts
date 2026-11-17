@@ -101,6 +101,12 @@ export type UploadTarget =
       workerPool?: StampWorkerPool
       counter?: ChunkCounter
       signal?: AbortSignal
+      /**
+       * Awaited before every stamp. For a write path that may have to wait
+       * before it is allowed to stamp again (a partition whose holder has
+       * not heard from the signaling server for too long).
+       */
+      ready?: () => Promise<void>
     }
   | {
       mode: "subsidised"
@@ -244,12 +250,14 @@ function makeStampFn(
   workerPool?: StampWorkerPool,
   counter?: ChunkCounter,
   signal?: AbortSignal,
+  ready?: () => Promise<void>,
 ): StampChunkFn {
   const stamp: StampChunkFn = workerPool
     ? (address) => workerPool.stampChunkData(address)
     : (address) => Promise.resolve(stamper.stamp(address))
   return async (address) => {
     if (signal?.aborted) throw abortedError(signal)
+    await ready?.()
     const envelope = await stamp(address)
     if (counter) counter.chunks++
     return envelope
@@ -802,6 +810,7 @@ async function uploadDataPlain(
       workerPool,
       target.counter,
       target.signal,
+      target.ready,
     )
     const requestOptions = withSignal(options?.requestOptions, target.signal)
     const { tag, stream } = await prepareStamperUpload(target, options)
@@ -954,6 +963,7 @@ async function uploadDataEncrypted(
       workerPool,
       target.counter,
       target.signal,
+      target.ready,
     )
     const requestOptions = withSignal(options?.requestOptions, target.signal)
     const { tag, stream: wsStream } = await prepareStamperUpload(
@@ -1206,7 +1216,13 @@ export async function uploadChunk(
   } else {
     const { bee, stamper } = target
     const address = await calculateChunkAddress(chunkData)
-    const stamp = makeStampFn(stamper, undefined, target.counter, target.signal)
+    const stamp = makeStampFn(
+      stamper,
+      undefined,
+      target.counter,
+      target.signal,
+      target.ready,
+    )
     const requestOptions = withSignal(options?.requestOptions, target.signal)
 
     await uploadStampedChunkViaHttp(

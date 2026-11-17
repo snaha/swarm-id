@@ -172,8 +172,8 @@ and checked in `models/bus-lease`. Nothing is written to Swarm for it.
   was confirmed by a round trip with the server within `LEASE_STOP_MS` (6 s). The server
   asks every member to ping every 2 s. The stamper carries the deadline, so an upload in
   flight stops by itself (§12). A late confirmation of the same connection ends nothing:
-  the context was in the room throughout and freed no claim, so it carries on. A claim that
-  reaches it while it is overdue is answered "free", and that does end the hold.
+  the context was in the room throughout and freed no claim, so it carries on. Claims that
+  reach it while it is overdue go unanswered; the claimant asks again with every tick.
 - **Taking a lane.** A context asks everyone in the room (`lane-claim`). It holds the
   lane once every other context has either answered "free" for that claim (`lane-free`)
   or has been absent from the room for `LEASE_WAIT_MS` (8 s). A context that has just
@@ -249,8 +249,8 @@ that failed part-way) searches before it publishes.
 
 **Hold check before the ack.** After the upload's chunks are written and before the
 counter is published, the context checks that it still holds the lane, waiting for the
-next confirmation if that one is overdue. If the lane went meanwhile (a claim was answered
-"free", or the connection was replaced), the publish and the ack are refused: an upload
+next confirmation if that one is overdue. If the lane went meanwhile (the connection was
+replaced), the publish and the ack are refused: an upload
 that outlived the hold must not publish slots someone else may be using. Chunks are content-addressed,
 so the failed upload is a safe retry.
 

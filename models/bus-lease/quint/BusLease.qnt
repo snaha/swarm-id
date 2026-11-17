@@ -142,7 +142,7 @@ module BusLease {
 
   // A heartbeat round trip with the server. A holder whose last one was too
   // old did not write meanwhile, and writes again from here: it stayed in the
-  // room, and a claim it was handed in that time ended its hold (handleClaim).
+  // room and answered no claim in that time (handleClaim).
   action heartbeat(d: int): bool = all {
     online.get(d),
     link.get(d),
@@ -194,10 +194,18 @@ module BusLease {
     any {
       // not writing: free
       all {
-        mode.get(m.to) == "idle" or (mode.get(m.to) == "holding" and not(holds(m.to))),
-        mode' = mode.set(m.to, "idle"),
-        acks' = acks.set(m.to, Set()),
+        mode.get(m.to) == "idle",
+        mode' = mode,
+        acks' = acks,
         msgs' = msgs.union(Set(reply(m, "free"))),
+      },
+      // holding, its heartbeat overdue: no answer
+      all {
+        mode.get(m.to) == "holding",
+        not(holds(m.to)),
+        mode' = mode,
+        acks' = acks,
+        msgs' = msgs,
       },
       // both claiming: the lower id wins
       all {

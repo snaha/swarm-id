@@ -147,6 +147,32 @@ describe("uploadData while it prepares a large payload", () => {
     return ranBeforeFirstStamp === true
   }
 
+  it("waits for the target to be ready before each stamp", async () => {
+    const { target } = setup()
+    let ready = false
+    const order: string[] = []
+    if (target.mode !== "stamper") throw new Error("expected a stamper target")
+    const inner = target.stamper
+    const stamper = Object.assign(Object.create(inner) as typeof inner, {
+      stamp: (...args: Parameters<typeof inner.stamp>) => {
+        order.push(ready ? "stamp" : "stamp-too-early")
+        return inner.stamp(...args)
+      },
+    })
+    await uploadData(
+      {
+        ...target,
+        stamper,
+        ready: async () => {
+          await new Promise((resolve) => setTimeout(resolve, 0))
+          ready = true
+        },
+      },
+      makeData(CHUNK_SIZE),
+    )
+    expect(order).toEqual(["stamp"])
+  })
+
   it("gives way to other tasks while it encrypts", async () => {
     expect(await otherTasksRanBeforeFirstStamp(true)).toBe(true)
   })

@@ -613,6 +613,13 @@ export class BatchWriteCoordinator {
       bee: this.deps.bee,
       stamper: this.deps.stamper,
       workerPool,
+      // A stamp that is due while the confirmation is overdue waits for it:
+      // the stamper would refuse, and the upload fail, with the lane kept.
+      ready: async () => {
+        if (this.held !== undefined && this.lanes.get(this.held)?.suspended) {
+          await this.confirmedAgain()
+        }
+      },
     }
   }
 

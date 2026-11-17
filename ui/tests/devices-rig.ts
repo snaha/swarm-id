@@ -38,6 +38,8 @@ export const SIGNALING_HEALTH_URL = 'http://localhost:5520/healthz'
 /** How long everyone else must have been absent before a lane nobody answers
  *  for is taken; also how long a context that just joined waits. */
 export const LEASE_WAIT_MS = 8_000
+/** How long a holder may go without a confirmed round trip and still stamp. */
+export const LEASE_STOP_MS = 6_000
 /** A holder that wrote within this does not hand its lane over. */
 export const PEER_YIELD_MIN_IDLE_MS = 3_000
 /** Once every lane is known to be held, one more holder is asked to move per step. */
@@ -322,6 +324,20 @@ export class Device {
   /** The lane held on one drive, by its batch id. */
   async lane(batchHex: string, page: Page = this.page): Promise<number | undefined> {
     return (await this.lanes(page)).get(batchHex.slice(0, LANE_PREFIX_LENGTH))
+  }
+
+  /**
+   * Keep the proxy iframe's thread busy for `ms`: nothing in it runs, so it
+   * neither answers the signaling server nor stamps. What a large upload's
+   * CPU work, a slow machine or a suspended tab does to it.
+   */
+  async stall(ms: number, page: Page = this.page): Promise<void> {
+    const proxy = page.frames().find((frame) => frame.url().startsWith(ID_ORIGIN))
+    if (!proxy) throw new Error(`${this.label}: no proxy iframe to stall`)
+    await proxy.evaluate((duration) => {
+      const until = Date.now() + duration
+      while (Date.now() < until);
+    }, ms)
   }
 
   /** Upload and return the partition the session held for it. */

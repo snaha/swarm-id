@@ -35,15 +35,16 @@ signaling server dropped its lane when the confirmation did arrive, and had to w
 `LEASE_WAIT_MS` to take it again. A tab whose main thread was busy for six seconds (an
 upload preparing its chunks) lost its lane with nobody else asking for it.
 
-**Decision.** An overdue holder still may not stamp, and still answers a claim "free",
-which ends its hold. Otherwise, once the same connection is confirmed again it carries on;
-a write that finds the confirmation overdue waits for it. A new connection holds nothing,
+**Decision.** An overdue holder still may not stamp, and leaves claims unanswered (a
+starved tab wakes to the queued claims before the server's answer, and "free" there gave
+the lane away). Once the same connection is confirmed again it carries on; a write or a
+stamp that finds the confirmation overdue waits for it. A new connection holds nothing,
 as before.
 
 **Why.** A claimant takes a lane only from "free" answers and from peers absent from the
 room for `LEASE_WAIT_MS`. A holder on the same connection was never absent, so only its own
-"free" can have given the lane away. `models/bus-lease` holds `Exclusion` without the rule,
-over the same 404,019 states.
+"free" can have given the lane away. `models/bus-lease` holds `Exclusion` with this
+(421,149 states).
 
 ## 2026-11-17 Partition state is published as SBU1 leaves, with no depth on the wire
 

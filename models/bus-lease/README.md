@@ -54,7 +54,7 @@ java -cp /path/to/tla2tools.jar tlc2.TLC -config Safe.cfg BusLease.tla
 
 | Config               | Change from `Safe.cfg`                         | Result                                          |
 | -------------------- | ---------------------------------------------- | ----------------------------------------------- |
-| `Safe.cfg`           | none: `Wait = TStop`, both checks on           | `Exclusion` holds: 404,019 states, depth 30     |
+| `Safe.cfg`           | none: `Wait = TStop`, both checks on           | `Exclusion` holds: 421,149 states, depth 30     |
 | `Reachable.cfg`      | checks `NobodyEverHolds` instead               | fails in 6 steps, as intended (holding happens) |
 | `ShortWait.cfg`      | `Wait < TStop`                                 | `Exclusion` violated in 10 steps                |
 | `NoRoundMatch.cfg`   | a "free" answer counts for any claim round     | `Exclusion` violated in 11 steps                |
@@ -85,7 +85,7 @@ rows predate the removal of the explicit message-loss steps:
 
 | Checker                   | Broken variants                          | `Safe`                                   |
 | ------------------------- | ---------------------------------------- | ---------------------------------------- |
-| `verify --backend=tlc`    | same violations as the TLA+ spec, 2–13 s | holds, the same 404,019 states, 11 s     |
+| `verify --backend=tlc`    | same violations as the TLA+ spec, 2–13 s | holds, the same 421,149 states, 11 s     |
 | `verify` (Apalache)       | `ShortWait` in 112 s; others over 30 min | not finished: step 10 of 15 after 30 min |
 | `run` (random simulation) | none found in 100,000 runs each          | no violation, which says little          |
 

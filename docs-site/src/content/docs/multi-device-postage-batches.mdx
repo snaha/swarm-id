@@ -196,9 +196,8 @@ context that reconnects is a new participant and holds nothing.
 
 1. **Writing.** A context stamps only while it holds the lane **and** its connection was
    confirmed less than `LEASE_STOP_MS` ago. A context whose confirmation is overdue
-   stops stamping and answers any claim "free", which ends its hold. If no claim came and
-   the same connection is confirmed again, it carries on with the lane; a new connection
-   holds nothing.
+   stops stamping and leaves claims unanswered. Once the same connection is confirmed again
+   it carries on with the lane; a new connection holds nothing.
 2. **Claiming.** A context that wants a lane sends `lane-claim` with a fresh random
    `round`, to everyone, and again with every confirmation while the claim is open.
 3. **Taking.** The claimant holds the lane once every other context has either answered
