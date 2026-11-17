@@ -112,7 +112,11 @@ import {
   type PieceSource,
 } from "./utils/piece-source"
 import { STREAM_IDLE_TIMEOUT_MS } from "./proxy/chunking"
-import { DEFAULT_REQUEST_TIMEOUT_MS } from "./utils/constants"
+import {
+  DEFAULT_REQUEST_TIMEOUT_MS,
+  QUEUED_SILENCE_TIMEOUT_MS,
+  QUEUED_WRITE_TIMEOUT_MS,
+} from "./utils/constants"
 const DEFAULT_INITIALIZATION_TIMEOUT_MS = 30000
 /**
  * The round trip of a `requestPermissions` message: the proxy answers it
@@ -264,6 +268,11 @@ export class SwarmIdClient {
       readingSource?: boolean
       /** Restart the wait at its full timeout */
       rearm: () => void
+      /**
+       * The write is waiting for its drive: hold the timeout off for another
+       * beat, until the queue's cap
+       */
+      queued: () => void
     }
   > = new Map()
   /** Streaming downloads the proxy is still answering, by request id. */
@@ -685,7 +694,11 @@ export class SwarmIdClient {
         void this.answerSourcePull(message.requestId, message.index)
         break
 
-      case "requestAlive":
+      case "requestQueued":
+        this.pendingRequests.get(message.requestId)?.queued()
+        break
+
+      case "requestStarted":
         this.keepAlive(message.requestId)
         break
 
@@ -773,11 +786,16 @@ export class SwarmIdClient {
     // large upload must not be cut off at the constructor default (#775).
     // A streaming upload has no whole round trip to bound, so there it is how
     // long the proxy may stay silent. Neither counts the time a write waits
-    // for its drive behind another: the proxy's `requestAlive` restarts it.
+    // for its drive behind another: while the proxy says `requestQueued`, the
+    // wait is for its next beat, within the queue's own cap, and
+    // `requestStarted` restarts it.
     const timeout =
       sources.length > 0
         ? this.streamIdleTimeout(options?.timeout)
         : this.roundTripTimeout(options?.timeout)
+    const queueCap = Math.max(timeout, QUEUED_WRITE_TIMEOUT_MS)
+    // When the proxy first said the write is queued; unset once it starts
+    let queuedSince: number | undefined
     return new Promise((resolve, reject) => {
       const onAbort = () => {
         clearTimeout(pending.timeoutId)
@@ -788,12 +806,10 @@ export class SwarmIdClient {
       const stopWatchingSignal = () =>
         signal?.removeEventListener("abort", onAbort)
 
-      const expire = () => {
+      const expire = (reason = `Request timeout after ${timeout}ms`) => {
         stopWatchingSignal()
         this.pendingRequests.delete(message.requestId)
-        reject(
-          new SwarmIdError("timeout", `Request timeout after ${timeout}ms`),
-        )
+        reject(new SwarmIdError("timeout", reason))
         // The proxy may still be at it, or queued to be: a write that ran
         // after its caller was told it failed would spend stamps for nothing,
         // and nothing else ends a streaming upload's pulling.
@@ -811,12 +827,29 @@ export class SwarmIdClient {
           stopWatchingSignal()
           reject(error)
         },
-        timeoutId: setTimeout(expire, timeout),
+        timeoutId: setTimeout(() => expire(), timeout),
         sources,
         readingSource: false,
         rearm: () => {
+          queuedSince = undefined
           clearTimeout(pending.timeoutId)
-          pending.timeoutId = setTimeout(expire, timeout)
+          pending.timeoutId = setTimeout(() => expire(), timeout)
+        },
+        queued: () => {
+          clearTimeout(pending.timeoutId)
+          const now = Date.now()
+          queuedSince ??= now
+          const capReason = `Request timeout: waited over ${queueCap}ms for its drive`
+          const left = queueCap - (now - queuedSince)
+          if (left <= 0) {
+            expire(capReason)
+            return
+          }
+          const silence = Math.max(timeout, QUEUED_SILENCE_TIMEOUT_MS)
+          pending.timeoutId =
+            silence < left
+              ? setTimeout(() => expire(), silence)
+              : setTimeout(() => expire(capReason), left)
         },
       }
       this.pendingRequests.set(message.requestId, pending)
@@ -945,6 +978,8 @@ export class SwarmIdClient {
               idleTimeout,
               `Request timeout after ${idleTimeout}ms`,
             )
+            // Cancelled while this pull waited: the stream is closed already.
+            if (!this.downloadStreams.has(requestId)) return
             waiting = undefined
             if (data) {
               controller.enqueue(data)
@@ -963,7 +998,10 @@ export class SwarmIdClient {
           }
         },
         cancel: () => {
+          // Settle the pull waiting on the proxy, so its deadline is disarmed.
+          const pull = waiting
           finish()
+          pull?.resolve(undefined)
           this.sendAbort(requestId)
         },
       },

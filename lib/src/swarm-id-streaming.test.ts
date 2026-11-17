@@ -328,6 +328,45 @@ describe("streaming across the bridge", () => {
         expect(progress.at(-1)).toEqual({ total: CHUNKS, processed: CHUNKS })
       })
 
+      it("posts a held-back report once the interval is up, while the upload stalls", async () => {
+        vi.useFakeTimers({ toFake: ["Date"] })
+        const progress: Array<{ total: number; processed: number }> = []
+        const data = makeData(CHUNK_SIZE * LEAVES)
+        let reachStall!: () => void
+        const stallReached = new Promise<void>((r) => (reachStall = r))
+        let release!: () => void
+        const stalled = new Promise<void>((r) => (release = r))
+        let sent = false
+        const stallingStream = new ReadableStream<Uint8Array>(
+          {
+            async pull(controller) {
+              if (!sent) {
+                sent = true
+                controller.enqueue(data)
+                return
+              }
+              reachStall()
+              await stalled
+              controller.close()
+            },
+          },
+          { highWaterMark: 0 },
+        )
+
+        const upload = client.uploadData(stallingStream, {
+          onProgress: (p) => progress.push(p),
+        })
+        await stallReached
+        await new Promise((r) =>
+          setTimeout(r, PROGRESS_INTERVAL_MS + SETTLE_MS),
+        )
+
+        expect(progress.length).toBe(2)
+        expect(progress[1].processed).toBeGreaterThanOrEqual(LEAVES)
+        release()
+        await upload
+      })
+
       it("posts a report every interval while the upload goes on", async () => {
         vi.useFakeTimers({ toFake: ["Date"] })
         const progress: Array<{ total: number; processed: number }> = []
@@ -1019,6 +1058,34 @@ describe("streaming across the bridge", () => {
       await settle()
 
       expectNothingLeftBehind()
+    })
+
+    it("disarms the outstanding pull's deadline when the reader cancels", async () => {
+      const reference = await upload(makeData(STREAM_PIECE_SIZE * 3))
+      const { stream } = await client.downloadDataStream(reference)
+      const reader = stream.getReader()
+      await reader.read()
+      vi.spyOn(bee.chunk, "download").mockReturnValue(new Promise(() => {}))
+      const sendAbort = vi.spyOn(
+        client as unknown as { sendAbort: (id: string) => void },
+        "sendAbort",
+      )
+      vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] })
+      try {
+        const pending = reader.read()
+        await vi.advanceTimersByTimeAsync(SETTLE_MS)
+
+        await reader.cancel()
+        await vi.advanceTimersByTimeAsync(STREAM_IDLE_TIMEOUT_MS + 1)
+
+        expect(await pending).toEqual({ done: true, value: undefined })
+        expect(sendAbort).toHaveBeenCalledTimes(1)
+        expect(
+          (client as unknown as ClientInternals).downloadStreams.size,
+        ).toBe(0)
+      } finally {
+        vi.useRealTimers()
+      }
     })
 
     it("errors the stream when the signal aborts", async () => {

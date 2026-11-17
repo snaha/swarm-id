@@ -10,14 +10,14 @@ Two package entries, one build: `@snaha/swarm-id` (`src/index.ts`) is the dApp A
 All cross-origin communication via `postMessage` with Zod validation.
 
 The full unions live in `types.ts` (`ParentToIframeMessageSchema`, `IframeToParentMessageSchema`,
-`PopupToIframeMessageSchema`) — 50 and 55 members, one `…Response` per request (`abortRequest` and the pull-and-piece messages of a streaming transfer get none). The ones worth
+`PopupToIframeMessageSchema`) — 50 and 56 members, one `…Response` per request (`abortRequest` and the pull-and-piece messages of a streaming transfer get none). The ones worth
 knowing by name:
 
 - **Parent → Iframe**: `parentIdentify`, `checkAuth`, `connect`, `requestPermissions` (#711), `getPermissions` (#885),
   `disconnect`, `uploadData`, `downloadData`, `downloadDataStream`, `downloadFileStream`, `deriveAppSecret`, `abortRequest`, `uploadSourcePiece`, `downloadStreamPull`
 - **Iframe → Parent**: `proxyReady`, `initError`, `authStatusResponse`, `authSuccess`,
   `connectResponse`, `connectionInfoChanged` (what `initialize()` awaits; `drivesChanged: true` on it when the app's drives moved, #933), `uploadDataResponse`,
-  `uploadSourcePull`, `downloadStreamPiece`, `requestAlive` (a write still waiting for its drive restarts the client's timeout), `error`
+  `uploadSourcePull`, `downloadStreamPiece`, `requestQueued` / `requestStarted` (a write waiting for its drive holds the client's timeout off, up to a cap), `error`
 - **Popup → Iframe**: `setSecret` — the partitioned handover, below — and `grantUpdated`, the
   permissions popup handing a partitioned session its new grant as an account delta (#711)
 

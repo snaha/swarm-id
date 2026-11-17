@@ -14,6 +14,11 @@ import {
 } from "./types"
 import { generatedAvatar } from "./utils/avatar"
 import { TimeoutError } from "./utils/promise"
+import {
+  QUEUED_SILENCE_TIMEOUT_MS,
+  QUEUED_WRITE_TIMEOUT_MS,
+  REQUEST_QUEUED_INTERVAL_MS,
+} from "./utils/constants"
 
 /**
  * A view of the client that admits to the private members these tests drive.
@@ -891,9 +896,8 @@ describe("SwarmIdClient request seam", () => {
     })
   })
 
-  describe("requestAlive", () => {
+  describe("requestQueued / requestStarted", () => {
     const TIMEOUT_MS = 1000
-    const BEAT_MS = 400
     const BEATS = 5
     const REPLY_REFERENCE = "ab".repeat(32)
 
@@ -901,9 +905,9 @@ describe("SwarmIdClient request seam", () => {
       vi.useRealTimers()
     })
 
-    const queuedWrite = () => {
+    const queuedWrite = (timeout = TIMEOUT_MS) => {
       const promise = client.uploadChunk(new Uint8Array(1), undefined, {
-        timeout: TIMEOUT_MS,
+        timeout,
       })
       const settled = vi.fn()
       promise.then(settled, settled)
@@ -914,9 +918,10 @@ describe("SwarmIdClient request seam", () => {
       vi.useFakeTimers()
       const { promise, settled, requestId } = queuedWrite()
 
+      deliver({ type: "requestQueued", requestId })
       for (let i = 0; i < BEATS; i++) {
-        await vi.advanceTimersByTimeAsync(BEAT_MS)
-        deliver({ type: "requestAlive", requestId })
+        await vi.advanceTimersByTimeAsync(REQUEST_QUEUED_INTERVAL_MS)
+        deliver({ type: "requestQueued", requestId })
       }
       expect(settled).not.toHaveBeenCalled()
 
@@ -930,11 +935,26 @@ describe("SwarmIdClient request seam", () => {
       })
     })
 
-    it("gives the request its whole timeout from the proxy's last word", async () => {
+    it("keeps a short-timeout request alive between the proxy's beats", async () => {
+      vi.useFakeTimers()
+      const shortTimeout = REQUEST_QUEUED_INTERVAL_MS / 5
+      const { settled, requestId } = queuedWrite(shortTimeout)
+
+      deliver({ type: "requestQueued", requestId })
+      for (let i = 0; i < BEATS; i++) {
+        await vi.advanceTimersByTimeAsync(REQUEST_QUEUED_INTERVAL_MS)
+        deliver({ type: "requestQueued", requestId })
+      }
+
+      expect(settled).not.toHaveBeenCalled()
+    })
+
+    it("gives the request its whole timeout from the moment it starts", async () => {
       vi.useFakeTimers()
       const { settled, requestId } = queuedWrite()
-      await vi.advanceTimersByTimeAsync(BEAT_MS)
-      deliver({ type: "requestAlive", requestId })
+      deliver({ type: "requestQueued", requestId })
+      await vi.advanceTimersByTimeAsync(REQUEST_QUEUED_INTERVAL_MS)
+      deliver({ type: "requestStarted", requestId })
 
       await vi.advanceTimersByTimeAsync(TIMEOUT_MS - 1)
       expect(settled).not.toHaveBeenCalled()
@@ -943,6 +963,41 @@ describe("SwarmIdClient request seam", () => {
       expect(settled).toHaveBeenCalledWith(
         expect.objectContaining({ code: "timeout" }),
       )
+    })
+
+    it("times out a queued request whose proxy stops beating", async () => {
+      vi.useFakeTimers()
+      const { settled, requestId } = queuedWrite()
+      deliver({ type: "requestQueued", requestId })
+
+      await vi.advanceTimersByTimeAsync(QUEUED_SILENCE_TIMEOUT_MS - 1)
+      expect(settled).not.toHaveBeenCalled()
+
+      await vi.advanceTimersByTimeAsync(1)
+      expect(settled).toHaveBeenCalledWith(
+        expect.objectContaining({ code: "timeout" }),
+      )
+    })
+
+    it("caps the time a request may stay queued, and stops it in the proxy", async () => {
+      vi.useFakeTimers()
+      const { settled, requestId } = queuedWrite()
+      deliver({ type: "requestQueued", requestId })
+
+      const beatsInCap = QUEUED_WRITE_TIMEOUT_MS / REQUEST_QUEUED_INTERVAL_MS
+      for (let i = 0; i < beatsInCap - 1; i++) {
+        await vi.advanceTimersByTimeAsync(REQUEST_QUEUED_INTERVAL_MS)
+        deliver({ type: "requestQueued", requestId })
+      }
+      expect(settled).not.toHaveBeenCalled()
+
+      await vi.advanceTimersByTimeAsync(REQUEST_QUEUED_INTERVAL_MS)
+      deliver({ type: "requestQueued", requestId })
+
+      expect(settled).toHaveBeenCalledWith(
+        expect.objectContaining({ code: "timeout" }),
+      )
+      expect(lastPostedMessage()).toEqual({ type: "abortRequest", requestId })
     })
 
     it("still times out a request the proxy says nothing about", async () => {

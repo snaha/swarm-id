@@ -24,16 +24,30 @@ export const DAY = 24 * HOUR
 export const DEFAULT_REQUEST_TIMEOUT_MS = 30 * SECOND
 
 /**
- * How often, at most, the proxy says a write waiting for its drive is still
- * there (`requestAlive`). The proxy knows a call's own `requestOptions.timeout`
- * and the default above, not a client built with a shorter default of its own.
+ * How often the proxy says a write waiting for its drive is still queued
+ * (`requestQueued`), the first time as soon as it starts waiting.
  */
-export const REQUEST_ALIVE_INTERVAL_MS = 5 * SECOND
+export const REQUEST_QUEUED_INTERVAL_MS = 5 * SECOND
+
+/**
+ * How long the client lets a queued write's proxy go without a beat, or the
+ * request's own timeout when that is longer: a proxy that has died is caught
+ * within it, whatever timeout the client was built with.
+ */
+export const QUEUED_SILENCE_TIMEOUT_MS = 3 * REQUEST_QUEUED_INTERVAL_MS
+
+/**
+ * How long a write may wait for its drive in all, or the request's own
+ * timeout when that is longer: long enough for a large streaming upload
+ * ahead of it, short of forever behind a writer that hangs.
+ */
+export const QUEUED_WRITE_TIMEOUT_MS = 10 * MINUTE
 
 /**
  * The proxy posts an upload's progress at most this often: a report per chunk
  * would be hundreds of thousands of messages for a large file, each parsed on
- * the dApp's main thread. The last report is always posted.
+ * the dApp's main thread. A report held back is posted once the interval is
+ * up, and the last one always is.
  */
 export const PROGRESS_INTERVAL_MS = 250
 

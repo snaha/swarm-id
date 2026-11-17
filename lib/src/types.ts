@@ -1804,12 +1804,21 @@ export const UploadSourcePullMessageSchema = z.object({
 })
 
 /**
- * The proxy is still on `requestId`: a write says so while it waits for its
- * drive (the write path, the cross-tab lock, the partition lease) and once
- * more as it starts. Restarts the client's wait for the answer
+ * A write on `requestId` is waiting for its drive (the write path, the
+ * cross-tab lock, the partition lease). Said as the wait begins and on a
+ * beat while it lasts; the client's timeout does not run meanwhile
  */
-export const RequestAliveMessageSchema = z.object({
-  type: z.literal("requestAlive"),
+export const RequestQueuedMessageSchema = z.object({
+  type: z.literal("requestQueued"),
+  requestId: z.string(),
+})
+
+/**
+ * The write on `requestId` has its drive: the client's wait for the answer
+ * starts over, at its full timeout
+ */
+export const RequestStartedMessageSchema = z.object({
+  type: z.literal("requestStarted"),
   requestId: z.string(),
 })
 
@@ -2274,7 +2283,8 @@ export const IframeToParentMessageSchema = z.discriminatedUnion("type", [
   DownloadDataStreamResponseMessageSchema,
   UploadSourcePullMessageSchema,
   DownloadStreamPieceMessageSchema,
-  RequestAliveMessageSchema,
+  RequestQueuedMessageSchema,
+  RequestStartedMessageSchema,
   DeriveAppSecretResponseMessageSchema,
   UploadFileResponseMessageSchema,
   DownloadFileResponseMessageSchema,

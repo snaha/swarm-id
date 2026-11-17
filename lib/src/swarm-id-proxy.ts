@@ -240,9 +240,8 @@ import {
   type NetworkSettings,
 } from "./schemas"
 import {
-  DEFAULT_REQUEST_TIMEOUT_MS,
   PROGRESS_INTERVAL_MS,
-  REQUEST_ALIVE_INTERVAL_MS,
+  REQUEST_QUEUED_INTERVAL_MS,
   appSessionDuration,
 } from "./utils/constants"
 import { PERMISSIONS_POPUP_MAX_MS, untilPopupClosed } from "./utils/popup"
@@ -385,34 +384,18 @@ type Abortable<M> = M & {
 interface ProgressReporter {
   report: (progress: UploadProgress) => void
   /**
-   * Post the latest report held back, before the upload's answer. Not every
+   * Post the latest report held back, before the upload's answer or its
+   * error. Not every
    * last report says `processed >= total`: a stream of unknown length counts
    * what it has seen, so its total keeps pace with what has landed.
    */
   flush: () => void
 }
 
-/** The parent's request a write answers: where its `requestAlive` goes. */
+/** The parent's request a write answers: where `requestQueued` goes. */
 interface WriteRequest {
   event: MessageEvent
   message: Abortable<{ requestId: string }>
-}
-
-/** Beats within the client's wait, so one lands well before it runs out. */
-const REQUEST_ALIVE_BEATS_PER_TIMEOUT = 3
-
-/**
- * How often a write waiting for its drive says `requestAlive`: every
- * {@link REQUEST_ALIVE_INTERVAL_MS}, or a third of the client's wait when that
- * is shorter. The wait is the call's `requestOptions.timeout`, or the default.
- */
-function requestAliveInterval(perCall: number | undefined): number {
-  const timeout =
-    perCall !== undefined && perCall > 0 ? perCall : DEFAULT_REQUEST_TIMEOUT_MS
-  return Math.min(
-    REQUEST_ALIVE_INTERVAL_MS,
-    timeout / REQUEST_ALIVE_BEATS_PER_TIMEOUT,
-  )
 }
 
 /**
@@ -2286,7 +2269,8 @@ export class SwarmIdProxy {
 
   /**
    * Post an upload's progress to the parent, at most once per
-   * {@link PROGRESS_INTERVAL_MS}. Undefined if progress reporting is disabled.
+   * {@link PROGRESS_INTERVAL_MS}, and a report held back once the interval is
+   * up. Undefined if progress reporting is disabled.
    */
   private createProgressReporter(
     event: MessageEvent,
@@ -2296,7 +2280,10 @@ export class SwarmIdProxy {
     if (!enableProgress) return undefined
     let lastPostedAt: number | undefined
     let heldBack: UploadProgress | undefined
+    let trailing: ReturnType<typeof setTimeout> | undefined
     const post = (progress: UploadProgress) => {
+      clearTimeout(trailing)
+      trailing = undefined
       lastPostedAt = Date.now()
       heldBack = undefined
       this.postMessage(event, {
@@ -2308,11 +2295,18 @@ export class SwarmIdProxy {
     }
     return {
       report: (progress) => {
-        const recent =
-          lastPostedAt !== undefined &&
-          Date.now() - lastPostedAt < PROGRESS_INTERVAL_MS
-        if (recent) heldBack = progress
-        else post(progress)
+        const elapsed =
+          lastPostedAt === undefined ? Infinity : Date.now() - lastPostedAt
+        if (elapsed >= PROGRESS_INTERVAL_MS) {
+          post(progress)
+          return
+        }
+        heldBack = progress
+        // Held back until the interval is up, not until the next chunk: the
+        // node may stall right after it.
+        trailing ??= setTimeout(() => {
+          if (heldBack) post(heldBack)
+        }, PROGRESS_INTERVAL_MS - elapsed)
       },
       flush: () => {
         if (heldBack) post(heldBack)
@@ -2612,9 +2606,10 @@ export class SwarmIdProxy {
    * built on first use, and never falls back to the gateway: the app asked
    * for that drive (#862).
    *
-   * `request`, when given, hears `requestAlive` while the write waits for its
-   * drive, which another write may hold for as long as a streaming upload
-   * runs, so its caller's timeout counts none of that wait.
+   * `request`, when given, hears `requestQueued` while the write waits for
+   * its drive, which another write may hold for as long as a streaming upload
+   * runs, and `requestStarted` once it has it: its caller's timeout counts
+   * none of that wait.
    */
   private async withModeAwareWriteLock<T>(
     targetOptions:
@@ -2683,10 +2678,10 @@ export class SwarmIdProxy {
   }
 
   /**
-   * Say `requestAlive` for a write on a heartbeat while it waits for its
-   * drive, and once more as it starts: the client's wait for the answer then
-   * begins when the write does. `stop` ends the heartbeat when the wait
-   * fails instead.
+   * Say `requestQueued` for a write now and on a heartbeat while it waits for
+   * its drive, and `requestStarted` as it starts: the client's wait for the
+   * answer then begins when the write does. `stop` ends the heartbeat when
+   * the wait fails instead.
    */
   private keepAliveWhileQueued(request: WriteRequest | undefined): {
     started: () => void
@@ -2694,20 +2689,18 @@ export class SwarmIdProxy {
   } {
     if (!request) return { started: () => {}, stop: () => {} }
     const { event, message } = request
-    const alive = () =>
-      this.postMessage(event, {
-        type: "requestAlive",
-        requestId: message.requestId,
-      })
+    const say = (type: "requestQueued" | "requestStarted") =>
+      this.postMessage(event, { type, requestId: message.requestId })
+    say("requestQueued")
     const heartbeat = setInterval(
-      alive,
-      requestAliveInterval(message.requestOptions.timeout),
+      () => say("requestQueued"),
+      REQUEST_QUEUED_INTERVAL_MS,
     )
     const stop = () => clearInterval(heartbeat)
     return {
       started: () => {
         stop()
-        alive()
+        say("requestStarted")
       },
       stop,
     }
@@ -4697,15 +4690,14 @@ export class SwarmIdProxy {
       concurrency,
     } = message
 
+    const progress = this.createProgressReporter(
+      event,
+      requestId,
+      enableProgress,
+    )
     try {
       const batchID = options?.batchID
       this.ensureCanUpload(batchID)
-
-      const progress = this.createProgressReporter(
-        event,
-        requestId,
-        enableProgress,
-      )
 
       // Execute upload with mode-aware locking
       const { result: uploadResult, stampedChunks } =
@@ -4742,6 +4734,7 @@ export class SwarmIdProxy {
         tagUid: uploadResult.tagUid,
       })
     } catch (error) {
+      progress?.flush()
       this.sendErrorToParent(event, requestId, error, "Upload failed")
     }
   }
@@ -4929,15 +4922,14 @@ export class SwarmIdProxy {
     } = message
     const fileName = name || "index.bin"
 
+    const progress = this.createProgressReporter(
+      event,
+      requestId,
+      enableProgress,
+    )
     try {
       const batchID = options?.batchID
       this.ensureCanUpload(batchID)
-
-      const progress = this.createProgressReporter(
-        event,
-        requestId,
-        enableProgress,
-      )
 
       // Create or use provided tag for the entire upload operation
       const uploadTag = options?.tag ?? (await tryCreateTag(this.bee))
@@ -5011,6 +5003,7 @@ export class SwarmIdProxy {
         tagUid: manifestResult.tagUid,
       })
     } catch (error) {
+      progress?.flush()
       this.sendErrorToParent(event, requestId, error, "Upload failed")
     }
   }
@@ -5136,14 +5129,14 @@ export class SwarmIdProxy {
       workerCount,
     } = message
 
+    const progress = this.createProgressReporter(
+      event,
+      requestId,
+      enableProgress,
+    )
     try {
       const batchID = options?.batchID
       this.ensureCanUpload(batchID)
-      const progress = this.createProgressReporter(
-        event,
-        requestId,
-        enableProgress,
-      )
       const tag = options?.tag ?? (await tryCreateTag(this.bee))
 
       // A pulled file's generator pulls nothing until the upload reaches it.
@@ -5176,6 +5169,7 @@ export class SwarmIdProxy {
         tagUid: result.tagUid,
       })
     } catch (error) {
+      progress?.flush()
       this.sendErrorToParent(event, requestId, error, "Upload failed")
     }
   }
@@ -6551,6 +6545,11 @@ export class SwarmIdProxy {
       enableProgress,
     } = message
 
+    const progress = this.createProgressReporter(
+      event,
+      requestId,
+      enableProgress,
+    )
     try {
       const batchID = options?.batchID
       this.ensureCanUpload(batchID)
@@ -6558,12 +6557,6 @@ export class SwarmIdProxy {
       // Parse grantee public keys from compressed hex
       const granteePublicKeys = grantees.map((hex) =>
         parseCompressedPublicKey(hex),
-      )
-
-      const progress = this.createProgressReporter(
-        event,
-        requestId,
-        enableProgress,
       )
 
       // The app key publishes unless the dApp asked for the identity-level
@@ -6669,6 +6662,7 @@ export class SwarmIdProxy {
         tagUid: contentUpload.tagUid,
       })
     } catch (error) {
+      progress?.flush()
       this.sendErrorToParent(event, requestId, error, "ACT upload failed")
     }
   }
