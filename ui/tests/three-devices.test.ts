@@ -37,12 +37,15 @@ import {
   HANDOVER_TIMEOUT_MS,
   LEASE_STOP_MS,
   LEASE_WAIT_MS,
+  MAX_SILENT_TICKS,
   PEER_YIELD_MIN_IDLE_MS,
   type Seed,
+  TICK_MS,
   UNANSWERED_WAIT,
   UPLOAD_TIMEOUT_MS,
   createAccountWithDrives,
   expectNoDualHold,
+  isDataWrite,
   rigUp,
   skipScenario,
   sleep,
@@ -52,6 +55,9 @@ import { THREE_DEVICES_SEED_FILE } from './global-setup-devices'
 // Not `serial`: a scenario that fails must not hide the ones after it — the
 // point of the run is a verdict per scenario. Each one re-establishes what it
 // needs (`ensureConnected`) and takes the partitions as it finds them.
+/** Enough for an upload to still be stamping when its first chunk leaves. */
+const MANY_CHUNKS_BYTES = 400_000
+
 test.describe('three devices on two partitions', () => {
   test.skip(
     !rigUp,
@@ -278,6 +284,41 @@ test.describe('three devices on two partitions', () => {
 
     expect(await A.partition(), 'A let go of its partition').toBe(held)
     expect(A.lostLaneSince(since), 'A reported its partition gone').toBe(false)
+    await expectNoDualHold(all())
+  })
+
+  test('a tab that stops answering in the middle of an upload completes it on the same partition', async () => {
+    for (const device of all()) await device.ensureConnected()
+    const held = await A.uploadAndHoldOrSkip()
+    const since = Date.now()
+
+    // Many chunks, and the thread goes as the first of them leaves: the rest
+    // of the stamps and the publish are due when it comes back.
+    const firstWrite = A.page.waitForRequest(isDataWrite, { timeout: UPLOAD_TIMEOUT_MS })
+    const upload = A.upload(undefined, undefined, MANY_CHUNKS_BYTES)
+    await firstWrite
+    await A.stall(LEASE_STOP_MS + 1_000)
+    await upload
+
+    expect(await A.partition(), 'A let go of its partition').toBe(held)
+    expect(A.lostLaneSince(since), 'A reported its partition gone').toBe(false)
+    await expectNoDualHold(all())
+  })
+
+  test('a tab the server dropped for not answering holds nothing, and an upload asked for meanwhile completes once it is back', async () => {
+    for (const device of all()) await device.ensureConnected()
+    test.setTimeout(UPLOAD_TIMEOUT_MS * 4)
+    await A.uploadAndHoldOrSkip()
+    const since = Date.now()
+
+    // Past the server's patience: the connection that comes back is a new
+    // one, which holds nothing and has to ask like a newcomer.
+    const stalled = A.stall(TICK_MS * (MAX_SILENT_TICKS + 2))
+    await sleep(500)
+    await A.uploadAndHoldOrSkip()
+    await stalled
+
+    expect(A.lostLaneSince(since), 'A was never dropped: the stall tested nothing').toBe(true)
     await expectNoDualHold(all())
   })
 
