@@ -13,7 +13,12 @@
 
 import { deriveAesGcmKey, deriveSecret } from "../utils/key-derivation"
 
-const BUS_TOPIC_CONTEXT = "swarm-id/account-bus/topic/v1"
+/**
+ * The version is the room's protocol: everyone in a room must answer lane
+ * claims (`sync/bus-lease.ts`), since a claimant waits for each member. A
+ * build that speaks another protocol gets another label, and so another room.
+ */
+const BUS_TOPIC_CONTEXT = "swarm-id/account-bus/topic/v2"
 const BUS_ENCRYPTION_CONTEXT = "swarm-id/account-bus/encryption/v1"
 
 export interface BusContext {

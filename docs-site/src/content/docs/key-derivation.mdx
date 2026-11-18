@@ -55,10 +55,10 @@ recovery phrase (BIP-39)
    └─ derivationKey         = deriveSecret(master, "derivation-key")    stored on the account
       ├─ swarmEncryptionKey = deriveSecret(derivationKey, "swarm-encryption")
       │  └─ backupKey       = deriveSecret(swarmEncryptionKey, "backup-key")
-      │     └─ backup signer  secp256k1 key; its address owns every feed and lock chunk
+      │     └─ backup signer  secp256k1 key; its address owns every feed and partition-state chunk
       ├─ postageSignerKey   = deriveSecret(derivationKey, "postage-signer")
       ├─ sharing key        = deriveSecret(derivationKey, "act-sharing")
-      ├─ bus topic          = deriveSecret(derivationKey, "swarm-id/account-bus/topic/v1")
+      ├─ bus topic          = deriveSecret(derivationKey, "swarm-id/account-bus/topic/v2")
       └─ bus envelope key   = AES-GCM key from (derivationKey, "swarm-id/account-bus/encryption/v1")
 ```
 

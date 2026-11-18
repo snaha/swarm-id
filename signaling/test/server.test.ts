@@ -616,8 +616,6 @@ describe('signaling server — client round trip', () => {
     const topic = randomTopic()
     const answering = await connect(topic, ticking.port)
     const silent = await connect(topic, ticking.port)
-    // It pinged once, so it is a client that knows the rule, and then stopped.
-    silent.socket.send(JSON.stringify({ type: 'ping', nonce: 1 }))
     let nonce = 0
     answering.socket.addEventListener('message', (event) => {
       if (JSON.parse(String(event.data)).type === 'tick') {
@@ -631,23 +629,6 @@ describe('signaling server — client round trip', () => {
     } finally {
       answering.close()
       silent.close()
-      await ticking.close()
-    }
-  })
-
-  // A client built before ticks existed ignores them. It stays connected: the
-  // server is deployed ahead of the clients, and browsers keep old pages open.
-  it('keeps a room member that has never pinged', async () => {
-    const ticking = await createSignalingServer({ port: 0, tickIntervalMs: EVENT_SETTLE_MS })
-    const client = await connect(randomTopic(), ticking.port)
-    const TICKS_WELL_PAST_THE_LIMIT = 8
-    try {
-      await new Promise((resolve) =>
-        setTimeout(resolve, EVENT_SETTLE_MS * TICKS_WELL_PAST_THE_LIMIT),
-      )
-      expect(client.socket.readyState).toBe(WebSocket.OPEN)
-    } finally {
-      client.close()
       await ticking.close()
     }
   })
