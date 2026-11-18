@@ -322,10 +322,33 @@ export function isChunkAbsent(error: unknown): boolean {
   if (status === HTTP_NOT_FOUND) return true
   return (
     status === HTTP_INTERNAL_ERROR &&
-    typeof responseBody === "object" &&
-    responseBody !== null &&
-    (responseBody as { message?: unknown }).message === BEE_READ_CHUNK_FAILED
+    beeErrorMessage(responseBody) === BEE_READ_CHUNK_FAILED
   )
+}
+
+/**
+ * The `message` of Bee's `{ code, message }` error body. A chunk is asked for
+ * as bytes, so the body of a refusal arrives as bytes too, not parsed.
+ */
+function beeErrorMessage(body: unknown): string | undefined {
+  let parsed = body
+  if (body instanceof ArrayBuffer || ArrayBuffer.isView(body)) {
+    const bytes =
+      body instanceof ArrayBuffer
+        ? new Uint8Array(body)
+        : new Uint8Array(body.buffer, body.byteOffset, body.byteLength)
+    parsed = new TextDecoder().decode(bytes)
+  }
+  if (typeof parsed === "string") {
+    try {
+      parsed = JSON.parse(parsed)
+    } catch {
+      return undefined
+    }
+  }
+  if (typeof parsed !== "object" || parsed === null) return undefined
+  const { message } = parsed as { message?: unknown }
+  return typeof message === "string" ? message : undefined
 }
 
 /**

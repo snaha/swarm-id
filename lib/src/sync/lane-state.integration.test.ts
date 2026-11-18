@@ -651,13 +651,20 @@ describe("LaneState — a holder's resume and publish", () => {
   // Bee answers 500 "read chunk failed" for a chunk nobody has when the node
   // asked is itself the closest to its address.
   it("starts from zero when the node asked is the closest to an entry nobody has", async () => {
-    vi.spyOn(downloadData, "downloadEncryptedSOC").mockRejectedValue(
-      Object.assign(new Error("Internal Server Error"), {
-        status: 500,
-        responseBody: { code: 500, message: "read chunk failed" },
-      }),
-    )
-    expect(await makeLaneState().resume()).toEqual(new Uint32Array(NUM_BUCKETS))
+    // A chunk is asked for as bytes, so the refusal's body arrives as bytes.
+    const parsed = { code: 500, message: "read chunk failed" }
+    const bytes = new TextEncoder().encode(JSON.stringify(parsed))
+    for (const responseBody of [bytes, bytes.buffer, parsed]) {
+      vi.spyOn(downloadData, "downloadEncryptedSOC").mockRejectedValue(
+        Object.assign(new Error("Internal Server Error"), {
+          status: 500,
+          responseBody,
+        }),
+      )
+      expect(await makeLaneState().resume()).toEqual(
+        new Uint32Array(NUM_BUCKETS),
+      )
+    }
   })
 
   it("after a publish fails, the next one looks before it writes and never reuses an entry", async () => {
