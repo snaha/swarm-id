@@ -27,7 +27,12 @@ const TEST_TIMEOUT_MS = 6 * 60 * 1000
 
 export default defineConfig({
   testDir: './tests',
-  testMatch: ['**/three-devices.test.ts', '**/two-drives.test.ts', '**/delete-account.test.ts'],
+  testMatch: [
+    '**/three-devices.test.ts',
+    '**/two-drives.test.ts',
+    '**/delete-account.test.ts',
+    '**/drive-dilute-upload.test.ts',
+  ],
   fullyParallel: false,
   workers: 1,
   globalSetup: './tests/global-setup-devices.ts',
