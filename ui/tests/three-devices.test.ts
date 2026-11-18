@@ -381,13 +381,16 @@ test.describe('three devices on two partitions', () => {
     // shares the proxy's thread, and megabytes of text typed into it hold
     // that thread for longer than the upload does.
     let stop: (() => Promise<number>) | undefined
-    const reference = await A.upload(undefined, undefined, PAUSE_PROBE_BYTES, async () => {
+    await A.upload(undefined, undefined, PAUSE_PROBE_BYTES, async () => {
       stop = await A.watchPauses()
     })
     const uploading = await stop?.()
     expect(uploading, 'the upload held the thread').toBeLessThan(MAX_PAUSE_MS)
 
-    const downloading = await A.longestPause(() => A.download(reference))
+    // A smaller payload to read back: what the download returns is shown on
+    // the page, and megabytes of it hold the shared thread as the text box did.
+    const shown = await A.upload(undefined, undefined, MANY_CHUNKS_BYTES)
+    const downloading = await A.longestPause(() => A.download(shown))
     expect(downloading, 'the download held the thread').toBeLessThan(MAX_PAUSE_MS)
   })
 
