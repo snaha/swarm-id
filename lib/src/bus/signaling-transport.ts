@@ -165,7 +165,8 @@ export class SignalingTransport implements BusTransport {
   notePeer(peerId: string): void {
     // Heard from a peer our view of the room does not contain: the view is
     // behind, and the peer was present a moment ago.
-    if (!this.peers.has(peerId)) this.markPresent(peerId)
+    if (peerId === this.selfPeerId || this.peers.has(peerId)) return
+    this.markPresent(peerId)
   }
 
   private markPresent(peerId: string): void {
