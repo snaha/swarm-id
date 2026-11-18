@@ -54,6 +54,8 @@ export const PEER_YIELD_MIN_IDLE_MS = 3_000
 export const NEXT_LANE_AFTER_MS = 1_500
 /** The signaling server's tick: a pending claim is sent again at each. */
 export const TICK_MS = 2_000
+/** Tries at getting two devices to hold both partitions. */
+const HOLD_BOTH_ROUNDS = 3
 /** How often `longestPause` looks. */
 const PAUSE_BEAT_MS = 20
 /** Unanswered ticks after which the server drops a member (`MAX_SILENT_TICKS`). */
@@ -126,6 +128,8 @@ export const isDataWrite = (request: Request): boolean =>
 export class Device {
   /** Console lines from every tab, proxy iframes included, with the time seen. */
   readonly log: { at: number; text: string }[] = []
+  /** Every upload this device was told had succeeded, and what it held. */
+  readonly acknowledged: { reference: string; payload: string }[] = []
 
   private constructor(
     readonly label: string,
@@ -271,7 +275,13 @@ export class Device {
    * "Bucket is full" — a limit, not a lease event. Distinct content spreads
    * across buckets the way real uploads do.
    */
-  async upload(page: Page = this.page, batchHex?: string, padBytes = 0): Promise<string> {
+  async upload(
+    page: Page = this.page,
+    batchHex?: string,
+    padBytes = 0,
+    /** Runs once the payload is in the text box, before the upload starts. */
+    onEntered?: () => Promise<void>,
+  ): Promise<string> {
     // A named drive, else the primary: the sidebar's "Write to" select, shown
     // once the app holds more than one drive. It keeps its last choice, so an
     // unnamed upload sets it back rather than inheriting the previous target.
@@ -281,6 +291,7 @@ export class Device {
     const padding = padBytes > 0 ? ` ${randomBytes(padBytes / 2).toString('hex')}` : ''
     const payload = `${this.label} ${Date.now()} ${Math.random()}${padding}`
     await page.getByPlaceholder('Enter data to upload...').fill(payload)
+    await onEntered?.()
     // The upload has started once a write leaves for the node (from the proxy
     // iframe — the page-level wait covers frames).
     // The DATA write: the state pointer is a write of its own (`/soc/…`).
@@ -317,6 +328,7 @@ export class Device {
     await expect(result, `${this.label}: the upload reported no reference`).toBeVisible()
     const reference = REFERENCE_HEX.exec(await result.innerText())![0]
     expect(await readFromBee(reference), `${this.label}: read-back differs`).toBe(payload)
+    this.acknowledged.push({ reference, payload })
     return reference
   }
 
@@ -366,6 +378,13 @@ export class Device {
    * server meanwhile.
    */
   async longestPause(work: () => Promise<unknown>, page: Page = this.page): Promise<number> {
+    const stop = await this.watchPauses(page)
+    await work()
+    return stop()
+  }
+
+  /** `longestPause` from now until the returned function is called. */
+  async watchPauses(page: Page = this.page): Promise<() => Promise<number>> {
     const proxy = this.proxyFrame(page)
     await proxy.evaluate((beatMs) => {
       const state = { last: performance.now(), longest: 0, timer: 0 }
@@ -376,14 +395,14 @@ export class Device {
       }, beatMs)
       Object.assign(window, { __pause: state })
     }, PAUSE_BEAT_MS)
-    await work()
-    return proxy.evaluate(() => {
-      const { __pause: state } = window as unknown as {
-        __pause: { last: number; longest: number; timer: number }
-      }
-      window.clearInterval(state.timer)
-      return Math.max(state.longest, performance.now() - state.last)
-    })
+    return () =>
+      proxy.evaluate(() => {
+        const { __pause: state } = window as unknown as {
+          __pause: { last: number; longest: number; timer: number }
+        }
+        window.clearInterval(state.timer)
+        return Math.max(state.longest, performance.now() - state.last)
+      })
   }
 
   /** Download `reference` through the demo and return what it shows. */
@@ -434,12 +453,14 @@ export class Device {
   }
 
   /**
-   * `uploadAndHold` for a device that has to be handed a lane by a holder.
-   * While the two holders keep publishing device state to each other (#707)
-   * neither is ever idle, no claim is answered, and the wait times out with
-   * "No partition available". That is the bug, not this scenario's subject,
-   * so the scenario is skipped with the pointer rather than failed — and
-   * passes on its own once the holders go quiet.
+   * `uploadAndHold` as a scenario's SETUP, for a device that may have to be
+   * handed a lane by a holder. While the two holders keep publishing device
+   * state to each other (#707) neither is ever idle, no claim is answered, and
+   * the wait times out with "No partition available". Where that is not the
+   * scenario's subject it is skipped with the pointer rather than failed.
+   *
+   * Never where the handover IS the subject: a protocol that answers no claim
+   * fails the same way, and must fail the scenario (`uploadAndHold`).
    */
   async uploadAndHoldOrSkip(page: Page = this.page): Promise<number> {
     try {
@@ -528,6 +549,25 @@ export async function expectNoDualHold(
   const taken = [...held.values()].filter((p): p is number => p !== undefined)
   expect(new Set(taken).size, `dual hold: ${JSON.stringify([...held])}`).toBe(taken.length)
   return held
+}
+
+/**
+ * Make `first` and `second` hold the two partitions between them, whoever
+ * held what before: the starting point of a scenario about a handover. Each
+ * uploads in turn until both hold; a third device that holds one is asked
+ * for it by those uploads like anyone else.
+ */
+export async function holdBothPartitions(first: Device, second: Device): Promise<void> {
+  for (let round = 0; round < HOLD_BOTH_ROUNDS; round++) {
+    for (const device of [first, second]) {
+      if ((await device.partition()) === undefined) await device.uploadAndHold()
+    }
+    const held = await expectNoDualHold([first, second])
+    if ([...held.values()].every((partition) => partition !== undefined)) return
+    // A holder that has just written does not hand over.
+    await sleep(PEER_YIELD_MIN_IDLE_MS)
+  }
+  throw new Error(`${first.label} and ${second.label} never both held a partition`)
 }
 
 /** Read a reference straight off the cluster, as another device would. */
