@@ -112,12 +112,6 @@ interface Peer {
   alive: boolean
   /** Ticks sent since this peer's last `ping`. */
   silentTicks: number
-  /**
-   * Whether this peer has ever pinged. One that has not is a client from
-   * before ticks existed, which ignores them: it is not held to answering,
-   * and peers that wait on it wait as they did before.
-   */
-  pings: boolean
   /** Start of the current message-rate window, and its running count. */
   windowStartedAt: number
   messagesInWindow: number
@@ -251,7 +245,6 @@ export function createSignalingServer(options: SignalingServerOptions): Promise<
       socket,
       alive: true,
       silentTicks: 0,
-      pings: false,
       windowStartedAt: Date.now(),
       messagesInWindow: 0,
     }
@@ -363,7 +356,6 @@ export function createSignalingServer(options: SignalingServerOptions): Promise<
       // asserts: a peer told this socket has left gets no more of them.
       if (message.type === 'ping') {
         peer.silentTicks = 0
-        peer.pings = true
         send(peer, { type: 'pong', nonce: message.nonce })
         return
       }
@@ -431,7 +423,7 @@ export function createSignalingServer(options: SignalingServerOptions): Promise<
       const tick = setInterval(() => {
         for (const room of rooms.values()) {
           for (const peer of room.values()) {
-            if (peer.pings && peer.silentTicks >= MAX_SILENT_TICKS) {
+            if (peer.silentTicks >= MAX_SILENT_TICKS) {
               peer.socket.terminate()
               continue
             }

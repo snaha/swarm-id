@@ -36,7 +36,7 @@ payload cap, and a join timeout for a socket that never names a room. A server-s
 30 s terminates a socket that has not answered by the next one, which is what turns a
 half-open peer into `peer-left`. A room member that leaves four `tick`s in a row unanswered
 is terminated too: its browser may still hold the socket open while the page is frozen, and
-a member that answers nothing keeps every partition claim in its room waiting. The rule applies once a member has pinged for the first time: a client built before ticks existed ignores them and stays connected, so the server can be deployed ahead of the clients.
+a member that answers nothing keeps every partition claim in its room waiting.
 
 `1008` (policy violation) is permanent for that topic and the client stops reconnecting: the
 server only sends it for a topic it would refuse identically next time. A socket that never sent
