@@ -15,15 +15,20 @@ while. A lane is taken again exactly when connectivity has just changed. Two suc
 for the newest pointer entry made a holder resume from an older entry, or from zero, and
 stamp over uploads it had acknowledged itself.
 
-**Decision.** A context that read or wrote an entry in this session treats a lookup that
-ends below that entry as unsettled: it does not resume and does not publish. The entry a
-browser remembers from an earlier session (IndexedDB) is still only a hint; when Bee calls
-it absent the search starts from nothing.
+**Decision.** A lookup that ends below an entry known to have been published is unsettled:
+the context does not resume and does not publish. Known means read or written by this
+context in this session, or remembered by the browser from an earlier one (IndexedDB). The
+remembered entry is still only a hint for where to search: when it is gone and the search
+from nothing ends at or above it, that result is used.
 
-**Why.** Within a session nothing removes an entry, so "absent" there can only be a
-misread. Across sessions it can be true (a local chain was reset, a format moved the
-entries), and refusing to write then leaves a drive stuck until local data is cleared.
-That case stays exposed to the double misread; it is the open half of this decision.
+**Why.** Entries are only added, so the newest is never below one that existed; a lookup
+that says otherwise is a misread. The test is the result, not whether the known entry is
+still there, because a later entry can replace one that is off its search path
+(`state-pointer-search.ts`): a device that comes back after others published would
+otherwise find its remembered entry gone and never write again. What this costs: a browser
+that remembers an entry of a batch whose entries are all gone (a local chain reset that
+reissues the batch id) cannot write that partition until its local data is cleared. A
+format change is not that case, the store's version bump drops what was remembered.
 
 ## 2026-11-18 A room is one protocol version, and the server holds every member to its ticks
 
