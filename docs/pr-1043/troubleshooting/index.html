@@ -90,7 +90,8 @@ way).</p>
 <ul>
 <li>The client’s default <code dir="auto">timeout</code> (30 s) bounds the whole request, uploads of plain bytes (a
 <code dir="auto">Uint8Array</code>) included. A file of a few MB over a testnet or the public gateway takes longer.
-A <code dir="auto">File</code>, <code dir="auto">Blob</code> or stream is bounded by silence instead, at least 2 minutes by default.</li>
+A <code dir="auto">File</code>, <code dir="auto">Blob</code> or stream is bounded by silence instead, at least 2 minutes by default; a
+longer timeout lets its source stay silent for 10 minutes at most.</li>
 <li>The upload is direct (<code dir="auto">deferred: false</code>, the default) against a Bee node in dev mode, which
 serves only deferred uploads and never answers a direct one.</li>
 </ul>
