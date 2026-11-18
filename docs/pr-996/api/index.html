@@ -924,7 +924,7 @@
 <td><code dir="auto">options.pin</code></td>
 <td><code dir="auto">boolean</code></td>
 <td>No</td>
-<td>Whether to pin the data locally (defaults to <code dir="auto">false</code>; ignored on a subsidised gateway)</td>
+<td>Whether to pin the data locally (defaults to <code dir="auto">false</code>; ignored on a subsidised gateway); with <code dir="auto">useWebSocket</code>, refused with <code dir="auto">invalid-request</code></td>
 </tr>
 <tr>
 <td><code dir="auto">options.encrypt</code></td>
@@ -936,7 +936,7 @@
 <td><code dir="auto">options.tag</code></td>
 <td><code dir="auto">number</code></td>
 <td>No</td>
-<td>Tag ID for tracking upload progress (ignored on a subsidised gateway)</td>
+<td>Tag ID for tracking upload progress (ignored on a subsidised gateway); with <code dir="auto">useWebSocket</code>, refused with <code dir="auto">invalid-request</code> unless <code dir="auto">deferred: true</code></td>
 </tr>
 <tr>
 <td><code dir="auto">options.deferred</code></td>
@@ -949,6 +949,12 @@
 <td><code dir="auto">(progress) =&gt; void</code></td>
 <td>No</td>
 <td>Callback for tracking upload progress</td>
+</tr>
+<tr>
+<td><code dir="auto">options.useWebSocket</code></td>
+<td><code dir="auto">boolean</code></td>
+<td>No</td>
+<td>Send the content’s chunks over Bee’s chunk stream instead of HTTP. Needs Bee 2.8.1 or newer, reached directly: through a gateway the upload fails. Ignored in subsidised mode. A direct upload is slower than a deferred one and reports no tag</td>
 </tr>
 <tr>
 <td><code dir="auto">requestOptions</code></td>
@@ -1166,6 +1172,12 @@
 <td><code dir="auto">boolean</code></td>
 <td>No</td>
 <td>Encrypt the manifest too, so the reference carries the key (defaults to <code dir="auto">true</code>)</td>
+</tr>
+<tr>
+<td><code dir="auto">options.useWebSocket</code></td>
+<td><code dir="auto">boolean</code></td>
+<td>No</td>
+<td>Send the content’s chunks over Bee’s chunk stream instead of HTTP. Needs Bee 2.8.1 or newer, reached directly: through a gateway the upload fails. Ignored in subsidised mode. A direct upload is slower than a deferred one and reports no tag. The manifest stays on HTTP. <code dir="auto">pin</code> and <code dir="auto">tag</code> are refused with it as in <a href="#uploaddatadata-options-requestoptions"><code dir="auto">uploadData</code></a></td>
 </tr>
 <tr>
 <td><code dir="auto">requestOptions</code></td>
@@ -2771,13 +2783,13 @@
 <td><code dir="auto">options.pin</code></td>
 <td><code dir="auto">boolean</code></td>
 <td>No</td>
-<td>Whether to pin the data locally (defaults to <code dir="auto">false</code>; ignored on a subsidised gateway)</td>
+<td>Whether to pin the data locally (defaults to <code dir="auto">false</code>; ignored on a subsidised gateway); with <code dir="auto">useWebSocket</code>, refused with <code dir="auto">invalid-request</code></td>
 </tr>
 <tr>
 <td><code dir="auto">options.tag</code></td>
 <td><code dir="auto">number</code></td>
 <td>No</td>
-<td>Tag ID for tracking upload progress (ignored on a subsidised gateway)</td>
+<td>Tag ID for tracking upload progress (ignored on a subsidised gateway); with <code dir="auto">useWebSocket</code>, refused with <code dir="auto">invalid-request</code> unless <code dir="auto">deferred: true</code></td>
 </tr>
 <tr>
 <td><code dir="auto">options.deferred</code></td>
@@ -2790,6 +2802,12 @@
 <td><code dir="auto">(progress) =&gt; void</code></td>
 <td>No</td>
 <td>Callback for tracking upload progress</td>
+</tr>
+<tr>
+<td><code dir="auto">options.useWebSocket</code></td>
+<td><code dir="auto">boolean</code></td>
+<td>No</td>
+<td>Send the content’s chunks over Bee’s chunk stream instead of HTTP. Needs Bee 2.8.1 or newer, reached directly: through a gateway the upload fails. Ignored in subsidised mode. A direct upload is slower than a deferred one and reports no tag. The manifest and the ACT’s own chunks stay on HTTP</td>
 </tr>
 <tr>
 <td><code dir="auto">options.publisher</code></td>
