@@ -3,9 +3,11 @@
 
 /**
  * Who may write on one lane — a (batch, partition) — decided between the
- * contexts of an account over the account bus. This is the protocol of
- * `models/bus-lease` (`BusLease.tla`), action for action; the names in
- * comments are the model's.
+ * contexts of an account over the account bus. The core is the protocol of
+ * `models/bus-lease` (`BusLease.tla`), and a name in backticks in a comment
+ * is the model's action. The "held" answer, gentle claims and `insist()` are
+ * not in the model. They add no way to take a lane: a "held" answer and a
+ * gentle claim only ever leave a holder where it is.
  *
  * A participant (the model's "device") is one context's connection: a tab or
  * an iframe, for as long as its socket lasts. Two tabs of one browser are two
@@ -23,11 +25,13 @@
  *   asking someone to move is the only way left.
  *
  * Messages may be lost, late, repeated or reordered. Nothing here stores or
- * reads Swarm: what the next holder must read is the caller's, through
- * `beforeHandover`.
+ * reads Swarm. The holder publishes the lane's counter after each upload
+ * (`lane-state.ts`), so a handover has nothing left to write: `BusLanes.open`
+ * passes no `beforeHandover`.
  */
 
 import type { BusMessage, BusMessageInput } from "../bus/messages"
+import { uint8ArrayToHex } from "../utils/hex"
 
 /** How long a holder may go without a confirmed connection (`TStop`). */
 export const LEASE_STOP_MS = 6000
@@ -94,10 +98,7 @@ export interface BusLaneOptions {
 type Mode = "idle" | "claiming" | "holding" | "yielding"
 
 function randomRound(): string {
-  const bytes = crypto.getRandomValues(new Uint8Array(ROUND_BYTES))
-  return Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join(
-    "",
-  )
+  return uint8ArrayToHex(crypto.getRandomValues(new Uint8Array(ROUND_BYTES)))
 }
 
 export class BusLane {

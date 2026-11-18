@@ -46,8 +46,8 @@ const PARTITIONED_SPEC = '**/bus-propagation.test.ts'
 const POPUP_BLOCKER_SPEC = '**/popup-blocker.test.ts'
 
 /**
- * The three-device partition scenarios: minutes of TTL and idle waits by
- * design, so they run only through `playwright.devices.config.ts`.
+ * The three-device partition scenarios: minutes of waiting out the protocol's
+ * timings by design, so they run only through `playwright.devices.config.ts`.
  */
 const DEVICES_SPEC = '**/three-devices.test.ts'
 

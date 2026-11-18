@@ -168,14 +168,14 @@ export function detectDeviceName(): string {
  *
  * The label is per-origin and the thing it labels is per-site, and both are
  * right for their own job. The name is per-origin because the origin is what a
- * user recognises. The row is per-site because it stands for a WRITER, not for
- * a security boundary: nothing reads the device registry to decide whether a
- * write is allowed (`knownDeviceIds` only feeds the lease rival set), and two
- * contexts in one partition cannot write at the same time anyway — they share
- * `withBatchWriteLock`, a Web Lock scoped to the store they share. Giving them
- * a row each would spend two of a finite `partitionCount` on writers that are
- * already serialised. Where per-origin state really is per-origin, the storage
- * key says so: the stored session (#671), and the stamper's.
+ * user recognises. The row is per-site because the device id lives in the
+ * store the two share, and it is not a security boundary: nothing reads the
+ * device registry to decide whether a write is allowed. Who writes is settled
+ * per context on the account bus, each claiming a lane for itself
+ * (`sync/bus-lease.ts`), and two contexts in one partition also share
+ * `withBatchWriteLock`, a Web Lock scoped to the store they share. Where
+ * per-origin state really is per-origin, the storage key says so: the stored
+ * session (#671), and the stamper's.
  *
  * What the alternation costs: nothing on the refresh itself. A partitioned
  * proxy keeps the merged registry in memory, and the refresh that produces it
@@ -203,11 +203,8 @@ export function partitionDeviceName(appOrigin: string): string {
  * Whether a merged device registry is worth persisting over the stored one.
  *
  * Not merely "did the list get longer": a merge that only refreshes a peer's
- * `lastSignedInAt` or sets a `removedAt` tombstone moves exactly the fields
- * `activeDeviceIds` prunes the rival set on. Discarding it would let a peer the
- * roster shows as live age out of the stored copy, drop out of the rival set,
- * and never get an intent read: the dual-acquire the registry refresh exists
- * to prevent (#586).
+ * `lastSignedInAt` or sets a `removedAt` tombstone is a change too.
+ * Discarding it would leave the stored copy behind the roster (#586).
  *
  * Every field counts, our own included. `mergeDevices` does not stamp our
  * `lastSignedInAt` on a poll (#652), so when it moves it is a genuine sign-in (a

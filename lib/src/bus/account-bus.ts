@@ -46,7 +46,7 @@ export interface BusTransport {
    */
   onPeerLeft?(handler: (peerId: string) => void): () => void
   /**
-   * The two things the partition lease needs from a transport that crosses
+   * The two things a lane (`sync/bus-lease.ts`) needs from a transport that crosses
    * devices (models/bus-lease, #1017), and the whole of what it may assume
    * about how the transport knows:
    *

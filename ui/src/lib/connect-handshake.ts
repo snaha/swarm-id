@@ -79,9 +79,10 @@ function saveConnection(
  *
  * `derivationKey` stays, and that is the honest trade-off to state rather than
  * hide: the account bus derives its topic and envelope key from it
- * (`deriveBusContext`), and the partition lease derives the Swarm encryption
- * key and the lock-SOC signer from it (`deriveSwarmEncryptionKey` →
- * `backup-key`). A partitioned session cannot write without it.
+ * (`deriveBusContext`), and the write path derives the Swarm encryption key
+ * and the signer of the published partition state from it
+ * (`deriveSwarmEncryptionKey` → `backup-key`). A partitioned session cannot
+ * write without it.
  *
  * Which means this narrows what the session HOLDS, not what it could learn: the
  * key that opens the room stays, and an `account-delta` carries the whole

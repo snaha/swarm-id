@@ -286,7 +286,8 @@ interface EncryptedChunkRef {
  * How long chunk preparation runs before it gives way. Encrypting and
  * addressing a chunk is over a millisecond of CPU, so a large payload in one
  * stretch keeps the thread from answering anything for seconds: a write-path
- * holder that cannot confirm its connection for six loses its partition.
+ * holder that cannot confirm its connection for six may not stamp until it is
+ * confirmed again.
  */
 const PREPARE_SLICE_MS = 30
 

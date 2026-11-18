@@ -31,7 +31,7 @@
  * every confirmation, past which `stamp()` throws `PartitionLeaseLostError`,
  * so the upload stops by itself; and the hold is checked again before the
  * upload is acknowledged. A handover never lands mid-upload: a holder with a
- * write in flight does not answer a claim.
+ * write in flight answers a claim `lane-held` and keeps the lane.
  */
 
 import { Bee, BatchId, PrivateKey } from "@ethersphere/bee-js"
@@ -226,12 +226,6 @@ export class BatchWriteCoordinator {
   /** True when the last attempt to take a lane failed. */
   get isReadOnly(): boolean {
     return this.readOnly
-  }
-
-  /** The bound stamper — exposed for the proxy's `buildConnectionInfo`
-   *  (appKey / uploadMode). */
-  get stamperRef(): UtilizationAwareStamper {
-    return this.deps.stamper
   }
 
   /** The account this coordinator (and its batch) was built for — exposed so

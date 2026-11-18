@@ -90,7 +90,7 @@ Everything below is a small chunk kept out of the data slots and stamped to
   explicitly to route it to slot `p` (`markReservedUtilizationChunk`).
 - **State-pointer entry** — the numbered, write-once pointer to the latest counter
   reference-chunk (§8). Routed to slot `p` via the stamper's single SOC reservation
-  (`withIntentSocSlot`).
+  (`withStatePointerSlot`).
 
 > Because these **all** land at `slot = p`, two of them in the **same bucket** would
 > overwrite each other under the mutable batch. The publish actively avoids that — see §10.

@@ -136,8 +136,9 @@ Counters are little-endian in the serialized chunk. Chunk `i` covers buckets
 
 ### Per-chunk encryption key
 
-Utilization chunks are uploaded as **encrypted content-addressed chunks**. The key for
-chunk `i` is deterministic so re-saves dedup:
+The cache records, for each row, the address it has as an **encrypted content-addressed
+chunk** (`contentHash`); the rows themselves are not uploaded. The key for row `i` is
+deterministic:
 
 ```text
 chunkKey = HMAC-SHA256(
@@ -147,10 +148,9 @@ chunkKey = HMAC-SHA256(
 ```
 
 `nonce` starts at 0 and is incremented only when the resulting encrypted address would
-land in the same bucket as another utilization chunk in the same save (collisions are
-vanishingly rare — ≈0.008 bumps per save with 32 chunks over 65 536 buckets). The nonce
-that produced a chunk is cached so an unchanged plaintext reuses the same key and the
-upload is skipped.
+land in the same bucket as another row's, or as a chunk of the published partition state.
+The nonce that produced a row's address is cached, so an unchanged plaintext keeps the
+same key.
 
 ### Local cache
 
@@ -279,7 +279,8 @@ state however long ago it was written.
 
 Entries share the partition's reserved slot, so a later write in the same bucket replaces
 an earlier entry. The search is fixed (which entries it reads depends only on the
-answer), which leaves at most 60 entries that a later search depends on. A writer keeps
+answer), which leaves a small set of entries that a later search depends on (`searchPath`:
+18 after ten thousand publishes, no more than 47 in the first quarter of a million). A writer keeps
 its counter and reference chunks out of their buckets, and `salt` picks, by a rule the
 reader repeats, the first of 8 candidate addresses whose bucket is clear of the earlier
 entries on the entry's search path.
@@ -511,7 +512,9 @@ To interoperate with the reference implementation, an external client must:
 8. **Respect the partition gate**: never publish account state without holding a partition.
 
 All hashes are keccak256; multi-byte integers in identifiers and topics are **big-endian**
-(`uint32` for partitions, `uint64` for epochs); serialized counters are **little-endian**;
+(`uint32` for partitions, `uint64` for epochs and state-pointer entry numbers), and so are
+those of the reference chunk; a leaf's counters are packed most significant bit first; the
+rows of the reference client's local cache are **little-endian** `uint32`;
 every feed and SOC is owned by the backup signer.
 
 ## Future work
