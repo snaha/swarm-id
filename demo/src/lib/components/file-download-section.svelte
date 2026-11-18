@@ -12,6 +12,9 @@
   import { clientStore } from '$lib/stores/client.svelte'
   import { logStore } from '$lib/stores/log.svelte'
   import { formatBytes } from '$lib/utils/format'
+  import { describeDownload, watchBridgeTraffic } from '$lib/utils/bridge-traffic'
+  import { resolveProxyOrigin } from '$lib/utils/environment'
+  import { describeSave, saveStream } from '$lib/utils/save-stream'
 
   interface Props {
     reference?: string
@@ -24,24 +27,35 @@
 
   const REFERENCE_LENGTH = 64
   const ENCRYPTED_REFERENCE_LENGTH = 128
+  const MS_PER_SECOND = 1000
+  /** Hex characters of the reference in the name the save picker suggests */
+  const FILE_NAME_REFERENCE_CHARS = 8
+
+  /** The trimmed reference, or undefined once the invalid one is reported. */
+  function validReference(): string | undefined {
+    const ref = reference.trim()
+    if (!ref || (ref.length !== REFERENCE_LENGTH && ref.length !== ENCRYPTED_REFERENCE_LENGTH)) {
+      error = 'Invalid reference (must be 64 or 128 hex chars)'
+      logStore.log('Invalid reference', 'error')
+      return undefined
+    }
+    return ref
+  }
 
   async function handleDownload() {
     result = undefined
     error = undefined
-    const ref = reference.trim()
+    const ref = validReference()
+    if (!ref) return
 
-    if (!ref || (ref.length !== REFERENCE_LENGTH && ref.length !== ENCRYPTED_REFERENCE_LENGTH)) {
-      error = 'Invalid reference (must be 64 or 128 hex chars)'
-      logStore.log('Invalid reference', 'error')
-      return
-    }
-
+    const stopWatching = watchBridgeTraffic(resolveProxyOrigin())
     try {
       logStore.log(`Downloading file from reference: ${ref}`)
       const downloadStartTime = Date.now()
       const fileData = await clientStore.client!.downloadFile(ref)
       const elapsedTime = (Date.now() - downloadStartTime) / 1000
       const speed = elapsedTime > 0 ? fileData.data.length / elapsedTime : 0
+      logStore.log(describeDownload(stopWatching()))
       logStore.log(
         `Download successful! Filename: ${fileData.name} (${fileData.data.length} bytes)`,
       )
@@ -72,6 +86,55 @@
       const msg = err instanceof Error ? err.message : String(err)
       logStore.log(`Download failed: ${msg}`, 'error')
       error = msg
+    } finally {
+      stopWatching()
+    }
+  }
+
+  /** `downloadFileStream`, saved to disk as it arrives; the bytes are never rendered. */
+  async function handleStreamToDisk() {
+    result = undefined
+    error = undefined
+    const ref = validReference()
+    if (!ref) return
+
+    const stopWatching = watchBridgeTraffic(resolveProxyOrigin())
+    try {
+      logStore.log(`Streaming file to disk from reference: ${ref}`)
+      // The picker opens before the manifest is read, so it cannot suggest
+      // the file's own name.
+      const suggestedName = `swarm-${ref.slice(0, FILE_NAME_REFERENCE_CHARS)}`
+      const outcome = await saveStream(suggestedName, () =>
+        clientStore.client!.downloadFileStream(ref),
+      )
+      if (outcome.path === 'cancelled') {
+        logStore.log('Save cancelled in the picker; nothing was downloaded')
+        return
+      }
+      const { download } = outcome
+      const elapsedTime = outcome.elapsedMs / MS_PER_SECOND
+      const speed = elapsedTime > 0 ? download.size / elapsedTime : 0
+      logStore.log(describeDownload(stopWatching()))
+      logStore.log(
+        `Saved ${download.name} (${formatBytes(download.size)}) ${describeSave(outcome)} in ${elapsedTime.toFixed(2)}s`,
+      )
+      result = {
+        title: 'File streamed to disk:',
+        entries: [
+          { label: 'Filename', value: download.name },
+          { label: 'Size', value: formatBytes(download.size) },
+          { label: 'Saved', value: describeSave(outcome) },
+          { label: 'Time', value: `${elapsedTime.toFixed(2)}s` },
+          { label: 'Speed', value: `${formatBytes(speed)}/s` },
+        ],
+        status: 'success',
+      }
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err)
+      logStore.log(`Streaming download failed: ${msg}`, 'error')
+      error = msg
+    } finally {
+      stopWatching()
     }
   }
 </script>
@@ -82,7 +145,16 @@
   </CardHeader>
   <CardContent class="space-y-4">
     <Input bind:value={reference} placeholder="Reference (64 or 128 hex chars)" />
-    <Button onclick={handleDownload} disabled={!clientStore.authenticated}>Download File</Button>
+    <div class="flex flex-wrap gap-2">
+      <Button onclick={handleDownload} disabled={!clientStore.authenticated}>Download File</Button>
+      <Button variant="outline" onclick={handleStreamToDisk} disabled={!clientStore.authenticated}>
+        Stream File to Disk
+      </Button>
+    </div>
+    <p class="text-xs text-muted-foreground">
+      Streaming saves the file as it arrives, through the save picker where the browser has one;
+      elsewhere it is collected and handed to the browser's download.
+    </p>
     <ResultDisplay {result} {error} />
   </CardContent>
 </Card>

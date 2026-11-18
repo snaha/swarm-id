@@ -12,8 +12,8 @@ import { stockWorkerFaucets, workerFaucetKey } from './worker-faucet'
 /**
  * What one drive costs a run of the device suites: the smallest drive at 30
  * days is ~0.65 BZZ, and whatever is left over is stranded on that signer for
- * good — so not the everyday 3 BZZ. The three-device suite buys one, the
- * two-drive suite two.
+ * good — so not the everyday 3 BZZ. The three-device and streaming suites buy
+ * one each, the two-drive suite two.
  */
 export const DEVICES_RUN_BZZ_PLUR = 10n ** 16n // 1 BZZ
 
@@ -44,11 +44,16 @@ export async function stockedSlot(
  *  restarted after a failure reuses the drives instead of buying more. */
 export const THREE_DEVICES_SEED_FILE = 'three-devices-seed.json'
 export const TWO_DRIVES_SEED_FILE = 'two-drives-seed.json'
+export const STREAMING_TRANSFER_SEED_FILE = 'streaming-transfer-seed.json'
 
 export default async function globalSetup(config: FullConfig): Promise<void> {
   // One account per run: the seed survives worker restarts inside a run, not
   // across runs, or the roster grows by three devices every time.
-  for (const seed of [THREE_DEVICES_SEED_FILE, TWO_DRIVES_SEED_FILE]) {
+  for (const seed of [
+    THREE_DEVICES_SEED_FILE,
+    TWO_DRIVES_SEED_FILE,
+    STREAMING_TRANSFER_SEED_FILE,
+  ]) {
     rmSync(join(config.projects[0].outputDir, seed), { force: true })
   }
   if (!(await chainReachable())) return

@@ -33,6 +33,7 @@ import {
 import type { UploadProgress } from "./types"
 import type { SingleOwnerChunk } from "../types"
 import { hexToUint8Array } from "../utils/hex"
+import { abortedError } from "../errors"
 
 /**
  * The slice of a Bee client that reading chunks needs.
@@ -407,6 +408,81 @@ export async function downloadDataWithChunkAPI(
   }
 
   return result
+}
+
+/** A download opened at its root: the size is known, the bytes come on demand. */
+export interface DataStream {
+  size: number
+  leaves: AsyncGenerator<Uint8Array>
+}
+
+/**
+ * Yield a chunk's leaves in order, fetching children a batch at a time, one
+ * batch ahead of the reader: at most two batches per tree level are held, so
+ * a file of any size stays bounded.
+ */
+async function* walkLeaves(
+  bee: ChunkDownloader,
+  node: { span: number; payload: Uint8Array },
+  isEncrypted: boolean,
+  requestOptions?: BeeRequestOptions,
+): AsyncGenerator<Uint8Array> {
+  if (node.span <= MAX_PAYLOAD_SIZE) {
+    yield node.payload.slice(0, node.span)
+    return
+  }
+
+  const childRefs = extractReferences(node.payload, node.span, isEncrypted)
+  if (childRefs.length === 0) {
+    throw new Error("No valid references found in intermediate chunk")
+  }
+
+  const signal = requestOptions?.signal
+  const fetchBatch = (start: number) => {
+    const batch = Promise.all(
+      childRefs
+        .slice(start, start + DEFAULT_DOWNLOAD_CONCURRENCY)
+        .map((ref) => downloadAndProcessChunk(bee, ref, requestOptions)),
+    )
+    // A batch the walk never reaches, once the reader stops, must not reject
+    // unhandled; the walk still sees the rejection when it awaits it.
+    batch.catch(() => {})
+    return batch
+  }
+  // The next batch is fetched while this one's leaves are read, so the walk
+  // does not idle through each piece's trip to the reader.
+  let next = fetchBatch(0)
+  for (let i = 0; i < childRefs.length; i += DEFAULT_DOWNLOAD_CONCURRENCY) {
+    if (signal?.aborted) throw abortedError(signal)
+    const children = await next
+    const following = i + DEFAULT_DOWNLOAD_CONCURRENCY
+    if (following < childRefs.length) next = fetchBatch(following)
+    for (const child of children) {
+      yield* walkLeaves(bee, child, isEncrypted, requestOptions)
+    }
+  }
+}
+
+/**
+ * {@link downloadDataWithChunkAPI} for reading as the bytes arrive. Fetches the
+ * root now, so a missing reference fails here rather than mid-stream.
+ */
+export async function openDataStream(
+  bee: ChunkDownloader,
+  reference: string,
+  requestOptions?: BeeRequestOptions,
+): Promise<DataStream> {
+  const rootRef = parseReference(reference)
+  const root = await downloadAndProcessChunk(bee, rootRef, requestOptions)
+  return {
+    size: root.span,
+    leaves: walkLeaves(
+      bee,
+      root,
+      rootRef.encryptionKey !== undefined,
+      requestOptions,
+    ),
+  }
 }
 
 export async function downloadSOC(

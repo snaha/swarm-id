@@ -5,6 +5,8 @@
 export const CHUNK_SIZE = 4096
 export const PLAIN_REFS_PER_CHUNK = 128 // 4096 / 32 = 128 plain (unencrypted) refs per intermediate chunk
 export const ENCRYPTED_REFS_PER_CHUNK = 64 // 4096 / 64 = 64 encrypted refs per intermediate chunk
+/** The most bytes one message of a streaming upload or download carries. */
+export const STREAM_PIECE_SIZE = 256 * 1024
 
 /**
  * Chunks a file of `span` bytes splits into, for upload progress and drive
