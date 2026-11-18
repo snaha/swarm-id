@@ -198,6 +198,23 @@ function sumChunkCounts(
     : first + second
 }
 
+/** The options of a single-chunk write, as the wire carries them. */
+type ChunkWireOptions = ChunkUploadOptions & Pick<UploadOptions, "encrypt">
+
+/**
+ * A single-chunk write's options as they cross the bridge: only the fields
+ * the wire knows. Wider options assign to `ChunkUploadOptions` through a
+ * variable, and a function among them, such as `onProgress`, would make
+ * `postMessage` throw `DataCloneError`.
+ */
+function chunkWireOptions(
+  options: ChunkWireOptions | undefined,
+): ChunkWireOptions | undefined {
+  if (!options) return undefined
+  const { batchID, pin, tag, deferred, encrypt } = options
+  return { batchID, pin, tag, deferred, encrypt }
+}
+
 export class SwarmIdClient {
   private iframe: HTMLIFrameElement | undefined
   private iframeOrigin: string
@@ -2107,7 +2124,7 @@ export class SwarmIdClient {
       type: "uploadChunk",
       requestId,
       data: webBytes(data),
-      options,
+      options: chunkWireOptions(options),
       requestOptions,
     })
 
@@ -2350,7 +2367,7 @@ export class SwarmIdClient {
         identifier: this.normalizeSocIdentifier(identifier),
         data: new Uint8Array(data),
         signer: signerKey,
-        options,
+        options: chunkWireOptions(options),
         requestOptions,
       })
 
@@ -2380,7 +2397,7 @@ export class SwarmIdClient {
         identifier: this.normalizeSocIdentifier(identifier),
         data: new Uint8Array(data),
         signer: signerKey,
-        options,
+        options: chunkWireOptions(options),
         requestOptions,
       })
 
@@ -3244,7 +3261,7 @@ export class SwarmIdClient {
             : undefined,
         hasTimestamp: options?.hasTimestamp,
         lookupTimeoutMs: options?.lookupTimeoutMs,
-        options,
+        options: chunkWireOptions(options),
         requestOptions,
       })
 
@@ -3289,7 +3306,7 @@ export class SwarmIdClient {
         encryptionKey: options?.encryptionKey
           ? this.normalizeSocKey(options.encryptionKey)
           : undefined,
-        options,
+        options: chunkWireOptions(options),
         requestOptions,
       })
 
@@ -3331,7 +3348,7 @@ export class SwarmIdClient {
             : undefined,
         hasTimestamp: options?.hasTimestamp,
         lookupTimeoutMs: options?.lookupTimeoutMs,
-        options,
+        options: chunkWireOptions(options),
         requestOptions,
       })
 
@@ -3414,7 +3431,7 @@ export class SwarmIdClient {
       topic: normalizedTopic,
       owner: options?.owner,
       feedType: options?.feedType,
-      uploadOptions: options?.uploadOptions,
+      uploadOptions: chunkWireOptions(options?.uploadOptions),
       requestOptions,
     })
 
@@ -3516,7 +3533,7 @@ export class SwarmIdClient {
       signer,
       identifier,
       data: new Uint8Array(data),
-      options,
+      options: chunkWireOptions(options),
       requestOptions,
     })
 

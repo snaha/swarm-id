@@ -47,7 +47,7 @@ import {
 } from "@ethersphere/core-sdk"
 import type { ChunkReference, UploadProgress } from "./types"
 import type { StampWorkerPool } from "./stamp-worker-pool"
-import { tryCreateTag } from "../utils/tag"
+import { createTagIfSupported, tryCreateTag } from "../utils/tag"
 import { uint8ArrayToHex, webBytes } from "../utils/hex"
 import { normalizeUrl } from "../utils/url"
 
@@ -502,8 +502,10 @@ export function refuseChunkStreamConflicts(
 /**
  * The tag a stamper upload goes under: the caller's, or one made for it. Over
  * WebSocket the tag is what defers the stream, so a direct stream gets none,
- * and a deferred one the node gives no tag for is refused rather than sent
- * direct. Also refuses what the stream cannot honour, before anything is made.
+ * and a deferred one on a node without tags is refused rather than sent
+ * direct. A deferred one whose tag the node fails to make rejects with Bee's
+ * own error. Also refuses what the stream cannot honour, before anything is
+ * made.
  */
 export async function stamperUploadTag(
   bee: Bee,
@@ -515,11 +517,11 @@ export async function stamperUploadTag(
   if (!options?.webSocket) return given ?? (await tryCreateTag(bee))
   refuseChunkStreamConflicts(options)
   if (!options.deferred) return undefined
-  const tag = given ?? (await tryCreateTag(bee))
+  const tag = given ?? (await createTagIfSupported(bee))
   if (tag === undefined) {
     throw new SwarmIdError(
       "invalid-request",
-      "Bee defers chunks sent over WebSocket only under a tag, and the node gave none: pass a tag, or upload without useWebSocket",
+      "Bee defers chunks sent over WebSocket only under a tag, and the node does not support tags: pass a tag, or upload without useWebSocket",
     )
   }
   return tag

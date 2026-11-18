@@ -4,7 +4,10 @@
 import { describe, expect, it, vi } from "vitest"
 import type { Tag } from "@ethersphere/bee-js"
 import { MockBee } from "../proxy/feeds/epochs/test-utils"
-import { tryCreateTag } from "./tag"
+import { createTagIfSupported, tryCreateTag } from "./tag"
+
+const NOT_FOUND = 404
+const INTERNAL_SERVER_ERROR = 500
 
 const tag = (uid: number): Tag => ({
   uid,
@@ -114,5 +117,30 @@ describe("tryCreateTag", () => {
     await tryCreateTag(gateway.bee)
     // A separate Bee instance is unaffected by the gateway's cached verdict.
     expect(await tryCreateTag(realNode.bee)).toBe(7)
+  })
+})
+
+describe("createTagIfSupported", () => {
+  it("returns undefined on a 404 and caches it", async () => {
+    const { bee, createTag } = beeWithTagSpy()
+    createTag.mockRejectedValue(
+      Object.assign(new Error("Not Found"), { status: NOT_FOUND }),
+    )
+
+    expect(await createTagIfSupported(bee)).toBeUndefined()
+    expect(await createTagIfSupported(bee)).toBeUndefined()
+    expect(createTag).toHaveBeenCalledTimes(1)
+  })
+
+  it("rethrows any other failure and re-probes on the next call", async () => {
+    const { bee, createTag } = beeWithTagSpy()
+    const failure = Object.assign(new Error("Bee returned 500"), {
+      status: INTERNAL_SERVER_ERROR,
+    })
+    createTag.mockRejectedValueOnce(failure).mockResolvedValueOnce(tag(5))
+
+    await expect(createTagIfSupported(bee)).rejects.toBe(failure)
+    expect(await createTagIfSupported(bee)).toBe(5)
+    expect(createTag).toHaveBeenCalledTimes(2)
   })
 })

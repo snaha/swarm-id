@@ -11,6 +11,7 @@ import {
   type ConnectionInfo,
   type IframeToParentMessage,
   type RequestOptions,
+  type UploadOptions,
 } from "./types"
 import { generatedAvatar } from "./utils/avatar"
 import { TimeoutError } from "./utils/promise"
@@ -922,6 +923,45 @@ describe("SwarmIdClient request seam", () => {
     const sent = lastPostedMessage()
     expect(sent).toMatchObject({ type: "actUploadData", ...transfer })
     expect(sent.options).toEqual({ pin: false })
+  })
+
+  describe("single-chunk writes post only the options the wire knows", () => {
+    // Wider options assign to `ChunkUploadOptions` through a variable, so a
+    // function such as `onProgress` can reach the call and must not reach
+    // `postMessage`, which cannot clone it.
+    const widerOptions: UploadOptions = {
+      pin: true,
+      tag: 7,
+      deferred: true,
+      onProgress: () => {},
+      useWebSocket: true,
+      concurrency: 4,
+    }
+
+    it("uploadChunk", () => {
+      void client.uploadChunk(new Uint8Array([1]), widerOptions).catch(() => {})
+
+      const sent = lastPostedMessage()
+      expect(sent.type).toBe("uploadChunk")
+      expect(sent.options).toEqual({ pin: true, tag: 7, deferred: true })
+      expect(() => structuredClone(sent)).not.toThrow()
+    })
+
+    it("gsocSend", () => {
+      void client
+        .gsocSend(
+          "a".repeat(64),
+          "b".repeat(64),
+          new Uint8Array([1]),
+          widerOptions,
+        )
+        .catch(() => {})
+
+      const sent = lastPostedMessage()
+      expect(sent.type).toBe("gsocSend")
+      expect(sent.options).toEqual({ pin: true, tag: 7, deferred: true })
+      expect(() => structuredClone(sent)).not.toThrow()
+    })
   })
 
   it("downloadData sends plain non-ACT options (#420)", async () => {

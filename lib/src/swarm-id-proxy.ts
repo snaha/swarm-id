@@ -2558,6 +2558,20 @@ export class SwarmIdProxy {
   }
 
   /**
+   * Refuse what Bee's chunk stream cannot honour, first thing in an upload
+   * handler. A gateway takes no stream, so it is refused only where the write
+   * goes to a stamper.
+   */
+  private refuseStreamConflicts(
+    useWebSocket: boolean | undefined,
+    options: UploadDataMessage["options"],
+  ): void {
+    if (useWebSocket && !this.writesSubsidised(options?.batchID)) {
+      refuseChunkStreamConflicts(options)
+    }
+  }
+
+  /**
    * {@link withModeAwareWriteLock} for a write that reports its cost (#932).
    * The counter is made here and returned with the result, so a handler has
    * no counter it could forget to wire and then report as zero. `signal` is
@@ -4512,12 +4526,8 @@ export class SwarmIdProxy {
     } = message
 
     try {
+      this.refuseStreamConflicts(useWebSocket, options)
       const batchID = options?.batchID
-      // A gateway takes no stream, so what the stream cannot honour is refused
-      // only where the write goes to a stamper.
-      if (useWebSocket && !this.writesSubsidised(batchID)) {
-        refuseChunkStreamConflicts(options)
-      }
       this.ensureCanUpload(batchID)
 
       // Create progress callback if enabled (works in both modes)
@@ -4605,6 +4615,7 @@ export class SwarmIdProxy {
     const fileName = name || "index.bin"
 
     try {
+      this.refuseStreamConflicts(useWebSocket, options)
       const batchID = options?.batchID
       this.ensureCanUpload(batchID)
 
@@ -6186,12 +6197,8 @@ export class SwarmIdProxy {
     } = message
 
     try {
+      this.refuseStreamConflicts(useWebSocket, options)
       const batchID = options?.batchID
-      // A gateway takes no stream, so what the stream cannot honour is refused
-      // only where the write goes to a stamper.
-      if (useWebSocket && !this.writesSubsidised(batchID)) {
-        refuseChunkStreamConflicts(options)
-      }
       this.ensureCanUpload(batchID)
 
       // Parse grantee public keys from compressed hex

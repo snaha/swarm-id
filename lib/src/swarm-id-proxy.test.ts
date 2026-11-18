@@ -1513,6 +1513,24 @@ describe("SwarmIdProxy subsidised-mode selection", () => {
       },
     )
 
+    it("refuses what the stream cannot honour ahead of a session that cannot upload", async () => {
+      for (const type of ["uploadData", "uploadFile", "actUploadData"]) {
+        parentWindow.postMessage.mockClear()
+        await identify()
+
+        await send({
+          ...fileUpload({ pin: true, deferred: true }),
+          type,
+          grantees: [],
+        })
+
+        expect(answer()).toMatchObject({
+          type: "error",
+          code: "invalid-request",
+        })
+      }
+    })
+
     // The gateway stamps the chunks itself and takes no stream, so neither a
     // pin nor a tag conflicts with anything there.
     it("accepts in subsidised mode what only the stream would refuse", async () => {

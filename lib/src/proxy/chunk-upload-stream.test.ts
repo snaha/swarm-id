@@ -10,6 +10,8 @@ const BEE_URL = "http://bee.example"
 const TAG_UID = 7
 const NORMAL_CLOSURE = 1000
 const ABNORMAL_CLOSURE = 1006
+const NOT_FOUND = 404
+const INTERNAL_SERVER_ERROR = 500
 /** Splits into three leaves under one parent, plain or encrypted */
 const THREE_LEAVES_SIZE = 9_000
 const THREE_LEAVES_AND_PARENT = 4
@@ -309,10 +311,12 @@ describe.each([
   )
 
   it(
-    "refuses a deferred upload the node gives no tag for, before any stream",
+    "refuses a deferred upload on a node without tags, before any stream",
     async () => {
       const { target, chunkUpload, tagCreate } = spiedStamperTarget()
-      tagCreate.mockRejectedValue(new Error("tags are down"))
+      tagCreate.mockRejectedValue(
+        Object.assign(new Error("Not Found"), { status: NOT_FOUND }),
+      )
 
       await expect(
         uploadData(target, new Uint8Array(1), {
@@ -322,6 +326,29 @@ describe.each([
         }),
       ).rejects.toMatchObject({ code: "invalid-request" })
 
+      expect(FakeWebSocket.last).toBeUndefined()
+      expect(chunkUpload).not.toHaveBeenCalled()
+    },
+    HANG_MS,
+  )
+
+  it(
+    "rejects a deferred upload with Bee's own error when making its tag fails",
+    async () => {
+      const { target, chunkUpload, tagCreate } = spiedStamperTarget()
+      const failure = Object.assign(new Error("Internal Server Error"), {
+        status: INTERNAL_SERVER_ERROR,
+      })
+      tagCreate.mockRejectedValue(failure)
+
+      const error = await uploadData(target, new Uint8Array(1), {
+        ...encryption,
+        deferred: true,
+        webSocket: {},
+      }).catch((e: unknown) => e)
+
+      expect(error).toBe(failure)
+      expect(error).not.toMatchObject({ code: "invalid-request" })
       expect(FakeWebSocket.last).toBeUndefined()
       expect(chunkUpload).not.toHaveBeenCalled()
     },
