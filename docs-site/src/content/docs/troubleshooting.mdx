@@ -57,6 +57,10 @@ expired drive used to land here too, and so did one whose stored record already 
 drive has expired` with `uploadUnavailableReason` set to `stamp-expired`, or `The account's drive
 is not usable` with `stamp-not-usable` — as `upload-unavailable` with that `reason`.
 
+A session that could not ask the account's other devices at all (the signaling server is
+unreachable, or the identity site was built without one) fails differently: as
+`upload-unavailable` with `no-account-bus`.
+
 **Fix.** A batch the node has not ingested yet needs a moment after purchase; the session says so
 as `stamp-warming-up` and `onConnectionChange` fires when it is over. Otherwise check the drive:
 `getPostageBatch()` reports `exists` and `usable` from a real node, and `connectionInfo.canUpload`
@@ -71,7 +75,8 @@ Swarm ID has no drive, so without a `subsidisedGatewayUrl` every first-time user
 **Fix.** Gate uploads on `connectionInfo.canUpload`, and show `uploadUnavailableReason` when it is
 false: `no-stamp` and `stamp-expired` are the user's to fix (attach, buy or renew a drive),
 `stamp-not-usable` is the user's too (open the drive in Swarm ID, which refreshes its record),
-`stamp-warming-up` clears by itself within a minute, `stamper-failed` is a bug to report. Pass the public gateway as `subsidisedGatewayUrl` for a
+`stamp-warming-up` clears by itself within a minute, `no-account-bus` is the identity site's
+operator's to fix (it needs a [signaling server](../self-hosting/)), `stamper-failed` is a bug to report. Pass the public gateway as `subsidisedGatewayUrl` for a
 free tier. See [Quick Start](../getting-started/#a-batch-you-were-given) and
 [Why Uploads Are Unavailable](../subsidised-gateway/#why-uploads-are-unavailable).
 

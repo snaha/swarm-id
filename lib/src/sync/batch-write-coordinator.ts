@@ -99,6 +99,22 @@ export class PartitionContendedError extends Error {
   }
 }
 
+/**
+ * No lane could be asked for: this context has no confirmed connection to
+ * the account's other devices, or none at all (a build with no signaling
+ * server). Nobody is holding it up, so waiting or trying another lane does
+ * not help; a contended lane it is all the same to a caller that skips.
+ */
+export class AccountBusUnavailableError extends PartitionContendedError {
+  constructor(accountId?: string) {
+    super(
+      "This context is not connected to the account's other devices, so it cannot write to a shared batch.",
+      accountId,
+    )
+    this.name = "AccountBusUnavailableError"
+  }
+}
+
 /** Long-lived (proxy) vs one-off (`sync-account`) behaviour. */
 export type CoordinatorMode = "persistent" | "oneshot"
 
@@ -222,6 +238,11 @@ export class BatchWriteCoordinator {
 
   get batchId(): string {
     return this.deps.batchId
+  }
+
+  /** More than one: the batch is split, and written only over the bus. */
+  get partitionCount(): number {
+    return this.deps.partitionCount
   }
 
   // ---- write entry point --------------------------------------------------
@@ -490,10 +511,7 @@ export class BatchWriteCoordinator {
     const { stamper, partitionCount, lanes } = this.deps
     if (!lanes) {
       this.readOnly = true
-      throw new PartitionContendedError(
-        "This context is not connected to the account's other devices, so it cannot write to a shared batch.",
-        this.deps.accountId,
-      )
+      throw new AccountBusUnavailableError(this.deps.accountId)
     }
     const run = ++this.acquireRun
     const deadline =
@@ -509,6 +527,11 @@ export class BatchWriteCoordinator {
       const partition = await this.claimAny(order, lanes, deadline)
       if (partition === undefined) {
         if (!this.disposed) this.readOnly = true
+        // Nobody answered because nobody was asked: a claim cannot start
+        // while the connection is unconfirmed.
+        if (lanes.confirmedAgoMs() >= LEASE_STOP_MS) {
+          throw new AccountBusUnavailableError(this.deps.accountId)
+        }
         throw new PartitionContendedError(
           "No partition available — all slots are held by other devices.",
           this.deps.accountId,

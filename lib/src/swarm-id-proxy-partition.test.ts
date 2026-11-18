@@ -849,6 +849,7 @@ describe("SwarmIdProxy partitioned write enablement", () => {
       yieldForPeer: ReturnType<typeof vi.fn>
       notifySlotMaybeFree: ReturnType<typeof vi.fn>
       currentPartition: number | undefined
+      partitionCount?: number
       deps: {
         flushStamperState(): Promise<void>
         getWorkerPool(count?: number): Promise<unknown>
@@ -1004,6 +1005,23 @@ describe("SwarmIdProxy partitioned write enablement", () => {
         // And the drives' own flag, on the info it accompanies.
         expect(drivesAnnounced()).toBe(drivesBefore + 1)
         expect(lastInfo().drivesChanged).toBe(true)
+      })
+
+      // This proxy was mounted with no signaling URL, and who writes which
+      // partition is agreed over the server it names.
+      it("reports a split drive as not writable from a build with no signaling server", async () => {
+        await connectWithTwoDrives()
+        await vi.waitFor(() =>
+          expect(coordinatorFor(BATCH_ID_HEX)).toBeDefined(),
+        )
+        expect(lastInfo().uploadMode).toBe("user-stamp")
+
+        const coordinator = coordinatorFor(BATCH_ID_HEX)!
+        coordinator.partitionCount = 1 + 1
+        coordinator.deps.onLeaseChange()
+
+        expect(lastInfo().canUpload).toBe(false)
+        expect(lastInfo().uploadUnavailableReason).toBe("no-account-bus")
       })
 
       it("sends no drivesChanged for a change that is not a drive's", async () => {
