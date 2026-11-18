@@ -7,9 +7,11 @@
  */
 import { describe, expect, it } from 'vitest'
 
-import { formatReport, runChecks } from './safari-check'
-import type { CheckInput, CheckResult } from './safari-check'
+import { BLOB_PROBE_BYTES, describeTransport, formatReport, runChecks } from './safari-check'
+import type { CheckInput, CheckResult, TransportResult } from './safari-check'
 
+/** A `Blob.stream()` piece within the bridge's bound */
+const SMALL_PIECE_BYTES = 64 * 1024
 const DEVICE = 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee'
 const OTHER_DEVICE = '11111111-2222-3333-4444-555555555555'
 
@@ -194,5 +196,115 @@ describe('formatReport', () => {
     expect(report).toContain('https://swarm-id.snaha.net')
     expect(report).toContain('[PASS] window.opener handover survived')
     expect(report).toContain('[????] Partitioned storage survives reloads')
+  })
+})
+
+describe('describeTransport', () => {
+  function result(results: TransportResult[], id: string): TransportResult {
+    const found = results.find((r) => r.id === id)
+    if (!found) throw new Error(`no probe with id ${id}`)
+    return found
+  }
+
+  it('says each probe has not run before it has', () => {
+    for (const probe of describeTransport({})) expect(probe.observed).toBe('Not run yet.')
+  })
+
+  // Safari 26.5.2: the measurement the bridge's transport rests on.
+  it('reads a DataCloneError as stream transfer unsupported, so pieces are pulled', () => {
+    const probe = result(
+      describeTransport({
+        streamTransfer: {
+          outcome: 'threw',
+          errorName: 'DataCloneError',
+          message: 'The object can not be cloned.',
+        },
+      }),
+      'stream-transfer',
+    )
+    expect(probe.observed).toContain('DataCloneError')
+    expect(probe.meaning).toContain('stream transfer unsupported')
+    expect(probe.meaning).toContain('pulled')
+  })
+
+  it('reads a stream that never arrives as unsupported too', () => {
+    const probe = result(
+      describeTransport({ streamTransfer: { outcome: 'lost' } }),
+      'stream-transfer',
+    )
+    expect(probe.meaning).toContain('stream transfer unsupported')
+  })
+
+  // Working here is no reason for a second transport: Safari still cannot.
+  it('reads a stream that arrives intact as supported here, and the bridge pulling regardless', () => {
+    const probe = result(
+      describeTransport({ streamTransfer: { outcome: 'arrived', intact: true } }),
+      'stream-transfer',
+    )
+    expect(probe.meaning).toContain('works in this browser')
+    expect(probe.meaning).toContain('regardless')
+  })
+
+  it('does not credit a stream that arrives garbled', () => {
+    const probe = result(
+      describeTransport({ streamTransfer: { outcome: 'arrived', intact: false } }),
+      'stream-transfer',
+    )
+    expect(probe.meaning).toContain('stream transfer unsupported')
+  })
+
+  // Safari 26.5.2 again: the reason a Blob is read with slice().
+  it('reads one piece for the whole blob as unbounded, so a Blob is sliced', () => {
+    const probe = result(
+      describeTransport({
+        blobStream: { size: BLOB_PROBE_BYTES, pieces: 1, largestPiece: BLOB_PROBE_BYTES },
+      }),
+      'blob-stream',
+    )
+    expect(probe.observed).toBe('1 piece for 5.00 MB, the largest 5.00 MB.')
+    expect(probe.meaning).toContain('One piece for 5.00 MB')
+    expect(probe.meaning).toContain('slice()')
+  })
+
+  it('reads several pieces over the bridge’s bound as unbounded too', () => {
+    const probe = result(
+      describeTransport({
+        blobStream: { size: BLOB_PROBE_BYTES, pieces: 2, largestPiece: BLOB_PROBE_BYTES / 2 },
+      }),
+      'blob-stream',
+    )
+    expect(probe.meaning).toContain('Pieces over the bridge’s 256.0 KB')
+  })
+
+  it('reads pieces within the bound as bounded here, and the bridge slicing regardless', () => {
+    const piece = SMALL_PIECE_BYTES
+    const probe = result(
+      describeTransport({
+        blobStream: {
+          size: BLOB_PROBE_BYTES,
+          pieces: BLOB_PROBE_BYTES / piece,
+          largestPiece: piece,
+        },
+      }),
+      'blob-stream',
+    )
+    expect(probe.observed).toBe('80 pieces for 5.00 MB, the largest 64.0 KB.')
+    expect(probe.meaning).toContain('regardless')
+  })
+})
+
+describe('formatReport with the transport probes', () => {
+  // Observations, not verdicts: the report must not mark them PASS or FAIL.
+  it('carries each probe’s observation and meaning, marked as seen', () => {
+    const transport = describeTransport({
+      streamTransfer: { outcome: 'threw', errorName: 'DataCloneError', message: 'no' },
+      blobStream: { size: BLOB_PROBE_BYTES, pieces: 1, largestPiece: BLOB_PROBE_BYTES },
+    })
+    const report = formatReport(runChecks({ loadCount: 0 }), {}, transport)
+    expect(report).toContain('## Transport')
+    expect(report).toContain('[SEEN] Transfer a ReadableStream over postMessage')
+    expect(report).toContain('postMessage throws DataCloneError: no')
+    expect(report).toContain('One piece for 5.00 MB')
+    expect(report).not.toMatch(/\[(PASS|FAIL)\] (Transfer|Read a)/)
   })
 })

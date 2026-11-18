@@ -13,6 +13,8 @@
   import type { ResultData } from './result-types'
   import { clientStore } from '$lib/stores/client.svelte'
   import { logStore } from '$lib/stores/log.svelte'
+  import { describeUpload, watchBridgeTraffic } from '$lib/utils/bridge-traffic'
+  import { resolveProxyOrigin } from '$lib/utils/environment'
 
   interface Props {
     onUploadResult?: (reference: string) => void
@@ -39,6 +41,8 @@
       return
     }
 
+    // A Uint8Array goes over in one message: the log says so.
+    const stopWatching = watchBridgeTraffic(resolveProxyOrigin())
     try {
       logStore.log(
         `Uploading data (${data.length} bytes, encryption: ${encrypt ? 'enabled' : 'disabled'})...`,
@@ -55,6 +59,7 @@
         workerCount: useWorkers ? workerCount : undefined,
         concurrency,
       })
+      logStore.log(describeUpload(stopWatching()))
       logStore.log(
         `Upload successful! Reference: ${uploadResult.reference} (${uploadResult.reference.length} chars)`,
       )
@@ -68,6 +73,8 @@
       const msg = err instanceof Error ? err.message : String(err)
       logStore.log(`Upload failed: ${msg}`, 'error')
       error = msg
+    } finally {
+      stopWatching()
     }
   }
 </script>

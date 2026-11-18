@@ -16,7 +16,9 @@
  * the proxy (the `setSecret` handler), so a partitioned session reporting it is
  * proof the popup's postMessage arrived, whatever happens downstream.
  */
-import type { UploadUnavailableReason } from '@snaha/swarm-id'
+import { STREAM_PIECE_SIZE, type UploadUnavailableReason } from '@snaha/swarm-id'
+
+import { formatBytes } from './format'
 
 /** What the page has observed, across this load and the previous one. */
 export interface CheckInput {
@@ -283,6 +285,119 @@ function uploadPath(input: CheckInput): CheckResult {
       }
 }
 
+/**
+ * The transport probes: what this browser does with the two things the
+ * iframe bridge could have been built on (#979). Observations, not verdicts —
+ * neither answer breaks anything, since the bridge pulls bounded pieces over
+ * `postMessage` on every engine. They are here so the measurements behind
+ * that choice, first taken on Safari 26.5.2, can be re-run on any browser.
+ */
+
+/** The blob `Blob.stream()` is probed with: the size Safari handed back as one piece */
+export const BLOB_PROBE_BYTES = 5 * 1024 * 1024
+/** How long a transferred stream may take to arrive before it counts as lost */
+export const STREAM_ARRIVAL_TIMEOUT_MS = 5000
+const MS_PER_SECOND = 1000
+
+/** What posting a transferred `ReadableStream` over a `MessageChannel` did. */
+export type StreamTransferObservation =
+  /** The stream arrived; `intact` when it read back the bytes sent */
+  | { outcome: 'arrived'; intact: boolean }
+  /** `postMessage` threw */
+  | { outcome: 'threw'; errorName: string; message: string }
+  /** `postMessage` returned, and nothing arrived in time */
+  | { outcome: 'lost' }
+
+/** What reading a blob of `size` bytes through `Blob.stream()` handed back. */
+export interface BlobStreamObservation {
+  size: number
+  pieces: number
+  largestPiece: number
+}
+
+export interface TransportInput {
+  streamTransfer?: StreamTransferObservation
+  blobStream?: BlobStreamObservation
+}
+
+/** One probe: what this browser did, and what that means for the bridge. */
+export interface TransportResult {
+  id: string
+  title: string
+  observed: string
+  meaning: string
+}
+
+const NOT_RUN = { observed: 'Not run yet.', meaning: 'Run the transport probes.' }
+
+function streamTransfer(observation: StreamTransferObservation | undefined): TransportResult {
+  const id = 'stream-transfer'
+  const title = 'Transfer a ReadableStream over postMessage'
+  if (!observation) return { id, title, ...NOT_RUN }
+  const pulled =
+    'stream transfer unsupported → an upload’s or a download’s pieces must be pulled over postMessage, which is what the bridge does.'
+  switch (observation.outcome) {
+    case 'threw':
+      return {
+        id,
+        title,
+        observed: `postMessage throws ${observation.errorName}: ${observation.message}`,
+        meaning: `This browser cannot transfer a stream: ${pulled}`,
+      }
+    case 'lost':
+      return {
+        id,
+        title,
+        observed: `postMessage returns, and nothing arrives within ${STREAM_ARRIVAL_TIMEOUT_MS / MS_PER_SECOND} s.`,
+        meaning: `The transfer never lands: ${pulled}`,
+      }
+    case 'arrived':
+      return observation.intact
+        ? {
+            id,
+            title,
+            observed: 'The stream arrives and reads back the bytes sent.',
+            meaning:
+              'Stream transfer works in this browser, though not in every one (Safari 26.5.2 throws DataCloneError) → the bridge pulls pieces regardless: one transport for every engine.',
+          }
+        : {
+            id,
+            title,
+            observed: 'Something arrives, but it does not read back the bytes sent.',
+            meaning: `The transfer cannot be trusted: ${pulled}`,
+          }
+  }
+}
+
+function blobStream(observation: BlobStreamObservation | undefined): TransportResult {
+  const id = 'blob-stream'
+  const title = `Read a ${formatBytes(BLOB_PROBE_BYTES)} Blob with Blob.stream()`
+  if (!observation) return { id, title, ...NOT_RUN }
+  const { size, pieces, largestPiece } = observation
+  const observed = `${pieces === 1 ? '1 piece' : `${pieces} pieces`} for ${formatBytes(size)}, the largest ${formatBytes(largestPiece)}.`
+  if (largestPiece <= STREAM_PIECE_SIZE) {
+    return {
+      id,
+      title,
+      observed,
+      meaning: `Blob.stream() keeps its pieces within the bridge’s ${formatBytes(STREAM_PIECE_SIZE)} here, though not in every browser (Safari 26.5.2 handed 5 MB back as one piece) → the bridge reads a Blob with slice() regardless.`,
+    }
+  }
+  return {
+    id,
+    title,
+    observed,
+    meaning:
+      pieces === 1
+        ? `One piece for ${formatBytes(size)} → Blob.stream() does not bound its pieces, so a Blob must be read with slice(), which is what the bridge does.`
+        : `Pieces over the bridge’s ${formatBytes(STREAM_PIECE_SIZE)} → a Blob must be read with slice(), which is what the bridge does.`,
+  }
+}
+
+export function describeTransport(input: TransportInput): TransportResult[] {
+  return [streamTransfer(input.streamTransfer), blobStream(input.blobStream)]
+}
+
 export function runChecks(input: CheckInput): CheckResult[] {
   return [
     partitioning(input),
@@ -294,7 +409,11 @@ export function runChecks(input: CheckInput): CheckResult[] {
 }
 
 /** A paste-able summary — the device has no console to copy from. */
-export function formatReport(results: CheckResult[], environment: Record<string, string>): string {
+export function formatReport(
+  results: CheckResult[],
+  environment: Record<string, string>,
+  transport: TransportResult[] = [],
+): string {
   const lines = ['# Safari partitioned-upload check (#584)', '']
   for (const [key, value] of Object.entries(environment)) {
     lines.push(`${key}: ${value}`)
@@ -304,6 +423,14 @@ export function formatReport(results: CheckResult[], environment: Record<string,
     const mark = result.verdict === 'pass' ? 'PASS' : result.verdict === 'fail' ? 'FAIL' : '????'
     lines.push(`[${mark}] ${result.title}`)
     lines.push(`       ${result.detail}`)
+  }
+  if (transport.length > 0) {
+    lines.push('', '## Transport (what this browser does — observations, not pass/fail)', '')
+    for (const result of transport) {
+      lines.push(`[SEEN] ${result.title}`)
+      lines.push(`       ${result.observed}`)
+      lines.push(`       ${result.meaning}`)
+    }
   }
   return lines.join('\n')
 }

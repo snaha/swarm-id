@@ -39,6 +39,13 @@ export const REQUEST_QUEUED_INTERVAL_MS = 5 * SECOND
 export const QUEUED_SILENCE_TIMEOUT_MS = 90 * SECOND
 
 /**
+ * The silence either side of a streaming transfer tolerates by default: the
+ * client waiting on the proxy, the proxy waiting on an upload's source or a
+ * download's reader. A longer `requestOptions.timeout` raises both.
+ */
+export const STREAM_IDLE_TIMEOUT_MS = 2 * MINUTE
+
+/**
  * The proxy posts an upload's progress at most this often: a report per chunk
  * would be hundreds of thousands of messages for a large file, each parsed on
  * the dApp's main thread. A report held back is posted once the interval is

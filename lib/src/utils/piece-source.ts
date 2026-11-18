@@ -1,0 +1,107 @@
+// Copyright 2026 The Swarm Authors. All rights reserved.
+// SPDX-License-Identifier: Apache-2.0
+
+import { SwarmIdError } from "../errors"
+import { STREAM_PIECE_SIZE } from "../proxy/chunking"
+import type { UploadInput } from "../types"
+
+/**
+ * An upload's bytes, read one bounded piece at a time. Each piece owns its
+ * buffer, so it can be transferred across the iframe bridge: a posted view
+ * would clone the whole buffer under it.
+ */
+export interface PieceSource {
+  /** The total in bytes, when the input knows it */
+  readonly size: number | undefined
+  /** The next piece, or undefined at the end, where a stream is handed back */
+  next: () => Promise<Uint8Array<ArrayBuffer> | undefined>
+  /** Stop the input: a stream is cancelled with `reason`, then handed back */
+  cancel: (reason?: unknown) => Promise<void>
+  /** Hand a stream back to its owner, unlocked and not cancelled */
+  release: () => void
+}
+
+function isStream(input: UploadInput): input is ReadableStream<Uint8Array> {
+  return typeof (input as ReadableStream).getReader === "function"
+}
+
+function isBlob(input: UploadInput): input is Blob {
+  return typeof (input as Blob).arrayBuffer === "function"
+}
+
+/**
+ * A source for a `Blob` or `File`. Sliced by hand: Safari's `Blob.stream()`
+ * yields a blob as one piece.
+ */
+export function openBlobSource(blob: Blob): PieceSource {
+  let offset = 0
+  return {
+    size: blob.size,
+    next: async () => {
+      if (offset >= blob.size) return undefined
+      const end = Math.min(offset + STREAM_PIECE_SIZE, blob.size)
+      const piece = new Uint8Array(await blob.slice(offset, end).arrayBuffer())
+      offset = end
+      return piece
+    },
+    cancel: async () => {},
+    release: () => {},
+  }
+}
+
+function streamSource(stream: ReadableStream<Uint8Array>): PieceSource {
+  if (stream.locked) {
+    throw new SwarmIdError(
+      "invalid-request",
+      "The upload stream is locked: another reader holds it.",
+    )
+  }
+  const reader = stream.getReader()
+  let rest: Uint8Array | undefined
+  let released = false
+  const release = () => {
+    if (released) return
+    released = true
+    reader.releaseLock()
+  }
+  return {
+    size: undefined,
+    next: async () => {
+      while (!rest?.length) {
+        if (released) return undefined
+        const { done, value } = await reader.read()
+        if (done) {
+          release()
+          return undefined
+        }
+        if (!(value instanceof Uint8Array)) {
+          throw new SwarmIdError(
+            "invalid-request",
+            "An upload stream must yield Uint8Array chunks.",
+          )
+        }
+        rest = value
+      }
+      // Copied by construction: a subclass's `slice()` may be a view (`Buffer`)
+      const piece = new Uint8Array(rest.subarray(0, STREAM_PIECE_SIZE))
+      rest = rest.subarray(STREAM_PIECE_SIZE)
+      return piece
+    },
+    cancel: async (reason) => {
+      if (released) return
+      try {
+        await reader.cancel(reason)
+      } finally {
+        release()
+      }
+    },
+    release,
+  }
+}
+
+/** A source for a `Blob` or `ReadableStream`; undefined for plain bytes. */
+export function openPieceSource(input: UploadInput): PieceSource | undefined {
+  if (isStream(input)) return streamSource(input)
+  if (isBlob(input)) return openBlobSource(input)
+  return undefined
+}
