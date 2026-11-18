@@ -363,11 +363,15 @@ describe('accountBusStore', () => {
     accountBusStore.join(makeAccount())
     await settle()
 
-    expect(transports[0].publish).toHaveBeenCalledWith({
-      type: 'presence',
-      accountId: 'aa'.repeat(20),
-      fromDeviceId: localStorageFake.get('swarm-id-device-id'),
-    })
+    // To the whole room: no one peer is named.
+    expect(transports[0].publish).toHaveBeenCalledWith(
+      {
+        type: 'presence',
+        accountId: 'aa'.repeat(20),
+        fromDeviceId: localStorageFake.get('swarm-id-device-id'),
+      },
+      undefined,
+    )
   })
 
   it("lists a peer's beat as live, but not this device's own", async () => {
@@ -441,12 +445,16 @@ describe('accountBusStore', () => {
 
     transports[0].deliver?.(claim, 'peer-claimant')
 
-    expect(transports[0].publish).toHaveBeenCalledWith({
-      ...claim,
-      type: 'lane-free',
-      from: 'peer-tab',
-      to: 'peer-claimant',
-    })
+    // To the claimant alone.
+    expect(transports[0].publish).toHaveBeenCalledWith(
+      {
+        ...claim,
+        type: 'lane-free',
+        from: 'peer-tab',
+        to: 'peer-claimant',
+      },
+      'peer-claimant',
+    )
     expect(accountBusStore.lanes()).toBeDefined()
   })
 
