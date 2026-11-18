@@ -302,6 +302,32 @@ async function joinChunks(
   return result
 }
 
+const HTTP_NOT_FOUND = 404
+const HTTP_INTERNAL_ERROR = 500
+/** Bee's message when the node asked is the closest to the address and does
+ *  not have the chunk (`pkg/api/chunk.go`): it has nobody to ask. */
+const BEE_READ_CHUNK_FAILED = "read chunk failed"
+
+/**
+ * Did a chunk read fail because Bee says the chunk is not there? Only Bee's
+ * own two answers count. Anything else (no response, a rate limit, a proxy's
+ * 502) says nothing about the chunk, and must not be read as absent.
+ */
+export function isChunkAbsent(error: unknown): boolean {
+  if (typeof error !== "object" || error === null) return false
+  const { status, responseBody } = error as {
+    status?: unknown
+    responseBody?: unknown
+  }
+  if (status === HTTP_NOT_FOUND) return true
+  return (
+    status === HTTP_INTERNAL_ERROR &&
+    typeof responseBody === "object" &&
+    responseBody !== null &&
+    (responseBody as { message?: unknown }).message === BEE_READ_CHUNK_FAILED
+  )
+}
+
 /**
  * Download data using only the chunk API
  * This ensures encrypted data remains encrypted during transmission and avoids metadata leakage

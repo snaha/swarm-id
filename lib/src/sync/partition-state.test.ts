@@ -314,6 +314,34 @@ describe("writePartitionState — two-phase publish (pointer after chunks)", () 
   })
 })
 
+describe("writePartitionState — the pointer entry", () => {
+  // The publish is the commit point: the next holder must be able to read the
+  // entry the moment the upload is acknowledged. Bee defers a SOC that comes
+  // with a tag unless told otherwise.
+  it("is uploaded direct", async () => {
+    const stamper = await makeBoundStamper()
+    const localCounter = new Uint32Array(NUM_BUCKETS)
+    localCounter[1000] = 1
+    vi.mocked(uploadSOC).mockClear()
+
+    await writePartitionState({
+      bee: bee,
+      stamper,
+      batchId: TEST_BATCH_ID,
+      partition: PARTITION,
+      localCounter,
+      backupSigner: BACKUP_SIGNER,
+      swarmEncryptionKey: TEST_ENC_KEY,
+      seq: 1,
+    })
+
+    expect(uploadSOC).toHaveBeenCalledTimes(1)
+    expect(vi.mocked(uploadSOC).mock.calls[0][4]).toMatchObject({
+      deferred: false,
+    })
+  })
+})
+
 describe("writePartitionState — counter monotonicity tripwire", () => {
   it("refuses an incremental publish whose counter regressed below the previous", async () => {
     const stamper = await makeBoundStamper()

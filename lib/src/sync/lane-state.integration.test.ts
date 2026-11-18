@@ -612,6 +612,54 @@ describe("LaneState — a holder's resume and publish", () => {
     expect(await makeLaneState().resume()).toBeUndefined()
   })
 
+  // A read that failed says nothing about the entry: a gateway answering 502,
+  // a rate limit and a dropped connection all look like this.
+  it("does not resume a published lane from zero while its pointer reads fail", async () => {
+    const holder = makeLaneState()
+    const counter = (await holder.resume()) ?? new Uint32Array(NUM_BUCKETS)
+    counter[100] = 5
+    await holder.publish(counter)
+
+    vi.spyOn(downloadData, "downloadEncryptedSOC").mockRejectedValue(
+      new TypeError("Failed to fetch"),
+    )
+    expect(await makeLaneState().resume()).toBeUndefined()
+  })
+
+  it("does not resume from an older entry when one read on the way to the newest fails", async () => {
+    const holder = makeLaneState()
+    const counter = (await holder.resume()) ?? new Uint32Array(NUM_BUCKETS)
+    const published = 9
+    for (let seq = 1; seq <= published; seq++) {
+      counter[100] = seq
+      await holder.publish(counter)
+    }
+
+    const download = downloadData.downloadEncryptedSOC
+    let reads = 0
+    vi.spyOn(downloadData, "downloadEncryptedSOC").mockImplementation(
+      (...args) =>
+        ++reads === 2
+          ? Promise.reject(
+              Object.assign(new Error("Bad Gateway"), { status: 502 }),
+            )
+          : download(...args),
+    )
+    expect(await makeLaneState().resume()).toBeUndefined()
+  })
+
+  // Bee answers 500 "read chunk failed" for a chunk nobody has when the node
+  // asked is itself the closest to its address.
+  it("starts from zero when the node asked is the closest to an entry nobody has", async () => {
+    vi.spyOn(downloadData, "downloadEncryptedSOC").mockRejectedValue(
+      Object.assign(new Error("Internal Server Error"), {
+        status: 500,
+        responseBody: { code: 500, message: "read chunk failed" },
+      }),
+    )
+    expect(await makeLaneState().resume()).toEqual(new Uint32Array(NUM_BUCKETS))
+  })
+
   it("after a publish fails, the next one looks before it writes and never reuses an entry", async () => {
     const state = makeLaneState()
     const counter = (await state.resume()) ?? new Uint32Array(NUM_BUCKETS)
