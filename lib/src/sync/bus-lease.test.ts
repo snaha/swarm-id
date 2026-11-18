@@ -75,8 +75,17 @@ describe("BusLane — a device on its own", () => {
     a.lane.claim()
     a.liveness.absentFor = Infinity
     a.liveness.confirmedAgo = LEASE_STOP_MS
-    a.lane.receive({ kind: "free", from: "b", to: "a", round: "nope" })
+    a.lane.receive({
+      kind: "free",
+      from: "b",
+      to: "a",
+      round: a.sent[0].round,
+    })
+    // Confirmed again without another answer: the lane was not taken meanwhile.
+    a.liveness.confirmedAgo = 0
+    a.liveness.absentFor = 0
     expect(a.lane.holds()).toBe(false)
+    expect(a.lane.claiming).toBe(true)
   })
 
   it("asks again on every confirmation while it waits", () => {
@@ -154,6 +163,18 @@ describe("BusLane — two devices", () => {
     deliver(a, b)
     deliver(b, a)
     expect(a.lane.holds()).toBe(true)
+  })
+
+  it("does not count an answer of free from a device that then says held", () => {
+    const { a } = pair()
+    a.liveness.absentFor = 0
+    a.lane.claim()
+    const { round } = a.sent[0]
+    a.lane.receive({ kind: "free", from: "b", to: "a", round })
+    a.lane.receive({ kind: "held", from: "b", to: "a", round })
+    a.liveness.absentFor = Infinity
+    a.liveness.confirm()
+    expect(a.lane.holds()).toBe(false)
   })
 
   it("does not take the lane while a present device has not answered", () => {

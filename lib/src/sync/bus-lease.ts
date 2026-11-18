@@ -215,6 +215,8 @@ export class BusLane {
     )
       return
     if (message.kind === "held") {
+      // It holds the lane now, whatever it answered before.
+      this.acks.delete(message.from)
       this.refusals.add(message.from)
       return
     }

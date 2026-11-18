@@ -457,6 +457,27 @@ describe("AccountBus — liveness", () => {
     }
   })
 
+  // A lane message over BroadcastChannel has no transport sender, and its
+  // sender may not be in the room view yet: the view is behind all the same.
+  it("tells every transport about the sender a lane message names, on a path that names none", () => {
+    const local = fakeRemote({ confirmedAgoMs: 0, absentExceptMs: 0 })
+    const remote = fakeRemote({ confirmedAgoMs: 0, absentExceptMs: 0 })
+    const bus = new AccountBus([local.transport, remote.transport])
+    try {
+      local.deliver({
+        type: "lane-claim",
+        accountId: "a".repeat(40),
+        batchId: "b".repeat(64),
+        partition: 0,
+        from: "peer-9",
+        round: "0".repeat(16),
+      })
+      expect(remote.heard).toEqual(["peer-9"])
+    } finally {
+      bus.close()
+    }
+  })
+
   it("is named by its remote transport", () => {
     const remote = fakeRemote({
       selfId: "peer-self",

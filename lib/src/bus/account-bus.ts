@@ -130,6 +130,15 @@ export class BroadcastChannelTransport implements BusTransport {
   }
 }
 
+/** The context a lane message says it is from. */
+function laneSender(message: BusMessage): string | undefined {
+  return message.type === "lane-claim" ||
+    message.type === "lane-free" ||
+    message.type === "lane-held"
+    ? message.from
+    : undefined
+}
+
 /**
  * Fans a publish out to every transport and funnels received messages through
  * schema validation to subscribers. Invalid messages are dropped silently
@@ -155,7 +164,13 @@ export class AccountBus {
     const removers = [
       transport.subscribe((raw, from) => {
         const message = this.dispatch(raw, from)
-        if (message && from !== undefined) transport.notePeer?.(from)
+        if (!message) return
+        // A path that names no sender (BroadcastChannel) still carries lane
+        // messages, and those say who sent them. Every transport hears of the
+        // sender: the one that keeps the room may not have it in view yet.
+        const sender = from ?? laneSender(message)
+        if (sender === undefined) return
+        for (const each of this.transports) each.notePeer?.(sender)
       }),
     ]
     const onPeerLeft = transport.onPeerLeft?.((peerId) => {
