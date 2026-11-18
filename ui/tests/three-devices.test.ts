@@ -46,6 +46,7 @@ import {
   createAccountWithDrives,
   expectNoDualHold,
   isDataWrite,
+  readFromBee,
   rigUp,
   skipScenario,
   sleep,
@@ -55,6 +56,8 @@ import { THREE_DEVICES_SEED_FILE } from './global-setup-devices'
 // Not `serial`: a scenario that fails must not hide the ones after it — the
 // point of the run is a verdict per scenario. Each one re-establishes what it
 // needs (`ensureConnected`) and takes the partitions as it finds them.
+/** Well under the six seconds a holder may go unconfirmed, well over a busy frame. */
+const MAX_PAUSE_MS = 1_000
 /** Enough for an upload to still be stamping when its first chunk leaves. */
 const MANY_CHUNKS_BYTES = 400_000
 
@@ -303,6 +306,54 @@ test.describe('three devices on two partitions', () => {
     expect(await A.partition(), 'A let go of its partition').toBe(held)
     expect(A.lostLaneSince(since), 'A reported its partition gone').toBe(false)
     await expectNoDualHold(all())
+  })
+
+  test('a SOC upload asked for while the tab could not answer completes on the same partition', async () => {
+    for (const device of all()) await device.ensureConnected()
+    const held = await A.uploadAndHoldOrSkip()
+    const since = Date.now()
+
+    await A.openDemoPage('SOC')
+    const stalled = A.stall(LEASE_STOP_MS + 1_000)
+    await sleep(500)
+    await A.uploadSoc()
+    await stalled
+    await A.openDemoPage('Storage')
+
+    expect(await A.partition(), 'A let go of its partition').toBe(held)
+    expect(A.lostLaneSince(since), 'A reported its partition gone').toBe(false)
+    await expectNoDualHold(all())
+  })
+
+  test('a download asked for while the tab could not answer completes, and the partition stays', async () => {
+    for (const device of all()) await device.ensureConnected()
+    const held = await A.uploadAndHoldOrSkip()
+    const reference = await A.upload(undefined, undefined, MANY_CHUNKS_BYTES)
+    const since = Date.now()
+
+    const stalled = A.stall(LEASE_STOP_MS + 1_000)
+    await sleep(500)
+    expect(await A.download(reference)).toContain(await readFromBee(reference))
+    await stalled
+
+    expect(await A.partition(), 'A let go of its partition').toBe(held)
+    expect(A.lostLaneSince(since), 'A reported its partition gone').toBe(false)
+  })
+
+  // The check that does not depend on what the work is: whatever an upload or
+  // a download does, the proxy's thread has to come up for air.
+  test('neither an upload nor a download of many chunks holds the thread for long', async () => {
+    for (const device of all()) await device.ensureConnected()
+    await A.uploadAndHoldOrSkip()
+
+    let reference = ''
+    const uploading = await A.longestPause(async () => {
+      reference = await A.upload(undefined, undefined, MANY_CHUNKS_BYTES)
+    })
+    expect(uploading, 'the upload held the thread').toBeLessThan(MAX_PAUSE_MS)
+
+    const downloading = await A.longestPause(() => A.download(reference))
+    expect(downloading, 'the download held the thread').toBeLessThan(MAX_PAUSE_MS)
   })
 
   test('a tab the server dropped for not answering holds nothing, and an upload asked for meanwhile completes once it is back', async () => {

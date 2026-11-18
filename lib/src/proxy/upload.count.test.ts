@@ -108,6 +108,37 @@ describe.each([
     expect(counter.chunks).toBe(1)
   })
 
+  // A SOC is one stamp, and a write path may have to wait before it is
+  // allowed to make it (`UploadTarget.ready`).
+  it("for a SOC, stamped only once the target is ready", async () => {
+    const { target, counter } = stamper()
+    if (target.mode !== "stamper") throw new Error("expected a stamper target")
+    let ready = false
+    let stampedAt: boolean | undefined
+    const inner = target.stamper
+    const watched = Object.assign(Object.create(inner) as typeof inner, {
+      stamp: (...args: Parameters<typeof inner.stamp>) => {
+        stampedAt = ready
+        return inner.stamp(...args)
+      },
+    })
+    await uploadSOC(
+      {
+        ...target,
+        stamper: watched,
+        ready: async () => {
+          await new Promise((resolve) => setTimeout(resolve, 0))
+          ready = true
+        },
+      },
+      signer,
+      identifier,
+      new Uint8Array(16),
+    )
+    expect(stampedAt).toBe(true)
+    expect(counter.chunks).toBe(1)
+  })
+
   it("adding up across calls on the same target", async () => {
     const { target, counter } = make()
     await uploadChunk(target, new Uint8Array(16))
