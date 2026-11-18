@@ -15,8 +15,8 @@ import {
 import { generatedAvatar } from "./utils/avatar"
 import { TimeoutError } from "./utils/promise"
 import {
+  HOUR,
   QUEUED_SILENCE_TIMEOUT_MS,
-  QUEUED_WRITE_TIMEOUT_MS,
   REQUEST_QUEUED_INTERVAL_MS,
 } from "./utils/constants"
 
@@ -899,6 +899,8 @@ describe("SwarmIdClient request seam", () => {
   describe("requestQueued / requestStarted", () => {
     const TIMEOUT_MS = 1000
     const BEATS = 5
+    /** A streaming upload of several GiB holds its drive for about this long */
+    const LONG_UPLOAD_MS = 2 * HOUR
     const REPLY_REFERENCE = "ab".repeat(32)
 
     afterEach(() => {
@@ -979,20 +981,26 @@ describe("SwarmIdClient request seam", () => {
       )
     })
 
-    it("caps the time a request may stay queued, and stops it in the proxy", async () => {
+    it("keeps a request queued behind a long upload for as long as the proxy beats", async () => {
       vi.useFakeTimers()
       const { settled, requestId } = queuedWrite()
       deliver({ type: "requestQueued", requestId })
 
-      const beatsInCap = QUEUED_WRITE_TIMEOUT_MS / REQUEST_QUEUED_INTERVAL_MS
-      for (let i = 0; i < beatsInCap - 1; i++) {
+      const beats = LONG_UPLOAD_MS / REQUEST_QUEUED_INTERVAL_MS
+      for (let i = 0; i < beats; i++) {
         await vi.advanceTimersByTimeAsync(REQUEST_QUEUED_INTERVAL_MS)
         deliver({ type: "requestQueued", requestId })
       }
-      expect(settled).not.toHaveBeenCalled()
 
-      await vi.advanceTimersByTimeAsync(REQUEST_QUEUED_INTERVAL_MS)
+      expect(settled).not.toHaveBeenCalled()
+    })
+
+    it("stops a queued request in the proxy when its beats end", async () => {
+      vi.useFakeTimers()
+      const { settled, requestId } = queuedWrite()
       deliver({ type: "requestQueued", requestId })
+
+      await vi.advanceTimersByTimeAsync(QUEUED_SILENCE_TIMEOUT_MS)
 
       expect(settled).toHaveBeenCalledWith(
         expect.objectContaining({ code: "timeout" }),

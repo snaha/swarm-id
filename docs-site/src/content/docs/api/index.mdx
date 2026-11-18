@@ -817,9 +817,9 @@ console.log('Downloaded:', text)
 
 ---
 
-### `downloadDataStream(reference, options?, requestOptions?)`
+### `downloadDataStream(reference, requestOptions?)`
 
-Reads raw binary data as it arrives, for a file too large to hold whole. Takes the same arguments as [`downloadData`](#downloaddatareference-options-requestoptions). The returned stream is pulled: nothing past the root chunk is fetched until it is read, and it fetches no further ahead of the reader than one small batch per tree level.
+Reads raw binary data as it arrives, for a file too large to hold whole: the streaming counterpart of [`downloadData`](#downloaddatareference-options-requestoptions), without its `options`. The returned stream is pulled: nothing past the root chunk is fetched until it is read, and it fetches no further ahead of the reader than one small batch per tree level.
 
 Read the stream to the end, or cancel it, or abort `requestOptions.signal`: otherwise the request stays open inside the identity iframe until the stream has gone unread for 2 minutes, or a longer `requestOptions.timeout`, and then errors with `timeout`. `requestOptions.timeout` is how long the iframe may stay silent for each piece (default: at least 2 minutes), not a bound on the whole download.
 
@@ -942,9 +942,9 @@ const url = URL.createObjectURL(blob)
 
 ---
 
-### `downloadFileStream(reference, path?, options?, requestOptions?)`
+### `downloadFileStream(reference, path?, requestOptions?)`
 
-Reads a file as it arrives, for a file too large to hold whole: the streaming counterpart of [`downloadFile`](#downloadfilereference-path-options-requestoptions), taking the same arguments. The manifest and the path are resolved as there, then the content streams with the contract of [`downloadDataStream`](#downloaddatastreamreference-options-requestoptions): nothing past the content's root chunk is fetched until the stream is read, `requestOptions.timeout` is how long the iframe may stay silent for each piece, and the stream must be read to the end, cancelled, or stopped with `requestOptions.signal`.
+Reads a file as it arrives, for a file too large to hold whole: the streaming counterpart of [`downloadFile`](#downloadfilereference-path-options-requestoptions), without its `options`. The manifest and the path are resolved as there, then the content streams with the contract of [`downloadDataStream`](#downloaddatastreamreference-requestoptions): nothing past the content's root chunk is fetched until the stream is read, `requestOptions.timeout` is how long the iframe may stay silent for each piece, and the stream must be read to the end, cancelled, or stopped with `requestOptions.signal`.
 
 **Returns:** `Promise<FileDownload>`
 
@@ -1751,7 +1751,7 @@ console.log('Decrypted:', text)
 
 ### `actDownloadDataStream(encryptedReference, historyReference, publisherPubKey, timestamp?, requestOptions?)`
 
-Reads ACT-protected data as it arrives. Takes the same arguments as [`actDownloadData`](#actdownloaddataencryptedreference-historyreference-publisherpubkey-timestamp-requestoptions) and returns a `DataDownload`, with the contract of [`downloadDataStream`](#downloaddatastreamreference-options-requestoptions). A caller who is not a grantee is refused before any stream exists.
+Reads ACT-protected data as it arrives. Takes the same arguments as [`actDownloadData`](#actdownloaddataencryptedreference-historyreference-publisherpubkey-timestamp-requestoptions) and returns a `DataDownload`, with the contract of [`downloadDataStream`](#downloaddatastreamreference-requestoptions). A caller who is not a grantee is refused before any stream exists.
 
 ---
 

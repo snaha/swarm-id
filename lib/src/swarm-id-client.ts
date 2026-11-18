@@ -111,11 +111,10 @@ import {
   openPieceSource,
   type PieceSource,
 } from "./utils/piece-source"
-import { STREAM_IDLE_TIMEOUT_MS } from "./proxy/chunking"
 import {
   DEFAULT_REQUEST_TIMEOUT_MS,
   QUEUED_SILENCE_TIMEOUT_MS,
-  QUEUED_WRITE_TIMEOUT_MS,
+  STREAM_IDLE_TIMEOUT_MS,
 } from "./utils/constants"
 const DEFAULT_INITIALIZATION_TIMEOUT_MS = 30000
 /**
@@ -268,10 +267,7 @@ export class SwarmIdClient {
       readingSource?: boolean
       /** Restart the wait at its full timeout */
       rearm: () => void
-      /**
-       * The write is waiting for its drive: hold the timeout off for another
-       * beat, until the queue's cap
-       */
+      /** The write is waiting for its drive: hold the timeout off for a beat */
       queued: () => void
     }
   > = new Map()
@@ -786,16 +782,13 @@ export class SwarmIdClient {
     // large upload must not be cut off at the constructor default (#775).
     // A streaming upload has no whole round trip to bound, so there it is how
     // long the proxy may stay silent. Neither counts the time a write waits
-    // for its drive behind another: while the proxy says `requestQueued`, the
-    // wait is for its next beat, within the queue's own cap, and
-    // `requestStarted` restarts it.
+    // for its drive behind another, which a streaming upload may hold for
+    // hours: while the proxy says `requestQueued`, the wait is for its next
+    // beat, and `requestStarted` restarts it.
     const timeout =
       sources.length > 0
         ? this.streamIdleTimeout(options?.timeout)
         : this.roundTripTimeout(options?.timeout)
-    const queueCap = Math.max(timeout, QUEUED_WRITE_TIMEOUT_MS)
-    // When the proxy first said the write is queued; unset once it starts
-    let queuedSince: number | undefined
     return new Promise((resolve, reject) => {
       const onAbort = () => {
         clearTimeout(pending.timeoutId)
@@ -806,10 +799,12 @@ export class SwarmIdClient {
       const stopWatchingSignal = () =>
         signal?.removeEventListener("abort", onAbort)
 
-      const expire = (reason = `Request timeout after ${timeout}ms`) => {
+      const expire = () => {
         stopWatchingSignal()
         this.pendingRequests.delete(message.requestId)
-        reject(new SwarmIdError("timeout", reason))
+        reject(
+          new SwarmIdError("timeout", `Request timeout after ${timeout}ms`),
+        )
         // The proxy may still be at it, or queued to be: a write that ran
         // after its caller was told it failed would spend stamps for nothing,
         // and nothing else ends a streaming upload's pulling.
@@ -827,29 +822,19 @@ export class SwarmIdClient {
           stopWatchingSignal()
           reject(error)
         },
-        timeoutId: setTimeout(() => expire(), timeout),
+        timeoutId: setTimeout(expire, timeout),
         sources,
         readingSource: false,
         rearm: () => {
-          queuedSince = undefined
           clearTimeout(pending.timeoutId)
-          pending.timeoutId = setTimeout(() => expire(), timeout)
+          pending.timeoutId = setTimeout(expire, timeout)
         },
         queued: () => {
           clearTimeout(pending.timeoutId)
-          const now = Date.now()
-          queuedSince ??= now
-          const capReason = `Request timeout: waited over ${queueCap}ms for its drive`
-          const left = queueCap - (now - queuedSince)
-          if (left <= 0) {
-            expire(capReason)
-            return
-          }
-          const silence = Math.max(timeout, QUEUED_SILENCE_TIMEOUT_MS)
-          pending.timeoutId =
-            silence < left
-              ? setTimeout(() => expire(), silence)
-              : setTimeout(() => expire(capReason), left)
+          pending.timeoutId = setTimeout(
+            expire,
+            Math.max(timeout, QUEUED_SILENCE_TIMEOUT_MS),
+          )
         },
       }
       this.pendingRequests.set(message.requestId, pending)
@@ -2034,7 +2019,6 @@ export class SwarmIdClient {
    * (default: at least 2 minutes), not a bound on the whole download.
    *
    * @param reference - The Swarm reference of the data, 64 or 128 hex chars
-   * @param options - Optional download configuration
    * @param requestOptions - Optional request configuration
    * @returns The content's stream and length in bytes
    * @throws {Error} If the reference is not found: before any stream exists
@@ -2047,7 +2031,6 @@ export class SwarmIdClient {
    */
   async downloadDataStream(
     reference: Reference,
-    options?: DownloadOptions,
     requestOptions?: RequestOptions,
   ): Promise<DataDownload> {
     this.ensureReady()
@@ -2056,7 +2039,6 @@ export class SwarmIdClient {
       type: "downloadDataStream",
       requestId,
       reference,
-      options,
       requestOptions,
     })
     return {
@@ -2269,7 +2251,6 @@ export class SwarmIdClient {
    *
    * @param reference - The Swarm reference of the file's manifest
    * @param path - Optional path within the manifest; its index document if not given
-   * @param options - Optional download configuration
    * @param requestOptions - Optional request configuration; `timeout` is how long the proxy may stay silent per piece
    * @returns The file's name, and its content's stream and length in bytes
    * @throws {Error} If the reference or the path is not found: before any stream exists
@@ -2284,7 +2265,6 @@ export class SwarmIdClient {
   async downloadFileStream(
     reference: Reference,
     path?: string,
-    options?: DownloadOptions,
     requestOptions?: RequestOptions,
   ): Promise<FileDownload> {
     this.ensureReady()
@@ -2297,7 +2277,6 @@ export class SwarmIdClient {
       requestId,
       reference,
       path,
-      options,
       requestOptions,
     })
     return {

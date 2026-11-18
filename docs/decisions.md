@@ -54,9 +54,10 @@ minutes or a longer `timeout`, then fails the transfer. No request's timeout
 counts the time a write waits behind another on the same drive: while it
 waits for the drive's lock and lease, the proxy says `requestQueued` on a
 5-second beat, the client holds its timeout off for up to 15 seconds between
-beats, and `requestStarted` restarts it at its full length. A write may stay
-queued for 10 minutes in all, or the call's longer timeout. Every request
-that expires on the client is aborted in the proxy. (#979)
+beats, and `requestStarted` restarts it at its full length. Nothing caps the
+queue in all: on the local cluster an encrypted upload moves about 1.8 MiB a
+second, so a file of a few GiB holds its drive for hours. Every request that
+expires on the client is aborted in the proxy. (#979)
 
 **Why.** One transport that works on every engine beats a fast path plus a
 fallback for the Safari versions still without stream transfer, and a pull costs under 0.25 ms against a node that takes
@@ -69,10 +70,13 @@ device, the identity UI included. That lock is also why the queue is not
 counted: behind a long upload, a write waiting its turn would time out while
 nothing was wrong, and a proxy that has died still says nothing, so it is
 still caught. The client, not the proxy, judges the silence between beats,
-because only it knows the timeout it was built with. The cap is for a writer
-that hangs while holding the lock: without it, every write queued behind
-that writer would wait forever. A write its caller was told had failed must not run later and
-spend stamps, so an expired request is stopped where it is, queue included.
+because only it knows the timeout it was built with. The queue has no cap of
+its own because no number fits it: any fixed one fails every write behind an
+upload that is merely large. A writer that hangs is ended by its own
+deadlines instead, the client's timeout and the source's, and a caller that
+will not wait passes `requestOptions.signal`. A write its caller was told had
+failed must not run later and spend stamps, so an expired request is stopped
+where it is, queue included.
 
 ## 2026-11-13 SvelteKit 3, with `$lib` kept as an alias
 

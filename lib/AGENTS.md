@@ -17,7 +17,7 @@ knowing by name:
   `disconnect`, `uploadData`, `downloadData`, `downloadDataStream`, `downloadFileStream`, `deriveAppSecret`, `abortRequest`, `uploadSourcePiece`, `downloadStreamPull`
 - **Iframe → Parent**: `proxyReady`, `initError`, `authStatusResponse`, `authSuccess`,
   `connectResponse`, `connectionInfoChanged` (what `initialize()` awaits; `drivesChanged: true` on it when the app's drives moved, #933), `uploadDataResponse`,
-  `uploadSourcePull`, `downloadStreamPiece`, `requestQueued` / `requestStarted` (a write waiting for its drive holds the client's timeout off, up to a cap), `error`
+  `uploadSourcePull`, `downloadStreamPiece`, `requestQueued` / `requestStarted` (a write waiting for its drive holds the client's timeout off), `error`
 - **Popup → Iframe**: `setSecret` — the partitioned handover, below — and `grantUpdated`, the
   permissions popup handing a partitioned session its new grant as an account delta (#711)
 

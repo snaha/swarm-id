@@ -37,11 +37,11 @@ export const REQUEST_QUEUED_INTERVAL_MS = 5 * SECOND
 export const QUEUED_SILENCE_TIMEOUT_MS = 3 * REQUEST_QUEUED_INTERVAL_MS
 
 /**
- * How long a write may wait for its drive in all, or the request's own
- * timeout when that is longer: long enough for a large streaming upload
- * ahead of it, short of forever behind a writer that hangs.
+ * The silence either side of a streaming transfer tolerates by default: the
+ * client waiting on the proxy, the proxy waiting on an upload's source or a
+ * download's reader. A longer `requestOptions.timeout` raises both.
  */
-export const QUEUED_WRITE_TIMEOUT_MS = 10 * MINUTE
+export const STREAM_IDLE_TIMEOUT_MS = 2 * MINUTE
 
 /**
  * The proxy posts an upload's progress at most this often: a report per chunk

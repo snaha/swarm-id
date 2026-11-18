@@ -171,11 +171,7 @@ import {
 import { deviceHomePartition } from "./sync/partition-lock"
 import { MAX_TIMER_DELAY_MS, TimeoutError, withTimeout } from "./utils/promise"
 import { Inbox } from "./utils/inbox"
-import {
-  STREAM_IDLE_TIMEOUT_MS,
-  STREAM_PIECE_SIZE,
-  rechunk,
-} from "./proxy/chunking"
+import { STREAM_PIECE_SIZE, rechunk } from "./proxy/chunking"
 import { UtilizationStoreDB } from "./storage/utilization-store"
 import type { PartitionLeaseStateSnapshot } from "./sync/partition-lease"
 import { BatchWriteCoordinator } from "./sync/batch-write-coordinator"
@@ -241,6 +237,7 @@ import {
 import {
   PROGRESS_INTERVAL_MS,
   REQUEST_QUEUED_INTERVAL_MS,
+  STREAM_IDLE_TIMEOUT_MS,
   appSessionDuration,
 } from "./utils/constants"
 import { PERMISSIONS_POPUP_MAX_MS, untilPopupClosed } from "./utils/popup"

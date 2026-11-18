@@ -1167,7 +1167,6 @@ export const DownloadDataStreamMessageSchema = z.object({
   type: z.literal("downloadDataStream"),
   requestId: z.string(),
   reference: ReferenceSchema,
-  options: DownloadOptionsSchema,
   requestOptions: RequestOptionsSchema,
 })
 
@@ -1227,7 +1226,6 @@ export const DownloadFileStreamMessageSchema = z.object({
   requestId: z.string(),
   reference: ReferenceSchema,
   path: z.string().optional(),
-  options: DownloadOptionsSchema,
   requestOptions: RequestOptionsSchema,
 })
 

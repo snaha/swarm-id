@@ -21,12 +21,8 @@ import {
   type IframeToParentMessage,
 } from "./types"
 import { calculateChunkAddress } from "./chunk"
-import {
-  CHUNK_SIZE,
-  STREAM_IDLE_TIMEOUT_MS,
-  STREAM_PIECE_SIZE,
-} from "./proxy/chunking"
-import { PROGRESS_INTERVAL_MS } from "./utils/constants"
+import { CHUNK_SIZE, STREAM_PIECE_SIZE } from "./proxy/chunking"
+import { PROGRESS_INTERVAL_MS, STREAM_IDLE_TIMEOUT_MS } from "./utils/constants"
 import { MockBee, MockChunkStore } from "./proxy/feeds/epochs/test-utils"
 import { DriveWritePath } from "./proxy/drive-write-path"
 import { uploadCollection } from "./proxy/collection"
@@ -1093,7 +1089,7 @@ describe("streaming across the bridge", () => {
     it("errors the stream when the signal aborts", async () => {
       const reference = await upload(makeData(STREAM_PIECE_SIZE * 3))
       const controller = new AbortController()
-      const { stream } = await client.downloadDataStream(reference, undefined, {
+      const { stream } = await client.downloadDataStream(reference, {
         signal: controller.signal,
       })
       const reader = stream.getReader()
@@ -1130,11 +1126,9 @@ describe("streaming across the bridge", () => {
         const reference = await upload(makeData(STREAM_PIECE_SIZE * 2))
         vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] })
         const longer = STREAM_IDLE_TIMEOUT_MS * 2
-        const { stream } = await client.downloadDataStream(
-          reference,
-          undefined,
-          { timeout: longer },
-        )
+        const { stream } = await client.downloadDataStream(reference, {
+          timeout: longer,
+        })
 
         await vi.advanceTimersByTimeAsync(STREAM_IDLE_TIMEOUT_MS + 1)
         expect(proxy.downloadPulls.size).toBe(1)
@@ -1343,7 +1337,7 @@ describe("the wait for a streaming upload", () => {
   })
 
   it("rejects a download's read the proxy leaves unanswered, and stops it", async () => {
-    const download = client.downloadDataStream("ab".repeat(32), undefined, {
+    const download = client.downloadDataStream("ab".repeat(32), {
       timeout: SHORT_MS,
     })
     const requestId = requestIdOf()
