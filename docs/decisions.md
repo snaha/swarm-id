@@ -27,6 +27,29 @@ Whether data is immutable is then the application's choice, not a property of th
 the contract enforces nothing on it today either. Refusing on it locks out batches a user
 already paid for, on the strength of a property that may stop existing.
 
+## 2026-11-18 The live Relay suite runs where a Relay change can show
+
+**Context.** `relay.live.test.ts` quotes Relay's real API and ran as a job of
+`ci.yml` on every PR. Relay changes without a commit of ours, so a bad hour
+there turned every open PR red whatever it touched (#843), and runs that
+started together were answered with HTTP 429 (#1049).
+
+**Decision.** The suite has its own workflow, `live-contracts.yml`. It runs on
+a PR that touches the payment code, the suite's config, the lib's timeout
+helpers or the lockfile, on every push to `main`, nightly, and on demand. Its
+runs share no concurrency group.
+
+**Why.** A red check on a PR should mean the PR broke something. `main` and the
+nightly run still date a change on Relay's side to a day, though a failed
+nightly run notifies only whoever last edited its `cron` line, so it is seen by
+opening the Actions tab. A workflow of its own takes a `paths` filter and a
+schedule without either applying to the rest of CI. The filter alone removes
+almost all the overlap behind the 429s: every one recorded in #1049 came from a
+PR that no longer runs the suite. A shared concurrency group was rejected:
+GitHub holds one pending run per group, so a queued PR run would be dropped for
+a later run on another ref, and the nightly run tests `main`, never that PR's
+head. The 429s that remain are the suite's to handle (#1049).
+
 ## 2026-11-18 Previews use production's signaling server; a PR that changes the server gets a Render instance
 
 **Context.** The GitHub Pages builds (`main` and the per-PR previews) had no signaling

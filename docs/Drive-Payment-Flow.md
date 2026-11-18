@@ -574,10 +574,11 @@ with trading for the token, on the very pools the test is about.
 A green local run therefore says nothing about the bridged rail. `relay.live.test.ts` contract-tests
 Relay's **quote** against the live API (`pnpm --filter @swarm-id/ui test:live`, which CI runs from
 `./ui`; the root `pnpm test:live` is `lib/`'s own live suite) — the only thing that catches our
-request or response mapping drifting from theirs. Everything downstream of it — routing, the real
-step model, delivery, refunds — has no automated coverage; it has been verified by hand, with a real
-cross-chain payment carried end to end on the production rail. An automated canary is tracked in
-[#542](https://github.com/snaha/swarm-id/issues/542).
+request or response mapping drifting from theirs. CI runs it on a PR that touches the payment code,
+on every push to `main` and nightly (`live-contracts.yml`). Everything downstream of it — routing,
+the real step model, delivery, refunds — has no automated coverage; it has been verified by hand,
+with a real cross-chain payment carried end to end on the production rail. An automated canary is
+tracked in [#542](https://github.com/snaha/swarm-id/issues/542).
 
 A green local run must never be read as "the payment path works". The local rail rehearses the UX
 only — Relay's pricing, routing and refund semantics stay untested. The step shape is mirrored,
