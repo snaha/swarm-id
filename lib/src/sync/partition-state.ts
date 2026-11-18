@@ -691,7 +691,7 @@ export async function writePartitionState(opts: {
   previousReferenceHex?: string
   /** Runs once the leaves and the reference chunk are stored, just before
    *  the pointer entry is written; a throw leaves the entry unwritten. */
-  beforePointer?: () => void
+  beforePointer?: () => void | Promise<void>
 }): Promise<{
   /** Reference-chunk reference (hex) — the caller's "synced reference". */
   referenceHex: string
@@ -834,11 +834,11 @@ export async function writePartitionState(opts: {
   // written they are the newest state there is, and a new chunk in one of
   // their buckets would evict it: a publish that then stops half-way would
   // leave a lane nobody can read.
-  if (previous) {
-    for (const reference of previous.references) {
-      if (!bytesAllZero(reference))
-        claimedBuckets.add(toBucket(reference.slice(0, 32)))
-    }
+  // Whether or not this publish builds on them: one that packs under a new
+  // frame replaces every leaf.
+  for (const reference of opts.previousReferences ?? []) {
+    if (!bytesAllZero(reference))
+      claimedBuckets.add(toBucket(reference.slice(0, 32)))
   }
   if (opts.previousReferenceHex !== undefined) {
     claimedBuckets.add(
@@ -913,7 +913,7 @@ export async function writePartitionState(opts: {
     ...prepared.map((p) => uploadChunk(target, p.data, { deferred: false })),
     uploadChunk(target, refPicked.data, { deferred: false }),
   ])
-  opts.beforePointer?.()
+  await opts.beforePointer?.()
   await writeStatePointer({
     bee,
     stamper,

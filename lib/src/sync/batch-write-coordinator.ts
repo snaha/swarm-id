@@ -332,7 +332,13 @@ export class BatchWriteCoordinator {
           "(ack-after-publish); failing the upload.",
       )
     }
-    await this.state(partition).publish(localCounter, stillHeld)
+    // Asked again just before the pointer entry is written. A confirmation
+    // that is overdue at that moment is waited for, as a stamp waits: the
+    // lane is not gone until the connection is.
+    await this.state(partition).publish(localCounter, async () => {
+      await confirmed()
+      return stillHeld()
+    })
     await confirmed()
     if (!stillHeld()) throw new PartitionLeaseLostError()
   }

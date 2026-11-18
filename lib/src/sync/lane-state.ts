@@ -60,6 +60,15 @@ export class LaneState {
   private publishedCounter: Uint32Array | undefined
   private publishedFrame: CounterFrame | undefined
 
+  /**
+   * Counts reads and publishes. One that finds a later one started since is
+   * out of date: the coordinator gives up on a read after a while and reads
+   * again, and a lane can go and be taken again while its entry is being
+   * written. What such a run learnt is dropped, so the baseline is always
+   * that of the latest one.
+   */
+  private run = 0
+
   constructor(private readonly opts: LaneStateOptions) {}
 
   private get owner() {
@@ -81,6 +90,7 @@ export class LaneState {
     const { bee, batchId, partition, swarmEncryptionKey, stamper } = this.opts
     const cached = stamper instanceof UtilizationAwareStamper
     const trusted = this.known
+    const run = ++this.run
     const lookup = await readStatePointer({
       bee,
       owner: this.owner,
@@ -102,7 +112,11 @@ export class LaneState {
       },
       trusted,
     )
-    if (state.readFailed) return undefined
+    if (state.readFailed || run !== this.run) return undefined
+    // An entry this context read or wrote itself does not go away. Bee
+    // answers "not found" for a retrieval that failed some other way too, so
+    // a lookup that ends below that entry is a misread, not news.
+    if (trusted && (lookup.pointer?.seq ?? 0) < trusted.seq) return undefined
 
     if (state.unchanged) {
       // Nothing was published since this context last read or wrote the
@@ -129,6 +143,7 @@ export class LaneState {
         await stamper.setProtectedStateBuckets(partition, state.stateBuckets)
       }
     }
+    if (run !== this.run) return undefined
 
     // The publish baseline is the state just read, so the first publish is
     // incremental. `publishedCounter` must be a COPY: the stamper mutates the
@@ -148,23 +163,32 @@ export class LaneState {
    */
   async publish(
     localCounter: Uint32Array,
-    stillHeld: () => boolean = () => true,
+    stillHeld: () => boolean | Promise<boolean> = () => true,
   ): Promise<void> {
     const { bee, batchId, partition, swarmEncryptionKey, stamper } = this.opts
     // The next entry is one past the newest. Not knowing the newest for sure
     // (a publish failed after it may have written its entry), look before
     // writing: writing an entry a second time is the one thing the sequence
     // must never do.
+    const run = ++this.run
+    const superseded = () => {
+      // Its entry may be on Swarm all the same: the next publish looks.
+      this.publishUnsettled = true
+      return new PartitionLeaseLostError()
+    }
     if (this.published === undefined || this.publishUnsettled) {
+      const known = this.known
       const { pointer, inconclusive } = await readStatePointer({
         bee,
         owner: this.owner,
         swarmEncryptionKey,
         batchId,
         partition,
-        known: this.known,
+        known,
       })
-      if (inconclusive) {
+      if (run !== this.run) throw superseded()
+      // Ending below an entry this context knows of is a misread (`resume`).
+      if (inconclusive || (known && (pointer?.seq ?? 0) < known.seq)) {
         throw new Error(
           `[LaneState] partition ${partition}: could not tell which state ` +
             "pointer entry is the newest; not publishing over it.",
@@ -174,25 +198,34 @@ export class LaneState {
       this.publishUnsettled = false
     }
     this.publishUnsettled = true
-    const published = await writePartitionState({
-      bee,
-      stamper,
-      batchId,
-      partition,
-      localCounter,
-      backupSigner: this.opts.backupSigner,
-      swarmEncryptionKey,
-      seq: this.published.seq + 1,
-      previousReferences: this.publishedReferences,
-      previousCounter: this.publishedCounter,
-      previousFrame: this.publishedFrame,
-      previousReferenceHex: this.published.referenceHex,
-      // The entry is what the next holder acts on: not written for a lane
-      // that went while the leaves were uploaded.
-      beforePointer: () => {
-        if (!stillHeld()) throw new PartitionLeaseLostError()
-      },
-    })
+    let published: Awaited<ReturnType<typeof writePartitionState>>
+    try {
+      published = await writePartitionState({
+        bee,
+        stamper,
+        batchId,
+        partition,
+        localCounter,
+        backupSigner: this.opts.backupSigner,
+        swarmEncryptionKey,
+        seq: this.published.seq + 1,
+        previousReferences: this.publishedReferences,
+        previousCounter: this.publishedCounter,
+        previousFrame: this.publishedFrame,
+        previousReferenceHex: this.published.referenceHex,
+        // The entry is what the next holder acts on: not written for a lane
+        // that went while the leaves were uploaded.
+        beforePointer: async () => {
+          if (run !== this.run || !(await stillHeld())) {
+            throw new PartitionLeaseLostError()
+          }
+        },
+      })
+    } catch (error) {
+      if (run !== this.run) throw superseded()
+      throw error
+    }
+    if (run !== this.run) throw superseded()
     this.publishUnsettled = false
     this.publishedReferences = published.references
     this.publishedCounter = published.publishedCounter
