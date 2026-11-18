@@ -11,7 +11,6 @@ import type {
   PostageStampsStoreInterface,
 } from "./store-interfaces"
 import type { UtilizationStoreDB } from "../storage/utilization-store"
-import type { DebouncedUtilizationUploader } from "../storage/debounced-uploader"
 import {
   TEST_ETH_ADDRESS_HEX,
   TEST_BATCH_ID_HEX,
@@ -20,6 +19,7 @@ import {
   createPostageStamp,
 } from "../test-fixtures"
 import { PartitionContendedError } from "./batch-write-coordinator"
+import { updateAfterWrite } from "../utils/batch-utilization"
 
 // ============================================================================
 // Mock Factories
@@ -169,7 +169,6 @@ vi.mock("../utils/batch-utilization", async (importOriginal) => ({
     state: { chunks: new Map() },
     tracker: { hasDirtyChunks: () => false, getDirtyChunks: () => [] },
   }),
-  saveUtilizationState: vi.fn().mockResolvedValue(undefined),
   calculateUtilization: vi.fn().mockReturnValue(0.01),
   UtilizationAwareStamper: MockUtilizationAwareStamper,
 }))
@@ -261,9 +260,6 @@ describe("createSyncAccount", () => {
       bee: createMockBee(),
       ...stores,
       utilizationStore: {} as UtilizationStoreDB,
-      utilizationUploader: {
-        scheduleUpload: vi.fn().mockResolvedValue(undefined),
-      } as unknown as DebouncedUtilizationUploader,
     })
 
     const result = await syncAccount(TEST_ETH_ADDRESS_HEX)
@@ -286,6 +282,29 @@ describe("createSyncAccount", () => {
     expect(result.chunkAddresses.length).toBeGreaterThanOrEqual(2)
   })
 
+  // The counters travel as the lane's published state. Rows written beside
+  // it would be stamped by a stamper bound to no lane, into another lane's
+  // reserved slot.
+  it("writes no utilisation rows to Swarm after its upload", async () => {
+    const stores = createMockStores()
+    vi.mocked(updateAfterWrite).mockResolvedValueOnce({
+      state: { chunks: new Map() },
+      tracker: { hasDirtyChunks: () => true, getDirtyChunks: () => [0] },
+    } as unknown as Awaited<ReturnType<typeof updateAfterWrite>>)
+
+    const syncAccount = createSyncAccount({
+      bee: createMockBee(),
+      ...stores,
+      utilizationStore: {} as UtilizationStoreDB,
+    })
+    const result = await syncAccount(TEST_ETH_ADDRESS_HEX)
+
+    expect(result?.status).toBe("success")
+    expect(updateAfterWrite).toHaveBeenCalled()
+    // Once, for the write path itself.
+    expect(stores.postageStampsStore.getStamper).toHaveBeenCalledTimes(1)
+  })
+
   it("writes this device's view to its own device-state feed", async () => {
     const stores = createMockStores()
 
@@ -293,9 +312,6 @@ describe("createSyncAccount", () => {
       bee: createMockBee(),
       ...stores,
       utilizationStore: {} as UtilizationStoreDB,
-      utilizationUploader: {
-        scheduleUpload: vi.fn().mockResolvedValue(undefined),
-      } as unknown as DebouncedUtilizationUploader,
     })
 
     await syncAccount(TEST_ETH_ADDRESS_HEX)
@@ -332,9 +348,6 @@ describe("createSyncAccount", () => {
       bee: createMockBee(),
       ...stores,
       utilizationStore: {} as UtilizationStoreDB,
-      utilizationUploader: {
-        scheduleUpload: vi.fn().mockResolvedValue(undefined),
-      } as unknown as DebouncedUtilizationUploader,
     })
 
     await syncAccount(TEST_ETH_ADDRESS_HEX)
@@ -355,9 +368,6 @@ describe("createSyncAccount", () => {
       bee: createMockBee(),
       ...stores,
       utilizationStore: {} as UtilizationStoreDB,
-      utilizationUploader: {
-        scheduleUpload: vi.fn().mockResolvedValue(undefined),
-      } as unknown as DebouncedUtilizationUploader,
     })
 
     const result = await syncAccount(TEST_ETH_ADDRESS_HEX)
@@ -381,9 +391,6 @@ describe("createSyncAccount", () => {
       bee: createMockBee(),
       ...stores,
       utilizationStore: {} as UtilizationStoreDB,
-      utilizationUploader: {
-        scheduleUpload: vi.fn().mockResolvedValue(undefined),
-      } as unknown as DebouncedUtilizationUploader,
     })
 
     const result = await syncAccount(TEST_ETH_ADDRESS_HEX)
@@ -398,9 +405,6 @@ describe("createSyncAccount", () => {
       bee: createMockBee(),
       ...stores,
       utilizationStore: {} as UtilizationStoreDB,
-      utilizationUploader: {
-        scheduleUpload: vi.fn().mockResolvedValue(undefined),
-      } as unknown as DebouncedUtilizationUploader,
     })
 
     await syncAccount(TEST_ETH_ADDRESS_HEX)
@@ -424,9 +428,6 @@ describe("createSyncAccount", () => {
         bee: createMockBee(),
         ...stores,
         utilizationStore: {} as UtilizationStoreDB,
-        utilizationUploader: {
-          scheduleUpload: vi.fn().mockResolvedValue(undefined),
-        } as unknown as DebouncedUtilizationUploader,
       })
       vi.mocked(ensureInRoster).mockClear().mockResolvedValueOnce(false)
 
@@ -452,9 +453,6 @@ describe("createSyncAccount", () => {
       bee: createMockBee(),
       ...stores,
       utilizationStore: {} as UtilizationStoreDB,
-      utilizationUploader: {
-        scheduleUpload: vi.fn().mockResolvedValue(undefined),
-      } as unknown as DebouncedUtilizationUploader,
     })
 
     const result = await syncAccount(TEST_ETH_ADDRESS_HEX)
@@ -487,9 +485,6 @@ describe("createSyncAccount", () => {
       bee: createMockBee(),
       ...stores,
       utilizationStore: {} as UtilizationStoreDB,
-      utilizationUploader: {
-        scheduleUpload: vi.fn().mockResolvedValue(undefined),
-      } as unknown as DebouncedUtilizationUploader,
     })
 
     const result = await syncAccount(TEST_ETH_ADDRESS_HEX)
@@ -521,9 +516,6 @@ describe("createSyncAccount", () => {
       bee: createMockBee(),
       ...stores,
       utilizationStore: {} as UtilizationStoreDB,
-      utilizationUploader: {
-        scheduleUpload: vi.fn().mockResolvedValue(undefined),
-      } as unknown as DebouncedUtilizationUploader,
     })
 
     const result = await syncAccount(TEST_ETH_ADDRESS_HEX)
@@ -544,9 +536,6 @@ describe("createSyncAccount", () => {
       bee: createMockBee(),
       ...stores,
       utilizationStore: {} as UtilizationStoreDB,
-      utilizationUploader: {
-        scheduleUpload: vi.fn().mockResolvedValue(undefined),
-      } as unknown as DebouncedUtilizationUploader,
     })
 
     const result = await syncAccount(TEST_ETH_ADDRESS_HEX)
@@ -577,9 +566,6 @@ describe("createSyncAccount", () => {
       bee: createMockBee(),
       ...stores,
       utilizationStore: {} as UtilizationStoreDB,
-      utilizationUploader: {
-        scheduleUpload: vi.fn().mockResolvedValue(undefined),
-      } as unknown as DebouncedUtilizationUploader,
     })
 
     const first = syncAccount(TEST_ETH_ADDRESS_HEX)
@@ -609,9 +595,6 @@ describe("createSyncAccount", () => {
       bee: createMockBee(),
       ...stores,
       utilizationStore: {} as UtilizationStoreDB,
-      utilizationUploader: {
-        scheduleUpload: vi.fn().mockResolvedValue(undefined),
-      } as unknown as DebouncedUtilizationUploader,
     })
 
     const first = syncAccount(TEST_ETH_ADDRESS_HEX)
@@ -638,9 +621,6 @@ describe("createSyncAccount", () => {
       bee: createMockBee(),
       ...stores,
       utilizationStore: {} as UtilizationStoreDB,
-      utilizationUploader: {
-        scheduleUpload: vi.fn().mockResolvedValue(undefined),
-      } as unknown as DebouncedUtilizationUploader,
     })
 
     const first = syncAccount(TEST_ETH_ADDRESS_HEX)

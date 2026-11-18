@@ -22,7 +22,6 @@ import type { StatePointer } from "../sync/partition-state"
 import {
   type Stamper,
   BatchId,
-  type Bee,
   EthAddress,
   PrivateKey,
   type EnvelopeWithBatchId,
@@ -34,8 +33,6 @@ import {
 import { stamp as stampAtSlot } from "@ethersphere/core-sdk"
 import { Binary } from "cafe-utility"
 import type { UtilizationStoreDB } from "../storage/utilization-store"
-import { uploadChunk, type UploadTarget } from "../proxy/upload"
-import { tryCreateTag } from "./tag"
 import { uint8ArrayToHex, webBytes } from "./hex"
 
 // ============================================================================
@@ -468,60 +465,6 @@ function claimedBucketsForCleanChunks(
 }
 
 // ============================================================================
-// Chunk Upload/Download for Swarm Storage
-// ============================================================================
-
-/**
- * Upload an encrypted utilization chunk to Swarm as CAC
- *
- * Architecture: Just upload encrypted chunk data as CAC (immutable)
- *
- * @param bee - Bee client instance
- * @param stamper - Stamper for signing
- * @param data - Chunk data to upload (4KB)
- * @param encryptionKey - Encryption key (32 bytes)
- * @returns CAC reference
- */
-export async function uploadUtilizationChunk(
-  bee: Bee,
-  stamper: Stamper,
-  data: Uint8Array,
-  encryptionKey: Uint8Array,
-): Promise<Uint8Array> {
-  // Validate inputs
-  if (data.length < 1 || data.length > 4096) {
-    throw new Error(`Invalid data length: ${data.length} (expected 1-4096)`)
-  }
-  if (encryptionKey.length !== KEY_LENGTH) {
-    throw new Error(
-      `Invalid encryption key length: ${encryptionKey.length} (expected ${KEY_LENGTH})`,
-    )
-  }
-
-  // Calculate CAC reference first (before upload)
-  const encryptedChunk = makeEncryptedContentAddressedChunk(data, encryptionKey)
-  const cacReference = encryptedChunk.address.toUint8Array()
-
-  const tag = await tryCreateTag(bee)
-
-  const target: UploadTarget = {
-    mode: "stamper",
-    bee,
-    stamper,
-  }
-
-  // Upload the exact encrypted bytes the reference was computed from —
-  // re-encrypting would randomize the padding of sub-4096 plaintexts and
-  // change the address (deferred: false for fast return)
-  await uploadChunk(target, encryptedChunk.data, {
-    deferred: false,
-    tag,
-  })
-
-  return cacReference
-}
-
-// ============================================================================
 // Serialization
 // ============================================================================
 
@@ -799,127 +742,6 @@ export async function loadUtilizationState(
     chunks,
     lastSync: Date.now(),
   }
-}
-
-/**
- * Save utilization state with incremental upload
- *
- * Only uploads dirty chunks to minimize network traffic.
- * Updates IndexedDB cache with new chunk data.
- *
- * @param state - Current utilization state (modified in place)
- * @param options - Save options
- */
-export async function saveUtilizationState(
-  state: BatchUtilizationState,
-  options: {
-    bee: Bee
-    stamper: Stamper
-    encryptionKey: Uint8Array
-    cache: UtilizationStoreDB
-    tracker: DirtyChunkTracker
-    reservedBuckets?: ReadonlySet<number>
-  },
-): Promise<void> {
-  const { bee, stamper, encryptionKey, cache, tracker, reservedBuckets } =
-    options
-
-  // Get dirty chunks from tracker
-  const dirtyChunkIndices = tracker.getDirtyChunks()
-
-  if (dirtyChunkIndices.length === 0) {
-    return
-  }
-
-  // Treat the buckets currently occupied by clean utilisation chunks as
-  // already claimed — dirty chunks must avoid them so utilisation chunks
-  // land in distinct buckets within a save. Also avoid `reservedBuckets`
-  // (the published partition state) so utilisation chunks don't land on a
-  // slot a published chunk occupies.
-  const claimedBuckets = claimedBucketsForCleanChunks(state)
-  if (reservedBuckets) {
-    for (const bucket of reservedBuckets) {
-      claimedBuckets.add(bucket)
-    }
-  }
-
-  // Counter chunks overstamp this partition's reserved slot rather than a data
-  // slot (see `UtilizationAwareStamper.stamp`). Their addresses are
-  // content-derived, so register each before uploading and clear them after.
-  const isUtilStamper = stamper instanceof UtilizationAwareStamper
-
-  for (const chunkIndex of dirtyChunkIndices) {
-    const chunkMetadata = state.chunks[chunkIndex]
-
-    // Extract chunk data from dataCounters
-    const chunkData = extractChunk(state.dataCounters, chunkIndex)
-
-    // Search for a derived key whose bucket isn't already claimed. Start
-    // from the previously-chosen nonce so unchanged plaintexts reuse their
-    // key (and skip upload via dedup below).
-    const resolved = await chooseUtilizationChunkKey({
-      swarmEncryptionKey: encryptionKey,
-      batchId: state.batchId,
-      chunkIndex,
-      plaintext: chunkData,
-      priorNonce: chunkMetadata.nonce,
-      claimedBuckets,
-    })
-
-    if (isUtilStamper) {
-      stamper.markReservedUtilizationChunk(resolved.address)
-    }
-
-    try {
-      // Upload to Swarm as encrypted CAC with the per-chunk derived key
-      const cacReference = await uploadUtilizationChunk(
-        bee,
-        stamper,
-        chunkData,
-        resolved.key,
-      )
-
-      const cacReferenceHex = Binary.uint8ArrayToHex(cacReference)
-
-      // Skip if reference unchanged (deduplication)
-      if (
-        chunkMetadata.contentHash === cacReferenceHex &&
-        chunkMetadata.nonce === resolved.nonce
-      ) {
-        tracker.markClean(chunkIndex)
-        continue
-      }
-
-      // Update metadata
-      chunkMetadata.contentHash = cacReferenceHex
-      chunkMetadata.lastUpload = Date.now()
-      chunkMetadata.dirty = false
-      chunkMetadata.nonce = resolved.nonce
-
-      // Update IndexedDB cache
-      await cache.putChunk({
-        batchId: state.batchId.toHex(),
-        chunkIndex,
-        data: chunkData,
-        contentHash: cacReferenceHex,
-        nonce: resolved.nonce,
-        lastAccess: Date.now(),
-      })
-
-      // Mark chunk as clean
-      tracker.markClean(chunkIndex)
-    } catch (error) {
-      console.error(`[BatchUtil] Failed to upload chunk ${chunkIndex}:`, error)
-      if (isUtilStamper) stamper.clearReservedUtilizationChunks()
-      // Keep it marked as dirty for retry
-      throw error
-    }
-  }
-
-  if (isUtilStamper) stamper.clearReservedUtilizationChunks()
-
-  // Update lastSync timestamp
-  state.lastSync = Date.now()
 }
 
 // ============================================================================
@@ -1263,21 +1085,15 @@ export class UtilizationAwareStamper implements Stamper, SlotAssigner {
   }
 
   /**
-   * Register a utilisation/state chunk address so the next `stamp()` of it
-   * routes to a reserved slot instead of a data slot. `slot` defaults to the
-   * currently bound partition — pass it explicitly when the stamper may be
-   * unbound at stamp time (the teardown release publishes state chunks after
-   * `unbindPartition()`, and a default of 0 would overstamp partition 0's
-   * reserved chunks). Idempotent per address.
+   * Register a state chunk address so the next `stamp()` of it routes to
+   * `slot`, the reserved slot of the lane whose state it is, instead of a
+   * data slot. Idempotent per address.
    */
-  markReservedUtilizationChunk(address: Uint8Array, slot?: number): void {
+  markReservedUtilizationChunk(address: Uint8Array, slot: number): void {
     if (!this.reservedUtilizationChunks) {
       this.reservedUtilizationChunks = new Map()
     }
-    this.reservedUtilizationChunks.set(
-      uint8ArrayToHex(address),
-      slot ?? this.partition ?? 0,
-    )
+    this.reservedUtilizationChunks.set(uint8ArrayToHex(address), slot)
   }
 
   /** Clear the registered utilisation-chunk addresses after a save. */

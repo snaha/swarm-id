@@ -488,7 +488,7 @@ describe("UtilizationAwareStamper partition awareness", () => {
     // A counter chunk marked reserved overstamps slot 0 (the partition's
     // reserved slot), which is free even though the data lane is full.
     const counterChunk = makeAddressInBucket(BUCKET, 9999)
-    stamper.markReservedUtilizationChunk(counterChunk)
+    stamper.markReservedUtilizationChunk(counterChunk, 0)
     const env = decodeIndex(stamper.stamp(counterChunk).index)
     expect(env.bucket).toBe(BUCKET)
     expect(env.slot).toBe(0)
@@ -883,7 +883,7 @@ describe("UtilizationAwareStamper partition awareness", () => {
 
     const BUCKET = 0x6789
     const chunk = makeAddressInBucket(BUCKET, 3)
-    stamper.markReservedUtilizationChunk(chunk)
+    stamper.markReservedUtilizationChunk(chunk, 1)
 
     const env = decodeIndex(stamper.stamp(chunk).index)
     expect(env.bucket).toBe(BUCKET)
@@ -1105,38 +1105,14 @@ describe("UtilizationAwareStamper partition awareness", () => {
       TEST_OWNER,
       TEST_ENC_KEY,
     )
-    // No bindPartition: this is the teardown-release scenario — the
-    // coordinator unbinds synchronously and the detached release publishes
-    // afterwards. The slot recorded at marking time must win; falling back
-    // to `partition ?? 0` would overstamp partition 0's reserved chunks.
+    // No bindPartition: the slot recorded at marking time is the one used,
+    // whatever lane the stamper is bound to when the chunk is stamped.
     const BUCKET = 0x1234
     const chunk = makeAddressInBucket(BUCKET, 7)
     stamper.markReservedUtilizationChunk(chunk, 1)
 
     const env = decodeIndex(stamper.stamp(chunk).index)
     expect(env.bucket).toBe(BUCKET)
-    expect(env.slot).toBe(1)
-  })
-
-  it("defaults a marked reserved chunk to the bound partition's slot", async () => {
-    const stamper = await UtilizationAwareStamper.create(
-      TEST_SIGNER_KEY,
-      TEST_BATCH_ID,
-      TEST_DEPTH,
-      makeEmptyCache(),
-      TEST_OWNER,
-      TEST_ENC_KEY,
-    )
-    stamper.bindPartition({
-      partition: 1,
-      partitionCount: PARTITION_COUNT,
-      localCounter: new Uint32Array(NUM_BUCKETS),
-    })
-    const BUCKET = 0x4321
-    const chunk = makeAddressInBucket(BUCKET, 9)
-    stamper.markReservedUtilizationChunk(chunk)
-
-    const env = decodeIndex(stamper.stamp(chunk).index)
     expect(env.slot).toBe(1)
   })
 })
