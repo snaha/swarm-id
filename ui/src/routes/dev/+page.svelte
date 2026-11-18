@@ -39,6 +39,7 @@
   import { onboard } from '$lib/crypto/onboard'
   import {
     ANVIL_ACCOUNT,
+    DEV_BATCH_DEPTH,
     type FundsRow,
     createExpiringTestDrive,
     createOwnedBatchOnChain,
@@ -54,6 +55,7 @@
   } from '$lib/dev/local-payment-rail'
   import { postageStampsStore } from '$lib/dev/postage-stamps.svelte'
   import { syncStore } from '$lib/dev/sync.svelte'
+  import { DRIVE_SIZE_BREAKPOINTS, formatBytes } from '$lib/drives'
   import { chainIdentity, evictChainCaches, probeChainId } from '$lib/payment/chain'
   import { fetchExistingBatchFromChain } from '$lib/payment/contract'
   import { CARD_SHOP_HOST, WIDGET_HOST } from '$lib/payment/multichain-widget'
@@ -252,6 +254,16 @@
   // On-chain drive tooling: fund the account's postage signer and create a
   // batch it OWNS, so extend/resize can run for real against the local chain.
   let chainToolBusy = $state(false)
+  /** The local pool is thin: past this the simulated purchase is likely to come up short. */
+  const MAX_DEV_BATCH_DEPTH = 24
+  /** The size of the batch the create buttons buy, as a depth. */
+  let devBatchDepth = $state(String(DEV_BATCH_DEPTH))
+  const DEV_BATCH_DEPTH_OPTIONS = DRIVE_SIZE_BREAKPOINTS.filter(
+    ([depth]) => depth <= MAX_DEV_BATCH_DEPTH,
+  ).map(([depth, bytes]) => ({
+    value: String(depth),
+    label: `${formatBytes(bytes)} (depth ${depth})`,
+  }))
   let chainToolMessage = $state('')
   let chainToolError = $state('')
 
@@ -1796,6 +1808,10 @@ Check console logs for details:
         the local chain's BZZ pool, swapping rather than drawing on the faucet above, since the purchase
         is the one leg worth simulating faithfully.
       </p>
+      <label class={`${LABEL_CLASS} w-64`}>
+        <span class={LABEL_TEXT_CLASS}>Size</span>
+        <Select options={DEV_BATCH_DEPTH_OPTIONS} bind:value={devBatchDepth} />
+      </label>
       <div class="flex flex-wrap gap-2">
         <Button
           variant="secondary"
@@ -1803,21 +1819,32 @@ Check console logs for details:
           onclick={() =>
             runChainTool(
               'Created owned batch',
-              async (account) => (await createOwnedBatchOnChain(account.derivationKey)).batchId,
+              async (account) =>
+                (
+                  await createOwnedBatchOnChain(account.derivationKey, {
+                    depth: Number(devBatchDepth),
+                  })
+                ).batchId,
             )}
         >
-          Create owned batch (depth 20)
+          Create owned batch
         </Button>
         <Button
           disabled={chainToolBusy || !selectedAccountId}
-          onclick={() => runChainTool('Created drive', createTestDrive)}
+          onclick={() =>
+            runChainTool('Created drive', (account) =>
+              createTestDrive(account, { depth: Number(devBatchDepth) }),
+            )}
         >
           Create drive to test with
         </Button>
         <Button
           variant="secondary"
           disabled={chainToolBusy || !selectedAccountId}
-          onclick={() => runChainTool('Created expiring drive', createExpiringTestDrive)}
+          onclick={() =>
+            runChainTool('Created expiring drive', (account) =>
+              createExpiringTestDrive(account, Number(devBatchDepth)),
+            )}
         >
           Create expiring drive
         </Button>

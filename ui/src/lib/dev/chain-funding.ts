@@ -53,7 +53,7 @@ export const ANVIL_ACCOUNT = {
 }
 
 /** Default drive size for the dev batch actions. */
-const DEV_BATCH_DEPTH = 20
+export const DEV_BATCH_DEPTH = 20
 /**
  * How long a dev batch is funded for, as a multiple of the contract's ~24h
  * minimum — so the number reads as days.
@@ -301,14 +301,20 @@ export async function createOwnedBatchOnChain(
   const { minimumInitialBalancePerChunk } = await chain.getPostageWriteConstraints()
   const amountPerChunk = minimumInitialBalancePerChunk * days
 
+  const swapXdai = PURCHASE_SWAP_XDAI << BigInt(Math.max(0, depth - DEV_BATCH_DEPTH))
+
   const created = await simulateWidgetPurchase(
     {
       owner,
       depth,
       amountPerChunk,
       payerPrivateKey: generatePrivateKey(),
-      payerXdai: PURCHASE_PAYER_XDAI,
-      swapXdai: PURCHASE_SWAP_XDAI,
+      // A batch one depth deeper costs twice as much: the swap grows with it,
+      // and the payer's bankroll by the same amount.
+      // ponytail: linear in price, so the thin pool's slippage eats into the
+      // margin at large depths; quote the pool if a deep purchase reverts.
+      payerXdai: PURCHASE_PAYER_XDAI + swapXdai,
+      swapXdai,
     },
     chain.settings,
   )
@@ -425,6 +431,6 @@ export async function createTestDrive(account: Account, shape?: BatchShape): Pro
 }
 
 /** A drive that is already inside the "Expires soon" window, for testing it. */
-export async function createExpiringTestDrive(account: Account): Promise<string> {
-  return createTestDrive(account, { days: DEV_BATCH_EXPIRING_DAYS })
+export async function createExpiringTestDrive(account: Account, depth?: number): Promise<string> {
+  return createTestDrive(account, { depth, days: DEV_BATCH_EXPIRING_DAYS })
 }
