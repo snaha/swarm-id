@@ -47,6 +47,7 @@ vi.mock("../utils/batch-write-lock", () => ({
 }))
 
 import {
+  AccountBusUnavailableError,
   BatchWriteCoordinator,
   NEXT_LANE_AFTER_MS,
   PEER_YIELD_MIN_IDLE_MS,
@@ -240,9 +241,22 @@ describe("BatchWriteCoordinator — without lanes", () => {
     const a = makeContext("a", { lanes: undefined })
 
     await expect(a.coordinator.withWrite(async () => "x")).rejects.toThrow(
-      PartitionContendedError,
+      AccountBusUnavailableError,
     )
     expect(a.coordinator.isReadOnly).toBe(true)
+  })
+
+  // Nobody held it up: it could not ask. Not the same failure as every lane
+  // being taken, though a caller that skips on contention skips this too.
+  it("says it could not ask, when its connection was never confirmed in the time it waited", async () => {
+    const a = makeContext("a")
+    a.liveness.confirmedAgo = Infinity
+
+    const write = a.coordinator.withWrite(async () => "x")
+    const failure = expect(write).rejects.toThrow(AccountBusUnavailableError)
+    await advance(SLOT_WAIT_TIMEOUT_MS + 1000)
+    await failure
+    await expect(write).rejects.toBeInstanceOf(PartitionContendedError)
   })
 })
 

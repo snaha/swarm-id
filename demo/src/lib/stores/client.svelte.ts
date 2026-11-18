@@ -284,6 +284,8 @@ function uploadUnavailableDescription(info: ConnectionInfo): string {
       return 'the account’s drive record says the node lacks or cannot use it — open the drive in Swarm ID to refresh it, or add another'
     case 'stamp-warming-up':
       return 'the account’s drive is new and the network has not seen its batch yet — uploads work in about a minute'
+    case 'no-account-bus':
+      return 'the identity site cannot reach the account’s other devices (no signaling server), so it cannot write to the drive'
     default:
       return 'no postage stamp available'
   }

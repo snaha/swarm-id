@@ -527,8 +527,8 @@ export class SwarmIdProxy {
       // Said out loud because the alternative is silence: without a URL the
       // bus never leaves this origin+partition, and a static build that lost
       // its `PUBLIC_BUS_SIGNALING_URL` looks exactly like a healthy one.
-      console.info(
-        "[Proxy] No account-bus signaling URL configured — cross-partition and cross-device coordination is off (docs/Account-Bus.md).",
+      console.warn(
+        "[Proxy] No account-bus signaling URL configured: this build cannot write to a drive shared between an account's devices (docs/Account-Bus.md).",
       )
     }
     this.setupMessageListener()
@@ -3554,7 +3554,17 @@ export class SwarmIdProxy {
     // means no coordinator, and a user-stamp write would throw "Stamper not
     // initialized".
     if (!this.drive.stamper) return false
+    if (this.lacksAccountBus(this.drive)) return false
     return true
+  }
+
+  /**
+   * A split batch is written only by a context that can ask the account's
+   * other devices who writes where. A build with no signaling server never
+   * can, so it says so up front instead of failing each upload after a wait.
+   */
+  private lacksAccountBus(drive: DriveWritePath): boolean {
+    return !this.signalingUrl && (drive.coordinator?.partitionCount ?? 1) > 1
   }
 
   /**
@@ -3737,6 +3747,7 @@ export class SwarmIdProxy {
     // `initializeStamper` logs and returns rather than throwing, so this is the
     // only place that difference survives to the dApp.
     if (!this.drive.stamper) return "stamper-failed"
+    if (this.lacksAccountBus(this.drive)) return "no-account-bus"
     return undefined
   }
 

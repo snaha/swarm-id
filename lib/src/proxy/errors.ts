@@ -63,6 +63,9 @@ export function toWireError(error: unknown, fallback: string): WireError {
     wire.code = "bee-rejected"
     wire.status = status
     wire.beeMessage = body
+  } else if (error.name === "AccountBusUnavailableError") {
+    wire.code = "upload-unavailable"
+    wire.reason = "no-account-bus"
   } else if (error.name in LIB_ERROR_CODES) {
     wire.code = LIB_ERROR_CODES[error.name]
   } else if (error instanceof ZodError) {

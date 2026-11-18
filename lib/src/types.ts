@@ -886,6 +886,10 @@ export type UploadMode = z.infer<typeof UploadModeSchema>
  *   stored record says the node does not have the batch (`exists: false`) or
  *   cannot use it (`usable: false`). Opening the drive in the identity UI
  *   refreshes the record from the chain (#765).
+ * - `no-account-bus` — the drive is shared between the account's devices, and
+ *   this session cannot reach them: the identity site was built with no
+ *   signaling server, or the connection to it is down. Who writes where is
+ *   agreed over that connection, so without it nothing is written.
  */
 export const UploadUnavailableReasonSchema = z.enum([
   "no-stamp",
@@ -894,6 +898,7 @@ export const UploadUnavailableReasonSchema = z.enum([
   "stamp-not-usable",
   /** The batch is younger than the ten blocks Bee waits before stamping with one (#924) */
   "stamp-warming-up",
+  "no-account-bus",
 ])
 
 export type UploadUnavailableReason = z.infer<
@@ -1757,7 +1762,8 @@ export const UploadProgressMessageSchema = z.object({
  *   switch (#885). Ask with `requestPermissions()`, or check `getPermissions()`
  *   first
  * - `partition-contended` — every partition of the batch is held by other
- *   devices and none yielded in time
+ *   devices and none yielded in time. A session that could not ask them at
+ *   all fails as `upload-unavailable` with `no-account-bus` instead
  * - `lease-lost` — this device's partition was reclaimed mid-write
  * - `bee-rejected` — Bee or the gateway answered with a non-2xx status:
  *   `status`, `beeMessage` and `url` say which
