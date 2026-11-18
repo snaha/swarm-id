@@ -2653,10 +2653,12 @@ describe("PartitionLease.acquire — holder presence beacons (gateway holder-exi
   })
 
   it("a holder publishes a beacon on acquire (and not when it has no rival)", async () => {
-    const withRival = await joinerLease().acquire({
+    const lease = joinerLease()
+    const withRival = await lease.acquire({
       partitionCount: PARTITION_COUNT,
     })
     expect(withRival.partition).toBe(0)
+    await lease.beaconPublishSettled
     const beacon = await readPartitionIntent({
       bee: bee,
       backupSigner: BACKUP_SIGNER,
@@ -2683,6 +2685,7 @@ describe("PartitionLease.acquire — holder presence beacons (gateway holder-exi
     expect(
       (await solo.acquire({ partitionCount: PARTITION_COUNT })).partition,
     ).toBe(0)
+    await solo.beaconPublishSettled
     const beacon = await readPartitionIntent({
       bee: bee,
       backupSigner: BACKUP_SIGNER,

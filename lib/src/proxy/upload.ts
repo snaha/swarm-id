@@ -47,7 +47,7 @@ import {
 } from "@ethersphere/core-sdk"
 import type { ChunkReference, UploadProgress } from "./types"
 import type { StampWorkerPool } from "./stamp-worker-pool"
-import { tryCreateTag } from "../utils/tag"
+import { createTagIfSupported, tryCreateTag } from "../utils/tag"
 import { uint8ArrayToHex, webBytes } from "../utils/hex"
 import { normalizeUrl } from "../utils/url"
 
@@ -142,7 +142,12 @@ export interface UploadDataOptions {
   deferred?: boolean
   /** Tag for tracking upload progress */
   tag?: number
-  /** WebSocket upload options (stamper mode only) */
+  /**
+   * Send the chunks over Bee's chunk stream instead of HTTP (stamper mode only;
+   * a subsidised gateway stamps the chunks itself and takes no stream). The
+   * stream carries a tag only when `deferred` is set; see
+   * {@link refuseChunkStreamConflicts} for what it refuses.
+   */
   webSocket?: { concurrency?: number }
   /** HTTP concurrency for parallel uploads */
   httpConcurrency?: number
@@ -439,22 +444,107 @@ async function uploadChunksViaWebSocket(
   onUploaded: (address: Uint8Array) => void,
 ): Promise<void> {
   let nextIndex = 0
+  // Once one chunk fails the upload has failed: no more stamps are spent on it.
+  let failed = false
 
   const worker = async () => {
-    while (nextIndex < chunks.length) {
+    while (!failed && nextIndex < chunks.length) {
       const chunk = chunks[nextIndex++]
-      await uploadStampedChunkViaWebSocket(
-        stamp,
-        stream,
-        chunk.data,
-        chunk.address,
-      )
+      try {
+        await uploadStampedChunkViaWebSocket(
+          stamp,
+          stream,
+          chunk.data,
+          chunk.address,
+        )
+      } catch (error) {
+        failed = true
+        throw error
+      }
       onUploaded(chunk.address)
     }
   }
 
   const workerCount = stream.getConcurrency()
   await Promise.all(Array.from({ length: workerCount }, () => worker()))
+}
+
+/**
+ * The tag a caller gave, as Bee reads it: tag 0 is no tag (`Deferred: tag != 0`).
+ */
+function givenTag(tag: number | undefined): number | undefined {
+  return tag === 0 ? undefined : tag
+}
+
+/**
+ * Refuse what Bee's chunk stream cannot honour. Bee has no pinning on the
+ * stream, and defers a stream's chunks exactly when the stream has a tag, so a
+ * tag without `deferred` would make a direct upload deferred. Either is an
+ * error rather than an upload that quietly differs from the request.
+ */
+export function refuseChunkStreamConflicts(
+  options: Pick<UploadDataOptions, "pin" | "tag" | "deferred"> | undefined,
+): void {
+  if (options?.pin) {
+    throw new SwarmIdError(
+      "invalid-request",
+      "Bee cannot pin chunks sent over WebSocket: upload without useWebSocket to pin",
+    )
+  }
+  if (givenTag(options?.tag) !== undefined && !options?.deferred) {
+    throw new SwarmIdError(
+      "invalid-request",
+      "A tag makes Bee defer the chunks it receives over WebSocket: pass deferred: true with it",
+    )
+  }
+}
+
+/**
+ * The tag a stamper upload goes under: the caller's, or one made for it. Over
+ * WebSocket the tag is what defers the stream, so a direct stream gets none,
+ * and a deferred one on a node without tags is refused rather than sent
+ * direct. A deferred one whose tag the node fails to make rejects with Bee's
+ * own error. Also refuses what the stream cannot honour, before anything is
+ * made.
+ */
+export async function stamperUploadTag(
+  bee: Bee,
+  options:
+    | Pick<UploadDataOptions, "pin" | "tag" | "deferred" | "webSocket">
+    | undefined,
+): Promise<number | undefined> {
+  const given = givenTag(options?.tag)
+  if (!options?.webSocket) return given ?? (await tryCreateTag(bee))
+  refuseChunkStreamConflicts(options)
+  if (!options.deferred) return undefined
+  const tag = given ?? (await createTagIfSupported(bee))
+  if (tag === undefined) {
+    throw new SwarmIdError(
+      "invalid-request",
+      "Bee defers chunks sent over WebSocket only under a tag, and the node does not support tags: pass a tag, or upload without useWebSocket",
+    )
+  }
+  return tag
+}
+
+/**
+ * The tag of a stamper upload and, when it goes over WebSocket, its open
+ * stream. A direct upload's stream goes untagged and reports no tag back.
+ */
+async function prepareStamperUpload(
+  target: Extract<UploadTarget, { mode: "stamper" }>,
+  options: UploadDataOptions | undefined,
+): Promise<{ tag: number | undefined; stream: ChunkUploadStream | undefined }> {
+  const { bee, signal } = target
+  const tag = await stamperUploadTag(bee, options)
+  if (!options?.webSocket) return { tag, stream: undefined }
+  const stream = new ChunkUploadStream(bee.url, {
+    tag,
+    concurrency: options.webSocket.concurrency,
+    signal,
+  })
+  await stream.open()
+  return { tag, stream }
 }
 
 // ============================================================================
@@ -691,13 +781,6 @@ async function uploadDataPlain(
   } else {
     // Stamper mode
     const { bee, stamper, workerPool } = target
-    const tag = options?.tag ?? (await tryCreateTag(bee))
-    const uploadOptions = {
-      ...options,
-      tag,
-      deferred: options?.deferred ?? false,
-    }
-
     const stamp = makeStampFn(
       stamper,
       workerPool,
@@ -705,43 +788,69 @@ async function uploadDataPlain(
       target.signal,
     )
     const requestOptions = withSignal(options?.requestOptions, target.signal)
+    const { tag, stream } = await prepareStamperUpload(target, options)
+    const uploadOptions = {
+      ...options,
+      tag,
+      deferred: options?.deferred ?? false,
+    }
 
-    // Upload leaf chunks
-    for (const chunk of chunks) {
-      await uploadStampedChunkViaHttp(
-        bee,
-        stamp,
-        chunk.data,
-        chunk.address.toUint8Array(),
-        uploadOptions,
-        requestOptions,
-      )
+    const sendChunk = (data: Uint8Array, address: Uint8Array) =>
+      stream
+        ? uploadStampedChunkViaWebSocket(stamp, stream, data, address)
+        : uploadStampedChunkViaHttp(
+            bee,
+            stamp,
+            data,
+            address,
+            uploadOptions,
+            requestOptions,
+          )
+    const onLeafUploaded = () => {
       processedChunks++
       reportProgress()
     }
 
-    // Build merkle tree if multiple chunks
-    let rootReference: Reference
-
-    if (chunkRefs.length === 1) {
-      rootReference = new Reference(chunkRefs[0].address)
-    } else {
-      rootReference = await buildPlainMerkleTree(chunkRefs, async (chunk) => {
-        await uploadStampedChunkViaHttp(
+    try {
+      // Upload leaf chunks
+      const leaves = chunks.map((chunk) => ({
+        data: chunk.data,
+        address: chunk.address.toUint8Array(),
+      }))
+      if (stream) {
+        await uploadChunksViaWebSocket(stamp, stream, leaves, onLeafUploaded)
+      } else {
+        await uploadChunksViaHttp(
           bee,
           stamp,
-          chunk.data,
-          chunk.address.toUint8Array(),
+          leaves,
           uploadOptions,
           requestOptions,
+          onLeafUploaded,
+          /* concurrency */ 1,
         )
-        totalChunks++
-        processedChunks++
-        reportProgress()
-      })
-    }
+      }
 
-    return { reference: rootReference.toHex(), tagUid: tag }
+      // Build merkle tree if multiple chunks
+      let rootReference: Reference
+
+      if (chunkRefs.length === 1) {
+        rootReference = new Reference(chunkRefs[0].address)
+      } else {
+        rootReference = await buildPlainMerkleTree(chunkRefs, async (chunk) => {
+          await sendChunk(chunk.data, chunk.address.toUint8Array())
+          totalChunks++
+          processedChunks++
+          reportProgress()
+        })
+      }
+
+      await stream?.close()
+      return { reference: rootReference.toHex(), tagUid: tag }
+    } catch (error) {
+      stream?.abandon()
+      throw error
+    }
   }
 }
 
@@ -824,12 +933,6 @@ async function uploadDataEncrypted(
   } else {
     // Stamper mode
     const { bee, stamper, workerPool } = target
-    const tag = options?.tag ?? (await tryCreateTag(bee))
-    const uploadOptions = {
-      ...options,
-      tag,
-      deferred: options?.deferred ?? false,
-    }
     const stamp = makeStampFn(
       stamper,
       workerPool,
@@ -837,16 +940,14 @@ async function uploadDataEncrypted(
       target.signal,
     )
     const requestOptions = withSignal(options?.requestOptions, target.signal)
-
-    // Open WebSocket stream if requested
-    let wsStream: ChunkUploadStream | undefined
-    if (options?.webSocket) {
-      wsStream = new ChunkUploadStream(bee.url, {
-        tag,
-        concurrency: options.webSocket.concurrency,
-        signal: target.signal,
-      })
-      await wsStream.open()
+    const { tag, stream: wsStream } = await prepareStamperUpload(
+      target,
+      options,
+    )
+    const uploadOptions = {
+      ...options,
+      tag,
+      deferred: options?.deferred ?? false,
     }
 
     try {
@@ -904,15 +1005,15 @@ async function uploadDataEncrypted(
         },
       )
 
+      await wsStream?.close()
       return {
         reference: rootReference.toHex(),
         tagUid: tag,
         chunkAddresses: uploadedChunkAddresses,
       }
-    } finally {
-      if (wsStream) {
-        await wsStream.close()
-      }
+    } catch (error) {
+      wsStream?.abandon()
+      throw error
     }
   }
 }

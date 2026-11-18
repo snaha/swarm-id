@@ -630,9 +630,9 @@ describe("SwarmIdClient feed readers and writers", () => {
       ])
     })
 
-    // The uploads repeat `index`, `at`, `hasTimestamp` and `lookupTimeoutMs`
-    // inside `options`, which the proxy reads only for its drive: a wire quirk
-    // pinned as it is, not a contract (#963).
+    // `index`, `at`, `hasTimestamp`, `lookupTimeoutMs` and the raw upload's
+    // `encryptionKey` travel as their own fields; `options` carries only what a
+    // single-chunk write takes.
     it("uploads a payload", async () => {
       const writer = client.makeSequentialFeedWriter({
         topic: TOPIC,
@@ -643,6 +643,7 @@ describe("SwarmIdClient feed readers and writers", () => {
         at: AT,
         hasTimestamp: true,
         lookupTimeoutMs: LOOKUP_TIMEOUT_MS,
+        deferred: true,
       }
       const result = await writer.uploadPayload(DATA, options)
       expect(result).toEqual(seqUploadAnswer())
@@ -656,7 +657,7 @@ describe("SwarmIdClient feed readers and writers", () => {
           at: AT.toString(),
           hasTimestamp: true,
           lookupTimeoutMs: LOOKUP_TIMEOUT_MS,
-          options,
+          options: { deferred: true },
         },
       ])
     })
@@ -673,7 +674,7 @@ describe("SwarmIdClient feed readers and writers", () => {
           topic: TOPIC,
           data: DATA,
           encryptionKey: KEY,
-          options,
+          options: {},
         },
       ])
     })
@@ -690,7 +691,7 @@ describe("SwarmIdClient feed readers and writers", () => {
           topic: TOPIC,
           reference: REF,
           index: INDEX.toString(),
-          options,
+          options: {},
         },
       ])
     })

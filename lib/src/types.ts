@@ -189,8 +189,17 @@ export interface UploadOptions {
   onProgress?: (progress: UploadProgress) => void
   /**
    * Use WebSocket for chunk upload instead of HTTP. Per-chunk stamping is used.
-   * Needs Bee 2.8.1 or newer, reached directly rather than through a gateway.
-   * Applies to encrypted uploads; a plain upload goes over HTTP regardless.
+   * Needs Bee 2.8.1 or newer, reached directly: through a gateway the upload
+   * fails. Ignored in subsidised mode, where the gateway does the stamping
+   * and nothing below is refused.
+   *
+   * Bee defers a stream's chunks exactly when the stream has a tag, so a
+   * direct upload goes untagged and reports no tag, and `tag` without
+   * `deferred: true` is refused; a `deferred: true` upload the node gives no
+   * tag for is refused rather than sent direct. Tag 0 is no tag, as Bee reads
+   * it. Bee cannot pin over the stream, so `pin` is refused too. A direct
+   * upload is slower than a deferred one: Bee takes its chunks one at a time,
+   * each waiting for push-sync before its ack.
    */
   useWebSocket?: boolean
   /** Use Web Workers for parallel stamp signing. Speeds up upload on multi-core CPUs. */
@@ -200,6 +209,12 @@ export interface UploadOptions {
   /** Upload concurrency (parallel in-flight chunks). HTTP default: 8, WebSocket default: 32. */
   concurrency?: number
 }
+
+/** What a single-chunk write takes: one chunk needs no stream, workers or concurrency. */
+export type ChunkUploadOptions = Pick<
+  UploadOptions,
+  "batchID" | "pin" | "tag" | "deferred"
+>
 
 /**
  * `signal` stops the call and rejects it with `aborted`. It cannot
@@ -531,12 +546,12 @@ export interface SOCWriter extends SOCReader {
    *
    * @param identifier - SOC identifier (32-byte value)
    * @param data - SOC payload data (1-4096 bytes)
-   * @param options - Optional upload configuration
+   * @param options - Optional upload configuration; `encrypt: false` uploads it unencrypted
    */
   upload: (
     identifier: Identifier | Uint8Array | string,
     data: Uint8Array,
-    options?: UploadOptions,
+    options?: ChunkUploadOptions & Pick<UploadOptions, "encrypt">,
   ) => Promise<SocUploadResult>
   /**
    * Upload an unencrypted SOC.
@@ -548,7 +563,7 @@ export interface SOCWriter extends SOCReader {
   rawUpload: (
     identifier: Identifier | Uint8Array | string,
     data: Uint8Array,
-    options?: UploadOptions,
+    options?: ChunkUploadOptions,
   ) => Promise<SocRawUploadResult>
 }
 
@@ -732,7 +747,10 @@ export interface SequentialFeedUpdateOptions {
  * Options for sequential feed uploads.
  */
 export interface SequentialFeedUploadOptions
-  extends UploadOptions, SequentialFeedUpdateOptions {}
+  extends
+    ChunkUploadOptions,
+    Pick<UploadOptions, "encrypt">,
+    SequentialFeedUpdateOptions {}
 
 /**
  * Options for sequential feed raw download (encryptionKey in options).
@@ -1412,6 +1430,10 @@ export const ActUploadDataMessageSchema = z.object({
   options: ActUploadOptionsSchema,
   requestOptions: RequestOptionsSchema,
   enableProgress: z.boolean().optional(),
+  useWebSocket: z.boolean().optional(),
+  useWorkers: z.boolean().optional(),
+  workerCount: z.number().int().min(1).max(32).optional(),
+  concurrency: z.number().int().min(1).max(256).optional(),
 })
 
 export const ActDownloadDataMessageSchema = z.object({

@@ -36,6 +36,7 @@ export type {
   ButtonConfig,
   RequestOptions,
   UploadOptions,
+  ChunkUploadOptions,
   DownloadOptions,
   UploadResult,
   UploadUnavailableReason,

@@ -96,6 +96,8 @@ import {
   uploadData,
   uploadSOC,
   uploadChunk,
+  refuseChunkStreamConflicts,
+  stamperUploadTag,
   type ChunkCounter,
   type UploadTarget,
 } from "./proxy/upload"
@@ -2518,6 +2520,12 @@ export class SwarmIdProxy {
     if (signal?.aborted) throw abortedError(signal)
     const operation = (target: UploadTarget) =>
       uncounted({ ...target, counter, signal })
+    if (this.writesSubsidised(batchId)) {
+      return operation({
+        mode: "subsidised",
+        gatewayUrl: this.subsidisedGatewayUrl!,
+      })
+    }
     if (batchId !== undefined) {
       const drive = await this.writePathFor(batchId)
       this.refuseDrive(drive)
@@ -2530,12 +2538,6 @@ export class SwarmIdProxy {
       }
       return drive.coordinator.withWrite(operation, targetOptions)
     }
-    if (this.isSubsidisedModeActive()) {
-      return operation({
-        mode: "subsidised",
-        gatewayUrl: this.subsidisedGatewayUrl!,
-      })
-    }
     const coordinator = this.drive?.coordinator
     if (!coordinator) {
       throw new SwarmIdError(
@@ -2544,6 +2546,29 @@ export class SwarmIdProxy {
       )
     }
     return coordinator.withWrite(operation, targetOptions)
+  }
+
+  /**
+   * Whether a write to `batchId` goes to the subsidised gateway, which stamps
+   * the chunks itself: a write that names no drive, while the session has no
+   * usable stamp of its own and a gateway to fall back on.
+   */
+  private writesSubsidised(batchId: string | undefined): boolean {
+    return batchId === undefined && this.isSubsidisedModeActive()
+  }
+
+  /**
+   * Refuse what Bee's chunk stream cannot honour, first thing in an upload
+   * handler. A gateway takes no stream, so it is refused only where the write
+   * goes to a stamper.
+   */
+  private refuseStreamConflicts(
+    useWebSocket: boolean | undefined,
+    options: UploadDataMessage["options"],
+  ): void {
+    if (useWebSocket && !this.writesSubsidised(options?.batchID)) {
+      refuseChunkStreamConflicts(options)
+    }
   }
 
   /**
@@ -4501,6 +4526,7 @@ export class SwarmIdProxy {
     } = message
 
     try {
+      this.refuseStreamConflicts(useWebSocket, options)
       const batchID = options?.batchID
       this.ensureCanUpload(batchID)
 
@@ -4589,6 +4615,7 @@ export class SwarmIdProxy {
     const fileName = name || "index.bin"
 
     try {
+      this.refuseStreamConflicts(useWebSocket, options)
       const batchID = options?.batchID
       this.ensureCanUpload(batchID)
 
@@ -4599,8 +4626,16 @@ export class SwarmIdProxy {
         enableProgress,
       )
 
-      // Create or use provided tag for the entire upload operation
-      const uploadTag = options?.tag ?? (await tryCreateTag(this.bee))
+      // One tag for the content and the manifest, by the content's rule: none
+      // over a direct stream, which would otherwise track the manifest alone.
+      // The stream's refusals come with it, before the write lock is taken.
+      const uploadTag = await stamperUploadTag(this.bee, {
+        ...options,
+        webSocket:
+          useWebSocket && !this.writesSubsidised(batchID)
+            ? { concurrency }
+            : undefined,
+      })
 
       // Execute upload with mode-aware locking
       const { result: manifestResult, stampedChunks } =
@@ -6155,9 +6190,14 @@ export class SwarmIdProxy {
       options,
       requestOptions,
       enableProgress,
+      useWebSocket,
+      useWorkers,
+      workerCount,
+      concurrency,
     } = message
 
     try {
+      this.refuseStreamConflicts(useWebSocket, options)
       const batchID = options?.batchID
       this.ensureCanUpload(batchID)
 
@@ -6194,14 +6234,22 @@ export class SwarmIdProxy {
         result: { actResult, contentUpload },
         stampedChunks,
       } = await this.withCountedWrite(
-        { signal: message.requestOptions.signal, useWorkers: true },
+        {
+          signal: message.requestOptions.signal,
+          useWorkers: useWorkers ?? true,
+          workerCount,
+        },
         async (target) => {
-          // Step 1: Upload raw content data (encrypted by default for 64-byte reference)
+          // Step 1: Upload raw content data (encrypted by default for 64-byte
+          // reference). Only the content takes the stream: the manifest and
+          // the ACT's own chunks go over HTTP.
           const contentUploadResult = await uploadData(target, data, {
             encryptionKey: options?.encrypt !== false ? true : undefined,
             pin: options?.pin,
             deferred: options?.deferred,
             tag: options?.tag,
+            webSocket: useWebSocket ? { concurrency } : undefined,
+            httpConcurrency: concurrency,
             onProgress,
             requestOptions,
           })

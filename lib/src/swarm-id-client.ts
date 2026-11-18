@@ -11,6 +11,7 @@ import type {
   UploadResult,
   FileData,
   UploadOptions,
+  ChunkUploadOptions,
   UploadFilesOptions,
   CollectionFileInput,
   CollectionEntry,
@@ -195,6 +196,23 @@ function sumChunkCounts(
   return first === undefined || second === undefined
     ? undefined
     : first + second
+}
+
+/** The options of a single-chunk write, as the wire carries them. */
+type ChunkWireOptions = ChunkUploadOptions & Pick<UploadOptions, "encrypt">
+
+/**
+ * A single-chunk write's options as they cross the bridge: only the fields
+ * the wire knows. Wider options assign to `ChunkUploadOptions` through a
+ * variable, and a function among them, such as `onProgress`, would make
+ * `postMessage` throw `DataCloneError`.
+ */
+function chunkWireOptions(
+  options: ChunkWireOptions | undefined,
+): ChunkWireOptions | undefined {
+  if (!options) return undefined
+  const { batchID, pin, tag, deferred, encrypt } = options
+  return { batchID, pin, tag, deferred, encrypt }
 }
 
 export class SwarmIdClient {
@@ -2091,12 +2109,11 @@ export class SwarmIdClient {
    */
   async uploadChunk(
     data: Uint8Array,
-    options?: UploadOptions,
+    options?: ChunkUploadOptions,
     requestOptions?: RequestOptions,
   ): Promise<UploadResult> {
     this.ensureReady()
     const requestId = this.generateRequestId()
-    const { onProgress: _onProgress, ...serializableOptions } = options ?? {}
 
     const response = await this.sendRequest<{
       type: "uploadChunkResponse"
@@ -2107,7 +2124,7 @@ export class SwarmIdClient {
       type: "uploadChunk",
       requestId,
       data: webBytes(data),
-      options: serializableOptions,
+      options: chunkWireOptions(options),
       requestOptions,
     })
 
@@ -2338,7 +2355,7 @@ export class SwarmIdClient {
     const sendSocUpload = async (
       identifier: Identifier | Uint8Array | string,
       data: Uint8Array,
-      options?: UploadOptions,
+      options?: ChunkUploadOptions & Pick<UploadOptions, "encrypt">,
     ): Promise<SocUploadResult> => {
       const requestId = this.generateRequestId()
       const response = await this.sendRequest<
@@ -2350,7 +2367,7 @@ export class SwarmIdClient {
         identifier: this.normalizeSocIdentifier(identifier),
         data: new Uint8Array(data),
         signer: signerKey,
-        options,
+        options: chunkWireOptions(options),
         requestOptions,
       })
 
@@ -2368,7 +2385,7 @@ export class SwarmIdClient {
     const sendRawSocUpload = async (
       identifier: Identifier | Uint8Array | string,
       data: Uint8Array,
-      options?: UploadOptions,
+      options?: ChunkUploadOptions,
     ): Promise<SocRawUploadResult> => {
       const requestId = this.generateRequestId()
       const response = await this.sendRequest<
@@ -2380,7 +2397,7 @@ export class SwarmIdClient {
         identifier: this.normalizeSocIdentifier(identifier),
         data: new Uint8Array(data),
         signer: signerKey,
-        options,
+        options: chunkWireOptions(options),
         requestOptions,
       })
 
@@ -3244,7 +3261,7 @@ export class SwarmIdClient {
             : undefined,
         hasTimestamp: options?.hasTimestamp,
         lookupTimeoutMs: options?.lookupTimeoutMs,
-        options,
+        options: chunkWireOptions(options),
         requestOptions,
       })
 
@@ -3289,7 +3306,7 @@ export class SwarmIdClient {
         encryptionKey: options?.encryptionKey
           ? this.normalizeSocKey(options.encryptionKey)
           : undefined,
-        options,
+        options: chunkWireOptions(options),
         requestOptions,
       })
 
@@ -3331,7 +3348,7 @@ export class SwarmIdClient {
             : undefined,
         hasTimestamp: options?.hasTimestamp,
         lookupTimeoutMs: options?.lookupTimeoutMs,
-        options,
+        options: chunkWireOptions(options),
         requestOptions,
       })
 
@@ -3397,7 +3414,7 @@ export class SwarmIdClient {
       owner?: string
       /** Feed type: "Sequence" for sequential feeds, "Epoch" for epoch feeds. Default: "Sequence" */
       feedType?: "Sequence" | "Epoch"
-      uploadOptions?: UploadOptions
+      uploadOptions?: ChunkUploadOptions & Pick<UploadOptions, "encrypt">
     },
     requestOptions?: RequestOptions,
   ): Promise<string> {
@@ -3414,7 +3431,7 @@ export class SwarmIdClient {
       topic: normalizedTopic,
       owner: options?.owner,
       feedType: options?.feedType,
-      uploadOptions: options?.uploadOptions,
+      uploadOptions: chunkWireOptions(options?.uploadOptions),
       requestOptions,
     })
 
@@ -3498,7 +3515,7 @@ export class SwarmIdClient {
     signer: string,
     identifier: string,
     data: Uint8Array,
-    options?: UploadOptions,
+    options?: ChunkUploadOptions,
     requestOptions?: RequestOptions,
   ): Promise<UploadResult> {
     this.ensureReady()
@@ -3516,7 +3533,7 @@ export class SwarmIdClient {
       signer,
       identifier,
       data: new Uint8Array(data),
-      options,
+      options: chunkWireOptions(options),
       requestOptions,
     })
 
@@ -3548,6 +3565,8 @@ export class SwarmIdClient {
    * @param options.tag - Tag ID for tracking upload progress
    * @param options.deferred - Whether to use deferred upload (defaults to false)
    * @param options.onProgress - Optional callback for tracking upload progress
+   * @param options.useWebSocket - Send the content over Bee's chunk stream, as `uploadData` does; the
+   *   manifest and the ACT's own chunks go over HTTP
    * @param requestOptions - Optional request configuration (timeout, headers, endlesslyRetry). `timeout` replaces the client default for this call's whole round trip, not only the Bee request
    * @returns A promise resolving to the ACT upload result
    * @returns return.encryptedReference - The encrypted reference that must be stored with the ACT
@@ -3590,7 +3609,14 @@ export class SwarmIdClient {
   }> {
     this.ensureReady()
     const requestId = this.generateRequestId()
-    const { onProgress, ...serializableOptions } = options ?? {}
+    const {
+      onProgress,
+      useWebSocket,
+      useWorkers,
+      workerCount,
+      concurrency,
+      ...serializableOptions
+    } = options ?? {}
 
     const stopProgress = this.listenForProgress(requestId, onProgress)
     try {
@@ -3612,6 +3638,10 @@ export class SwarmIdClient {
         options: serializableOptions,
         requestOptions,
         enableProgress: !!onProgress,
+        useWebSocket,
+        useWorkers,
+        workerCount,
+        concurrency,
       })
 
       return {
