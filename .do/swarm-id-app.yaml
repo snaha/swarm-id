@@ -63,8 +63,10 @@ services:
     health_check:
       http_path: /healthz
     envs:
+      # The second origin is GitHub Pages: the `main` build and the PR previews
+      # under swarm.snaha.net use this server too (`deploy-preview.yml`).
       - key: ALLOWED_ORIGINS
-        value: 'https://swarm-id.snaha.net'
+        value: 'https://swarm-id.snaha.net,https://swarm.snaha.net'
 
 # Environment variables
 envs:

@@ -46,6 +46,9 @@ jobs:
             id:
               - 'ui/**'
               - 'lib/**'
+              # A PR that only changes the server still needs a UI built
+              # against the server it deployed.
+              - 'signaling/**'
             demo:
               - 'demo/**'
               - 'lib/**'
@@ -54,10 +57,10 @@ jobs:
             signaling:
               - 'signaling/**'
 
-  # The previews share one signaling server (`render.yaml`). A PR that changes
-  # the server puts its own head commit there, so its preview meets the server
-  # it was written against; the last such PR to push wins, and every other
-  # preview meets that server too until it closes.
+  # A PR that changes the signaling server puts its head commit on the Render
+  # instance (`render.yaml`), and its preview is built against that. The last
+  # such PR to push has the instance; nothing puts `main` there, because every
+  # other build uses production's server.
   preview-bus:
     runs-on: ubuntu-latest
     needs: detect-changes
@@ -70,7 +73,7 @@ jobs:
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: |
           if [ -z "$DEPLOY_HOOK" ]; then
-            echo "No deploy hook: leaving the preview signaling server as it is."
+            echo "No deploy hook: this preview meets whatever the Render instance runs."
             exit 0
           fi
           curl --fail-with-body --silent --show-error "${DEPLOY_HOOK}&ref=${HEAD_SHA}"
@@ -146,9 +149,9 @@ jobs:
           ORIGIN: https://swarm.snaha.net
           PUBLIC_APP_DOMAIN: https://swarm.snaha.net/demo/pr-${{ github.event.number }}
           PUBLIC_ID_DOMAIN: https://swarm.snaha.net/id/pr-${{ github.event.number }}
-          # The previews' own signaling server (`render.yaml`). Unset, a
-          # preview talks only between the tabs of one browser.
-          PUBLIC_BUS_SIGNALING_URL: ${{ vars.PREVIEW_BUS_SIGNALING_URL }}
+          # Production's signaling server, which runs `main`; a PR that
+          # changes the server meets its own instead (`preview-bus`).
+          PUBLIC_BUS_SIGNALING_URL: ${{ needs.detect-changes.outputs.signaling == 'true' && vars.PREVIEW_BUS_SIGNALING_URL || 'wss://swarm-id.snaha.net/bus' }}
         run: pnpm --filter @swarm-id/ui build
 
       - name: Create 404.html for SPA routing
@@ -339,27 +342,6 @@ jobs:
           edit-mode: replace
 
   # Cleanup preview on PR close
-  # A PR that had put its own signaling server on the previews' instance takes
-  # it away again: back to `main`'s.
-  restore-preview-bus:
-    runs-on: ubuntu-latest
-    if: github.event.action == 'closed'
-    steps:
-      - name: Deploy main's signaling server
-        env:
-          DEPLOY_HOOK: ${{ secrets.RENDER_PREVIEW_BUS_DEPLOY_HOOK }}
-          GH_TOKEN: ${{ github.token }}
-          PR: ${{ github.event.number }}
-        run: |
-          if [ -z "$DEPLOY_HOOK" ]; then
-            exit 0
-          fi
-          if ! gh api "repos/${GITHUB_REPOSITORY}/pulls/${PR}/files" --paginate --jq '.[].filename' | grep -q '^signaling/'; then
-            echo "This PR did not change the signaling server."
-            exit 0
-          fi
-          curl --fail-with-body --silent --show-error "${DEPLOY_HOOK}"
-
   cleanup:
     runs-on: ubuntu-latest
     if: github.event.action == 'closed'

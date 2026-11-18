@@ -1,20 +1,28 @@
-# The signaling server the PR previews talk to (swarm.snaha.net/…/pr-N/).
+# A signaling server for the PRs that change the signaling server.
 #
-# One free instance, deployed by `.github/workflows/deploy-preview.yml`: from a
-# pull request's head commit when that PR touches `signaling/`, and from `main`
-# again when it closes. Production's server is the `bus-signaling` service in
-# `.do/swarm-id-app.yaml`; this one never serves it.
+# Every build under swarm.snaha.net (the `main` build and the PR previews)
+# talks to production's server, the `bus-signaling` service in
+# `.do/swarm-id-app.yaml`, which runs `main`. A PR that touches `signaling/`
+# cannot: its preview needs the server it was written against. Such a PR
+# deploys its head commit here (`.github/workflows/deploy-preview.yml`) and its
+# preview is built against this address (the repository variable
+# `PREVIEW_BUS_SIGNALING_URL`). Nothing puts `main` here: between such PRs the
+# instance runs whatever the last one left, and nothing uses it.
 #
-# A free instance sleeps after 15 minutes without a request or a WebSocket
-# message, and takes about a minute to wake: the first visitor to a preview
-# after a quiet spell waits that long before the page can write.
+# One free instance: two open PRs that both change the server take turns, the
+# last push wins. It sleeps after 15 minutes without a request or a WebSocket
+# message and takes about a minute to wake.
+#
+# Keep it at no cost: no payment method on the Render workspace, or a spend
+# limit of zero. Build minutes and bandwidth past the free allowance are
+# billed as overage where a card is on file.
 services:
   - type: web
     name: swarm-id-bus-preview
     runtime: node
     plan: free
     branch: main
-    # Deployed by the workflow, which knows which commit a preview needs.
+    # The blueprint's own branch; the workflow deploys PR head commits.
     autoDeployTrigger: 'off'
     buildCommand: corepack enable && pnpm install --frozen-lockfile --filter @swarm-id/signaling...
     startCommand: corepack enable && pnpm --filter @swarm-id/signaling start

@@ -158,11 +158,11 @@ app at root paths, plus per-PR previews under `…/pr-N/` (`deploy-main-pages.ym
 | `swarm.snaha.net/demo/` | demo, run against `/id` |
 | `swarm.snaha.net/docs/` | docs site               |
 
-Everything under `swarm.snaha.net` shares one account-bus signaling server, a free Render
-instance (`render.yaml`, its address in the repository variable `PREVIEW_BUS_SIGNALING_URL`).
-It runs `main`, except while a PR that touches `signaling/` is open: `deploy-preview.yml` puts
-that PR's head commit there, and `main` back when it closes. It sleeps when idle and takes
-about a minute to wake.
+The builds under `swarm.snaha.net` use production's account-bus signaling server (below),
+which admits that origin too. The exception is a PR that touches `signaling/`: its preview is
+built against a free Render instance (`render.yaml`, its address in the repository variable
+`PREVIEW_BUS_SIGNALING_URL`) that `deploy-preview.yml` deploys the PR's head commit to. That
+instance sleeps when idle and takes about a minute to wake.
 
 DigitalOcean (`deploy-do.yml`, push to main) keeps the canonical domains:
 

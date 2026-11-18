@@ -136,9 +136,8 @@ jobs:
           ORIGIN: https://swarm.snaha.net
           PUBLIC_APP_DOMAIN: https://swarm.snaha.net/demo
           PUBLIC_ID_DOMAIN: https://swarm.snaha.net/id
-          # The signaling server the previews use (`render.yaml`): this build
-          # shares their origin, and production's server admits only its own.
-          PUBLIC_BUS_SIGNALING_URL: ${{ vars.PREVIEW_BUS_SIGNALING_URL }}
+          # Production's signaling server, which runs `main` as this build does.
+          PUBLIC_BUS_SIGNALING_URL: wss://swarm-id.snaha.net/bus
         run: pnpm --filter @swarm-id/ui build
 
       - name: Create 404.html for SPA routing
