@@ -55,6 +55,11 @@ import type { StampWorkerPool } from "../proxy/stamp-worker-pool"
 
 /** Hard cap on getting a lane, the read of its published counter included. */
 const LANE_ACQUIRE_TIMEOUT_MS = 45000
+/**
+ * How long the read of a lane's published counter may take. The lane is
+ * answered "held" meanwhile, so a read that never ends must not keep it.
+ */
+export const LANE_RESUME_TIMEOUT_MS = 20000
 /** How long a blocking write waits for a lane to be handed over. */
 export const SLOT_WAIT_TIMEOUT_MS = 30000
 /**
@@ -541,7 +546,11 @@ export class BatchWriteCoordinator {
       let localCounter: Uint32Array | undefined
       this.resuming = partition
       try {
-        localCounter = await this.state(partition).resume()
+        localCounter = await withTimeout(
+          this.state(partition).resume(),
+          LANE_RESUME_TIMEOUT_MS,
+          `Partition ${partition}'s published state could not be read in time`,
+        )
       } catch (error) {
         lane.release()
         throw error

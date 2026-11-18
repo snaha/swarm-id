@@ -689,6 +689,8 @@ export async function writePartitionState(opts: {
   previousCounter?: Uint32Array
   /** The frame the previous publish packed with; kept while it still fits. */
   previousFrame?: CounterFrame
+  /** The previous publish's reference chunk. */
+  previousReferenceHex?: string
   /** Runs once the leaves and the reference chunk are stored, just before
    *  the pointer entry is written; a throw leaves the entry unwritten. */
   beforePointer?: () => void
@@ -829,6 +831,21 @@ export async function writePartitionState(opts: {
       if (!uploadSet.has(i) && !bytesAllZero(references[i]))
         claimedBuckets.add(toBucket(references[i].slice(0, 32)))
     }
+  }
+  // The chunks this publish replaces, too. Until its pointer entry is
+  // written they are the newest state there is, and a new chunk in one of
+  // their buckets would evict it: a publish that then stops half-way would
+  // leave a lane nobody can read.
+  if (previous) {
+    for (const reference of previous.references) {
+      if (!bytesAllZero(reference))
+        claimedBuckets.add(toBucket(reference.slice(0, 32)))
+    }
+  }
+  if (opts.previousReferenceHex !== undefined) {
+    claimedBuckets.add(
+      toBucket(new Reference(opts.previousReferenceHex).toUint8Array()),
+    )
   }
 
   // Precompute (CPU only) a distinct-bucket key/address for each chunk we will

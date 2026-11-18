@@ -111,7 +111,12 @@ export class LaneState {
       // the one bound last. Stamps of an upload that was never acknowledged
       // are not in the baseline, and their slots are used again.
       this.publishUnsettled = false
-      return this.publishedCounter?.slice() ?? new Uint32Array(NUM_BUCKETS)
+      if (this.publishedCounter === undefined) {
+        throw new Error(
+          `[LaneState] partition ${partition}: no counter kept for the state it is in sync with.`,
+        )
+      }
+      return this.publishedCounter.slice()
     }
 
     const localCounter = state.localCounter ?? new Uint32Array(NUM_BUCKETS)
@@ -181,6 +186,7 @@ export class LaneState {
       previousReferences: this.publishedReferences,
       previousCounter: this.publishedCounter,
       previousFrame: this.publishedFrame,
+      previousReferenceHex: this.published.referenceHex,
       // The entry is what the next holder acts on: not written for a lane
       // that went while the leaves were uploaded.
       beforePointer: () => {
