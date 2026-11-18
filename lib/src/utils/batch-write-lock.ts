@@ -32,7 +32,9 @@ export async function withBatchWriteLock<T>(
         op,
       )
     } catch (error) {
-      // A queued request rejects with the signal's reason; `op` never ran.
+      // A request aborted while it queues rejects with the signal's reason, as
+      // does an `op` that ends on the abort itself: either way the write was
+      // aborted.
       if (signal?.aborted && error === signal.reason) {
         throw abortedError(signal)
       }

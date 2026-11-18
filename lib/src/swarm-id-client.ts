@@ -746,11 +746,16 @@ export class SwarmIdClient {
       const stopWatchingSignal = () =>
         signal?.removeEventListener("abort", onAbort)
 
-      const expire = () => {
+      const expire = (waited: number, queued: boolean) => {
         stopWatchingSignal()
         this.pendingRequests.delete(message.requestId)
         reject(
-          new SwarmIdError("timeout", `Request timeout after ${timeout}ms`),
+          new SwarmIdError(
+            "timeout",
+            queued
+              ? `Request timeout after ${waited}ms: the proxy went silent while the write was queued for its drive`
+              : `Request timeout after ${waited}ms`,
+          ),
         )
         // The proxy may still be at it, or queued to be: a write that ran
         // after its caller was told it failed would spend stamps for nothing.
@@ -768,17 +773,15 @@ export class SwarmIdClient {
           stopWatchingSignal()
           reject(error)
         },
-        timeoutId: setTimeout(expire, timeout),
+        timeoutId: setTimeout(() => expire(timeout, false), timeout),
         rearm: () => {
           clearTimeout(pending.timeoutId)
-          pending.timeoutId = setTimeout(expire, timeout)
+          pending.timeoutId = setTimeout(() => expire(timeout, false), timeout)
         },
         queued: () => {
           clearTimeout(pending.timeoutId)
-          pending.timeoutId = setTimeout(
-            expire,
-            Math.max(timeout, QUEUED_SILENCE_TIMEOUT_MS),
-          )
+          const silence = Math.max(timeout, QUEUED_SILENCE_TIMEOUT_MS)
+          pending.timeoutId = setTimeout(() => expire(silence, true), silence)
         },
       }
       this.pendingRequests.set(message.requestId, pending)
