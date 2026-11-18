@@ -102,6 +102,42 @@ function makeLaneState(): LaneState {
   })
 }
 
+/**
+ * A stamper that remembers what it is in sync with in `rows`, as the
+ * browser's store does: contexts that share `rows` share what is remembered,
+ * and a context made after another is one opened after a reload.
+ */
+function makeRememberingStamper(
+  rows = new Map<string, unknown>(),
+): Promise<UtilizationAwareStamper> {
+  return UtilizationAwareStamper.create(
+    "11".repeat(32),
+    TEST_BATCH_ID,
+    20,
+    {
+      getAllChunks: async () => [],
+      putChunk: async () => undefined,
+      getMetadata: async (id: string) => rows.get(id),
+      putMetadata: async (meta: { batchId: string }) => {
+        rows.set(meta.batchId, meta)
+      },
+    } as unknown as UtilizationStoreDB,
+    OWNER,
+    TEST_ENC_KEY,
+  )
+}
+
+function makeLaneStateOf(stamper: UtilizationAwareStamper): LaneState {
+  return new LaneState({
+    bee: bee,
+    batchId: TEST_BATCH_ID,
+    partition: 0,
+    backupSigner: BACKUP_SIGNER,
+    swarmEncryptionKey: TEST_ENC_KEY,
+    stamper,
+  })
+}
+
 /** Publish `counter` as entry 1 of partition 0, as an earlier holder would. */
 async function publishAsEarlierHolder(counter: Uint32Array) {
   return partitionState.writePartitionState({
@@ -565,30 +601,8 @@ describe("LaneState — a holder's resume and publish", () => {
     const published = new Uint32Array(NUM_BUCKETS)
     published[100] = 5
     await publishAsEarlierHolder(published)
-    const rows = new Map<string, unknown>()
-    const stamper = await UtilizationAwareStamper.create(
-      "11".repeat(32),
-      TEST_BATCH_ID,
-      20,
-      {
-        getAllChunks: async () => [],
-        putChunk: async () => undefined,
-        getMetadata: async (id: string) => rows.get(id),
-        putMetadata: async (meta: { batchId: string }) => {
-          rows.set(meta.batchId, meta)
-        },
-      } as unknown as UtilizationStoreDB,
-      OWNER,
-      TEST_ENC_KEY,
-    )
-    const state = new LaneState({
-      bee: bee,
-      batchId: TEST_BATCH_ID,
-      partition: 0,
-      backupSigner: BACKUP_SIGNER,
-      swarmEncryptionKey: TEST_ENC_KEY,
-      stamper,
-    })
+    const stamper = await makeRememberingStamper()
+    const state = makeLaneStateOf(stamper)
     expect(await state.resume()).toEqual(published)
 
     const otherLane = new Uint32Array(NUM_BUCKETS)
@@ -697,10 +711,9 @@ describe("LaneState — a holder's resume and publish", () => {
 
   // Bee answers "not found" for a retrieval that failed some other way too
   // (a deadline, no peer to ask), and for a while it keeps doing so.
-  describe("an entry it read or wrote itself, reported absent", () => {
-    const notFound = () =>
-      Object.assign(new Error("Not Found"), { status: 404 })
+  const notFound = () => Object.assign(new Error("Not Found"), { status: 404 })
 
+  describe("an entry it read or wrote itself, reported absent", () => {
     it("is not resumed below", async () => {
       const state = makeLaneState()
       const counter = (await state.resume()) ?? new Uint32Array(NUM_BUCKETS)
@@ -729,6 +742,71 @@ describe("LaneState — a holder's resume and publish", () => {
       )
       await expect(state.publish(counter)).rejects.toThrow(/newest/)
       expect(writeSpy).toHaveBeenCalledTimes(1)
+    })
+  })
+
+  // What the browser remembers across a reload is an entry that was on
+  // Swarm, so the newest entry is that one or a later one.
+  describe("an entry the browser remembers from before a reload", () => {
+    /** Publishes `entries` states, then returns a context opened after. */
+    async function reloadedAfterPublishing(entries: number) {
+      const rows = new Map<string, unknown>()
+      const before = makeLaneStateOf(await makeRememberingStamper(rows))
+      const counter = (await before.resume()) ?? new Uint32Array(NUM_BUCKETS)
+      for (let entry = 1; entry <= entries; entry++) {
+        counter[100] = entry
+        await before.publish(counter)
+      }
+      return {
+        counter,
+        state: makeLaneStateOf(await makeRememberingStamper(rows)),
+        remembers: await makeRememberingStamper(rows),
+      }
+    }
+
+    it("is not resumed below when every entry is reported absent", async () => {
+      const { state } = await reloadedAfterPublishing(2)
+
+      vi.spyOn(downloadData, "downloadEncryptedSOC").mockRejectedValue(
+        notFound(),
+      )
+      expect(await state.resume()).toBeUndefined()
+    })
+
+    it("is not resumed below when only the newest entries are reported absent", async () => {
+      const { state } = await reloadedAfterPublishing(2)
+
+      const read = downloadData.downloadEncryptedSOC
+      vi.spyOn(downloadData, "downloadEncryptedSOC").mockImplementation(
+        async (...args) => {
+          const soc = await read(...args)
+          const { seq } = JSON.parse(new TextDecoder().decode(soc.payload))
+          if (seq === 2) throw notFound()
+          return soc
+        },
+      )
+      expect(await state.resume()).toBeUndefined()
+    })
+
+    // An entry off the search path of a later one can be replaced by it, so
+    // the remembered entry being gone is not by itself a misread.
+    it("resumes from a later entry when the remembered one is gone", async () => {
+      const { state, counter, remembers } = await reloadedAfterPublishing(3)
+      await remembers.setSyncedPointer(0, {
+        seq: 2,
+        referenceHex: "aa".repeat(64),
+      })
+
+      const read = downloadData.downloadEncryptedSOC
+      vi.spyOn(downloadData, "downloadEncryptedSOC").mockImplementation(
+        async (...args) => {
+          const soc = await read(...args)
+          const { seq } = JSON.parse(new TextDecoder().decode(soc.payload))
+          if (seq === 2) throw notFound()
+          return soc
+        },
+      )
+      expect(await state.resume()).toEqual(counter)
     })
   })
 

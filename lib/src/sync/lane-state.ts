@@ -91,15 +91,18 @@ export class LaneState {
     const cached = stamper instanceof UtilizationAwareStamper
     const trusted = this.known
     const run = ++this.run
+    // What the browser remembers across a reload is an entry too, though not
+    // one whose counter this context has.
+    const remembered =
+      trusted ??
+      (cached ? await stamper.getSyncedPointer(partition) : undefined)
     const lookup = await readStatePointer({
       bee,
       owner: this.owner,
       swarmEncryptionKey,
       batchId,
       partition,
-      known:
-        trusted ??
-        (cached ? await stamper.getSyncedPointer(partition) : undefined),
+      known: remembered,
     })
     const state = await readPartitionState(
       {
@@ -113,10 +116,19 @@ export class LaneState {
       trusted,
     )
     if (state.readFailed || run !== this.run) return undefined
-    // An entry this context read or wrote itself does not go away. Bee
-    // answers "not found" for a retrieval that failed some other way too, so
-    // a lookup that ends below that entry is a misread, not news.
-    if (trusted && (lookup.pointer?.seq ?? 0) < trusted.seq) return undefined
+    // The newest entry is never below one that was read or written before:
+    // entries are only added. Bee answers "not found" for a retrieval that
+    // failed some other way too, so a lookup that ends below is a misread,
+    // not news. Ending at or above it is fine with the entry itself gone: a
+    // later entry can replace one that is off its search path.
+    if (remembered && (lookup.pointer?.seq ?? 0) < remembered.seq) {
+      console.warn(
+        `[LaneState] partition ${partition}: entry ${remembered.seq} was ` +
+          `published, and the newest found is ${lookup.pointer?.seq ?? 0}; ` +
+          "not resuming below it.",
+      )
+      return undefined
+    }
 
     if (state.unchanged) {
       // Nothing was published since this context last read or wrote the
