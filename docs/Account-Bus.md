@@ -320,9 +320,10 @@ Each landed as its own PR chain, in this order:
    beside a lock chunk on Swarm). A context claims a lane with `lane-claim`, naming itself by
    its peer id and the claim by a random round; every other context answers `lane-free` for
    that round unless it is writing on the lane or claiming it under a lower name. The claimant
-   holds the lane once everyone has answered or been absent from the room for 8 s, and only
-   while its own connection is confirmed (a round trip with the server at the server's 2 s
-   tick, never older than 6 s). `BusLanes` (`lib/src/sync/bus-lease.ts`) runs this for a
+   holds the lane once everyone has answered or been absent from the room for 8 s (and it
+   has itself been in the room that long), and only while its own connection is confirmed
+   (a round trip with the server at the server's 2 s tick, never older than 6 s). An answer
+   goes to the claimant alone; a holder that is writing answers `lane-held`. `BusLanes` (`lib/src/sync/bus-lease.ts`) runs this for a
    context and answers for lanes it never opened; `BatchWriteCoordinator` decides when to ask
    and when a holder is busy.
 
@@ -453,14 +454,11 @@ Not yet written:
 
 ## Known gaps
 
-- **A mixed-version window means two holders of one lane.** The lock, intent and occupancy
-  addresses derive from the batch since [#589](https://github.com/snaha/swarm-id/issues/589), so an
-  old bundle and a new one compute different addresses for the same `(batch, partition)` and each
-  reads the other's lane as free — two writers in one slot set, not a stale read. Both sides deploy
-  together, which is what makes that window short rather than absent; it is the same deploy-in-step
-  property [#588](https://github.com/snaha/swarm-id/issues/588) established for the channel rename, and
-  the first change here where the cost of getting it wrong is a corrupted lane rather than a missed
-  message.
+- **A room is one protocol version.** A claimant waits for every member of its room, so a
+  member that speaks another lane protocol would block every lane. The room topic's label
+  names the protocol (`bus-context.ts`), which puts such a build in a room of its own:
+  nothing is corrupted, and the two do not see each other live until both run the same
+  build ([`decisions.md`](./decisions.md), 2026-11-18).
 - A revocation made while a dApp partition is **closed** is not pushed to it: the room has no
   mailbox. Since #635 the popup re-handshake is no longer what catches it either — a restored
   session reads the account's published state once instead, and ends itself on a tombstone.

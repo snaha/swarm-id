@@ -55,9 +55,9 @@ built from it. The proxy holds a map of them keyed by batch id. Entries never re
 other.
 
 **The primary drive's entry is created at connect, every other entry on the first write to
-that drive.** An entry costs a lane acquire and a heartbeat, so an "all drives" app must not
-pay for drives it never writes; the coordinator's existing idle-yield releases the lane
-again. The primary's entry is the one the proxy builds today (`uploadMode` and
+that drive.** An entry costs a lane acquire, and a lane taken is kept until the tab closes
+or another context asks for it, so an "all drives" app must not take lanes on drives it
+never writes. The primary's entry is the one the proxy builds today (`uploadMode` and
 `uploadUnavailableReason` report whether its stamper built, and its eager lease spares the
 first upload the acquire), and it keeps today's job: the proxy's own account-state publish
 (`runAccountStatePublish`, for multi-device accounts)
@@ -198,8 +198,8 @@ bucket overwrites its oldest chunk in that lane.
   `lib/src/sync/partition-state.ts`), and a monotonic counter keeps it valid unchanged.
 - **Counters serialize as uint32**, as on every drive: a wrapping counter is not bounded by
   the lane.
-- **The drive's own metadata is safe.** Lock SOCs, intent, partition state and utilization
-  chunks stamp the reserved slots `[0, partitionCount)`, below the data lane, so the ring
+- **The drive's own metadata is safe.** The partition state (its leaves, reference chunk
+  and pointer entries) stamps the reserved slots `[0, partitionCount)`, below the data lane, so the ring
   never evicts them.
 - **Two apps on one scratch drive** share the counter (as two tabs on one batch do today), so
   one overwrites the other's data only once the counters wrap. Accepted.
