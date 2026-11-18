@@ -84,8 +84,9 @@ embeds <code dir="auto">swarm-id.snaha.net</code>, both under <code dir="auto">s
 <ol>
 <li>Build <code dir="auto">ui/</code> with <code dir="auto">BASE_PATH</code> set to the path you serve it from (the hosted deployments
 use <code dir="auto">/id</code>), and <code dir="auto">PUBLIC_BUS_SIGNALING_URL</code> pointing at a
-<a href="../account-bus/">signaling server</a> you run, or leave it unset to run without
-cross-device sync.</li>
+<a href="../account-bus/">signaling server</a> you run. The server is required to upload: an
+account’s devices agree over it who writes which part of a drive, and a build with no
+server reports <code dir="auto">canUpload: false</code> with <code dir="auto">no-account-bus</code>.</li>
 <li>Serve the build from a subdomain of your app’s site, over HTTPS, with the same
 registrable domain. Ports do not affect site; the scheme and the registrable domain do.</li>
 <li>Point your <code dir="auto">SwarmIdClient</code> at it with <code dir="auto">iframeOrigin</code>.</li>
