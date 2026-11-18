@@ -190,8 +190,15 @@ describe("a write across the bridge", () => {
     const CHUNKS = LEAVES + 2 + 1
     const STALL_AT_CHUNK = LEAVES / 2
 
+    /**
+     * The clock and the throttle's trailing timer only move when a test
+     * advances them, so how fast the machine runs the upload changes nothing.
+     */
+    const fakeTheThrottle = () =>
+      vi.useFakeTimers({ toFake: ["Date", "setTimeout", "clearTimeout"] })
+
     it("is posted once an interval at most, and the last report always", async () => {
-      vi.useFakeTimers({ toFake: ["Date"] })
+      fakeTheThrottle()
       const progress: Array<{ total: number; processed: number }> = []
 
       await bridge.client.uploadData(makeData(CHUNK_SIZE * LEAVES), {
@@ -203,7 +210,7 @@ describe("a write across the bridge", () => {
     })
 
     it("posts a held-back report once the interval is up, while the upload stalls", async () => {
-      vi.useFakeTimers({ toFake: ["Date"] })
+      fakeTheThrottle()
       const progress: Array<{ total: number; processed: number }> = []
       let reachStall: () => void = () => {}
       const stallReached = new Promise<void>((r) => (reachStall = r))
@@ -219,7 +226,7 @@ describe("a write across the bridge", () => {
         onProgress: (p) => progress.push(p),
       })
       await stallReached
-      await new Promise((r) => setTimeout(r, PROGRESS_INTERVAL_MS + SETTLE_MS))
+      await vi.advanceTimersByTimeAsync(PROGRESS_INTERVAL_MS + SETTLE_MS)
 
       expect(progress.length).toBe(2)
       expect(progress[1].processed).toBe(STALL_AT_CHUNK - 1)

@@ -32,9 +32,11 @@ export const REQUEST_QUEUED_INTERVAL_MS = 5 * SECOND
 /**
  * How long the client lets a queued write's proxy go without a beat, or the
  * request's own timeout when that is longer: a proxy that has died is caught
- * within it, whatever timeout the client was built with.
+ * within it, whatever timeout the client was built with. A browser may run a
+ * hidden page's repeating timers only once a minute, so the proxy's beats can
+ * arrive a minute apart: the allowance is that minute plus slack.
  */
-export const QUEUED_SILENCE_TIMEOUT_MS = 3 * REQUEST_QUEUED_INTERVAL_MS
+export const QUEUED_SILENCE_TIMEOUT_MS = 90 * SECOND
 
 /**
  * The proxy posts an upload's progress at most this often: a report per chunk

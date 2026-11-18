@@ -2,8 +2,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * An in-memory `navigator.locks` for tests, which Node does not have:
- * exclusive locks only, granted in request order. A request whose `signal`
+ * An in-memory `navigator.locks` for tests, whatever the Node running them
+ * provides: exclusive locks only, granted in request order. A request whose `signal`
  * aborts while it queues rejects with the signal's reason and leaves the
  * queue, as the Web Locks API does.
  */

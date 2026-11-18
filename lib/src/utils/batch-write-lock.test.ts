@@ -1,7 +1,7 @@
 // Copyright 2026 The Swarm Authors. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { describe, it, expect, vi, afterEach } from "vitest"
+import { describe, it, expect, vi, afterEach, beforeEach } from "vitest"
 import { withBatchWriteLock } from "./batch-write-lock"
 import { FakeLockManager } from "./fake-web-locks"
 
@@ -78,6 +78,11 @@ describe("withBatchWriteLock", () => {
   })
 
   describe("without Web Locks", () => {
+    // Whether the Node running the tests has `navigator.locks` changes nothing.
+    beforeEach(() => {
+      vi.stubGlobal("navigator", {})
+    })
+
     it("runs the write", async () => {
       expect(await withBatchWriteLock(BATCH_ID, async () => "ran")).toBe("ran")
     })
