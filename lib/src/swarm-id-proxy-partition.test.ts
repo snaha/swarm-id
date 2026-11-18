@@ -4905,11 +4905,9 @@ describe("SwarmIdProxy partitioned write enablement", () => {
     })
 
     // An unbound stamper cannot judge a lane yet, but the lane it is ABOUT to
-    // bind may be exactly the one the delta carries. Dropping it loses it for
-    // good: the coordinator's adopt fast path re-binds from this tab's own
-    // in-memory counters (`buildLeaseLocalCounter`), not from durable state, so
-    // a sibling tab's writes would be invisible and we would re-issue slots it
-    // already consumed.
+    // bind may be exactly the one the delta carries: a bind takes the lane's
+    // published counter, and a sibling tab's stamps past it are only in the
+    // delta.
     it("holds a delta received while unbound and folds it in on lease acquire", async () => {
       await hydrateOnLane(0)
       // Between leases: no lane to compare against.

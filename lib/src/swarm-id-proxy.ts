@@ -1769,11 +1769,9 @@ export class SwarmIdProxy {
           const lane = stamper.currentPartition
           if (lane === undefined) {
             // Unbound: the lane this delta belongs to may well be the one we
-            // are about to bind. Dropping it loses it for good — the adopt
-            // fast path re-binds from THIS tab's in-memory counters
-            // (`buildLeaseLocalCounter`), not from durable state, so a sibling
-            // tab's writes would be invisible and we would re-issue slots it
-            // already consumed. Hold it until the bind names our lane.
+            // are about to bind: a bind takes the lane's published counter,
+            // and stamps a sibling tab has made past it are only in these
+            // deltas. Hold it until the bind names our lane.
             // A legacy single-partition delta has no lease to wait for and
             // applies immediately.
             if (message.partition === 0 && message.partitionCount === 1) {
