@@ -7,6 +7,26 @@ present and may point at an issue or PR; the reasons live here.
 
 A PR that makes or changes a decision adds the entry in the same PR.
 
+## 2026-11-18 The live Relay suite runs where a Relay change can show, one run at a time
+
+**Context.** `relay.live.test.ts` quotes Relay's real API and ran as a job of
+`ci.yml` on every PR. Relay changes without a commit of ours, so a bad hour
+there turned every open PR red whatever it touched (#843), and runs that
+started together were answered with HTTP 429 (#1049).
+
+**Decision.** The suite has its own workflow, `live-contracts.yml`. It runs on
+a PR that touches the payment code, the suite's config or the lib's timeout
+helpers, on every push to `main`, nightly, and on demand. All its runs share one
+concurrency group and queue instead of cancelling.
+
+**Why.** A red check on a PR should mean the PR broke something. `main` and the
+nightly run still date a change on Relay's side to a day. A workflow of its own
+takes a `paths` filter and a schedule without either applying to the rest of
+CI. The queue keeps runs from sharing Relay's rate limit; GitHub holds one
+pending run per group, so a burst of pushes leaves the newest queued run and
+drops the older queued ones, which the next push or the nightly run makes up
+for. The suite still treats a 429 as a refused route (#1049).
+
 ## 2026-11-18 Previews use production's signaling server; a PR that changes the server gets a Render instance
 
 **Context.** The GitHub Pages builds (`main` and the per-PR previews) had no signaling
