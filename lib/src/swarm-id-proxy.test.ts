@@ -1387,6 +1387,8 @@ describe("SwarmIdProxy subsidised-mode selection", () => {
     class AckingWebSocket {
       static readonly OPEN = 1
       static readonly CLOSED = 3
+      /** The URL of every stream opened, in order. */
+      static opened: string[] = []
       readyState = 0
       binaryType = ""
       onopen: (() => void) | undefined
@@ -1394,6 +1396,7 @@ describe("SwarmIdProxy subsidised-mode selection", () => {
       onclose: (() => void) | undefined
 
       constructor(readonly url: string) {
+        AckingWebSocket.opened.push(url)
         queueMicrotask(() => {
           this.readyState = AckingWebSocket.OPEN
           this.onopen?.()
@@ -1431,6 +1434,7 @@ describe("SwarmIdProxy subsidised-mode selection", () => {
         stamper: true,
       })
       vi.stubGlobal("WebSocket", AckingWebSocket)
+      AckingWebSocket.opened = []
       const withWrite = vi.fn(
         (operation: (target: UploadTarget) => Promise<unknown>) =>
           operation({
@@ -1464,6 +1468,15 @@ describe("SwarmIdProxy subsidised-mode selection", () => {
       expect(tagCreate).not.toHaveBeenCalled()
     })
 
+    it("sends an ACT upload's content over the stream", async () => {
+      await userStampSession()
+
+      await send({ ...fileUpload({}), type: "actUploadData", grantees: [] })
+
+      expect(answer()).toMatchObject({ type: "actUploadDataResponse" })
+      expect(AckingWebSocket.opened).not.toHaveLength(0)
+    })
+
     it("tags a deferred file upload", async () => {
       await userStampSession()
 
@@ -1484,11 +1497,11 @@ describe("SwarmIdProxy subsidised-mode selection", () => {
     ])(
       "refuses $title before taking the write lock or a tag",
       async ({ options }) => {
-        for (const type of ["uploadData", "uploadFile"]) {
+        for (const type of ["uploadData", "uploadFile", "actUploadData"]) {
           parentWindow.postMessage.mockClear()
           const { withWrite, tagCreate } = await userStampSession()
 
-          await send({ ...fileUpload(options), type })
+          await send({ ...fileUpload(options), type, grantees: [] })
 
           expect(answer()).toMatchObject({
             type: "error",
@@ -1503,7 +1516,7 @@ describe("SwarmIdProxy subsidised-mode selection", () => {
     // The gateway stamps the chunks itself and takes no stream, so neither a
     // pin nor a tag conflicts with anything there.
     it("accepts in subsidised mode what only the stream would refuse", async () => {
-      for (const type of ["uploadData", "uploadFile"]) {
+      for (const type of ["uploadData", "uploadFile", "actUploadData"]) {
         parentWindow.postMessage.mockClear()
         await identify(GATEWAY_URL)
         setAccountState({})
@@ -1512,7 +1525,11 @@ describe("SwarmIdProxy subsidised-mode selection", () => {
             new Response(JSON.stringify({ reference: "ab".repeat(32) })),
         )
 
-        await send({ ...fileUpload({ pin: true, tag: CALLER_TAG }), type })
+        await send({
+          ...fileUpload({ pin: true, tag: CALLER_TAG }),
+          type,
+          grantees: [],
+        })
 
         await vi.waitFor(() => expect(answer()).toBeDefined())
         expect(answer()).toMatchObject({ type: `${type}Response` })

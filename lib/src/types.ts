@@ -210,6 +210,12 @@ export interface UploadOptions {
   concurrency?: number
 }
 
+/** What a single-chunk write takes: one chunk needs no stream, workers or concurrency. */
+export type ChunkUploadOptions = Pick<
+  UploadOptions,
+  "batchID" | "pin" | "tag" | "deferred"
+>
+
 /**
  * `signal` stops the call and rejects it with `aborted`. It cannot
  * cross the bridge, so the wire schema has no such field: the client sends
@@ -540,12 +546,12 @@ export interface SOCWriter extends SOCReader {
    *
    * @param identifier - SOC identifier (32-byte value)
    * @param data - SOC payload data (1-4096 bytes)
-   * @param options - Optional upload configuration
+   * @param options - Optional upload configuration; `encrypt: false` uploads it unencrypted
    */
   upload: (
     identifier: Identifier | Uint8Array | string,
     data: Uint8Array,
-    options?: UploadOptions,
+    options?: ChunkUploadOptions & Pick<UploadOptions, "encrypt">,
   ) => Promise<SocUploadResult>
   /**
    * Upload an unencrypted SOC.
@@ -557,7 +563,7 @@ export interface SOCWriter extends SOCReader {
   rawUpload: (
     identifier: Identifier | Uint8Array | string,
     data: Uint8Array,
-    options?: UploadOptions,
+    options?: ChunkUploadOptions,
   ) => Promise<SocRawUploadResult>
 }
 
@@ -741,7 +747,10 @@ export interface SequentialFeedUpdateOptions {
  * Options for sequential feed uploads.
  */
 export interface SequentialFeedUploadOptions
-  extends UploadOptions, SequentialFeedUpdateOptions {}
+  extends
+    ChunkUploadOptions,
+    Pick<UploadOptions, "encrypt">,
+    SequentialFeedUpdateOptions {}
 
 /**
  * Options for sequential feed raw download (encryptionKey in options).
@@ -1421,6 +1430,10 @@ export const ActUploadDataMessageSchema = z.object({
   options: ActUploadOptionsSchema,
   requestOptions: RequestOptionsSchema,
   enableProgress: z.boolean().optional(),
+  useWebSocket: z.boolean().optional(),
+  useWorkers: z.boolean().optional(),
+  workerCount: z.number().int().min(1).max(32).optional(),
+  concurrency: z.number().int().min(1).max(256).optional(),
 })
 
 export const ActDownloadDataMessageSchema = z.object({

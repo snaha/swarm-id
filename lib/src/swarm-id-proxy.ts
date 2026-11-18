@@ -6179,10 +6179,19 @@ export class SwarmIdProxy {
       options,
       requestOptions,
       enableProgress,
+      useWebSocket,
+      useWorkers,
+      workerCount,
+      concurrency,
     } = message
 
     try {
       const batchID = options?.batchID
+      // A gateway takes no stream, so what the stream cannot honour is refused
+      // only where the write goes to a stamper.
+      if (useWebSocket && !this.writesSubsidised(batchID)) {
+        refuseChunkStreamConflicts(options)
+      }
       this.ensureCanUpload(batchID)
 
       // Parse grantee public keys from compressed hex
@@ -6218,14 +6227,22 @@ export class SwarmIdProxy {
         result: { actResult, contentUpload },
         stampedChunks,
       } = await this.withCountedWrite(
-        { signal: message.requestOptions.signal, useWorkers: true },
+        {
+          signal: message.requestOptions.signal,
+          useWorkers: useWorkers ?? true,
+          workerCount,
+        },
         async (target) => {
-          // Step 1: Upload raw content data (encrypted by default for 64-byte reference)
+          // Step 1: Upload raw content data (encrypted by default for 64-byte
+          // reference). Only the content takes the stream: the manifest and
+          // the ACT's own chunks go over HTTP.
           const contentUploadResult = await uploadData(target, data, {
             encryptionKey: options?.encrypt !== false ? true : undefined,
             pin: options?.pin,
             deferred: options?.deferred,
             tag: options?.tag,
+            webSocket: useWebSocket ? { concurrency } : undefined,
+            httpConcurrency: concurrency,
             onProgress,
             requestOptions,
           })

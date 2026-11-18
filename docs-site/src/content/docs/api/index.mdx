@@ -1008,7 +1008,7 @@ Chunks are the fundamental unit of storage in Swarm (4KB each). This method is u
 | Parameter                       | Type                     | Required | Description                                                                                                                            |
 | ------------------------------- | ------------------------ | -------- | -------------------------------------------------------------------------------------------------------------------------------------- |
 | `data`                          | `Uint8Array`             | Yes      | The chunk payload, 1 to 4096 bytes                                                                                                     |
-| `options`                       | `UploadOptions`          | No       | Upload configuration (see `uploadData`)                                                                                                |
+| `options`                       | `ChunkUploadOptions`     | No       | `batchID`, `pin`, `tag`, `deferred` (see `uploadData`)                                                                                 |
 | `requestOptions`                | `RequestOptions`         | No       | Request configuration                                                                                                                  |
 | `requestOptions.timeout`        | `number`                 | No       | Request timeout in milliseconds for this call. Replaces the client's default (30 s) for the whole round trip, not only the Bee request |
 | `requestOptions.headers`        | `Record<string, string>` | No       | Custom headers                                                                                                                         |
@@ -1432,7 +1432,7 @@ A feed manifest enables accessing the latest feed content via a URL path (e.g., 
 | `options`                | `object`                 | No       | Configuration options                                                                                                                  |
 | `options.owner`          | `string`                 | No       | Feed owner address; if omitted, uses app signer                                                                                        |
 | `options.feedType`       | `"Sequence" \| "Epoch"`  | No       | Feed type (defaults to `"Sequence"`)                                                                                                   |
-| `options.uploadOptions`  | `UploadOptions`          | No       | Upload configuration (pin, deferred, etc.)                                                                                             |
+| `options.uploadOptions`  | `ChunkUploadOptions`     | No       | `batchID`, `pin`, `tag`, `deferred`, and `encrypt` for the manifest (defaults to `true`)                                               |
 | `requestOptions`         | `RequestOptions`         | No       | Request configuration                                                                                                                  |
 | `requestOptions.timeout` | `number`                 | No       | Request timeout in milliseconds for this call. Replaces the client's default (30 s) for the whole round trip, not only the Bee request |
 | `requestOptions.headers` | `Record<string, string>` | No       | Custom headers                                                                                                                         |
@@ -1522,7 +1522,7 @@ Use the signer obtained from `gsocMine()` to send messages that will be routed t
 | `signer`                        | `string`                 | Yes      | The mined signer (private key) from `gsocMine()`                                                                                       |
 | `identifier`                    | `string`                 | Yes      | The identifier for the SOC (must match the one used in mining)                                                                         |
 | `data`                          | `Uint8Array`             | Yes      | The message data to send                                                                                                               |
-| `options`                       | `UploadOptions`          | No       | Upload configuration (see `uploadData`)                                                                                                |
+| `options`                       | `ChunkUploadOptions`     | No       | `batchID`, `pin`, `tag`, `deferred` (see `uploadData`)                                                                                 |
 | `requestOptions`                | `RequestOptions`         | No       | Request configuration                                                                                                                  |
 | `requestOptions.timeout`        | `number`                 | No       | Request timeout in milliseconds for this call. Replaces the client's default (30 s) for the whole round trip, not only the Bee request |
 | `requestOptions.headers`        | `Record<string, string>` | No       | Custom headers                                                                                                                         |
@@ -1900,6 +1900,7 @@ import type {
 
   // Upload/Download
   UploadOptions,
+  ChunkUploadOptions,
   DownloadOptions,
   UploadResult,
   FileData,

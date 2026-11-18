@@ -907,6 +907,23 @@ describe("SwarmIdClient request seam", () => {
     }
   })
 
+  it("actUploadData sends the stream and worker settings beside its options", () => {
+    const transfer = {
+      useWebSocket: true,
+      useWorkers: false,
+      workerCount: 2,
+      concurrency: 16,
+    }
+
+    void client
+      .actUploadData(new Uint8Array([1]), [], { pin: false, ...transfer })
+      .catch(() => {})
+
+    const sent = lastPostedMessage()
+    expect(sent).toMatchObject({ type: "actUploadData", ...transfer })
+    expect(sent.options).toEqual({ pin: false })
+  })
+
   it("downloadData sends plain non-ACT options (#420)", async () => {
     const reference = "a".repeat(64)
     const data = new Uint8Array([1, 2, 3])
