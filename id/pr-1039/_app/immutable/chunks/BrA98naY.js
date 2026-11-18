@@ -1,0 +1,1 @@
+import{payload as e}from"../entry/payload.DSmR2FwN.js";e.env;var t=`wss://swarm-id-bus-preview.onrender.com`;export{t};
