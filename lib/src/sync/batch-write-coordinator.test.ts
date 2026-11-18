@@ -15,7 +15,7 @@ const laneState = vi.hoisted(() => ({
   duringResume: undefined as (() => void | Promise<void>) | undefined,
   /** Runs inside `publish`, with the caller's "is the lane still mine?". */
   duringPublish: undefined as
-    | ((stillHeld: () => boolean) => void | Promise<void>)
+    | ((stillHeld: () => Promise<boolean>) => void | Promise<void>)
     | undefined,
 }))
 
@@ -29,7 +29,7 @@ vi.mock("./lane-state", () => ({
     }
     async publish(
       _counter: Uint32Array,
-      stillHeld: () => boolean,
+      stillHeld: () => Promise<boolean>,
     ): Promise<void> {
       if (laneState.publishError) throw laneState.publishError
       await laneState.duringPublish?.(stillHeld)
@@ -568,11 +568,11 @@ describe("BatchWriteCoordinator — losing the connection", () => {
     await a.coordinator.withWrite(async () => "x")
 
     const held: boolean[] = []
-    laneState.duringPublish = (stillHeld) => {
-      held.push(stillHeld())
+    laneState.duringPublish = async (stillHeld) => {
+      held.push(await stillHeld())
       a.liveness.confirmedAgo = LEASE_STOP_MS
       a.liveness.id = "a2"
-      held.push(stillHeld())
+      held.push(await stillHeld())
     }
     await expect(a.coordinator.withWrite(async () => "y")).rejects.toThrow(
       /reclaimed/,
@@ -706,9 +706,9 @@ describe("BatchWriteCoordinator — teardown", () => {
     await a.coordinator.withWrite(async () => "x")
 
     const held: boolean[] = []
-    laneState.duringPublish = (stillHeld) => {
+    laneState.duringPublish = async (stillHeld) => {
       a.coordinator.teardown()
-      held.push(stillHeld())
+      held.push(await stillHeld())
     }
     await expect(a.coordinator.withWrite(async () => "y")).rejects.toThrow()
     expect(held).toEqual([false])

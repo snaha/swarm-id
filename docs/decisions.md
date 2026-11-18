@@ -7,6 +7,24 @@ present and may point at an issue or PR; the reasons live here.
 
 A PR that makes or changes a decision adds the entry in the same PR.
 
+## 2026-11-18 An entry a context knows of is never taken for absent
+
+**Context.** Bee answers `404`, or `500 read chunk failed`, for a retrieval that failed for
+other reasons too (a deadline, no peer to ask), and goes on doing so for that chunk for a
+while. A lane is taken again exactly when connectivity has just changed. Two such answers
+for the newest pointer entry made a holder resume from an older entry, or from zero, and
+stamp over uploads it had acknowledged itself.
+
+**Decision.** A context that read or wrote an entry in this session treats a lookup that
+ends below that entry as unsettled: it does not resume and does not publish. The entry a
+browser remembers from an earlier session (IndexedDB) is still only a hint; when Bee calls
+it absent the search starts from nothing.
+
+**Why.** Within a session nothing removes an entry, so "absent" there can only be a
+misread. Across sessions it can be true (a local chain was reset, a format moved the
+entries), and refusing to write then leaves a drive stuck until local data is cleared.
+That case stays exposed to the double misread; it is the open half of this decision.
+
 ## 2026-11-18 A room is one protocol version, and the server holds every member to its ticks
 
 **Context.** A claimant waits for every member of its room. A page left open on a build

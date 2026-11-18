@@ -695,6 +695,130 @@ describe("LaneState — a holder's resume and publish", () => {
     expect(writeSpy.mock.calls.map(([opts]) => opts.seq)).toEqual([1, 2, 3, 3])
   })
 
+  // Bee answers "not found" for a retrieval that failed some other way too
+  // (a deadline, no peer to ask), and for a while it keeps doing so.
+  describe("an entry it read or wrote itself, reported absent", () => {
+    const notFound = () =>
+      Object.assign(new Error("Not Found"), { status: 404 })
+
+    it("is not resumed below", async () => {
+      const state = makeLaneState()
+      const counter = (await state.resume()) ?? new Uint32Array(NUM_BUCKETS)
+      counter[100] = 5
+      await state.publish(counter)
+
+      vi.spyOn(downloadData, "downloadEncryptedSOC").mockRejectedValue(
+        notFound(),
+      )
+      expect(await state.resume()).toBeUndefined()
+    })
+
+    it("is not published over", async () => {
+      const state = makeLaneState()
+      const counter = (await state.resume()) ?? new Uint32Array(NUM_BUCKETS)
+      counter[100] = 5
+      await state.publish(counter)
+      const writeSpy = vi
+        .spyOn(partitionState, "writePartitionState")
+        .mockRejectedValueOnce(new Error("failed part-way"))
+      counter[101] = 1
+      await expect(state.publish(counter)).rejects.toThrow("failed part-way")
+
+      vi.spyOn(downloadData, "downloadEncryptedSOC").mockRejectedValue(
+        notFound(),
+      )
+      await expect(state.publish(counter)).rejects.toThrow(/newest/)
+      expect(writeSpy).toHaveBeenCalledTimes(1)
+    })
+  })
+
+  describe("a read and a publish that overlap", () => {
+    // The coordinator gives up on a read after a while; the read goes on.
+    it("drops the result of a read that a later one overtook", async () => {
+      const holder = makeLaneState()
+      const first = (await holder.resume()) ?? new Uint32Array(NUM_BUCKETS)
+      first[100] = 1
+      await holder.publish(first)
+
+      const state = makeLaneState()
+      const read = partitionState.readPartitionState
+      let release = () => {}
+      let waiting = false
+      vi.spyOn(partitionState, "readPartitionState").mockImplementationOnce(
+        async (...args) => {
+          const result = await read(...args)
+          await new Promise<void>((resolve) => {
+            release = resolve
+            waiting = true
+          })
+          return result
+        },
+      )
+      const slow = state.resume()
+      await vi.waitFor(() => expect(waiting).toBe(true))
+
+      // A second read binds, and an upload is published under it: entry 2.
+      const counter = (await state.resume()) ?? new Uint32Array(NUM_BUCKETS)
+      counter[100] = 2
+      await state.publish(counter)
+
+      // The first read answers at last, with the state as it was at entry 1.
+      release()
+      expect(await slow).toBeUndefined()
+
+      // The next publish is entry 3, not entry 2 a second time.
+      const writeSpy = vi.spyOn(partitionState, "writePartitionState")
+      counter[100] = 3
+      await state.publish(counter)
+      expect(writeSpy.mock.calls.map(([opts]) => opts.seq)).toEqual([3])
+      expect(await makeLaneState().resume()).toEqual(counter)
+    })
+
+    // The lane went and was taken again while the pointer entry was on its
+    // way: the publish belongs to the hold that ended.
+    it("keeps the baseline of the read when a publish it overtook lands", async () => {
+      const state = makeLaneState()
+      const counter = (await state.resume()) ?? new Uint32Array(NUM_BUCKETS)
+      counter[100] = 1
+      await state.publish(counter)
+
+      const write = partitionState.writePartitionState
+      let release = () => {}
+      let waiting = false
+      vi.spyOn(partitionState, "writePartitionState").mockImplementationOnce(
+        async (opts) => {
+          const result = await write(opts)
+          await new Promise<void>((resolve) => {
+            release = resolve
+            waiting = true
+          })
+          return result
+        },
+      )
+      const stale = counter.slice()
+      stale[100] = 2
+      const overtaken = state.publish(stale)
+      await vi.waitFor(() => expect(waiting).toBe(true))
+
+      // Entry 2 is on Swarm by now, so this read finds it.
+      const resumed = await state.resume()
+      expect(resumed).toEqual(stale)
+      release()
+      await expect(overtaken).rejects.toThrow(/reclaimed/)
+
+      // The holder carries on from what it read: nothing regressed, and no
+      // entry is written twice.
+      const next = (resumed ?? stale).slice()
+      next[100] = 3
+      const writeSpy = vi
+        .spyOn(partitionState, "writePartitionState")
+        .mockClear()
+      await state.publish(next)
+      expect(writeSpy.mock.calls.map(([opts]) => opts.seq)).toEqual([3])
+      expect(await makeLaneState().resume()).toEqual(next)
+    })
+  })
+
   it("writes no pointer entry for a lane that went while its leaves were uploaded", async () => {
     const state = makeLaneState()
     const counter = (await state.resume()) ?? new Uint32Array(NUM_BUCKETS)
