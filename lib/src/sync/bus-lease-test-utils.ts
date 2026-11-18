@@ -48,6 +48,9 @@ export class FakeLiveness implements LaneLiveness {
   }
 }
 
+/** The signaling server's tick. */
+const SOLO_CONFIRM_MS = 2000
+
 /** A room of contexts whose published messages reach everyone else. */
 export function makeRoom() {
   const members: {
@@ -94,5 +97,10 @@ export function makeRoom() {
 /** The lanes of a context that is alone in its room: every claim succeeds at
  *  once. For a process with no account bus that still has to write. */
 export function soloLanes(): BusLanes {
-  return new BusLanes(makeRoom().join("solo"))
+  const bus = makeRoom().join("solo")
+  // Confirmed on the server's beat, as a real connection is: a holder may
+  // stamp only for a while after each confirmation, and an upload outlasts it.
+  const beat = setInterval(() => bus.liveness.confirm(), SOLO_CONFIRM_MS)
+  beat.unref?.()
+  return new BusLanes(bus)
 }
