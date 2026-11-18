@@ -21,7 +21,14 @@ import {
 import { SwarmIdClient } from "./swarm-id-client"
 import type { IframeToParentMessage } from "./types"
 import { CHUNK_SIZE, STREAM_PIECE_SIZE } from "./proxy/chunking"
-import { PROGRESS_INTERVAL_MS, STREAM_IDLE_TIMEOUT_MS } from "./utils/constants"
+import {
+  HOUR,
+  PROGRESS_INTERVAL_MS,
+  STREAM_IDLE_TIMEOUT_MS,
+  STREAM_SOURCE_DEADLINE_SLACK_MS,
+  STREAM_SOURCE_IDLE_MAX_MS,
+} from "./utils/constants"
+import { uploadSourceIdleTimeout } from "./utils/stream-deadline"
 import type { MockBee } from "./proxy/feeds/epochs/test-utils"
 import { DriveWritePath } from "./proxy/drive-write-path"
 import { uploadCollection } from "./proxy/collection"
@@ -179,9 +186,41 @@ describe("streaming across the bridge", () => {
     })
 
     it("still posts plain bytes as bytes", async () => {
+      const internals = client as unknown as ClientInternals
+      const received = vi.spyOn(internals, "handleIframeMessage")
+      const sent: Array<{ type: string; data?: unknown }> = []
+      const forward = internals.iframe as {
+        contentWindow: {
+          postMessage: (
+            message: { type: string; data?: unknown },
+            origin: string,
+            transfer?: Transferable[],
+          ) => void
+        }
+      }
+      internals.iframe = {
+        contentWindow: {
+          postMessage: (
+            message: { type: string; data?: unknown },
+            origin: string,
+            transfer?: Transferable[],
+          ) => {
+            sent.push(message)
+            forward.contentWindow.postMessage(message, origin, transfer)
+          },
+        },
+      }
       const data = makeData(32)
+
       const { reference } = await client.uploadData(data)
+
       expect(reference).toHaveLength(64)
+      const upload = sent.find((message) => message.type === "uploadData")
+      expect(upload?.data).toBeInstanceOf(Uint8Array)
+      expect(upload?.data).toEqual(data)
+      const types = received.mock.calls.map(([message]) => message.type)
+      expect(types).toContain("uploadDataResponse")
+      expect(types).not.toContain("uploadSourcePull")
     })
 
     it("reads an encrypted stream back", async () => {
@@ -416,6 +455,27 @@ describe("streaming across the bridge", () => {
         expect(settled).toHaveBeenCalledWith(
           expect.objectContaining({ code: "timeout" }),
         )
+      })
+
+      it("is let go of at the ceiling whatever a longer timeout asks", async () => {
+        vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] })
+        const cancel = vi.fn()
+        const upload = client.uploadData(silentStream(cancel), undefined, {
+          timeout: HOUR,
+        })
+        const settled = vi.fn()
+        upload.then(settled, settled)
+
+        await vi.advanceTimersByTimeAsync(STREAM_SOURCE_IDLE_MAX_MS - 1)
+        expect(settled).not.toHaveBeenCalled()
+
+        await vi.advanceTimersByTimeAsync(1)
+        expect(settled).toHaveBeenCalledWith(
+          expect.objectContaining({ code: "timeout" }),
+        )
+        await vi.advanceTimersByTimeAsync(SETTLE_MS)
+        expect(cancel).toHaveBeenCalledTimes(1)
+        expectNothingLeftBehind()
       })
 
       it("is let go of at once when a chunk fails", async () => {
@@ -1053,6 +1113,17 @@ describe("streaming across the bridge", () => {
           code: "timeout",
         })
       })
+
+      // An unread download holds no write lock: the upload's ceiling is not its.
+      it("is waited for past the upload source's ceiling when a timeout asks", async () => {
+        const reference = await upload(makeData(STREAM_PIECE_SIZE * 2))
+        vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] })
+        await client.downloadDataStream(reference, { timeout: HOUR })
+
+        await vi.advanceTimersByTimeAsync(STREAM_SOURCE_IDLE_MAX_MS + 1)
+
+        expect(proxy.downloadPulls.size).toBe(1)
+      })
     })
 
     it("errors the stream on a chunk that cannot be fetched", async () => {
@@ -1232,6 +1303,33 @@ describe("the wait for a streaming upload", () => {
     const requestId = requestIdOf()
 
     await expect(upload).rejects.toMatchObject({ code: "timeout" })
+    expect(posted().at(-1)).toEqual({ type: "abortRequest", requestId })
+    expect(cancel).toHaveBeenCalledTimes(1)
+  })
+
+  it("rejects with timeout once a silent source outlasts the proxy's deadline, and cancels it", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] })
+    const cancel = vi.fn()
+    const stream = new ReadableStream<Uint8Array>(
+      { pull: () => new Promise<void>(() => {}), cancel },
+      { highWaterMark: 0 },
+    )
+    const upload = client.uploadData(stream, undefined, { timeout: SHORT_MS })
+    const settled = vi.fn()
+    upload.then(settled, settled)
+    const requestId = requestIdOf()
+    // The proxy asks for a piece, then is never heard from again.
+    deliver({ type: "uploadSourcePull", requestId })
+    const deadline =
+      uploadSourceIdleTimeout(SHORT_MS) + STREAM_SOURCE_DEADLINE_SLACK_MS
+
+    await vi.advanceTimersByTimeAsync(deadline - 1)
+    expect(settled).not.toHaveBeenCalled()
+
+    await vi.advanceTimersByTimeAsync(1)
+    const error = settled.mock.calls[0][0]
+    expect(error).toMatchObject({ code: "timeout" })
+    expect(error.message).toMatch(/source/)
     expect(posted().at(-1)).toEqual({ type: "abortRequest", requestId })
     expect(cancel).toHaveBeenCalledTimes(1)
   })

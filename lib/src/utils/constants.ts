@@ -48,9 +48,25 @@ export const QUEUED_SILENCE_TIMEOUT_MS = 90 * SECOND
 /**
  * The silence either side of a streaming transfer tolerates by default: the
  * client waiting on the proxy, the proxy waiting on an upload's source or a
- * download's reader. A longer `requestOptions.timeout` raises both.
+ * download's reader. A longer `requestOptions.timeout` raises both, an
+ * upload's source up to {@link STREAM_SOURCE_IDLE_MAX_MS}.
  */
 export const STREAM_IDLE_TIMEOUT_MS = 2 * MINUTE
+
+/**
+ * The longest an upload's source may stay silent, whatever
+ * `requestOptions.timeout` asks: the upload holds the drive's cross-tab write
+ * lock for every writer on the device while it waits. A download's reader
+ * holds no lock and has no such ceiling.
+ */
+export const STREAM_SOURCE_IDLE_MAX_MS = 10 * MINUTE
+
+/**
+ * How much longer than the proxy the client waits on an upload's source
+ * before giving up on its own, so the proxy's `timeout` normally answers first
+ * and the client's deadline only catches a proxy that has gone.
+ */
+export const STREAM_SOURCE_DEADLINE_SLACK_MS = 10 * SECOND
 
 /**
  * The proxy posts an upload's progress at most this often: a report per chunk

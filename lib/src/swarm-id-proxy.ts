@@ -171,7 +171,11 @@ import {
   type PublishedCounter,
 } from "./sync/published-counter"
 import { deviceHomePartition } from "./sync/partition-lock"
-import { MAX_TIMER_DELAY_MS, TimeoutError, withTimeout } from "./utils/promise"
+import { TimeoutError, withTimeout } from "./utils/promise"
+import {
+  downloadReaderIdleTimeout,
+  uploadSourceIdleTimeout,
+} from "./utils/stream-deadline"
 import { Inbox } from "./utils/inbox"
 import { STREAM_PIECE_SIZE, rechunk } from "./proxy/chunking"
 import { UtilizationStoreDB } from "./storage/utilization-store"
@@ -243,7 +247,6 @@ import {
   PROGRESS_INTERVAL_MS,
   REQUEST_QUEUED_ANNOUNCE_DELAY_MS,
   REQUEST_QUEUED_INTERVAL_MS,
-  STREAM_IDLE_TIMEOUT_MS,
   appSessionDuration,
 } from "./utils/constants"
 import { PERMISSIONS_POPUP_MAX_MS, untilPopupClosed } from "./utils/popup"
@@ -398,19 +401,6 @@ interface ProgressReporter {
 interface WriteRequest {
   event: MessageEvent
   message: Abortable<{ requestId: string }>
-}
-
-/**
- * How long the dApp's side of a streaming transfer may stay silent, an
- * upload's source or a download's reader: the default, or a longer
- * `requestOptions.timeout`. A shorter one bounds only the proxy's own
- * silence, on the client.
- */
-function sourceIdleTimeout(perCall: number | undefined): number {
-  return Math.min(
-    Math.max(perCall ?? 0, STREAM_IDLE_TIMEOUT_MS),
-    MAX_TIMER_DELAY_MS,
-  )
 }
 
 /**
@@ -4825,7 +4815,7 @@ export class SwarmIdProxy {
       const download = await openDataStream(this.bee, reference, requestOptions)
       const pulls = new Inbox<undefined>(requestOptions.signal)
       this.downloadPulls.set(requestId, pulls)
-      const deadline = sourceIdleTimeout(requestOptions.timeout)
+      const deadline = downloadReaderIdleTimeout(requestOptions.timeout)
       const pieces = rechunk(download.leaves, STREAM_PIECE_SIZE)
       try {
         this.postMessage(event, { ...answer, requestId, size: download.size })
@@ -4916,7 +4906,7 @@ export class SwarmIdProxy {
   ): AsyncGenerator<Uint8Array> {
     const inbox = new Inbox<Uint8Array | undefined>(requestOptions.signal)
     this.uploadSources.set(requestId, { index, inbox })
-    const deadline = sourceIdleTimeout(requestOptions.timeout)
+    const deadline = uploadSourceIdleTimeout(requestOptions.timeout)
     try {
       while (true) {
         this.postMessage(event, { type: "uploadSourcePull", requestId, index })

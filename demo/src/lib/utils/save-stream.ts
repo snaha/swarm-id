@@ -32,6 +32,10 @@ function errorName(error: unknown): string | undefined {
   return error instanceof DOMException ? error.name : undefined
 }
 
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error)
+}
+
 function downloadBlob(blob: Blob, name: string): void {
   const url = URL.createObjectURL(blob)
   const anchor = document.createElement('a')
@@ -49,7 +53,8 @@ function downloadBlob(blob: Blob, name: string): void {
  * first, while the click's user activation is fresh, and the download is
  * asked for only once a file is chosen: a stream nobody reads is ended by the
  * proxy, and a picker opened after a slow lookup can be refused. A picker
- * that refuses for any reason but a cancel falls back to the Blob download.
+ * that refuses for any reason but a cancel, or a chosen file that will not
+ * open for writing, falls back to the Blob download.
  */
 export async function saveStream<T extends { stream: ReadableStream<Uint8Array>; name?: string }>(
   name: string,
@@ -63,10 +68,17 @@ export async function saveStream<T extends { stream: ReadableStream<Uint8Array>;
       handle = await picker({ suggestedName: name })
     } catch (error) {
       if (errorName(error) === 'AbortError') return { path: 'cancelled' }
-      reason = `the save picker refused: ${error instanceof Error ? error.message : String(error)}`
+      reason = `the save picker refused: ${errorMessage(error)}`
     }
+    let writable: FileSystemWritableFileStream | undefined
     if (handle) {
-      const writable = await handle.createWritable()
+      try {
+        writable = await handle.createWritable()
+      } catch (error) {
+        reason = `the chosen file would not open for writing: ${errorMessage(error)}`
+      }
+    }
+    if (writable) {
       let download: T
       try {
         download = await open()
