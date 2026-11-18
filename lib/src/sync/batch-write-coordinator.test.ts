@@ -13,6 +13,10 @@ const laneState = vi.hoisted(() => ({
   publishError: undefined as Error | undefined,
   /** Runs inside `resume`, before it returns. */
   duringResume: undefined as (() => void) | undefined,
+  /** Runs inside `publish`, with the caller's "is the lane still mine?". */
+  duringPublish: undefined as
+    | ((stillHeld: () => boolean) => void | Promise<void>)
+    | undefined,
 }))
 
 vi.mock("./lane-state", () => ({
@@ -23,8 +27,12 @@ vi.mock("./lane-state", () => ({
       laneState.duringResume?.()
       return laneState.resume()
     }
-    async publish(): Promise<void> {
+    async publish(
+      _counter: Uint32Array,
+      stillHeld: () => boolean,
+    ): Promise<void> {
       if (laneState.publishError) throw laneState.publishError
+      await laneState.duringPublish?.(stillHeld)
       laneState.published.push(this.opts.partition)
     }
   },
@@ -121,6 +129,7 @@ beforeEach(() => {
   laneState.published = []
   laneState.publishError = undefined
   laneState.duringResume = undefined
+  laneState.duringPublish = undefined
 })
 
 afterEach(() => {
@@ -519,6 +528,50 @@ describe("BatchWriteCoordinator — losing the connection", () => {
     expect(a.coordinator.currentPartition).toBeUndefined()
   })
 
+  it("does not acknowledge an upload whose connection was replaced while its counter was published", async () => {
+    const a = makeContext("a")
+    await a.coordinator.withWrite(async () => "x")
+
+    const held: boolean[] = []
+    laneState.duringPublish = (stillHeld) => {
+      held.push(stillHeld())
+      a.liveness.confirmedAgo = LEASE_STOP_MS
+      a.liveness.id = "a2"
+      held.push(stillHeld())
+    }
+    await expect(a.coordinator.withWrite(async () => "y")).rejects.toThrow(
+      /reclaimed/,
+    )
+    // What the publish asks just before it writes the pointer entry.
+    expect(held).toEqual([true, false])
+  })
+
+  it("does not acknowledge an upload against a lane taken again after its own was lost", async () => {
+    const a = makeContext("a")
+    await a.coordinator.withWrite(async () => "x")
+
+    let finishFirst = () => {}
+    const first = a.coordinator.withWrite(async () => {
+      a.liveness.confirmedAgo = 0
+      a.liveness.id = "a2"
+      await new Promise<void>((resolve) => (finishFirst = resolve))
+      return "first"
+    })
+    const outcome = first.then(
+      () => "acknowledged",
+      (error: Error) => error.message,
+    )
+    await advance(0)
+    // A second upload takes the lane again, under the new connection.
+    await expect(a.coordinator.withWrite(async () => "second")).resolves.toBe(
+      "second",
+    )
+    expect(a.coordinator.currentPartition).toBe(HOME)
+
+    finishFirst()
+    expect(await outcome).toMatch(/reclaimed/)
+  })
+
   it("moves the stamper's deadline forward with every confirmation", async () => {
     const a = makeContext("a")
     await a.coordinator.withWrite(async () => "x")
@@ -611,6 +664,19 @@ describe("BatchWriteCoordinator — teardown", () => {
     expect(laneState.published).toEqual([])
     expect(await b.coordinator.withWrite(async () => "y")).toBe("y")
     expect(b.coordinator.currentPartition).toBe(HOME)
+  })
+
+  it("does not acknowledge an upload whose counter was being published when it stopped", async () => {
+    const a = makeContext("a")
+    await a.coordinator.withWrite(async () => "x")
+
+    const held: boolean[] = []
+    laneState.duringPublish = (stillHeld) => {
+      a.coordinator.teardown()
+      held.push(stillHeld())
+    }
+    await expect(a.coordinator.withWrite(async () => "y")).rejects.toThrow()
+    expect(held).toEqual([false])
   })
 
   it("never takes a lane again", async () => {

@@ -688,6 +688,24 @@ describe("LaneState — a holder's resume and publish", () => {
     expect(writeSpy.mock.calls.map(([opts]) => opts.seq)).toEqual([1, 2, 3, 3])
   })
 
+  it("writes no pointer entry for a lane that went while its leaves were uploaded", async () => {
+    const state = makeLaneState()
+    const counter = (await state.resume()) ?? new Uint32Array(NUM_BUCKETS)
+    counter[100] = 1
+
+    await expect(state.publish(counter, () => false)).rejects.toThrow(
+      /reclaimed/,
+    )
+    const { pointer } = await partitionState.readStatePointer({
+      bee,
+      owner: OWNER,
+      swarmEncryptionKey: TEST_ENC_KEY,
+      batchId: TEST_BATCH_ID,
+      partition: 0,
+    })
+    expect(pointer).toBeUndefined()
+  })
+
   it("does not publish while it cannot tell which entry is the newest", async () => {
     const state = makeLaneState()
     const counter = (await state.resume()) ?? new Uint32Array(NUM_BUCKETS)

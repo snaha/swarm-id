@@ -542,7 +542,11 @@ export async function readPartitionState(
   // Nothing newer than the state the caller's counter is already in sync
   // with: it read or wrote that state itself and still has what it needs to
   // publish against it, so nothing is downloaded.
-  if (known !== undefined && seq === known.seq) {
+  if (
+    known !== undefined &&
+    seq === known.seq &&
+    referenceHex === known.referenceHex
+  ) {
     return { referenceHex, seq, unchanged: true }
   }
 
@@ -685,6 +689,9 @@ export async function writePartitionState(opts: {
   previousCounter?: Uint32Array
   /** The frame the previous publish packed with; kept while it still fits. */
   previousFrame?: CounterFrame
+  /** Runs once the leaves and the reference chunk are stored, just before
+   *  the pointer entry is written; a throw leaves the entry unwritten. */
+  beforePointer?: () => void
 }): Promise<{
   /** Reference-chunk reference (hex) — the caller's "synced reference". */
   referenceHex: string
@@ -891,6 +898,7 @@ export async function writePartitionState(opts: {
     ...prepared.map((p) => uploadChunk(target, p.data, { deferred: false })),
     uploadChunk(target, refPicked.data, { deferred: false }),
   ])
+  opts.beforePointer?.()
   await writeStatePointer({
     bee,
     stamper,
