@@ -31,8 +31,9 @@ Two distinct problems hid in "synchronized back":
 - **P2 — batch-utilization coordination.** Uploads consume stamp slots; the partition-lease
   protocol coordinates writers that cannot talk to each other, so its timeouts are
   conservative (~10 s for a late device to acquire a partition). Treating every Safari dApp
-  partition as a separate device would multiply that contention. The lease protocol had to stay
-  (it is the offline-safe fallback) but live contexts deserved a fast path.
+  partition as a separate device would multiply that contention. Live contexts deserved a fast
+  path. (Since then the bus has become the only path: who holds a partition is agreed on it
+  and stored nowhere — Message kinds, Coordination.)
 
 Constraint carried through the whole design: Swarm's upcoming pub-sub
 ([SWIP-60](https://github.com/ethersphere/SWIPs/pull/104)) must be able to plug in later
@@ -151,6 +152,14 @@ newcomer                         signaling server                       existing
   next tick, so a half-open peer (backgrounded mobile Safari, a laptop lid) is announced as
   `peer-left` within about a minute. The client's `close()` drains in-flight publishes first,
   so a teardown announcement made in the closing tick still reaches the wire.
+- **Liveness.** The server sends every room member a `tick` every 2 s; the client answers
+  each with a `ping` and the server with a `pong`. The send time of the newest answered ping
+  is how recently the context's own connection is known to have worked
+  (`AccountBus.confirmedAgoMs`), and the room is how long everyone outside a given set of
+  peers has been absent (`AccountBus.absentExceptMs`). A context is named by the peer id of
+  its current connection (`AccountBus.selfId`). These two
+  answers are all the partition lease may ask of a transport
+  ([`models/bus-lease`](../models/bus-lease/README.md), [#1017](https://github.com/snaha/swarm-id/issues/1017)).
 - **No mailbox.** A message reaches the peers that are in the room right now. That is the
   whole design: the bus makes live peers converge fast; it does not carry anything to a
   context that is closed (see Known gaps).
@@ -187,21 +196,22 @@ transient and backs off with jitter.
   not a bus message kind — nothing publishes it, and nothing may. A leave message of our own is
   not an option: a publish encrypts before it sends, and a page being torn down never gets back
   to the send. Ageing is the backstop for what the room cannot see — a peer the server has not
-  yet reaped, and a device heard only over the local transport. This is the liveness signal: a peer beating in the room is alive by
-  construction, at no Swarm cost, so the partition rival set (`knownDeviceIds`) is the live set
-  unioned with the registry's recent sign-ins — the latter only as a bootstrap for a context with
-  no bus. Nothing durable is written. A `lastSeenAt` riding the account snapshot was
+  yet reaped, and a device heard only over the local transport. This is the liveness signal the device list shows: a peer beating in the room is alive by
+  construction, at no Swarm cost. It plays no part in who holds a partition. Nothing durable is written. A `lastSeenAt` riding the account snapshot was
   considered and rejected: every publish would be a byte change to fold and re-persist, and an
   unpartitioned proxy answers every storage event with a delta and a stamped feed write, so it
   loops without settling, even on one device. Stale devices are therefore _ignored_ at read,
   never tombstoned; the roster grows per device, not per time, and needs no prune.
-- **Coordination (P2).** Lease negotiation/handover requests and utilization deltas. Live
-  peers release or transfer a partition sub-second; if nobody answers, the existing
-  conservative Swarm lease protocol ([`BatchWriteCoordinator.md`](./BatchWriteCoordinator.md))
-  proceeds unchanged as the safety net. Utilization deltas are **lane-scoped**: the buckets
+- **Coordination (P2).** Who writes which partition (`lane-claim`, `lane-free`, `lane-held`) and
+  utilization deltas. A lane is one partition of one batch; a context asks the room for it,
+  everyone not writing on it answers "free", and a holder that is not writing hands it over
+  ([`Postage-Batch-Partitioning.md`](./Postage-Batch-Partitioning.md) §7, the protocol of
+  `models/bus-lease`). There is no fallback on Swarm: a context whose connection is not
+  confirmed cannot write a partitioned batch. Every context on the bus must answer claims,
+  whether it writes or not, so every `AccountBus` gets a `BusLanes`. Utilization deltas are **lane-scoped**: the buckets
   carry the writer's per-partition counter `j`, not an absolute slot
   (`slot = partitionCount + partition + partitionCount·j`), so the message names its lane and
-  a receiver folds it in only when the lane matches. Since leases are exclusive, this means a
+  a receiver folds it in only when the lane matches. Since a lane has one holder, this means a
   delta is shared between contexts of the same holder and dropped everywhere else — the bus
   widens its reach, not the set of contexts a counter is comparable across. They are published
   `localOnly`: every remote peer is a different device on a different lane, so a remote copy
@@ -225,7 +235,7 @@ With the bus in place the partitioned iframe is a first-class writer:
 
   The `derivationKey` **stays**, and that is the trade-off worth stating rather than leaving
   implicit: the bus derives its topic and envelope key from it (`deriveBusContext`), and the
-  partition lease derives the Swarm encryption key and the lock-SOC signer from it
+  partition's published state derives its encryption key and its owner from it
   (`deriveSwarmEncryptionKey` → `backup-key`). A partitioned session cannot write without it.
   So this is least privilege, not a boundary being closed — the iframe is on the SwarmID
   origin, and an unpartitioned proxy reads the same material out of shared storage. What
@@ -253,7 +263,7 @@ With the bus in place the partitioned iframe is a first-class writer:
   while the tab was closed, which reaches it no other way. That read is a revocation check,
   not a fold: everything else still arrives over the bus, and a fold that lands re-persists
   the record so the next reload does not undo it. The iframe keeps its own
-  `swarm-id-device-id` and lease cache — it _is_ a device, named after the dApp it belongs to
+  `swarm-id-device-id` — it _is_ a device, named after the dApp it belongs to
   in the roster (#643), and its liveness comes from presence like every other device's; nothing
   expires a device (see Message kinds).
 - **What that session PUBLISHES, and why a partial view is safe to publish**
@@ -276,8 +286,8 @@ With the bus in place the partitioned iframe is a first-class writer:
 
 ### Why this shape
 
-- The socket now buys something even for a lone dApp tab: presence is what makes this device a
-  rival to every other context of the account, and what tells it who its own rivals are. Any
+- The socket is needed even for a lone dApp tab: without a confirmed connection a context
+  cannot write a partitioned batch at all. Any
   gating of the signaling attach ([#581](https://github.com/snaha/swarm-id/issues/581)) has to
   be weighed against that.
 - On Safari, during normal dApp use the iframe is often the **only** live context — so
@@ -306,51 +316,25 @@ Each landed as its own PR chain, in this order:
    and `sendSecretToOpener`, hydration in `handlePopupMessage`, the persisted partition
    session, roster naming for partition devices, the tombstone that survives a poll, and the
    removal of the download-only session.
-4. **Bus-accelerated leases** (#547, #576, #582, #593): a slot-waiting acquire broadcasts
-   `lease-request` each poll round (`onSlotWait` dep) with a fresh 8-hex `requestId`; an idle
-   live holder yields via the normal idle-yield release path (`yieldForPeer`, guarded by
-   `PEER_YIELD_MIN_IDLE_MS` and the in-flight upload count, under the write lock) and answers
-   `lease-released`, which wakes the waiter's poll sleep (`notifySlotMaybeFree`) — handover in
-   ~one bus round-trip instead of the 10 s `LEASE_REFRESH_MS` poll. The Swarm lock-SOC protocol
-   is untouched as the authority and offline fallback.
+4. **Partition lanes** (#1017; first built as "bus-accelerated leases", #547, a fast path
+   beside a lock chunk on Swarm). A context claims a lane with `lane-claim`, naming itself by
+   its peer id and the claim by a random round; every other context answers `lane-free` for
+   that round unless it is writing on the lane or claiming it under a lower name. The claimant
+   holds the lane once everyone has answered or been absent from the room for 8 s (and it
+   has itself been in the room that long), and only while its own connection is confirmed
+   (a round trip with the server at the server's 2 s tick, never older than 6 s). An answer
+   goes to the claimant alone; a holder that is writing answers `lane-held`. `BusLanes` (`lib/src/sync/bus-lease.ts`) runs this for a
+   context and answers for lanes it never opened; `BatchWriteCoordinator` decides when to ask
+   and when a holder is busy.
 
-   **Scoped to the batch, like the lock it front-runs** (#589). Every lease message carries a
-   `batchId`, and a receiver routes it to the write path of the drive it names, or drops it
-   when it holds none for that batch: a session writing several drives runs one coordinator
-   per drive, each answering for its own lanes (#862). A lane is
-   `(batchId, partition)` — the lock, intent and occupancy addresses all hash the batch — so a
-   holder on batch X and a waiter on batch Y contend for nothing, and answering across batches
-   would drop a lease that helps neither. The bus must be neither broader nor narrower than the
-   lock: while lanes were account-wide, the same argument said these messages must NOT carry a
-   batch, and filtering on one would have suppressed legitimate yields.
+   **Scoped to the batch** (#589). Every lane message carries a `batchId` and a `partition`: a
+   session writing several drives runs one coordinator per drive, each with its own lanes
+   (#862), and a holder on batch X and a claimant on batch Y contend for nothing.
 
-   **Exactly one holder answers** (#576). A waiter needs one slot, but the request names no
-   partition, so every idle holder used to release at once and whoever lost the re-race got
-   "Uploads are unavailable". Every holder that would presently yield (`canYieldForPeer`)
-   derives the same permutation of the partitions from the `requestId` and waits its own
-   rank in it — `rank = (requestId₁₆ + partition) % partitionCount`, `PEER_YIELD_RANK_STEP_MS`
-   apart. Rank 0 answers immediately, so a single-holder handover is not slowed at all.
-
-   The winner publishes **`lease-claim` before it starts releasing**, and later ranks stand
-   down on that: releasing is two stamped Swarm writes, so a signal sent on completion would
-   reach them only after they had all begun releasing too. `lease-released` still carries
-   the `requestId` and also stands holders down, covering a missed claim. If the winner then
-   declines (an upload slipped in), the round goes unanswered and the next one draws a fresh
-   id. `requestId` is required on the wire and must be `^[0-9a-f]{8}$`, since it is parsed
-   straight into the rank seed; a request without one is dropped at parse.
-
-   The waiter's wake is **sticky for one round** (#582): the answer usually lands during the
-   `acquire()` at the top of the poll loop — it is a reply to the request that loop
-   broadcast one line earlier — where there is no sleep to wake and the scan it interrupts
-   read the state from before the release. The announcement also outruns the released
-   slot's sentinel write, so the round it wakes often still reads the old holder (#724); the
-   wait then re-scans a few times at a short interval (`ANNOUNCED_RESCAN_INTERVAL_MS` ×
-   `ANNOUNCED_RESCAN_ROUNDS`) **without re-asking** — a repeat ask is a fresh request id the
-   holder that already yielded cannot stand the others down against, so a second one would
-   yield for the same waiter. The state lives on a per-wait object, so a wait left running
-   detached by `ensureLease`'s timeout race cannot clear the live one's, and one announcement
-   buys one window per wait (each round past it re-broadcasts, so an unbounded window would
-   be one holder dropped per bus round-trip).
+   **A claim is gentle first.** `gentle: true` asks only whether the lane is held at all, so a
+   newcomer takes a free lane before any holder is asked to move. A holder that keeps its
+   lane says so (`lane-held`), and a claimant asks one to hand over only once every lane has
+   answered that way: a peer that has merely not answered yet is not mistaken for a holder.
 
 5. **The SwarmID tab as a bus peer** (#608, #610, #631): it publishes a delta on every account
    mutation, and folds a peer's into **shared storage**
@@ -384,7 +368,7 @@ Each landed as its own PR chain, in this order:
    every publish: it would turn that one round trip into a loop (see Presence).
 
 6. **Presence** (#655): the heartbeat above, in the proxy and the SwarmID tab, feeding the
-   rival set and the dev device list's Online badge.
+   dev device list's Online badge.
 
 ### Not yet
 
@@ -395,14 +379,14 @@ Each landed as its own PR chain, in this order:
   sense, fresh per encryption, which is not what stops a replay), and nothing durable tracks what
   has been seen. Checked per kind, worst first:
 
-  | kind                  | reaches the relay? | what a replay does                                                                                                                                                                  |
-  | --------------------- | ------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-  | `lease-request`       | yes                | an idle holder releases its lane — two stamped Swarm writes — and re-acquires on its next upload. **The only durable cost.**                                                        |
-  | `lease-claim`         | yes                | stands other holders down for that round; the waiter falls back to its 10 s poll                                                                                                    |
-  | `lease-released`      | yes                | wakes a waiter early: one extra read round, and one re-scan window per wait (#593, #724)                                                                                            |
-  | `presence`            | yes                | the receiver stamps its own clock, so a replay keeps a departed device in the rival set for the 3-minute window — one absent intent read, and indefinitely if replayed on a timer\* |
-  | `account-delta`       | yes                | inert up to the one bounded echo described above\*                                                                                                                                  |
-  | `utilization-updated` | **no**             | published `localOnly`, so it never leaves the device and a relay never sees it                                                                                                      |
+  | kind                  | reaches the relay? | what a replay does                                                                                                                                            |
+  | --------------------- | ------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+  | `lane-claim`          | yes                | an idle holder hands its lane to a claimant that is no longer asking, and takes one again on its next upload: one claim and one pointer read. No Swarm write. |
+  | `lane-free`           | yes                | nothing: an answer counts only for the claim round it names, and rounds are random                                                                            |
+  | `lane-held`           | yes                | nothing that matters: a claimant asks a holder to move a little earlier or later                                                                              |
+  | `presence`            | yes                | the receiver stamps its own clock, so a replay keeps a departed device "Online" in the dev list for the 3-minute window                                       |
+  | `account-delta`       | yes                | inert up to the one bounded echo described above\*                                                                                                            |
+  | `utilization-updated` | **no**             | published `localOnly`, so it never leaves the device and a relay never sees it                                                                                |
 
   \* The `account-delta` echo: LWW converges and a replayed tombstone re-applies itself, but the
   SwarmID tab's fold always commits, so the _first_ replay of a stale snapshot can change serialized
@@ -411,31 +395,21 @@ Each landed as its own PR chain, in this order:
   A timed `presence` replay is the same denial as a withheld `peer-left`, which the threat model
   below already covers.
 
-  Server-originated frames (`welcome`, `peer-joined`, `peer-left`) are not envelopes and are not in
-  that table: they are the server's word, trusted from it by construction. Since #669 `peer-left`
-  drops a device from the rival set, so a forged one costs an intent round its rival — but a server
-  that would forge it can drop the real ones instead, which is the same denial for less work.
+  Server-originated frames (`welcome`, `peer-joined`, `peer-left`, `pong`, `tick`) are not
+  envelopes and are not in that table: they are the server's word, trusted from it by
+  construction. That trust now carries the partition lanes: a server that hid a present context
+  from another, or kept a dead one in the room, could make two contexts hold one lane or keep a
+  lane taken. Mitigating that needs the membership itself to be verifiable, which is a different
+  transport (SWIP-60, #571).
 
   **Who can replay.** The room topic and the envelope key both derive from `derivationKey`
   (`bus-context.ts`), so anything that can join the room already holds the account. The replayer is
-  therefore the signaling server or a WSS MITM — a party that can already deny the fast path
-  outright by dropping frames, which is cheaper and more effective than replaying one.
+  therefore the signaling server or a WSS MITM — a party that can already deny writing outright by
+  dropping frames, which is cheaper and more effective than replaying one.
 
-  **What bounds the one path that costs.** `canYieldForPeer` requires a held lane, zero in-flight
-  uploads, and 3 s since the last lease activity, so a context with work ignores replays entirely;
-  and a yield leaves the holder with no lane, so it cannot be made to yield again until it
-  re-acquires. `answeredRequests` (32 ids, FIFO, in memory) absorbs a replay of a round this
-  instance already handled — but it falls through twice over: it is empty after a reload, so a
-  captured request replayed against a fresh page always lands, and FIFO eviction means even a
-  long-lived instance yields again for a captured request once 32 later rounds have pushed it out. That residue is exactly what a `sentAt` window would cover: the
-  two guards are complementary, not redundant.
-
-  **Why it is not built.** A `{ sentAt, message }` wrapper reintroduces clock skew into a design
-  that avoided it on purpose — presence carries no timestamp precisely so there is "no timestamp to
-  skew" — and the window has to be generous enough for a hidden tab's throttled timers, which still
-  admits an immediate replay. Bounded nuisance, from an attacker with cheaper denial available,
-  against a real new failure mode. Revisit with SWIP-60 (#571), where the transport is brokered by
-  someone else and the envelope has to carry its own guarantees.
+  **Why a replay window is not built.** A `{ sentAt, message }` wrapper reintroduces clock skew
+  into a design that avoided it on purpose, and the window has to be generous enough for a hidden
+  tab's throttled timers, which still admits an immediate replay. Revisit with SWIP-60 (#571).
 
 - **Gating the signaling attach** ([#581](https://github.com/snaha/swarm-id/issues/581)) — see
   Why this shape.
@@ -445,10 +419,9 @@ Each landed as its own PR chain, in this order:
 Done:
 
 - Unit (Vitest, TDD): envelope encryption/schema, "delta merged over bus ≡ delta merged from
-  feed payload", lease fast-path state machine and rank election, lane-scoped utilization
+  feed payload", the lane protocol and the coordinator on it, lane-scoped utilization
   deltas, partitioned hydration and the persisted session, presence (the tracker; the proxy
-  beats on join and per interval and stops on destroy; a peer's beat enters the rival set and
-  ages out; the SwarmID tab beats and lists a peer). The relay tests run the real signaling
+  beats on join and per interval and stops on destroy; the SwarmID tab beats and lists a peer). The relay tests run the real signaling
   server; WebRTC is faked.
 - Playwright e2e over the real signaling server (`ui/tests/bus-propagation.test.ts`, #569): a
   genuinely partitioned proxy iframe — the demo browsed under a loopback literal while the proxy
@@ -462,14 +435,10 @@ Done:
   shows the other online 25 s after it joins (the first interval beat plus the dev list's 5 s
   tick) and drops it when the presence window lapses after its tab closes — 60 s when this was
   measured, three minutes since the window widened to survive a throttled background tab.
-- Handover latency against the local cluster and the dev signaling server
-  (`scripts/bus-handover-latency.ts`, #660; 2026-09-02, K=2, 2 s intent window). Three simulated
-  devices on a two-partition batch, a fresh account per row: a free partition costs C 5.3 s (the
-  floor, intent round included), a bus handover 9.0 s, a holder's idle tick 39.4 s, and a lapsed
-  lock with nobody refreshing 48.5 s. The bus itself is the 1.4 s from C's call to the holder's
-  `lease-released` — two stamped release writes, over the relay, since Node has no
-  `RTCPeerConnection`; the remaining ~7.5 s is the ordinary cold claim. A one-off script, not
-  suite coverage: it runs on demand, never on commit.
+- Three devices on two partitions and two devices on two drives, in real browsers over the
+  real signaling server (`ui/tests/three-devices.test.ts`, `two-drives.test.ts`): a handover on
+  request, a reload, a second tab, a disconnect and a closed tab, each ending on "no two
+  contexts hold one partition".
 - Real Safari (iOS 18.7 / Safari 26.6, against the DO deployment, #584): ITP partitions the
   iframe, the connect popup's `window.opener` `postMessage` reaches it, the hydrated view
   builds a working stamper, a chunk uploads and reads back byte-identical, and the device id
@@ -478,10 +447,6 @@ Done:
 
 Not yet written:
 
-- Lease handover with a signaling server in the live suite — sub-second with both peers live,
-  timeout fallback with one peer killed. Extends
-  `lib/test/live/multi-device-acquire-upload.test.ts` and
-  `three-device-acquire-handoff.test.ts`, not the Playwright rig.
 - Whether a dormant account's partitioned storage survives ITP's ~30-day window
   ([#659](https://github.com/snaha/swarm-id/issues/659)) — two loads in one sitting say
   nothing about it. Nothing in the bus depends on the answer now that stale devices are
@@ -489,14 +454,11 @@ Not yet written:
 
 ## Known gaps
 
-- **A mixed-version window means two holders of one lane.** The lock, intent and occupancy
-  addresses derive from the batch since [#589](https://github.com/snaha/swarm-id/issues/589), so an
-  old bundle and a new one compute different addresses for the same `(batch, partition)` and each
-  reads the other's lane as free — two writers in one slot set, not a stale read. Both sides deploy
-  together, which is what makes that window short rather than absent; it is the same deploy-in-step
-  property [#588](https://github.com/snaha/swarm-id/issues/588) established for the channel rename, and
-  the first change here where the cost of getting it wrong is a corrupted lane rather than a missed
-  message.
+- **A room is one protocol version.** A claimant waits for every member of its room, so a
+  member that speaks another lane protocol would block every lane. The room topic's label
+  names the protocol (`bus-context.ts`), which puts such a build in a room of its own:
+  nothing is corrupted, and the two do not see each other live until both run the same
+  build ([`decisions.md`](./decisions.md), 2026-11-18).
 - A revocation made while a dApp partition is **closed** is not pushed to it: the room has no
   mailbox. Since #635 the popup re-handshake is no longer what catches it either — a restored
   session reads the account's published state once instead, and ends itself on a tombstone.
@@ -521,19 +483,11 @@ Not yet written:
   signaling-server relay.
 - A newcomer's join-time presence beat is dropped (its socket has no peers yet), so remote
   peers first count it at its first interval beat, up to 20 s later. Its own view of the room
-  fills in the same way. The registry's 30-minute sign-in window covers the gap for the rival
-  set.
+  fills in the same way. Only the Online badge is late by it.
 - A departure is only as prompt as the socket's close. A tab closed normally produces one at
-  once; a crashed peer or a dropped network waits for the server's ping cycle to reap the
-  socket, and the presence window covers it until then. **The lock is not reclaimed any
-  faster either way**: releasing it is a stamped SOC write the dying page cannot finish, so
-  `LEASE_TTL_MS` remains the mechanism for a partition a closed tab was holding.
-- The same promptness cuts the other way on a **reconnect**: a peer whose socket closes cleanly
-  and comes back (a `1013` backoff, a blip the client sees before the server does) is dropped at
-  once and is missing from every rival set until its rejoin beat, so a claim made in that window
-  sees no rival and skips the intent round. This is a new way to flap out of the live set, which
-  the three-minute window was sized to avoid; it is safe because the occupancy beacon on the
-  refresh tick backstops a peer that is invisible right now (`partition-lease.ts`).
+  once; a crashed peer or a dropped network waits for the server to reap the socket: four
+  missed ticks (8 s) for a peer that stopped answering, the ping cycle for a half-open
+  connection. The partition such a peer held is free 8 s after the room saw it go.
 - Safari (ITP) deletes script-writable storage for sites without first-party user
   interaction. The window is **30 operational days** by default since a Feb 2024 WebKit
   change ([`DataRemovalFrequency`](https://github.com/WebKit/WebKit/commit/45061230013728ec9c4900b01b12af26dc592b4b));

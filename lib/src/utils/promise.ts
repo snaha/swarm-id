@@ -37,9 +37,8 @@ export function withTimeout<T>(
  * Resolve after `ms` milliseconds — the default delay behind a poll or backoff.
  *
  * A caller whose timing a test needs to drive should keep taking an injectable
- * wait and pass this as its default (as `acquirePartitionLock` does with
- * `opts.wait`) rather than calling it directly, which would pin real time into
- * the test path.
+ * wait and pass this as its default rather than calling it directly, which
+ * would pin real time into the test path.
  */
 export function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms))
@@ -78,5 +77,24 @@ export function withIdleTimeout<T>(
   return Promise.race([started, timeout]).finally(() => {
     settled = true
     clearTimeout(timer)
+  })
+}
+
+/**
+ * Let the tasks that queued up meanwhile run — messages, socket frames,
+ * timers that are due — and come back. For long CPU work on a thread that
+ * also has to answer something.
+ *
+ * A message port and not `setTimeout(0)`: a hidden tab's timers are clamped
+ * to once a second, which would stretch the work a hundredfold.
+ */
+export function yieldToEventLoop(): Promise<void> {
+  return new Promise((resolve) => {
+    const channel = new MessageChannel()
+    channel.port1.onmessage = () => {
+      channel.port1.close()
+      resolve()
+    }
+    channel.port2.postMessage(undefined)
   })
 }

@@ -39,7 +39,7 @@ That design is no longer needed. Since #537 was written:
 - [#683](https://github.com/snaha/swarm-id/pull/683): the lock, intent and occupancy SOCs
   hash the batch — a lane is `(batchId, partition)`.
 - [#684](https://github.com/snaha/swarm-id/issues/684): the lease cache is keyed per batch.
-- The bus `lease-request` / `lease-claim` / `lease-released` messages carry a `batchId`.
+- The bus lane messages (`lane-claim` / `lane-free`) carry a `batchId`.
 
 So two batches of one account no longer share any write state. Multi-drive is **N
 independent copies of the existing single-batch stack**, and `lib/src/sync/` does not
@@ -55,9 +55,9 @@ built from it. The proxy holds a map of them keyed by batch id. Entries never re
 other.
 
 **The primary drive's entry is created at connect, every other entry on the first write to
-that drive.** An entry costs a lane acquire and a heartbeat, so an "all drives" app must not
-pay for drives it never writes; the coordinator's existing idle-yield releases the lane
-again. The primary's entry is the one the proxy builds today (`uploadMode` and
+that drive.** An entry costs a lane acquire, and a lane taken is kept until the tab closes
+or another context asks for it, so an "all drives" app must not take lanes on drives it
+never writes. The primary's entry is the one the proxy builds today (`uploadMode` and
 `uploadUnavailableReason` report whether its stamper built, and its eager lease spares the
 first upload the acquire), and it keeps today's job: the proxy's own account-state publish
 (`runAccountStatePublish`, for multi-device accounts)
@@ -196,10 +196,10 @@ bucket overwrites its oldest chunk in that lane.
 - **Counters stay monotonic.** Only the slot is reduced modulo the capacity. The
   partition-state publish refuses a counter that goes backwards (its "KEYSTONE tripwire",
   `lib/src/sync/partition-state.ts`), and a monotonic counter keeps it valid unchanged.
-- **Counters serialize as uint32** on a scratch drive. A uint16 counter is chosen today for
-  depth ≤ 31 because the counter is bounded by the lane; a wrapping one is not.
-- **The drive's own metadata is safe.** Lock SOCs, intent, partition state and utilization
-  chunks stamp the reserved slots `[0, partitionCount)`, below the data lane, so the ring
+- **Counters serialize as uint32**, as on every drive: a wrapping counter is not bounded by
+  the lane.
+- **The drive's own metadata is safe.** The partition state (its leaves, reference chunk
+  and pointer entries) stamps the reserved slots `[0, partitionCount)`, below the data lane, so the ring
   never evicts them.
 - **Two apps on one scratch drive** share the counter (as two tabs on one batch do today), so
   one overwrites the other's data only once the counters wrap. Accepted.

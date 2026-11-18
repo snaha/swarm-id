@@ -302,6 +302,55 @@ async function joinChunks(
   return result
 }
 
+const HTTP_NOT_FOUND = 404
+const HTTP_INTERNAL_ERROR = 500
+/** Bee's message when the node asked is the closest to the address and does
+ *  not have the chunk (`pkg/api/chunk.go`): it has nobody to ask. */
+const BEE_READ_CHUNK_FAILED = "read chunk failed"
+
+/**
+ * Did a chunk read fail because Bee says the chunk is not there? Only Bee's
+ * own two answers count. Anything else (no response, a rate limit, a proxy's
+ * 502) says nothing about the chunk, and must not be read as absent.
+ */
+export function isChunkAbsent(error: unknown): boolean {
+  if (typeof error !== "object" || error === null) return false
+  const { status, responseBody } = error as {
+    status?: unknown
+    responseBody?: unknown
+  }
+  if (status === HTTP_NOT_FOUND) return true
+  return (
+    status === HTTP_INTERNAL_ERROR &&
+    beeErrorMessage(responseBody) === BEE_READ_CHUNK_FAILED
+  )
+}
+
+/**
+ * The `message` of Bee's `{ code, message }` error body. A chunk is asked for
+ * as bytes, so the body of a refusal arrives as bytes too, not parsed.
+ */
+function beeErrorMessage(body: unknown): string | undefined {
+  let parsed = body
+  if (body instanceof ArrayBuffer || ArrayBuffer.isView(body)) {
+    const bytes =
+      body instanceof ArrayBuffer
+        ? new Uint8Array(body)
+        : new Uint8Array(body.buffer, body.byteOffset, body.byteLength)
+    parsed = new TextDecoder().decode(bytes)
+  }
+  if (typeof parsed === "string") {
+    try {
+      parsed = JSON.parse(parsed)
+    } catch {
+      return undefined
+    }
+  }
+  if (typeof parsed !== "object" || parsed === null) return undefined
+  const { message } = parsed as { message?: unknown }
+  return typeof message === "string" ? message : undefined
+}
+
 /**
  * Download data using only the chunk API
  * This ensures encrypted data remains encrypted during transmission and avoids metadata leakage

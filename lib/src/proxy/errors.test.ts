@@ -13,7 +13,10 @@ import { z } from "zod"
 import { toWireError } from "./errors"
 import { SwarmIdError } from "../errors"
 import { TimeoutError } from "../utils/promise"
-import { PartitionContendedError } from "../sync/batch-write-coordinator"
+import {
+  AccountBusUnavailableError,
+  PartitionContendedError,
+} from "../sync/batch-write-coordinator"
 import { PartitionLeaseLostError } from "../utils/batch-utilization"
 import { SocUploadError } from "./upload"
 
@@ -72,6 +75,13 @@ describe("toWireError", () => {
     expect(
       toWireError(new TypeError("Failed to fetch"), "Upload failed"),
     ).toEqual({ error: "Failed to fetch", code: "network" })
+  })
+
+  it("reports a session that cannot reach the account's devices as unable to upload", () => {
+    expect(toWireError(new AccountBusUnavailableError(), "x")).toMatchObject({
+      code: "upload-unavailable",
+      reason: "no-account-bus",
+    })
   })
 
   it("names the lease outcomes and a deadline", () => {

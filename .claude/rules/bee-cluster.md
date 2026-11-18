@@ -35,7 +35,7 @@ nodes never ingest a batch you can plainly see on-chain (`/chainstate` looks hea
 
 ## Pushsync needs `reachabilityOverridePublic=true` — now built into bee-compose ≥ 0.1.4
 
-`deferred: false` writes (every epoch-feed, partition-lock/intent SOC, and any direct
+`deferred: false` writes (every epoch-feed, state-pointer SOC, and any direct
 `/bytes`/`/chunks`/`/soc` upload — note `uploadData`/`uploadChunk` are non-deferred) require Bee
 **pushsync** to complete a network **receipt**. A node only stores+receipts a chunk when `IsReachable()`
 is true (`kademlia.go`: reachability == `Public`; checked in `pushsync.go`'s handler). Stock
@@ -44,7 +44,7 @@ env var), so it relies on libp2p AutoNAT — which never confirms reachability i
 network. Every node's _own_ reachability stays `Unknown` → `IsReachable()` is false → the push runs out
 Bee's hard `defaultTTL = 30 s` and fails with `context deadline exceeded`. Symptom: **every
 SOC/non-deferred upload takes exactly ~30 s** (reads still work — the chunk is stored locally on the
-origin — but replication/receipts don't), and multi-device lock/intent SOCs never become
+origin — but replication/receipts don't), and state-pointer SOCs never become
 network-readable by peers.
 
 **Fixed in bee-compose ≥ 0.1.4** ([#11](https://github.com/snaha/bee-compose/issues/11)):

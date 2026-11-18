@@ -91,8 +91,8 @@ describe('partitionHandoverAccount', () => {
   })
 
   // Everything else the synced projection carries is still needed: the topic
-  // and envelope key of the account bus, and the lock-SOC signer of the
-  // partition lease, all derive from `derivationKey`.
+  // and envelope key of the account bus, and the signer of the published
+  // partition state, all derive from `derivationKey`.
   it('still carries the derivation key and strips app secrets', () => {
     const payload = partitionHandoverAccount(makeAccount(), APP_ORIGIN)
 

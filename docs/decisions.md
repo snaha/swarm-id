@@ -7,6 +7,140 @@ present and may point at an issue or PR; the reasons live here.
 
 A PR that makes or changes a decision adds the entry in the same PR.
 
+## 2026-11-18 An entry a context knows of is never taken for absent
+
+**Context.** Bee answers `404`, or `500 read chunk failed`, for a retrieval that failed for
+other reasons too (a deadline, no peer to ask), and goes on doing so for that chunk for a
+while. A lane is taken again exactly when connectivity has just changed. Two such answers
+for the newest pointer entry made a holder resume from an older entry, or from zero, and
+stamp over uploads it had acknowledged itself.
+
+**Decision.** A lookup that ends below an entry known to have been published is unsettled:
+the context does not resume and does not publish. Known means read or written by this
+context in this session, or remembered by the browser from an earlier one (IndexedDB). The
+remembered entry is still only a hint for where to search: when it is gone and the search
+from nothing ends at or above it, that result is used.
+
+**Why.** Entries are only added, so the newest is never below one that existed; a lookup
+that says otherwise is a misread. The test is the result, not whether the known entry is
+still there, because a later entry can replace one that is off its search path
+(`state-pointer-search.ts`): a device that comes back after others published would
+otherwise find its remembered entry gone and never write again. What this costs: a browser
+that remembers an entry of a batch whose entries are all gone (a local chain reset that
+reissues the batch id) cannot write that partition until its local data is cleared. A
+format change is not that case, the store's version bump drops what was remembered.
+
+## 2026-11-18 A room is one protocol version, and the server holds every member to its ticks
+
+**Context.** A claimant waits for every member of its room. A page left open on a build
+that answers no lane claim sat in the same room and blocked every lane of its account. The
+server was also told to keep a member that never pinged, so that such a page was not
+dropped and reconnected every ten seconds, which kept it in the room for good.
+
+**Decision.** The room topic's label names the room's protocol (`bus-context.ts`), and a
+build whose members must answer lane claims is `v2`. The server drops any member that
+leaves `MAX_SILENT_TICKS` ticks unanswered, with no exemption.
+
+**Why.** A room in which one member cannot be waited for is a room in which nothing can be
+taken. A page on an older build keeps syncing with its own kind in the `v1` room; the
+server reconnects it every ten seconds there, which costs a handshake and breaks nothing
+that worked. Before `1.0` there is nobody to keep (`AGENTS.md`).
+
+## 2026-11-18 A signaling server is required to write a shared drive
+
+**Context.** A context with no confirmed connection to the account's other devices cannot
+ask for a lane. A build with no signaling URL, or one whose server was unreachable, waited
+thirty seconds and failed with "all slots are held by other devices", while `canUpload`
+stayed true and the self-hosting page called the server optional.
+
+**Decision.** There is no fallback to writing alone. A build with no signaling URL reports
+`canUpload: false` with `uploadUnavailableReason: no-account-bus` for a split batch, and a
+write that could not ask fails as `upload-unavailable` with that reason
+(`AccountBusUnavailableError`).
+
+**Why.** Writing without asking is what the lanes exist to prevent: a second device of the
+account may be writing the same partition, and nothing on Swarm says so. A subsidised
+gateway, where one is configured, is still the fallback, as for any other reason.
+
+## 2026-11-18 Only Bee's own answer makes a pointer entry absent
+
+**Context.** The search for the newest state-pointer entry read any failure but its own
+timeout as "this entry does not exist". A dropped connection, a rate limit or a proxy's
+502 on one read made a lane resume from zero or from an older entry, and the slots of
+acknowledged uploads were issued again.
+
+**Decision.** An entry is absent when Bee says so: `404`, or `500` with Bee's message
+`read chunk failed`. Every other failure leaves the entry unsettled, the lookup is
+inconclusive, and the lane is not written (`isChunkAbsent`).
+
+**Why.** The `500` is included because it is how Bee reports a chunk nobody has when the
+node asked is itself the closest to the address and has no peer to ask (`no peer found`):
+always on the four-node local cluster, and occasionally on a real node. Treating it as
+unsettled would make a fresh partition untakeable there. Its cost: a node that is the
+closest and has not yet received an entry published elsewhere reads it as absent, as it
+would with a `404`.
+
+## 2026-11-18 An upload is acknowledged under the hold it began with
+
+**Context.** The coordinator checked that some lane was held before it published an
+upload's counter, and not after. An upload was acknowledged when its connection was
+replaced or its write path rebuilt (a top-up, a dilute) while the publish ran, and when its
+lane was lost and taken again while it uploaded: the new hold starts from the published
+counter, which knows nothing of the first upload's stamps.
+
+**Decision.** Each bind and each loss of the bound lane is a hold of its own. An upload
+remembers the hold it began with, and is acknowledged only if that hold stands before the
+publish and after it. The publish asks once more just before it writes the pointer entry.
+
+**Why.** The pointer entry is the one write the next holder acts on. An entry written
+after the lane went can land after the next holder read the lane, which then resumes below
+an acknowledged upload. The window that remains is the pointer upload itself, inside the
+two seconds between `LEASE_STOP_MS` and `LEASE_WAIT_MS`, and an upload caught in it is
+reported failed.
+
+## 2026-11-18 A lane message counts its sender as present, on every path
+
+**Context.** Hearing from a peer the room view does not contain restarts that peer's
+absence clock (`ResetOnContact` in `models/bus-lease`). The rule was applied only where the
+transport names the sender. `BroadcastChannel` names none, so a tab whose stream from the
+server had stalled for a moment answered a claim from another tab of the same browser,
+still saw the room as empty, and took the lane the other tab then took too.
+
+**Decision.** A lane message says who sent it, and that sender is noted on every transport
+whichever path the message came by. An answer of "held" withdraws the sender's earlier
+"free". Answers go to the claimant alone, and a context that stood down for a lower id
+does not ask again before its next confirmation.
+
+**Why.** The model had no stream that stalls and recovers on the same connection: its room
+view moved in step with the server. With that added (`Stall`), `Exclusion` holds only with
+the reset on every path (1,168,225 states) and `NoContactReset.cfg` shows the two-tab
+trace. The last two rules are about load, not safety: answers sent to the whole room and
+losers asking again within 250 ms passed the server's message budget from about six
+contexts on the relay, and the server then disconnected holders.
+
+## 2026-11-18 The account sync writes no counter rows to Swarm
+
+**Context.** After its upload the SwarmID tab's sync wrote the changed rows of the local
+counter cache to Swarm, through a stamper bound to no lane. Those stamps went to partition
+0's reserved slot whoever held that lane, and could land on another device's published
+state. Nothing read the rows back.
+
+**Decision.** The rows are not written. The counters travel as the lane's published state
+(`partition-state.ts`), and a chunk stamped at a reserved slot names the slot.
+
+**Why.** A second copy nobody reads bought nothing and put the copy that is read at risk.
+
+## 2026-11-18 Open: a signaling deploy that overlaps
+
+The signaling server closes every connection on `SIGTERM`, so a context is not left
+confirmed by an instance that is being replaced. What is not decided: while the platform
+runs the old and the new instance side by side, a context that joins the new one sees an
+empty room and may take a lane after `LEASE_WAIT_MS` that a context on the old instance
+still holds. Closing it needs the new instance to answer no ping for longer than the
+overlap, which stops every write for that long after each deploy. The same holds for one
+account reached through two signaling URLs (a signaling PR's preview and the `main` build
+share an origin and storage, and sit in different rooms).
+
 ## 2026-11-18 Previews use production's signaling server; a PR that changes the server gets a Render instance
 
 **Context.** The GitHub Pages builds (`main` and the per-PR previews) had no signaling
@@ -27,6 +161,204 @@ without restarting production. It is one shared instance (two open PRs that both
 the server take turns), it sleeps after 15 idle minutes, and an account open in such a PR's
 preview and in another preview does not see itself live, since the two sit on different
 servers.
+
+## 2026-11-17 The local counter cache has one layout for every depth
+
+**Context.** The IndexedDB rows were uint16 up to depth 31 and uint32 above. A dilute from
+31 to 32 read the old rows under the new layout and got zeros (#463).
+
+**Decision.** Rows are always uint32: 64 rows of 1024 counters. The cache version is bumped,
+which drops existing rows; they re-derive on next use.
+
+**Why.** Deleting the switch removes the crossing, where invalidating the cache at dilute
+time would only handle it, and every device would have to notice the dilute. The cost is
+128 KB more per batch in IndexedDB below depth 32.
+
+## 2026-11-17 A late confirmation does not end a hold
+
+**Context.** A holder that went `LEASE_STOP_MS` without a confirmed round trip with the
+signaling server dropped its lane when the confirmation did arrive, and had to wait
+`LEASE_WAIT_MS` to take it again. A tab whose main thread was busy for six seconds (an
+upload preparing its chunks) lost its lane with nobody else asking for it.
+
+**Decision.** An overdue holder still may not stamp, and leaves claims unanswered (a
+starved tab wakes to the queued claims before the server's answer, and "free" there gave
+the lane away). Once the same connection is confirmed again it carries on; a write or a
+stamp that finds the confirmation overdue waits for it. A new connection holds nothing,
+as before.
+
+**Why.** A claimant takes a lane only from "free" answers and from peers absent from the
+room for `LEASE_WAIT_MS`. A holder on the same connection was never absent, so only its own
+"free" can have given the lane away. `models/bus-lease` holds `Exclusion` with this
+(421,149 states).
+
+## 2026-11-17 Partition state is published as SBU1 leaves, with no depth on the wire
+
+**Context.** The counter was serialized as fixed uint16 or uint32 chunks chosen
+from the batch depth: 32 or 64 chunks, all of which a spread-out upload
+rewrote, and a layout that changed when a dilute crossed depth 31 to 32
+(#463). #918 fixed this on the lock-based stack, which is not continued.
+
+**Decision.** Taken over from #918: the counters are packed with the leaf
+encoding of Nectar's SBU1 usage snapshot, a frame (base and bit width) chosen
+per publish from the counters' spread, deltas packed to that width, outliers
+as exceptions. The frame rides in the reference chunk under topic domain `v2`.
+State under `v1` is not read. Not taken over: #918's changes to the local
+cache rows, which were built for tabs sharing one partition. The holder keeps
+its publish baseline in memory instead, as exactly the counter it last read or
+published.
+
+**Why.** Nothing published depends on the depth, and a takeover reads 8–24
+chunks instead of 33 or 65. Not reading `v1` means a lane's first take under
+`v2` resumes from zero; accepted while the version is `0.x`. The widest delta
+is 23 bits, so that the frame, 128 exceptions and a reference per leaf fit one
+chunk. The baseline lives in memory because each tab now holds its partition
+alone and reads the published counter when it takes one, so there are no
+shared rows to certify. The cache rows still depend on the depth, so a dilute
+across 31 to 32 on a live drive is not handled by this change.
+
+## 2026-11-17 Each tab holds a partition for itself
+
+**Context.** The bus lease was decided with "several tabs of one device keep
+coordinating as they do" (2026-11-16): tabs shared a held partition through a
+record in local storage, and a reloaded tab took it up again at once. Wiring
+the protocol showed this does not fit it. The model's participant is one
+process with one connection, and its safety rests on a participant that
+reconnects holding nothing. A tab that reconnects and reads the device's hold
+from a shared record holds again without asking, while another device that
+saw every tab of this one gone for the wait has taken the partition: both
+write.
+
+**Decision.** Every context (a tab, an iframe) is its own participant, named
+by its current connection to the signaling server. It asks for a partition
+like any other context and is handed one by whoever holds it and is not
+writing, a tab of the same browser included. The local lease record and the
+take-up on reload are removed. A new or reloaded context waits until it has
+been in the room for 8 s before it writes. This reverses the tab sentence of
+the 2026-11-16 entry and may be revisited.
+
+**Why.** It is the protocol exactly as checked, with no state shared between
+contexts to get wrong. The cost is the wait on every page load, and that two
+tabs of one browser hand a partition back and forth when both write and the
+other partition is taken. Sharing between tabs would need the model extended
+with tabs first; one way is a single tab per browser speaking for the others,
+which keeps the sharing but adds a hand-off when that tab closes. Revisit if
+the wait or the hand-offs between tabs show up in use.
+
+## 2026-11-17 Nothing on Swarm says who holds a partition
+
+**Context.** With the lease on the bus (2026-11-16) and the state pointer
+found by search (below), the lock chunk and the intent and occupancy beacons
+have no reader left.
+
+**Decision.** They are removed, with the refresh timer, the idle release, the
+release sentinel and the lease messages that sped them up. A claim first asks
+whether a partition is held at all, and only then asks a holder to hand over,
+so a newcomer takes a free partition before it disturbs anyone. The signaling
+server drops a room member that stops answering its ticks. A process without
+a bus (a script, a test) cannot write a partitioned batch.
+
+**Why.** Each removed piece was a write to a fixed address read through
+caches, or a timer covering for one. Removing the beacons also closes the gap
+the entry below left open: nothing is written to the reserved slot any more
+that the publish cannot steer away from the pointer entries. A member that
+answers nothing must go because a claimant waits for everyone present, and a
+frozen tab's browser keeps its socket open.
+
+## 2026-11-17 The state pointer is a numbered, write-once entry found by search
+
+**Context.** The partition's state pointer was written at an address derived
+from the current 30-second window and rewritten there by every publish and
+every refresh tick. A taking-over device found it through the lock chunk's
+`leasedUntil`. Rewriting an address is what proved unreliable for the lock
+(#1017): a deferred upload loses the new content and a node that cached the
+old content keeps serving it. The lock chunk is also going away (the partition
+lease moves to the account bus), and its timestamp with it.
+
+**Decision.** Each publish writes the pointer as the next numbered entry, at
+an address computed from the number, and no address is written twice. A reader
+searches for the highest number: the powers of 8, then 8-way splits. It starts
+from the last entry the device knows, kept with the stamper's synced
+reference. The search is fixed, so the entries any later search depends on are
+a small computable set, and the writer keeps every chunk it places in the
+reserved slot out of their buckets. An idle holder writes nothing. A holder
+that does not know the newest entry for sure searches before it publishes. A
+search with an unsettled read above its answer fails safe, also on a partition
+nothing was published on.
+
+**Why.** A fresh address per publish has no older version for a cache to
+serve, and the lookup needs neither a clock nor the lock. Numbers and not
+timestamps, because two devices whose clocks differ by more than a publish
+interval would order states wrongly. The entries stay in the reserved slot and
+do not move to a data slot, because a data slot would spend drive capacity on
+every publish and wrap away on a scratch drive. The price is that a later
+reserved-slot write can replace an entry, which is why the search must be
+fixed and its entries protected. Measured on the public gateway, a read of an
+absent chunk answers in about half a second, so the usual lookup is one such
+round and a cold one over 10,000 entries about eight. Not solved here: the
+intent and occupancy beacons sit at fixed addresses in the same slot and can
+still replace an entry, until the bus lease removes them.
+
+## 2026-11-16 A transport answers two liveness questions, at the server's pace
+
+**Context.** The bus lease (next entry) needs to know whether this context's
+own connection works and whether another device is gone. The signaling server
+is the first service to answer that; Swarm's pub/sub (BPS, bee#5626, SWIP-60)
+is a likely second, and it has no join or leave notices and no acknowledgement
+of a publish.
+
+**Decision.** A transport that crosses devices answers `confirmedAgoMs()` and
+`absentExceptMs(deviceIds)`: how recently this context's connection was
+confirmed, and for how long nobody but the named devices has been present.
+The lease asks nothing else about liveness. Both must come from one
+authority: a device shown absent over a span had no confirmation within it.
+The second question is asked about everyone outside a set, so that a device
+this context has never heard of counts too. On the signaling server the confirmation is a
+`ping`/`pong` round trip, timed from when the ping was sent, and the server
+asks for one with a `tick` every 2 s.
+
+**Why.** `peer-left` is a fact about sockets on one server; a contract in its
+terms could not be met by a broker that reports no departures. Stated as two
+durations, the signaling server meets it from its room and BPS can meet it
+from a context's own messages coming back in the broker's order. The server
+sets the pace because a hidden page's timers are throttled to about one a
+minute while its message events are not, and a holder that cannot confirm its
+connection stops writing.
+
+## 2026-11-16 The signaling server is a single instance
+
+**Context.** With the lease on the bus, the server's room is what says a
+device is absent.
+
+**Decision.** One instance serves all rooms. If it is ever scaled out, an
+account is routed to one instance by a value derived from its key.
+
+**Why.** Two instances with a room each for one account would show two devices
+each other's absence, and both could hold the same partition.
+
+## 2026-11-16 The partition lease is held over the account bus
+
+**Context.** The lease was a lock chunk overwritten in place on Swarm. That
+depends on several Bee behaviours holding at once: uploads being direct, no
+node or cache serving an older copy, a header browsers may not send (#1016,
+#1017). A stack of PRs built further on it (#918 to #1007).
+
+**Decision.** Devices agree on who holds a partition over the account bus,
+following the protocol checked in `models/bus-lease`. A context writes only
+while it holds the partition and its connection was confirmed recently; one
+that cannot reach the signaling server is read-only. A context waits after
+joining before it may treat a device it has not seen as absent; the starting
+values are a 2 s tick and a 6 s limit on an unconfirmed holder, which makes
+that wait 6 to 8 s. Several tabs of one device keep coordinating as they do.
+The utilization state stays on Swarm, at a new address on each publish. The
+stack is not continued: the work starts from `main` and takes from the stack
+only what does not depend on the lock chunk.
+
+**Why.** Mutual exclusion needs one answer to "who is here", and a chunk read
+through caches does not give one. The wait is paid once per page load and
+starts when the proxy loads, so it is mostly over before the first upload.
+Read-only without the server is the simple rule, and the one the model was
+checked with.
 
 ## 2026-11-13 SvelteKit 3, with `$lib` kept as an alias
 

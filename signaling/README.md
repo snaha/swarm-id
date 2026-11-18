@@ -21,6 +21,8 @@ Every frame is a JSON object with a `type`:
 | server → room   | `{ type: "peer-joined", peerId }` / `{ type: "peer-left", peerId }` | Membership changes.                                                                  |
 | client → server | `{ type: "signal", to, payload }`                                   | Forwarded as `{ type: "signal", from, payload }`.                                    |
 | client → server | `{ type: "relay", to, payload }`                                    | Forwarded as `{ type: "relay", from, payload }`. `payload` is ciphertext.            |
+| server → room   | `{ type: "tick" }`                                                  | "Ping me now", every 2 s. A hidden page's own timers are too slow to set the pace.   |
+| client → server | `{ type: "ping", nonce }`                                           | Answered with `{ type: "pong", nonce }`, only to a socket that is in a room.         |
 
 Topics are 16–128 lower-case hex characters, derived per account by the clients
 (`deriveBusContext` in the lib); the server treats them as opaque room names.
@@ -31,8 +33,10 @@ Global rather than per-IP, because the service sits behind the platform ingress 
 client address only exists in a spoofable header: 500 connections, 200 rooms, 24 peers per
 room, a per-socket message budget sized from the WebRTC negotiation cost per peer, a 64 KiB
 payload cap, and a join timeout for a socket that never names a room. A server-side ping every
-30 s terminates a socket that has not answered by the next tick, which is what turns a
-half-open peer into `peer-left`.
+30 s terminates a socket that has not answered by the next one, which is what turns a
+half-open peer into `peer-left`. A room member that leaves four `tick`s in a row unanswered
+is terminated too: its browser may still hold the socket open while the page is frozen, and
+a member that answers nothing keeps every partition claim in its room waiting.
 
 `1008` (policy violation) is permanent for that topic and the client stops reconnecting: the
 server only sends it for a topic it would refuse identically next time. A socket that never sent

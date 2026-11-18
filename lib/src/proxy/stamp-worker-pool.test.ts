@@ -390,7 +390,7 @@ describe("StampWorkerPool over a partition-bound UtilizationAwareStamper", () =>
 
   it("routes a reserved chunk to its reserved slot without spending a data slot", async () => {
     const reserved = addressInBucket(BUCKET, 0x0a)
-    stamper.markReservedUtilizationChunk(reserved)
+    stamper.markReservedUtilizationChunk(reserved, PARTITION)
 
     expect(slotOf(await pool.stampChunkData(reserved))).toBe(PARTITION)
     expect(stamper.getLocalCounter()?.[BUCKET]).toBe(0)

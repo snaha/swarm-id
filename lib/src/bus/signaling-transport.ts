@@ -33,6 +33,9 @@ const SignalPayloadSchema = z.discriminatedUnion("kind", [
 const RECONNECT_BASE_DELAY_MS = 1000
 const RECONNECT_MAX_DELAY_MS = 30000
 const DATA_CHANNEL_LABEL = "bus"
+/** How long a departed peer is remembered. Only the last several seconds of
+ *  a departure matter to anyone asking who is absent. */
+const PRESENCE_MEMORY_MS = 60_000
 
 export interface SignalingTransportOptions {
   /** Signaling server URL, e.g. `wss://swarm-id.snaha.net/bus`. */
@@ -48,6 +51,38 @@ export interface SignalingTransportOptions {
    * everything else falls back to the relay.
    */
   createPeerConnection?: () => RTCPeerConnection
+  /** How long the server may say nothing before the socket is taken for
+   *  dead. Override for tests. */
+  serverSilenceLimitMs?: number
+}
+
+/**
+ * The server asks every two seconds and drops a member that has not answered
+ * five times running. A socket that has delivered nothing for this long is
+ * one the server no longer has, whether or not its close arrived.
+ */
+const SERVER_SILENCE_LIMIT_MS = 12_000
+const SILENCE_CHECKS_PER_LIMIT = 4
+
+/** A moment on both clocks. The monotonic one cannot be moved by a change to
+ *  the system clock; the wall clock keeps counting while a device sleeps,
+ *  which the monotonic one does not everywhere. */
+interface Instant {
+  monotonic: number
+  wall: number
+}
+
+function now(): Instant {
+  return { monotonic: performance.now(), wall: Date.now() }
+}
+
+/** The longer of what the two clocks say has passed: time is never
+ *  under-counted, whichever of them stood still or jumped back. */
+function elapsedSince(instant: Instant): number {
+  return Math.max(
+    performance.now() - instant.monotonic,
+    Date.now() - instant.wall,
+  )
 }
 
 interface PeerState {
@@ -88,6 +123,26 @@ export class SignalingTransport implements BusTransport {
    *  announcement published in the closing tick still reaches the wire. */
   private pendingDeliveries = new Set<Promise<void>>()
 
+  // Liveness, all of it scoped to one socket's stay in the room: a reconnect
+  // is a new session and starts every clock again.
+  /** When this session's `welcome` arrived. */
+  private sessionStartedAt: number | undefined
+  /** When the newest ping the server has answered was SENT: the server
+   *  counted this socket a room member no earlier than that. */
+  private confirmedAt: Instant | undefined
+  private pingNonce = 0
+  private pingsSentAt = new Map<number, Instant>()
+  /** When the server last sent anything on the current socket. */
+  private serverHeardAt: Instant | undefined
+  private silenceTimer: ReturnType<typeof setInterval> | undefined
+  private confirmedHandlers = new Set<(unconfirmedForMs: number) => void>()
+  /** This socket's name in the room, as the server gave it. */
+  private selfPeerId: string | undefined
+  /** When each peer that is not in our room was last known present: when it
+   *  left, or when a message from it arrived although our view of the room
+   *  did not contain it. */
+  private peerLastPresentAt = new Map<string, number>()
+
   constructor(options: SignalingTransportOptions) {
     this.options = options
     this.connect()
@@ -107,8 +162,8 @@ export class SignalingTransport implements BusTransport {
     return Promise.allSettled([...this.pendingDeliveries]).then(() => undefined)
   }
 
-  publish(message: BusMessageInput): void {
-    const delivery = this.deliver(message).catch((error) => {
+  publish(message: BusMessageInput, to?: string): void {
+    const delivery = this.deliver(message, to).catch((error) => {
       console.error("[SignalingTransport] Publish failed:", error)
     })
     this.pendingDeliveries.add(delivery)
@@ -125,16 +180,64 @@ export class SignalingTransport implements BusTransport {
     return () => this.peerLeftHandlers.delete(handler)
   }
 
+  confirmedAgoMs(): number {
+    if (this.confirmedAt === undefined) return Infinity
+    return elapsedSince(this.confirmedAt)
+  }
+
+  onConfirmed(handler: (unconfirmedForMs: number) => void): () => void {
+    this.confirmedHandlers.add(handler)
+    return () => this.confirmedHandlers.delete(handler)
+  }
+
+  /** This context's name in the room for the current connection; a new one
+   *  after every reconnect. */
+  selfId(): string | undefined {
+    return this.selfPeerId
+  }
+
+  notePeer(peerId: string): void {
+    // Heard from a peer our view of the room does not contain: the view is
+    // behind, and the peer was present a moment ago.
+    if (peerId === this.selfPeerId || this.peers.has(peerId)) return
+    this.markPresent(peerId)
+  }
+
+  private markPresent(peerId: string): void {
+    const now = performance.now()
+    for (const [peer, at] of this.peerLastPresentAt) {
+      if (now - at > PRESENCE_MEMORY_MS) this.peerLastPresentAt.delete(peer)
+    }
+    this.peerLastPresentAt.set(peerId, now)
+  }
+
+  /**
+   * The server's room is the authority. Everyone outside `peerIds` is absent
+   * while every peer in the room is in the set, counted from the latest of:
+   * this context joining, and a peer outside the set last being present.
+   */
+  absentExceptMs(peerIds: ReadonlySet<string>): number {
+    if (this.sessionStartedAt === undefined) return 0
+    for (const peerId of this.peers.keys()) {
+      if (!peerIds.has(peerId)) return 0
+    }
+    let since = this.sessionStartedAt
+    for (const [peerId, at] of this.peerLastPresentAt) {
+      if (!peerIds.has(peerId)) since = Math.max(since, at)
+    }
+    return performance.now() - since
+  }
+
   /**
    * Stops reconnecting at once, but lets in-flight publishes reach the wire
-   * first: `deliver` awaits envelope encryption, and callers announce a
-   * teardown (`lease-released`) and close the bus in the same tick, so tearing
-   * the socket down synchronously would drop exactly the message a waiting
-   * peer is owed. Each pending delivery is a single encrypt plus synchronous
+   * first: `deliver` awaits envelope encryption, and callers publish a last
+   * message and close the bus in the same tick, so tearing the socket down
+   * synchronously would drop exactly the message a peer is owed. Each pending delivery is a single encrypt plus synchronous
    * sends, so this settles promptly — it is not a flush of a send queue.
    */
   close(): void {
     this.closed = true
+    this.stopWatchingForSilence()
     if (this.reconnectTimer !== undefined) {
       clearTimeout(this.reconnectTimer)
     }
@@ -157,7 +260,24 @@ export class SignalingTransport implements BusTransport {
       peer.connection?.close()
     }
     this.peers.clear()
+    this.endSession()
+    this.confirmedHandlers.clear()
     this.socket?.close()
+  }
+
+  private endSession(): void {
+    this.sessionStartedAt = undefined
+    this.confirmedAt = undefined
+    this.pingsSentAt.clear()
+    this.selfPeerId = undefined
+    this.peerLastPresentAt.clear()
+  }
+
+  /** One round trip with the server; the answer is handled in `pong`. */
+  private ping(): void {
+    this.pingNonce += 1
+    this.pingsSentAt.set(this.pingNonce, now())
+    this.sendToServer({ type: "ping", nonce: this.pingNonce })
   }
 
   // ==========================================================================
@@ -177,6 +297,7 @@ export class SignalingTransport implements BusTransport {
 
     socket.addEventListener("open", () => {
       this.sendToServer({ type: "join", topic: this.options.topic })
+      this.watchForSilence(socket)
     })
 
     socket.addEventListener("message", (event) => {
@@ -185,9 +306,14 @@ export class SignalingTransport implements BusTransport {
       // `open` made every such failure reconnect at the 1 s floor forever. A
       // message received is proof the connection was actually useful.
       this.reconnectDelayMs = RECONNECT_BASE_DELAY_MS
+      this.serverHeardAt = now()
       void this.handleServerMessage(String(event.data))
     })
     socket.addEventListener("close", (event) => {
+      // Already given up on as silent, and replaced.
+      if (this.socket !== socket) return
+      this.stopWatchingForSilence()
+      this.endSession()
       // A policy close is permanent for this topic (the server only sends it
       // for a topic it will reject identically next time); retrying is a hot
       // loop against an answer that will not change.
@@ -203,6 +329,43 @@ export class SignalingTransport implements BusTransport {
     socket.addEventListener("error", () => {
       // The close event follows and drives the reconnect.
     })
+  }
+
+  /**
+   * A socket the server dropped while the network was away never hears of
+   * it: the close was lost, and this side only speaks when spoken to. Take a
+   * socket that has been silent too long for dead, and connect again.
+   */
+  private watchForSilence(socket: WebSocket): void {
+    this.stopWatchingForSilence()
+    this.serverHeardAt = now()
+    const limit = this.options.serverSilenceLimitMs ?? SERVER_SILENCE_LIMIT_MS
+    // A step of the system clock reads as silence too, until the server's
+    // next message. So a silence counts only once it has been seen twice
+    // with nothing heard in between: the looks are further apart than the
+    // server's ticks.
+    let suspected: Instant | undefined
+    this.silenceTimer = setInterval(() => {
+      if (this.socket !== socket || this.serverHeardAt === undefined) return
+      if (elapsedSince(this.serverHeardAt) < limit) {
+        suspected = undefined
+        return
+      }
+      if (suspected !== this.serverHeardAt) {
+        suspected = this.serverHeardAt
+        return
+      }
+      this.stopWatchingForSilence()
+      this.socket = undefined
+      socket.close()
+      this.endSession()
+      this.scheduleReconnect()
+    }, limit / SILENCE_CHECKS_PER_LIMIT)
+  }
+
+  private stopWatchingForSilence(): void {
+    clearInterval(this.silenceTimer)
+    this.silenceTimer = undefined
   }
 
   private scheduleReconnect(): void {
@@ -230,19 +393,22 @@ export class SignalingTransport implements BusTransport {
   // Sending
   // ==========================================================================
 
-  private async deliver(message: BusMessageInput): Promise<void> {
-    if (this.peers.size === 0) return
+  private async deliver(message: BusMessageInput, to?: string): Promise<void> {
+    if (to === undefined && this.peers.size === 0) return
     const ciphertext = await encryptEnvelope(
       JSON.stringify(message),
       this.options.encryptionKey,
     )
-    for (const [peerId, peer] of this.peers) {
+    // One peer: by its channel when there is one, else through the server,
+    // which knows the room even where this context's view of it is behind.
+    const recipients: [string, PeerState | undefined][] =
+      to === undefined ? [...this.peers] : [[to, this.peers.get(to)]]
+    for (const [peerId, peer] of recipients) {
       // Per peer, and never fatal to the rest of the fan-out: a `send` that
       // throws (SCTP size limit, a channel torn down between the readyState
       // read and the call) must not escape this loop and starve every peer
-      // after it — for a teardown `lease-released` that costs the waiter its
-      // whole poll interval. A failed channel falls through to the relay.
-      if (peer.dataChannel?.readyState === "open") {
+      // after it. A failed channel falls through to the relay.
+      if (peer?.dataChannel?.readyState === "open") {
         try {
           peer.dataChannel.send(ciphertext)
           continue
@@ -280,6 +446,9 @@ export class SignalingTransport implements BusTransport {
 
     switch (message.type) {
       case "welcome":
+        this.sessionStartedAt = performance.now()
+        this.selfPeerId = message.peerId
+        this.ping()
         for (const peerId of message.peers) {
           this.peers.set(peerId, newPeerState())
           // The newcomer (us) initiates toward every existing peer.
@@ -294,6 +463,7 @@ export class SignalingTransport implements BusTransport {
         const peer = this.peers.get(message.peerId)
         peer?.connection?.close()
         this.peers.delete(message.peerId)
+        this.markPresent(message.peerId)
         // Reported, not just cleaned up: this is the only departure signal a
         // closing tab produces (why, in `PresenceTracker`'s header). The
         // server's reaper closes a dead socket too, so a crash and a dropped
@@ -309,6 +479,23 @@ export class SignalingTransport implements BusTransport {
       case "signal":
         await this.handleSignal(message.from, message.payload)
         return
+      case "tick":
+        this.ping()
+        return
+      case "pong": {
+        // Answers arrive in the order the pings were sent, so everything up
+        // to this nonce is settled. A nonce from an earlier session is not in
+        // the map.
+        const sentAt = this.pingsSentAt.get(message.nonce)
+        if (sentAt === undefined) return
+        const unconfirmedForMs = this.confirmedAgoMs()
+        this.confirmedAt = sentAt
+        for (const nonce of this.pingsSentAt.keys()) {
+          if (nonce <= message.nonce) this.pingsSentAt.delete(nonce)
+        }
+        for (const handler of this.confirmedHandlers) handler(unconfirmedForMs)
+        return
+      }
     }
   }
 

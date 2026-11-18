@@ -15,8 +15,9 @@ embeds `swarm-id.snaha.net`, both under `snaha.net`.
 
 1. Build `ui/` with `BASE_PATH` set to the path you serve it from (the hosted deployments
    use `/id`), and `PUBLIC_BUS_SIGNALING_URL` pointing at a
-   [signaling server](../account-bus/) you run, or leave it unset to run without
-   cross-device sync.
+   [signaling server](../account-bus/) you run. The server is required to upload: an
+   account's devices agree over it who writes which part of a drive, and a build with no
+   server reports `canUpload: false` with `no-account-bus`.
 2. Serve the build from a subdomain of your app's site, over HTTPS, with the same
    registrable domain. Ports do not affect site; the scheme and the registrable domain do.
 3. Point your `SwarmIdClient` at it with `iframeOrigin`.

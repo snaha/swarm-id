@@ -57,8 +57,6 @@ export type {
   SyncedAccount,
 } from "./schemas"
 
-export { DebouncedUtilizationUploader } from "./storage/debounced-uploader"
-
 // The vault's encryption, for the host case above: a host that writes the
 // record produces the same `encryptedSeed` bytes the identity UI does.
 export {
@@ -90,10 +88,8 @@ export {
 
 export type { SyncAccountFunction, SyncResult } from "./sync"
 
-export { PartitionLease } from "./sync/partition-lease"
+export { BusLanes } from "./sync/bus-lease"
 export { mergeAccountSettings } from "./sync/merge-snapshot"
-
-export type { PartitionLeaseStateSnapshot } from "./sync/partition-lease"
 
 export {
   AuthDataSchema,
@@ -107,7 +103,6 @@ export {
   STORAGE_CHALLENGE_KEY,
   STORAGE_KEY_ACCOUNTS,
   STORAGE_KEY_NETWORK_SETTINGS,
-  leaseCacheStorageKey,
 } from "./types"
 
 export type { AccountStateSnapshot } from "./utils/account-state-snapshot"

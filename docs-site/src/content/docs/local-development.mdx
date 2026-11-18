@@ -112,11 +112,10 @@ Everything that talks to the Bee node:
 - **Stored stamps** — the batches saved in this browser, with the fields needed to re-adopt one on a fresh account.
 - **Retrievability self-check** — writes a throwaway single-owner chunk and reads it back, to confirm the node serves back what you write. Multi-device coordination (and reliable sync) only works where it does; a companion read-by-address runs the same check across two devices, which is the one that mirrors real coordination on a load-balanced gateway.
 - **Manual sync testing** — triggers a sync for every account, to exercise postage-stamp utilization tracking. Detailed `[StateSync]` logs go to the browser console.
-- **Partition tuning** — overrides the multi-device intent-round timings for a gateway with slower propagation.
 
 ### Devices Tab
 
-The devices registered to the selected account, which partitions each currently holds, and an **Online** badge for every device heard on the [account bus](../account-bus/) in the last three minutes. The rows refresh every 5 s, so a peer shows up about one presence message (20 s) after it joins.
+The devices registered to the selected account, and an **Online** badge for every device heard on the [account bus](../account-bus/) in the last three minutes. The rows refresh every 5 s, so a peer shows up about one presence message (20 s) after it joins.
 
 ## Getting a Postage Batch
 

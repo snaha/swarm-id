@@ -49,7 +49,6 @@ export type {
 export const STORAGE_KEY_ACCOUNTS = "swarm-id-accounts"
 export const STORAGE_KEY_NETWORK_SETTINGS = "swarm-id-network-settings"
 export const STORAGE_CHALLENGE_KEY = "swarm-storage-challenge"
-export const STORAGE_KEY_LEASE_CACHE_PREFIX = "swarm-id-lease-v2"
 
 /**
  * Key PREFIX for the handed-over session a PARTITIONED proxy keeps, so a reload
@@ -68,28 +67,6 @@ export const STORAGE_KEY_LEASE_CACHE_PREFIX = "swarm-id-lease-v2"
  * of where it was found.
  */
 export const STORAGE_KEY_PARTITION_SESSION = "swarm-id-partition-session"
-
-/**
- * localStorage key for the proxy's partition-lease cache (a
- * `PartitionLeaseStateSnapshot`), per account AND per batch. Same-origin tabs
- * share this, so the SwarmID UI reads it to render the *self* device's active
- * partition without a Swarm round-trip. The proxy is the sole writer.
- *
- * The batch is in the key because the lease is: a lane is one partition of one
- * batch (#589), and an account has two coordinators whenever a dApp carries a
- * per-app stamp override. Under one key per account they shared a slot and
- * overwrote each other — safe, since `PartitionLease.hydrate` refuses a
- * snapshot whose `batchId` differs, but a hint that stops hinting exactly when
- * there are two writers to hint for is no hint. The `batchId` inside the record
- * stays as the second line of that pair of braces, as `parentOrigin` does in
- * the partitioned session (#671).
- */
-export function leaseCacheStorageKey(
-  accountId: string,
-  batchId: string,
-): string {
-  return `${STORAGE_KEY_LEASE_CACHE_PREFIX}:${accountId.toLowerCase()}:${batchId.toLowerCase()}`
-}
 
 /**
  * Where a partitioned session is stored, per dApp origin.
@@ -295,9 +272,9 @@ export interface ActUploadOptions extends UploadOptions {
 /**
  * How many chunks a write sent (#932): one per stamp the proxy signed in
  * stamper mode, one per chunk the gateway accepted in subsidised mode, so a
- * dApp can show what a save cost against what it estimated. The partition
- * lease's own chunks (lock, intent, and the state publish after each write)
- * are not counted: they re-use reserved slots and spend no capacity.
+ * dApp can show what a save cost against what it estimated. The chunks of
+ * the partition state published after each write are not counted: they
+ * re-use reserved slots and spend no capacity.
  * Optional on the wire: an identity site older than the field sends none.
  */
 const StampedChunksSchema = z.number().int().min(0).optional()
@@ -909,6 +886,10 @@ export type UploadMode = z.infer<typeof UploadModeSchema>
  *   stored record says the node does not have the batch (`exists: false`) or
  *   cannot use it (`usable: false`). Opening the drive in the identity UI
  *   refreshes the record from the chain (#765).
+ * - `no-account-bus` — the drive is shared between the account's devices, and
+ *   this session cannot reach them: the identity site was built with no
+ *   signaling server, or the connection to it is down. Who writes where is
+ *   agreed over that connection, so without it nothing is written.
  */
 export const UploadUnavailableReasonSchema = z.enum([
   "no-stamp",
@@ -917,6 +898,7 @@ export const UploadUnavailableReasonSchema = z.enum([
   "stamp-not-usable",
   /** The batch is younger than the ten blocks Bee waits before stamping with one (#924) */
   "stamp-warming-up",
+  "no-account-bus",
 ])
 
 export type UploadUnavailableReason = z.infer<
@@ -997,9 +979,9 @@ export const ConnectionInfoSchema = z.object({
    */
   uploadUnavailableReason: UploadUnavailableReasonSchema.optional(),
   /**
-   * Partition number this device currently holds in the postage batch's
-   * partition-lease. `undefined` when no lease is held (sign-in only,
-   * pre-first-upload) or for legacy single-device accounts.
+   * Partition of the postage batch this context currently holds (its lane).
+   * `undefined` when none is held (sign-in only, pre-first-upload) or for
+   * legacy single-device accounts.
    */
   partition: z.number().int().min(0).optional(),
   /**
@@ -1780,7 +1762,8 @@ export const UploadProgressMessageSchema = z.object({
  *   switch (#885). Ask with `requestPermissions()`, or check `getPermissions()`
  *   first
  * - `partition-contended` — every partition of the batch is held by other
- *   devices and none yielded in time
+ *   devices and none yielded in time. A session that could not ask them at
+ *   all fails as `upload-unavailable` with `no-account-bus` instead
  * - `lease-lost` — this device's partition was reclaimed mid-write
  * - `bee-rejected` — Bee or the gateway answered with a non-2xx status:
  *   `status`, `beeMessage` and `url` say which

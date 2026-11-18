@@ -88,6 +88,28 @@ describe("SignalingTransport — relay path", () => {
     }
   })
 
+  it("delivers a message for one peer to that peer alone", async () => {
+    const sender = makeTransport()
+    const receiver = makeTransport()
+    const bystander = makeTransport()
+    try {
+      const received = collect(receiver)
+      const overheard = collect(bystander)
+      await waitForPeers(sender, 2)
+      await vi.waitFor(() => expect(receiver.selfId()).toBeDefined())
+      sender.publish(UTILIZATION_MESSAGE, receiver.selfId())
+      await vi.waitFor(() => expect(received.length).toBe(1))
+      // Give a stray copy time to arrive before saying there is none.
+      sender.publish(UTILIZATION_MESSAGE)
+      await vi.waitFor(() => expect(overheard.length).toBe(1))
+      expect(received.length).toBe(1 + 1)
+    } finally {
+      sender.close()
+      receiver.close()
+      bystander.close()
+    }
+  })
+
   it("never delivers plaintext to a peer without the account key", async () => {
     const otherContext = await deriveBusContext(OTHER_DERIVATION_KEY)
     const sender = makeTransport()
@@ -110,10 +132,8 @@ describe("SignalingTransport — relay path", () => {
     }
   })
 
-  // The teardown announcement (`lease-released`) is published and the bus
-  // closed in the same synchronous tick, while `deliver` is still awaiting its
-  // encryption. Dropping it there costs a waiting peer the full poll interval
-  // — the exact latency the message exists to remove.
+  // A message can be published and the bus closed in the same synchronous
+  // tick, while `deliver` is still awaiting its encryption. It still goes out.
   it("still delivers an envelope published in the same tick as close()", async () => {
     const sender = makeTransport()
     const receiver = makeTransport()
@@ -415,8 +435,7 @@ describe("SignalingTransport — joining a room", () => {
 })
 
 describe("SignalingTransport — WebRTC upgrade", () => {
-  // A `send` that throws for one peer must not starve every peer after it: for
-  // a teardown `lease-released` that costs the waiter its whole poll interval.
+  // A `send` that throws for one peer must not starve every peer after it.
   // The peer falls back to the relay and the others are unaffected.
   it("relays past a peer whose data channel send throws", async () => {
     const sender = makeTransport({ createPeerConnection: fakeRtcFactory })
@@ -632,6 +651,257 @@ describe("SignalingTransport — WebRTC upgrade", () => {
       second.close()
       FakePeerConnection.registry.clear()
       FakePeerConnection.channels = []
+    }
+  })
+})
+
+const FAST_TICK_MS = 20
+/** The transport looks four times per limit: two ticks between looks. */
+const TICKS_PER_SILENCE_LIMIT = 8
+/** Long enough for a test to see the connection before it is given up on. */
+const SILENCE_LIMIT_MS = 400
+/** Past the transport's first reconnect delay. */
+const RECONNECT_WAIT_MS = 4000
+/** A server that, for the length of a test, never asks. */
+const SILENT_TICK_MS = 60_000
+/** Longer than a few pings, short enough to keep the suite quick. */
+const SETTLE_MS = 120
+const settle = () => new Promise((resolve) => setTimeout(resolve, SETTLE_MS))
+const NOBODY: ReadonlySet<string> = new Set()
+
+// What a lane asks of a transport (`LaneLiveness`, models/bus-lease): whether
+// this context's own connection is confirmed, and how long the service has
+// shown a device absent.
+describe("SignalingTransport — liveness", () => {
+  it("confirms its own connection by a round trip with the server", async () => {
+    const transport = makeTransport()
+    try {
+      expect(transport.confirmedAgoMs()).toBe(Infinity)
+      await vi.waitFor(() =>
+        expect(transport.confirmedAgoMs()).toBeLessThan(SETTLE_MS),
+      )
+    } finally {
+      transport.close()
+    }
+  })
+
+  it("stays confirmed for as long as the server keeps asking", async () => {
+    const ticking = await createSignalingServer({
+      port: 0,
+      tickIntervalMs: FAST_TICK_MS,
+    })
+    const transport = makeTransport({ url: `ws://127.0.0.1:${ticking.port}` })
+    try {
+      await settle()
+      await settle()
+      expect(transport.confirmedAgoMs()).toBeLessThan(SETTLE_MS)
+    } finally {
+      transport.close()
+      await ticking.close()
+    }
+  })
+
+  // A socket the server dropped while the network was away: the server's
+  // close never arrived, and a context alone in its room has nothing to send
+  // that would show the socket is dead.
+  it("reconnects when the server has gone silent", async () => {
+    const silent = await createSignalingServer({
+      port: 0,
+      tickIntervalMs: SILENT_TICK_MS,
+    })
+    const transport = makeTransport({
+      url: `ws://127.0.0.1:${silent.port}`,
+      serverSilenceLimitMs: SILENCE_LIMIT_MS,
+    })
+    try {
+      await vi.waitFor(() => expect(transport.selfId()).toBeDefined())
+      const first = transport.selfId()
+      // The reconnect waits out its first backoff.
+      await vi.waitFor(
+        () => {
+          expect(transport.selfId()).toBeDefined()
+          expect(transport.selfId()).not.toBe(first)
+        },
+        { timeout: RECONNECT_WAIT_MS },
+      )
+    } finally {
+      transport.close()
+      await silent.close()
+    }
+  })
+
+  // A step of the system clock (a time sync, a VM resumed) reads as silence
+  // until the next message from the server, which is on its way.
+  it("keeps a socket the server is still talking on when the wall clock jumps forward", async () => {
+    // Several ticks between two looks of the transport, as in production.
+    const ticking = await createSignalingServer({
+      port: 0,
+      tickIntervalMs: SILENCE_LIMIT_MS / TICKS_PER_SILENCE_LIMIT,
+    })
+    const transport = makeTransport({
+      url: `ws://127.0.0.1:${ticking.port}`,
+      serverSilenceLimitMs: SILENCE_LIMIT_MS,
+    })
+    try {
+      await vi.waitFor(() => expect(transport.selfId()).toBeDefined())
+      const first = transport.selfId()
+      const wall = Date.now
+      const jumpMs = 60_000
+      const dateSpy = vi
+        .spyOn(Date, "now")
+        .mockImplementation(() => wall() + jumpMs)
+      try {
+        await new Promise((resolve) => setTimeout(resolve, SILENCE_LIMIT_MS))
+        expect(transport.selfId()).toBe(first)
+      } finally {
+        dateSpy.mockRestore()
+      }
+    } finally {
+      transport.close()
+      await ticking.close()
+    }
+  })
+
+  // The monotonic clock stops while a laptop sleeps on some systems; the
+  // server has dropped this context long before it wakes.
+  it("counts time the monotonic clock did not see", async () => {
+    const ticking = await createSignalingServer({
+      port: 0,
+      tickIntervalMs: SILENT_TICK_MS,
+    })
+    const transport = makeTransport({ url: `ws://127.0.0.1:${ticking.port}` })
+    try {
+      await vi.waitFor(() =>
+        expect(transport.confirmedAgoMs()).toBeLessThan(SETTLE_MS),
+      )
+      const asleepMs = 60_000
+      const wall = Date.now()
+      const dateSpy = vi.spyOn(Date, "now").mockReturnValue(wall + asleepMs)
+      try {
+        expect(transport.confirmedAgoMs()).toBeGreaterThanOrEqual(asleepMs)
+      } finally {
+        dateSpy.mockRestore()
+      }
+    } finally {
+      transport.close()
+      await ticking.close()
+    }
+  })
+
+  it("is unconfirmed again once the socket is gone", async () => {
+    const ownServer = await createSignalingServer({ port: 0 })
+    const transport = makeTransport({
+      url: `ws://127.0.0.1:${ownServer.port}`,
+    })
+    try {
+      await vi.waitFor(() =>
+        expect(transport.confirmedAgoMs()).toBeLessThan(SETTLE_MS),
+      )
+      await ownServer.close()
+      await vi.waitFor(() => expect(transport.confirmedAgoMs()).toBe(Infinity))
+      expect(transport.absentExceptMs(NOBODY)).toBe(0)
+    } finally {
+      transport.close()
+      await ownServer.close()
+    }
+  })
+
+  it("reports each confirmation with the gap before it", async () => {
+    const ticking = await createSignalingServer({
+      port: 0,
+      tickIntervalMs: FAST_TICK_MS,
+    })
+    const transport = makeTransport({ url: `ws://127.0.0.1:${ticking.port}` })
+    const gaps: number[] = []
+    try {
+      transport.onConfirmed((unconfirmedForMs) => gaps.push(unconfirmedForMs))
+      await vi.waitFor(() => expect(gaps.length).toBeGreaterThanOrEqual(3))
+      expect(gaps[0]).toBe(Infinity)
+      expect(gaps[1]).toBeLessThan(SETTLE_MS)
+    } finally {
+      transport.close()
+      await ticking.close()
+    }
+  })
+
+  it("counts everyone absent from the moment this context joined", async () => {
+    const transport = makeTransport()
+    try {
+      expect(transport.absentExceptMs(NOBODY)).toBe(0)
+      await settle()
+      await vi.waitFor(() =>
+        expect(transport.absentExceptMs(NOBODY)).toBeGreaterThan(0),
+      )
+    } finally {
+      transport.close()
+    }
+  })
+
+  it("names itself as the server named it, anew after every connection", async () => {
+    const transport = makeTransport()
+    const other = makeTransport()
+    const senders: string[] = []
+    try {
+      expect(transport.selfId()).toBeUndefined()
+      other.subscribe((_raw, from) => {
+        if (from !== undefined) senders.push(from)
+      })
+      await waitForPeers(transport, 1)
+      await waitForPeers(other, 1)
+      transport.publish(UTILIZATION_MESSAGE)
+      await vi.waitFor(() => expect(senders.length).toBe(1))
+      expect(transport.selfId()).toBe(senders[0])
+    } finally {
+      transport.close()
+      other.close()
+    }
+  })
+
+  it("counts a peer present while it is in the room, and absent from when it left", async () => {
+    const transport = makeTransport()
+    const other = makeTransport()
+    try {
+      await waitForPeers(transport, 1)
+      await vi.waitFor(() => expect(other.selfId()).toBeDefined())
+      const onlyOther = new Set([other.selfId() ?? ""])
+
+      await settle()
+      // The other is in the room: nobody is absent unless it is set aside.
+      expect(transport.absentExceptMs(NOBODY)).toBe(0)
+      const exceptOther = transport.absentExceptMs(onlyOther)
+      expect(exceptOther).toBeGreaterThanOrEqual(SETTLE_MS)
+
+      other.close()
+      await waitForPeers(transport, 0)
+      expect(transport.absentExceptMs(NOBODY)).toBeLessThan(SETTLE_MS)
+      // With the other set aside, its departure restarts nothing.
+      expect(transport.absentExceptMs(onlyOther)).toBeGreaterThanOrEqual(
+        exceptOther,
+      )
+    } finally {
+      transport.close()
+      other.close()
+    }
+  })
+
+  // The room view can be behind: a message from a peer it does not contain
+  // says the peer was here a moment ago.
+  it("restarts a peer's absence when it is heard from outside the room", async () => {
+    const transport = makeTransport()
+    try {
+      await settle()
+      await vi.waitFor(() =>
+        expect(transport.absentExceptMs(NOBODY)).toBeGreaterThanOrEqual(
+          SETTLE_MS,
+        ),
+      )
+      transport.notePeer("not-in-the-room")
+      expect(transport.absentExceptMs(NOBODY)).toBeLessThan(SETTLE_MS)
+      expect(
+        transport.absentExceptMs(new Set(["not-in-the-room"])),
+      ).toBeGreaterThanOrEqual(SETTLE_MS)
+    } finally {
+      transport.close()
     }
   })
 })

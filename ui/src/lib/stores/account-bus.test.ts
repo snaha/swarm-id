@@ -72,6 +72,8 @@ vi.mock('@snaha/swarm-id/internal', async (importActual) => {
             transport.peerLeft = undefined
           }
         }),
+        // The name the server would give this tab's connection.
+        selfId: () => 'peer-tab',
         close: vi.fn(),
         deliver: undefined as ((raw: unknown, from?: string) => void) | undefined,
         peerLeft: undefined as ((peerId: string) => void) | undefined,
@@ -361,11 +363,15 @@ describe('accountBusStore', () => {
     accountBusStore.join(makeAccount())
     await settle()
 
-    expect(transports[0].publish).toHaveBeenCalledWith({
-      type: 'presence',
-      accountId: 'aa'.repeat(20),
-      fromDeviceId: localStorageFake.get('swarm-id-device-id'),
-    })
+    // To the whole room: no one peer is named.
+    expect(transports[0].publish).toHaveBeenCalledWith(
+      {
+        type: 'presence',
+        accountId: 'aa'.repeat(20),
+        fromDeviceId: localStorageFake.get('swarm-id-device-id'),
+      },
+      undefined,
+    )
   })
 
   it("lists a peer's beat as live, but not this device's own", async () => {
@@ -418,9 +424,38 @@ describe('accountBusStore', () => {
     await settle()
 
     transports[0].deliver?.({ type: 'account-delta', snapshot: { nope: true } })
-    transports[0].deliver?.({ type: 'lease-request', accountId: 'aa'.repeat(20) })
+    transports[0].deliver?.({ type: 'no-such-kind', accountId: 'aa'.repeat(20) })
 
     expect(applyAccountDelta).not.toHaveBeenCalled()
+  })
+
+  // A context asking for a partition waits for an answer from everyone in the
+  // room. This tab writes nothing through the bus store, and must still say so.
+  it('answers a claim of a partition it does not hold', async () => {
+    accountBusStore.join(makeAccount())
+    await settle()
+    const claim = {
+      type: 'lane-claim',
+      accountId: 'aa'.repeat(20),
+      batchId: 'ab'.repeat(32),
+      partition: 1,
+      from: 'peer-claimant',
+      round: '0123456789abcdef',
+    }
+
+    transports[0].deliver?.(claim, 'peer-claimant')
+
+    // To the claimant alone.
+    expect(transports[0].publish).toHaveBeenCalledWith(
+      {
+        ...claim,
+        type: 'lane-free',
+        from: 'peer-tab',
+        to: 'peer-claimant',
+      },
+      'peer-claimant',
+    )
+    expect(accountBusStore.lanes()).toBeDefined()
   })
 
   // The room's keys scope it to ONE account. A peer holding them that names a

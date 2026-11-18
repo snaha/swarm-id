@@ -59,6 +59,19 @@ const REFUSAL_LINGER_MS = 1000
  */
 const DEFAULT_HEARTBEAT_INTERVAL_MS = 30_000
 /**
+ * How often every room member is asked to ping (`tick` in the protocol). It
+ * bounds how stale a client's view of its own connection can be, which is what
+ * a partition holder checks before each write (models/bus-lease).
+ */
+const DEFAULT_TICK_INTERVAL_MS = 2000
+/**
+ * How many ticks in a row a room member may leave unanswered before its socket
+ * is terminated. A member that answers nothing answers no lane claim either
+ * (a frozen tab, whose browser still keeps the socket open), and everyone
+ * claiming a lane waits for it for as long as it is in the room.
+ */
+const MAX_SILENT_TICKS = 4
+/**
  * Bounds for a single 1 vCPU / 0.5 GB instance with no autoscale. Deliberately
  * not per-IP: this service sits behind the platform's ingress, so the socket's
  * remote address is the proxy and the client address only exists in a
@@ -97,6 +110,8 @@ interface Peer {
    * laptops all produce them.
    */
   alive: boolean
+  /** Ticks sent since this peer's last `ping`. */
+  silentTicks: number
   /** Start of the current message-rate window, and its running count. */
   windowStartedAt: number
   messagesInWindow: number
@@ -118,6 +133,7 @@ export interface SignalingServerOptions {
    * service anyway.
    */
   heartbeatIntervalMs?: number
+  tickIntervalMs?: number
   maxConnections?: number
   maxRooms?: number
   maxPeersPerRoom?: number
@@ -152,6 +168,7 @@ function send(peer: Peer, message: ServerMessage): void {
 export function createSignalingServer(options: SignalingServerOptions): Promise<SignalingServer> {
   const rooms = new Map<string, Map<string, Peer>>()
   const heartbeatIntervalMs = options.heartbeatIntervalMs ?? DEFAULT_HEARTBEAT_INTERVAL_MS
+  const tickIntervalMs = options.tickIntervalMs ?? DEFAULT_TICK_INTERVAL_MS
   const maxConnections = options.maxConnections ?? DEFAULT_MAX_CONNECTIONS
   const maxRooms = options.maxRooms ?? DEFAULT_MAX_ROOMS
   const maxPeersPerRoom = options.maxPeersPerRoom ?? DEFAULT_MAX_PEERS_PER_ROOM
@@ -227,6 +244,7 @@ export function createSignalingServer(options: SignalingServerOptions): Promise<
       id: randomUUID(),
       socket,
       alive: true,
+      silentTicks: 0,
       windowStartedAt: Date.now(),
       messagesInWindow: 0,
     }
@@ -334,6 +352,14 @@ export function createSignalingServer(options: SignalingServerOptions): Promise<
       if (message.type === 'join') return
       const room = joined.room
 
+      // Reached only by a socket that is in its room, which is what the answer
+      // asserts: a peer told this socket has left gets no more of them.
+      if (message.type === 'ping') {
+        peer.silentTicks = 0
+        send(peer, { type: 'pong', nonce: message.nonce })
+        return
+      }
+
       if (message.type === 'signal') {
         const target = room.get(message.to)
         if (target) {
@@ -394,11 +420,24 @@ export function createSignalingServer(options: SignalingServerOptions): Promise<
           }
         }
       }, heartbeatIntervalMs)
+      const tick = setInterval(() => {
+        for (const room of rooms.values()) {
+          for (const peer of room.values()) {
+            if (peer.silentTicks >= MAX_SILENT_TICKS) {
+              peer.socket.terminate()
+              continue
+            }
+            peer.silentTicks += 1
+            send(peer, { type: 'tick' })
+          }
+        }
+      }, tickIntervalMs)
       resolve({
         port,
         close: () =>
           new Promise<void>((resolveClose) => {
             clearInterval(heartbeat)
+            clearInterval(tick)
             for (const client of wss.clients) {
               client.terminate()
             }
