@@ -51,6 +51,38 @@ export interface SignalingTransportOptions {
    * everything else falls back to the relay.
    */
   createPeerConnection?: () => RTCPeerConnection
+  /** How long the server may say nothing before the socket is taken for
+   *  dead. Override for tests. */
+  serverSilenceLimitMs?: number
+}
+
+/**
+ * The server asks every two seconds and drops a member that has not answered
+ * five times running. A socket that has delivered nothing for this long is
+ * one the server no longer has, whether or not its close arrived.
+ */
+const SERVER_SILENCE_LIMIT_MS = 12_000
+const SILENCE_CHECKS_PER_LIMIT = 4
+
+/** A moment on both clocks. The monotonic one cannot be moved by a change to
+ *  the system clock; the wall clock keeps counting while a device sleeps,
+ *  which the monotonic one does not everywhere. */
+interface Instant {
+  monotonic: number
+  wall: number
+}
+
+function now(): Instant {
+  return { monotonic: performance.now(), wall: Date.now() }
+}
+
+/** The longer of what the two clocks say has passed: time is never
+ *  under-counted, whichever of them stood still or jumped back. */
+function elapsedSince(instant: Instant): number {
+  return Math.max(
+    performance.now() - instant.monotonic,
+    Date.now() - instant.wall,
+  )
 }
 
 interface PeerState {
@@ -92,15 +124,17 @@ export class SignalingTransport implements BusTransport {
   private pendingDeliveries = new Set<Promise<void>>()
 
   // Liveness, all of it scoped to one socket's stay in the room: a reconnect
-  // is a new session and starts every clock again. Times are
-  // `performance.now()`, which a change to the system clock cannot move.
+  // is a new session and starts every clock again.
   /** When this session's `welcome` arrived. */
   private sessionStartedAt: number | undefined
   /** When the newest ping the server has answered was SENT: the server
    *  counted this socket a room member no earlier than that. */
-  private confirmedAt: number | undefined
+  private confirmedAt: Instant | undefined
   private pingNonce = 0
-  private pingsSentAt = new Map<number, number>()
+  private pingsSentAt = new Map<number, Instant>()
+  /** When the server last sent anything on the current socket. */
+  private serverHeardAt: Instant | undefined
+  private silenceTimer: ReturnType<typeof setInterval> | undefined
   private confirmedHandlers = new Set<(unconfirmedForMs: number) => void>()
   /** This socket's name in the room, as the server gave it. */
   private selfPeerId: string | undefined
@@ -148,7 +182,7 @@ export class SignalingTransport implements BusTransport {
 
   confirmedAgoMs(): number {
     if (this.confirmedAt === undefined) return Infinity
-    return performance.now() - this.confirmedAt
+    return elapsedSince(this.confirmedAt)
   }
 
   onConfirmed(handler: (unconfirmedForMs: number) => void): () => void {
@@ -203,6 +237,7 @@ export class SignalingTransport implements BusTransport {
    */
   close(): void {
     this.closed = true
+    this.stopWatchingForSilence()
     if (this.reconnectTimer !== undefined) {
       clearTimeout(this.reconnectTimer)
     }
@@ -241,7 +276,7 @@ export class SignalingTransport implements BusTransport {
   /** One round trip with the server; the answer is handled in `pong`. */
   private ping(): void {
     this.pingNonce += 1
-    this.pingsSentAt.set(this.pingNonce, performance.now())
+    this.pingsSentAt.set(this.pingNonce, now())
     this.sendToServer({ type: "ping", nonce: this.pingNonce })
   }
 
@@ -262,6 +297,7 @@ export class SignalingTransport implements BusTransport {
 
     socket.addEventListener("open", () => {
       this.sendToServer({ type: "join", topic: this.options.topic })
+      this.watchForSilence(socket)
     })
 
     socket.addEventListener("message", (event) => {
@@ -270,9 +306,13 @@ export class SignalingTransport implements BusTransport {
       // `open` made every such failure reconnect at the 1 s floor forever. A
       // message received is proof the connection was actually useful.
       this.reconnectDelayMs = RECONNECT_BASE_DELAY_MS
+      this.serverHeardAt = now()
       void this.handleServerMessage(String(event.data))
     })
     socket.addEventListener("close", (event) => {
+      // Already given up on as silent, and replaced.
+      if (this.socket !== socket) return
+      this.stopWatchingForSilence()
       this.endSession()
       // A policy close is permanent for this topic (the server only sends it
       // for a topic it will reject identically next time); retrying is a hot
@@ -289,6 +329,31 @@ export class SignalingTransport implements BusTransport {
     socket.addEventListener("error", () => {
       // The close event follows and drives the reconnect.
     })
+  }
+
+  /**
+   * A socket the server dropped while the network was away never hears of
+   * it: the close was lost, and this side only speaks when spoken to. Take a
+   * socket that has been silent too long for dead, and connect again.
+   */
+  private watchForSilence(socket: WebSocket): void {
+    this.stopWatchingForSilence()
+    this.serverHeardAt = now()
+    const limit = this.options.serverSilenceLimitMs ?? SERVER_SILENCE_LIMIT_MS
+    this.silenceTimer = setInterval(() => {
+      if (this.socket !== socket || this.serverHeardAt === undefined) return
+      if (elapsedSince(this.serverHeardAt) < limit) return
+      this.stopWatchingForSilence()
+      this.socket = undefined
+      socket.close()
+      this.endSession()
+      this.scheduleReconnect()
+    }, limit / SILENCE_CHECKS_PER_LIMIT)
+  }
+
+  private stopWatchingForSilence(): void {
+    clearInterval(this.silenceTimer)
+    this.silenceTimer = undefined
   }
 
   private scheduleReconnect(): void {

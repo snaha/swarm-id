@@ -659,6 +659,12 @@ describe("SignalingTransport — WebRTC upgrade", () => {
 })
 
 const FAST_TICK_MS = 20
+/** Long enough for a test to see the connection before it is given up on. */
+const SILENCE_LIMIT_MS = 400
+/** Past the transport's first reconnect delay. */
+const RECONNECT_WAIT_MS = 4000
+/** A server that, for the length of a test, never asks. */
+const SILENT_TICK_MS = 60_000
 /** Longer than a few pings, short enough to keep the suite quick. */
 const SETTLE_MS = 120
 const settle = () => new Promise((resolve) => setTimeout(resolve, SETTLE_MS))
@@ -690,6 +696,61 @@ describe("SignalingTransport — liveness", () => {
       await settle()
       await settle()
       expect(transport.confirmedAgoMs()).toBeLessThan(SETTLE_MS)
+    } finally {
+      transport.close()
+      await ticking.close()
+    }
+  })
+
+  // A socket the server dropped while the network was away: the server's
+  // close never arrived, and a context alone in its room has nothing to send
+  // that would show the socket is dead.
+  it("reconnects when the server has gone silent", async () => {
+    const silent = await createSignalingServer({
+      port: 0,
+      tickIntervalMs: SILENT_TICK_MS,
+    })
+    const transport = makeTransport({
+      url: `ws://127.0.0.1:${silent.port}`,
+      serverSilenceLimitMs: SILENCE_LIMIT_MS,
+    })
+    try {
+      await vi.waitFor(() => expect(transport.selfId()).toBeDefined())
+      const first = transport.selfId()
+      // The reconnect waits out its first backoff.
+      await vi.waitFor(
+        () => {
+          expect(transport.selfId()).toBeDefined()
+          expect(transport.selfId()).not.toBe(first)
+        },
+        { timeout: RECONNECT_WAIT_MS },
+      )
+    } finally {
+      transport.close()
+      await silent.close()
+    }
+  })
+
+  // The monotonic clock stops while a laptop sleeps on some systems; the
+  // server has dropped this context long before it wakes.
+  it("counts time the monotonic clock did not see", async () => {
+    const ticking = await createSignalingServer({
+      port: 0,
+      tickIntervalMs: SILENT_TICK_MS,
+    })
+    const transport = makeTransport({ url: `ws://127.0.0.1:${ticking.port}` })
+    try {
+      await vi.waitFor(() =>
+        expect(transport.confirmedAgoMs()).toBeLessThan(SETTLE_MS),
+      )
+      const asleepMs = 60_000
+      const wall = Date.now()
+      const dateSpy = vi.spyOn(Date, "now").mockReturnValue(wall + asleepMs)
+      try {
+        expect(transport.confirmedAgoMs()).toBeGreaterThanOrEqual(asleepMs)
+      } finally {
+        dateSpy.mockRestore()
+      }
     } finally {
       transport.close()
       await ticking.close()
