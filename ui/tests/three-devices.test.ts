@@ -3,8 +3,7 @@
 /**
  * Three devices, two write partitions, real browsers.
  *
- * The browser counterpart of `lib/test/live/three-device-acquire-handoff.test.ts`:
- * the same account on three `BrowserContext`s — separate storage, separate
+ * The same account on three `BrowserContext`s — separate storage, separate
  * device ids, one signaling server — each driving the demo the way a person
  * does, with the partition read off the demo's own sidebar and every upload a
  * round trip through the demo's Safari-check harness. Taking a partition
@@ -12,9 +11,10 @@
  * disconnect and the closed tab all run for real, with production timings.
  *
  * Every step ends on the one invariant it all exists for: no two contexts
- * hold the same partition. The scenarios are ordered and share the devices —
- * each starts from where the previous one left the partitions — so the file
- * is serial and runs on one worker (`playwright.devices.config.ts`).
+ * hold the same partition; and the run ends on what that protects: every
+ * upload that was acknowledged still reads back. The scenarios share the
+ * devices and run on one worker (`playwright.devices.config.ts`), but none
+ * depends on another: each sets up the partitions it needs.
  *
  * Not part of the everyday e2e run: `.github/workflows/three-devices.yml` runs it on a PR that
  * touches the partition seams, nightly on main, before every npm publish (a red
@@ -38,6 +38,7 @@ import {
   LEASE_STOP_MS,
   LEASE_WAIT_MS,
   MAX_SILENT_TICKS,
+  PARTITION_LINE,
   PEER_YIELD_MIN_IDLE_MS,
   type Seed,
   TICK_MS,
@@ -45,6 +46,7 @@ import {
   UPLOAD_TIMEOUT_MS,
   createAccountWithDrives,
   expectNoDualHold,
+  holdBothPartitions,
   isDataWrite,
   readFromBee,
   rigUp,
@@ -52,14 +54,24 @@ import {
   sleep,
 } from './devices-rig'
 import { THREE_DEVICES_SEED_FILE } from './global-setup-devices'
+import { BEE_API_URL } from './helpers'
+
+/** Enough of a reference to find it in the log. */
+const REFERENCE_PREFIX = 16
 
 // Not `serial`: a scenario that fails must not hide the ones after it — the
 // point of the run is a verdict per scenario. Each one re-establishes what it
 // needs (`ensureConnected`) and takes the partitions as it finds them.
-/** Well under the six seconds a holder may go unconfirmed, well over a busy frame. */
-const MAX_PAUSE_MS = 1_000
+/**
+ * Over the slice an upload's preparation runs for before it gives the thread
+ * up (30 ms), with room for a slow runner; under what `PAUSE_PROBE_BYTES`
+ * costs in one go.
+ */
+const MAX_PAUSE_MS = 400
 /** Enough for an upload to still be stamping when its first chunk leaves. */
 const MANY_CHUNKS_BYTES = 400_000
+/** About 500 chunks: some 800 ms of preparation if it never gave way. */
+const PAUSE_PROBE_BYTES = 2_000_000
 
 test.describe('three devices on two partitions', () => {
   test.skip(
@@ -138,39 +150,56 @@ test.describe('three devices on two partitions', () => {
   })
 
   test('C arrives with both partitions held: its first upload makes a holder hand one over', async () => {
-    for (const device of all()) await device.ensureConnected()
+    for (const device of [A, B]) await device.ensureConnected()
+    // C starts out of it, whatever an earlier scenario left it holding.
+    if ((await C.partition()) !== undefined) await C.disconnect()
+    await holdBothPartitions(A, B)
     // Both holders idle past the peer-yield threshold, so either may answer.
     await sleep(PEER_YIELD_MIN_IDLE_MS)
     const before = await expectNoDualHold([A, B])
+    const asked = Date.now()
 
     await C.connect()
     // C asks for every partition gently first, and nobody moves. Then it asks
     // the holder of its home partition to hand over, then the other one; a
     // holder that is not writing does, and the upload completes on the
-    // partition it was handed.
-    const pC = await C.uploadAndHoldOrSkip()
+    // partition it was handed. Not skipped when nobody answers: that is the
+    // failure this scenario exists to see.
+    const pC = await C.uploadAndHold()
     // Whoever held C's partition before has let go of it: it stopped before
     // it answered.
     const previousHolder = [...before].find(([, p]) => p === pC)?.[0]
-    if (previousHolder) {
-      const device = previousHolder === 'A' ? A : B
-      await expect.poll(() => device.partition(), { timeout: HANDOVER_TIMEOUT_MS }).not.toBe(pC)
-    }
+    expect(previousHolder, 'C holds a partition neither A nor B held').toBeDefined()
+    const device = previousHolder === 'A' ? A : B
+    await expect.poll(() => device.partition(), { timeout: HANDOVER_TIMEOUT_MS }).not.toBe(pC)
+    expect(device.lostLaneSince(asked), `${device.label} did not hand over`).toBe(true)
     await expectNoDualHold(all())
   })
 
   test('the device that handed over is served on its next upload', async () => {
     for (const device of all()) await device.ensureConnected()
-    const before = await expectNoDualHold(all())
+    // Two of the three hold the two partitions; the third is the one that
+    // handed over, or is made to be.
+    let before = await expectNoDualHold(all())
+    if ([...before.values()].filter((p) => p !== undefined).length < 2) {
+      await holdBothPartitions(B, C)
+      before = await expectNoDualHold(all())
+    }
     const waiter = [...before].find(([, p]) => p === undefined)?.[0]
-    expect(waiter, 'every device holds a partition, nobody handed one over').toBeDefined()
+    expect(waiter, 'three devices hold two partitions').toBeDefined()
     const waiting = all().find((d) => d.label === waiter)!
+    const holders = all().filter((d) => d !== waiting)
     await sleep(PEER_YIELD_MIN_IDLE_MS)
+    const asked = Date.now()
 
     // Its upload asks the room, an idle holder hands a partition over, and the
     // upload itself completes on it.
-    const held = await waiting.uploadAndHoldOrSkip()
+    const held = await waiting.uploadAndHold()
     expect(held).toBeDefined()
+    expect(
+      holders.some((holder) => holder.lostLaneSince(asked)),
+      `${waiting.label} was served without anyone handing over`,
+    ).toBe(true)
     await expectNoDualHold(all())
   })
 
@@ -200,6 +229,8 @@ test.describe('three devices on two partitions', () => {
     // The fresh page is a new context in the room: it is owed nothing, and
     // must have been there for the wait before it takes a partition nobody
     // answers for. The one its predecessor held is free by then.
+    await expect(A.page.getByText(PARTITION_LINE)).toBeVisible({ timeout: UPLOAD_TIMEOUT_MS })
+    expect(await A.partition(), 'the reloaded page held a partition at once').toBeUndefined()
     await expect
       .poll(() => A.partition(), { timeout: ACQUIRE_TIMEOUT_MS + HANDOVER_TIMEOUT_MS })
       .not.toBeUndefined()
@@ -346,10 +377,14 @@ test.describe('three devices on two partitions', () => {
     for (const device of all()) await device.ensureConnected()
     await A.uploadAndHoldOrSkip()
 
-    let reference = ''
-    const uploading = await A.longestPause(async () => {
-      reference = await A.upload(undefined, undefined, MANY_CHUNKS_BYTES)
+    // Watched from the moment the payload is entered: the demo's text box
+    // shares the proxy's thread, and megabytes of text typed into it hold
+    // that thread for longer than the upload does.
+    let stop: (() => Promise<number>) | undefined
+    const reference = await A.upload(undefined, undefined, PAUSE_PROBE_BYTES, async () => {
+      stop = await A.watchPauses()
     })
+    const uploading = await stop?.()
     expect(uploading, 'the upload held the thread').toBeLessThan(MAX_PAUSE_MS)
 
     const downloading = await A.longestPause(() => A.download(reference))
@@ -400,5 +435,24 @@ test.describe('three devices on two partitions', () => {
       held.get('A') !== undefined && held.get('B') !== undefined,
       `A and B never both held after C closed: ${JSON.stringify([...held])}`,
     ).toBe(true)
+  })
+
+  // What exclusion is for. Two contexts stamping one partition, or a holder
+  // that resumed below what the last one published, issue a slot twice, and
+  // the second chunk evicts the first: an upload that read back when it was
+  // made no longer does. Last, so it sees every handover of the run.
+  test('every upload that was acknowledged still reads back', async () => {
+    const uploads = all().flatMap((device) =>
+      device.acknowledged.map((upload) => ({ ...upload, by: device.label })),
+    )
+    expect(uploads.length, 'the run acknowledged no upload').toBeGreaterThan(0)
+    const lost: string[] = []
+    for (const { reference, payload, by } of uploads) {
+      const response = await fetch(`${BEE_API_URL}/bytes/${reference}`)
+      const read = response.ok ? new TextDecoder().decode(await response.arrayBuffer()) : undefined
+      if (read !== payload)
+        lost.push(`${by} ${reference.slice(0, REFERENCE_PREFIX)}: ${response.status}`)
+    }
+    expect(lost, `${lost.length} of ${uploads.length} acknowledged uploads are gone`).toEqual([])
   })
 })
