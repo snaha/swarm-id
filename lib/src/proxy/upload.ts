@@ -161,7 +161,11 @@ export interface UploadDataResult {
   reference: string
   /** Tag UID if one was created */
   tagUid?: number
-  /** Addresses of all uploaded chunks (encrypted mode only) */
+  /**
+   * Addresses of all uploaded chunks: set by an encrypted {@link uploadData}
+   * only. {@link uploadDataStream} never keeps them, so its memory does not
+   * grow with the source.
+   */
   chunkAddresses?: Uint8Array[]
 }
 
@@ -237,9 +241,7 @@ export interface UploadChunkResult {
  */
 type StampChunkFn = (address: Uint8Array) => Promise<EnvelopeWithBatchId>
 
-/**
- * Create a StampChunkFn from a Stamper and optional worker pool.
- */
+/** `requestOptions` with the request's abort `signal` on them, if there is one. */
 function withSignal(
   requestOptions: BeeRequestOptions | undefined,
   signal: AbortSignal | undefined,
@@ -247,6 +249,9 @@ function withSignal(
   return signal ? { ...requestOptions, signal } : requestOptions
 }
 
+/**
+ * Create a StampChunkFn from a Stamper and optional worker pool.
+ */
 function makeStampFn(
   stamper: Stamper,
   workerPool?: StampWorkerPool,
@@ -516,38 +521,42 @@ export class SendWindow {
   }
 }
 
+// ============================================================================
+// Merkle Tree Building
+// ============================================================================
+
+/** One child of an intermediate chunk of a plain tree. */
+interface PlainRef {
+  address: Uint8Array
+  span: bigint
+}
+
+/** One child of an intermediate chunk of an encrypted tree: its key too. */
+interface EncryptedRef extends PlainRef {
+  key: Uint8Array
+}
+
 /**
  * Send the intermediate chunk over `refs` and resolve with its reference. A
  * reference is known from the bytes alone, so chunks may land in any order and
  * the tree never waits for an answer from the node.
  */
-type WrapChunk = (refs: TreeRef[]) => Promise<TreeRef>
-
-// ============================================================================
-// Merkle Tree Building
-// ============================================================================
-
-/** One child of an intermediate chunk. `key` is set on encrypted trees. */
-interface TreeRef {
-  address: Uint8Array
-  key?: Uint8Array
-  span: bigint
-}
+type WrapChunk<R extends PlainRef> = (refs: R[]) => Promise<R>
 
 /**
  * Builds a Merkle tree from its leaves as they arrive, holding one partial
  * intermediate per level rather than every reference: a full level is wrapped
  * at once and only the wrapper is carried up.
  */
-class ReferenceTree {
-  private readonly levels: TreeRef[][] = [[]]
+class ReferenceTree<R extends PlainRef> {
+  private readonly levels: R[][] = [[]]
 
   constructor(
     private readonly fanout: number,
-    private readonly wrap: WrapChunk,
+    private readonly wrap: WrapChunk<R>,
   ) {}
 
-  async add(ref: TreeRef, level = 0): Promise<void> {
+  async add(ref: R, level = 0): Promise<void> {
     const refs = (this.levels[level] ??= [])
     refs.push(ref)
     if (refs.length < this.fanout) return
@@ -555,7 +564,7 @@ class ReferenceTree {
     await this.add(await this.wrap(refs), level + 1)
   }
 
-  async finish(): Promise<TreeRef> {
+  async finish(): Promise<R> {
     for (let level = 0; ; level++) {
       const refs = this.levels[level]
       const nothingAbove = this.levels
@@ -572,39 +581,85 @@ class ReferenceTree {
   }
 }
 
-function plainWrap(sends: SendWindow): WrapChunk {
-  return async (refs) => {
+/** How one kind of tree, plain or encrypted, makes and references its chunks. */
+interface TreeMode<R extends PlainRef> {
+  encrypted: boolean
+  fanout: number
+  /** The leaf chunk over `payload`, and its reference */
+  leaf: (payload: Uint8Array) => { chunkData: Uint8Array; ref: R }
+  wrap: (sends: SendWindow) => WrapChunk<R>
+  /** The bytes of the upload's reference, from its root */
+  rootBytes: (root: R) => Uint8Array
+}
+
+function sumSpans(refs: PlainRef[]): bigint {
+  return refs.reduce((sum, ref) => sum + ref.span, 0n)
+}
+
+const PLAIN_MODE: TreeMode<PlainRef> = {
+  encrypted: false,
+  fanout: PLAIN_REFS_PER_CHUNK,
+  leaf: (payload) => {
+    const chunk = makeContentAddressedChunk(payload)
+    return {
+      chunkData: chunk.data,
+      ref: {
+        address: chunk.address.toUint8Array(),
+        span: BigInt(payload.length),
+      },
+    }
+  },
+  wrap: (sends) => async (refs) => {
     const payload = new Uint8Array(refs.length * UNENCRYPTED_REF_SIZE)
     refs.forEach((ref, index) => {
       payload.set(ref.address, index * UNENCRYPTED_REF_SIZE)
     })
     // An intermediate chunk's span is the data length its children cover, not
     // the length of its references: the downloader tells it from a leaf by it.
-    const span = refs.reduce((sum, ref) => sum + ref.span, 0n)
+    const span = sumSpans(refs)
     const chunk = makeContentAddressedChunk(payload, span)
     const address = chunk.address.toUint8Array()
     await sends.submit(chunk.data, address)
     return { address, span }
-  }
+  },
+  rootBytes: (root) => root.address,
 }
 
-function encryptedWrap(sends: SendWindow): WrapChunk {
-  return async (refs) => {
-    // Padded with zeros to a full chunk before encryption
-    const payload = new Uint8Array(CHUNK_SIZE)
-    refs.forEach((ref, index) => {
-      payload.set(ref.address, index * ENCRYPTED_REF_SIZE)
-      payload.set(ref.key!, index * ENCRYPTED_REF_SIZE + UNENCRYPTED_REF_SIZE)
-    })
-    const span = refs.reduce((sum, ref) => sum + ref.span, 0n)
-    const { key, encryptedSpan, encryptedData } =
-      newChunkEncrypter().encryptChunk(
-        Binary.concatBytes(Span.fromBigInt(span).toUint8Array(), payload),
-      )
-    const chunkData = Binary.concatBytes(encryptedSpan, encryptedData)
-    const address = calculateChunkAddress(chunkData).toUint8Array()
-    await sends.submit(chunkData, address)
-    return { address, key, span }
+function encryptedMode(
+  explicitKey: Uint8Array | undefined,
+): TreeMode<EncryptedRef> {
+  return {
+    encrypted: true,
+    fanout: ENCRYPTED_REFS_PER_CHUNK,
+    leaf: (payload) => {
+      const chunk = makeEncryptedContentAddressedChunk(payload, explicitKey)
+      return {
+        chunkData: chunk.data,
+        ref: {
+          address: chunk.address.toUint8Array(),
+          key: chunk.encryptionKey,
+          span: BigInt(payload.length),
+        },
+      }
+    },
+    wrap: (sends) => async (refs) => {
+      // Padded with zeros to a full chunk before encryption
+      const payload = new Uint8Array(CHUNK_SIZE)
+      refs.forEach((ref, index) => {
+        payload.set(ref.address, index * ENCRYPTED_REF_SIZE)
+        payload.set(ref.key, index * ENCRYPTED_REF_SIZE + UNENCRYPTED_REF_SIZE)
+      })
+      const span = sumSpans(refs)
+      const { key, encryptedSpan, encryptedData } =
+        newChunkEncrypter().encryptChunk(
+          Binary.concatBytes(Span.fromBigInt(span).toUint8Array(), payload),
+        )
+      const chunkData = Binary.concatBytes(encryptedSpan, encryptedData)
+      const address = calculateChunkAddress(chunkData).toUint8Array()
+      await sends.submit(chunkData, address)
+      return { address, key, span }
+    },
+    rootBytes: (root) => Binary.concatBytes(root.address, root.key),
   }
 }
 
@@ -669,12 +724,24 @@ async function writeTree(
   const { signal } = target
   if (signal?.aborted) throw abortedError(signal)
 
-  const isEncrypted = options?.encryptionKey !== undefined
+  if (options?.encryptionKey === undefined) {
+    return writeTreeIn(PLAIN_MODE, target, source, options, known)
+  }
   const explicitKey =
-    options?.encryptionKey instanceof Uint8Array
+    options.encryptionKey instanceof Uint8Array
       ? options.encryptionKey
       : undefined
-  const fanout = isEncrypted ? ENCRYPTED_REFS_PER_CHUNK : PLAIN_REFS_PER_CHUNK
+  return writeTreeIn(encryptedMode(explicitKey), target, source, options, known)
+}
+
+async function writeTreeIn<R extends PlainRef>(
+  mode: TreeMode<R>,
+  target: UploadTarget,
+  source: AsyncIterable<Uint8Array>,
+  options: UploadDataOptions | UploadDataStreamOptions | undefined,
+  known: { size?: number; chunkAddresses?: Uint8Array[] },
+): Promise<UploadDataResult> {
+  const { fanout } = mode
   const { chunkAddresses } = known
 
   const estimated =
@@ -684,7 +751,7 @@ async function writeTree(
   const reportProgress = (total = Math.max(estimated, submitted)) =>
     options?.onProgress?.({ total, processed })
 
-  const sender = await openChunkSender(target, isEncrypted, options)
+  const sender = await openChunkSender(target, mode.encrypted, options)
   const sends = new SendWindow(
     sender.concurrency,
     (chunkData, address) => {
@@ -697,26 +764,12 @@ async function writeTree(
       reportProgress()
     },
   )
-  const tree = new ReferenceTree(
-    fanout,
-    isEncrypted ? encryptedWrap(sends) : plainWrap(sends),
-  )
+  const tree = new ReferenceTree(fanout, mode.wrap(sends))
 
   const sendLeaf = async (payload: Uint8Array): Promise<void> => {
-    if (isEncrypted) {
-      const chunk = makeEncryptedContentAddressedChunk(payload, explicitKey)
-      const address = chunk.address.toUint8Array()
-      await sends.submit(chunk.data, address)
-      return tree.add({
-        address,
-        key: chunk.encryptionKey,
-        span: BigInt(payload.length),
-      })
-    }
-    const chunk = makeContentAddressedChunk(payload)
-    const address = chunk.address.toUint8Array()
-    await sends.submit(chunk.data, address)
-    return tree.add({ address, span: BigInt(payload.length) })
+    const { chunkData, ref } = mode.leaf(payload)
+    await sends.submit(chunkData, ref.address)
+    return tree.add(ref)
   }
 
   const payloads = rechunk(source, CHUNK_SIZE)
@@ -737,11 +790,8 @@ async function writeTree(
     await sends.drain()
     if (estimated !== processed) reportProgress(processed)
 
-    const rootBytes = root.key
-      ? Binary.concatBytes(root.address, root.key)
-      : root.address
     return {
-      reference: new Reference(rootBytes).toHex(),
+      reference: new Reference(mode.rootBytes(root)).toHex(),
       tagUid: sender.tagUid,
       chunkAddresses,
     }
