@@ -30,7 +30,9 @@ export interface BusTransport {
    * lane-scoped traffic off the wire.
    */
   readonly local: boolean
-  publish(message: BusMessageInput): void
+  /** To everyone the transport reaches, or to `to` alone where the transport
+   *  can address one peer; one that cannot sends to everyone. */
+  publish(message: BusMessageInput, to?: string): void
   /**
    * `from` is the transport's own name for whoever sent the message — a peer
    * id on the signaling transport, absent on a transport that has no peers.
@@ -77,6 +79,10 @@ export interface BusTransport {
 /** Restricts a publish to transports that stay inside this browser profile. */
 export interface PublishOptions {
   localOnly?: boolean
+  /** The one context the message is for, by its name on the transport that
+   *  crosses devices. Others may still see it on a transport that cannot
+   *  address a single peer. */
+  to?: string
 }
 
 const CHANNEL_PREFIX = "swarm-id-bus-v1"
@@ -208,7 +214,7 @@ export class AccountBus {
     if (this.closed) return
     for (const transport of this.transports) {
       if (options?.localOnly && !transport.local) continue
-      transport.publish(message)
+      transport.publish(message, options?.to)
     }
   }
 

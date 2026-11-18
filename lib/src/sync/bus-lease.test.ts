@@ -252,6 +252,20 @@ describe("BusLane — two devices", () => {
     expect(b.lane.claiming).toBe(false)
   })
 
+  // Asking again at once would knock the winner's rivals down in turn, and
+  // with several contexts the claims never settle.
+  it("does not ask again after losing a tie until its connection is next confirmed", () => {
+    const { a, b } = pair()
+    a.lane.claim()
+    b.lane.claim()
+    deliver(a, b)
+    expect(b.lane.claiming).toBe(false)
+
+    expect(b.lane.claim()).toBe(false)
+    b.liveness.confirm()
+    expect(b.lane.claim()).toBe(true)
+  })
+
   // A starved tab wakes to the claims that queued up, before the answer
   // from the server that it is still connected.
   it("leaves a claim unanswered while its confirmation is overdue, and keeps the lane", () => {
@@ -417,6 +431,19 @@ describe("BusLanes", () => {
     expect(lane.claim()).toBe(true)
 
     expect(lane.holds()).toBe(true)
+  })
+
+  it("answers the claimant alone, not the whole room", () => {
+    const { join } = makeRoom()
+    const a = new BusLanes(join("a"))
+    new BusLanes(join("b"))
+    const bystander = join("c")
+    const seen: string[] = []
+    bystander.subscribe((message) => seen.push(message.type))
+    new BusLanes(bystander)
+
+    expect(a.open({ ...LANE, partition: 0 }, idle).claim()).toBe(true)
+    expect(seen).toEqual(["lane-claim"])
   })
 
   it("keeps the lanes of one bus apart", () => {
