@@ -15,6 +15,7 @@ import type { BatchId, Bee, PrivateKey, Stamper } from "@ethersphere/bee-js"
 import type { CounterFrame } from "./counter-codec"
 import {
   NUM_BUCKETS,
+  PartitionLeaseLostError,
   UtilizationAwareStamper,
 } from "../utils/batch-utilization"
 import {
@@ -140,7 +141,10 @@ export class LaneState {
    * makes an upload's slots durable before it is acknowledged. Whoever takes
    * the lane next resumes at exactly this counter.
    */
-  async publish(localCounter: Uint32Array): Promise<void> {
+  async publish(
+    localCounter: Uint32Array,
+    stillHeld: () => boolean = () => true,
+  ): Promise<void> {
     const { bee, batchId, partition, swarmEncryptionKey, stamper } = this.opts
     // The next entry is one past the newest. Not knowing the newest for sure
     // (a publish failed after it may have written its entry), look before
@@ -177,6 +181,11 @@ export class LaneState {
       previousReferences: this.publishedReferences,
       previousCounter: this.publishedCounter,
       previousFrame: this.publishedFrame,
+      // The entry is what the next holder acts on: not written for a lane
+      // that went while the leaves were uploaded.
+      beforePointer: () => {
+        if (!stillHeld()) throw new PartitionLeaseLostError()
+      },
     })
     this.publishUnsettled = false
     this.publishedReferences = published.references

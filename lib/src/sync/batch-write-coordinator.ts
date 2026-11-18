@@ -36,7 +36,10 @@
 
 import { Bee, BatchId, PrivateKey } from "@ethersphere/bee-js"
 import { Binary } from "cafe-utility"
-import { UtilizationAwareStamper } from "../utils/batch-utilization"
+import {
+  PartitionLeaseLostError,
+  UtilizationAwareStamper,
+} from "../utils/batch-utilization"
 import { abortedError } from "../errors"
 import { withBatchWriteLock } from "../utils/batch-write-lock"
 import { withTimeout } from "../utils/promise"
@@ -168,6 +171,9 @@ export class BatchWriteCoordinator {
   private states = new Map<number, LaneState>()
   /** The lane whose counter is bound on the stamper. */
   private held: number | undefined
+  /** Counts holds: every bind and every loss of the bound lane. An upload
+   *  is acknowledged only under the hold it began with. */
+  private hold = 0
   /** A lane just taken whose published counter is still being read. */
   private resuming: number | undefined
   private readOnly: boolean = false
@@ -244,10 +250,11 @@ export class BatchWriteCoordinator {
         // not answered, so the lane cannot be handed over under the upload.
         this.activeUploadCount++
         this.lastActivityAt = Date.now()
+        const hold = this.hold
         try {
           const target = await this.buildStamperTarget(opts)
           const result = await op(target)
-          await this.commit()
+          await this.commit(hold)
           return { result }
         } finally {
           this.activeUploadCount--
@@ -269,26 +276,31 @@ export class BatchWriteCoordinator {
 
   /**
    * Commit-ordered ack: an upload is reported durable only after the lane's
-   * counter, which reserves its slots, is published.
-   *  1. The lane must still be held. An upload that outlived the hold must
-   *     not publish slots someone else may be using.
-   *  2. Publish the counter, then resolve. A throw propagates → the upload is
-   *     reported failed, never acked (chunks are content-addressed → a retry
-   *     is safe).
+   * counter, which reserves its slots, is published under the hold the upload
+   * began with (`hold`).
+   *  1. That hold must still stand. A lane lost and taken again is another
+   *     hold, with a counter that knows nothing of this upload's stamps.
+   *  2. Publish the counter. The publish asks once more just before it writes
+   *     the pointer entry, the one write the next holder acts on.
+   *  3. The hold must still stand when the publish is done: the next holder
+   *     may have read the lane before the entry landed.
+   * A throw propagates → the upload is reported failed, never acked (chunks
+   * are content-addressed → a retry is safe).
    */
-  private async commit(): Promise<void> {
+  private async commit(hold: number): Promise<void> {
+    if (this.deps.partitionCount <= 1) return
+    const stillHeld = () => this.hold === hold && this.mayWrite()
+    const confirmed = () =>
+      withTimeout(
+        this.confirmedAgain(),
+        LANE_ACQUIRE_TIMEOUT_MS,
+        "The connection to the account's other devices was not confirmed",
+      )
+    if (this.hold !== hold) throw new PartitionLeaseLostError()
+    await confirmed()
     const partition = this.held
-    if (partition === undefined) {
-      if (this.deps.partitionCount <= 1) return
-      throw new Error("Partition lease was reclaimed by another device.")
-    }
-    await withTimeout(
-      this.confirmedAgain(),
-      LANE_ACQUIRE_TIMEOUT_MS,
-      "The connection to the account's other devices was not confirmed",
-    )
-    if (!this.mayWrite()) {
-      throw new Error("Partition lease was reclaimed by another device.")
+    if (!stillHeld() || partition === undefined) {
+      throw new PartitionLeaseLostError()
     }
     const localCounter = this.deps.stamper.getLocalCounter()
     if (localCounter === undefined) {
@@ -300,7 +312,9 @@ export class BatchWriteCoordinator {
           "(ack-after-publish); failing the upload.",
       )
     }
-    await this.state(partition).publish(localCounter)
+    await this.state(partition).publish(localCounter, stillHeld)
+    await confirmed()
+    if (!stillHeld()) throw new PartitionLeaseLostError()
   }
 
   /** Persistent mode: take a lane in the background so the first upload does
@@ -409,6 +423,7 @@ export class BatchWriteCoordinator {
   private dropHeld(): void {
     if (this.held === undefined) return
     this.held = undefined
+    this.hold++
     this.deps.stamper.invalidateLease()
     if (this.activeUploadCount === 0) this.deps.stamper.unbindPartition()
   }
@@ -529,6 +544,7 @@ export class BatchWriteCoordinator {
       if (run !== this.acquireRun) return
       stamper.bindPartition({ partition, partitionCount, localCounter })
       this.held = partition
+      this.hold++
       this.readOnly = false
       this.syncStampDeadline()
       this.lastActivityAt = Date.now()
