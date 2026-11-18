@@ -256,7 +256,7 @@
   let chainToolBusy = $state(false)
   /** The local pool is thin: past this the simulated purchase is likely to come up short. */
   const MAX_DEV_BATCH_DEPTH = 24
-  /** The size of the batch the two create buttons buy, as a depth. */
+  /** The size of the batch the create buttons buy, as a depth. */
   let devBatchDepth = $state(String(DEV_BATCH_DEPTH))
   const DEV_BATCH_DEPTH_OPTIONS = DRIVE_SIZE_BREAKPOINTS.filter(
     ([depth]) => depth <= MAX_DEV_BATCH_DEPTH,
@@ -1841,7 +1841,10 @@ Check console logs for details:
         <Button
           variant="secondary"
           disabled={chainToolBusy || !selectedAccountId}
-          onclick={() => runChainTool('Created expiring drive', createExpiringTestDrive)}
+          onclick={() =>
+            runChainTool('Created expiring drive', (account) =>
+              createExpiringTestDrive(account, Number(devBatchDepth)),
+            )}
         >
           Create expiring drive
         </Button>

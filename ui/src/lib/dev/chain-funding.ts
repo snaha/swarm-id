@@ -431,6 +431,6 @@ export async function createTestDrive(account: Account, shape?: BatchShape): Pro
 }
 
 /** A drive that is already inside the "Expires soon" window, for testing it. */
-export async function createExpiringTestDrive(account: Account): Promise<string> {
-  return createTestDrive(account, { days: DEV_BATCH_EXPIRING_DAYS })
+export async function createExpiringTestDrive(account: Account, depth?: number): Promise<string> {
+  return createTestDrive(account, { depth, days: DEV_BATCH_EXPIRING_DAYS })
 }
