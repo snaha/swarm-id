@@ -728,7 +728,7 @@ For a stream or `Blob`, `requestOptions.timeout` does not bound the whole upload
 
 No call's timeout counts the wait for the drive's write lock: an upload queued behind another one to the same drive waits its turn, however long that takes, because the identity iframe keeps saying it is still there. A request that does time out, or is aborted, is stopped inside the iframe too, so a queued write never runs after its promise rejected.
 
-The upload holds the drive's write lock for as long as it runs, and every writer to that drive on the device waits for it: other apps and the identity UI too. So your source may stay silent for 2 minutes, or for a longer `requestOptions.timeout`, before the upload fails with `timeout` and frees the drive.
+The upload holds the drive's write lock for as long as it runs, and every writer to that drive on the device waits for it: other apps and the identity UI too. So your source may stay silent for 2 minutes, or for a longer `requestOptions.timeout` up to 10 minutes whatever it asks, before the upload fails with `timeout` and frees the drive.
 
 **Parameters:**
 
@@ -838,6 +838,7 @@ Read the stream to the end, or cancel it, or abort `requestOptions.signal`: othe
 **Example:**
 
 ```typescript
+// `writable` is ready before the call: a stream left unread is ended after the idle deadline
 const { stream, size } = await client.downloadDataStream('a1b2c3...')
 console.log(`Saving ${size} bytes`)
 await stream.pipeTo(writable)
@@ -961,10 +962,12 @@ Reads a file as it arrives, for a file too large to hold whole: the streaming co
 
 **Example:**
 
+Open the destination before the download: the click that allows a save picker may no longer count after a slow lookup, and a stream left unread is ended after the idle deadline.
+
 ```typescript
-const { name, stream } = await client.downloadFileStream('a1b2c3...')
 // Straight to disk, never held whole (File System Access API)
-const handle = await window.showSaveFilePicker({ suggestedName: name })
+const handle = await window.showSaveFilePicker()
+const { stream } = await client.downloadFileStream('a1b2c3...')
 await stream.pipeTo(await handle.createWritable())
 ```
 
@@ -976,25 +979,25 @@ Uploads a folder as one manifest: a fork per file with its path and content type
 
 Read a folder back with [`listFiles`](#listfilesreference-requestoptions) and [`downloadData`](#downloaddatareference-options-requestoptions) per entry, or one file with [`downloadFile`](#downloadfilereference-path-options-requestoptions) and its path.
 
-Each file is read piece by piece when the upload reaches it, one file at a time, so a folder is never held whole on either side of the iframe.
+Each file is read piece by piece when the upload reaches it, one file at a time, so a folder is never held whole on either side of the iframe. A file that cannot be read therefore fails the upload only when the upload reaches it, after the earlier files' chunks are already stamped.
 
 **Parameters:**
 
-| Parameter                 | Type                                                 | Required | Description                                                                                                                                                                                    |
-| ------------------------- | ---------------------------------------------------- | -------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `files`                   | `FileList \| Iterable<File \| { path, file: Blob }>` | Yes      | The folder's files                                                                                                                                                                             |
-| `options`                 | `UploadFilesOptions`                                 | No       | Upload configuration                                                                                                                                                                           |
-| `options.encrypt`         | `boolean`                                            | No       | Encrypt the file content (defaults to `true`). `false` also leaves the manifest plain                                                                                                          |
-| `options.encryptManifest` | `boolean`                                            | No       | Encrypt the manifest too, so the root reference carries the key (defaults to `true`). `false` gives a 32-byte root reference whose manifest anyone can read, while the content stays encrypted |
-| `options.indexDocument`   | `string`                                             | No       | The file the bare `/bzz/<reference>/` serves (`website-index-document`), e.g. `index.html`                                                                                                     |
-| `options.errorDocument`   | `string`                                             | No       | The file served for a path that is not in the folder (`website-error-document`)                                                                                                                |
-| `options.pin`             | `boolean`                                            | No       | Pin on the user's own node (defaults to `false`; ignored on a subsidised gateway)                                                                                                              |
-| `options.deferred`        | `boolean`                                            | No       | Whether to use deferred upload (defaults to `false`); see [`uploadData`](#uploaddatadata-options-requestoptions)                                                                               |
-| `options.tag`             | `number`                                             | No       | Tag ID for tracking upload progress                                                                                                                                                            |
-| `options.onProgress`      | `(progress) => void`                                 | No       | Called once per file with `{ total, processed }`                                                                                                                                               |
-| `options.useWorkers`      | `boolean`                                            | No       | Stamp in a worker pool, as [`uploadData`](#uploaddatadata-options-requestoptions) does                                                                                                         |
-| `options.workerCount`     | `number`                                             | No       | Size of that pool                                                                                                                                                                              |
-| `requestOptions`          | `RequestOptions`                                     | No       | Request configuration; `timeout` is how long the identity iframe may stay silent, as for a `Blob` given to [`uploadData`](#uploaddatadata-options-requestoptions)                              |
+| Parameter                 | Type                                                 | Required | Description                                                                                                                                                                                           |
+| ------------------------- | ---------------------------------------------------- | -------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `files`                   | `FileList \| Iterable<File \| { path, file: Blob }>` | Yes      | The folder's files                                                                                                                                                                                    |
+| `options`                 | `UploadFilesOptions`                                 | No       | Upload configuration                                                                                                                                                                                  |
+| `options.encrypt`         | `boolean`                                            | No       | Encrypt the file content (defaults to `true`). `false` also leaves the manifest plain                                                                                                                 |
+| `options.encryptManifest` | `boolean`                                            | No       | Encrypt the manifest too, so the root reference carries the key (defaults to `true`). `false` gives a 32-byte root reference whose manifest anyone can read, while the content stays encrypted        |
+| `options.indexDocument`   | `string`                                             | No       | The file the bare `/bzz/<reference>/` serves (`website-index-document`), e.g. `index.html`                                                                                                            |
+| `options.errorDocument`   | `string`                                             | No       | The file served for a path that is not in the folder (`website-error-document`)                                                                                                                       |
+| `options.pin`             | `boolean`                                            | No       | Pin on the user's own node (defaults to `false`; ignored on a subsidised gateway)                                                                                                                     |
+| `options.deferred`        | `boolean`                                            | No       | Whether to use deferred upload (defaults to `false`); see [`uploadData`](#uploaddatadata-options-requestoptions)                                                                                      |
+| `options.tag`             | `number`                                             | No       | Tag ID for tracking upload progress                                                                                                                                                                   |
+| `options.onProgress`      | `(progress) => void`                                 | No       | Called once per file with `{ total, processed }`                                                                                                                                                      |
+| `options.useWorkers`      | `boolean`                                            | No       | Stamp in a worker pool, as [`uploadData`](#uploaddatadata-options-requestoptions) does                                                                                                                |
+| `options.workerCount`     | `number`                                             | No       | Size of that pool                                                                                                                                                                                     |
+| `requestOptions`          | `RequestOptions`                                     | No       | Request configuration; `timeout` is how long the identity iframe may stay silent, as for a `Blob` given to [`uploadData`](#uploaddatadata-options-requestoptions), a file's source 10 minutes at most |
 
 **Returns:** `Promise<UploadResult>` - Contains `reference` (the manifest's) and optional `tagUid`
 

@@ -25,7 +25,8 @@ way).
 
 - The client's default `timeout` (30 s) bounds the whole request, uploads of plain bytes (a
   `Uint8Array`) included. A file of a few MB over a testnet or the public gateway takes longer.
-  A `File`, `Blob` or stream is bounded by silence instead, at least 2 minutes by default.
+  A `File`, `Blob` or stream is bounded by silence instead, at least 2 minutes by default; a
+  longer timeout lets its source stay silent for 10 minutes at most.
 - The upload is direct (`deferred: false`, the default) against a Bee node in dev mode, which
   serves only deferred uploads and never answers a direct one.
 

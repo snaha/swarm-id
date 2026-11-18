@@ -106,6 +106,7 @@ import { collectionPath } from "./utils/collection"
 import { PERMISSIONS_POPUP_MAX_MS, untilPopupClosed } from "./utils/popup"
 import { buildAuthUrl } from "./utils/url"
 import { MAX_TIMER_DELAY_MS, TimeoutError, withTimeout } from "./utils/promise"
+import { uploadSourceIdleTimeout } from "./utils/stream-deadline"
 import {
   openBlobSource,
   openPieceSource,
@@ -115,6 +116,7 @@ import {
   DEFAULT_REQUEST_TIMEOUT_MS,
   QUEUED_SILENCE_TIMEOUT_MS,
   STREAM_IDLE_TIMEOUT_MS,
+  STREAM_SOURCE_DEADLINE_SLACK_MS,
 } from "./utils/constants"
 const DEFAULT_INITIALIZATION_TIMEOUT_MS = 30000
 /**
@@ -269,6 +271,8 @@ export class SwarmIdClient {
       rearm: () => void
       /** The write is waiting for its drive: hold the timeout off for a beat */
       queued: () => void
+      /** A source is being read: wait on the proxy's deadline for it, plus slack */
+      readSource: () => void
     }
   > = new Map()
   /** Streaming downloads the proxy is still answering, by request id. */
@@ -799,22 +803,22 @@ export class SwarmIdClient {
       const stopWatchingSignal = () =>
         signal?.removeEventListener("abort", onAbort)
 
-      const expire = (waited: number, queued: boolean) => {
+      const expire = (reason: string) => {
         stopWatchingSignal()
         this.pendingRequests.delete(message.requestId)
-        reject(
-          new SwarmIdError(
-            "timeout",
-            queued
-              ? `Request timeout after ${waited}ms: the proxy went silent while the write was queued for its drive`
-              : `Request timeout after ${waited}ms`,
-          ),
-        )
+        reject(new SwarmIdError("timeout", reason))
         // The proxy may still be at it, or queued to be: a write that ran
         // after its caller was told it failed would spend stamps for nothing,
         // and nothing else ends a streaming upload's pulling.
         this.sendAbort(message.requestId)
       }
+
+      const expireOnProxy = () => expire(`Request timeout after ${timeout}ms`)
+      // Past the proxy's own deadline for the source, so its `timeout`
+      // normally answers first: this one catches a proxy that has gone.
+      const sourceDeadline =
+        uploadSourceIdleTimeout(options?.timeout) +
+        STREAM_SOURCE_DEADLINE_SLACK_MS
 
       const pending = {
         requestType: message.type,
@@ -827,17 +831,33 @@ export class SwarmIdClient {
           stopWatchingSignal()
           reject(error)
         },
-        timeoutId: setTimeout(() => expire(timeout, false), timeout),
+        timeoutId: setTimeout(expireOnProxy, timeout),
         sources,
         readingSource: false,
         rearm: () => {
           clearTimeout(pending.timeoutId)
-          pending.timeoutId = setTimeout(() => expire(timeout, false), timeout)
+          pending.timeoutId = setTimeout(expireOnProxy, timeout)
         },
         queued: () => {
           clearTimeout(pending.timeoutId)
           const silence = Math.max(timeout, QUEUED_SILENCE_TIMEOUT_MS)
-          pending.timeoutId = setTimeout(() => expire(silence, true), silence)
+          pending.timeoutId = setTimeout(
+            () =>
+              expire(
+                `Request timeout after ${silence}ms: the proxy went silent while the write was queued for its drive`,
+              ),
+            silence,
+          )
+        },
+        readSource: () => {
+          clearTimeout(pending.timeoutId)
+          pending.timeoutId = setTimeout(
+            () =>
+              expire(
+                `Request timeout after ${sourceDeadline}ms: the upload source sent nothing, and the proxy did not end the upload`,
+              ),
+            sourceDeadline,
+          )
         },
       }
       this.pendingRequests.set(message.requestId, pending)
@@ -876,7 +896,7 @@ export class SwarmIdClient {
     if (!pending || !source) return
     const isStillWaiting = () => this.pendingRequests.get(requestId) === pending
     pending.readingSource = true
-    clearTimeout(pending.timeoutId)
+    pending.readSource()
     try {
       const data = await source.next()
       if (!isStillWaiting()) return
@@ -1881,8 +1901,9 @@ export class SwarmIdClient {
    * piece by piece, as fast as the node takes it, so it is never held whole.
    * `requestOptions.timeout` then bounds the proxy's silence (default: at
    * least 2 minutes), not the whole upload. The source may stay silent for 2
-   * minutes, or a longer timeout, before the upload fails with `timeout`: it
-   * holds the drive's write lock for every other writer meanwhile. A stream
+   * minutes, or a longer timeout up to 10 minutes whatever it asks, before the
+   * upload fails with `timeout`: it holds the drive's write lock for every
+   * other writer meanwhile. A stream
    * is locked while the upload reads it and handed back once read to the
    * end; on failure or abort the stream is cancelled.
    *
@@ -2028,6 +2049,8 @@ export class SwarmIdClient {
    *
    * @example
    * ```typescript
+   * // `writable` is ready before the call: the proxy ends a stream left
+   * // unread past the idle deadline.
    * const { stream, size } = await client.downloadDataStream(reference)
    * await stream.pipeTo(writable)
    * ```
@@ -2260,8 +2283,10 @@ export class SwarmIdClient {
    *
    * @example
    * ```typescript
-   * const { name, stream } = await client.downloadFileStream(reference)
-   * const handle = await window.showSaveFilePicker({ suggestedName: name })
+   * // The picker opens first: the click that allows it may no longer count
+   * // after a slow lookup, and the proxy ends a stream left unread.
+   * const handle = await window.showSaveFilePicker()
+   * const { stream } = await client.downloadFileStream(reference)
    * await stream.pipeTo(await handle.createWritable())
    * ```
    */
@@ -2306,11 +2331,16 @@ export class SwarmIdClient {
    * {@link downloadFile} and its path.
    *
    * Each file is read piece by piece when the upload gets to it, one file at
-   * a time, so a folder is never held whole on either side of the iframe.
+   * a time, so a folder is never held whole on either side of the iframe. A
+   * file that cannot be read therefore fails the upload only when the upload
+   * gets to it, after the earlier files' chunks are already stamped.
+   * `requestOptions.timeout` is how long the proxy may stay silent, and a
+   * file may stay silent for 2 minutes, or a longer timeout up to 10 minutes,
+   * as for a `Blob` given to {@link uploadData}.
    *
    * @param files - The folder's files
    * @param options - Optional upload configuration; `onProgress` counts files, `useWorkers` / `workerCount` stamp in a pool as with {@link uploadData}
-   * @param requestOptions - Optional request configuration (timeout, headers, endlesslyRetry). `timeout` replaces the client default for this call's whole round trip, not only the Bee request, not counting time queued behind another write on the same drive
+   * @param requestOptions - Optional request configuration (timeout, headers, endlesslyRetry). `timeout` is how long the proxy may stay silent, as above, not counting time queued behind another write on the same drive
    * @returns A promise resolving to the upload result
    * @returns return.reference - The Swarm reference of the manifest
    * @returns return.tagUid - The tag UID if a tag was created
