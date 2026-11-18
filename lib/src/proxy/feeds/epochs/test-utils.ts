@@ -37,7 +37,9 @@ export class MockChunkStore {
   async get(address: string): Promise<Uint8Array> {
     const data = this.chunks.get(address.toLowerCase())
     if (!data) {
-      throw new Error(`Chunk not found: ${address}`)
+      throw Object.assign(new Error(`Chunk not found: ${address}`), {
+        status: 404,
+      })
     }
     return data
   }

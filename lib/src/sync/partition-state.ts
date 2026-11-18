@@ -45,9 +45,10 @@ import { z } from "zod"
 import {
   downloadDataWithChunkAPI,
   downloadEncryptedSOC,
+  isChunkAbsent,
 } from "../proxy/download-data"
 import { uploadChunk, uploadSOC, type UploadTarget } from "../proxy/upload"
-import { TimeoutError, withTimeout } from "../utils/promise"
+import { withTimeout } from "../utils/promise"
 import { makeEncryptedContentAddressedChunk } from "../chunk"
 import {
   NUM_BUCKETS,
@@ -347,20 +348,20 @@ export async function writeStatePointer(opts: {
     bee: opts.bee,
     stamper: opts.stamper,
   }
+  // Direct: the entry is the commit point, and the next holder reads it as
+  // soon as the upload is acknowledged. Bee defers a SOC that comes with a tag
+  // unless told otherwise.
+  const options = { encryptionKey: opts.swarmEncryptionKey, deferred: false }
   if (opts.stamper instanceof UtilizationAwareStamper) {
     // Serialized against another state-pointer write through this stamper,
     // so neither clobbers the shared reservation and mis-stamps into a data
     // slot.
     await opts.stamper.withIntentSocSlot(address, opts.partition, () =>
-      uploadSOC(target, opts.backupSigner, identifier, data, {
-        encryptionKey: opts.swarmEncryptionKey,
-      }),
+      uploadSOC(target, opts.backupSigner, identifier, data, options),
     )
     return
   }
-  await uploadSOC(target, opts.backupSigner, identifier, data, {
-    encryptionKey: opts.swarmEncryptionKey,
-  })
+  await uploadSOC(target, opts.backupSigner, identifier, data, options)
 }
 
 /**
@@ -388,6 +389,7 @@ export async function readStatePointer(opts: {
   const entries = statePointerEntries(opts.batchId, opts.partition, opts.owner)
   const references = new Map<number, string>()
   const readEntry = async (seq: number): Promise<Probe> => {
+    let payload: Uint8Array
     try {
       const soc = await withTimeout(
         downloadEncryptedSOC(
@@ -399,16 +401,22 @@ export async function readStatePointer(opts: {
         STATE_POINTER_READ_TIMEOUT_MS,
         "state-pointer read timed out",
       )
+      payload = soc.payload
+    } catch (error) {
+      // Absent only when Bee says so. A read that timed out or failed some
+      // other way leaves the entry unsettled: it may be there.
+      return isChunkAbsent(error) ? false : undefined
+    }
+    // Read and verified, so what it holds is settled: an entry, or not one.
+    try {
       const parsed = StatePointerPayloadSchemaV1.safeParse(
-        JSON.parse(new TextDecoder().decode(soc.payload)),
+        JSON.parse(new TextDecoder().decode(payload)),
       )
       if (!parsed.success || parsed.data.seq !== seq) return false
       references.set(seq, parsed.data.referenceHex)
       return true
-    } catch (error) {
-      // A timeout leaves the entry unsettled (a slow gateway may hold it); a
-      // clean miss or a malformed blob is a conclusive absent.
-      return error instanceof TimeoutError ? undefined : false
+    } catch {
+      return false
     }
   }
   const read = (seqs: number[]) => Promise.all(seqs.map(readEntry))
