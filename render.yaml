@@ -1,0 +1,26 @@
+# The signaling server the PR previews talk to (swarm.snaha.net/…/pr-N/).
+#
+# One free instance, deployed by `.github/workflows/deploy-preview.yml`: from a
+# pull request's head commit when that PR touches `signaling/`, and from `main`
+# again when it closes. Production's server is the `bus-signaling` service in
+# `.do/swarm-id-app.yaml`; this one never serves it.
+#
+# A free instance sleeps after 15 minutes without a request or a WebSocket
+# message, and takes about a minute to wake: the first visitor to a preview
+# after a quiet spell waits that long before the page can write.
+services:
+  - type: web
+    name: swarm-id-bus-preview
+    runtime: node
+    plan: free
+    branch: main
+    # Deployed by the workflow, which knows which commit a preview needs.
+    autoDeployTrigger: 'off'
+    buildCommand: corepack enable && pnpm install --frozen-lockfile --filter @swarm-id/signaling...
+    startCommand: corepack enable && pnpm --filter @swarm-id/signaling start
+    healthCheckPath: /healthz
+    envVars:
+      - key: NODE_VERSION
+        value: '24'
+      - key: ALLOWED_ORIGINS
+        value: https://swarm.snaha.net

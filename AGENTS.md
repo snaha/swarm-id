@@ -158,6 +158,12 @@ app at root paths, plus per-PR previews under `…/pr-N/` (`deploy-main-pages.ym
 | `swarm.snaha.net/demo/` | demo, run against `/id` |
 | `swarm.snaha.net/docs/` | docs site               |
 
+Everything under `swarm.snaha.net` shares one account-bus signaling server, a free Render
+instance (`render.yaml`, its address in the repository variable `PREVIEW_BUS_SIGNALING_URL`).
+It runs `main`, except while a PR that touches `signaling/` is open: `deploy-preview.yml` puts
+that PR's head commit there, and `main` back when it closes. It sleeps when idle and takes
+about a minute to wake.
+
 DigitalOcean (`deploy-do.yml`, push to main) keeps the canonical domains:
 
 - **Identity UI (`ui/`)**: https://swarm-id.snaha.net
