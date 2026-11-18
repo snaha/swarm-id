@@ -7,6 +7,117 @@ present and may point at an issue or PR; the reasons live here.
 
 A PR that makes or changes a decision adds the entry in the same PR.
 
+## 2026-11-18 A room is one protocol version, and the server holds every member to its ticks
+
+**Context.** A claimant waits for every member of its room. A page left open on a build
+that answers no lane claim sat in the same room and blocked every lane of its account. The
+server was also told to keep a member that never pinged, so that such a page was not
+dropped and reconnected every ten seconds, which kept it in the room for good.
+
+**Decision.** The room topic's label names the room's protocol (`bus-context.ts`), and a
+build whose members must answer lane claims is `v2`. The server drops any member that
+leaves `MAX_SILENT_TICKS` ticks unanswered, with no exemption.
+
+**Why.** A room in which one member cannot be waited for is a room in which nothing can be
+taken. A page on an older build keeps syncing with its own kind in the `v1` room; the
+server reconnects it every ten seconds there, which costs a handshake and breaks nothing
+that worked. Before `1.0` there is nobody to keep (`AGENTS.md`).
+
+## 2026-11-18 A signaling server is required to write a shared drive
+
+**Context.** A context with no confirmed connection to the account's other devices cannot
+ask for a lane. A build with no signaling URL, or one whose server was unreachable, waited
+thirty seconds and failed with "all slots are held by other devices", while `canUpload`
+stayed true and the self-hosting page called the server optional.
+
+**Decision.** There is no fallback to writing alone. A build with no signaling URL reports
+`canUpload: false` with `uploadUnavailableReason: no-account-bus` for a split batch, and a
+write that could not ask fails as `upload-unavailable` with that reason
+(`AccountBusUnavailableError`).
+
+**Why.** Writing without asking is what the lanes exist to prevent: a second device of the
+account may be writing the same partition, and nothing on Swarm says so. A subsidised
+gateway, where one is configured, is still the fallback, as for any other reason.
+
+## 2026-11-18 Only Bee's own answer makes a pointer entry absent
+
+**Context.** The search for the newest state-pointer entry read any failure but its own
+timeout as "this entry does not exist". A dropped connection, a rate limit or a proxy's
+502 on one read made a lane resume from zero or from an older entry, and the slots of
+acknowledged uploads were issued again.
+
+**Decision.** An entry is absent when Bee says so: `404`, or `500` with Bee's message
+`read chunk failed`. Every other failure leaves the entry unsettled, the lookup is
+inconclusive, and the lane is not written (`isChunkAbsent`).
+
+**Why.** The `500` is included because it is how Bee reports a chunk nobody has when the
+node asked is itself the closest to the address and has no peer to ask (`no peer found`):
+always on the four-node local cluster, and occasionally on a real node. Treating it as
+unsettled would make a fresh partition untakeable there. Its cost: a node that is the
+closest and has not yet received an entry published elsewhere reads it as absent, as it
+would with a `404`.
+
+## 2026-11-18 An upload is acknowledged under the hold it began with
+
+**Context.** The coordinator checked that some lane was held before it published an
+upload's counter, and not after. An upload was acknowledged when its connection was
+replaced or its write path rebuilt (a top-up, a dilute) while the publish ran, and when its
+lane was lost and taken again while it uploaded: the new hold starts from the published
+counter, which knows nothing of the first upload's stamps.
+
+**Decision.** Each bind and each loss of the bound lane is a hold of its own. An upload
+remembers the hold it began with, and is acknowledged only if that hold stands before the
+publish and after it. The publish asks once more just before it writes the pointer entry.
+
+**Why.** The pointer entry is the one write the next holder acts on. An entry written
+after the lane went can land after the next holder read the lane, which then resumes below
+an acknowledged upload. The window that remains is the pointer upload itself, inside the
+two seconds between `LEASE_STOP_MS` and `LEASE_WAIT_MS`, and an upload caught in it is
+reported failed.
+
+## 2026-11-18 A lane message counts its sender as present, on every path
+
+**Context.** Hearing from a peer the room view does not contain restarts that peer's
+absence clock (`ResetOnContact` in `models/bus-lease`). The rule was applied only where the
+transport names the sender. `BroadcastChannel` names none, so a tab whose stream from the
+server had stalled for a moment answered a claim from another tab of the same browser,
+still saw the room as empty, and took the lane the other tab then took too.
+
+**Decision.** A lane message says who sent it, and that sender is noted on every transport
+whichever path the message came by. An answer of "held" withdraws the sender's earlier
+"free". Answers go to the claimant alone, and a context that stood down for a lower id
+does not ask again before its next confirmation.
+
+**Why.** The model had no stream that stalls and recovers on the same connection: its room
+view moved in step with the server. With that added (`Stall`), `Exclusion` holds only with
+the reset on every path (1,168,225 states) and `NoContactReset.cfg` shows the two-tab
+trace. The last two rules are about load, not safety: answers sent to the whole room and
+losers asking again within 250 ms passed the server's message budget from about six
+contexts on the relay, and the server then disconnected holders.
+
+## 2026-11-18 The account sync writes no counter rows to Swarm
+
+**Context.** After its upload the SwarmID tab's sync wrote the changed rows of the local
+counter cache to Swarm, through a stamper bound to no lane. Those stamps went to partition
+0's reserved slot whoever held that lane, and could land on another device's published
+state. Nothing read the rows back.
+
+**Decision.** The rows are not written. The counters travel as the lane's published state
+(`partition-state.ts`), and a chunk stamped at a reserved slot names the slot.
+
+**Why.** A second copy nobody reads bought nothing and put the copy that is read at risk.
+
+## 2026-11-18 Open: a signaling deploy that overlaps
+
+The signaling server closes every connection on `SIGTERM`, so a context is not left
+confirmed by an instance that is being replaced. What is not decided: while the platform
+runs the old and the new instance side by side, a context that joins the new one sees an
+empty room and may take a lane after `LEASE_WAIT_MS` that a context on the old instance
+still holds. Closing it needs the new instance to answer no ping for longer than the
+overlap, which stops every write for that long after each deploy. The same holds for one
+account reached through two signaling URLs (a signaling PR's preview and the `main` build
+share an origin and storage, and sit in different rooms).
+
 ## 2026-11-18 Previews use production's signaling server; a PR that changes the server gets a Render instance
 
 **Context.** The GitHub Pages builds (`main` and the per-PR previews) had no signaling

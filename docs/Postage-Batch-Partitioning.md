@@ -238,14 +238,20 @@ state however long ago it was written, and an idle holder writes nothing.
 
 Entries share the partition's reserved slot, so a later reserved-slot write in the same
 bucket replaces an earlier entry. Which entries a search reads depends only on the
-answer, which gives a small set (at most 60) that any later search depends on. The
+answer, which gives a small set (a few dozen entries: 47 below 300,000 publishes, 63
+below 16 million) that any later search depends on. The
 publish keeps its chunks out of their buckets (§10), and `salt` (one of 8 candidate
 addresses, the same choice for reader and writer) keeps those entries out of each
 other's.
 
-A search whose read of a possibly newer entry timed out is **inconclusive**: fail safe
-(read-only + retry), never resume from what was found and never zero-seed. An entry is
-never written twice: a holder that does not know the newest entry for sure (a publish
+An entry is **absent** only when Bee says so: `404`, or `500 read chunk failed` (the node
+asked is the closest to the address and has nobody to ask). A read that timed out or
+failed any other way (a dropped connection, a rate limit, a proxy's 502) leaves the entry
+unsettled, and a search with an unsettled read of a possibly newer entry is
+**inconclusive**: fail safe (read-only + retry), never resume from what was found and
+never zero-seed ([`decisions.md`](./decisions.md), 2026-11-18). The pointer entry is
+uploaded direct, so it is readable when the upload is acknowledged. An entry is never
+written twice: a holder that does not know the newest entry for sure (a publish
 that failed part-way) searches before it publishes.
 
 **Hold check before the ack.** After the upload's chunks are written and before the
@@ -264,15 +270,19 @@ another tab of the same browser may have published since.
 
 `teardown()` (sign-out, disconnect, a drive leaving the grant) closes the context's lanes
 and unbinds the stamper. Nothing is written: the counter was published with the last
-acknowledged upload. An upload in flight at that moment fails at its next stamp.
+acknowledged upload. An upload in flight at that moment fails: at its next stamp, or, if
+it was already publishing its counter, before the pointer entry is written or before the
+acknowledgement. An upload is acknowledged only under the hold it began with
+([`decisions.md`](./decisions.md), 2026-11-18).
 
 ## 10. Reserved-slot bucket-collision avoidance
 
 All reserved-slot writers for partition `p` stamp `slot = p` (§3), so two of them in the
 same bucket evict one another. Within a publish, `writePartitionState` picks each
-counter/reference chunk in a bucket distinct from the live utilisation chunks, the
-retained real chunks (incremental), and the **state-pointer entries** a search depends on
-(§8), its own new entry included. A retained chunk that stands where that new entry goes
+counter/reference chunk in a bucket distinct from the retained real chunks
+(incremental), the chunks it replaces (they are the newest state until its own pointer
+entry is written), and the **state-pointer entries** a search depends on (§8), its own
+new entry included. A retained chunk that stands where that new entry goes
 is uploaded again elsewhere first.
 
 ## 11. Utilisation reporting over the account bus
@@ -304,12 +314,21 @@ decided on the room's membership and the server round trip.
   server round trip and one pointer read each time
   ([`decisions.md`](./decisions.md), 2026-11-17).
 - **A context that is present but answers nothing blocks every lane.** A frozen tab is
-  dropped by the server after a few missed ticks. A context running a build from before
-  the bus lease has no answer to give and is dropped the same way, then reconnects and is
-  dropped again; while it is in the room, claims wait.
-- **A holder that stops mid-upload.** `stamp()` throws `PartitionLeaseLostError` once the
-  stamper's deadline passes (`LEASE_STOP_MS` after the last confirmation) or the
-  coordinator stopped holding the lane. A long multi-chunk upload aborts mid-stream; the
+  dropped by the server after a few missed ticks. A page on a build with another lane
+  protocol is not in the room at all: the room's topic names its protocol version
+  ([`decisions.md`](./decisions.md), 2026-11-18).
+- **No signaling server, no writes.** A context with no confirmed connection to the
+  account's other devices cannot ask for a lane. A build with no signaling URL reports
+  `canUpload: false` with `no-account-bus`; one whose server is unreachable fails each
+  write with that reason after its wait.
+- **A signaling deploy that overlaps.** While the platform runs the old and the new
+  server instance side by side, a context that joins the new one sees an empty room. The
+  old instance closes its connections on `SIGTERM`; the overlap before that is open
+  ([`decisions.md`](./decisions.md), 2026-11-18).
+- **A holder that stops mid-upload.** While its confirmation is overdue on the same
+  connection a holder stamps nothing and waits for the next one; it carries on then. Once
+  the connection is replaced, or the coordinator stopped holding the lane, `stamp()`
+  throws `PartitionLeaseLostError`. A long multi-chunk upload aborts mid-stream; the
   chunks are content-addressed, so the upload fails cleanly and can be retried. A chunk
   whose request was already on the wire when the deadline passed is not modelled.
 - **Clocks that run at different rates.** The margin between `LEASE_STOP_MS` (6 s) and
@@ -337,7 +356,6 @@ decided on the room's membership and the server round trip.
 | `BUCKET_DEPTH`                    | 16        | → 65,536 buckets                                                                                           |
 | `PARTITION_COUNT` (`K`)           | 2         | partitions sharing each bucket's slots                                                                     |
 | `DATA_COUNTER_START`              | `= K` (2) | first data slot; reserved slots are `[0, K)`                                                               |
-| `UTILIZATION_SLOTS_PER_BUCKET`    | 2         | reserved slots per bucket (one per partition)                                                              |
 | `LEASE_STOP_MS` / `LEASE_WAIT_MS` | 6 s / 8 s | how long a holder may go unconfirmed / how long everyone else must be absent — `lib/src/sync/bus-lease.ts` |
 | `PEER_YIELD_MIN_IDLE_MS`          | 3 s       | a holder that wrote within this does not hand over — `lib/src/sync/batch-write-coordinator.ts`             |
 | `NEXT_LANE_AFTER_MS`              | 1.5 s     | once every lane is known held, one more lane insisted on per step — same file                              |

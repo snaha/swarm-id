@@ -78,8 +78,8 @@ Methods and getters:
   doesn't wait for it. No-op in oneshot mode.
 - **`teardown()`** — give every lane up and invalidate-then-unbind the stamper. Writes nothing and
   never throws. Sets a `disposed` flag (see below).
-- **`currentPartition`** / **`isReadOnly`** / **`stamperRef`** — read by the proxy's
-  `buildConnectionInfo` (partition, read-only state, appKey/uploadMode).
+- **`currentPartition`** / **`partitionCount`** — read by the proxy's connection info: the
+  lane held, and whether the batch is split at all (a split batch needs the account bus).
 - **`PartitionContendedError`** — thrown when no lane could be taken: every lane is held by a
   context that is writing, or this context has no confirmed connection to the bus. Distinct from
   operational errors (missing stamper, an unreadable published state), which propagate as-is so
@@ -138,10 +138,14 @@ confirmation. Three things keep such an upload from doing harm:
    `stamper.invalidateLease()` at once. The flag outlives `unbindPartition()`, which is left to the
    upload's own `finally` when one is in flight: an unbound stamper would otherwise stamp the rest
    of that upload at legacy slots. Only the next `bindPartition()` clears the flag.
-3. **The hold check before the ack.** The counter is not published, and the upload not
-   acknowledged, unless the lane is still held when the upload's chunks are written.
+3. **The hold an upload began with.** Every bind and every loss of the bound lane is a hold
+   of its own. The counter is not published unless the upload's hold still stands when its
+   chunks are written; the publish asks again just before it writes the pointer entry; and
+   the upload is acknowledged only if the hold stands after the publish too. A lane lost
+   and taken again meanwhile is another hold, whose counter knows nothing of the upload.
 
-A handover never lands mid-upload, because a holder with a write in flight does not answer.
+A handover never lands mid-upload, because a holder with a write in flight answers
+`lane-held` and keeps the lane.
 
 ## Consumers
 
