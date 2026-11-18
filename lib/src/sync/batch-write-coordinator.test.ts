@@ -12,7 +12,7 @@ const laneState = vi.hoisted(() => ({
   published: [] as number[],
   publishError: undefined as Error | undefined,
   /** Runs inside `resume`, before it returns. */
-  duringResume: undefined as (() => void) | undefined,
+  duringResume: undefined as (() => void | Promise<void>) | undefined,
   /** Runs inside `publish`, with the caller's "is the lane still mine?". */
   duringPublish: undefined as
     | ((stillHeld: () => boolean) => void | Promise<void>)
@@ -24,7 +24,7 @@ vi.mock("./lane-state", () => ({
     constructor(private readonly opts: { partition: number }) {}
     async resume(): Promise<Uint32Array | undefined> {
       laneState.resumed.push(this.opts.partition)
-      laneState.duringResume?.()
+      await laneState.duringResume?.()
       return laneState.resume()
     }
     async publish(
@@ -49,6 +49,7 @@ vi.mock("../utils/batch-write-lock", () => ({
 import {
   AccountBusUnavailableError,
   BatchWriteCoordinator,
+  LANE_RESUME_TIMEOUT_MS,
   NEXT_LANE_AFTER_MS,
   PEER_YIELD_MIN_IDLE_MS,
   PartitionContendedError,
@@ -500,6 +501,26 @@ describe("BatchWriteCoordinator — a lane whose state cannot be read", () => {
     // The lane is not held by A: B is answered without waiting.
     laneState.resume = () => new Uint32Array(8)
     expect(await b.coordinator.withWrite(async () => "y")).toBe("y")
+    expect(b.coordinator.currentPartition).toBe(HOME)
+  })
+
+  // A lane being read is answered "held": a read that never ends would keep
+  // it from everyone, this context included.
+  it("gives the lane back when its counter is not read in time", async () => {
+    const a = makeContext("a")
+    laneState.duringResume = () => new Promise<void>(() => {})
+
+    const write = a.coordinator.withWrite(async () => "x")
+    const failure = expect(write).rejects.toThrow(/could not be read in time/)
+    await advance(LANE_RESUME_TIMEOUT_MS + 1000)
+    await failure
+    expect(a.coordinator.currentPartition).toBeUndefined()
+
+    laneState.duringResume = undefined
+    const b = makeContext("b")
+    const taken = b.coordinator.withWrite(async () => "y")
+    await advance(1000)
+    expect(await taken).toBe("y")
     expect(b.coordinator.currentPartition).toBe(HOME)
   })
 

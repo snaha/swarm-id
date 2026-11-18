@@ -26,6 +26,9 @@ import { BatchId, PrivateKey, Reference } from "@ethersphere/bee-js"
 // makes it available to the hoisted `vi.mock` factory below.
 const force = vi.hoisted(() => ({ bucket: undefined as number | undefined }))
 
+/** A chunk address, the first half of an encrypted reference. */
+const CHUNK_ADDRESS_BYTES = 32
+
 vi.mock("../chunk", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../chunk")>()
   return {
@@ -69,9 +72,11 @@ vi.mock("../proxy/upload", async (importOriginal) => {
 
 import { writePartitionState } from "./partition-state"
 import { uploadChunk, uploadSOC } from "../proxy/upload"
+import { hexToUint8Array } from "../utils/hex"
 import {
   NUM_BUCKETS,
   PARTITION_COUNT,
+  toBucket,
   UtilizationAwareStamper,
 } from "../utils/batch-utilization"
 import {
@@ -230,6 +235,51 @@ describe("writePartitionState — reserved-slot bucket-collision avoidance", () 
       second.stateBuckets.filter((b) => b === entryTwoBucket),
     ).toHaveLength(1)
     expect(new Set(second.stateBuckets).size).toBe(second.stateBuckets.length)
+  })
+})
+
+describe("writePartitionState — the state it replaces", () => {
+  // Until the new pointer entry is written, the previous state is the newest
+  // there is: a publish that stops half-way must leave it readable.
+  it("keeps its new chunks out of the buckets of the chunks it replaces", async () => {
+    const publish = (
+      stamper: UtilizationAwareStamper,
+      localCounter: Uint32Array,
+      seq: number,
+      previous?: Awaited<ReturnType<typeof writePartitionState>>,
+    ) =>
+      writePartitionState({
+        bee: bee,
+        stamper,
+        batchId: TEST_BATCH_ID,
+        partition: PARTITION,
+        localCounter,
+        backupSigner: BACKUP_SIGNER,
+        swarmEncryptionKey: TEST_ENC_KEY,
+        seq,
+        previousReferences: previous?.references,
+        previousCounter: previous?.publishedCounter,
+        previousFrame: previous?.frame,
+        previousReferenceHex: previous?.referenceHex,
+      })
+    const bucketOf = (reference: Uint8Array) =>
+      toBucket(reference.slice(0, CHUNK_ADDRESS_BYTES))
+    const stamper = await makeBoundStamper()
+    const counter = leafyCounter()
+    const first = await publish(stamper, counter, 1)
+    const replaced = [
+      bucketOf(hexToUint8Array(first.referenceHex)),
+      bucketOf(first.references[0]),
+    ]
+
+    for (const bucket of replaced) {
+      const next = counter.slice()
+      next[0] += 1
+      // Steer the changed leaf onto a chunk of the state being replaced.
+      force.bucket = bucket
+      const second = await publish(stamper, next, 2, first)
+      expect(second.stateBuckets).not.toContain(bucket)
+    }
   })
 })
 
