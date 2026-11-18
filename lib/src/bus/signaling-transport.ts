@@ -340,9 +340,21 @@ export class SignalingTransport implements BusTransport {
     this.stopWatchingForSilence()
     this.serverHeardAt = now()
     const limit = this.options.serverSilenceLimitMs ?? SERVER_SILENCE_LIMIT_MS
+    // A step of the system clock reads as silence too, until the server's
+    // next message. So a silence counts only once it has been seen twice
+    // with nothing heard in between: the looks are further apart than the
+    // server's ticks.
+    let suspected: Instant | undefined
     this.silenceTimer = setInterval(() => {
       if (this.socket !== socket || this.serverHeardAt === undefined) return
-      if (elapsedSince(this.serverHeardAt) < limit) return
+      if (elapsedSince(this.serverHeardAt) < limit) {
+        suspected = undefined
+        return
+      }
+      if (suspected !== this.serverHeardAt) {
+        suspected = this.serverHeardAt
+        return
+      }
       this.stopWatchingForSilence()
       this.socket = undefined
       socket.close()

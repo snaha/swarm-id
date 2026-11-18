@@ -125,6 +125,12 @@ export class BusLane {
       // ends nothing: this device stayed in the room and freed no claim.
       if (this.mode === "holding") this.holds()
       if (this.mode === "claiming") {
+        // Claimed on a connection that is gone: nothing is sent under its
+        // name, which a path that names no sender would take at its word.
+        if (this.self !== this.opts.liveness.selfId()) {
+          this.release()
+          return
+        }
         // The claim may have been lost; asking again is harmless.
         this.sendClaim()
         this.tryAcquire()
@@ -200,6 +206,10 @@ export class BusLane {
   /** Ask a holder to hand over, for a claim that began gentle. */
   insist(): void {
     if (this.mode !== "claiming" || !this.gentle) return
+    if (this.self !== this.opts.liveness.selfId()) {
+      this.release()
+      return
+    }
     this.gentle = false
     this.sendClaim()
   }
