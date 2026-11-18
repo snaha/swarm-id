@@ -54,6 +54,8 @@ export const PEER_YIELD_MIN_IDLE_MS = 3_000
 export const NEXT_LANE_AFTER_MS = 1_500
 /** The signaling server's tick: a pending claim is sent again at each. */
 export const TICK_MS = 2_000
+/** How often `longestPause` looks. */
+const PAUSE_BEAT_MS = 20
 /** Unanswered ticks after which the server drops a member (`MAX_SILENT_TICKS`). */
 export const MAX_SILENT_TICKS = 4
 
@@ -310,7 +312,8 @@ export class Device {
     await expect(page.getByRole('button', { name: 'Upload Data' })).toBeEnabled({
       timeout: UPLOAD_TIMEOUT_MS,
     })
-    const result = page.getByRole('main').getByText(REFERENCE_HEX)
+    // The first: a download shown further down the page may hold hex too.
+    const result = page.getByRole('main').getByText(REFERENCE_HEX).first()
     await expect(result, `${this.label}: the upload reported no reference`).toBeVisible()
     const reference = REFERENCE_HEX.exec(await result.innerText())![0]
     expect(await readFromBee(reference), `${this.label}: read-back differs`).toBe(payload)
@@ -344,12 +347,82 @@ export class Device {
    * CPU work, a slow machine or a suspended tab does to it.
    */
   async stall(ms: number, page: Page = this.page): Promise<void> {
-    const proxy = page.frames().find((frame) => frame.url().startsWith(ID_ORIGIN))
-    if (!proxy) throw new Error(`${this.label}: no proxy iframe to stall`)
-    await proxy.evaluate((duration) => {
+    await this.proxyFrame(page).evaluate((duration) => {
       const until = Date.now() + duration
       while (Date.now() < until);
     }, ms)
+  }
+
+  private proxyFrame(page: Page) {
+    const proxy = page.frames().find((frame) => frame.url().startsWith(ID_ORIGIN))
+    if (!proxy) throw new Error(`${this.label}: no proxy iframe`)
+    return proxy
+  }
+
+  /**
+   * The longest stretch, in ms, for which the proxy iframe's thread ran
+   * nothing else while `work` was under way: the gap between beats of a timer
+   * in it. Work that holds the thread that long cannot answer the signaling
+   * server meanwhile.
+   */
+  async longestPause(work: () => Promise<unknown>, page: Page = this.page): Promise<number> {
+    const proxy = this.proxyFrame(page)
+    await proxy.evaluate((beatMs) => {
+      const state = { last: performance.now(), longest: 0, timer: 0 }
+      state.timer = window.setInterval(() => {
+        const now = performance.now()
+        state.longest = Math.max(state.longest, now - state.last)
+        state.last = now
+      }, beatMs)
+      Object.assign(window, { __pause: state })
+    }, PAUSE_BEAT_MS)
+    await work()
+    return proxy.evaluate(() => {
+      const { __pause: state } = window as unknown as {
+        __pause: { last: number; longest: number; timer: number }
+      }
+      window.clearInterval(state.timer)
+      return Math.max(state.longest, performance.now() - state.last)
+    })
+  }
+
+  /** Download `reference` through the demo and return what it shows. */
+  async download(reference: string, page: Page = this.page): Promise<string> {
+    await page.getByPlaceholder('Reference (64 hex chars)').first().fill(reference)
+    await page.getByRole('button', { name: 'Download Data' }).click()
+    const main = page.getByRole('main')
+    await expect(main.getByText('Downloaded Data:')).toBeVisible({ timeout: UPLOAD_TIMEOUT_MS })
+    return main.innerText()
+  }
+
+  /**
+   * Move within the demo by its sidebar. Not `goto`: a page load is a new
+   * proxy iframe, a new context that holds nothing.
+   */
+  async openDemoPage(name: 'SOC' | 'Storage', page: Page = this.page): Promise<void> {
+    await page.getByRole('link', { name, exact: true }).click()
+    await expect(page).toHaveURL(new RegExp(`/${name.toLowerCase()}$`))
+  }
+
+  /**
+   * Upload a raw SOC under a fresh identifier, on the demo's SOC page (see
+   * `openDemoPage`). One stamp on the held lane.
+   */
+  async uploadSoc(page: Page = this.page): Promise<void> {
+    const upload = page.getByRole('button', { name: 'Upload Raw SOC' })
+    await expect(upload).toBeEnabled({ timeout: WARM_UP_TIMEOUT_MS })
+    await page
+      .getByPlaceholder('Identifier (64 hex chars)')
+      .first()
+      .fill(randomBytes(32).toString('hex'))
+    await upload.click()
+    const main = page.getByRole('main')
+    const done = main.getByText('Raw SOC Upload Result:')
+    const failed = main.getByText(/^Error:/)
+    await expect(done.or(failed)).toBeVisible({ timeout: UPLOAD_TIMEOUT_MS })
+    if (await failed.isVisible()) {
+      throw new Error(`${this.label}: SOC upload failed — ${await main.innerText()}`)
+    }
   }
 
   /** Upload and return the partition the session held for it. */

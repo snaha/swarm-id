@@ -1150,6 +1150,7 @@ export async function uploadSOC(
 
     const { signal } = withSignal(options?.requestOptions, target.signal) ?? {}
     if (signal?.aborted) throw abortedError(signal)
+    await target.ready?.()
     const envelope = stamper.stamp(socAddressBytes)
     if (target.counter) target.counter.chunks++
 
