@@ -43,7 +43,7 @@ const ROUND_BYTES = 8
 
 /** What the lanes need from the account bus (`AccountBus` is one). */
 export interface LaneBus extends LaneLiveness {
-  publish(message: BusMessageInput): void
+  publish(message: BusMessageInput, options?: { to?: string }): void
   subscribe(handler: (message: BusMessage, from?: string) => void): () => void
 }
 
@@ -112,10 +112,14 @@ export class BusLane {
   private acks = new Set<string>()
   /** Who answered the current claim "held". */
   private refusals = new Set<string>()
+  /** Stood down for a lower id: no new claim before the next confirmation.
+   *  Asking again at once knocks the winner's other rivals down in turn. */
+  private stoodDown = false
   private stopListening: () => void
 
   constructor(private readonly opts: BusLaneOptions) {
     this.stopListening = opts.liveness.onConfirmed(() => {
+      this.stoodDown = false
       // A new connection holds nothing. A late confirmation of the same one
       // ends nothing: this device stayed in the room and freed no claim.
       if (this.mode === "holding") this.holds()
@@ -161,7 +165,12 @@ export class BusLane {
    */
   claim(options?: { gentle?: boolean }): boolean {
     const self = this.opts.liveness.selfId()
-    if (this.mode !== "idle" || self === undefined || !this.confirmed()) {
+    if (
+      this.mode !== "idle" ||
+      self === undefined ||
+      this.stoodDown ||
+      !this.confirmed()
+    ) {
       return false
     }
     this.self = self
@@ -278,6 +287,7 @@ export class BusLane {
         // Both claiming: the lower id wins, the other stands down.
         if (claimant < this.self) {
           this.release()
+          this.stoodDown = true
           this.sendFree(claimant, round)
         }
         return
@@ -373,15 +383,18 @@ export class BusLanes {
       if (message.type !== "lane-claim") return
       const self = bus.selfId()
       if (self === undefined || self === message.from) return
-      bus.publish({
-        type: "lane-free",
-        accountId: message.accountId,
-        batchId: message.batchId,
-        partition: message.partition,
-        from: self,
-        to: message.from,
-        round: message.round,
-      })
+      bus.publish(
+        {
+          type: "lane-free",
+          accountId: message.accountId,
+          batchId: message.batchId,
+          partition: message.partition,
+          from: self,
+          to: message.from,
+          round: message.round,
+        },
+        { to: message.from },
+      )
     })
   }
 
@@ -404,24 +417,30 @@ export class BusLanes {
     const lane = new BusLane({
       ...hooks,
       liveness: this.bus,
-      send: (message) =>
+      send: (message) => {
+        if (message.kind === "claim") {
+          this.bus.publish({
+            type: "lane-claim",
+            ...key,
+            from: message.from,
+            round: message.round,
+            gentle: message.gentle,
+          })
+          return
+        }
+        // An answer is for the claimant alone: sent to the whole room, every
+        // claim would cost a message per pair of contexts.
         this.bus.publish(
-          message.kind === "claim"
-            ? {
-                type: "lane-claim",
-                ...key,
-                from: message.from,
-                round: message.round,
-                gentle: message.gentle,
-              }
-            : {
-                type: message.kind === "free" ? "lane-free" : "lane-held",
-                ...key,
-                from: message.from,
-                to: message.to,
-                round: message.round,
-              },
-        ),
+          {
+            type: message.kind === "free" ? "lane-free" : "lane-held",
+            ...key,
+            from: message.from,
+            to: message.to,
+            round: message.round,
+          },
+          { to: message.to },
+        )
+      },
     })
     this.lanes.set(name, lane)
     return lane

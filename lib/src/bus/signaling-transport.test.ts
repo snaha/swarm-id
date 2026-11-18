@@ -88,6 +88,28 @@ describe("SignalingTransport — relay path", () => {
     }
   })
 
+  it("delivers a message for one peer to that peer alone", async () => {
+    const sender = makeTransport()
+    const receiver = makeTransport()
+    const bystander = makeTransport()
+    try {
+      const received = collect(receiver)
+      const overheard = collect(bystander)
+      await waitForPeers(sender, 2)
+      await vi.waitFor(() => expect(receiver.selfId()).toBeDefined())
+      sender.publish(UTILIZATION_MESSAGE, receiver.selfId())
+      await vi.waitFor(() => expect(received.length).toBe(1))
+      // Give a stray copy time to arrive before saying there is none.
+      sender.publish(UTILIZATION_MESSAGE)
+      await vi.waitFor(() => expect(overheard.length).toBe(1))
+      expect(received.length).toBe(1 + 1)
+    } finally {
+      sender.close()
+      receiver.close()
+      bystander.close()
+    }
+  })
+
   it("never delivers plaintext to a peer without the account key", async () => {
     const otherContext = await deriveBusContext(OTHER_DERIVATION_KEY)
     const sender = makeTransport()

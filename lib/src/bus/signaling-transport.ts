@@ -128,8 +128,8 @@ export class SignalingTransport implements BusTransport {
     return Promise.allSettled([...this.pendingDeliveries]).then(() => undefined)
   }
 
-  publish(message: BusMessageInput): void {
-    const delivery = this.deliver(message).catch((error) => {
+  publish(message: BusMessageInput, to?: string): void {
+    const delivery = this.deliver(message, to).catch((error) => {
       console.error("[SignalingTransport] Publish failed:", error)
     })
     this.pendingDeliveries.add(delivery)
@@ -316,18 +316,22 @@ export class SignalingTransport implements BusTransport {
   // Sending
   // ==========================================================================
 
-  private async deliver(message: BusMessageInput): Promise<void> {
-    if (this.peers.size === 0) return
+  private async deliver(message: BusMessageInput, to?: string): Promise<void> {
+    if (to === undefined && this.peers.size === 0) return
     const ciphertext = await encryptEnvelope(
       JSON.stringify(message),
       this.options.encryptionKey,
     )
-    for (const [peerId, peer] of this.peers) {
+    // One peer: by its channel when there is one, else through the server,
+    // which knows the room even where this context's view of it is behind.
+    const recipients: [string, PeerState | undefined][] =
+      to === undefined ? [...this.peers] : [[to, this.peers.get(to)]]
+    for (const [peerId, peer] of recipients) {
       // Per peer, and never fatal to the rest of the fan-out: a `send` that
       // throws (SCTP size limit, a channel torn down between the readyState
       // read and the call) must not escape this loop and starve every peer
       // after it. A failed channel falls through to the relay.
-      if (peer.dataChannel?.readyState === "open") {
+      if (peer?.dataChannel?.readyState === "open") {
         try {
           peer.dataChannel.send(ciphertext)
           continue

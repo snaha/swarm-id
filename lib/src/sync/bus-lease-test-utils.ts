@@ -80,9 +80,11 @@ export function makeRoom() {
       confirmedAgoMs: () => liveness.confirmedAgoMs(),
       absentExceptMs: (ids) => liveness.absentExceptMs(ids),
       onConfirmed: (handler) => liveness.onConfirmed(handler),
-      publish: (message) => {
+      publish: (message, options) => {
         for (const member of members) {
-          if (member.id !== id) deliverTo(member.id, message, id)
+          if (member.id === id) continue
+          if (options?.to !== undefined && options.to !== member.id) continue
+          deliverTo(member.id, message, id)
         }
       },
       subscribe: (handler) => {

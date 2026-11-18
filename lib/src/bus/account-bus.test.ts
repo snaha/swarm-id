@@ -478,6 +478,19 @@ describe("AccountBus — liveness", () => {
     }
   })
 
+  it("names the one peer a message is for to each transport", () => {
+    const published: [unknown, string | undefined][] = []
+    const remote = fakeRemote({ confirmedAgoMs: 0, absentExceptMs: 0 })
+    remote.transport.publish = (message, to) => published.push([message, to])
+    const bus = new AccountBus([remote.transport])
+    try {
+      bus.publish(PRESENCE_MESSAGE, { to: "peer-7" })
+      expect(published).toEqual([[PRESENCE_MESSAGE, "peer-7"]])
+    } finally {
+      bus.close()
+    }
+  })
+
   it("is named by its remote transport", () => {
     const remote = fakeRemote({
       selfId: "peer-self",
