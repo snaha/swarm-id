@@ -4,10 +4,10 @@ A TLA+ model of mutual exclusion on one batch partition when devices coordinate
 over the account bus and a device without a live connection to the signaling
 server is read-only. Background: [#1017](https://github.com/snaha/swarm-id/issues/1017).
 
-**Status.** The TLA+ spec was checked with TLC 2.19 on 2026-11-12; results
-are in the table under "Running it". The Quint version in `quint/` gives the
-same results. Three devices: a broken variant is caught; the safe
-configuration was checked to depth 20 without a violation, not exhaustively.
+**Status.** The TLA+ spec was checked with TLC on 2026-11-18; results are in
+the table under "Running it". The Quint version in `quint/` and the
+three-device run are of the model as it stood on 2026-11-13, without the two
+rules marked "since" below; neither has been run again.
 
 ## The protocol being modelled
 
@@ -16,8 +16,13 @@ configuration was checked to depth 20 without a violation, not exhaustively.
 - To claim, a device asks every peer. It may take the partition when each peer
   has either answered "free" for this claim round, or has been absent from the
   server's room, as reported to the claimant, for `Wait` ticks.
+- A claimant takes nothing before it has itself been in the room for `Wait`
+  ticks (`SessionAge`, since 2026-11-18): it cannot have seen anyone absent
+  for longer than that.
 - Two devices claiming at once: the lower device id wins, the other stands down.
 - A holder that is asked and is idle hands over; a busy one refuses.
+- A holder whose heartbeat is overdue answers no claim, and writes again once
+  the same connection completes one (since 2026-11-17).
 
 The signaling server only reports who is connected. It grants nothing and
 stores nothing.
@@ -25,6 +30,12 @@ stores nothing.
 ## What can go wrong in the model
 
 - A device's socket dies and the server, the device, or both notice late.
+- A device's stream from the server stalls and comes back on the same
+  connection (`Stall`, since 2026-11-18): it hears of everyone who joined or
+  left meanwhile only then, while messages between devices still reach it.
+  This is two tabs of one browser, which also talk over `BroadcastChannel`.
+  It is the case that needs `ResetOnContact` on every path a lane message
+  arrives by.
 - Any message between devices is lost, delayed, reordered or delivered twice,
   over the relay or a WebRTC DataChannel, with or without a live server socket.
   A sent message stays deliverable for good and may be delivered at any later
@@ -54,13 +65,13 @@ java -cp /path/to/tla2tools.jar tlc2.TLC -config Safe.cfg BusLease.tla
 
 | Config               | Change from `Safe.cfg`                         | Result                                          |
 | -------------------- | ---------------------------------------------- | ----------------------------------------------- |
-| `Safe.cfg`           | none: `Wait = TStop`, both checks on           | `Exclusion` holds: 421,149 states, depth 30     |
+| `Safe.cfg`           | none: `Wait = TStop`, both checks on           | `Exclusion` holds: 1,168,225 states, depth 32   |
 | `Reachable.cfg`      | checks `NobodyEverHolds` instead               | fails in 6 steps, as intended (holding happens) |
-| `ShortWait.cfg`      | `Wait < TStop`                                 | `Exclusion` violated in 10 steps                |
-| `NoRoundMatch.cfg`   | a "free" answer counts for any claim round     | `Exclusion` violated in 11 steps                |
-| `NoContactReset.cfg` | hearing from a peer does not restart its timer | `Exclusion` violated in 12 steps                |
+| `ShortWait.cfg`      | `Wait < TStop`                                 | `Exclusion` violated in 9 steps                 |
+| `NoRoundMatch.cfg`   | a "free" answer counts for any claim round     | `Exclusion` violated in 15 steps                |
+| `NoContactReset.cfg` | hearing from a peer does not restart its timer | `Exclusion` violated in 16 steps                |
 
-All five finish in seconds. The result covers two devices, `TStop = Wait = 2` and two
+All five finish within half a minute. The result covers two devices, `TStop = Wait = 2` and two
 claim rounds per device, not larger sizes.
 
 The three failing variants each remove one rule, to show that the rule is
@@ -80,8 +91,10 @@ pnpm exec quint typecheck BusLease.qnt
 pnpm exec quint verify --backend=tlc --main=Safe --invariant=exclusion BusLease.qnt
 ```
 
-Measured on 2026-11-12 (Quint 0.33.1, 14 cores). The Apalache and simulation
-rows predate the removal of the explicit message-loss steps:
+Measured on 2026-11-12 (Quint 0.33.1, 14 cores), on the model without
+`SessionAge` and `Stall`, which the Quint version does not have. The Apalache
+and simulation rows also predate the removal of the explicit message-loss
+steps:
 
 | Checker                   | Broken variants                          | `Safe`                                   |
 | ------------------------- | ---------------------------------------- | ---------------------------------------- |
@@ -110,7 +123,7 @@ with room.
 | `room`, `view`       | the signaling server's room and its `peer-joined`/`peer-left` |
 | `link`, `online`     | whether a WebSocket works, and whether the device thinks so   |
 | `Heartbeat`, `since` | a round trip with the server, and the time since the last one |
-| `claim` / `free`     | `lease-request`, `lease-released` on the bus                  |
+| `claim` / `free`     | `lane-claim`, `lane-free` on the bus                          |
 | `round`              | a per-claim nonce                                             |
 | `TStop`              | how long a holder may write without hearing from the server   |
 | `Wait`               | how long a claimant waits after `peer-left`                   |

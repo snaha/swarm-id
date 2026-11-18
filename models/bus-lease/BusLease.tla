@@ -36,7 +36,9 @@ CONSTANTS
   Wait,           \* ticks a peer must be seen absent before it is ignored
   MaxRound,       \* claim rounds per device (bounds the model)
   MatchRound,     \* TRUE: an answer counts only for the claim round it answers
-  ResetOnContact  \* TRUE: hearing from a peer restarts its absence timer
+  ResetOnContact, \* TRUE: hearing from a peer restarts its absence timer
+  SessionAge,     \* TRUE: acquire only once this session is Wait ticks old
+  Stall           \* TRUE: a down link may come back on the same session
 
 ASSUME /\ Devices \subseteq Nat
        /\ TStop \in Nat \ {0}
@@ -55,9 +57,11 @@ VARIABLES
   absent,  \* per device and peer: ticks the device has seen the peer absent
   round,   \* per device: number of its current claim round
   acks,    \* per device: peers that answered "free" in the current round
-  msgs     \* messages in flight between devices
+  msgs,    \* messages in flight between devices
+  age,     \* per device: ticks since its Join (session age)
+  changed  \* per device: peers that joined or left while its stream was stalled
 
-vars == <<mode, link, online, room, view, since, absent, round, acks, msgs>>
+vars == <<mode, link, online, room, view, since, absent, round, acks, msgs, age, changed>>
 
 Others(d) == Devices \ {d}
 
@@ -93,6 +97,8 @@ Init ==
   /\ round = [d \in Devices |-> 0]
   /\ acks = [d \in Devices |-> {}]
   /\ msgs = {}
+  /\ age = [d \in Devices |-> 0]
+  /\ changed = [d \in Devices |-> {}]
 
 -----------------------------------------------------------------------------
 (* Connection to the signaling server *)
@@ -114,6 +120,8 @@ Join(d) ==
                   IF e = d THEN 0
                   ELSE IF p = d /\ link[e] = "up" THEN 0
                   ELSE absent[e][p]]]
+  /\ age' = [age EXCEPT ![d] = 0]
+  /\ changed' = [e \in Devices |-> IF e = d THEN {} ELSE IF link[e] = "down" /\ online[e] THEN changed[e] \cup {d} ELSE changed[e]]
   /\ UNCHANGED <<mode, round, acks, msgs>>
 
 (* The socket dies. Neither side knows yet. *)
@@ -129,6 +137,7 @@ ServerNotices(d) ==
   /\ room' = room \ {d}
   /\ view' = [e \in Devices |->
                 IF link[e] = "up" THEN view[e] \ {d} ELSE view[e]]
+  /\ changed' = [e \in Devices |-> IF e # d /\ link[e] = "down" /\ online[e] THEN changed[e] \cup {d} ELSE changed[e]]
   /\ UNCHANGED <<mode, link, online, since, absent, round, acks, msgs>>
 
 (* The device notices the dead socket and goes read-only. *)
@@ -139,6 +148,22 @@ DeviceNotices(d) ==
   /\ mode' = [mode EXCEPT ![d] = "idle"]
   /\ acks' = [acks EXCEPT ![d] = {}]
   /\ UNCHANGED <<link, room, view, since, absent, round, msgs>>
+
+
+(* The server->device stream was only delayed, not dead: the device catches up
+   on the room on the SAME session. Not in the original model, where a link
+   that went down never comes back without a new Join. *)
+Recover(d) ==
+  /\ Stall
+  /\ online[d]
+  /\ link[d] = "down"
+  /\ d \in room
+  /\ link' = [link EXCEPT ![d] = "up"]
+  /\ view' = [view EXCEPT ![d] = room]
+  /\ absent' = [absent EXCEPT ![d] =
+                  [p \in Devices |-> IF p \in changed[d] THEN 0 ELSE absent[d][p]]]
+  /\ changed' = [changed EXCEPT ![d] = {}]
+  /\ UNCHANGED <<mode, online, room, since, round, acks, msgs>>
 
 (* A heartbeat round trip with the server. A holder whose last one was too
    old did not write meanwhile, and writes again from here: it stayed in the
@@ -157,6 +182,7 @@ Tick ==
                   IF p # d /\ online[d] /\ p \notin view[d]
                   THEN Min(absent[d][p] + 1, Wait)
                   ELSE absent[d][p]]]
+  /\ age' = [d \in Devices |-> Min(age[d] + 1, Wait)]
   /\ UNCHANGED <<mode, link, online, room, view, round, acks, msgs>>
 
 -----------------------------------------------------------------------------
@@ -233,6 +259,7 @@ Acquire(d) ==
   /\ mode[d] = "claiming"
   /\ since[d] < TStop
   /\ \A p \in Others(d) : p \in acks[d] \/ absent[d][p] >= Wait
+  /\ (SessionAge => age[d] >= Wait)
   /\ mode' = [mode EXCEPT ![d] = "holding"]
   /\ UNCHANGED <<link, online, room, view, since, absent, round, acks, msgs>>
 
@@ -246,12 +273,16 @@ StandDown(d) ==
 -----------------------------------------------------------------------------
 
 Next ==
-  \/ Tick
-  \/ \E d \in Devices :
-       \/ Join(d) \/ LinkDown(d) \/ ServerNotices(d) \/ DeviceNotices(d)
-       \/ Heartbeat(d) \/ StartClaim(d) \/ Acquire(d)
-       \/ StandDown(d)
-  \/ \E m \in msgs : HandleClaim(m) \/ HandleFree(m)
+  \/ Tick /\ UNCHANGED changed
+  \/ \E d \in Devices : Join(d)
+  \/ /\ UNCHANGED age
+     /\ \/ \E d \in Devices : ServerNotices(d) \/ Recover(d)
+        \/ /\ UNCHANGED changed
+           /\ \/ \E d \in Devices :
+                   \/ LinkDown(d) \/ DeviceNotices(d)
+                   \/ Heartbeat(d) \/ StartClaim(d) \/ Acquire(d)
+                   \/ StandDown(d)
+              \/ \E m \in msgs : HandleClaim(m) \/ HandleFree(m)
 
 Spec == Init /\ [][Next]_vars
 
