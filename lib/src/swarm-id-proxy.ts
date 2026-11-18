@@ -229,7 +229,11 @@ import {
   type SyncedAccount,
   type NetworkSettings,
 } from "./schemas"
-import { appSessionDuration } from "./utils/constants"
+import {
+  PROGRESS_INTERVAL_MS,
+  REQUEST_QUEUED_INTERVAL_MS,
+  appSessionDuration,
+} from "./utils/constants"
 import { PERMISSIONS_POPUP_MAX_MS, untilPopupClosed } from "./utils/popup"
 import { effectivePermissions } from "./permissions"
 import type { ActKeyCandidate } from "./proxy/act"
@@ -364,6 +368,19 @@ function deltaFoldView(snapshot: AccountStateSnapshot): DeviceStateSnapshot {
 /** A parent message as its handler gets it, the request's abort signal on it. */
 type Abortable<M> = M & {
   requestOptions: NonNullable<RequestOptions> & { signal: AbortSignal }
+}
+
+/** An upload's progress on its way to the parent, throttled. */
+interface ProgressReporter {
+  report: (progress: UploadProgress) => void
+  /** Post the latest report held back, before the upload's answer or its error. */
+  flush: () => void
+}
+
+/** The parent's request a write answers: where `requestQueued` goes. */
+interface WriteRequest {
+  event: MessageEvent
+  message: Abortable<{ requestId: string }>
 }
 
 /**
@@ -2194,22 +2211,49 @@ export class SwarmIdProxy {
   }
 
   /**
-   * Create an onProgress callback for upload operations.
-   * Returns undefined if progress reporting is disabled.
+   * Post an upload's progress to the parent, at most once per
+   * {@link PROGRESS_INTERVAL_MS}, and a report held back once the interval is
+   * up. Undefined if progress reporting is disabled.
    */
-  private createProgressCallback(
+  private createProgressReporter(
     event: MessageEvent,
     requestId: string,
     enableProgress: boolean | undefined,
-  ): ((progress: UploadProgress) => void) | undefined {
+  ): ProgressReporter | undefined {
     if (!enableProgress) return undefined
-    return (progress: UploadProgress) => {
+    let lastPostedAt: number | undefined
+    let heldBack: UploadProgress | undefined
+    let trailing: ReturnType<typeof setTimeout> | undefined
+    const post = (progress: UploadProgress) => {
+      clearTimeout(trailing)
+      trailing = undefined
+      lastPostedAt = Date.now()
+      heldBack = undefined
       this.postMessage(event, {
         type: "uploadProgress",
         requestId,
         total: progress.total,
         processed: progress.processed,
       })
+    }
+    return {
+      report: (progress) => {
+        const elapsed =
+          lastPostedAt === undefined ? Infinity : Date.now() - lastPostedAt
+        if (elapsed >= PROGRESS_INTERVAL_MS) {
+          post(progress)
+          return
+        }
+        heldBack = progress
+        // Held back until the interval is up, not until the next chunk: the
+        // node may stall right after it.
+        trailing ??= setTimeout(() => {
+          if (heldBack) post(heldBack)
+        }, PROGRESS_INTERVAL_MS - elapsed)
+      },
+      flush: () => {
+        if (heldBack) post(heldBack)
+      },
     }
   }
 
@@ -2504,6 +2548,11 @@ export class SwarmIdProxy {
    * A write that names its drive (`batchId`) goes to that drive's write path,
    * built on first use, and never falls back to the gateway: the app asked
    * for that drive (#862).
+   *
+   * `request`, when given, hears `requestQueued` while the write waits for
+   * its drive, which another write may hold for as long as a streaming upload
+   * runs, and `requestStarted` once it has it: its caller's timeout counts
+   * none of that wait.
    */
   private async withModeAwareWriteLock<T>(
     targetOptions:
@@ -2516,6 +2565,7 @@ export class SwarmIdProxy {
       | undefined,
     uncounted: (target: UploadTarget) => Promise<T>,
     batchId?: string,
+    request?: WriteRequest,
   ): Promise<T> {
     // Every chunk the write sends lands on the request's counter and
     // stops with its signal.
@@ -2529,6 +2579,25 @@ export class SwarmIdProxy {
         gatewayUrl: this.subsidisedGatewayUrl!,
       })
     }
+    const queued = this.keepAliveWhileQueued(request)
+    try {
+      const coordinator = await this.coordinatorFor(batchId)
+      return await coordinator.withWrite((target) => {
+        queued.started()
+        return operation(target)
+      }, targetOptions)
+    } finally {
+      queued.stop()
+    }
+  }
+
+  /**
+   * The coordinator a user-stamp write goes through: the named drive's, its
+   * write path built on first use, or the primary's.
+   */
+  private async coordinatorFor(
+    batchId: string | undefined,
+  ): Promise<BatchWriteCoordinator> {
     if (batchId !== undefined) {
       const drive = await this.writePathFor(batchId)
       this.refuseDrive(drive)
@@ -2539,7 +2608,7 @@ export class SwarmIdProxy {
           { reason: "stamper-failed" },
         )
       }
-      return drive.coordinator.withWrite(operation, targetOptions)
+      return drive.coordinator
     }
     const coordinator = this.drive?.coordinator
     if (!coordinator) {
@@ -2548,7 +2617,36 @@ export class SwarmIdProxy {
         "Stamper not initialized. Please login first.",
       )
     }
-    return coordinator.withWrite(operation, targetOptions)
+    return coordinator
+  }
+
+  /**
+   * Say `requestQueued` for a write now and on a heartbeat while it waits for
+   * its drive, and `requestStarted` as it starts: the client's wait for the
+   * answer then begins when the write does. `stop` ends the heartbeat when
+   * the wait fails instead.
+   */
+  private keepAliveWhileQueued(request: WriteRequest | undefined): {
+    started: () => void
+    stop: () => void
+  } {
+    if (!request) return { started: () => {}, stop: () => {} }
+    const { event, message } = request
+    const say = (type: "requestQueued" | "requestStarted") =>
+      this.postMessage(event, { type, requestId: message.requestId })
+    say("requestQueued")
+    const heartbeat = setInterval(
+      () => say("requestQueued"),
+      REQUEST_QUEUED_INTERVAL_MS,
+    )
+    const stop = () => clearInterval(heartbeat)
+    return {
+      started: () => {
+        stop()
+        say("requestStarted")
+      },
+      stop,
+    }
   }
 
   /**
@@ -2577,23 +2675,25 @@ export class SwarmIdProxy {
   /**
    * {@link withModeAwareWriteLock} for a write that reports its cost (#932).
    * The counter is made here and returned with the result, so a handler has
-   * no counter it could forget to wire and then report as zero. `signal` is
-   * required for the same reason: a write must not outlive its abort.
+   * no counter it could forget to wire and then report as zero. The request
+   * is required for the same reason: a write must not outlive its abort, and
+   * its caller must hear that it is still queued.
    */
   private async withCountedWrite<T>(
-    targetOptions: {
-      signal: AbortSignal
+    request: WriteRequest & {
       useWorkers?: boolean
       workerCount?: number
     },
     operation: (target: UploadTarget) => Promise<T>,
     batchId?: string,
   ): Promise<{ result: T; stampedChunks: number }> {
+    const { event, message, ...pool } = request
     const counter: ChunkCounter = { chunks: 0 }
     const result = await this.withModeAwareWriteLock(
-      { ...targetOptions, counter },
+      { ...pool, counter, signal: message.requestOptions.signal },
       operation,
       batchId,
+      { event, message },
     )
     return { result, stampedChunks: counter.chunks }
   }
@@ -4528,22 +4628,20 @@ export class SwarmIdProxy {
       concurrency,
     } = message
 
+    const progress = this.createProgressReporter(
+      event,
+      requestId,
+      enableProgress,
+    )
     try {
       this.refuseStreamConflicts(useWebSocket, options)
       const batchID = options?.batchID
       this.ensureCanUpload(batchID)
 
-      // Create progress callback if enabled (works in both modes)
-      const onProgress = this.createProgressCallback(
-        event,
-        requestId,
-        enableProgress,
-      )
-
       // Execute upload with mode-aware locking
       const { result: uploadResult, stampedChunks } =
         await this.withCountedWrite(
-          { signal: message.requestOptions.signal, useWorkers, workerCount },
+          { event, message, useWorkers, workerCount },
           async (target) => {
             const result = await uploadData(target, data, {
               encryptionKey: options?.encrypt ? true : undefined,
@@ -4552,7 +4650,7 @@ export class SwarmIdProxy {
               tag: options?.tag,
               webSocket: useWebSocket ? { concurrency } : undefined,
               httpConcurrency: concurrency,
-              onProgress,
+              onProgress: progress?.report,
               requestOptions,
             })
             return result
@@ -4560,7 +4658,7 @@ export class SwarmIdProxy {
           batchID,
         )
 
-      // Send response
+      progress?.flush()
       this.postMessage(event, {
         type: "uploadDataResponse",
         requestId,
@@ -4569,6 +4667,7 @@ export class SwarmIdProxy {
         tagUid: uploadResult.tagUid,
       })
     } catch (error) {
+      progress?.flush()
       this.sendErrorToParent(event, requestId, error, "Upload failed")
     }
   }
@@ -4617,17 +4716,15 @@ export class SwarmIdProxy {
     } = message
     const fileName = name || "index.bin"
 
+    const progress = this.createProgressReporter(
+      event,
+      requestId,
+      enableProgress,
+    )
     try {
       this.refuseStreamConflicts(useWebSocket, options)
       const batchID = options?.batchID
       this.ensureCanUpload(batchID)
-
-      // Create progress callback if enabled
-      const onProgress = this.createProgressCallback(
-        event,
-        requestId,
-        enableProgress,
-      )
 
       // One tag for the content and the manifest, by the content's rule: none
       // over a direct stream, which would otherwise track the manifest alone.
@@ -4643,7 +4740,7 @@ export class SwarmIdProxy {
       // Execute upload with mode-aware locking
       const { result: manifestResult, stampedChunks } =
         await this.withCountedWrite(
-          { signal: message.requestOptions.signal, useWorkers, workerCount },
+          { event, message, useWorkers, workerCount },
           async (target) => {
             // Step 1: Upload file content — encrypted by default, like the
             // manifest below (the rule is `manifestEncryption`)
@@ -4656,7 +4753,7 @@ export class SwarmIdProxy {
               tag: uploadTag,
               webSocket: useWebSocket ? { concurrency } : undefined,
               httpConcurrency: concurrency,
-              onProgress,
+              onProgress: progress?.report,
               requestOptions,
             })
 
@@ -4694,7 +4791,7 @@ export class SwarmIdProxy {
           batchID,
         )
 
-      // Send response
+      progress?.flush()
       this.postMessage(event, {
         type: "uploadFileResponse",
         requestId,
@@ -4703,6 +4800,7 @@ export class SwarmIdProxy {
         tagUid: manifestResult.tagUid,
       })
     } catch (error) {
+      progress?.flush()
       this.sendErrorToParent(event, requestId, error, "Upload failed")
     }
   }
@@ -4790,28 +4888,29 @@ export class SwarmIdProxy {
       workerCount,
     } = message
 
+    const progress = this.createProgressReporter(
+      event,
+      requestId,
+      enableProgress,
+    )
     try {
       const batchID = options?.batchID
       this.ensureCanUpload(batchID)
-      const onProgress = this.createProgressCallback(
-        event,
-        requestId,
-        enableProgress,
-      )
       const tag = options?.tag ?? (await tryCreateTag(this.bee))
 
       const { result, stampedChunks } = await this.withCountedWrite(
-        { signal: message.requestOptions.signal, useWorkers, workerCount },
+        { event, message, useWorkers, workerCount },
         (target) =>
           uploadCollection(target, files, {
             ...options,
             tag,
-            onProgress,
+            onProgress: progress?.report,
             requestOptions,
           }),
         batchID,
       )
 
+      progress?.flush()
       this.postMessage(event, {
         type: "uploadFilesResponse",
         requestId,
@@ -4820,6 +4919,7 @@ export class SwarmIdProxy {
         tagUid: result.tagUid,
       })
     } catch (error) {
+      progress?.flush()
       this.sendErrorToParent(event, requestId, error, "Upload failed")
     }
   }
@@ -4860,7 +4960,7 @@ export class SwarmIdProxy {
 
       // Execute upload with mode-aware locking
       const { stampedChunks } = await this.withCountedWrite(
-        { signal: message.requestOptions.signal },
+        { event, message },
         async (target) => {
           await uploadChunk(target, chunk.data, {
             pin: options?.pin,
@@ -4941,7 +5041,7 @@ export class SwarmIdProxy {
       const id = new Identifier(identifier)
 
       const { result, stampedChunks } = await this.withCountedWrite(
-        { signal: message.requestOptions.signal },
+        { event, message },
         async (target) => {
           return await uploadSOC(target, signerKey, id, data, {
             pin: options?.pin,
@@ -4983,7 +5083,7 @@ export class SwarmIdProxy {
       const id = new Identifier(identifier)
 
       const { result, stampedChunks } = await this.withCountedWrite(
-        { signal: message.requestOptions.signal },
+        { event, message },
         async (target) => {
           return await uploadSOC(target, signerKeyObj, id, data, {
             encryptionKey: options?.encrypt !== false ? true : undefined,
@@ -5026,7 +5126,7 @@ export class SwarmIdProxy {
       const id = new Identifier(identifier)
 
       const { result, stampedChunks } = await this.withCountedWrite(
-        { signal: message.requestOptions.signal },
+        { event, message },
         async (target) => {
           return await uploadSOC(target, signerKeyObj, id, data, {
             pin: options?.pin,
@@ -5401,7 +5501,7 @@ export class SwarmIdProxy {
       // Use mode-aware write lock for the upload operation
       const { result: updateResult, stampedChunks } =
         await this.withCountedWrite(
-          { signal: message.requestOptions.signal },
+          { event, message },
           async (target) => {
             const result = await updater.update(
               atValue,
@@ -5876,7 +5976,7 @@ export class SwarmIdProxy {
 
       // Upload SOC with optional encryption (enabled by default)
       const { result, stampedChunks } = await this.withCountedWrite(
-        { signal: message.requestOptions.signal },
+        { event, message },
         async (target) => {
           return await uploadSOC(target, signerKeyObj, identifier, payload, {
             encryptionKey: options?.encrypt !== false ? true : undefined,
@@ -5967,7 +6067,7 @@ export class SwarmIdProxy {
 
       // Upload SOC - use encryption if key provided, otherwise plain SOC
       const { result, stampedChunks } = await this.withCountedWrite(
-        { signal: message.requestOptions.signal },
+        { event, message },
         async (target) => {
           return await uploadSOC(target, signerKeyObj, identifier, payload, {
             encryptionKey: encryptionKey
@@ -6062,7 +6162,7 @@ export class SwarmIdProxy {
 
       // uploadReference always uses encryption with auto-generated key
       const { result, stampedChunks } = await this.withCountedWrite(
-        { signal: message.requestOptions.signal },
+        { event, message },
         async (target) => {
           return await uploadSOC(target, signerKeyObj, identifier, payload, {
             encryptionKey: true,
@@ -6163,6 +6263,11 @@ export class SwarmIdProxy {
       concurrency,
     } = message
 
+    const progress = this.createProgressReporter(
+      event,
+      requestId,
+      enableProgress,
+    )
     try {
       this.refuseStreamConflicts(useWebSocket, options)
       const batchID = options?.batchID
@@ -6171,13 +6276,6 @@ export class SwarmIdProxy {
       // Parse grantee public keys from compressed hex
       const granteePublicKeys = grantees.map((hex) =>
         parseCompressedPublicKey(hex),
-      )
-
-      // Progress callback (if enabled)
-      const onProgress = this.createProgressCallback(
-        event,
-        requestId,
-        enableProgress,
       )
 
       // The app key publishes unless the dApp asked for the identity-level
@@ -6201,11 +6299,7 @@ export class SwarmIdProxy {
         result: { actResult, contentUpload },
         stampedChunks,
       } = await this.withCountedWrite(
-        {
-          signal: message.requestOptions.signal,
-          useWorkers: useWorkers ?? true,
-          workerCount,
-        },
+        { event, message, useWorkers: useWorkers ?? true, workerCount },
         async (target) => {
           // Step 1: Upload raw content data (encrypted by default for 64-byte
           // reference). Only the content takes the stream: the manifest and
@@ -6217,7 +6311,7 @@ export class SwarmIdProxy {
             tag: options?.tag,
             webSocket: useWebSocket ? { concurrency } : undefined,
             httpConcurrency: concurrency,
-            onProgress,
+            onProgress: progress?.report,
             requestOptions,
           })
 
@@ -6272,7 +6366,7 @@ export class SwarmIdProxy {
         batchID,
       )
 
-      // Send final response
+      progress?.flush()
       this.postMessage(event, {
         type: "actUploadDataResponse",
         requestId,
@@ -6285,6 +6379,7 @@ export class SwarmIdProxy {
         tagUid: contentUpload.tagUid,
       })
     } catch (error) {
+      progress?.flush()
       this.sendErrorToParent(event, requestId, error, "ACT upload failed")
     }
   }
@@ -6386,7 +6481,7 @@ export class SwarmIdProxy {
 
       // Add grantees to ACT
       const { result, stampedChunks } = await this.withCountedWrite(
-        { signal: message.requestOptions.signal, useWorkers: true },
+        { event, message, useWorkers: true },
         async (target) => {
           return await addGranteesToAct(
             target,
@@ -6439,7 +6534,7 @@ export class SwarmIdProxy {
 
       // Revoke grantees from ACT (drops their entries; reference unchanged, #496)
       const { result, stampedChunks } = await this.withCountedWrite(
-        { signal: message.requestOptions.signal, useWorkers: true },
+        { event, message, useWorkers: true },
         async (target) => {
           return await revokeGranteesFromAct(
             target,
@@ -6873,7 +6968,7 @@ export class SwarmIdProxy {
       this.ensureCanUpload(batchID)
 
       const { result, stampedChunks } = await this.withCountedWrite(
-        { signal: message.requestOptions.signal },
+        { event, message },
         async (target) => {
           return await createFeedManifestDirect(
             target,
