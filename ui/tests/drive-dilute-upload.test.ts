@@ -25,7 +25,7 @@ import { addDrive, completeCreateFlow, mintToPostageSigner, waitForBatchIngestio
 const MANY_CHUNKS_BYTES = 400_000
 /** Far above what three uploads stamp, far below a misread counter. */
 const MAX_PLAUSIBLE_STAMPS = 10_000
-/** The last depth whose counters fitted 16 bits. */
+/** The deepest batch whose per-bucket slot count fits 16 bits. */
 const DEPTH_BEFORE_CROSSING = 31
 /** A depth-31 batch for a month is thousands of BZZ, and doubling it as much again. */
 const MINTED_BZZ_PLUR = 10n ** 22n // a million BZZ (16 decimals)
@@ -117,8 +117,9 @@ test('an app goes on uploading to a drive that was made larger under it', async 
   }
 })
 
-// The crossing the issue is about: the device's cached counters were 16-bit
-// rows up to depth 31 and 32-bit above. Nothing has to fill the batch; it only
+// The crossing the issue is about: up to depth 31 a bucket's count fits 16
+// bits, above it needs 32, and the device's cached rows are 32-bit at every
+// depth. Nothing has to fill the batch; it only
 // has to exist at that depth, and the chain will sell one to a signer whose
 // balance was written into the token.
 test('…and across depth 31 to 32', async ({ browser }) => {

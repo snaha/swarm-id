@@ -135,8 +135,7 @@ describe("regression: serializeUint32Array round-trip", () => {
 /**
  * `UtilizationAwareStamper.flush()` writes `contentHash` as the hex of the BMT
  * address of the encrypted chunk for the dirty plaintext + the stamper's
- * encryption key. The upload-path dedup at `saveUtilizationState` compares
- * against the same value, so these tests pin the underlying property: for a
+ * encryption key. These tests pin the underlying property: for a
  * given (plaintext, key) pair the BMT-of-encrypted address is deterministic,
  * and any change to either input produces a different address.
  */
@@ -254,8 +253,8 @@ describe("deriveUtilizationChunkKey", () => {
 })
 
 /**
- * The partition-aware stamper is the load-bearing piece of the multi-device
- * partition-lease feature: when two devices stamp into the same shared
+ * The partition-aware stamper is the load-bearing piece of sharing one batch
+ * between devices: when two devices stamp into the same shared
  * postage batch, their per-bucket slot picks MUST be drawn from disjoint
  * residue classes mod K so that no two chunks ever share a `(bucket, slot)`
  * pair. These tests pin that property.
@@ -568,7 +567,7 @@ describe("UtilizationAwareStamper partition awareness", () => {
     expect(envA.bucket).toBe(BUCKET)
     expect(envB.bucket).toBe(BUCKET)
     // Both behave as partition 0, K=1, j=0 → slot 1, so they collide. This is
-    // the bug partition-lease fixes.
+    // the collision partitioning prevents.
     expect(envA.slot).toBe(dataSlot(0, 0, 1))
     expect(envB.slot).toBe(dataSlot(0, 0, 1))
   })
@@ -736,7 +735,7 @@ describe("UtilizationAwareStamper partition awareness", () => {
     expect(decodeIndex(stamper.stamp(stateChunk).index).slot).toBe(1)
 
     const pointerSoc = makeAddressInBucket(0x9b, 2)
-    stamper.reserveIntentSocSlot(pointerSoc, 1)
+    stamper.reserveStatePointerSlot(pointerSoc, 1)
     expect(decodeIndex(stamper.stamp(pointerSoc).index).slot).toBe(1)
   })
 
@@ -806,7 +805,7 @@ describe("UtilizationAwareStamper partition awareness", () => {
 
   it("bindPartition clears a stale lease deadline (re-acquire reuses stamper)", async () => {
     // A reused stamper must not carry a previous session's lapsed deadline into
-    // a fresh bind — the coordinator pushes the new `leasedUntil` right after.
+    // a fresh bind — the coordinator pushes the new deadline right after.
     const stamper = await UtilizationAwareStamper.create(
       TEST_SIGNER_KEY,
       TEST_BATCH_ID,
@@ -836,10 +835,9 @@ describe("UtilizationAwareStamper partition awareness", () => {
   })
 
   it("the lease fence reads the injected clock (deterministic, no Date.now)", async () => {
-    // #385: the fence uses the stamper's injected clock — the SAME clock a test
-    // gives the lease (whose `leasedUntil` feeds `leaseValidUntil`). Drive it by
-    // hand: no real time, no `Date.now` mock; advancing the clock across the
-    // deadline flips the fence deterministically.
+    // #385: the fence uses the stamper's injected clock. Drive it by hand: no
+    // real time, no `Date.now` mock; advancing the clock across the deadline
+    // flips the fence deterministically.
     let clock = 1_000_000
     const stamper = await UtilizationAwareStamper.create(
       TEST_SIGNER_KEY,
@@ -899,10 +897,10 @@ describe("UtilizationAwareStamper partition awareness", () => {
     expect(env2.slot).toBe(dataSlot(1, 0, PARTITION_COUNT))
   })
 
-  it("intent SOC routes to the contended partition's reserved slot, never a data lane, without consuming data budget", async () => {
-    // Phase-2 intent SOCs (partition-intent.ts) are stamped BEFORE the partition
-    // is bound. They must overstamp the contended partition's reserved slot
-    // (< DATA_COUNTER_START), so they can never collide with user data.
+  it("a state-pointer SOC routes to the reserved slot of the partition it names, never a data lane, without consuming data budget", async () => {
+    // A state-pointer SOC (`writeStatePointer`) is stamped at the slot its
+    // reservation names: the reserved slot of the partition whose state it
+    // points at (< DATA_COUNTER_START), so it can never collide with user data.
     const stamper = await UtilizationAwareStamper.create(
       TEST_SIGNER_KEY,
       TEST_BATCH_ID,
@@ -911,8 +909,8 @@ describe("UtilizationAwareStamper partition awareness", () => {
       TEST_OWNER,
       TEST_ENC_KEY,
     )
-    // Bind to partition 0 to prove the intent slot comes from the EXPLICIT
-    // reservation (the contended partition, here 1), not `this.partition`.
+    // Bind to partition 0 to prove the slot comes from the EXPLICIT
+    // reservation (partition 1 here), not `this.partition`.
     stamper.bindPartition({
       partition: 0,
       partitionCount: PARTITION_COUNT,
@@ -920,16 +918,16 @@ describe("UtilizationAwareStamper partition awareness", () => {
     })
 
     const BUCKET = 0x2222
-    const CONTENDED = 1
-    const intentChunk = makeAddressInBucket(BUCKET, 1)
-    stamper.reserveIntentSocSlot(intentChunk, CONTENDED)
-    const intentEnv = decodeIndex(stamper.stamp(intentChunk).index)
-    stamper.clearIntentSocSlot()
+    const OTHER_PARTITION = 1
+    const pointerChunk = makeAddressInBucket(BUCKET, 1)
+    stamper.reserveStatePointerSlot(pointerChunk, OTHER_PARTITION)
+    const pointerEnv = decodeIndex(stamper.stamp(pointerChunk).index)
+    stamper.clearStatePointerSlot()
 
-    expect(intentEnv.bucket).toBe(BUCKET)
-    // Routed to the contended partition's reserved slot — below every data lane.
-    expect(intentEnv.slot).toBe(CONTENDED)
-    expect(intentEnv.slot).toBeLessThan(DATA_COUNTER_START)
+    expect(pointerEnv.bucket).toBe(BUCKET)
+    // Routed to the named partition's reserved slot — below every data lane.
+    expect(pointerEnv.slot).toBe(OTHER_PARTITION)
+    expect(pointerEnv.slot).toBeLessThan(DATA_COUNTER_START)
     // Did not consume the data lane: counter untouched, so the next data chunk
     // in this bucket still lands at j=0.
     expect(stamper.getLocalCounter()![BUCKET]).toBe(0)
@@ -940,13 +938,13 @@ describe("UtilizationAwareStamper partition awareness", () => {
     expect(dataEnv.slot).toBeGreaterThanOrEqual(DATA_COUNTER_START)
   })
 
-  it("intent stamps never share a (bucket, slot) with data stamps", async () => {
-    // Regression guard for the class of bug where intents fell into a data
-    // lane (overstamping user data). Interleave data + intent stamps in one
+  it("state-pointer stamps never share a (bucket, slot) with data stamps", async () => {
+    // Guards against a state-pointer SOC falling into a data lane
+    // (overstamping user data). Interleave data + state-pointer stamps in one
     // bucket and assert the two occupy disjoint slot ranges: data lives at
-    // >= DATA_COUNTER_START, intents at the contended partition's reserved
-    // slot (< DATA_COUNTER_START). (Intents overstamping each OTHER at the
-    // same reserved slot is the documented, accepted residual — not asserted.)
+    // >= DATA_COUNTER_START, state pointers at the partition's reserved slot
+    // (< DATA_COUNTER_START). (State pointers overstamping each OTHER at the
+    // same reserved slot is what `entrySalt` deals with — not asserted here.)
     const stamper = await UtilizationAwareStamper.create(
       TEST_SIGNER_KEY,
       TEST_BATCH_ID,
@@ -971,25 +969,24 @@ describe("UtilizationAwareStamper partition awareness", () => {
       expect(dataSlots.has(dataEnv.slot)).toBe(false) // data slots never reused
       dataSlots.add(dataEnv.slot)
 
-      const intentChunk = makeAddressInBucket(BUCKET, 200 + i)
-      stamper.reserveIntentSocSlot(intentChunk, 0)
-      const intentEnv = decodeIndex(stamper.stamp(intentChunk).index)
-      stamper.clearIntentSocSlot()
-      // Intent slot is below the data range, so it can never equal a data slot.
-      expect(intentEnv.slot).toBeLessThan(DATA_COUNTER_START)
-      expect(dataSlots.has(intentEnv.slot)).toBe(false)
+      const pointerChunk = makeAddressInBucket(BUCKET, 200 + i)
+      stamper.reserveStatePointerSlot(pointerChunk, 0)
+      const pointerEnv = decodeIndex(stamper.stamp(pointerChunk).index)
+      stamper.clearStatePointerSlot()
+      // The reserved slot is below the data range, so it can never equal a data slot.
+      expect(pointerEnv.slot).toBeLessThan(DATA_COUNTER_START)
+      expect(dataSlots.has(pointerEnv.slot)).toBe(false)
     }
   })
 
-  it("withIntentSocSlot serializes concurrent intent-SOC writes so neither clobbers the other's reserved slot", async () => {
-    // The intent / occupancy / state-pointer SOC writes all share the single
-    // `intentSoc` reservation. The off-lock refresh-tick presence beacon and an
-    // under-lock upload's state-pointer publish run concurrently, so their
-    // reserve→stamp windows can overlap: the second reserve clobbers the first's
-    // address, and the first `stamp()` then no longer matches `intentSoc` and
-    // falls through to a DATA slot (consuming budget + bumping the counter).
-    // `withIntentSocSlot` serializes the critical sections so each writer's
-    // reservation is intact at stamp time.
+  it("withStatePointerSlot serializes concurrent state-pointer writes so neither clobbers the other's reserved slot", async () => {
+    // Every state-pointer SOC write shares the single `statePointerSoc`
+    // reservation. Were two to run their reserve→stamp windows at once, the
+    // second reserve would clobber the first's address, and the first
+    // `stamp()` would not match `statePointerSoc` and fall through to a DATA
+    // slot (consuming budget + bumping the counter). `withStatePointerSlot`
+    // serializes the critical sections so each writer's reservation is intact
+    // at stamp time.
     const stamper = await UtilizationAwareStamper.create(
       TEST_SIGNER_KEY,
       TEST_BATCH_ID,
@@ -1008,7 +1005,7 @@ describe("UtilizationAwareStamper partition awareness", () => {
     const slots: Record<string, number> = {}
     async function write(name: string, bucket: number): Promise<void> {
       const chunk = makeAddressInBucket(bucket, bucket)
-      await stamper.withIntentSocSlot(chunk, SLOT, async () => {
+      await stamper.withStatePointerSlot(chunk, SLOT, async () => {
         // Yield microtasks so an unserialized concurrent writer would clobber
         // the shared reservation before this flow stamps.
         await Promise.resolve()
@@ -1029,12 +1026,11 @@ describe("UtilizationAwareStamper partition awareness", () => {
     expect(stamper.getLocalCounter()).toEqual(counterBefore)
   })
 
-  it("withIntentSocSlot releases the mutex when fn throws, so later writes don't deadlock", async () => {
+  it("withStatePointerSlot releases the mutex when fn throws, so later writes don't deadlock", async () => {
     // Regression (the reserve/fn-throw guard): if `fn` — the upload — throws,
-    // the `finally` must still `clearIntentSocSlot()` and resolve the lock.
-    // Otherwise `intentSocLock` stays pending forever and EVERY later intent /
-    // occupancy / state-pointer write on this stamper deadlocks on
-    // `await previous`.
+    // the `finally` must still `clearStatePointerSlot()` and resolve the lock.
+    // Otherwise `statePointerLock` stays pending forever and EVERY later
+    // state-pointer write on this stamper deadlocks on `await previous`.
     const stamper = await UtilizationAwareStamper.create(
       TEST_SIGNER_KEY,
       TEST_BATCH_ID,
@@ -1052,7 +1048,7 @@ describe("UtilizationAwareStamper partition awareness", () => {
     const SLOT = 0
     const boom = new Error("upload failed")
     await expect(
-      stamper.withIntentSocSlot(new Uint8Array(32), SLOT, async () => {
+      stamper.withStatePointerSlot(new Uint8Array(32), SLOT, async () => {
         throw boom
       }),
     ).rejects.toBe(boom)
@@ -1061,7 +1057,7 @@ describe("UtilizationAwareStamper partition awareness", () => {
     // completes and routes to the reserved slot. Without the finally-release it
     // would hang forever on `await previous` (the test would time out).
     const chunk = makeAddressInBucket(0x4444, 0x4444)
-    const slot = await stamper.withIntentSocSlot(
+    const slot = await stamper.withStatePointerSlot(
       chunk,
       SLOT,
       async () => decodeIndex(stamper.stamp(chunk).index).slot,
@@ -1069,8 +1065,8 @@ describe("UtilizationAwareStamper partition awareness", () => {
     expect(slot).toBe(SLOT)
   })
 
-  it("seeds the local counter from the caller (Case B resume scenario)", async () => {
-    // Simulates Case B: device 1 acquires partition 1 and resumes from a
+  it("seeds the local counter from the caller (resuming a published counter)", async () => {
+    // Device 1 takes partition 1 and resumes from a
     // non-zero per-bucket high-water published by a previous holder.
     const stamper = await UtilizationAwareStamper.create(
       TEST_SIGNER_KEY,

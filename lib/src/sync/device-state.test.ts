@@ -405,7 +405,7 @@ describe("foldAccount — per-field scalar LWW", () => {
 describe("foldAccount — account immutables from any defining view", () => {
   it("takes partitionCount from a later view when views[0] has the default", () => {
     // views[0] is an older/partial feed: partitionCount defaulted to 1 (which
-    // would disable partition locking). A later view carries the real value —
+    // would disable partitioning). A later view carries the real value —
     // the fold must prefer that, not views[0]. publicKey is an account immutable
     // present on every view, so it always comes from views[0].
     const partial = makeView({ partitionCount: 1 })

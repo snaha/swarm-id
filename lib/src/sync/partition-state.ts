@@ -4,10 +4,9 @@
 /**
  * Partition-state pointer for multi-device postage-batch sharing.
  *
- * The current holder publishes its per-partition counter on each upload (and on
- * release); the next holder reads it on acquire and resumes from exactly that
- * counter, so the two devices never race for the same `(bucket, slot)` pair
- * during an orderly hand-off.
+ * The holder of a lane publishes its per-partition counter after each upload;
+ * the next holder reads it when it takes the lane and resumes from exactly
+ * that counter, so the two never use the same `(bucket, slot)` pair.
  *
  * The counter is packed as SBU1 leaves (`counter-codec.ts`: a base and bit
  * width chosen per publish, deltas packed to that width, outliers listed as
@@ -191,8 +190,8 @@ const UINT32_BYTES = 4
  * reconstructed from the binary wire format (reference chunk → counter
  * chunks, see the module doc above for the byte layout). The wire format is
  * versioned by the feed topic domain (`PARTITION_STATE_TOPIC_DOMAIN`), not an
- * in-blob version byte — a future v2 publishes under a v2 topic and never
- * collides with v1 readers.
+ * in-blob version byte — a different layout publishes under its own topic
+ * domain and never collides with readers of this one.
  *
  * `readPartitionState` validates the assembled counter against this schema
  * before returning it; a failure is reported as `readFailed` (fail-safe —
@@ -356,7 +355,7 @@ export async function writeStatePointer(opts: {
     // Serialized against another state-pointer write through this stamper,
     // so neither clobbers the shared reservation and mis-stamps into a data
     // slot.
-    await opts.stamper.withIntentSocSlot(address, opts.partition, () =>
+    await opts.stamper.withStatePointerSlot(address, opts.partition, () =>
       uploadSOC(target, opts.backupSigner, identifier, data, options),
     )
     return
@@ -442,9 +441,8 @@ export async function readStatePointer(opts: {
  * `localCounter` array — the previous holder's per-bucket high-water.
  *
  * Returns a fresh zero-filled array when no prior snapshot exists — i.e.
- * when a fresh partition is being seeded for the first time (Case A on a
- * brand-new account, or Case B when no peer has yet published on the
- * partition we're about to take). We resume at exactly the published
+ * when nothing has been published on the partition yet. We resume at exactly
+ * the published
  * counter: an unclean-crash window where a peer stamped past its last
  * publish is not defended against — that data was never durably persisted
  * anyway, so overwriting those slots loses nothing of value.
@@ -765,7 +763,7 @@ export async function writePartitionState(opts: {
   // an acked slot into reuse. But it is a broken-persistence symptom on ANY path,
   // so guard on a known `previousCounter` ALONE, not `incremental`: the sparse-full
   // path is reachable with a previous counter but no refs (a cache-hit read whose
-  // best-effort reference-chunk download failed seeds the lease that way), and a
+  // best-effort reference-chunk download failed seeds the lane that way), and a
   // regressed resume point must fail loud there too rather than ship silently.
   // Cheap: one pass over the 65536-entry counter, dwarfed by the ECDSA/upload work
   // below. (It catches the regression SYMPTOM; it cannot decode the retained refs'
@@ -928,7 +926,7 @@ export async function writePartitionState(opts: {
 
   // Diagnostic (visible in the browser console): how many chunks this publish
   // actually wrote — counter chunks + the reference chunk + the pointer SOC —
-  // and the batch latency. Shows whether a held-lease upload's publish is
+  // and the batch latency. Shows whether an upload's publish is
   // sparse/incremental (~a few writes) or a full publish, and its gateway cost.
   console.debug(
     `[partition-state] publish p=${partition} incremental=${incremental} ` +

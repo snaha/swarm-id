@@ -272,9 +272,9 @@ export interface ActUploadOptions extends UploadOptions {
 /**
  * How many chunks a write sent (#932): one per stamp the proxy signed in
  * stamper mode, one per chunk the gateway accepted in subsidised mode, so a
- * dApp can show what a save cost against what it estimated. The partition
- * lease's own chunks (lock, intent, and the state publish after each write)
- * are not counted: they re-use reserved slots and spend no capacity.
+ * dApp can show what a save cost against what it estimated. The chunks of
+ * the partition state published after each write are not counted: they
+ * re-use reserved slots and spend no capacity.
  * Optional on the wire: an identity site older than the field sends none.
  */
 const StampedChunksSchema = z.number().int().min(0).optional()
@@ -979,9 +979,9 @@ export const ConnectionInfoSchema = z.object({
    */
   uploadUnavailableReason: UploadUnavailableReasonSchema.optional(),
   /**
-   * Partition number this device currently holds in the postage batch's
-   * partition-lease. `undefined` when no lease is held (sign-in only,
-   * pre-first-upload) or for legacy single-device accounts.
+   * Partition of the postage batch this context currently holds (its lane).
+   * `undefined` when none is held (sign-in only, pre-first-upload) or for
+   * legacy single-device accounts.
    */
   partition: z.number().int().min(0).optional(),
   /**

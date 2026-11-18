@@ -308,9 +308,8 @@ describe("detectDeviceName", () => {
 })
 
 // The device-registry refresh persists every merge that moved a field, not
-// only a longer list: `knownDeviceIds` prunes on `lastSignedInAt` and the
-// tombstone, so a peer the roster shows as live could otherwise age out of the
-// stored copy and be skipped by the partition-intent round (#586).
+// only a longer list: a merge that only refreshes `lastSignedInAt` or sets the
+// tombstone would otherwise leave the stored copy behind the roster (#586).
 describe("deviceRegistryChanged", () => {
   const SELF = "self-device"
   const PEER = "peer-device"

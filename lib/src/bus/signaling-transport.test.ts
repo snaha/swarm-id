@@ -132,10 +132,8 @@ describe("SignalingTransport — relay path", () => {
     }
   })
 
-  // The teardown announcement (`lease-released`) is published and the bus
-  // closed in the same synchronous tick, while `deliver` is still awaiting its
-  // encryption. Dropping it there costs a waiting peer the full poll interval
-  // — the exact latency the message exists to remove.
+  // A message can be published and the bus closed in the same synchronous
+  // tick, while `deliver` is still awaiting its encryption. It still goes out.
   it("still delivers an envelope published in the same tick as close()", async () => {
     const sender = makeTransport()
     const receiver = makeTransport()
@@ -437,8 +435,7 @@ describe("SignalingTransport — joining a room", () => {
 })
 
 describe("SignalingTransport — WebRTC upgrade", () => {
-  // A `send` that throws for one peer must not starve every peer after it: for
-  // a teardown `lease-released` that costs the waiter its whole poll interval.
+  // A `send` that throws for one peer must not starve every peer after it.
   // The peer falls back to the relay and the others are unaffected.
   it("relays past a peer whose data channel send throws", async () => {
     const sender = makeTransport({ createPeerConnection: fakeRtcFactory })
@@ -670,7 +667,7 @@ const SETTLE_MS = 120
 const settle = () => new Promise((resolve) => setTimeout(resolve, SETTLE_MS))
 const NOBODY: ReadonlySet<string> = new Set()
 
-// What the partition lease asks of a transport (models/bus-lease): whether
+// What a lane asks of a transport (`LaneLiveness`, models/bus-lease): whether
 // this context's own connection is confirmed, and how long the service has
 // shown a device absent.
 describe("SignalingTransport — liveness", () => {

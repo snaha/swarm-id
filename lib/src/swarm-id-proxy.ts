@@ -1658,8 +1658,7 @@ export class SwarmIdProxy {
     }
     this.unsubscribeStorageListeners = []
 
-    // Release the partition leases (best-effort) so peers see this device
-    // vacate its partitions promptly.
+    // Tear the write paths down, which gives up the lanes they hold.
     this.destroyed = true
     // Also clears the expiry timer: nothing is left to expire.
     this.teardownDrives()
@@ -1716,10 +1715,9 @@ export class SwarmIdProxy {
    * Fold the buffered delta for the lane `drive` just bound in, then drop
    * that batch's other buffered lanes — they are another device's business.
    * Other batches' stay: their drives have not bound yet.
-   * Called on every lease acquire: on the cold path the counters are already
-   * seeded from the durable partition-state feed, so this is a harmless
-   * monotonic no-op; on the adopt fast path they are not, and this is the
-   * whole point.
+   * Called on every lease acquire. The fold only ever raises a counter, so
+   * it changes nothing where the published state the lane was bound from
+   * already covers the delta.
    */
   private applyPendingLaneUpdate(drive: DriveWritePath): void {
     const stamper = drive.stamper
@@ -2018,9 +2016,8 @@ export class SwarmIdProxy {
     if (superseded()) return
 
     // Build the write-path coordinator for this account+batch. It owns the
-    // cross-tab write lock, the partition-lease lifecycle, and the stamp flush.
-    // Lock-SOC routing on the stamper was auto-bound inside
-    // `UtilizationAwareStamper.create`. For multi-device accounts the
+    // cross-tab write lock, taking and holding a lane, and the stamp flush.
+    // For multi-device accounts the
     // coordinator eagerly pre-acquires a partition in the background
     // (`startLease`) so the first upload doesn't pay the acquire latency; a
     // concurrent first upload queues on the same write lock and then finds the
@@ -2062,9 +2059,9 @@ export class SwarmIdProxy {
       // lock (the publish re-enters the lock via the coordinator).
       //
       // Fold in any delta buffered while we had no lane FIRST, and
-      // synchronously: the bind that just happened may have seeded the counters
-      // from this tab's own in-memory state (the adopt fast path does), and the
-      // publish below reads those counters.
+      // synchronously: the bind that just happened seeded the counters from
+      // the lane's published state, which a buffered delta can be ahead of,
+      // and the publish below reads those counters.
       onLeaseAcquired: () => {
         this.applyPendingLaneUpdate(drive)
         this.schedulePublish("acquired")
@@ -2161,8 +2158,8 @@ export class SwarmIdProxy {
    * state; the proxy owns none of that.
    *
    * `targetOptions.counter`, when given, counts the chunks the write sends
-   * (#932): the lease's own lock, intent and state-publish chunks go out
-   * through the coordinator, not the target, and are not counted.
+   * (#932): the chunks of the partition state published after the write go
+   * out through the coordinator, not the target, and are not counted.
    *
    * A write that names its drive (`batchId`) goes to that drive's write path,
    * built on first use, and never falls back to the gateway: the app asked
@@ -2910,9 +2907,9 @@ export class SwarmIdProxy {
         this.requireDeviceId(),
         this.announcedDeviceName(),
       )
-      // Persist when anything the rival set reads actually moved — a peer
-      // appearing, a refreshed sign-in, a tombstone — including the timestamp-only
-      // merges `activeDeviceIds` prunes on (#586). A poll does not stamp our own entry (#652), so
+      // Persist when anything in the registry actually moved — a peer
+      // appearing, a refreshed sign-in, a tombstone — timestamp-only merges
+      // included (#586). A poll does not stamp our own entry (#652), so
       // a quiet round compares equal and causes no cross-tab storage-event churn.
       if (
         deviceRegistryChanged(

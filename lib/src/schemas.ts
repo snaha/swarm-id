@@ -444,8 +444,8 @@ export const AccountMetadataSchemaV1 = z.object({
   /**
    * Number of partitions the postage-batch slot space is divided into.
    * `1` means "no partitioning, single-device behaviour" — this is the
-   * default for snapshots from before the partition-lease shipped. New
-   * accounts write the current `PARTITION_COUNT` (2) here.
+   * default for a snapshot that carries none. New accounts write the current
+   * `PARTITION_COUNT` (2) here.
    */
   partitionCount: z.number().int().min(1).default(1),
 })

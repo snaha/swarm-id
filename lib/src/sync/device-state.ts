@@ -349,7 +349,7 @@ export function foldAccount(
 
   // Account immutables from any view that defines them — NOT just views[0],
   // whose feed could be older/partial and omit one (partitionCount defaults to 1,
-  // which would silently disable partition locking for a multi-partition
+  // which would silently disable partitioning for a multi-partition
   // account). Fall back to the roster (min createdAt) so a fold with reachable
   // roster but no readable device feed still has createdAt. publicKey is carried
   // on every view (callers pass a non-empty `views`), so `views[0]` always has it.
