@@ -1,1 +1,0 @@
-import"./DYrviY11.js";import"./BrA98naY.js";function e(){return`wss://swarm-id-bus-preview.onrender.com`}export{e as t};
