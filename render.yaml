@@ -13,6 +13,10 @@
 # last push wins. It sleeps after 15 minutes without a request or a WebSocket
 # message and takes about a minute to wake.
 #
+# The deploy hook answers as soon as the build is queued. A build that then
+# fails shows only in Render's dashboard, and the preview meets the server the
+# instance ran before.
+#
 # What it can cost, with a payment method on the Render workspace: builds use
 # the workspace's pipeline minutes (a deploy here takes about one), and traffic
 # its outbound bandwidth. Render has a spend limit for pipeline minutes
