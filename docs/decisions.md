@@ -7,6 +7,25 @@ present and may point at an issue or PR; the reasons live here.
 
 A PR that makes or changes a decision adds the entry in the same PR.
 
+## 2026-11-18 Every upload builds its Merkle tree as the chunks are sent
+
+**Context.** A plain upload and an encrypted one each had a pipeline of their
+own. Both cut the whole input into chunks first and built the tree a level at
+a time over every reference, so memory grew with the input, and a plain upload
+sent its chunks one after another whatever `concurrency` said.
+
+**Decision.** One pipeline serves both. It reads the input as a sequence of
+pieces, sends each 4096-byte chunk through a window of at most `concurrency`
+sends, and keeps one partial intermediate chunk per tree level, wrapping a
+level the moment it is full. Plain uploads honour `concurrency`; left unset
+they still go one at a time. References are unchanged. (#1041)
+
+**Why.** A chunk's reference follows from its bytes, so the tree never has to
+wait for the node, and what an upload holds is then bounded by the window
+rather than by the input. That bound is what lets an input larger than memory
+be uploaded at all, and waiting for a free slot in the window is the
+backpressure such an input needs.
+
 ## 2026-11-18 Previews use production's signaling server; a PR that changes the server gets a Render instance
 
 **Context.** The GitHub Pages builds (`main` and the per-PR previews) had no signaling

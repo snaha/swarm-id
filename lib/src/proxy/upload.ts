@@ -30,22 +30,23 @@ import {
   makeEncryptedContentAddressedChunk,
   calculateChunkAddress,
   newChunkEncrypter,
-  type ContentAddressedChunk,
-  type EncryptedChunk,
   DEFAULT_UPLOAD_CONCURRENCY,
+  ENCRYPTED_REF_SIZE,
+  UNENCRYPTED_REF_SIZE,
 } from "../chunk"
 import {
-  splitDataIntoChunks,
   CHUNK_SIZE,
   ENCRYPTED_REFS_PER_CHUNK,
   PLAIN_REFS_PER_CHUNK,
+  estimateTotalChunks,
+  rechunk,
 } from "./chunking"
 import { ChunkUploadStream } from "./chunk-upload-stream"
 import {
   convertEnvelopeToMarshaledStamp,
   makeSOCAddress,
 } from "@ethersphere/core-sdk"
-import type { ChunkReference, UploadProgress } from "./types"
+import type { UploadProgress } from "./types"
 import type { StampWorkerPool } from "./stamp-worker-pool"
 import { tryCreateTag } from "../utils/tag"
 import { uint8ArrayToHex, webBytes } from "../utils/hex"
@@ -160,8 +161,25 @@ export interface UploadDataResult {
   reference: string
   /** Tag UID if one was created */
   tagUid?: number
-  /** Addresses of all uploaded chunks (encrypted mode only) */
+  /**
+   * Addresses of all uploaded chunks: set by an encrypted {@link uploadData}
+   * only. {@link uploadDataStream} never keeps them, so its memory does not
+   * grow with the source.
+   */
   chunkAddresses?: Uint8Array[]
+}
+
+/**
+ * Options for {@link uploadDataStream}. Encryption is per-chunk with generated
+ * keys only: a caller's key can only apply to data known to fit one chunk.
+ */
+export interface UploadDataStreamOptions extends Omit<
+  UploadDataOptions,
+  "encryptionKey"
+> {
+  encryptionKey?: true
+  /** The source's length in bytes, if known, for progress to have a total */
+  size?: number
 }
 
 /**
@@ -223,9 +241,7 @@ export interface UploadChunkResult {
  */
 type StampChunkFn = (address: Uint8Array) => Promise<EnvelopeWithBatchId>
 
-/**
- * Create a StampChunkFn from a Stamper and optional worker pool.
- */
+/** `requestOptions` with the request's abort `signal` on them, if there is one. */
 function withSignal(
   requestOptions: BeeRequestOptions | undefined,
   signal: AbortSignal | undefined,
@@ -233,6 +249,9 @@ function withSignal(
   return signal ? { ...requestOptions, signal } : requestOptions
 }
 
+/**
+ * Create a StampChunkFn from a Stamper and optional worker pool.
+ */
 function makeStampFn(
   stamper: Stamper,
   workerPool?: StampWorkerPool,
@@ -248,50 +267,6 @@ function makeStampFn(
     if (counter) counter.chunks++
     return envelope
   }
-}
-
-// ============================================================================
-// Encrypted Chunk Helpers
-// ============================================================================
-
-interface EncryptedChunkRef {
-  address: Uint8Array
-  key: Uint8Array
-  span: bigint
-}
-
-/**
- * Encrypt all payloads into EncryptedChunks and collect their references.
- *
- * An explicit key is only valid for a single payload: every chunk of a
- * multi-chunk upload carries its own key, so honouring one shared key is
- * impossible and substituting random keys would silently break the caller's
- * expectation of a key-addressed reference.
- */
-function encryptChunkPayloads(
-  payloads: Uint8Array[],
-  encryptionKey?: Uint8Array,
-): { chunks: EncryptedChunk[]; refs: EncryptedChunkRef[] } {
-  if (encryptionKey && payloads.length > 1) {
-    throw new Error(
-      `Explicit encryption key is only supported for single-chunk data (up to ${CHUNK_SIZE} bytes), got ${payloads.length} chunks — pass encryptionKey: true to auto-generate per-chunk keys`,
-    )
-  }
-
-  const chunks: EncryptedChunk[] = []
-  const refs: EncryptedChunkRef[] = []
-
-  for (const payload of payloads) {
-    const chunk = makeEncryptedContentAddressedChunk(payload, encryptionKey)
-    chunks.push(chunk)
-    refs.push({
-      address: chunk.address.toUint8Array(),
-      key: chunk.encryptionKey,
-      span: BigInt(payload.length),
-    })
-  }
-
-  return { chunks, refs }
 }
 
 // ============================================================================
@@ -372,42 +347,6 @@ async function uploadChunkViaSubsidisedGatewayInternal(
   return { reference: result.reference }
 }
 
-/**
- * Upload multiple chunks via HTTP with sliding-window concurrency.
- */
-async function uploadChunksViaHttp(
-  bee: Bee,
-  stamp: StampChunkFn,
-  chunks: Array<{ data: Uint8Array; address: Uint8Array }>,
-  options: UploadOptions,
-  requestOptions: BeeRequestOptions | undefined,
-  onUploaded: (address: Uint8Array) => void,
-  concurrency: number = DEFAULT_UPLOAD_CONCURRENCY,
-): Promise<void> {
-  let nextIndex = 0
-
-  const worker = async () => {
-    while (nextIndex < chunks.length) {
-      const chunk = chunks[nextIndex++]
-      await uploadStampedChunkViaHttp(
-        bee,
-        stamp,
-        chunk.data,
-        chunk.address,
-        options,
-        requestOptions,
-      )
-      onUploaded(chunk.address)
-    }
-  }
-
-  await Promise.all(
-    Array.from({ length: Math.min(concurrency, chunks.length) }, () =>
-      worker(),
-    ),
-  )
-}
-
 // ============================================================================
 // WebSocket Transport
 // ============================================================================
@@ -429,170 +368,308 @@ async function uploadStampedChunkViaWebSocket(
   await stream.uploadChunk(stamped)
 }
 
-/**
- * Upload multiple chunks via WebSocket with per-chunk stamping.
- */
-async function uploadChunksViaWebSocket(
-  stamp: StampChunkFn,
-  stream: ChunkUploadStream,
-  chunks: Array<{ data: Uint8Array; address: Uint8Array }>,
-  onUploaded: (address: Uint8Array) => void,
-): Promise<void> {
-  let nextIndex = 0
+// ============================================================================
+// Chunk Sending
+// ============================================================================
 
-  const worker = async () => {
-    while (nextIndex < chunks.length) {
-      const chunk = chunks[nextIndex++]
-      await uploadStampedChunkViaWebSocket(
-        stamp,
-        stream,
-        chunk.data,
-        chunk.address,
-      )
-      onUploaded(chunk.address)
+/** Where the chunks of one upload go, and how many may be on the way at once. */
+interface ChunkSender {
+  concurrency: number
+  tagUid?: number
+  send: (chunkData: Uint8Array, address: Uint8Array) => Promise<void>
+  close: () => Promise<void>
+}
+
+async function openChunkSender(
+  target: UploadTarget,
+  isEncrypted: boolean,
+  options?: UploadDataOptions | UploadDataStreamOptions,
+): Promise<ChunkSender> {
+  if (isSubsidisedTarget(target)) {
+    const uploadOptions = {
+      deferred: options?.deferred,
+      signal: target.signal,
+    }
+    return {
+      concurrency: 1,
+      send: async (chunkData) => {
+        await uploadChunkViaSubsidisedGatewayInternal(
+          target.gatewayUrl,
+          chunkData,
+          uploadOptions,
+          target.counter,
+        )
+      },
+      close: async () => {},
     }
   }
 
-  const workerCount = stream.getConcurrency()
-  await Promise.all(Array.from({ length: workerCount }, () => worker()))
+  const { bee, stamper, workerPool, counter, signal } = target
+  const tag = options?.tag ?? (await tryCreateTag(bee))
+  const stamp = makeStampFn(stamper, workerPool, counter, signal)
+
+  if (isEncrypted && options?.webSocket) {
+    const stream = new ChunkUploadStream(bee.url, {
+      tag,
+      concurrency: options.webSocket.concurrency,
+      signal,
+    })
+    await stream.open()
+    return {
+      concurrency: stream.getConcurrency(),
+      tagUid: tag,
+      send: (chunkData, address) =>
+        uploadStampedChunkViaWebSocket(stamp, stream, chunkData, address),
+      close: () => stream.close(),
+    }
+  }
+
+  const uploadOptions: UploadOptions = {
+    pin: options?.pin,
+    tag,
+    deferred: options?.deferred ?? false,
+  }
+  const requestOptions = withSignal(options?.requestOptions, signal)
+  return {
+    concurrency:
+      options?.httpConcurrency ??
+      (isEncrypted ? DEFAULT_UPLOAD_CONCURRENCY : 1),
+    tagUid: tag,
+    send: (chunkData, address) =>
+      uploadStampedChunkViaHttp(
+        bee,
+        stamp,
+        chunkData,
+        address,
+        uploadOptions,
+        requestOptions,
+      ),
+    close: async () => {},
+  }
+}
+
+/**
+ * The chunks of one upload on their way to the node. `submit` waits for a free
+ * slot, which is the whole of the upload's backpressure: nothing further is
+ * read from the source until the node has taken something.
+ *
+ * Every wait here attaches only to promises that settle while the upload
+ * runs. One reaction per block on a promise that outlives them all would keep
+ * every block reachable until the upload ended.
+ */
+export class SendWindow {
+  private readonly inFlight = new Set<Promise<void>>()
+  private failure: { error: unknown } | undefined
+  /** The waits {@link orFailure} has open, each ended by the first failure. */
+  private readonly failureWaiters = new Set<(error: unknown) => void>()
+
+  constructor(
+    private readonly limit: number,
+    private readonly send: ChunkSender["send"],
+    private readonly onSent: (address: Uint8Array) => void,
+  ) {}
+
+  async submit(chunkData: Uint8Array, address: Uint8Array): Promise<void> {
+    // A failed send settles its `sending` too, so this wait sees failures.
+    while (this.inFlight.size >= this.limit && !this.failure) {
+      await Promise.race(this.inFlight)
+    }
+    this.throwIfFailed()
+    // A throwing `onSent` fails the upload as a failed send does, and `sending`
+    // itself never rejects: nothing is bound to observe it.
+    const sending: Promise<void> = this.send(chunkData, address)
+      .then(() => this.onSent(address))
+      .catch((error: unknown) => this.fail(error))
+      .finally(() => this.inFlight.delete(sending))
+    this.inFlight.add(sending)
+  }
+
+  /** `work`, unless a send fails first: then that failure. */
+  async orFailure<T>(work: Promise<T>): Promise<T> {
+    this.throwIfFailed()
+    let stop: (error: unknown) => void = () => {}
+    const failed = new Promise<never>((_resolve, reject) => {
+      stop = reject
+    })
+    this.failureWaiters.add(stop)
+    try {
+      return await Promise.race([work, failed])
+    } finally {
+      this.failureWaiters.delete(stop)
+    }
+  }
+
+  /** Wait for everything submitted to land, or for the first failure. */
+  async drain(): Promise<void> {
+    await this.orFailure(Promise.all(this.inFlight))
+    this.throwIfFailed()
+  }
+
+  /** Wait for the sends still running, however they end. */
+  async settled(): Promise<void> {
+    await Promise.all(this.inFlight)
+  }
+
+  private fail(error: unknown): void {
+    this.failure ??= { error }
+    for (const stop of this.failureWaiters) stop(this.failure.error)
+    this.failureWaiters.clear()
+  }
+
+  private throwIfFailed(): void {
+    if (this.failure) throw this.failure.error
+  }
 }
 
 // ============================================================================
 // Merkle Tree Building
 // ============================================================================
 
-/**
- * Build merkle tree from plain chunk references.
- * Returns 32-byte root reference.
- */
-async function buildPlainMerkleTree(
-  chunkRefs: ChunkReference[],
-  uploadIntermediate: (chunk: ContentAddressedChunk) => Promise<void>,
-): Promise<Reference> {
-  if (chunkRefs.length === 1) {
-    return new Reference(chunkRefs[0].address)
-  }
+/** One child of an intermediate chunk of a plain tree. */
+interface PlainRef {
+  address: Uint8Array
+  span: bigint
+}
 
-  const intermediateRefs: ChunkReference[] = []
-
-  for (let i = 0; i < chunkRefs.length; i += PLAIN_REFS_PER_CHUNK) {
-    const refs = chunkRefs.slice(
-      i,
-      Math.min(i + PLAIN_REFS_PER_CHUNK, chunkRefs.length),
-    )
-
-    // Pass through single-ref batches without wrapping in an intermediate
-    // (Bee's "carrier chunk" rule). A ghost intermediate with span ≤ 4096
-    // would be misidentified as a leaf by the download path's span-based
-    // leaf check.
-    if (refs.length === 1) {
-      intermediateRefs.push(refs[0])
-      continue
-    }
-
-    // Build payload with 32-byte references
-    const payload = new Uint8Array(refs.length * 32)
-    refs.forEach((ref, idx) => {
-      payload.set(ref.address, idx * 32)
-    })
-
-    // An intermediate chunk's span is the total data length covered by its
-    // children, not the length of its references payload. The downloader
-    // relies on this to tell intermediate chunks from leaves.
-    const totalSpan = refs.reduce((sum, ref) => sum + (ref.span ?? 0n), 0n)
-
-    const chunk = makeContentAddressedChunk(payload, totalSpan)
-    intermediateRefs.push({
-      address: chunk.address.toUint8Array(),
-      span: totalSpan,
-    })
-    await uploadIntermediate(chunk)
-  }
-
-  if (intermediateRefs.length > 1) {
-    return buildPlainMerkleTree(intermediateRefs, uploadIntermediate)
-  }
-
-  return new Reference(intermediateRefs[0].address)
+/** One child of an intermediate chunk of an encrypted tree: its key too. */
+interface EncryptedRef extends PlainRef {
+  key: Uint8Array
 }
 
 /**
- * Build merkle tree from encrypted chunk references.
- * Returns 64-byte root reference (address + encryption key).
+ * Send the intermediate chunk over `refs` and resolve with its reference. A
+ * reference is known from the bytes alone, so chunks may land in any order and
+ * the tree never waits for an answer from the node.
  */
-async function buildEncryptedMerkleTree(
-  refs: EncryptedChunkRef[],
-  uploadIntermediate: (chunkData: Uint8Array) => Promise<void>,
-): Promise<Reference> {
-  if (refs.length === 1) {
-    const ref = new Uint8Array(64)
-    ref.set(refs[0].address, 0)
-    ref.set(refs[0].key, 32)
-    return new Reference(ref)
+type WrapChunk<R extends PlainRef> = (refs: R[]) => Promise<R>
+
+/**
+ * Builds a Merkle tree from its leaves as they arrive, holding one partial
+ * intermediate per level rather than every reference: a full level is wrapped
+ * at once and only the wrapper is carried up.
+ */
+class ReferenceTree<R extends PlainRef> {
+  private readonly levels: R[][] = [[]]
+
+  constructor(
+    private readonly fanout: number,
+    private readonly wrap: WrapChunk<R>,
+  ) {}
+
+  async add(ref: R, level = 0): Promise<void> {
+    const refs = (this.levels[level] ??= [])
+    refs.push(ref)
+    if (refs.length < this.fanout) return
+    this.levels[level] = []
+    await this.add(await this.wrap(refs), level + 1)
   }
 
-  const intermediateChunks: EncryptedChunkRef[] = []
-
-  for (let i = 0; i < refs.length; i += ENCRYPTED_REFS_PER_CHUNK) {
-    const batch = refs.slice(
-      i,
-      Math.min(i + ENCRYPTED_REFS_PER_CHUNK, refs.length),
-    )
-
-    // Pass through single-ref batches without wrapping in an intermediate.
-    // A ghost intermediate with span ≤ 4096 would be misidentified as a leaf
-    // by the download path's span-based leaf check.
-    if (batch.length === 1) {
-      intermediateChunks.push(batch[0])
-      continue
+  async finish(): Promise<R> {
+    for (let level = 0; ; level++) {
+      const refs = this.levels[level]
+      const nothingAbove = this.levels
+        .slice(level + 1)
+        .every((above) => above.length === 0)
+      if (nothingAbove && refs.length === 1) return refs[0]
+      if (refs.length === 0) continue
+      this.levels[level] = []
+      // Bee's "carrier chunk" rule: a lone reference moves up unwrapped. A
+      // ghost intermediate with span ≤ 4096 would read back as a leaf.
+      const carried = refs.length === 1 ? refs[0] : await this.wrap(refs)
+      ;(this.levels[level + 1] ??= []).push(carried)
     }
-
-    // Calculate total span from all children
-    const totalSpan = batch.reduce((sum, ref) => sum + ref.span, 0n)
-
-    // Build intermediate chunk payload containing all 64-byte references
-    // Pad to 4096 bytes with zeros BEFORE encryption
-    const payload = new Uint8Array(4096)
-    batch.forEach((ref, idx) => {
-      payload.set(ref.address, idx * 64)
-      payload.set(ref.key, idx * 64 + 32)
-    })
-
-    // Create chunk with correct span + payload
-    const spanBytes = Span.fromBigInt(totalSpan).toUint8Array()
-    const chunkData = Binary.concatBytes(spanBytes, payload)
-
-    // Encrypt the chunk
-    const encrypter = newChunkEncrypter()
-    const { key, encryptedSpan, encryptedData } =
-      encrypter.encryptChunk(chunkData)
-    const encryptedChunkData = Binary.concatBytes(encryptedSpan, encryptedData)
-
-    // Calculate address from encrypted chunk
-    const address = await calculateChunkAddress(encryptedChunkData)
-
-    await uploadIntermediate(encryptedChunkData)
-
-    intermediateChunks.push({
-      address: address.toUint8Array(),
-      key,
-      span: totalSpan,
-    })
   }
+}
 
-  if (intermediateChunks.length > 1) {
-    return buildEncryptedMerkleTree(intermediateChunks, uploadIntermediate)
+/** How one kind of tree, plain or encrypted, makes and references its chunks. */
+interface TreeMode<R extends PlainRef> {
+  encrypted: boolean
+  fanout: number
+  /** The leaf chunk over `payload`, and its reference */
+  leaf: (payload: Uint8Array) => { chunkData: Uint8Array; ref: R }
+  wrap: (sends: SendWindow) => WrapChunk<R>
+  /** The bytes of the upload's reference, from its root */
+  rootBytes: (root: R) => Uint8Array
+}
+
+function sumSpans(refs: PlainRef[]): bigint {
+  return refs.reduce((sum, ref) => sum + ref.span, 0n)
+}
+
+const PLAIN_MODE: TreeMode<PlainRef> = {
+  encrypted: false,
+  fanout: PLAIN_REFS_PER_CHUNK,
+  leaf: (payload) => {
+    const chunk = makeContentAddressedChunk(payload)
+    return {
+      chunkData: chunk.data,
+      ref: {
+        address: chunk.address.toUint8Array(),
+        span: BigInt(payload.length),
+      },
+    }
+  },
+  wrap: (sends) => async (refs) => {
+    const payload = new Uint8Array(refs.length * UNENCRYPTED_REF_SIZE)
+    refs.forEach((ref, index) => {
+      payload.set(ref.address, index * UNENCRYPTED_REF_SIZE)
+    })
+    // An intermediate chunk's span is the data length its children cover, not
+    // the length of its references: the downloader tells it from a leaf by it.
+    const span = sumSpans(refs)
+    const chunk = makeContentAddressedChunk(payload, span)
+    const address = chunk.address.toUint8Array()
+    await sends.submit(chunk.data, address)
+    return { address, span }
+  },
+  rootBytes: (root) => root.address,
+}
+
+function encryptedMode(
+  explicitKey: Uint8Array | undefined,
+): TreeMode<EncryptedRef> {
+  return {
+    encrypted: true,
+    fanout: ENCRYPTED_REFS_PER_CHUNK,
+    leaf: (payload) => {
+      const chunk = makeEncryptedContentAddressedChunk(payload, explicitKey)
+      return {
+        chunkData: chunk.data,
+        ref: {
+          address: chunk.address.toUint8Array(),
+          key: chunk.encryptionKey,
+          span: BigInt(payload.length),
+        },
+      }
+    },
+    wrap: (sends) => async (refs) => {
+      // Padded with zeros to a full chunk before encryption
+      const payload = new Uint8Array(CHUNK_SIZE)
+      refs.forEach((ref, index) => {
+        payload.set(ref.address, index * ENCRYPTED_REF_SIZE)
+        payload.set(ref.key, index * ENCRYPTED_REF_SIZE + UNENCRYPTED_REF_SIZE)
+      })
+      const span = sumSpans(refs)
+      const { key, encryptedSpan, encryptedData } =
+        newChunkEncrypter().encryptChunk(
+          Binary.concatBytes(Span.fromBigInt(span).toUint8Array(), payload),
+        )
+      const chunkData = Binary.concatBytes(encryptedSpan, encryptedData)
+      const address = calculateChunkAddress(chunkData).toUint8Array()
+      await sends.submit(chunkData, address)
+      return { address, key, span }
+    },
+    rootBytes: (root) => Binary.concatBytes(root.address, root.key),
   }
-
-  const rootRef = new Uint8Array(64)
-  rootRef.set(intermediateChunks[0].address, 0)
-  rootRef.set(intermediateChunks[0].key, 32)
-  return new Reference(rootRef)
 }
 
 // ============================================================================
 // Public API: uploadData
 // ============================================================================
+
+async function* onePiece(data: Uint8Array): AsyncGenerator<Uint8Array> {
+  yield data
+}
 
 /**
  * Upload data to Swarm.
@@ -612,308 +689,117 @@ export async function uploadData(
   data: Uint8Array,
   options?: UploadDataOptions,
 ): Promise<UploadDataResult> {
-  const isEncrypted = options?.encryptionKey !== undefined
-
-  if (isEncrypted) {
-    return uploadDataEncrypted(target, data, options)
-  } else {
-    return uploadDataPlain(target, data, options)
+  const { encryptionKey } = options ?? {}
+  if (encryptionKey instanceof Uint8Array && data.length > CHUNK_SIZE) {
+    throw new Error(
+      `Explicit encryption key is only supported for single-chunk data (up to ${CHUNK_SIZE} bytes), got ${Math.ceil(data.length / CHUNK_SIZE)} chunks — pass encryptionKey: true to auto-generate per-chunk keys`,
+    )
   }
+  return writeTree(target, onePiece(data), options, {
+    size: data.length,
+    chunkAddresses: encryptionKey !== undefined ? [] : undefined,
+  })
 }
 
 /**
- * Upload plain (unencrypted) data.
+ * {@link uploadData} for bytes that arrive over time. Only what is on its way
+ * to the node is held, so `source` may be far larger than memory: it is read
+ * no faster than the node takes chunks. The reference depends on the bytes
+ * alone, not on how `source` cuts them up.
  */
-async function uploadDataPlain(
+export async function uploadDataStream(
   target: UploadTarget,
-  data: Uint8Array,
-  options?: UploadDataOptions,
+  source: AsyncIterable<Uint8Array>,
+  options?: UploadDataStreamOptions,
 ): Promise<UploadDataResult> {
-  const chunkPayloads = splitDataIntoChunks(data)
-
-  // Create CAC for each payload
-  const chunks: ContentAddressedChunk[] = []
-  const chunkRefs: ChunkReference[] = []
-
-  for (const payload of chunkPayloads) {
-    const chunk = makeContentAddressedChunk(payload)
-    chunks.push(chunk)
-    chunkRefs.push({
-      address: chunk.address.toUint8Array(),
-      span: BigInt(payload.length),
-    })
-  }
-
-  // Progress tracking
-  let totalChunks = chunks.length
-  let processedChunks = 0
-  const reportProgress = () =>
-    options?.onProgress?.({ total: totalChunks, processed: processedChunks })
-
-  if (isSubsidisedTarget(target)) {
-    // Subsidised gateway mode
-    const uploadOptions = {
-      deferred: options?.deferred,
-      signal: target.signal,
-    }
-
-    for (const chunk of chunks) {
-      await uploadChunkViaSubsidisedGatewayInternal(
-        target.gatewayUrl,
-        chunk.data,
-        uploadOptions,
-        target.counter,
-      )
-      processedChunks++
-      reportProgress()
-    }
-
-    // Build merkle tree if multiple chunks
-    let rootReference: Reference
-
-    if (chunkRefs.length === 1) {
-      rootReference = new Reference(chunkRefs[0].address)
-    } else {
-      rootReference = await buildPlainMerkleTree(chunkRefs, async (chunk) => {
-        await uploadChunkViaSubsidisedGatewayInternal(
-          target.gatewayUrl,
-          chunk.data,
-          uploadOptions,
-          target.counter,
-        )
-        totalChunks++
-        processedChunks++
-        reportProgress()
-      })
-    }
-
-    return { reference: rootReference.toHex() }
-  } else {
-    // Stamper mode
-    const { bee, stamper, workerPool } = target
-    const tag = options?.tag ?? (await tryCreateTag(bee))
-    const uploadOptions = {
-      ...options,
-      tag,
-      deferred: options?.deferred ?? false,
-    }
-
-    const stamp = makeStampFn(
-      stamper,
-      workerPool,
-      target.counter,
-      target.signal,
-    )
-    const requestOptions = withSignal(options?.requestOptions, target.signal)
-
-    // Upload leaf chunks
-    for (const chunk of chunks) {
-      await uploadStampedChunkViaHttp(
-        bee,
-        stamp,
-        chunk.data,
-        chunk.address.toUint8Array(),
-        uploadOptions,
-        requestOptions,
-      )
-      processedChunks++
-      reportProgress()
-    }
-
-    // Build merkle tree if multiple chunks
-    let rootReference: Reference
-
-    if (chunkRefs.length === 1) {
-      rootReference = new Reference(chunkRefs[0].address)
-    } else {
-      rootReference = await buildPlainMerkleTree(chunkRefs, async (chunk) => {
-        await uploadStampedChunkViaHttp(
-          bee,
-          stamp,
-          chunk.data,
-          chunk.address.toUint8Array(),
-          uploadOptions,
-          requestOptions,
-        )
-        totalChunks++
-        processedChunks++
-        reportProgress()
-      })
-    }
-
-    return { reference: rootReference.toHex(), tagUid: tag }
-  }
+  return writeTree(target, source, options, { size: options?.size })
 }
 
-/**
- * Upload encrypted data.
- */
-async function uploadDataEncrypted(
+async function writeTree(
   target: UploadTarget,
-  data: Uint8Array,
-  options?: UploadDataOptions,
+  source: AsyncIterable<Uint8Array>,
+  options: UploadDataOptions | UploadDataStreamOptions | undefined,
+  known: { size?: number; chunkAddresses?: Uint8Array[] },
 ): Promise<UploadDataResult> {
-  // Determine encryption key
-  const encryptionKey =
-    options?.encryptionKey === true ? undefined : options?.encryptionKey
+  const { signal } = target
+  if (signal?.aborted) throw abortedError(signal)
 
-  // Split and encrypt
-  const payloads = splitDataIntoChunks(data)
-  const { chunks: encryptedChunks, refs: encryptedChunkRefs } =
-    encryptChunkPayloads(payloads, encryptionKey)
+  if (options?.encryptionKey === undefined) {
+    return writeTreeIn(PLAIN_MODE, target, source, options, known)
+  }
+  const explicitKey =
+    options.encryptionKey instanceof Uint8Array
+      ? options.encryptionKey
+      : undefined
+  return writeTreeIn(encryptedMode(explicitKey), target, source, options, known)
+}
 
-  // Prepare chunk data for upload
-  const chunksToUpload = encryptedChunks.map((chunk) => ({
-    data: chunk.data,
-    address: chunk.address.toUint8Array(),
-  }))
+async function writeTreeIn<R extends PlainRef>(
+  mode: TreeMode<R>,
+  target: UploadTarget,
+  source: AsyncIterable<Uint8Array>,
+  options: UploadDataOptions | UploadDataStreamOptions | undefined,
+  known: { size?: number; chunkAddresses?: Uint8Array[] },
+): Promise<UploadDataResult> {
+  const { fanout } = mode
+  const { chunkAddresses } = known
 
-  // Progress tracking
-  let totalChunks = encryptedChunks.length
-  let processedChunks = 0
-  const uploadedChunkAddresses: Uint8Array[] = []
+  const estimated =
+    known.size !== undefined ? estimateTotalChunks(known.size, fanout) : 0
+  let submitted = 0
+  let processed = 0
+  const reportProgress = (total = Math.max(estimated, submitted)) =>
+    options?.onProgress?.({ total, processed })
 
-  const onChunkUploaded = (address: Uint8Array) => {
-    uploadedChunkAddresses.push(address)
-    processedChunks++
-    options?.onProgress?.({ total: totalChunks, processed: processedChunks })
+  const sender = await openChunkSender(target, mode.encrypted, options)
+  const sends = new SendWindow(
+    sender.concurrency,
+    (chunkData, address) => {
+      submitted++
+      return sender.send(chunkData, address)
+    },
+    (address) => {
+      chunkAddresses?.push(address)
+      processed++
+      reportProgress()
+    },
+  )
+  const tree = new ReferenceTree(fanout, mode.wrap(sends))
+
+  const sendLeaf = async (payload: Uint8Array): Promise<void> => {
+    const { chunkData, ref } = mode.leaf(payload)
+    await sends.submit(chunkData, ref.address)
+    return tree.add(ref)
   }
 
-  if (isSubsidisedTarget(target)) {
-    // Subsidised gateway mode
-    const uploadOptions = {
-      deferred: options?.deferred,
-      signal: target.signal,
+  const payloads = rechunk(source, CHUNK_SIZE)
+  try {
+    let hasContent = false
+    while (true) {
+      // A send can fail while the source has nothing to give.
+      const next = await sends.orFailure(payloads.next())
+      if (next.done) break
+      hasContent = true
+      await sendLeaf(next.value)
     }
+    // Zero-length content is a single empty chunk (span 0): Bee's canonical
+    // representation of an empty file.
+    if (!hasContent) await sendLeaf(new Uint8Array(0))
 
-    for (const chunk of chunksToUpload) {
-      await uploadChunkViaSubsidisedGatewayInternal(
-        target.gatewayUrl,
-        chunk.data,
-        uploadOptions,
-        target.counter,
-      )
-      onChunkUploaded(chunk.address)
-    }
-
-    // Build merkle tree
-    const rootReference = await buildEncryptedMerkleTree(
-      encryptedChunkRefs,
-      async (chunkData) => {
-        await uploadChunkViaSubsidisedGatewayInternal(
-          target.gatewayUrl,
-          chunkData,
-          uploadOptions,
-          target.counter,
-        )
-        const address = await calculateChunkAddress(chunkData)
-        uploadedChunkAddresses.push(address.toUint8Array())
-        totalChunks++
-        processedChunks++
-        options?.onProgress?.({
-          total: totalChunks,
-          processed: processedChunks,
-        })
-      },
-    )
+    const root = await tree.finish()
+    await sends.drain()
+    if (estimated !== processed) reportProgress(processed)
 
     return {
-      reference: rootReference.toHex(),
-      chunkAddresses: uploadedChunkAddresses,
+      reference: new Reference(mode.rootBytes(root)).toHex(),
+      tagUid: sender.tagUid,
+      chunkAddresses,
     }
-  } else {
-    // Stamper mode
-    const { bee, stamper, workerPool } = target
-    const tag = options?.tag ?? (await tryCreateTag(bee))
-    const uploadOptions = {
-      ...options,
-      tag,
-      deferred: options?.deferred ?? false,
-    }
-    const stamp = makeStampFn(
-      stamper,
-      workerPool,
-      target.counter,
-      target.signal,
-    )
-    const requestOptions = withSignal(options?.requestOptions, target.signal)
-
-    // Open WebSocket stream if requested
-    let wsStream: ChunkUploadStream | undefined
-    if (options?.webSocket) {
-      wsStream = new ChunkUploadStream(bee.url, {
-        tag,
-        concurrency: options.webSocket.concurrency,
-        signal: target.signal,
-      })
-      await wsStream.open()
-    }
-
-    try {
-      // Upload chunks
-      if (wsStream) {
-        await uploadChunksViaWebSocket(
-          stamp,
-          wsStream,
-          chunksToUpload,
-          onChunkUploaded,
-        )
-      } else {
-        await uploadChunksViaHttp(
-          bee,
-          stamp,
-          chunksToUpload,
-          uploadOptions,
-          requestOptions,
-          onChunkUploaded,
-          options?.httpConcurrency,
-        )
-      }
-
-      // Build merkle tree
-      const rootReference = await buildEncryptedMerkleTree(
-        encryptedChunkRefs,
-        async (chunkData) => {
-          const address = await calculateChunkAddress(chunkData)
-          uploadedChunkAddresses.push(address.toUint8Array())
-
-          if (wsStream) {
-            await uploadStampedChunkViaWebSocket(
-              stamp,
-              wsStream,
-              chunkData,
-              address.toUint8Array(),
-            )
-          } else {
-            await uploadStampedChunkViaHttp(
-              bee,
-              stamp,
-              chunkData,
-              address.toUint8Array(),
-              uploadOptions,
-              requestOptions,
-            )
-          }
-
-          totalChunks++
-          processedChunks++
-          options?.onProgress?.({
-            total: totalChunks,
-            processed: processedChunks,
-          })
-        },
-      )
-
-      return {
-        reference: rootReference.toHex(),
-        tagUid: tag,
-        chunkAddresses: uploadedChunkAddresses,
-      }
-    } finally {
-      if (wsStream) {
-        await wsStream.close()
-      }
-    }
+  } finally {
+    // Not awaited: it queues behind a `next()` the source may never answer.
+    void payloads.return(undefined).catch(() => {})
+    await sends.settled()
+    await sender.close()
   }
 }
 
