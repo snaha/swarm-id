@@ -105,3 +105,8 @@ auditConfig:
     # minimatch 10 under eslint and prettier plugins: lint tooling, fed only
     # this repo's own globs. #1023
     - GHSA-g3hv-75wg-m249
+    # picomatch, every release so far: no fixed one is published. 4.x is build
+    # and lint tooling matching this repo's own globs; 2.x reaches production
+    # dependencies only through unstorage's file-system driver, which the
+    # browser build of WalletConnect's storage does not load.
+    - GHSA-fc5q-39xc-vjpf
