@@ -14,6 +14,13 @@ import {
 } from "./types"
 import { generatedAvatar } from "./utils/avatar"
 import { TimeoutError } from "./utils/promise"
+import {
+  HOUR,
+  MINUTE,
+  SECOND,
+  QUEUED_SILENCE_TIMEOUT_MS,
+  REQUEST_QUEUED_INTERVAL_MS,
+} from "./utils/constants"
 
 /**
  * A view of the client that admits to the private members these tests drive.
@@ -797,7 +804,7 @@ describe("SwarmIdClient request seam", () => {
       expect(postMessage).toHaveBeenCalledTimes(1)
     })
 
-    it("says nothing to the proxy once the request timed out", async () => {
+    it("says nothing more to the proxy once the request timed out", async () => {
       const controller = new AbortController()
       const error = await rejectionOf(
         client.downloadData(REFERENCE, undefined, {
@@ -806,10 +813,11 @@ describe("SwarmIdClient request seam", () => {
         }),
       )
       expect(error).toMatchObject({ code: "timeout" })
+      const postedBeforeAbort = postMessage.mock.calls.length
 
       controller.abort()
 
-      expect(postMessage).toHaveBeenCalledTimes(1)
+      expect(postMessage).toHaveBeenCalledTimes(postedBeforeAbort)
     })
 
     it.each([
@@ -888,6 +896,187 @@ describe("SwarmIdClient request seam", () => {
       code: "upload-unavailable",
       reason: "stamp-expired",
     })
+  })
+
+  describe("requestQueued / requestStarted", () => {
+    const TIMEOUT_MS = 1000
+    const BEATS = 5
+    /** A streaming upload of several GiB holds its drive for about this long */
+    const LONG_UPLOAD_MS = 2 * HOUR
+    const REPLY_REFERENCE = "ab".repeat(32)
+    /** How often a browser may run a hidden page's repeating timers */
+    const THROTTLED_BEAT_MS = MINUTE
+    const QUEUED_ALLOWANCE_MS = 90 * SECOND
+
+    afterEach(() => {
+      vi.useRealTimers()
+    })
+
+    const queuedWrite = (timeout = TIMEOUT_MS) => {
+      const promise = client.uploadChunk(new Uint8Array(1), undefined, {
+        timeout,
+      })
+      const settled = vi.fn()
+      promise.then(settled, settled)
+      return { promise, settled, requestId: lastPostedMessage().requestId }
+    }
+
+    it("keeps a request alive for as long as the proxy says it is queued", async () => {
+      vi.useFakeTimers()
+      const { promise, settled, requestId } = queuedWrite()
+
+      deliver({ type: "requestQueued", requestId })
+      for (let i = 0; i < BEATS; i++) {
+        await vi.advanceTimersByTimeAsync(REQUEST_QUEUED_INTERVAL_MS)
+        deliver({ type: "requestQueued", requestId })
+      }
+      expect(settled).not.toHaveBeenCalled()
+
+      deliver({
+        type: "uploadChunkResponse",
+        requestId,
+        reference: REPLY_REFERENCE,
+      })
+      await expect(promise).resolves.toMatchObject({
+        reference: REPLY_REFERENCE,
+      })
+    })
+
+    it("keeps a short-timeout request alive between the proxy's beats", async () => {
+      vi.useFakeTimers()
+      const shortTimeout = REQUEST_QUEUED_INTERVAL_MS / 5
+      const { settled, requestId } = queuedWrite(shortTimeout)
+
+      deliver({ type: "requestQueued", requestId })
+      for (let i = 0; i < BEATS; i++) {
+        await vi.advanceTimersByTimeAsync(REQUEST_QUEUED_INTERVAL_MS)
+        deliver({ type: "requestQueued", requestId })
+      }
+
+      expect(settled).not.toHaveBeenCalled()
+    })
+
+    it("gives the request its whole timeout from the moment it starts", async () => {
+      vi.useFakeTimers()
+      const { settled, requestId } = queuedWrite()
+      deliver({ type: "requestQueued", requestId })
+      await vi.advanceTimersByTimeAsync(REQUEST_QUEUED_INTERVAL_MS)
+      deliver({ type: "requestStarted", requestId })
+
+      await vi.advanceTimersByTimeAsync(TIMEOUT_MS - 1)
+      expect(settled).not.toHaveBeenCalled()
+
+      await vi.advanceTimersByTimeAsync(1)
+      expect(settled).toHaveBeenCalledWith(
+        expect.objectContaining({ code: "timeout" }),
+      )
+    })
+
+    it("times out a queued request whose proxy stops beating", async () => {
+      vi.useFakeTimers()
+      const { settled, requestId } = queuedWrite()
+      deliver({ type: "requestQueued", requestId })
+
+      await vi.advanceTimersByTimeAsync(QUEUED_SILENCE_TIMEOUT_MS - 1)
+      expect(settled).not.toHaveBeenCalled()
+
+      await vi.advanceTimersByTimeAsync(1)
+      expect(settled).toHaveBeenCalledWith(
+        expect.objectContaining({ code: "timeout" }),
+      )
+    })
+
+    it("keeps a request queued behind a long upload for as long as the proxy beats", async () => {
+      vi.useFakeTimers()
+      const { settled, requestId } = queuedWrite()
+      deliver({ type: "requestQueued", requestId })
+
+      const beats = LONG_UPLOAD_MS / REQUEST_QUEUED_INTERVAL_MS
+      for (let i = 0; i < beats; i++) {
+        await vi.advanceTimersByTimeAsync(REQUEST_QUEUED_INTERVAL_MS)
+        deliver({ type: "requestQueued", requestId })
+      }
+
+      expect(settled).not.toHaveBeenCalled()
+    })
+
+    it("stops a queued request in the proxy when its beats end", async () => {
+      vi.useFakeTimers()
+      const { settled, requestId } = queuedWrite()
+      deliver({ type: "requestQueued", requestId })
+
+      await vi.advanceTimersByTimeAsync(QUEUED_SILENCE_TIMEOUT_MS)
+
+      expect(settled).toHaveBeenCalledWith(
+        expect.objectContaining({ code: "timeout" }),
+      )
+      expect(lastPostedMessage()).toEqual({ type: "abortRequest", requestId })
+    })
+
+    // A browser may run a hidden page's repeating timers only once a minute.
+    it("keeps a queued request alive when its beats arrive a minute apart", async () => {
+      vi.useFakeTimers()
+      const { settled, requestId } = queuedWrite()
+      deliver({ type: "requestQueued", requestId })
+
+      for (let i = 0; i < BEATS; i++) {
+        await vi.advanceTimersByTimeAsync(THROTTLED_BEAT_MS)
+        deliver({ type: "requestQueued", requestId })
+      }
+
+      expect(settled).not.toHaveBeenCalled()
+    })
+
+    it("times out a queued request after 90 seconds of silence", async () => {
+      vi.useFakeTimers()
+      const { settled, requestId } = queuedWrite()
+      deliver({ type: "requestQueued", requestId })
+
+      await vi.advanceTimersByTimeAsync(QUEUED_ALLOWANCE_MS - 1)
+      expect(settled).not.toHaveBeenCalled()
+
+      await vi.advanceTimersByTimeAsync(1)
+      expect(settled).toHaveBeenCalledWith(
+        expect.objectContaining({ code: "timeout" }),
+      )
+    })
+
+    it("says how long a queued request waited and that its proxy went silent", async () => {
+      vi.useFakeTimers()
+      const { settled, requestId } = queuedWrite()
+      deliver({ type: "requestQueued", requestId })
+
+      await vi.advanceTimersByTimeAsync(QUEUED_SILENCE_TIMEOUT_MS)
+
+      const error = settled.mock.calls[0][0]
+      expect(error).toMatchObject({ code: "timeout" })
+      expect(error.message).toContain(`${QUEUED_SILENCE_TIMEOUT_MS}ms`)
+      expect(error.message).not.toContain(`${TIMEOUT_MS}ms`)
+      expect(error.message).toMatch(/silent while the write was queued/)
+    })
+
+    it("still times out a request the proxy says nothing about", async () => {
+      vi.useFakeTimers()
+      const { settled } = queuedWrite()
+
+      await vi.advanceTimersByTimeAsync(TIMEOUT_MS)
+
+      expect(settled).toHaveBeenCalledWith(
+        expect.objectContaining({ code: "timeout" }),
+      )
+    })
+  })
+
+  // A write queued in the proxy would otherwise still run, and spend stamps,
+  // after the dApp was told it failed.
+  it("stops the proxy when a request times out", async () => {
+    const error = await client
+      .uploadChunk(new Uint8Array(1), undefined, { timeout: 1 })
+      .catch((e: unknown) => e)
+    const { requestId } = postMessage.mock.calls[0][0]
+
+    expect(error).toMatchObject({ code: "timeout" })
+    expect(lastPostedMessage()).toEqual({ type: "abortRequest", requestId })
   })
 
   it("times the round trip out with a SwarmIdError of code timeout", async () => {
