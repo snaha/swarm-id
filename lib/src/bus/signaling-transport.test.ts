@@ -656,6 +656,8 @@ describe("SignalingTransport — WebRTC upgrade", () => {
 })
 
 const FAST_TICK_MS = 20
+/** The transport looks four times per limit: two ticks between looks. */
+const TICKS_PER_SILENCE_LIMIT = 8
 /** Long enough for a test to see the connection before it is given up on. */
 const SILENCE_LIMIT_MS = 400
 /** Past the transport's first reconnect delay. */
@@ -725,6 +727,38 @@ describe("SignalingTransport — liveness", () => {
     } finally {
       transport.close()
       await silent.close()
+    }
+  })
+
+  // A step of the system clock (a time sync, a VM resumed) reads as silence
+  // until the next message from the server, which is on its way.
+  it("keeps a socket the server is still talking on when the wall clock jumps forward", async () => {
+    // Several ticks between two looks of the transport, as in production.
+    const ticking = await createSignalingServer({
+      port: 0,
+      tickIntervalMs: SILENCE_LIMIT_MS / TICKS_PER_SILENCE_LIMIT,
+    })
+    const transport = makeTransport({
+      url: `ws://127.0.0.1:${ticking.port}`,
+      serverSilenceLimitMs: SILENCE_LIMIT_MS,
+    })
+    try {
+      await vi.waitFor(() => expect(transport.selfId()).toBeDefined())
+      const first = transport.selfId()
+      const wall = Date.now
+      const jumpMs = 60_000
+      const dateSpy = vi
+        .spyOn(Date, "now")
+        .mockImplementation(() => wall() + jumpMs)
+      try {
+        await new Promise((resolve) => setTimeout(resolve, SILENCE_LIMIT_MS))
+        expect(transport.selfId()).toBe(first)
+      } finally {
+        dateSpy.mockRestore()
+      }
+    } finally {
+      transport.close()
+      await ticking.close()
     }
   })
 

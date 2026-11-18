@@ -411,6 +411,21 @@ describe("BusLane — a connection that is replaced", () => {
     expect(a.lane.claiming).toBe(false)
   })
 
+  // Over BroadcastChannel nothing checks the name on a message: an idle
+  // holder would hand its lane to a context that no longer exists.
+  it("sends no claim under its earlier name once it is confirmed under a new one", () => {
+    const a = makeDevice("a")
+    a.liveness.present.add("b")
+    expect(a.lane.claim()).toBe(true)
+    a.sent.length = 0
+
+    a.liveness.id = "a-again"
+    a.liveness.confirm()
+
+    expect(a.sent).toEqual([])
+    expect(a.lane.claiming).toBe(false)
+  })
+
   it("cannot claim without a name", () => {
     const a = makeDevice("a")
     a.liveness.id = undefined
