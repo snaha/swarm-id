@@ -105,13 +105,12 @@ export class LaneState {
 
     if (state.unchanged) {
       // Nothing was published since this context last read or wrote the
-      // lane, so the baseline it kept is still the newest state. Its own
-      // counter can only be ahead of that (stamps of an upload that was never
-      // acknowledged), which re-issues nothing that was acked.
+      // lane, so the baseline it kept is still the newest state. Not the
+      // stamper's counter: it serves every lane this context takes and holds
+      // the one bound last. Stamps of an upload that was never acknowledged
+      // are not in the baseline, and their slots are used again.
       this.publishUnsettled = false
-      return cached
-        ? stamper.buildLeaseLocalCounter()
-        : (this.publishedCounter?.slice() ?? new Uint32Array(NUM_BUCKETS))
+      return this.publishedCounter?.slice() ?? new Uint32Array(NUM_BUCKETS)
     }
 
     const localCounter = state.localCounter ?? new Uint32Array(NUM_BUCKETS)

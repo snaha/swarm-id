@@ -1693,16 +1693,6 @@ export class UtilizationAwareStamper implements Stamper, SlotAssigner {
   }
 
   /**
-   * Build the partition-local counter from the stamper's current
-   * `dataCounters` — i.e. resume exactly where this device left off. The
-   * lease orchestrator passes the result into `bindPartition` as the seed
-   * counter for a held partition.
-   */
-  buildLeaseLocalCounter(): Uint32Array {
-    return this.utilizationState.dataCounters.slice()
-  }
-
-  /**
    * Read the cached "synced pointer" for `partition` — the published
    * partition state this device's local counter was last in sync with. Used
    * by the acquire path to start the pointer search from it and to skip

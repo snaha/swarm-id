@@ -14,7 +14,11 @@ import { Binary } from "cafe-utility"
 import { LaneState } from "./lane-state"
 import * as partitionState from "./partition-state"
 import * as downloadData from "../proxy/download-data"
-import { NUM_BUCKETS } from "../utils/batch-utilization"
+import {
+  NUM_BUCKETS,
+  UtilizationAwareStamper,
+} from "../utils/batch-utilization"
+import type { UtilizationStoreDB } from "../storage/utilization-store"
 import { leafCount } from "./counter-codec"
 import { makeEncryptedContentAddressedChunk } from "../chunk"
 import { uploadData, type UploadTarget } from "../proxy/upload"
@@ -553,6 +557,50 @@ describe("LaneState — a holder's resume and publish", () => {
     await state.resume()
     expect(readSpy.mock.calls[1][1]).toMatchObject({ seq: 1 })
     expect((await readSpy.mock.results[1].value).unchanged).toBe(true)
+  })
+
+  // One stamper serves every lane a context takes, one after the other, and
+  // keeps the counter of the one bound last.
+  it("resumes a lane's own counter after the stamper was bound to another lane", async () => {
+    const published = new Uint32Array(NUM_BUCKETS)
+    published[100] = 5
+    await publishAsEarlierHolder(published)
+    const rows = new Map<string, unknown>()
+    const stamper = await UtilizationAwareStamper.create(
+      "11".repeat(32),
+      TEST_BATCH_ID,
+      20,
+      {
+        getAllChunks: async () => [],
+        putChunk: async () => undefined,
+        getMetadata: async (id: string) => rows.get(id),
+        putMetadata: async (meta: { batchId: string }) => {
+          rows.set(meta.batchId, meta)
+        },
+      } as unknown as UtilizationStoreDB,
+      OWNER,
+      TEST_ENC_KEY,
+    )
+    const state = new LaneState({
+      bee: bee,
+      batchId: TEST_BATCH_ID,
+      partition: 0,
+      backupSigner: BACKUP_SIGNER,
+      swarmEncryptionKey: TEST_ENC_KEY,
+      stamper,
+    })
+    expect(await state.resume()).toEqual(published)
+
+    const otherLane = new Uint32Array(NUM_BUCKETS)
+    otherLane[100] = 1
+    otherLane[200] = 9
+    stamper.bindPartition({
+      partition: 1,
+      partitionCount: 2,
+      localCounter: otherLane,
+    })
+
+    expect(await state.resume()).toEqual(published)
   })
 
   it("does not resume a lane whose published state cannot be read", async () => {
