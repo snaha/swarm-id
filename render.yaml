@@ -1,0 +1,39 @@
+# A signaling server for the PRs that change the signaling server.
+#
+# Every build under swarm.snaha.net (the `main` build and the PR previews)
+# talks to production's server, the `bus-signaling` service in
+# `.do/swarm-id-app.yaml`, which runs `main`. A PR that touches `signaling/`
+# cannot: its preview needs the server it was written against. Such a PR
+# deploys its head commit here (`.github/workflows/deploy-preview.yml`) and its
+# preview is built against this address (the repository variable
+# `PREVIEW_BUS_SIGNALING_URL`). Nothing puts `main` here: between such PRs the
+# instance runs whatever the last one left, and nothing uses it.
+#
+# One free instance: two open PRs that both change the server take turns, the
+# last push wins. It sleeps after 15 minutes without a request or a WebSocket
+# message and takes about a minute to wake.
+#
+# The deploy hook answers as soon as the build is queued. A build that then
+# fails shows only in Render's dashboard, and the preview meets the server the
+# instance ran before.
+#
+# What it can cost, with a payment method on the Render workspace: builds use
+# the workspace's pipeline minutes (a deploy here takes about one), and traffic
+# its outbound bandwidth. Render has a spend limit for pipeline minutes
+# (Workspace Settings, Build Pipeline) and none for bandwidth.
+services:
+  - type: web
+    name: swarm-id-bus-preview
+    runtime: node
+    plan: free
+    branch: main
+    # The blueprint's own branch; the workflow deploys PR head commits.
+    autoDeployTrigger: 'off'
+    buildCommand: corepack enable && pnpm install --frozen-lockfile --filter @swarm-id/signaling...
+    startCommand: corepack enable && pnpm --filter @swarm-id/signaling start
+    healthCheckPath: /healthz
+    envVars:
+      - key: NODE_VERSION
+        value: '24'
+      - key: ALLOWED_ORIGINS
+        value: https://swarm.snaha.net

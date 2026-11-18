@@ -7,6 +7,27 @@ present and may point at an issue or PR; the reasons live here.
 
 A PR that makes or changes a decision adds the entry in the same PR.
 
+## 2026-11-18 Previews use production's signaling server; a PR that changes the server gets a Render instance
+
+**Context.** The GitHub Pages builds (`main` and the per-PR previews) had no signaling
+server: they were built without `PUBLIC_BUS_SIGNALING_URL`, and production's server admitted
+only its own origin. A preview could not show anything that needs two devices, nor a change
+to the server itself.
+
+**Decision.** Production's server admits `https://swarm.snaha.net`, and every build there
+uses it. A PR that touches `signaling/` deploys its head commit to one free Render web
+service (`render.yaml`) and its preview is built against that instead.
+
+**Why.** Production's server already tracks `main` on every push, with no cold start, so
+nothing else has to be kept on `main`: a second server that also had to follow `main` went
+stale on a push to `main`, on a failed restore, and on a PR that reverted its server change.
+Preview traffic on production's relay is the accepted cost; rooms are per account. The
+Render instance exists only because a PR's server cannot run in production's container
+without restarting production. It is one shared instance (two open PRs that both change
+the server take turns), it sleeps after 15 idle minutes, and an account open in such a PR's
+preview and in another preview does not see itself live, since the two sit on different
+servers.
+
 ## 2026-11-13 SvelteKit 3, with `$lib` kept as an alias
 
 **Context.** SvelteKit 2 carried two advisories fixed only in 3.0 and pinned
