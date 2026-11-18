@@ -13,9 +13,10 @@
 # last push wins. It sleeps after 15 minutes without a request or a WebSocket
 # message and takes about a minute to wake.
 #
-# Keep it at no cost: no payment method on the Render workspace, or a spend
-# limit of zero. Build minutes and bandwidth past the free allowance are
-# billed as overage where a card is on file.
+# What it can cost, with a payment method on the Render workspace: builds use
+# the workspace's pipeline minutes (a deploy here takes about one), and traffic
+# its outbound bandwidth. Render has a spend limit for pipeline minutes
+# (Workspace Settings, Build Pipeline) and none for bandwidth.
 services:
   - type: web
     name: swarm-id-bus-preview
