@@ -14,6 +14,8 @@
   import { clientStore } from '$lib/stores/client.svelte'
   import { logStore } from '$lib/stores/log.svelte'
   import { formatBytes } from '$lib/utils/format'
+  import { describeUpload, watchBridgeTraffic } from '$lib/utils/bridge-traffic'
+  import { resolveProxyOrigin } from '$lib/utils/environment'
 
   interface Props {
     onUploadResult?: (reference: string) => void
@@ -56,6 +58,8 @@
     uploadStartTime = Date.now()
     chunkSplittingTime = undefined
 
+    // A File is pulled across the iframe piece by piece; the log says how many.
+    const stopWatching = watchBridgeTraffic(resolveProxyOrigin())
     try {
       const encryptionStatus = enableEncryption ? 'encrypted' : 'no encryption'
       logStore.log(
@@ -88,6 +92,7 @@
       const uploadOnlyTime = elapsedTime - splittingTime
       const uploadSpeed = uploadOnlyTime > 0 ? bytesUploaded / uploadOnlyTime : 0
 
+      logStore.log(describeUpload(stopWatching()))
       logStore.log(`Upload successful! Reference: ${uploadResult.reference}`)
 
       const encryptionLabel = enableEncryption ? 'Encrypted' : 'Not Encrypted'
@@ -118,6 +123,7 @@
       logStore.log(`Upload failed: ${msg}`, 'error')
       error = msg
     } finally {
+      stopWatching()
       isUploading = false
     }
   }

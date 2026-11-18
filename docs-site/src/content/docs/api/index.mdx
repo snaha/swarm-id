@@ -722,25 +722,31 @@ Uploads raw binary data to the Swarm network. The reference it returns is read b
 
 The data is uploaded using the authenticated user's postage stamp. Progress can be tracked via the `options.onProgress` callback.
 
+Pass a `Blob`, `File` or `ReadableStream<Uint8Array>` for a large file: it is read piece by piece, no faster than the node takes chunks, so it is never held whole on either side of the iframe. A `Uint8Array` is copied across the iframe in one go. The same bytes give the same reference through every input type (with `encrypt`, each upload uses fresh keys and so gets its own reference).
+
+For a stream or `Blob`, `requestOptions.timeout` does not bound the whole upload. It is how long the identity iframe may stay silent, restarted with every chunk it reports and paused while your source has nothing to give, and it defaults to at least 2 minutes. A `ReadableStream` is locked while the upload reads it and handed back once read to the end; on failure, or when `requestOptions.signal` aborts, it is cancelled.
+
 No call's timeout counts the wait for the drive's write lock: an upload queued behind another one to the same drive waits its turn, however long that takes, because the identity iframe keeps saying it is still there. A request that does time out, or is aborted, is stopped inside the iframe too, so a queued write never runs after its promise rejected.
+
+The upload holds the drive's write lock for as long as it runs, and every writer to that drive on the device waits for it: other apps and the identity UI too. So your source may stay silent for 2 minutes, or for a longer `requestOptions.timeout` up to 10 minutes whatever it asks, before the upload fails with `timeout` and frees the drive.
 
 **Parameters:**
 
-| Parameter                       | Type                     | Required | Description                                                                                                                                                                                                                                                                                                                                               |
-| ------------------------------- | ------------------------ | -------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `data`                          | `Uint8Array`             | Yes      | The binary data to upload                                                                                                                                                                                                                                                                                                                                 |
-| `options`                       | `UploadOptions`          | No       | Upload configuration                                                                                                                                                                                                                                                                                                                                      |
-| `options.batchID`               | `string`                 | No       | The drive to write to, from [`getDrives()`](#getdrives). Defaults to the primary drive. Every writer takes it                                                                                                                                                                                                                                             |
-| `options.pin`                   | `boolean`                | No       | Whether to pin the data locally (defaults to `false`; ignored on a subsidised gateway)                                                                                                                                                                                                                                                                    |
-| `options.encrypt`               | `boolean`                | No       | Whether to encrypt the data (defaults to `false`). The 128-hex reference then contains the decryption key: a capability, not an address — see [Quick Start](../getting-started/#upload-and-download-bytes)                                                                                                                                                |
-| `options.tag`                   | `number`                 | No       | Tag ID for tracking upload progress (ignored on a subsidised gateway)                                                                                                                                                                                                                                                                                     |
-| `options.deferred`              | `boolean`                | No       | Whether to use deferred upload (defaults to `false`). A Bee node in dev mode serves only deferred uploads, and a direct upload against one fails as a request timeout, not as a mode error — see [`getNodeInfo`](#getnodeinfo). Not needed on the public gateway                                                                                          |
-| `options.onProgress`            | `(progress) => void`     | No       | Callback for tracking upload progress                                                                                                                                                                                                                                                                                                                     |
-| `requestOptions`                | `RequestOptions`         | No       | Request configuration                                                                                                                                                                                                                                                                                                                                     |
-| `requestOptions.timeout`        | `number`                 | No       | Request timeout in milliseconds for this call. Replaces the client's default (30 s) for the whole upload — the round trip through the iframe as well as the Bee request, not counting time queued behind another write on the same drive; a file of a few MB over a testnet or the public gateway needs more, here or in `new SwarmIdClient({ timeout })` |
-| `requestOptions.headers`        | `Record<string, string>` | No       | Custom headers                                                                                                                                                                                                                                                                                                                                            |
-| `requestOptions.endlesslyRetry` | `boolean`                | No       | Whether to retry endlessly                                                                                                                                                                                                                                                                                                                                |
-| `requestOptions.signal`         | `AbortSignal`            | No       | Stops the call: the promise rejects at once with code `aborted`, and the proxy aborts its Bee requests and stops stamping                                                                                                                                                                                                                                 |
+| Parameter                       | Type                     | Required | Description                                                                                                                                                                                                                                                                                                                                                                                  |
+| ------------------------------- | ------------------------ | -------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `data`                          | `UploadInput`            | Yes      | The bytes to upload: a `Uint8Array`, `Blob`, `File` or `ReadableStream<Uint8Array>`                                                                                                                                                                                                                                                                                                          |
+| `options`                       | `UploadOptions`          | No       | Upload configuration                                                                                                                                                                                                                                                                                                                                                                         |
+| `options.batchID`               | `string`                 | No       | The drive to write to, from [`getDrives()`](#getdrives). Defaults to the primary drive. Every writer takes it                                                                                                                                                                                                                                                                                |
+| `options.pin`                   | `boolean`                | No       | Whether to pin the data locally (defaults to `false`; ignored on a subsidised gateway)                                                                                                                                                                                                                                                                                                       |
+| `options.encrypt`               | `boolean`                | No       | Whether to encrypt the data (defaults to `false`). The 128-hex reference then contains the decryption key: a capability, not an address — see [Quick Start](../getting-started/#upload-and-download-bytes)                                                                                                                                                                                   |
+| `options.tag`                   | `number`                 | No       | Tag ID for tracking upload progress (ignored on a subsidised gateway)                                                                                                                                                                                                                                                                                                                        |
+| `options.deferred`              | `boolean`                | No       | Whether to use deferred upload (defaults to `false`). A Bee node in dev mode serves only deferred uploads, and a direct upload against one fails as a request timeout, not as a mode error — see [`getNodeInfo`](#getnodeinfo). Not needed on the public gateway                                                                                                                             |
+| `options.onProgress`            | `(progress) => void`     | No       | Callback for tracking upload progress                                                                                                                                                                                                                                                                                                                                                        |
+| `requestOptions`                | `RequestOptions`         | No       | Request configuration                                                                                                                                                                                                                                                                                                                                                                        |
+| `requestOptions.timeout`        | `number`                 | No       | Request timeout in milliseconds for this call. Replaces the client's default (30 s) for the whole upload — the round trip through the iframe as well as the Bee request, not counting time queued behind another write on the same drive; a file of a few MB over a testnet or the public gateway needs more, here or in `new SwarmIdClient({ timeout })`. For a stream or `Blob`, see above |
+| `requestOptions.headers`        | `Record<string, string>` | No       | Custom headers                                                                                                                                                                                                                                                                                                                                                                               |
+| `requestOptions.endlesslyRetry` | `boolean`                | No       | Whether to retry endlessly                                                                                                                                                                                                                                                                                                                                                                   |
+| `requestOptions.signal`         | `AbortSignal`            | No       | Stops the call: the promise rejects at once with code `aborted`, and the proxy aborts its Bee requests and stops stamping                                                                                                                                                                                                                                                                    |
 
 **Returns:** `Promise<UploadResult>`
 
@@ -811,30 +817,59 @@ console.log('Downloaded:', text)
 
 ---
 
+### `downloadDataStream(reference, requestOptions?)`
+
+Reads raw binary data as it arrives, for a file too large to hold whole: the streaming counterpart of [`downloadData`](#downloaddatareference-options-requestoptions), without its `options`. The returned stream is pulled: nothing past the root chunk is fetched until it is read, and it fetches no further ahead of the reader than one small batch per tree level.
+
+Read the stream to the end, or cancel it, or abort `requestOptions.signal`: otherwise the request stays open inside the identity iframe until the stream has gone unread for 2 minutes, or a longer `requestOptions.timeout`, and then errors with `timeout`. `requestOptions.timeout` is how long the iframe may stay silent for each piece (default: at least 2 minutes), not a bound on the whole download.
+
+**Returns:** `Promise<DataDownload>`
+
+| Property | Type                         | Description                                                                           |
+| -------- | ---------------------------- | ------------------------------------------------------------------------------------- |
+| `stream` | `ReadableStream<Uint8Array>` | The content, in pieces of up to 256 KiB. A failure partway through errors this stream |
+| `size`   | `number`                     | The content's length in bytes                                                         |
+
+**Throws:**
+
+- `Error` if the client is not initialized
+- `Error` if the reference is not found, before any stream exists
+
+**Example:**
+
+```typescript
+// `writable` is ready before the call: a stream left unread is ended after the idle deadline
+const { stream, size } = await client.downloadDataStream('a1b2c3...')
+console.log(`Saving ${size} bytes`)
+await stream.pipeTo(writable)
+```
+
+---
+
 ## File Methods
 
 ### `uploadFile(file, name?, options?, requestOptions?)`
 
 Uploads a file to the Swarm network, wrapped in a manifest that carries its name and content type. The reference is read back with [`downloadFile`](#downloadfilereference-path-options-requestoptions). A gateway's `/bzz/<reference>/` is only for a plain reference, uploaded with `encrypt: false`: the default one carries the key, which [never goes in a gateway URL](../public-gateway/#what-that-means-for-an-app).
 
-Accepts either a File object (from file input) or raw Uint8Array data. When using a File object, the filename is automatically extracted unless explicitly overridden.
+Takes what [`uploadData`](#uploaddatadata-options-requestoptions) takes: a `File` from a file input, a `Blob` or `ReadableStream<Uint8Array>`, read piece by piece and never held whole, or a `Uint8Array`. A `File`'s own name is used unless `name` overrides it. A stream is handed back once read to the end and cancelled on failure or abort, and `requestOptions.timeout` means what it does for `uploadData`.
 
 Content and manifest are encrypted by default, so the reference is 128 hex characters and carries the key — the same rule as [`uploadFiles`](#uploadfilesfiles-options-requestoptions). `encryptManifest: false` gives a 64-character reference whose manifest anyone can read over encrypted content; `encrypt: false` leaves everything plain, which is what a `/bzz/` gateway link to a public file wants.
 
 **Parameters:**
 
-| Parameter                       | Type                     | Required | Description                                                                                                                                                                                                                                                                                                                                               |
-| ------------------------------- | ------------------------ | -------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `file`                          | `File \| Uint8Array`     | Yes      | The file to upload                                                                                                                                                                                                                                                                                                                                        |
-| `name`                          | `string`                 | No       | Filename (extracted from File object if not provided)                                                                                                                                                                                                                                                                                                     |
-| `options`                       | `UploadOptions`          | No       | Upload configuration (see `uploadData`)                                                                                                                                                                                                                                                                                                                   |
-| `options.encrypt`               | `boolean`                | No       | Encrypt the file content (defaults to `true`). `false` also leaves the manifest plain                                                                                                                                                                                                                                                                     |
-| `options.encryptManifest`       | `boolean`                | No       | Encrypt the manifest too, so the reference carries the key (defaults to `true`)                                                                                                                                                                                                                                                                           |
-| `requestOptions`                | `RequestOptions`         | No       | Request configuration                                                                                                                                                                                                                                                                                                                                     |
-| `requestOptions.timeout`        | `number`                 | No       | Request timeout in milliseconds for this call. Replaces the client's default (30 s) for the whole upload — the round trip through the iframe as well as the Bee request, not counting time queued behind another write on the same drive; a file of a few MB over a testnet or the public gateway needs more, here or in `new SwarmIdClient({ timeout })` |
-| `requestOptions.headers`        | `Record<string, string>` | No       | Custom headers                                                                                                                                                                                                                                                                                                                                            |
-| `requestOptions.endlesslyRetry` | `boolean`                | No       | Whether to retry endlessly                                                                                                                                                                                                                                                                                                                                |
-| `requestOptions.signal`         | `AbortSignal`            | No       | Stops the call: the promise rejects at once with code `aborted`, and the proxy aborts its Bee requests and stops stamping                                                                                                                                                                                                                                 |
+| Parameter                       | Type                     | Required | Description                                                                                                                                                                                                                                                                                                                                                                                  |
+| ------------------------------- | ------------------------ | -------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `file`                          | `UploadInput`            | Yes      | The file to upload: a `File`, `Blob`, `ReadableStream<Uint8Array>` or `Uint8Array`                                                                                                                                                                                                                                                                                                           |
+| `name`                          | `string`                 | No       | Filename (a `File`'s own name if not provided)                                                                                                                                                                                                                                                                                                                                               |
+| `options`                       | `UploadOptions`          | No       | Upload configuration (see `uploadData`)                                                                                                                                                                                                                                                                                                                                                      |
+| `options.encrypt`               | `boolean`                | No       | Encrypt the file content (defaults to `true`). `false` also leaves the manifest plain                                                                                                                                                                                                                                                                                                        |
+| `options.encryptManifest`       | `boolean`                | No       | Encrypt the manifest too, so the reference carries the key (defaults to `true`)                                                                                                                                                                                                                                                                                                              |
+| `requestOptions`                | `RequestOptions`         | No       | Request configuration                                                                                                                                                                                                                                                                                                                                                                        |
+| `requestOptions.timeout`        | `number`                 | No       | Request timeout in milliseconds for this call. Replaces the client's default (30 s) for the whole upload — the round trip through the iframe as well as the Bee request, not counting time queued behind another write on the same drive; a file of a few MB over a testnet or the public gateway needs more, here or in `new SwarmIdClient({ timeout })`. For a stream or `Blob`, see above |
+| `requestOptions.headers`        | `Record<string, string>` | No       | Custom headers                                                                                                                                                                                                                                                                                                                                                                               |
+| `requestOptions.endlesslyRetry` | `boolean`                | No       | Whether to retry endlessly                                                                                                                                                                                                                                                                                                                                                                   |
+| `requestOptions.signal`         | `AbortSignal`            | No       | Stops the call: the promise rejects at once with code `aborted`, and the proxy aborts its Bee requests and stops stamping                                                                                                                                                                                                                                                                    |
 
 **Returns:** `Promise<UploadResult>` - Contains `reference` and optional `tagUid`
 
@@ -855,6 +890,10 @@ const result = await client.uploadFile(file)
 // From Uint8Array with custom name
 const data = new Uint8Array([...])
 const result = await client.uploadFile(data, 'document.pdf')
+
+// From a stream, read as it arrives
+const response = await fetch(url)
+const result = await client.uploadFile(response.body, 'video.mp4')
 ```
 
 ---
@@ -904,31 +943,61 @@ const url = URL.createObjectURL(blob)
 
 ---
 
+### `downloadFileStream(reference, path?, requestOptions?)`
+
+Reads a file as it arrives, for a file too large to hold whole: the streaming counterpart of [`downloadFile`](#downloadfilereference-path-options-requestoptions), without its `options`. The manifest and the path are resolved as there, then the content streams with the contract of [`downloadDataStream`](#downloaddatastreamreference-requestoptions): nothing past the content's root chunk is fetched until the stream is read, `requestOptions.timeout` is how long the iframe may stay silent for each piece, and the stream must be read to the end, cancelled, or stopped with `requestOptions.signal`.
+
+**Returns:** `Promise<FileDownload>`
+
+| Property | Type                         | Description                                                                           |
+| -------- | ---------------------------- | ------------------------------------------------------------------------------------- |
+| `name`   | `string`                     | The filename                                                                          |
+| `stream` | `ReadableStream<Uint8Array>` | The content, in pieces of up to 256 KiB. A failure partway through errors this stream |
+| `size`   | `number`                     | The content's length in bytes                                                         |
+
+**Throws:**
+
+- `Error` if the client is not initialized
+- `Error` if the reference or the path is not found, before any stream exists
+
+**Example:**
+
+Open the destination before the download: the click that allows a save picker may no longer count after a slow lookup, and a stream left unread is ended after the idle deadline.
+
+```typescript
+// Straight to disk, never held whole (File System Access API)
+const handle = await window.showSaveFilePicker()
+const { stream } = await client.downloadFileStream('a1b2c3...')
+await stream.pipeTo(await handle.createWritable())
+```
+
+---
+
 ### `uploadFiles(files, options?, requestOptions?)`
 
 Uploads a folder as one manifest: a fork per file with its path and content type. A gateway serves a plain folder, uploaded with `encrypt: false`, at `/bzz/<reference>/<path>`; the default reference carries the key and stays out of gateway URLs. Takes what bee-js takes — the `FileList` of an `<input type="file" webkitdirectory>` or a dropped directory, a `File[]`, or `{ path, file }` pairs for a folder the app assembled itself. A `File`'s path is its `webkitRelativePath` with the picked folder's own name removed, or its name. Which files to include is the app's decision; the library uploads what it is given.
 
 Read a folder back with [`listFiles`](#listfilesreference-requestoptions) and [`downloadData`](#downloaddatareference-options-requestoptions) per entry, or one file with [`downloadFile`](#downloadfilereference-path-options-requestoptions) and its path.
 
-Every file is read into memory before the upload starts. For folders larger than that, upload the files with `uploadData` and build the manifest with `@ethersphere/core-sdk`'s `MantarayNode`.
+Each file is read piece by piece when the upload reaches it, one file at a time, so a folder is never held whole on either side of the iframe. A file that cannot be read therefore fails the upload only when the upload reaches it, after the earlier files' chunks are already stamped.
 
 **Parameters:**
 
-| Parameter                 | Type                                                 | Required | Description                                                                                                                                                                                    |
-| ------------------------- | ---------------------------------------------------- | -------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `files`                   | `FileList \| Iterable<File \| { path, file: Blob }>` | Yes      | The folder's files                                                                                                                                                                             |
-| `options`                 | `UploadFilesOptions`                                 | No       | Upload configuration                                                                                                                                                                           |
-| `options.encrypt`         | `boolean`                                            | No       | Encrypt the file content (defaults to `true`). `false` also leaves the manifest plain                                                                                                          |
-| `options.encryptManifest` | `boolean`                                            | No       | Encrypt the manifest too, so the root reference carries the key (defaults to `true`). `false` gives a 32-byte root reference whose manifest anyone can read, while the content stays encrypted |
-| `options.indexDocument`   | `string`                                             | No       | The file the bare `/bzz/<reference>/` serves (`website-index-document`), e.g. `index.html`                                                                                                     |
-| `options.errorDocument`   | `string`                                             | No       | The file served for a path that is not in the folder (`website-error-document`)                                                                                                                |
-| `options.pin`             | `boolean`                                            | No       | Pin on the user's own node (defaults to `false`; ignored on a subsidised gateway)                                                                                                              |
-| `options.deferred`        | `boolean`                                            | No       | Whether to use deferred upload (defaults to `false`); see [`uploadData`](#uploaddatadata-options-requestoptions)                                                                               |
-| `options.tag`             | `number`                                             | No       | Tag ID for tracking upload progress                                                                                                                                                            |
-| `options.onProgress`      | `(progress) => void`                                 | No       | Called once per file with `{ total, processed }`                                                                                                                                               |
-| `options.useWorkers`      | `boolean`                                            | No       | Stamp in a worker pool, as [`uploadData`](#uploaddatadata-options-requestoptions) does                                                                                                         |
-| `options.workerCount`     | `number`                                             | No       | Size of that pool                                                                                                                                                                              |
-| `requestOptions`          | `RequestOptions`                                     | No       | Request configuration; `timeout` bounds the whole upload, see [`uploadFile`](#uploadfilefile-name-options-requestoptions)                                                                      |
+| Parameter                 | Type                                                 | Required | Description                                                                                                                                                                                           |
+| ------------------------- | ---------------------------------------------------- | -------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `files`                   | `FileList \| Iterable<File \| { path, file: Blob }>` | Yes      | The folder's files                                                                                                                                                                                    |
+| `options`                 | `UploadFilesOptions`                                 | No       | Upload configuration                                                                                                                                                                                  |
+| `options.encrypt`         | `boolean`                                            | No       | Encrypt the file content (defaults to `true`). `false` also leaves the manifest plain                                                                                                                 |
+| `options.encryptManifest` | `boolean`                                            | No       | Encrypt the manifest too, so the root reference carries the key (defaults to `true`). `false` gives a 32-byte root reference whose manifest anyone can read, while the content stays encrypted        |
+| `options.indexDocument`   | `string`                                             | No       | The file the bare `/bzz/<reference>/` serves (`website-index-document`), e.g. `index.html`                                                                                                            |
+| `options.errorDocument`   | `string`                                             | No       | The file served for a path that is not in the folder (`website-error-document`)                                                                                                                       |
+| `options.pin`             | `boolean`                                            | No       | Pin on the user's own node (defaults to `false`; ignored on a subsidised gateway)                                                                                                                     |
+| `options.deferred`        | `boolean`                                            | No       | Whether to use deferred upload (defaults to `false`); see [`uploadData`](#uploaddatadata-options-requestoptions)                                                                                      |
+| `options.tag`             | `number`                                             | No       | Tag ID for tracking upload progress                                                                                                                                                                   |
+| `options.onProgress`      | `(progress) => void`                                 | No       | Called once per file with `{ total, processed }`                                                                                                                                                      |
+| `options.useWorkers`      | `boolean`                                            | No       | Stamp in a worker pool, as [`uploadData`](#uploaddatadata-options-requestoptions) does                                                                                                                |
+| `options.workerCount`     | `number`                                             | No       | Size of that pool                                                                                                                                                                                     |
+| `requestOptions`          | `RequestOptions`                                     | No       | Request configuration; `timeout` is how long the identity iframe may stay silent, as for a `Blob` given to [`uploadData`](#uploaddatadata-options-requestoptions), a file's source 10 minutes at most |
 
 **Returns:** `Promise<UploadResult>` - Contains `reference` (the manifest's) and optional `tagUid`
 
@@ -1578,11 +1647,13 @@ Uploads encrypted data to the Swarm network with access control for specific gra
 
 The data is encrypted using ACT (Access Control Tries) and can only be downloaded by users who have one of the grantee public keys.
 
+A `Blob`, `File` or `ReadableStream<Uint8Array>` is read piece by piece, with the same streaming behaviour and `timeout` meaning as [`uploadData`](#uploaddatadata-options-requestoptions).
+
 **Parameters:**
 
 | Parameter                       | Type                     | Required | Description                                                                                                                                                                                             |
 | ------------------------------- | ------------------------ | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `data`                          | `Uint8Array`             | Yes      | The binary data to upload                                                                                                                                                                               |
+| `data`                          | `UploadInput`            | Yes      | The bytes to upload: a `Uint8Array`, `Blob`, `File` or `ReadableStream<Uint8Array>`                                                                                                                     |
 | `grantees`                      | `string[]`               | Yes      | Array of compressed public keys (66 hex chars each)                                                                                                                                                     |
 | `options`                       | `ActUploadOptions`       | No       | Upload configuration                                                                                                                                                                                    |
 | `options.pin`                   | `boolean`                | No       | Whether to pin the data locally (defaults to `false`; ignored on a subsidised gateway)                                                                                                                  |
@@ -1678,6 +1749,12 @@ const data = await client.actDownloadData(encryptedReference, historyReference, 
 const text = new TextDecoder().decode(data)
 console.log('Decrypted:', text)
 ```
+
+---
+
+### `actDownloadDataStream(encryptedReference, historyReference, publisherPubKey, timestamp?, requestOptions?)`
+
+Reads ACT-protected data as it arrives. Takes the same arguments as [`actDownloadData`](#actdownloaddataencryptedreference-historyreference-publisherpubkey-timestamp-requestoptions) and returns a `DataDownload`, with the contract of [`downloadDataStream`](#downloaddatastreamreference-requestoptions). A caller who is not a grantee is refused before any stream exists.
 
 ---
 
@@ -1854,23 +1931,23 @@ try {
 }
 ```
 
-| Code                  | Meaning                                                                                                                                                                                                                | Also set                      |
-| --------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------- |
-| `not-authenticated`   | No session for this origin                                                                                                                                                                                             |                               |
-| `upload-unavailable`  | The session refuses to stamp; see [Why Uploads Are Unavailable](../subsidised-gateway/#why-uploads-are-unavailable)                                                                                                    | `reason`                      |
-| `drive-not-granted`   | The write names a drive this app was not granted; see [`getDrives()`](#getdrives)                                                                                                                                      |                               |
-| `permission-denied`   | The call needs the account-wide sharing key in a way the user has not allowed this app; see [`getPermissions()`](#getpermissions)                                                                                      | `permission`                  |
-| `partition-contended` | Every partition of the batch is held by other devices and none yielded in time                                                                                                                                         |                               |
-| `lease-lost`          | This device's partition was reclaimed mid-write                                                                                                                                                                        |                               |
-| `bee-rejected`        | Bee or the gateway answered with a non-2xx status. A `404` on `/bzz` and on a chunk mean different things; `url` — the request's path, never the node's host — says which                                              | `status`, `beeMessage`, `url` |
-| `network`             | The request never got a response: DNS, a refused connection, or a CORS preflight the gateway rejected                                                                                                                  |                               |
-| `timeout`             | A deadline ran out: the proxy's on a Bee request, or the client's on the whole round trip (`requestOptions.timeout`)                                                                                                   |                               |
-| `aborted`             | The call's `requestOptions.signal` aborted. Chunks already sent stay on the network and keep the stamps they used                                                                                                      |                               |
-| `invalid-request`     | The message or an argument failed validation                                                                                                                                                                           |                               |
-| `invalid-state`       | The client cannot take the call in its current state: `initialize()` has not resolved, was already called, or `destroy()` ran. A call, or an `initialize()`, still pending when `destroy()` runs rejects with this too |                               |
-| `init-failed`         | The proxy iframe did not come up: it failed to load, the proxy refused the origin, or it did not answer within `initializationTimeout`; `initialize()` rejects with this                                               |                               |
-| `popup-blocked`       | The browser blocked the authentication popup `connect()` opens: not called from a user gesture, or a blocker                                                                                                           |                               |
-| `internal`            | Anything else; the message is preserved                                                                                                                                                                                |                               |
+| Code                  | Meaning                                                                                                                                                                                                                                              | Also set                      |
+| --------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------- |
+| `not-authenticated`   | No session for this origin                                                                                                                                                                                                                           |                               |
+| `upload-unavailable`  | The session refuses to stamp; see [Why Uploads Are Unavailable](../subsidised-gateway/#why-uploads-are-unavailable)                                                                                                                                  | `reason`                      |
+| `drive-not-granted`   | The write names a drive this app was not granted; see [`getDrives()`](#getdrives)                                                                                                                                                                    |                               |
+| `permission-denied`   | The call needs the account-wide sharing key in a way the user has not allowed this app; see [`getPermissions()`](#getpermissions)                                                                                                                    | `permission`                  |
+| `partition-contended` | Every partition of the batch is held by other devices and none yielded in time                                                                                                                                                                       |                               |
+| `lease-lost`          | This device's partition was reclaimed mid-write                                                                                                                                                                                                      |                               |
+| `bee-rejected`        | Bee or the gateway answered with a non-2xx status. A `404` on `/bzz` and on a chunk mean different things; `url` — the request's path, never the node's host — says which                                                                            | `status`, `beeMessage`, `url` |
+| `network`             | The request never got a response: DNS, a refused connection, or a CORS preflight the gateway rejected                                                                                                                                                |                               |
+| `timeout`             | A deadline ran out: the proxy's on a Bee request, the client's on the whole round trip (`requestOptions.timeout`), the iframe staying silent during a stream or `Blob` transfer, an upload's source staying silent, or a streaming download not read |                               |
+| `aborted`             | The call's `requestOptions.signal` aborted. Chunks already sent stay on the network and keep the stamps they used                                                                                                                                    |                               |
+| `invalid-request`     | The message or an argument failed validation                                                                                                                                                                                                         |                               |
+| `invalid-state`       | The client cannot take the call in its current state: `initialize()` has not resolved, was already called, or `destroy()` ran. A call, or an `initialize()`, still pending when `destroy()` runs rejects with this too                               |                               |
+| `init-failed`         | The proxy iframe did not come up: it failed to load, the proxy refused the origin, or it did not answer within `initializationTimeout`; `initialize()` rejects with this                                                                             |                               |
+| `popup-blocked`       | The browser blocked the authentication popup `connect()` opens: not called from a user gesture, or a blocker                                                                                                                                         |                               |
+| `internal`            | Anything else; the message is preserved                                                                                                                                                                                                              |                               |
 
 The instance is built on the client side from the fields the proxy sends — an `Error` posted through the iframe bridge arrives as a plain `Error`, so it never crosses it. An app that bundles two copies of the package should branch on `error.code` rather than `instanceof`, which is per copy.
 
@@ -1902,7 +1979,10 @@ import type {
 
   // Upload/Download
   UploadOptions,
+  UploadInput,
   DownloadOptions,
+  DataDownload,
+  FileDownload,
   UploadResult,
   FileData,
   Reference,

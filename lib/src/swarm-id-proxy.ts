@@ -11,9 +11,12 @@ import type {
   ButtonConfig,
   UploadDataMessage,
   DownloadDataMessage,
+  DownloadDataStreamMessage,
+  PulledSource,
   DeriveAppSecretMessage,
   UploadFileMessage,
   DownloadFileMessage,
+  DownloadFileStreamMessage,
   UploadFilesMessage,
   ListFilesMessage,
   UploadChunkMessage,
@@ -39,6 +42,7 @@ import type {
   SequentialFeedUploadReferenceMessage,
   ActUploadDataMessage,
   ActDownloadDataMessage,
+  ActDownloadDataStreamMessage,
   ActAddGranteesMessage,
   ActRevokeGranteesMessage,
   ActGetGranteesMessage,
@@ -94,6 +98,9 @@ import { PresenceTracker, PRESENCE_INTERVAL_MS } from "./bus/presence"
 import type { BeeRequestOptions } from "@ethersphere/bee-js"
 import {
   uploadData,
+  uploadDataStream,
+  type UploadDataResult,
+  type UploadDataStreamOptions,
   uploadSOC,
   uploadChunk,
   type ChunkCounter,
@@ -101,6 +108,7 @@ import {
 } from "./proxy/upload"
 import {
   downloadDataWithChunkAPI,
+  openDataStream,
   downloadSOC,
   downloadEncryptedSOC,
 } from "./proxy/download-data"
@@ -161,7 +169,13 @@ import {
   type PublishedCounter,
 } from "./sync/published-counter"
 import { deviceHomePartition } from "./sync/partition-lock"
-import { withTimeout } from "./utils/promise"
+import { TimeoutError, withTimeout } from "./utils/promise"
+import {
+  downloadReaderIdleTimeout,
+  uploadSourceIdleTimeout,
+} from "./utils/stream-deadline"
+import { Inbox } from "./utils/inbox"
+import { STREAM_PIECE_SIZE, rechunk } from "./proxy/chunking"
 import { UtilizationStoreDB } from "./storage/utilization-store"
 import type { PartitionLeaseStateSnapshot } from "./sync/partition-lease"
 import { BatchWriteCoordinator } from "./sync/batch-write-coordinator"
@@ -368,7 +382,12 @@ type Abortable<M> = M & {
 /** An upload's progress on its way to the parent, throttled. */
 interface ProgressReporter {
   report: (progress: UploadProgress) => void
-  /** Post the latest report held back, before the upload's answer or its error. */
+  /**
+   * Post the latest report held back, before the upload's answer or its
+   * error. Not every
+   * last report says `processed >= total`: a stream of unknown length counts
+   * what it has seen, so its total keeps pace with what has landed.
+   */
   flush: () => void
 }
 
@@ -376,6 +395,24 @@ interface ProgressReporter {
 interface WriteRequest {
   event: MessageEvent
   message: Abortable<{ requestId: string }>
+}
+
+/**
+ * The next value the dApp hands `inbox`, within `deadline` ms: a streaming
+ * transfer it leaves silent for longer ends with `timeout`, rather than
+ * holding the request, and the drive's write lock for an upload, for good.
+ */
+function nextWithin<T>(
+  inbox: Inbox<T>,
+  deadline: number,
+  message: string,
+): Promise<T> {
+  return withTimeout(inbox.next(), deadline, message).catch(
+    (error: unknown) => {
+      if (!(error instanceof TimeoutError)) throw error
+      throw new SwarmIdError("timeout", error.message, { cause: error })
+    },
+  )
 }
 
 /**
@@ -405,6 +442,17 @@ export class SwarmIdProxy {
   private drives = new Map<string, DriveWritePath>()
   /** The parent's requests being handled, for `abortRequest` to stop. */
   private inFlightRequests = new Map<string, AbortController>()
+  /**
+   * Pulled uploads waiting on their next piece, by request id: the source
+   * being pulled, and which of a folder's files it is. A folder's files are
+   * pulled one at a time, so one request has one source here at most.
+   */
+  private uploadSources = new Map<
+    string,
+    { index: number | undefined; inbox: Inbox<Uint8Array | undefined> }
+  >()
+  /** Streaming downloads waiting to be asked for their next piece. */
+  private downloadPulls = new Map<string, Inbox<undefined>>()
   /**
    * The drives `connectionInfoChanged` last went out with (see `driveState`).
    * Starts unset, not empty, so the first emit carries `drivesChanged` for
@@ -2762,6 +2810,14 @@ export class SwarmIdProxy {
         this.inFlightRequests.get(message.requestId)?.abort()
         return
       }
+      if (message.type === "uploadSourcePiece") {
+        this.receiveUploadPiece(message.requestId, message.index, message.data)
+        return
+      }
+      if (message.type === "downloadStreamPull") {
+        this.downloadPulls.get(message.requestId)?.push(undefined)
+        return
+      }
 
       const controller = new AbortController()
       this.inFlightRequests.set(message.requestId, controller)
@@ -2783,7 +2839,11 @@ export class SwarmIdProxy {
         }
         this.sendErrorToParent(event, message.requestId, error, "Unknown error")
       } finally {
+        // A pull nobody will read settles at once rather than at its deadline.
+        this.uploadSources.get(message.requestId)?.inbox.close()
         this.inFlightRequests.delete(message.requestId)
+        this.uploadSources.delete(message.requestId)
+        this.downloadPulls.delete(message.requestId)
       }
     })
   }
@@ -2870,6 +2930,8 @@ export class SwarmIdProxy {
     switch (message.type) {
       case "parentIdentify":
       case "abortRequest":
+      case "uploadSourcePiece":
+      case "downloadStreamPull":
         // Already handled above
         break
 
@@ -2889,6 +2951,10 @@ export class SwarmIdProxy {
         await this.handleDownloadData(message, event)
         break
 
+      case "downloadDataStream":
+        await this.handleDownloadDataStream(message, event)
+        break
+
       case "deriveAppSecret":
         await this.handleDeriveAppSecret(message, event)
         break
@@ -2899,6 +2965,10 @@ export class SwarmIdProxy {
 
       case "downloadFile":
         await this.handleDownloadFile(message, event)
+        break
+
+      case "downloadFileStream":
+        await this.handleDownloadFileStream(message, event)
         break
 
       case "uploadFiles":
@@ -2984,6 +3054,10 @@ export class SwarmIdProxy {
 
       case "actDownloadData":
         await this.handleActDownloadData(message, event)
+        break
+
+      case "actDownloadDataStream":
+        await this.handleActDownloadDataStream(message, event)
         break
 
       case "actAddGrantees":
@@ -4046,6 +4120,7 @@ export class SwarmIdProxy {
   private postMessage(
     event: MessageEvent,
     message: IframeToParentMessage,
+    transfer?: Transferable[],
   ): void {
     if (!event.source) {
       console.warn("[Proxy] Cannot send message - no event source")
@@ -4053,6 +4128,7 @@ export class SwarmIdProxy {
     }
     ;(event.source as WindowProxy).postMessage(message, {
       targetOrigin: event.origin,
+      ...(transfer && { transfer }),
     })
   }
 
@@ -4614,16 +4690,22 @@ export class SwarmIdProxy {
         await this.withCountedWrite(
           { event, message, useWorkers, workerCount },
           async (target) => {
-            const result = await uploadData(target, data, {
-              encryptionKey: options?.encrypt ? true : undefined,
-              pin: options?.pin,
-              deferred: options?.deferred,
-              tag: options?.tag,
-              webSocket: useWebSocket ? { concurrency } : undefined,
-              httpConcurrency: concurrency,
-              onProgress: progress?.report,
-              requestOptions,
-            })
+            const result = await this.uploadWireData(
+              event,
+              message,
+              target,
+              data,
+              {
+                encryptionKey: options?.encrypt ? true : undefined,
+                pin: options?.pin,
+                deferred: options?.deferred,
+                tag: options?.tag,
+                webSocket: useWebSocket ? { concurrency } : undefined,
+                httpConcurrency: concurrency,
+                onProgress: progress?.report,
+                requestOptions,
+              },
+            )
             return result
           },
           batchID,
@@ -4669,6 +4751,146 @@ export class SwarmIdProxy {
     }
   }
 
+  /**
+   * Answer a streaming download: its size now, then one piece per pull. A pull
+   * is what lets the next piece be read, so a reader that stops stops the
+   * fetching too, and one silent past the idle deadline ends the download.
+   * `resolve` finds the content and what the answer says beside its size.
+   */
+  private async streamDownload(
+    event: MessageEvent,
+    message: Abortable<{ requestId: string }>,
+    failure: string,
+    resolve: () => Promise<{
+      answer:
+        | { type: "downloadDataStreamResponse" }
+        | { type: "actDownloadDataStreamResponse" }
+        | { type: "downloadFileStreamResponse"; name: string }
+      reference: string
+    }>,
+  ): Promise<void> {
+    const { requestId, requestOptions } = message
+    try {
+      const { answer, reference } = await resolve()
+      const download = await openDataStream(this.bee, reference, requestOptions)
+      const pulls = new Inbox<undefined>(requestOptions.signal)
+      this.downloadPulls.set(requestId, pulls)
+      const deadline = downloadReaderIdleTimeout(requestOptions.timeout)
+      const pieces = rechunk(download.leaves, STREAM_PIECE_SIZE)
+      try {
+        this.postMessage(event, { ...answer, requestId, size: download.size })
+        while (true) {
+          await nextWithin(
+            pulls,
+            deadline,
+            `The download was not read for ${deadline}ms`,
+          )
+          const { done, value } = await pieces.next()
+          if (done) {
+            this.postMessage(event, { type: "downloadStreamPiece", requestId })
+            return
+          }
+          this.postMessage(
+            event,
+            { type: "downloadStreamPiece", requestId, data: value },
+            [value.buffer],
+          )
+        }
+      } finally {
+        await pieces.return(undefined)
+      }
+    } catch (error) {
+      this.sendErrorToParent(event, requestId, error, failure)
+    }
+  }
+
+  private handleDownloadDataStream(
+    message: Abortable<DownloadDataStreamMessage>,
+    event: MessageEvent,
+  ): Promise<void> {
+    return this.streamDownload(event, message, "Download failed", async () => ({
+      answer: { type: "downloadDataStreamResponse" },
+      reference: message.reference,
+    }))
+  }
+
+  /** Upload what the parent sent: bytes, or a source to pull them from. */
+  private uploadWireData(
+    event: MessageEvent,
+    message: Abortable<{ requestId: string }>,
+    target: UploadTarget,
+    data: Uint8Array | PulledSource,
+    options: UploadDataStreamOptions,
+  ): Promise<UploadDataResult> {
+    if (data instanceof Uint8Array) return uploadData(target, data, options)
+    return uploadDataStream(
+      target,
+      this.pullPieces(event, message.requestId, message.requestOptions),
+      { ...options, size: data.size },
+    )
+  }
+
+  /**
+   * Hand a piece to the upload that pulled it. The proxy waits right after
+   * posting each pull, so one that finds nobody waiting, or names a file
+   * other than the one being pulled, was not asked for, and holding it would
+   * let the parent fill the iframe's memory.
+   */
+  private receiveUploadPiece(
+    requestId: string,
+    index: number | undefined,
+    data: Uint8Array | undefined,
+  ): void {
+    const source = this.uploadSources.get(requestId)
+    if (!source) return
+    if (!source.inbox.waiting || source.index !== index) {
+      console.warn("[Proxy] Dropped an upload piece not asked for:", requestId)
+      return
+    }
+    source.inbox.push(data)
+  }
+
+  /**
+   * The parent's pieces, one per pull, of its only source or of the folder's
+   * file at `index`. Nothing is pulled before the first `next()`, so a
+   * folder's files are pulled as the upload gets to them. The drive's write
+   * lock is held for every other writer on the device meanwhile, so a source
+   * silent past its deadline ends the upload rather than holding it
+   * indefinitely.
+   */
+  private async *pullPieces(
+    event: MessageEvent,
+    requestId: string,
+    requestOptions: Abortable<object>["requestOptions"],
+    index?: number,
+  ): AsyncGenerator<Uint8Array> {
+    const inbox = new Inbox<Uint8Array | undefined>(requestOptions.signal)
+    this.uploadSources.set(requestId, { index, inbox })
+    const deadline = uploadSourceIdleTimeout(requestOptions.timeout)
+    try {
+      while (true) {
+        this.postMessage(event, { type: "uploadSourcePull", requestId, index })
+        const piece = await nextWithin(
+          inbox,
+          deadline,
+          `The upload source sent nothing for ${deadline}ms`,
+        )
+        if (!piece) return
+        if (piece.length > STREAM_PIECE_SIZE) {
+          throw new SwarmIdError(
+            "invalid-request",
+            `An upload piece of ${piece.length} bytes is over the ${STREAM_PIECE_SIZE}-byte limit`,
+          )
+        }
+        yield piece
+      }
+    } finally {
+      // A folder opens one per file: each stops listening to the request's
+      // signal once its file is done, not when the whole folder is.
+      inbox.close()
+    }
+  }
+
   private async handleUploadFile(
     message: Abortable<UploadFileMessage>,
     event: MessageEvent,
@@ -4708,16 +4930,22 @@ export class SwarmIdProxy {
             // manifest below (the rule is `manifestEncryption`)
             const encryption = manifestEncryption(options)
 
-            const contentUpload = await uploadData(target, data, {
-              encryptionKey: encryption.content ? true : undefined,
-              pin: options?.pin,
-              deferred: options?.deferred,
-              tag: uploadTag,
-              webSocket: useWebSocket ? { concurrency } : undefined,
-              httpConcurrency: concurrency,
-              onProgress: progress?.report,
-              requestOptions,
-            })
+            const contentUpload = await this.uploadWireData(
+              event,
+              message,
+              target,
+              data,
+              {
+                encryptionKey: encryption.content ? true : undefined,
+                pin: options?.pin,
+                deferred: options?.deferred,
+                tag: uploadTag,
+                webSocket: useWebSocket ? { concurrency } : undefined,
+                httpConcurrency: concurrency,
+                onProgress: progress?.report,
+                requestOptions,
+              },
+            )
 
             // Step 2: Build manifest
             const manifest = new MantarayNode()
@@ -4767,6 +4995,53 @@ export class SwarmIdProxy {
     }
   }
 
+  /**
+   * The file a manifest holds at `path`, or at its index document: its name
+   * and the reference of its content.
+   */
+  private async resolveManifestFile(
+    reference: string,
+    path: string | undefined,
+    requestOptions: RequestOptions,
+  ): Promise<{ name: string; reference: string }> {
+    // Always load the manifest first - file uploads create manifests
+    const manifest = await loadMantarayTreeWithChunkAPI(
+      this.bee,
+      reference,
+      requestOptions,
+    )
+
+    let targetPath: string
+    if (path) {
+      // Use provided path
+      targetPath = path
+    } else {
+      // No path: get index document from manifest metadata
+      const { indexDocument } = new BeeMantarayNode(manifest).getDocsMetadata()
+      if (!indexDocument) {
+        throw new Error("Manifest does not contain an index document reference")
+      }
+      targetPath = indexDocument
+    }
+
+    // Find the content node at the target path
+    const contentNode = manifest.find(targetPath)
+    if (!contentNode) {
+      throw new Error(`Path not found in manifest: ${targetPath}`)
+    }
+    if (!contentNode.targetAddress) {
+      throw new Error(`Path "${targetPath}" does not have a target address`)
+    }
+
+    // Get filename from metadata or use the path
+    const name =
+      contentNode.metadata?.["Filename"] ||
+      targetPath.split("/").pop() ||
+      "file"
+
+    return { name, reference: uint8ArrayToHex(contentNode.targetAddress) }
+  }
+
   private async handleDownloadFile(
     message: DownloadFileMessage,
     event: MessageEvent,
@@ -4774,51 +5049,14 @@ export class SwarmIdProxy {
     const { requestId, reference, path, options, requestOptions } = message
 
     try {
-      // Always load the manifest first - file uploads create manifests
-      const manifest = await loadMantarayTreeWithChunkAPI(
-        this.bee,
+      const file = await this.resolveManifestFile(
         reference,
+        path,
         requestOptions,
       )
-
-      let targetPath: string
-      if (path) {
-        // Use provided path
-        targetPath = path
-      } else {
-        // No path: get index document from manifest metadata
-        const { indexDocument } = new BeeMantarayNode(
-          manifest,
-        ).getDocsMetadata()
-        if (!indexDocument) {
-          throw new Error(
-            "Manifest does not contain an index document reference",
-          )
-        }
-        targetPath = indexDocument
-      }
-
-      // Find the content node at the target path
-      const contentNode = manifest.find(targetPath)
-      if (!contentNode) {
-        throw new Error(`Path not found in manifest: ${targetPath}`)
-      }
-      if (!contentNode.targetAddress) {
-        throw new Error(`Path "${targetPath}" does not have a target address`)
-      }
-
-      // Get filename from metadata or use the path
-      const name =
-        contentNode.metadata?.["Filename"] ||
-        targetPath.split("/").pop() ||
-        "file"
-
-      // Download actual content from the target address
-      const targetRef = uint8ArrayToHex(contentNode.targetAddress)
-
       const data = await downloadDataWithChunkAPI(
         this.bee,
-        targetRef,
+        file.reference,
         options,
         undefined,
         requestOptions,
@@ -4827,12 +5065,30 @@ export class SwarmIdProxy {
       this.postMessage(event, {
         type: "downloadFileResponse",
         requestId,
-        name,
+        name: file.name,
         data: webBytes(data),
       })
     } catch (error) {
       this.sendErrorToParent(event, requestId, error, "Download failed")
     }
+  }
+
+  private handleDownloadFileStream(
+    message: Abortable<DownloadFileStreamMessage>,
+    event: MessageEvent,
+  ): Promise<void> {
+    const { reference, path, requestOptions } = message
+    return this.streamDownload(event, message, "Download failed", async () => {
+      const file = await this.resolveManifestFile(
+        reference,
+        path,
+        requestOptions,
+      )
+      return {
+        answer: { type: "downloadFileStreamResponse", name: file.name },
+        reference: file.reference,
+      }
+    })
   }
 
   /** A folder as one manifest (#750); the Swarm-specific part is `uploadCollection`. */
@@ -4860,10 +5116,19 @@ export class SwarmIdProxy {
       this.ensureCanUpload(batchID)
       const tag = options?.tag ?? (await tryCreateTag(this.bee))
 
+      // A pulled file's generator pulls nothing until the upload reaches it.
+      const entries = files.map(({ path, data, contentType }, index) => ({
+        path,
+        contentType,
+        data:
+          data instanceof Uint8Array
+            ? data
+            : this.pullPieces(event, requestId, requestOptions, index),
+      }))
       const { result, stampedChunks } = await this.withCountedWrite(
         { event, message, useWorkers, workerCount },
         (target) =>
-          uploadCollection(target, files, {
+          uploadCollection(target, entries, {
             ...options,
             tag,
             onProgress: progress?.report,
@@ -6295,14 +6560,20 @@ export class SwarmIdProxy {
         { event, message, useWorkers: true },
         async (target) => {
           // Step 1: Upload raw content data (encrypted by default for 64-byte reference)
-          const contentUploadResult = await uploadData(target, data, {
-            encryptionKey: options?.encrypt !== false ? true : undefined,
-            pin: options?.pin,
-            deferred: options?.deferred,
-            tag: options?.tag,
-            onProgress: progress?.report,
-            requestOptions,
-          })
+          const contentUploadResult = await this.uploadWireData(
+            event,
+            message,
+            target,
+            data,
+            {
+              encryptionKey: options?.encrypt !== false ? true : undefined,
+              pin: options?.pin,
+              deferred: options?.deferred,
+              tag: options?.tag,
+              onProgress: progress?.report,
+              requestOptions,
+            },
+          )
 
           // Step 2: Create Mantaray manifest wrapping the content
           // Content reference is 64 bytes (encrypted reference: address + encryption key)
@@ -6373,12 +6644,14 @@ export class SwarmIdProxy {
     }
   }
 
-  private async handleActDownloadData(
-    message: ActDownloadDataMessage,
-    event: MessageEvent,
-  ): Promise<void> {
+  /**
+   * Steps 1 to 3 of reading ACT content: decrypt the reference, load the
+   * manifest, and find the reference of the content inside it.
+   */
+  private async resolveActContent(
+    message: ActDownloadDataMessage | ActDownloadDataStreamMessage,
+  ): Promise<string> {
     const {
-      requestId,
       encryptedReference,
       historyReference,
       publisherPubKey,
@@ -6386,51 +6659,75 @@ export class SwarmIdProxy {
       requestOptions,
     } = message
 
+    if (!this.authenticated || !this.appSecret) {
+      throw new SwarmIdError(
+        "not-authenticated",
+        "Not authenticated. Please login first.",
+      )
+    }
+
+    // Decrypt the ACT reference to get the content reference
+    const contentReference = await decryptActReference(
+      this.bee,
+      encryptedReference,
+      historyReference,
+      publisherPubKey,
+      this.actKeys("dataSharing"),
+      timestamp,
+      requestOptions,
+    )
+
+    // Step 1: Download and unmarshal the Mantaray manifest (chunk API only)
+    const manifest = await loadMantarayTreeWithChunkAPI(
+      this.bee,
+      contentReference,
+      requestOptions,
+    )
+
+    // Step 2: Get the index document path from manifest metadata
+    const { indexDocument } = new BeeMantarayNode(manifest).getDocsMetadata()
+    if (!indexDocument) {
+      throw new Error("Manifest does not contain an index document reference")
+    }
+
+    // Step 3: Find the node at the index document path
+    const contentNode = manifest.find(indexDocument)
+    if (!contentNode) {
+      throw new Error(`Content node "${indexDocument}" not found in manifest`)
+    }
+
+    if (!contentNode.targetAddress) {
+      throw new Error(
+        `Content node "${indexDocument}" does not have a target address`,
+      )
+    }
+
+    return uint8ArrayToHex(contentNode.targetAddress)
+  }
+
+  private handleActDownloadDataStream(
+    message: Abortable<ActDownloadDataStreamMessage>,
+    event: MessageEvent,
+  ): Promise<void> {
+    return this.streamDownload(
+      event,
+      message,
+      "ACT download failed",
+      async () => ({
+        answer: { type: "actDownloadDataStreamResponse" },
+        reference: await this.resolveActContent(message),
+      }),
+    )
+  }
+
+  private async handleActDownloadData(
+    message: ActDownloadDataMessage,
+    event: MessageEvent,
+  ): Promise<void> {
+    const { requestId, requestOptions } = message
+
     try {
-      if (!this.authenticated || !this.appSecret) {
-        throw new SwarmIdError(
-          "not-authenticated",
-          "Not authenticated. Please login first.",
-        )
-      }
-
-      // Decrypt the ACT reference to get the content reference
-      const contentReference = await decryptActReference(
-        this.bee,
-        encryptedReference,
-        historyReference,
-        publisherPubKey,
-        this.actKeys("dataSharing"),
-        timestamp,
-        requestOptions,
-      )
-
-      // Step 1: Download and unmarshal the Mantaray manifest (chunk API only)
-      const manifest = await loadMantarayTreeWithChunkAPI(
-        this.bee,
-        contentReference,
-        requestOptions,
-      )
-
-      // Step 2: Get the index document path from manifest metadata
-      const { indexDocument } = new BeeMantarayNode(manifest).getDocsMetadata()
-      if (!indexDocument) {
-        throw new Error("Manifest does not contain an index document reference")
-      }
-
-      // Step 3: Find the node at the index document path
-      const contentNode = manifest.find(indexDocument)
-      if (!contentNode) {
-        throw new Error(`Content node "${indexDocument}" not found in manifest`)
-      }
-
-      if (!contentNode.targetAddress) {
-        throw new Error(
-          `Content node "${indexDocument}" does not have a target address`,
-        )
-      }
-
-      const actualContentRef = uint8ArrayToHex(contentNode.targetAddress)
+      const actualContentRef = await this.resolveActContent(message)
 
       // Step 4: Download the actual content
       const data = await downloadDataWithChunkAPI(

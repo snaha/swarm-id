@@ -26,6 +26,7 @@ import {
 const PLAIN_REF_HEX = 64
 const ENCRYPTED_REF_HEX = 128
 const MULTI_CHUNK_SIZE = 5000
+const PIECE_SIZE = 1000
 
 const text = new TextEncoder()
 const FILES = [
@@ -127,6 +128,41 @@ describe("uploadCollection", () => {
     const twice = [FILES[0], FILES[1], { ...FILES[2], path: FILES[0].path }]
     await expect(uploadCollection(target, twice)).rejects.toThrow("index.html")
     expect(store.size()).toBe(0)
+  })
+
+  it("lands streamed files on the root their bytes give, read one after another", async () => {
+    const { bee, target } = setup()
+    const { reference: fromBytes } = await uploadCollection(target, FILES, {
+      encrypt: false,
+    })
+    const reads: string[] = []
+    async function* piecesOf(
+      path: string,
+      data: Uint8Array,
+    ): AsyncGenerator<Uint8Array> {
+      reads.push(`start ${path}`)
+      for (let i = 0; i < data.length; i += PIECE_SIZE) {
+        yield data.slice(i, i + PIECE_SIZE)
+      }
+      reads.push(`end ${path}`)
+    }
+
+    const { reference } = await uploadCollection(
+      target,
+      FILES.map((file) => ({ ...file, data: piecesOf(file.path, file.data) })),
+      { encrypt: false },
+    )
+
+    expect(reference).toBe(fromBytes)
+    expect(reads).toEqual(
+      FILES.flatMap(({ path }) => [`start ${path}`, `end ${path}`]),
+    )
+    for (const entry of await listCollection(bee, reference)) {
+      const file = FILES.find(({ path }) => path === entry.path)!
+      expect(await downloadDataWithChunkAPI(bee, entry.reference)).toEqual(
+        file.data,
+      )
+    }
   })
 
   it("reports progress once per file", async () => {

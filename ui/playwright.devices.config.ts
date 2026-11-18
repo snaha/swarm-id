@@ -6,8 +6,9 @@ import { defineConfig, devices } from '@playwright/test'
  * The device scenarios: three browser contexts of one account sharing two
  * write partitions (`tests/three-devices.test.ts`), and two of them writing
  * two drives (`tests/two-drives.test.ts`, #882), driven through the demo the
- * way a person drives it; and the synced deletions
- * (`tests/delete-account.test.ts`), which need the same warm cluster. Minutes per run by construction — the
+ * way a person drives it; the synced deletions
+ * (`tests/delete-account.test.ts`) and the streaming transfers across the
+ * iframe (`tests/streaming-transfer.test.ts`), which need the same warm cluster. Minutes per run by construction — the
  * lease TTL, the idle yield and the beacon grace are each 30 s and the suite
  * waits them out — so it is not part of `pnpm test:e2e`. It runs on its own
  * workflow (`.github/workflows/three-devices.yml`): on a PR that touches the
@@ -27,7 +28,12 @@ const TEST_TIMEOUT_MS = 6 * 60 * 1000
 
 export default defineConfig({
   testDir: './tests',
-  testMatch: ['**/three-devices.test.ts', '**/two-drives.test.ts', '**/delete-account.test.ts'],
+  testMatch: [
+    '**/three-devices.test.ts',
+    '**/two-drives.test.ts',
+    '**/delete-account.test.ts',
+    '**/streaming-transfer.test.ts',
+  ],
   fullyParallel: false,
   workers: 1,
   globalSetup: './tests/global-setup-devices.ts',

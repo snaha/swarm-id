@@ -10,12 +10,28 @@
 import { NULL_ADDRESS } from "@ethersphere/bee-js"
 import type { Bee, BeeRequestOptions } from "@ethersphere/bee-js"
 import { MantarayNode } from "@ethersphere/core-sdk"
-import { uploadData, uploadChunk, type UploadTarget } from "./upload"
+import {
+  uploadData,
+  uploadDataStream,
+  uploadChunk,
+  type UploadTarget,
+} from "./upload"
 import { saveMantarayTree, loadMantarayTreeWithChunkAPI } from "./mantaray"
 import { hexToUint8Array, uint8ArrayToHex } from "../utils/hex"
-import type { UploadProgress, CollectionFile, CollectionEntry } from "../types"
+import type { UploadProgress, CollectionEntry } from "../types"
 
 const DEFAULT_CONTENT_TYPE = "application/octet-stream"
+
+/**
+ * One file of a folder to upload: its bytes, or a source of them read when
+ * the upload gets to the file, no faster than the node takes its chunks
+ */
+export interface CollectionUploadFile {
+  /** Path inside the folder, `/`-separated, no leading slash */
+  path: string
+  data: Uint8Array | AsyncIterable<Uint8Array>
+  contentType?: string
+}
 
 export interface UploadCollectionOptions {
   /** Encrypt file content (default true). `false` also leaves the manifest plain */
@@ -47,9 +63,14 @@ export function manifestEncryption(
   return { content, manifest: content && options?.encryptManifest !== false }
 }
 
+/**
+ * Upload a folder's files one after another, then the manifest over them. A
+ * file's reference depends on its bytes alone, so a streamed file and the
+ * same bytes in memory land on one root.
+ */
 export async function uploadCollection(
   target: UploadTarget,
-  files: CollectionFile[],
+  files: CollectionUploadFile[],
   options?: UploadCollectionOptions,
 ): Promise<{ reference: string; tagUid?: number }> {
   const { content: encryptContent, manifest: encryptManifest } =
@@ -72,10 +93,14 @@ export async function uploadCollection(
   const manifest = new MantarayNode()
   let processed = 0
   for (const file of files) {
-    const { reference } = await uploadData(target, file.data, {
+    const contentOptions = {
       ...chunkOptions,
-      encryptionKey: encryptContent ? true : undefined,
-    })
+      encryptionKey: encryptContent ? (true as const) : undefined,
+    }
+    const { reference } =
+      file.data instanceof Uint8Array
+        ? await uploadData(target, file.data, contentOptions)
+        : await uploadDataStream(target, file.data, contentOptions)
     manifest.addFork(file.path, hexToUint8Array(reference), {
       "Content-Type": file.contentType ?? DEFAULT_CONTENT_TYPE,
       Filename: file.path.split("/").pop() ?? file.path,

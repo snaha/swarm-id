@@ -37,6 +37,9 @@ export type {
   RequestOptions,
   UploadOptions,
   DownloadOptions,
+  UploadInput,
+  DataDownload,
+  FileDownload,
   UploadResult,
   UploadUnavailableReason,
   FileData,
@@ -76,6 +79,9 @@ export type { UploadCallback } from "./proxy/mantaray"
 
 // The path `uploadFiles` gives a `File` picked from a folder
 export { collectionPath } from "./utils/collection"
+
+// The largest piece a streaming transfer moves across the iframe at once
+export { STREAM_PIECE_SIZE } from "./proxy/chunking"
 
 // Stamp lifetime display
 export { formatTTL } from "./utils/ttl"
