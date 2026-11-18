@@ -57,8 +57,6 @@ export type {
   SyncedAccount,
 } from "./schemas"
 
-export { DebouncedUtilizationUploader } from "./storage/debounced-uploader"
-
 // The vault's encryption, for the host case above: a host that writes the
 // record produces the same `encryptedSeed` bytes the identity UI does.
 export {

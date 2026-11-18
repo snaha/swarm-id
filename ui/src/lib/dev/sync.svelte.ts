@@ -2,7 +2,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { Bee } from '@ethersphere/bee-js'
 import {
-  DebouncedUtilizationUploader,
   type SyncAccountFunction,
   type SyncResult,
   createSyncAccount,
@@ -19,19 +18,6 @@ import { networkSettingsStore } from '$lib/stores/network-settings.svelte'
 // Lazy Initialization (Browser Only)
 // ============================================================================
 
-// Lazy debounced uploader initialization
-let utilizationUploader: DebouncedUtilizationUploader | undefined
-
-const getUtilizationUploader = () => {
-  if (!browser) return undefined
-
-  if (!utilizationUploader) {
-    utilizationUploader = new DebouncedUtilizationUploader()
-  }
-
-  return utilizationUploader
-}
-
 // Sync account function — recreated whenever the Bee node URL changes,
 // since createSyncAccount closes over a specific Bee client instance.
 let syncAccountFn: SyncAccountFunction | undefined
@@ -44,8 +30,6 @@ const getSyncAccount = () => {
 
   if (!syncAccountFn || currentUrl !== lastBeeUrl) {
     const utilStore = getUtilizationStore()
-    const utilUploader = getUtilizationUploader()
-    if (!utilUploader) return undefined
 
     lastBeeUrl = currentUrl
     syncAccountFn = createSyncAccount({
@@ -53,7 +37,6 @@ const getSyncAccount = () => {
       accountsStore,
       postageStampsStore,
       utilizationStore: utilStore,
-      utilizationUploader: utilUploader,
       lanes: () => accountBusStore.lanes(),
     })
   }
