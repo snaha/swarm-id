@@ -3,7 +3,7 @@
 // Adapted from @upcoming/multichain-library (ISC)
 // https://github.com/ethersphere/multichain-library
 
-import { RollingValueProvider } from "cafe-utility"
+import { RollingValueProvider } from "./rolling-value-provider"
 import {
   type CreateBundleOptions,
   type ExtendBundleOptions,

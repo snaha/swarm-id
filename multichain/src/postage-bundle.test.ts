@@ -6,7 +6,7 @@
  * cannot, and never sent when the simulation reverts.
  */
 
-import { RollingValueProvider } from "cafe-utility"
+import { RollingValueProvider } from "./rolling-value-provider"
 import { parseTransaction } from "viem"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { bundleExtend } from "./postage-bundle"
