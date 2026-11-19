@@ -2,8 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { secp256k1 } from "@noble/curves/secp256k1"
-import { Binary } from "cafe-utility"
-import { encryptData } from "@ethersphere/core-sdk"
+import { encryptData, keccak256 } from "@ethersphere/core-sdk"
 // An ACT access key is the same 32 random bytes a chunk encryption key is.
 // Re-exported so ACT callers keep reaching for it beside the rest of the ACT crypto.
 import { generateRandomKey } from "../../chunk"
@@ -89,13 +88,13 @@ export function deriveKeys(
   const lookupKeyInput = new Uint8Array(sharedSecret.length + 1)
   lookupKeyInput.set(sharedSecret)
   lookupKeyInput[sharedSecret.length] = LOOKUP_KEY_NONCE
-  const lookupKey = Binary.keccak256(lookupKeyInput)
+  const lookupKey = keccak256(lookupKeyInput)
 
   // accessKeyDecryptionKey = keccak256(sharedX || 0x01)
   const akdKeyInput = new Uint8Array(sharedSecret.length + 1)
   akdKeyInput.set(sharedSecret)
   akdKeyInput[sharedSecret.length] = ACCESS_KEY_DECRYPTION_NONCE
-  const accessKeyDecryptionKey = Binary.keccak256(akdKeyInput)
+  const accessKeyDecryptionKey = keccak256(akdKeyInput)
 
   return { lookupKey, accessKeyDecryptionKey }
 }

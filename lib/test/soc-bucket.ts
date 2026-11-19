@@ -6,7 +6,7 @@
  * land in ONE postage bucket, so a lane fills and wraps within a test's budget.
  */
 import { EthAddress, Identifier } from "@ethersphere/bee-js"
-import { Binary } from "cafe-utility"
+import { keccak256 } from "@ethersphere/core-sdk"
 
 const ID_BYTES = 32
 const BUCKET_BYTE_MASK = 0xff
@@ -24,7 +24,7 @@ export function mineIdentifierInBucket(
   const low = bucket & BUCKET_BYTE_MASK
   for (;;) {
     crypto.getRandomValues(preimage.subarray(0, ID_BYTES))
-    const address = Binary.keccak256(preimage)
+    const address = keccak256(preimage)
     if (address[0] === high && address[1] === low) {
       return new Identifier(preimage.slice(0, ID_BYTES))
     }

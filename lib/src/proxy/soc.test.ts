@@ -20,7 +20,7 @@
 
 import { describe, it, expect, beforeEach, afterEach } from "vitest"
 import { Identifier, PrivateKey } from "@ethersphere/bee-js"
-import { Binary } from "cafe-utility"
+import { Bytes, keccak256 } from "@ethersphere/core-sdk"
 import { uploadSOC, type UploadTarget } from "./upload"
 import {
   makeContentAddressedChunk,
@@ -123,7 +123,7 @@ function createSubsidisedTarget(
  */
 function createTestIdentifier(name: string): Identifier {
   const encoder = new TextEncoder()
-  const hash = Binary.keccak256(encoder.encode(name))
+  const hash = keccak256(encoder.encode(name))
   return new Identifier(hash)
 }
 
@@ -165,10 +165,7 @@ describe("SOC upload signature validation", () => {
 
       // Verify: signature was computed over hash(identifier + unencrypted_chunk_address)
       const expectedAddress = expectedCAC.address.toUint8Array()
-      const toSign = Binary.concatBytes(
-        identifier.toUint8Array(),
-        expectedAddress,
-      )
+      const toSign = Bytes.concat(identifier.toUint8Array(), expectedAddress)
       const expectedSignature = signer.sign(toSign)
       expect(captured!.signature).toBe(expectedSignature.toHex())
     })
@@ -186,7 +183,7 @@ describe("SOC upload signature validation", () => {
       const actualChunkAddress = calculateChunkAddress(captured!.body)
 
       // Reconstruct what the signature should cover
-      const toSign = Binary.concatBytes(
+      const toSign = Bytes.concat(
         identifier.toUint8Array(),
         actualChunkAddress.toUint8Array(),
       )
@@ -231,10 +228,7 @@ describe("SOC upload signature validation", () => {
       const expectedAddress = calculateChunkAddress(
         captured!.body,
       ).toUint8Array()
-      const toSign = Binary.concatBytes(
-        identifier.toUint8Array(),
-        expectedAddress,
-      )
+      const toSign = Bytes.concat(identifier.toUint8Array(), expectedAddress)
       const expectedSignature = signer.sign(toSign)
       expect(captured!.signature).toBe(expectedSignature.toHex())
     })
@@ -254,7 +248,7 @@ describe("SOC upload signature validation", () => {
       const actualChunkAddress = calculateChunkAddress(captured!.body)
 
       // Reconstruct what the signature should cover
-      const toSign = Binary.concatBytes(
+      const toSign = Bytes.concat(
         identifier.toUint8Array(),
         actualChunkAddress.toUint8Array(),
       )
@@ -338,7 +332,7 @@ describe("SOC upload signature validation", () => {
 
       // What the BROKEN code would have signed (unencrypted chunk address)
       const unencryptedCAC = makeContentAddressedChunk(data)
-      const wrongToSign = Binary.concatBytes(
+      const wrongToSign = Bytes.concat(
         identifier.toUint8Array(),
         unencryptedCAC.address.toUint8Array(),
       )
@@ -351,7 +345,7 @@ describe("SOC upload signature validation", () => {
 
       // What the CORRECT code signs (encrypted chunk address = hash of sent body)
       const sentBodyAddress = calculateChunkAddress(captured!.body)
-      const correctToSign = Binary.concatBytes(
+      const correctToSign = Bytes.concat(
         identifier.toUint8Array(),
         sentBodyAddress.toUint8Array(),
       )
@@ -377,7 +371,7 @@ describe("SOC upload signature validation", () => {
       // Verify signature/data consistency
       const captured = capturingFetch.getCaptured()
       const actualAddress = calculateChunkAddress(captured!.body)
-      const toSign = Binary.concatBytes(
+      const toSign = Bytes.concat(
         identifier.toUint8Array(),
         actualAddress.toUint8Array(),
       )
@@ -401,7 +395,7 @@ describe("SOC upload signature validation", () => {
       // Verify signature/data consistency
       const captured = capturingFetch.getCaptured()
       const actualAddress = calculateChunkAddress(captured!.body)
-      const toSign = Binary.concatBytes(
+      const toSign = Bytes.concat(
         identifier.toUint8Array(),
         actualAddress.toUint8Array(),
       )

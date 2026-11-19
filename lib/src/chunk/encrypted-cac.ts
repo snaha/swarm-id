@@ -1,7 +1,6 @@
 // Copyright 2026 The Swarm Authors. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { Binary } from "cafe-utility"
 import { Bytes, Reference, Span } from "@ethersphere/bee-js"
 import { calculateChunkAddress } from "@ethersphere/core-sdk"
 import { MAX_PAYLOAD_SIZE, MIN_PAYLOAD_SIZE } from "./constants"
@@ -54,7 +53,7 @@ export function makeEncryptedContentAddressedChunk(
 
   // Create the original chunk data (span + payload)
   const span = Span.fromBigInt(BigInt(payloadBytes.length))
-  const chunkData = Binary.concatBytes(span.toUint8Array(), payloadBytes)
+  const chunkData = Bytes.concat(span.toUint8Array(), payloadBytes)
 
   // Encrypt the chunk
   const encrypter = newChunkEncrypter()
@@ -64,15 +63,13 @@ export function makeEncryptedContentAddressedChunk(
   )
 
   // Concatenate encrypted span and data
-  const encryptedChunkData = Binary.concatBytes(encryptedSpan, encryptedData)
+  const encryptedChunkData = Bytes.concat(encryptedSpan, encryptedData)
 
   // Calculate BMT address on encrypted data
   const address = calculateChunkAddress(encryptedChunkData)
 
   // Create 64-byte reference: address (32 bytes) + encryption key (32 bytes)
-  const reference = new Reference(
-    Binary.concatBytes(address.toUint8Array(), key),
-  )
+  const reference = new Reference(Bytes.concat(address.toUint8Array(), key))
 
   return {
     data: encryptedChunkData,

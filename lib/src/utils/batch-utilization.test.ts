@@ -3,7 +3,6 @@
 
 import { describe, it, expect } from "vitest"
 import { BatchId } from "@ethersphere/bee-js"
-import { Binary } from "cafe-utility"
 import { makeEncryptedContentAddressedChunk } from "../chunk"
 import {
   CHUNK_SIZE,
@@ -238,7 +237,7 @@ describe("BMT-of-encrypted chunk address (contentHash invariant)", () => {
   const KEY_B = new Uint8Array(32).map((_, i) => 255 - i)
 
   function bmtHex(data: Uint8Array, key: Uint8Array): string {
-    return Binary.uint8ArrayToHex(
+    return uint8ArrayToHex(
       makeEncryptedContentAddressedChunk(data, key).address.toUint8Array(),
     )
   }

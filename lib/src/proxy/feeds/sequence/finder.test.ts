@@ -2,8 +2,12 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, it, expect } from "vitest"
-import { Binary } from "cafe-utility"
-import { makeSOCAddress } from "@ethersphere/core-sdk"
+import {
+  Bytes,
+  keccak256,
+  makeSOCAddress,
+  numberToUint64,
+} from "@ethersphere/core-sdk"
 import { EthAddress, Topic } from "@ethersphere/bee-js"
 import { SyncSequentialFinder } from "./finder"
 
@@ -12,10 +16,8 @@ const OWNER = new EthAddress("a".repeat(40))
 // Replicate the module-private address derivation so the fake bee can reverse-map
 // a requested chunk address back to its sequence index.
 function addrForIndex(topic: Topic, index: bigint): string {
-  const indexBytes = Binary.numberToUint64(index, "BE")
-  const identifier = Binary.keccak256(
-    Binary.concatBytes(topic.toUint8Array(), indexBytes),
-  )
+  const indexBytes = numberToUint64(index, "BE")
+  const identifier = keccak256(Bytes.concat(topic.toUint8Array(), indexBytes))
   return makeSOCAddress(identifier, OWNER).toHex()
 }
 

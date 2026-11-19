@@ -21,8 +21,8 @@
 
 import { describe, it, expect, vi, beforeEach } from "vitest"
 import { EthAddress, PrivateKey, Reference } from "@ethersphere/bee-js"
-import { Binary } from "cafe-utility"
-import { makeSOCAddress } from "@ethersphere/core-sdk"
+import { keccak256, makeSOCAddress } from "@ethersphere/core-sdk"
+import { uint8ArrayToHex } from "../utils/hex"
 import type { Device } from "../schemas"
 import { withTimeout } from "../utils/promise"
 
@@ -46,7 +46,7 @@ vi.mock("../proxy/upload", async (importActual) => {
   return {
     ...actual,
     uploadData: vi.fn(async (_target: unknown, blob: Uint8Array) => {
-      const reference = Binary.uint8ArrayToHex(Binary.keccak256(blob)) as string
+      const reference = uint8ArrayToHex(keccak256(blob)) as string
       blobs.set(reference, blob)
       return { reference }
     }),

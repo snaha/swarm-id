@@ -8,7 +8,7 @@
  * Mirrors the Go sequential finder behavior.
  */
 
-import { Binary } from "cafe-utility"
+import { uint8ArrayToHex } from "../../../utils/hex"
 import type { EthAddress, Topic, BeeRequestOptions } from "@ethersphere/bee-js"
 import { makeSOCAddress } from "@ethersphere/core-sdk"
 import { abortedError } from "../../../errors"
@@ -58,7 +58,7 @@ export class SyncSequentialFinder implements SequentialFinder {
     for (let attempt = 0; attempt < 2; attempt++) {
       try {
         await this.bee.chunk.download(
-          Binary.uint8ArrayToHex(address.toUint8Array()),
+          uint8ArrayToHex(address.toUint8Array()),
           undefined,
           requestOptions,
         )

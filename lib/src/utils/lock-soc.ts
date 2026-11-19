@@ -10,8 +10,7 @@
  */
 
 import { Identifier, type BatchId, type EthAddress } from "@ethersphere/bee-js"
-import { Binary } from "cafe-utility"
-import { makeSOCAddress } from "@ethersphere/core-sdk"
+import { makeSOCAddress, keccak256 } from "@ethersphere/core-sdk"
 
 /** Domain separation tag for the lock-SOC identifier. */
 const PARTITION_LOCK_DOMAIN = "swarm-id-partition-lock-v1"
@@ -33,7 +32,7 @@ export function makePartitionLockIdentifier(
   batchId: BatchId,
   partition: number,
 ): Identifier {
-  const hash = Binary.keccak256(
+  const hash = keccak256(
     new TextEncoder().encode(
       `${PARTITION_LOCK_DOMAIN}:${batchId.toHex()}:${partition}`,
     ),

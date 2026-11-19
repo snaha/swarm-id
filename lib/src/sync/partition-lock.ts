@@ -37,7 +37,8 @@ import {
   type BatchId,
   type Stamper,
 } from "@ethersphere/bee-js"
-import { Binary } from "cafe-utility"
+import { keccak256 } from "@ethersphere/core-sdk"
+import { uint8ArrayToHex } from "../utils/hex"
 import { downloadEncryptedSOC } from "../proxy/download-data"
 import { uploadSOC, type UploadTarget } from "../proxy/upload"
 import { sleep, withTimeout } from "../utils/promise"
@@ -108,8 +109,8 @@ export interface ReleasePartitionLockResult {
  * as a hex string. Two different deviceIds collide with probability 2⁻⁶⁴.
  */
 export function makeDeviceTiebreaker(deviceId: string): string {
-  const hash = Binary.keccak256(new TextEncoder().encode(deviceId))
-  return Binary.uint8ArrayToHex(hash.slice(0, TIEBREAKER_BYTES))
+  const hash = keccak256(new TextEncoder().encode(deviceId))
+  return uint8ArrayToHex(hash.slice(0, TIEBREAKER_BYTES))
 }
 
 /**
@@ -129,7 +130,7 @@ export function deviceHomePartition(
   deviceId: string,
   partitionCount: number,
 ): number {
-  const hash = Binary.keccak256(new TextEncoder().encode(deviceId))
+  const hash = keccak256(new TextEncoder().encode(deviceId))
   const n = ((hash[0] << 24) | (hash[1] << 16) | (hash[2] << 8) | hash[3]) >>> 0
   return n % partitionCount
 }

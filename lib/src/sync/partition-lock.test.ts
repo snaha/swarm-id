@@ -11,8 +11,7 @@
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { BatchId, PrivateKey, type Stamper } from "@ethersphere/bee-js"
-import { Binary } from "cafe-utility"
-import { makeSOCAddress } from "@ethersphere/core-sdk"
+import { Bytes, keccak256, makeSOCAddress } from "@ethersphere/core-sdk"
 import {
   acquirePartitionLock,
   compareGenerations,
@@ -1192,8 +1191,8 @@ describe("lockSocAddress / lockSocBucket", () => {
 
     // Spec: keccak256(identifier || owner).
     const identifier = makePartitionLockIdentifier(TEST_BATCH_ID, 0)
-    const expected = Binary.keccak256(
-      Binary.concatBytes(identifier.toUint8Array(), OWNER.toUint8Array()),
+    const expected = keccak256(
+      Bytes.concat(identifier.toUint8Array(), OWNER.toUint8Array()),
     )
     expect(addr1).toEqual(expected)
   })

@@ -84,7 +84,7 @@ import {
   NULL_ADDRESS,
   MantarayNode as BeeMantarayNode,
 } from "@ethersphere/bee-js"
-import { MantarayNode } from "@ethersphere/core-sdk"
+import { MantarayNode, Bytes } from "@ethersphere/core-sdk"
 import { makeContentAddressedChunk } from "./chunk"
 import { AccountBus, BroadcastChannelTransport } from "./bus/account-bus"
 import { SignalingTransport } from "./bus/signaling-transport"
@@ -203,7 +203,6 @@ import {
   createAsyncSequentialFinder,
   sequentialFeedIdentifier,
 } from "./proxy/feeds/sequence"
-import { Binary } from "cafe-utility"
 import {
   GNOSIS_BLOCK_TIME,
   calculateTTLSeconds,
@@ -5817,7 +5816,7 @@ export class SwarmIdProxy {
     const timestamp = new Uint8Array(8)
     const view = new DataView(timestamp.buffer)
     view.setBigUint64(0, at, false)
-    return Binary.concatBytes(timestamp, data)
+    return Bytes.concat(timestamp, data)
   }
 
   private async handleSequentialFeedUploadPayload(
