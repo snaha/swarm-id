@@ -1,7 +1,7 @@
 // Copyright 2026 The Swarm Authors. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { Binary } from "cafe-utility"
+import { Bytes, keccak256 } from "@ethersphere/core-sdk"
 import { counterModeEncrypt, counterModeDecrypt } from "./crypto"
 import { publicKeysEqual } from "./act"
 
@@ -30,8 +30,8 @@ export interface UncompressedPublicKey {
 export function deriveGranteeListEncryptionKey(
   publisherPrivKey: Uint8Array,
 ): Uint8Array {
-  const input = Binary.concatBytes(publisherPrivKey, GRANTEE_LIST_KEY_SUFFIX)
-  return Binary.keccak256(input)
+  const input = Bytes.concat(publisherPrivKey, GRANTEE_LIST_KEY_SUFFIX)
+  return keccak256(input)
 }
 
 /**

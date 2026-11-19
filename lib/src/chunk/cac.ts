@@ -3,7 +3,6 @@
 
 // Content-addressed chunk (CAC) utilities
 
-import { Binary } from "cafe-utility"
 import { Bytes, Reference, Span } from "@ethersphere/bee-js"
 import { calculateChunkAddress } from "@ethersphere/core-sdk"
 import { MAX_PAYLOAD_SIZE, MIN_PAYLOAD_SIZE } from "./constants"
@@ -54,7 +53,7 @@ export function makeContentAddressedChunk(
   }
 
   // Create chunk data (span + payload)
-  const chunkData = Binary.concatBytes(span.toUint8Array(), payloadBytes)
+  const chunkData = Bytes.concat(span.toUint8Array(), payloadBytes)
 
   // Calculate BMT address
   const address = calculateChunkAddress(chunkData)

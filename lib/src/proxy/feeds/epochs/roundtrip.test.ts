@@ -8,9 +8,9 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach } from "vitest"
-import { Binary } from "cafe-utility"
+import { uint8ArrayToHex } from "../../../utils/hex"
 import { PrivateKey } from "@ethersphere/bee-js"
-import { makeContentAddressedChunk } from "@ethersphere/core-sdk"
+import { makeContentAddressedChunk, Bytes } from "@ethersphere/core-sdk"
 import { SyncEpochFinder } from "./finder"
 import { AsyncEpochFinder } from "./async-finder"
 import { BasicEpochUpdater, epochSocAddress } from "./updater"
@@ -98,7 +98,7 @@ function payloadWithTimestamp(
   const ts = new Uint8Array(8)
   new DataView(ts.buffer).setBigUint64(0, timestamp, false)
 
-  return Binary.concatBytes(span, ts, reference)
+  return Bytes.concat(span, ts, reference)
 }
 
 describe("Epoch Feeds Integration", () => {
@@ -405,9 +405,9 @@ describe("Epoch Feeds Integration", () => {
       const result3 = await updater.update(30n, ref3, target)
 
       // Verify SOC addresses are different
-      const addr1 = Binary.uint8ArrayToHex(result1.socAddress)
-      const addr2 = Binary.uint8ArrayToHex(result2.socAddress)
-      const addr3 = Binary.uint8ArrayToHex(result3.socAddress)
+      const addr1 = uint8ArrayToHex(result1.socAddress)
+      const addr2 = uint8ArrayToHex(result2.socAddress)
+      const addr3 = uint8ArrayToHex(result3.socAddress)
 
       expect(addr1).not.toBe(addr2)
       expect(addr2).not.toBe(addr3)
@@ -627,7 +627,7 @@ describe("Epoch Feeds Integration", () => {
         payloadWithTimestamp(at, createTestReference(4242)),
       ).toSingleOwnerChunk(identifier, impostor)
       const ownersAddress = await epochSocAddress(topic, epoch, owner)
-      await store.put(Binary.uint8ArrayToHex(ownersAddress), forged.data)
+      await store.put(uint8ArrayToHex(ownersAddress), forged.data)
 
       for (const finder of [
         new SyncEpochFinder(bee, topic, owner),

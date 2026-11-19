@@ -35,7 +35,7 @@ export function hexToUint8Array(hexString: string): Uint8Array<ArrayBuffer> {
  * Bytes as a Web API or the bridge takes them. `fetch`, `crypto.subtle` and
  * `WebSocket.send` accept a `BufferSource`, and a message schema infers
  * `Uint8Array<ArrayBuffer>`; both exclude a view over a `SharedArrayBuffer`,
- * which a plain `Uint8Array`, as bee-js and cafe-utility return it, admits.
+ * which a plain `Uint8Array`, as bee-js returns it, admits.
  * Nothing the library handles is backed by shared memory, and what crosses
  * `postMessage` arrives as a structured clone. This is the one place that
  * says so.

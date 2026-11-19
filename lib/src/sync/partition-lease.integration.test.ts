@@ -60,7 +60,8 @@ import {
   writePartitionIntent,
   writePartitionOccupancy,
 } from "./partition-intent"
-import { Binary } from "cafe-utility"
+import { Bytes, keccak256 } from "@ethersphere/core-sdk"
+import { uint8ArrayToHex } from "../utils/hex"
 import {
   LEASE_TTL_MS,
   PARTITION_COUNT,
@@ -368,7 +369,7 @@ describe("readPartitionState / writePartitionState round-trip", () => {
     // resolves to nothing (evicted/corrupt). A pointer EXISTS, so the partition
     // has a real resume point we failed to learn — readPartitionState must NOT
     // zero-seed (that would re-issue every used slot); it reports readFailed.
-    const danglingRef = Binary.uint8ArrayToHex(new Uint8Array(64).fill(0x99))
+    const danglingRef = uint8ArrayToHex(new Uint8Array(64).fill(0x99))
     await partitionState.writeStatePointer({
       bee: bee,
       stamper: createMockStamper(),
@@ -615,7 +616,7 @@ describe("intent / occupancy / state-pointer SOC slot race (regression)", () => 
     })
 
     const beforeCounter = stamper.getLocalCounter()!.slice()
-    const referenceHex = Binary.uint8ArrayToHex(new Uint8Array(64).fill(0x11))
+    const referenceHex = uint8ArrayToHex(new Uint8Array(64).fill(0x11))
     const now = Date.now()
     const epochBucket = intentEpochBucket(now)
     const generation = {
@@ -998,9 +999,7 @@ function bytesEqual(a: Uint8Array, b: Uint8Array): boolean {
 describe("PartitionLease.acquire — unreadable partition state", () => {
   it("degrades to read-only without writing the lock SOC", async () => {
     // Partition 0's state pointer names an unreadable reference.
-    await seedStatePointer(
-      Binary.uint8ArrayToHex(new Uint8Array(64).fill(0x99)),
-    )
+    await seedStatePointer(uint8ArrayToHex(new Uint8Array(64).fill(0x99)))
 
     const lease = makeLease({ deviceId: DEVICE_A, bee: bee })
     const result = await lease.acquire({ partitionCount: PARTITION_COUNT })
@@ -1036,7 +1035,7 @@ describe("PartitionLease.acquire — unreadable partition state", () => {
       target,
       new Uint8Array(32).fill(7),
     )
-    await seedStatePointer(Binary.uint8ArrayToHex(malformedRef))
+    await seedStatePointer(uint8ArrayToHex(malformedRef))
 
     const result = await partitionState.readPartitionState({
       bee: bee,
@@ -1068,11 +1067,11 @@ describe("PartitionLease.acquire — unreadable partition state", () => {
       new Uint8Array(100).fill(1),
     )
     const { numUtilizationChunks } = getChunkLayout(TEST_BATCH_DEPTH)
-    const referenceChunk = Binary.concatBytes(
+    const referenceChunk = Bytes.concat(
       ...Array.from({ length: numUtilizationChunks }, () => shortCounterRef),
     )
     const referenceChunkRef = await uploadEncryptedBlob(target, referenceChunk)
-    await seedStatePointer(Binary.uint8ArrayToHex(referenceChunkRef))
+    await seedStatePointer(uint8ArrayToHex(referenceChunkRef))
 
     const result = await partitionState.readPartitionState({
       bee: bee,
@@ -1594,9 +1593,7 @@ describe("acquirePartitionLock — self-refresh through a frozen-cache read (reg
     // what we write (the gateway frozen-cache effect). Other reads pass through.
     const lockId = makePartitionLockIdentifier(TEST_BATCH_ID, 0)
     const lockAddr = new Reference(
-      Binary.keccak256(
-        Binary.concatBytes(lockId.toUint8Array(), OWNER.toUint8Array()),
-      ),
+      keccak256(Bytes.concat(lockId.toUint8Array(), OWNER.toUint8Array())),
     )
       .toHex()
       .toLowerCase()
@@ -1942,8 +1939,8 @@ describe("writePartitionState — incremental", () => {
     // incremental guarantee — only the changed chunks hit the network.
     for (let i = 0; i < numUtilizationChunks; i++) {
       const retained =
-        Binary.uint8ArrayToHex(second.references[i]) ===
-        Binary.uint8ArrayToHex(first.references[i])
+        uint8ArrayToHex(second.references[i]) ===
+        uint8ArrayToHex(first.references[i])
       expect(retained, `chunk ${i} retained?`).toBe(!changed.has(i))
     }
 
@@ -2039,13 +2036,13 @@ describe("writePartitionState — incremental", () => {
 
     // The ahead chunk kept the ACKED ref (not re-uploaded); the new chunk changed.
     expect(
-      Binary.uint8ArrayToHex(incremental.references[aheadChunk]),
+      uint8ArrayToHex(incremental.references[aheadChunk]),
       "ahead chunk ref retained (acked floor)",
-    ).toBe(Binary.uint8ArrayToHex(ackedPublish.references[aheadChunk]))
+    ).toBe(uint8ArrayToHex(ackedPublish.references[aheadChunk]))
     expect(
-      Binary.uint8ArrayToHex(incremental.references[newChunk]),
+      uint8ArrayToHex(incremental.references[newChunk]),
       "new chunk re-uploaded",
-    ).not.toBe(Binary.uint8ArrayToHex(ackedPublish.references[newChunk]))
+    ).not.toBe(uint8ArrayToHex(ackedPublish.references[newChunk]))
 
     // A takeover reconstructs the ACKED floor for the ahead bucket (5), never the
     // unacked 6 — so it reissues only the unacked slot, never an acked one.

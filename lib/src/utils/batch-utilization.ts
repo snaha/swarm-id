@@ -30,14 +30,13 @@ import {
   makeEncryptedContentAddressedChunk,
   type ContentAddressedChunk,
 } from "../chunk"
-import { stamp as stampAtSlot } from "@ethersphere/core-sdk"
-import { Binary } from "cafe-utility"
+import { stamp as stampAtSlot, Bytes, equals } from "@ethersphere/core-sdk"
 import type { UtilizationStoreDB } from "../storage/utilization-store"
 import { uploadChunk, type UploadTarget } from "../proxy/upload"
 import { tryCreateTag } from "./tag"
 import { lockSocAddress } from "./lock-soc"
 import { deriveSecret, BACKUP_KEY_LABEL } from "./key-derivation"
-import { uint8ArrayToHex, webBytes } from "./hex"
+import { uint8ArrayToHex, webBytes, hexToUint8Array } from "./hex"
 
 // ============================================================================
 // Errors
@@ -483,12 +482,7 @@ export async function deriveUtilizationChunkKey(
   new DataView(indexBytes.buffer).setUint32(0, chunkIndex, false)
   const nonceBytes = new Uint8Array(UINT32_BYTES)
   new DataView(nonceBytes.buffer).setUint32(0, nonce, false)
-  const message = Binary.concatBytes(
-    domain,
-    batchIdBytes,
-    indexBytes,
-    nonceBytes,
-  )
+  const message = Bytes.concat(domain, batchIdBytes, indexBytes, nonceBytes)
 
   const cryptoKey = await crypto.subtle.importKey(
     "raw",
@@ -562,7 +556,7 @@ function claimedBucketsForCleanChunks(
   const claimed = new Set<number>()
   for (const meta of state.chunks) {
     if (!meta.dirty && meta.contentHash) {
-      claimed.add(toBucket(Binary.hexToUint8Array(meta.contentHash)))
+      claimed.add(toBucket(hexToUint8Array(meta.contentHash)))
     }
   }
   return claimed
@@ -1031,7 +1025,7 @@ export async function saveUtilizationState(
         resolved.key,
       )
 
-      const cacReferenceHex = Binary.uint8ArrayToHex(cacReference)
+      const cacReferenceHex = uint8ArrayToHex(cacReference)
 
       // Skip if reference unchanged (deduplication)
       if (
@@ -1724,7 +1718,7 @@ export class UtilizationAwareStamper implements Stamper, SlotAssigner {
     // counter — the SOC address is the same on every refresh, so the slot
     // it occupies stays the same too.
     const lockSoc = this.lockSocs?.find((soc) =>
-      Binary.equals(soc.address, chunkAddress),
+      equals(soc.address, chunkAddress),
     )
     if (lockSoc) {
       return lockSoc.partition
@@ -1885,7 +1879,7 @@ export class UtilizationAwareStamper implements Stamper, SlotAssigner {
           priorNonce: this.utilizationState.chunks[chunkIndex].nonce,
           claimedBuckets,
         })
-        const contentHash = Binary.uint8ArrayToHex(resolved.address)
+        const contentHash = uint8ArrayToHex(resolved.address)
 
         await this.cache.putChunk({
           batchId: this.batchId.toHex(),

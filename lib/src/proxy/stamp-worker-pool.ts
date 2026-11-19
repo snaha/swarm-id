@@ -15,7 +15,8 @@
 
 import type { Stamper, EnvelopeWithBatchId, BatchId } from "@ethersphere/bee-js"
 import { EthAddress, Signature } from "@ethersphere/bee-js"
-import { Binary } from "cafe-utility"
+import { Bytes } from "@ethersphere/core-sdk"
+import { hexToUint8Array } from "../utils/hex"
 import type { SlotAssigner } from "../utils/batch-utilization"
 import type {
   StampWorkerReadyResponse,
@@ -146,7 +147,7 @@ export class StampWorkerPool {
             worker.onmessage = origHandler
             worker.onerror = origErrorHandler
             resolve(
-              Binary.hexToUint8Array(
+              hexToUint8Array(
                 (event.data as StampWorkerReadyResponse).issuerHex,
               ),
             )
@@ -213,7 +214,7 @@ export class StampWorkerPool {
     )
 
     // 2. Construct signing message (80 bytes)
-    const message = Binary.concatBytes(
+    const message = Bytes.concat(
       address,
       this.batchId.toUint8Array(),
       index,
@@ -222,7 +223,7 @@ export class StampWorkerPool {
 
     // 3. Dispatch signing to worker (round-robin)
     const signatureHex = await this.dispatchSign(message)
-    const signature = Binary.hexToUint8Array(signatureHex)
+    const signature = hexToUint8Array(signatureHex)
 
     // 4. Return envelope
     return {
