@@ -199,7 +199,10 @@ import {
   createAsyncEpochFinder,
   createEpochUpdater,
 } from "./proxy/feeds/epochs"
-import { createAsyncSequentialFinder } from "./proxy/feeds/sequence"
+import {
+  createAsyncSequentialFinder,
+  sequentialFeedIdentifier,
+} from "./proxy/feeds/sequence"
 import { Binary } from "cafe-utility"
 import {
   GNOSIS_BLOCK_TIME,
@@ -5226,14 +5229,6 @@ export class SwarmIdProxy {
     return BigInt(value)
   }
 
-  private makeSequentialFeedIdentifier(
-    topic: Uint8Array,
-    index: bigint,
-  ): Uint8Array {
-    const indexBytes = Binary.numberToUint64(index, "BE")
-    return Binary.keccak256(Binary.concatBytes(topic, indexBytes))
-  }
-
   private async findLatestSequentialIndex(
     topic: Uint8Array,
     owner: EthAddress,
@@ -5561,11 +5556,7 @@ export class SwarmIdProxy {
 
     const atValue = this.parseFeedTimestamp(at)
     for (let current = latest; current >= 0n; current--) {
-      const identifierBytes = this.makeSequentialFeedIdentifier(
-        topicBytes,
-        current,
-      )
-      const identifier = new Identifier(identifierBytes)
+      const identifier = sequentialFeedIdentifier(topicBytes, current)
       const soc = raw
         ? encryptionKey
           ? await downloadEncryptedSOC(
@@ -5645,11 +5636,7 @@ export class SwarmIdProxy {
         lookupTimeoutMs,
       )
 
-      const identifierBytes = this.makeSequentialFeedIdentifier(
-        topicBytes,
-        resolvedIndex,
-      )
-      const identifier = new Identifier(identifierBytes)
+      const identifier = sequentialFeedIdentifier(topicBytes, resolvedIndex)
       const soc = await downloadEncryptedSOC(
         this.bee,
         ownerAddress,
@@ -5712,11 +5699,7 @@ export class SwarmIdProxy {
         lookupTimeoutMs,
       )
 
-      const identifierBytes = this.makeSequentialFeedIdentifier(
-        topicBytes,
-        resolvedIndex,
-      )
-      const identifier = new Identifier(identifierBytes)
+      const identifier = sequentialFeedIdentifier(topicBytes, resolvedIndex)
       const soc = encryptionKey
         ? await downloadEncryptedSOC(
             this.bee,
@@ -5788,11 +5771,7 @@ export class SwarmIdProxy {
         lookupTimeoutMs,
       )
 
-      const identifierBytes = this.makeSequentialFeedIdentifier(
-        topicBytes,
-        resolvedIndex,
-      )
-      const identifier = new Identifier(identifierBytes)
+      const identifier = sequentialFeedIdentifier(topicBytes, resolvedIndex)
       const soc = await downloadEncryptedSOC(
         this.bee,
         ownerAddress,
@@ -5893,11 +5872,7 @@ export class SwarmIdProxy {
         )
       }
 
-      const identifierBytes = this.makeSequentialFeedIdentifier(
-        topicBytes,
-        resolvedIndex,
-      )
-      const identifier = new Identifier(identifierBytes)
+      const identifier = sequentialFeedIdentifier(topicBytes, resolvedIndex)
 
       // Upload SOC with optional encryption (enabled by default)
       const { result, stampedChunks } = await this.withCountedWrite(
@@ -5988,11 +5963,7 @@ export class SwarmIdProxy {
         )
       }
 
-      const identifierBytes = this.makeSequentialFeedIdentifier(
-        topicBytes,
-        resolvedIndex,
-      )
-      const identifier = new Identifier(identifierBytes)
+      const identifier = sequentialFeedIdentifier(topicBytes, resolvedIndex)
 
       // Upload SOC - use encryption if key provided, otherwise plain SOC
       const { result, stampedChunks } = await this.withCountedWrite(
@@ -6087,11 +6058,7 @@ export class SwarmIdProxy {
         )
       }
 
-      const identifierBytes = this.makeSequentialFeedIdentifier(
-        topicBytes,
-        resolvedIndex,
-      )
-      const identifier = new Identifier(identifierBytes)
+      const identifier = sequentialFeedIdentifier(topicBytes, resolvedIndex)
 
       // uploadReference always uses encryption with auto-generated key
       const { result, stampedChunks } = await this.withCountedWrite(

@@ -29,12 +29,12 @@ import {
   Reference,
   Topic,
 } from "@ethersphere/bee-js"
-import { Binary } from "cafe-utility"
 import { DeviceSchemaV1, type Device } from "../schemas"
 import { hexToUint8Array } from "../utils/hex"
 import {
   BasicSequentialUpdater,
   SyncSequentialFinder,
+  sequentialFeedIdentifier,
 } from "../proxy/feeds/sequence"
 import { isStamperTarget, uploadData, type UploadTarget } from "../proxy/upload"
 import { downloadDataWithChunkAPI } from "../proxy/download-data"
@@ -147,10 +147,7 @@ export function rosterTopic(accountId: string): Topic {
 }
 
 export function rosterIdentifier(topic: Topic, index: bigint): Identifier {
-  const indexBytes = Binary.numberToUint64(index, "BE")
-  return new Identifier(
-    Binary.keccak256(Binary.concatBytes(topic.toUint8Array(), indexBytes)),
-  )
+  return sequentialFeedIdentifier(topic, index)
 }
 
 const HTTP_NOT_FOUND = 404

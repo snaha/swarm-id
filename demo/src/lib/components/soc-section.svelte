@@ -14,6 +14,7 @@
   import { Input } from '$lib/components/ui/input'
   import { Textarea } from '$lib/components/ui/textarea'
   import { Button } from '$lib/components/ui/button'
+  import { uint8ArrayToHex } from '@snaha/swarm-id'
   import AsyncButton from './async-button.svelte'
   import { Separator } from '$lib/components/ui/separator'
   import ResultDisplay from './result-display.svelte'
@@ -28,9 +29,7 @@
   function generateRandomIdentifier(): string {
     const bytes = new Uint8Array(32)
     crypto.getRandomValues(bytes)
-    return Array.from(bytes)
-      .map((b) => b.toString(16).padStart(2, '0'))
-      .join('')
+    return uint8ArrayToHex(bytes)
   }
 
   let identifier = $state(generateRandomIdentifier())

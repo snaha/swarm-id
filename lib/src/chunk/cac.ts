@@ -5,7 +5,7 @@
 
 import { Binary } from "cafe-utility"
 import { Bytes, Reference, Span } from "@ethersphere/bee-js"
-import { calculateChunkAddress } from "./bmt"
+import { calculateChunkAddress } from "@ethersphere/core-sdk"
 import { MAX_PAYLOAD_SIZE, MIN_PAYLOAD_SIZE } from "./constants"
 
 const ENCODER = new TextEncoder()

@@ -14,7 +14,7 @@
  *   so the compensating top-up must run FIRST (see `resizePlan`).
  */
 import type { PrivateKey } from '@ethersphere/bee-js'
-import { TimeoutError, withTimeout } from '@snaha/swarm-id'
+import { TimeoutError, uint8ArrayToHex, withTimeout } from '@snaha/swarm-id'
 import { type PostageStamp, remainingLifespanSeconds, sleep } from '@snaha/swarm-id/internal'
 import {
   MultichainClient,
@@ -46,13 +46,10 @@ export const GAS_PER_TRANSACTION_XDAI_WEI = 1_000_000_000_000_000n // 0.001 xDAI
 /** Bee's fixed bucket depth; a batch's depth must exceed it. */
 export const BUCKET_DEPTH = 16
 const BATCH_NONCE_BYTES = 32
-const HEX_RADIX = 16
 
 /** batchId = keccak256(creator, nonce), so the nonce must never be reused. */
 function randomBatchNonce(): `0x${string}` {
-  return `0x${Array.from(crypto.getRandomValues(new Uint8Array(BATCH_NONCE_BYTES)))
-    .map((byte) => byte.toString(HEX_RADIX).padStart(2, '0'))
-    .join('')}`
+  return `0x${uint8ArrayToHex(crypto.getRandomValues(new Uint8Array(BATCH_NONCE_BYTES)))}`
 }
 
 /** The batch-owner key in the 0x-hex form the multichain package signs with. */
