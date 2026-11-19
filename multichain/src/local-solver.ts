@@ -23,7 +23,8 @@
  * Never import this from production code.
  */
 
-import { RollingValueProvider } from "cafe-utility"
+import { sleep } from "./poll"
+import { RollingValueProvider } from "./rolling-value-provider"
 import { encodeFunctionData } from "viem"
 import { ERC20_ABI } from "./abi"
 import { ensureBundlingDelegate, fundLocalAccount } from "./dev"
@@ -59,10 +60,6 @@ interface SourceTransaction {
 
 interface SourceBlock {
   transactions: SourceTransaction[]
-}
-
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms))
 }
 
 const sourceRpc = (method: string, params: unknown[]): Promise<unknown> =>

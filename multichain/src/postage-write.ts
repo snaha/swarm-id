@@ -3,7 +3,8 @@
 // Adapted from @upcoming/multichain-library (ISC)
 // https://github.com/ethersphere/multichain-library
 
-import { RollingValueProvider, System } from "cafe-utility"
+import type { RollingValueProvider } from "./rolling-value-provider"
+import { sleep } from "./poll"
 import { privateKeyToAccount } from "viem/accounts"
 import { POSTAGE_STAMP_ABI } from "./abi"
 import { chainFromSettings, publicClientFor, walletClientFor } from "./chain"
@@ -102,7 +103,7 @@ export async function createBatch(
   )
 
   for (let i = 0; i < settings.receiptPollAttempts; i++) {
-    await System.sleepMillis(settings.receiptPollMillis)
+    await sleep(settings.receiptPollMillis)
     const receipt = await getTransactionReceipt(
       transactionHash,
       settings,

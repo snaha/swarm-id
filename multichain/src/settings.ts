@@ -3,8 +3,6 @@
 // Adapted from @upcoming/multichain-library (ISC)
 // https://github.com/ethersphere/multichain-library
 
-import { Objects } from "cafe-utility"
-
 /** Contract addresses the machinery talks to. */
 export interface MultichainAddresses {
   bzz: `0x${string}`
@@ -31,7 +29,7 @@ export interface MultichainSettings {
   /** EIP-155 chain id baked into every signature. */
   chainId: number
   chainName: string
-  /** Rotated on transport failures (RollingValueProvider). */
+  /** Rotated on transport failures (`RollingValueProvider`). */
   rpcUrls: string[]
   fetchTimeoutMillis: number
   receiptPollMillis: number
@@ -78,8 +76,16 @@ const GNOSIS_MAINNET_DEFAULTS: MultichainSettings = {
 export function gnosisMainnetSettings(
   overrides?: Partial<MultichainSettings>,
 ): MultichainSettings {
-  return Objects.deepMerge2(
-    GNOSIS_MAINNET_DEFAULTS,
-    overrides ?? {},
-  ) as MultichainSettings
+  const given = Object.fromEntries(
+    Object.entries(overrides ?? {}).filter(([, value]) => value !== undefined),
+  )
+  return {
+    ...GNOSIS_MAINNET_DEFAULTS,
+    ...given,
+    rpcUrls: [...(overrides?.rpcUrls ?? GNOSIS_MAINNET_DEFAULTS.rpcUrls)],
+    addresses: {
+      ...GNOSIS_MAINNET_DEFAULTS.addresses,
+      ...overrides?.addresses,
+    },
+  }
 }

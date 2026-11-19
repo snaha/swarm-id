@@ -7,7 +7,7 @@
  * behaviour of this module.
  */
 
-import { RollingValueProvider } from "cafe-utility"
+import { RollingValueProvider } from "./rolling-value-provider"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { jsonRpc, jsonRpcOrUndefined } from "./fetch"
 import { gnosisMainnetSettings } from "./settings"

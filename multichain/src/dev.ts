@@ -10,7 +10,7 @@
  * BZZ market. Production code must never import this module.
  */
 
-import { RollingValueProvider } from "cafe-utility"
+import { RollingValueProvider } from "./rolling-value-provider"
 import { SIMPLE_7702_ACCOUNT_RUNTIME_BYTECODE } from "./delegate-bytecode"
 import { devRpc } from "./dev-rpc"
 import { jsonRpc, jsonRpcOrUndefined } from "./fetch"

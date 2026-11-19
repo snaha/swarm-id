@@ -3,7 +3,7 @@
 // Adapted from @upcoming/multichain-library (ISC)
 // https://github.com/ethersphere/multichain-library
 
-import { RollingValueProvider } from "cafe-utility"
+import type { RollingValueProvider } from "./rolling-value-provider"
 import { privateKeyToAccount } from "viem/accounts"
 import { ERC20_ABI } from "./abi"
 import { chainFromSettings, publicClientFor, walletClientFor } from "./chain"

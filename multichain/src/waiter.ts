@@ -3,7 +3,8 @@
 // Adapted from @upcoming/multichain-library (ISC)
 // https://github.com/ethersphere/multichain-library
 
-import { RollingValueProvider, System } from "cafe-utility"
+import type { RollingValueProvider } from "./rolling-value-provider"
+import { waitFor } from "./poll"
 import { getNativeBalance, getTransactionReceipt } from "./rpc"
 import type { MultichainSettings } from "./settings"
 import { getBzzBalance } from "./tokens"
@@ -21,7 +22,7 @@ export async function waitForTransactionSuccess(
   rpcProvider: RollingValueProvider<string>,
 ): Promise<void> {
   let reverted = false
-  await System.waitFor(
+  await waitFor(
     async () => {
       const receipt = await getTransactionReceipt(
         transactionHash,
@@ -53,7 +54,7 @@ export async function waitForBzzBalanceAtLeast(
   settings: MultichainSettings,
   rpcProvider: RollingValueProvider<string>,
 ): Promise<void> {
-  await System.waitFor(
+  await waitFor(
     async () =>
       (await getBzzBalance(address, settings, rpcProvider).catch(() => -1n)) >=
       minimum,
@@ -70,7 +71,7 @@ export async function waitForNativeBalanceAtLeast(
   settings: MultichainSettings,
   rpcProvider: RollingValueProvider<string>,
 ): Promise<void> {
-  await System.waitFor(
+  await waitFor(
     async () =>
       (await getNativeBalance(address, settings, rpcProvider).catch(
         () => -1n,

@@ -4,7 +4,7 @@
 import { http, defineChain } from "viem"
 import type { Chain, PublicClient, WalletClient } from "viem"
 import { createPublicClient, createWalletClient } from "viem"
-import { RollingValueProvider } from "cafe-utility"
+import type { RollingValueProvider } from "./rolling-value-provider"
 import type { MultichainSettings } from "./settings"
 
 /**
