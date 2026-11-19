@@ -18,6 +18,7 @@ export type {
 export { SyncSequentialFinder } from "./finder"
 export { AsyncSequentialFinder } from "./async-finder"
 export { BasicSequentialUpdater } from "./updater"
+export { sequentialFeedIdentifier } from "./identifier"
 
 import { SyncSequentialFinder } from "./finder"
 import { AsyncSequentialFinder } from "./async-finder"

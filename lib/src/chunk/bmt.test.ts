@@ -7,7 +7,7 @@
 
 import { describe, it, expect } from "vitest"
 import { Span } from "@ethersphere/bee-js"
-import { calculateChunkAddress } from "./bmt"
+import { calculateChunkAddress } from "./index"
 
 // ============================================================================
 // calculateChunkAddress Tests

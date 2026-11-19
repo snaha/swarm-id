@@ -16,6 +16,7 @@
   import { Label } from '$lib/components/ui/label'
   import { Separator } from '$lib/components/ui/separator'
   import { Switch } from '$lib/components/ui/switch'
+  import { uint8ArrayToHex } from '@snaha/swarm-id'
   import FeedUpload from './feed-upload.svelte'
   import FeedDownload from './feed-download.svelte'
   import FeedManifest from './feed-manifest.svelte'
@@ -23,9 +24,7 @@
   function generateRandomTopic(): string {
     const bytes = new Uint8Array(32)
     crypto.getRandomValues(bytes)
-    return Array.from(bytes)
-      .map((b) => b.toString(16).padStart(2, '0'))
-      .join('')
+    return uint8ArrayToHex(bytes)
   }
 
   let topic = $state(generateRandomTopic())

@@ -14,6 +14,7 @@ import { RollingValueProvider } from "cafe-utility"
 import { SIMPLE_7702_ACCOUNT_RUNTIME_BYTECODE } from "./delegate-bytecode"
 import { devRpc } from "./dev-rpc"
 import { jsonRpc, jsonRpcOrUndefined } from "./fetch"
+import { toHex } from "viem"
 import { privateKeyToAccount } from "viem/accounts"
 import { createBatch, type CreateBatchResult } from "./postage-write"
 import { getNativeBalance } from "./rpc"
@@ -123,14 +124,9 @@ export async function fundLocalAccount(
 }
 
 const NONCE_BYTES = 32
-const HEX_RADIX = 16
 
 function randomNonce(): `0x${string}` {
-  const bytes = crypto.getRandomValues(new Uint8Array(NONCE_BYTES))
-  const hex = Array.from(bytes)
-    .map((byte) => byte.toString(HEX_RADIX).padStart(2, "0"))
-    .join("")
-  return `0x${hex}`
+  return toHex(crypto.getRandomValues(new Uint8Array(NONCE_BYTES)))
 }
 
 // ============================================================================

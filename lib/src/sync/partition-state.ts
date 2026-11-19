@@ -826,7 +826,7 @@ export async function writePartitionState(opts: {
   const uploadIndices = incremental
     ? allIndices.filter(
         (i) =>
-          !bytesEqual(
+          !Binary.equals(
             extractChunk(localCounter, i, batchDepth),
             extractChunk(previousCounter, i, batchDepth),
           ),
@@ -1014,15 +1014,6 @@ export async function writePartitionState(opts: {
 function bytesAllZero(b: Uint8Array): boolean {
   for (let i = 0; i < b.length; i++) {
     if (b[i] !== 0) return false
-  }
-  return true
-}
-
-/** Byte-wise equality for two equal-length chunk plaintexts. */
-function bytesEqual(a: Uint8Array, b: Uint8Array): boolean {
-  if (a.length !== b.length) return false
-  for (let i = 0; i < a.length; i++) {
-    if (a[i] !== b[i]) return false
   }
   return true
 }
