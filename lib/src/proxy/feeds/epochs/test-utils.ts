@@ -7,8 +7,9 @@
  * Provides mock storage and helpers for testing epoch feed operations
  */
 
-import { Binary, Optional } from "cafe-utility"
-import { makeSOCAddress } from "@ethersphere/core-sdk"
+import { Optional } from "cafe-utility"
+import { Bytes, keccak256, makeSOCAddress } from "@ethersphere/core-sdk"
+import { hexToUint8Array, uint8ArrayToHex } from "../../../utils/hex"
 import {
   Bee,
   PrivateKey,
@@ -109,7 +110,7 @@ export class MockBee extends Bee {
       throw new Error("MockBee.uploadChunk takes raw chunk bytes")
     }
     const address = calculateChunkAddress(data).toUint8Array()
-    const reference = Binary.uint8ArrayToHex(address)
+    const reference = uint8ArrayToHex(address)
     await this.store.put(reference, data)
     return {
       reference: new Reference(reference),
@@ -137,7 +138,7 @@ export function createTestSigner(): PrivateKey {
  */
 export function createTestTopic(name: string = "testtopic"): Topic {
   const encoder = new TextEncoder()
-  const hash = Binary.keccak256(encoder.encode(name))
+  const hash = keccak256(encoder.encode(name))
   return new Topic(hash)
 }
 
@@ -251,14 +252,14 @@ export function mockFetch(store?: MockChunkStore, owner?: EthAddress): void {
       const identifier = idAndSig[0]
 
       // Calculate SOC address: Keccak256(identifier || owner)
-      const identifierBytes = Binary.hexToUint8Array(identifier)
+      const identifierBytes = hexToUint8Array(identifier)
       const reference = makeSOCAddress(identifierBytes, socOwner).toHex()
 
       // Build full SOC chunk data (identifier + signature + span + payload)
       // For mock purposes, we need to reconstruct the full SOC
       const signatureHex = idAndSig[1]
-      const signatureBytes = Binary.hexToUint8Array(signatureHex)
-      const fullSOCData = Binary.concatBytes(
+      const signatureBytes = hexToUint8Array(signatureHex)
+      const fullSOCData = Bytes.concat(
         identifierBytes,
         signatureBytes,
         body, // This is span + payload
@@ -295,8 +296,8 @@ export function mockFetch(store?: MockChunkStore, owner?: EthAddress): void {
       }
 
       // Fallback: store by content hash
-      const address = Binary.keccak256(body)
-      const reference = Binary.uint8ArrayToHex(address)
+      const address = keccak256(body)
+      const reference = uint8ArrayToHex(address)
       if (store) {
         await store.put(reference, body)
       }

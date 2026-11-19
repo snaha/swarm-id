@@ -116,9 +116,10 @@ class MixedErrorMockBee extends CountingMockBee {
 vi.mock("../../upload", async (importOriginal) => {
   const mod = await importOriginal<typeof import("../../upload")>()
   // vi.mock factories are hoisted above the file's static imports, so a
-  // top-level `Binary` would be in the TDZ here.
+  // top-level import would be in the TDZ here.
   // eslint-disable-next-line no-restricted-syntax
-  const { Binary } = await import("cafe-utility")
+  const sdk = await import("@ethersphere/core-sdk")
+  const { Bytes, keccak256, makeSOCAddress } = sdk
 
   return {
     ...mod,
@@ -143,12 +144,12 @@ vi.mock("../../upload", async (importOriginal) => {
       spanView.setBigUint64(0, BigInt(data.length), true)
 
       // Sign: hash(identifier + hash(span + data))
-      const contentHash = Binary.keccak256(Binary.concatBytes(span, data))
-      const toSign = Binary.concatBytes(identifier.toUint8Array(), contentHash)
+      const contentHash = keccak256(Bytes.concat(span, data))
+      const toSign = Bytes.concat(identifier.toUint8Array(), contentHash)
       const signature = signer.sign(toSign)
 
       // Build SOC data: identifier(32) + signature(65) + span(8) + payload
-      const socData = Binary.concatBytes(
+      const socData = Bytes.concat(
         identifier.toUint8Array(),
         signature.toUint8Array(),
         span,
@@ -157,13 +158,11 @@ vi.mock("../../upload", async (importOriginal) => {
 
       // Calculate SOC address: Keccak256(identifier + owner)
       const owner = signer.publicKey().address()
-      const socAddress = Binary.keccak256(
-        Binary.concatBytes(identifier.toUint8Array(), owner.toUint8Array()),
-      )
+      const socAddress = makeSOCAddress(identifier, owner)
 
       // Store directly in mock store (bypassing fetch)
       const store = bee.getStore()
-      const reference = Binary.uint8ArrayToHex(socAddress)
+      const reference = socAddress.toHex()
       await store.put(reference, socData)
 
       return {

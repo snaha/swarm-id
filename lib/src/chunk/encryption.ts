@@ -1,7 +1,7 @@
 // Copyright 2026 The Swarm Authors. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { Binary } from "cafe-utility"
+import { keccak256 } from "@ethersphere/core-sdk"
 import { webBytes } from "../utils/hex"
 
 export const KEY_LENGTH = 32
@@ -127,10 +127,10 @@ export class Encryption implements EncryptionInterface {
     const keyAndCtr = new Uint8Array(this.encryptionKey.length + 4)
     keyAndCtr.set(this.encryptionKey)
     keyAndCtr.set(ctrBytes, this.encryptionKey.length)
-    const ctrHash = Binary.keccak256(keyAndCtr)
+    const ctrHash = keccak256(keyAndCtr)
 
     // Second round of hashing for selective disclosure
-    const segmentKey = Binary.keccak256(ctrHash)
+    const segmentKey = keccak256(ctrHash)
 
     // XOR bytes up to length of input (out must be at least as long)
     const inLength = input.length

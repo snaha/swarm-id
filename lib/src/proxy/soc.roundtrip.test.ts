@@ -12,7 +12,8 @@
 
 import { describe, it, expect, beforeEach, afterEach } from "vitest"
 import { Identifier, PrivateKey, EthAddress } from "@ethersphere/bee-js"
-import { Binary } from "cafe-utility"
+import { keccak256 } from "@ethersphere/core-sdk"
+import { hexToUint8Array, uint8ArrayToHex } from "../utils/hex"
 import { uploadSOC, type UploadTarget } from "./upload"
 import { downloadEncryptedSOC, downloadSOC } from "./download-data"
 import {
@@ -31,7 +32,7 @@ import {
  */
 function createTestIdentifier(name: string): Identifier {
   const encoder = new TextEncoder()
-  const hash = Binary.keccak256(encoder.encode(name))
+  const hash = keccak256(encoder.encode(name))
   return new Identifier(hash)
 }
 
@@ -293,8 +294,8 @@ describe("Encrypted SOC round-trip integration", () => {
       const key = uploadResult.encryptionKey!
 
       // Convert to hex and back (simulating what might happen in message passing)
-      const hexKey = Binary.uint8ArrayToHex(key)
-      const recoveredKey = Binary.hexToUint8Array(hexKey)
+      const hexKey = uint8ArrayToHex(key)
+      const recoveredKey = hexToUint8Array(hexKey)
 
       // Verify key survives hex round-trip
       expect(recoveredKey).toEqual(key)
@@ -332,7 +333,7 @@ describe("Encrypted SOC round-trip integration", () => {
       )
 
       const key = uploadResult.encryptionKey!
-      const hexKey = Binary.uint8ArrayToHex(key)
+      const hexKey = uint8ArrayToHex(key)
 
       // Create mock bee for download
       const mockBee = createMockBee(store)

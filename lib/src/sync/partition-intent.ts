@@ -62,8 +62,7 @@ import {
   type EthAddress,
   type Stamper,
 } from "@ethersphere/bee-js"
-import { Binary } from "cafe-utility"
-import { makeSOCAddress } from "@ethersphere/core-sdk"
+import { makeSOCAddress, keccak256 } from "@ethersphere/core-sdk"
 import { downloadEncryptedSOC } from "../proxy/download-data"
 import { uploadSOC, type UploadTarget } from "../proxy/upload"
 import { UtilizationAwareStamper } from "../utils/batch-utilization"
@@ -147,7 +146,7 @@ export function makePartitionIntentIdentifier(
   deviceId: string,
   epochBucket: number,
 ): Identifier {
-  const hash = Binary.keccak256(
+  const hash = keccak256(
     new TextEncoder().encode(
       `${PARTITION_INTENT_DOMAIN}:${batchId.toHex()}:${partition}:${deviceId}:${epochBucket}`,
     ),
@@ -185,7 +184,7 @@ export function makePartitionOccupancyIdentifier(
   partition: number,
   epochBucket: number,
 ): Identifier {
-  const hash = Binary.keccak256(
+  const hash = keccak256(
     new TextEncoder().encode(
       `${PARTITION_OCCUPANCY_DOMAIN}:${batchId.toHex()}:${partition}:${epochBucket}`,
     ),

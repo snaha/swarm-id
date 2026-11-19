@@ -10,7 +10,7 @@
  * Based on the Swarm Book of Feeds and Bee's epochs implementation.
  */
 
-import { Binary } from "cafe-utility"
+import { Bytes, keccak256 } from "@ethersphere/core-sdk"
 import { Identifier, type Topic } from "@ethersphere/bee-js"
 
 /** Maximum epoch level (2^32 seconds ≈ 136 years) */
@@ -59,7 +59,7 @@ export class EpochIndex implements Epoch {
     // Write level as 1 byte
     buffer[8] = this.level
 
-    return Binary.keccak256(buffer)
+    return keccak256(buffer)
   }
 
   /**
@@ -197,6 +197,6 @@ export async function makeEpochIdentifier(
 ): Promise<Identifier> {
   const epochHash = await epoch.marshalBinary()
   return new Identifier(
-    Binary.keccak256(Binary.concatBytes(topic.toUint8Array(), epochHash)),
+    keccak256(Bytes.concat(topic.toUint8Array(), epochHash)),
   )
 }

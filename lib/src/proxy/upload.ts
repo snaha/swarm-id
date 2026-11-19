@@ -24,7 +24,6 @@ import type {
   UploadOptions,
   EnvelopeWithBatchId,
 } from "@ethersphere/bee-js"
-import { Binary } from "cafe-utility"
 import {
   makeContentAddressedChunk,
   makeEncryptedContentAddressedChunk,
@@ -44,6 +43,7 @@ import { ChunkUploadStream } from "./chunk-upload-stream"
 import {
   convertEnvelopeToMarshaledStamp,
   makeSOCAddress,
+  Bytes,
 } from "@ethersphere/core-sdk"
 import type { ChunkReference, UploadProgress } from "./types"
 import type { StampWorkerPool } from "./stamp-worker-pool"
@@ -427,7 +427,7 @@ async function uploadStampedChunkViaWebSocket(
   address: Uint8Array,
 ): Promise<void> {
   const envelope = await stamp(address)
-  const stamped = Binary.concatBytes(
+  const stamped = Bytes.concat(
     convertEnvelopeToMarshaledStamp(envelope).toUint8Array(),
     chunkData,
   )
@@ -650,13 +650,13 @@ async function buildEncryptedMerkleTree(
 
     // Create chunk with correct span + payload
     const spanBytes = Span.fromBigInt(totalSpan).toUint8Array()
-    const chunkData = Binary.concatBytes(spanBytes, payload)
+    const chunkData = Bytes.concat(spanBytes, payload)
 
     // Encrypt the chunk
     const encrypter = newChunkEncrypter()
     const { key, encryptedSpan, encryptedData } =
       encrypter.encryptChunk(chunkData)
-    const encryptedChunkData = Binary.concatBytes(encryptedSpan, encryptedData)
+    const encryptedChunkData = Bytes.concat(encryptedSpan, encryptedData)
 
     // Calculate address from encrypted chunk
     const address = await calculateChunkAddress(encryptedChunkData)
@@ -1079,7 +1079,7 @@ export async function uploadSOC(
   // Sign: hash(identifier + chunkAddress)
   // For encrypted SOCs, this is the encrypted chunk address
   // For plain SOCs, this is the unencrypted chunk address
-  const toSign = Binary.concatBytes(identifier.toUint8Array(), chunkAddress)
+  const toSign = Bytes.concat(identifier.toUint8Array(), chunkAddress)
   const signature = signer.sign(toSign)
 
   const socAddressBytes = makeSOCAddress(identifier, owner).toUint8Array()
