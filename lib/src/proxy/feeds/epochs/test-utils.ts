@@ -8,6 +8,7 @@
  */
 
 import { Binary, Optional } from "cafe-utility"
+import { makeSOCAddress } from "@ethersphere/core-sdk"
 import {
   Bee,
   PrivateKey,
@@ -251,11 +252,7 @@ export function mockFetch(store?: MockChunkStore, owner?: EthAddress): void {
 
       // Calculate SOC address: Keccak256(identifier || owner)
       const identifierBytes = Binary.hexToUint8Array(identifier)
-      const ownerBytes = Binary.hexToUint8Array(socOwner)
-      const socAddress = Binary.keccak256(
-        Binary.concatBytes(identifierBytes, ownerBytes),
-      )
-      const reference = Binary.uint8ArrayToHex(socAddress)
+      const reference = makeSOCAddress(identifierBytes, socOwner).toHex()
 
       // Build full SOC chunk data (identifier + signature + span + payload)
       // For mock purposes, we need to reconstruct the full SOC
@@ -289,10 +286,7 @@ export function mockFetch(store?: MockChunkStore, owner?: EthAddress): void {
       // Compute SOC address: Keccak256(identifier + owner)
       if (store && owner) {
         const identifier = body.slice(0, SOC_IDENTIFIER_LENGTH)
-        const socAddress = Binary.keccak256(
-          Binary.concatBytes(identifier, owner.toUint8Array()),
-        )
-        const reference = Binary.uint8ArrayToHex(socAddress)
+        const reference = makeSOCAddress(identifier, owner).toHex()
         await store.put(reference, body)
         return new Response(JSON.stringify({ reference }), {
           status: 200,

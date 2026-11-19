@@ -12,6 +12,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { BatchId, PrivateKey, type Stamper } from "@ethersphere/bee-js"
 import { Binary } from "cafe-utility"
+import { makeSOCAddress } from "@ethersphere/core-sdk"
 import {
   acquirePartitionLock,
   compareGenerations,
@@ -660,10 +661,7 @@ describe("acquirePartitionLock — known failure modes", () => {
    */
   function lockSocAddress(): string {
     const identifier = makePartitionLockIdentifier(TEST_BATCH_ID, PARTITION)
-    const addr = Binary.keccak256(
-      Binary.concatBytes(identifier.toUint8Array(), OWNER.toUint8Array()),
-    )
-    return Binary.uint8ArrayToHex(addr)
+    return makeSOCAddress(identifier, OWNER).toHex()
   }
 
   it("an 'acquired' outcome is momentary — a later overwrite doesn't notify the holder", async () => {

@@ -22,6 +22,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest"
 import { EthAddress, PrivateKey, Reference } from "@ethersphere/bee-js"
 import { Binary } from "cafe-utility"
+import { makeSOCAddress } from "@ethersphere/core-sdk"
 import type { Device } from "../schemas"
 import { withTimeout } from "../utils/promise"
 
@@ -88,14 +89,7 @@ for (let index = 0; index < MAPPED_SLOTS; index++) {
   const identifier = rosterIdentifier(topic, BigInt(index))
   identifierToIndex.set(identifier.toHex(), index)
   // The address the sequential finder reads: keccak256(identifier ‖ owner).
-  addressToIndex.set(
-    Binary.uint8ArrayToHex(
-      Binary.keccak256(
-        Binary.concatBytes(identifier.toUint8Array(), OWNER.toUint8Array()),
-      ),
-    ),
-    index,
-  )
+  addressToIndex.set(makeSOCAddress(identifier, OWNER).toHex(), index)
 }
 
 function indexOfIdentifier(hex: string): number {
