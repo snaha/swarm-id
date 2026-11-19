@@ -3,10 +3,10 @@
 // Adapted from @upcoming/multichain-library (ISC)
 // https://github.com/ethersphere/multichain-library
 
-import { Dates, System } from "cafe-utility"
+import { sleep } from "./poll"
 
 const ATTEMPTS = 4
-const BACKOFF_MILLIS = Dates.seconds(2)
+const BACKOFF_MILLIS = 2_000
 
 /**
  * How each client family says it: Nethermind `AlreadyKnown`, geth and erigon
@@ -95,7 +95,7 @@ export async function withFeeTooLowRetry<T>(
         return options.onAlreadyKnown()
       }
       if (error instanceof Error && FEE_TOO_LOW.test(error.message)) {
-        await System.sleepMillis(BACKOFF_MILLIS)
+        await sleep(BACKOFF_MILLIS)
       } else {
         throw error
       }

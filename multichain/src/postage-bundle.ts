@@ -20,7 +20,8 @@
  * exactly as the sequential version did — verified on chain, not assumed.
  */
 
-import { RollingValueProvider, System } from "cafe-utility"
+import type { RollingValueProvider } from "./rolling-value-provider"
+import { sleep } from "./poll"
 import {
   BaseError,
   ExecutionRevertedError,
@@ -278,7 +279,7 @@ export async function bundleCreate(
   )
 
   for (let i = 0; i < settings.receiptPollAttempts; i++) {
-    await System.sleepMillis(settings.receiptPollMillis)
+    await sleep(settings.receiptPollMillis)
     const receipt = await getTransactionReceipt(
       transactionHash,
       settings,

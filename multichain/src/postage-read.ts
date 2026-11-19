@@ -1,7 +1,7 @@
 // Copyright 2026 The Swarm Authors. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { RollingValueProvider } from "cafe-utility"
+import type { RollingValueProvider } from "./rolling-value-provider"
 import { POSTAGE_STAMP_ABI } from "./abi"
 import { publicClientFor } from "./chain"
 import type { MultichainSettings } from "./settings"
