@@ -88,7 +88,6 @@ auditConfig:
     # Inside @web3-onboard/core and @relayprotocol/relay-sdk, with no fix in
     # the major they need (see above): zod 3, deepmerge, esbuild 0.19. #1022
     - GHSA-mrhx-c7xc-m3w5
-    - GHSA-gcqx-w48m-w2h4
     - GHSA-67mh-4wv8-2f99
     # The svelte 3 runtime compiled into @web3-onboard/core, which has no fixed
     # release in its major. The apps' own svelte is past every one of these.
