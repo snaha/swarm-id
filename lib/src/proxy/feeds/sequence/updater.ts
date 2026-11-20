@@ -7,10 +7,10 @@
  * Handles writing updates to sequential feeds by incrementing the index.
  */
 
-import { Binary } from "cafe-utility"
 import type { Bee, Stamper } from "@ethersphere/bee-js"
-import { EthAddress, Topic, PrivateKey, Identifier } from "@ethersphere/bee-js"
+import { EthAddress, Topic, PrivateKey } from "@ethersphere/bee-js"
 import { uploadSOC, type UploadTarget } from "../../upload"
+import { sequentialFeedIdentifier } from "./identifier"
 import type { SequentialUpdater } from "./types"
 
 export class BasicSequentialUpdater implements SequentialUpdater {
@@ -27,7 +27,7 @@ export class BasicSequentialUpdater implements SequentialUpdater {
     stamper: Stamper,
     encryptionKey?: Uint8Array,
   ): Promise<Uint8Array> {
-    const identifier = this.makeIdentifier(this.nextIndex)
+    const identifier = sequentialFeedIdentifier(this.topic, this.nextIndex)
 
     const target: UploadTarget = {
       mode: "stamper",
@@ -59,13 +59,5 @@ export class BasicSequentialUpdater implements SequentialUpdater {
 
   reset(): void {
     this.nextIndex = 0n
-  }
-
-  private makeIdentifier(index: bigint): Identifier {
-    const indexBytes = Binary.numberToUint64(index, "BE")
-    const identifierBytes = Binary.keccak256(
-      Binary.concatBytes(this.topic.toUint8Array(), indexBytes),
-    )
-    return new Identifier(identifierBytes)
   }
 }

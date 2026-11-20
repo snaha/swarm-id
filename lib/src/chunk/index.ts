@@ -36,7 +36,7 @@ export {
 } from "./encryption"
 
 // BMT hash calculation
-export { calculateChunkAddress } from "./bmt"
+export { calculateChunkAddress } from "@ethersphere/core-sdk"
 
 // Content-addressed chunks
 export { type ContentAddressedChunk, makeContentAddressedChunk } from "./cac"

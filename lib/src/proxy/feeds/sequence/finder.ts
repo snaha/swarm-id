@@ -13,12 +13,8 @@ import type { EthAddress, Topic, BeeRequestOptions } from "@ethersphere/bee-js"
 import { makeSOCAddress } from "@ethersphere/core-sdk"
 import { abortedError } from "../../../errors"
 import type { ChunkDownloader } from "../../download-data"
+import { sequentialFeedIdentifier } from "./identifier"
 import type { SequentialFinder, SequentialLookupResult } from "./types"
-
-function makeSequentialIdentifier(topic: Topic, index: bigint): Uint8Array {
-  const indexBytes = Binary.numberToUint64(index, "BE")
-  return Binary.keccak256(Binary.concatBytes(topic.toUint8Array(), indexBytes))
-}
 
 export class SyncSequentialFinder implements SequentialFinder {
   constructor(
@@ -47,7 +43,7 @@ export class SyncSequentialFinder implements SequentialFinder {
     index: bigint,
     requestOptions?: BeeRequestOptions,
   ): Promise<boolean> {
-    const identifier = makeSequentialIdentifier(this.topic, index)
+    const identifier = sequentialFeedIdentifier(this.topic, index)
     const address = makeSOCAddress(identifier, this.owner)
 
     // Bee's /chunks endpoint returns 500 ("read chunk failed") for a genuinely

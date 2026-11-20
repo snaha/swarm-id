@@ -108,9 +108,7 @@
           const reader = clientStore.client!.makeSequentialFeedReader({ topic, owner })
           const feedResult = await reader.downloadRawPayload(getDownloadOptions())
           const manifestRefBytes = feedResult.payload
-          manifestReference = Array.from(manifestRefBytes)
-            .map((b: number) => b.toString(16).padStart(2, '0'))
-            .join('')
+          manifestReference = uint8ArrayToHex(manifestRefBytes)
           logStore.log(
             `Got manifest reference from v1 payload: ${manifestReference} (index: ${feedResult.feedIndex})`,
           )
