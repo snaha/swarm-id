@@ -310,6 +310,35 @@ describe("stamper uploads honour deferred", () => {
       expect(options).toMatchObject({ deferred: false })
     }
   })
+
+  it("on a SOC", async () => {
+    const fetchMock = stubFetch()
+    await uploadSOC(
+      stamperTarget(new MockBee()),
+      signer,
+      identifier,
+      new Uint8Array(16),
+      { tag: TAG_UID, deferred: true },
+    )
+    const [, init] = fetchMock.mock.calls[0] as [string, RequestInit]
+    expect(init.headers).toMatchObject({ "swarm-deferred-upload": "true" })
+  })
+
+  // From 2.8.1 Bee's /soc handler takes a tagged upload without the header as
+  // deferred: the node keeps the first chunk it stored at the address and
+  // serves that, so a lock, beacon or pointer rewritten there never reads back.
+  it("sends a SOC direct when the caller does not say", async () => {
+    const fetchMock = stubFetch()
+    await uploadSOC(
+      stamperTarget(new MockBee()),
+      signer,
+      identifier,
+      new Uint8Array(16),
+      { tag: TAG_UID },
+    )
+    const [, init] = fetchMock.mock.calls[0] as [string, RequestInit]
+    expect(init.headers).toMatchObject({ "swarm-deferred-upload": "false" })
+  })
 })
 
 /**

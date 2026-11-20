@@ -224,10 +224,10 @@ export async function writePartitionLock(opts: {
   const identifier = makePartitionLockIdentifier(batchId, partition)
   const data = new TextEncoder().encode(JSON.stringify(payload))
   const target: UploadTarget = { mode: "stamper", bee, stamper }
-  // No `deferred` flag: Bee's /soc handler hardcodes Deferred:false and ignores
-  // the Swarm-Deferred-Upload header (bee 2.8.0 pkg/api/soc.go), so SOC writes
-  // are always synchronous / receipt-backed regardless. (Replication still
-  // depends on node reachability — see .claude/rules/bee-cluster.md.)
+  // No `deferred` flag: `uploadSOC` sends a stamped SOC direct by default, so
+  // the write is synchronous and receipt-backed, and a rewrite at this address
+  // reads back. (Replication still depends on node reachability — see
+  // .claude/rules/bee-cluster.md.)
   await uploadSOC(target, backupSigner, identifier, data, {
     encryptionKey: swarmEncryptionKey,
   })
