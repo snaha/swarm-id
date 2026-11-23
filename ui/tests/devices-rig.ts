@@ -70,6 +70,18 @@ export const PUBLISHED_LINE = 'Published device state'
 export const YIELDED_LINE = 'Released idle partition'
 /** Device-state publishes inside one idle window that say a holder was never idle (#707). */
 export const BUSY_PUBLISHES = 3
+/** The #707 loop's cadence: one device-state publish every ~3.5 s per device
+ *  (20 publishes in 70 s, measured in issue #707). */
+const BUSY_LOOP_PERIOD_MS = 3_500
+const MIN_BUSY_PUBLISHES = 2
+
+/** Publishes through a wait of `waitMs` that say a holder was never idle: half
+ *  what the #707 loop makes in that time, so a slower loop still counts while a
+ *  holder that published once or twice for a reason of its own does not (≈4
+ *  for the 30 s slot wait, 6 for 45 s). */
+function busyPublishesFor(waitMs: number): number {
+  return Math.max(MIN_BUSY_PUBLISHES, Math.floor(waitMs / (2 * BUSY_LOOP_PERIOD_MS)))
+}
 
 export const PARTITION_LINE = /^Partition: /
 /** The sidebar's per-drive lane line: `Lane on <8 hex>…: <n|Inactive>`. */
@@ -339,19 +351,33 @@ export class Device {
 
   /**
    * `uploadAndHold` for a device that has to be handed a slot by a holder.
-   * While the two holders keep publishing device state to each other (#707)
-   * neither is ever idle, no `lease-request` is answered, and the slot wait
-   * times out with "No partition available". That is the bug, not this
-   * scenario's subject, so the scenario is skipped with the pointer rather
-   * than failed — and passes on its own once the holders go quiet.
+   * While the holders keep publishing device state to each other (#707) none
+   * is ever idle, no `lease-request` is answered, and the slot wait times out
+   * with "No partition available". That is the bug, not this scenario's
+   * subject, so the scenario is skipped with the pointer — but only on that
+   * evidence: a holder among `others` published at the #707 loop's rate
+   * through the wait (`busyPublishesFor`). A wait that idle holders left
+   * unanswered is a lease failure, and fails the scenario.
    */
-  async uploadAndHoldOrSkip(page: Page = this.page): Promise<number> {
+  async uploadAndHoldOrSkip(others: Device[], page: Page = this.page): Promise<number> {
+    const asked = Date.now()
     try {
       return await this.uploadAndHold(page)
     } catch (error) {
+      const waited = Date.now() - asked
       const shown = error instanceof Error ? error.message : String(error)
       if (UNANSWERED_WAIT.test(shown)) {
-        skipScenario(`${this.label}'s slot wait was never answered: holders stayed busy (#707)`)
+        const threshold = busyPublishesFor(waited)
+        for (const device of others) {
+          if (device === this || (await device.partition()) === undefined) continue
+          const published = device.publishesSince(asked)
+          if (published >= threshold) {
+            skipScenario(
+              `${this.label}'s slot wait was never answered: holder ${device.label} published ` +
+                `${published}× through it, ${threshold} say busy (#707)`,
+            )
+          }
+        }
       }
       throw error
     }

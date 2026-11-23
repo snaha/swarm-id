@@ -187,7 +187,6 @@ export class BasicEpochUpdater implements EpochUpdater {
 
     const result = await uploadSOC(target, this.signer, identifier, payload, {
       encryptionKey,
-      deferred: false, // deferred setting is NOT the cause of /bzz/ timeout
     })
 
     return result.socAddress
