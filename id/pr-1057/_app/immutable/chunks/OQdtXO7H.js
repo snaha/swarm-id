@@ -1,0 +1,1 @@
+var e=/^[0-9a-fA-F]*$/;function t(e){return e.startsWith(`0x`)?e.slice(2):e}function n(t){if(t.startsWith(`0x`))return t;if(!e.test(t))throw Error(`Invalid hex string.`);return`0x${t}`}export{t as n,n as t};
