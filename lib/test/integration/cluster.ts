@@ -17,6 +17,17 @@ import { Bee, BatchId, Stamper } from "@ethersphere/bee-js"
 export const QUEEN_URL = "http://localhost:1633"
 
 /**
+ * The cluster's other full nodes: `pnpm dev:cluster:start` runs `--full 4`,
+ * the queen and three full workers, whose APIs bee-compose's `compose.yml`
+ * maps to these ports.
+ */
+export const WORKER_URLS = [
+  "http://localhost:16331",
+  "http://localhost:16332",
+  "http://localhost:16333",
+]
+
+/**
  * Queen node private key from the bee-compose dev chain. The queen owns every
  * stamp bought through its API, so this key can sign chunks for those stamps.
  * Documented in docs-site/src/content/docs/local-development.mdx.
