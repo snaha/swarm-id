@@ -143,7 +143,9 @@ newcomer                         signaling server                       existing
   stays on the relay.
 - **Publish.** `SignalingTransport.publish` encrypts the message **once** (AES-GCM, the bus
   key) and then delivers per peer: over that peer's DataChannel if it is open, else as a
-  `relay` frame the server forwards as-is. A context alone in its room sends nothing. The
+  `relay` frame the server forwards as-is. A lane message (`lane-claim`, `lane-free`,
+  `lane-held`) is always a `relay` frame: a channel can read open after its path died, and the
+  server's connection is the one a lane's liveness is measured on. A context alone in its room sends nothing. The
   server sees a room name, connection timing, and ciphertext.
 - **Receive.** Every transport hands raw messages to the one `AccountBus`, which validates
   them against `BusMessageSchema` (`lib/src/bus/messages.ts`) and drops what does not parse —

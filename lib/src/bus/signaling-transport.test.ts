@@ -13,6 +13,15 @@ import type { BusMessageInput } from "./messages"
 const DERIVATION_KEY = "11".repeat(32)
 const OTHER_DERIVATION_KEY = "99".repeat(32)
 
+const LANE_CLAIM_MESSAGE: BusMessageInput = {
+  type: "lane-claim",
+  accountId: "a".repeat(40),
+  batchId: "b".repeat(64),
+  partition: 1,
+  from: "peer-1",
+  round: "0123456789abcdef",
+}
+
 const UTILIZATION_MESSAGE: BusMessageInput = {
   type: "utilization-updated",
   batchId: "ab".repeat(32),
@@ -646,6 +655,37 @@ describe("SignalingTransport — WebRTC upgrade", () => {
         0,
       )
       expect(totalSent).toBeGreaterThanOrEqual(1)
+    } finally {
+      first.close()
+      second.close()
+      FakePeerConnection.registry.clear()
+      FakePeerConnection.channels = []
+    }
+  })
+
+  // A channel can read "open" for a while after its path died, and what is
+  // sent on it then is lost without an error. A lane message goes through
+  // the server, whose connection is the one the lane's liveness is about.
+  it("keeps a lane message on the relay when the data channel is open", async () => {
+    const first = makeTransport({ createPeerConnection: fakeRtcFactory })
+    const second = makeTransport({ createPeerConnection: fakeRtcFactory })
+    try {
+      const received = collect(first)
+      await waitForPeers(first, 1)
+      await waitForPeers(second, 1)
+      await vi.waitFor(() =>
+        expect(
+          FakePeerConnection.channels.filter((c) => c.readyState === "open")
+            .length,
+        ).toBe(2),
+      )
+
+      second.publish(LANE_CLAIM_MESSAGE)
+      await vi.waitFor(() => expect(received.length).toBe(1))
+      expect(received[0]).toEqual(LANE_CLAIM_MESSAGE)
+      expect(
+        FakePeerConnection.channels.every((channel) => channel.sentCount === 0),
+      ).toBe(true)
     } finally {
       first.close()
       second.close()

@@ -403,12 +403,15 @@ export class SignalingTransport implements BusTransport {
     // which knows the room even where this context's view of it is behind.
     const recipients: [string, PeerState | undefined][] =
       to === undefined ? [...this.peers] : [[to, this.peers.get(to)]]
+    // A lane message always goes through the server: a channel can read
+    // "open" after its path died, and a send on it is then lost in silence.
+    const useChannel = !message.type.startsWith("lane-")
     for (const [peerId, peer] of recipients) {
       // Per peer, and never fatal to the rest of the fan-out: a `send` that
       // throws (SCTP size limit, a channel torn down between the readyState
       // read and the call) must not escape this loop and starve every peer
       // after it. A failed channel falls through to the relay.
-      if (peer?.dataChannel?.readyState === "open") {
+      if (useChannel && peer?.dataChannel?.readyState === "open") {
         try {
           peer.dataChannel.send(ciphertext)
           continue

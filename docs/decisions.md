@@ -7,6 +7,21 @@ present and may point at an issue or PR; the reasons live here.
 
 A PR that makes or changes a decision adds the entry in the same PR.
 
+## 2026-11-23 A lane message goes through the server, never a DataChannel
+
+**Context.** The signaling transport delivers per peer over that peer's DataChannel when it
+reads open, else through the server. A channel reads open for a while after its path has
+died, and a message sent on it then is lost without an error, so a claim or its answer
+could vanish and the claimant waited out the whole absence window.
+
+**Decision.** `lane-claim`, `lane-free` and `lane-held` are always sent as `relay` frames.
+Everything else keeps using the channel.
+
+**Why.** A lane's liveness is measured on the server connection, so that is the path its
+messages should share: either both work or the context is not confirmed. Lane traffic was
+already sized for contexts with no channel at all, and answers go to the claimant alone,
+so the server's message budget holds.
+
 ## 2026-11-18 An entry a context knows of is never taken for absent
 
 **Context.** Bee answers `404`, or `500 read chunk failed`, for a retrieval that failed for
