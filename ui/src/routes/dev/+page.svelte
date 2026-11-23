@@ -1086,7 +1086,7 @@ Check console logs for details:
       if (importSetDefault) account.setDefaultStamp(stamp.batchID)
       importMessage =
         `✅ Imported ${batchId.toHex().slice(0, 12)}… (depth ${stamp.depth}` +
-        `${stamp.immutableFlag ? ', immutable — partition sharing needs a mutable batch' : ''}) ` +
+        `${stamp.immutableFlag ? ', immutable' : ''}) ` +
         `into ${account.name}`
     } catch (error) {
       importError = error instanceof Error ? error.message : String(error)

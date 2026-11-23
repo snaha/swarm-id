@@ -20,7 +20,6 @@ export interface DilutionChainState {
   remaining: bigint
   /** The batch owner, the only key `increaseDepth` accepts. */
   owner: string
-  immutable: boolean
 }
 
 export interface DilutionInput {
@@ -40,7 +39,7 @@ export interface DilutionInput {
  * step left to take, which includes one a previous attempt already diluted —
  * the reason a retried deletion sends nothing twice.
  */
-export type DilutionSkipReason = 'kept' | 'expires-soon' | 'not-owned' | 'immutable' | 'expired'
+export type DilutionSkipReason = 'kept' | 'expires-soon' | 'not-owned' | 'expired'
 
 export type DilutionPlan = { targetDepth: number } | { skip: DilutionSkipReason }
 
@@ -63,9 +62,6 @@ export function planDeleteDilution(input: DilutionInput): DilutionPlan {
   }
   if (chain.owner.toLowerCase() !== input.signerAddress.toLowerCase()) {
     return { skip: 'not-owned' }
-  }
-  if (chain.immutable) {
-    return { skip: 'immutable' }
   }
   const margined = input.minimumBalancePerChunk + input.lastPrice * FLOOR_MARGIN_BLOCKS
   // At least one PLUR: a zero floor (a chain with no price yet) is met by every

@@ -369,9 +369,8 @@ export async function preflightExtend(
 }
 
 /**
- * Extend preflight plus the resize-only rules: the signer must be the on-chain
- * owner, and immutable batches are not resized (the chain would allow it, but
- * Bee-node semantics of diluting an immutable batch are undefined).
+ * Extend preflight plus the resize-only rule: the signer must be the on-chain
+ * owner. `immutableFlag` is not consulted (#1056).
  * A batch already at/above `newDepth` is reported via `alreadyResized` — the
  * increase landed in a lost session and must be recorded, not re-sent.
  */
@@ -386,9 +385,6 @@ export async function preflightResize(
   const ownerAddress = signerKey.publicKey().address().toChecksum()
   if (preflight.batch.owner.toLowerCase() !== ownerAddress.toLowerCase()) {
     throw new Error('This drive is owned by a different key, so its size cannot be changed here.')
-  }
-  if (preflight.batch.immutableFlag) {
-    throw new Error('This drive is immutable and cannot be resized.')
   }
   return { ...preflight, alreadyResized: preflight.batch.depth >= newDepth }
 }
@@ -478,7 +474,7 @@ export async function readStampFromChain(
 
 /**
  * The batch as account deletion plans it, without refusing anything: a batch
- * that is gone, expired, owned elsewhere or immutable is a reason to leave it
+ * that is gone, expired or owned elsewhere is a reason to leave it
  * be (`planDeleteDilution`), not an error. Undefined when the chain has no such
  * batch; a failed read throws.
  */
@@ -495,7 +491,6 @@ export async function readDilutionState(
     depth: batch.depth,
     remaining: await chain.getRemainingBalance(batchIdHex(stamp)),
     owner: batch.owner,
-    immutable: batch.immutableFlag,
   }
 }
 

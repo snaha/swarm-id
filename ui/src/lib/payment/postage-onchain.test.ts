@@ -1,12 +1,17 @@
 // Copyright 2026 The Swarm Authors. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
-import { BatchId } from '@ethersphere/bee-js'
+import { BatchId, PrivateKey } from '@ethersphere/bee-js'
 import type { MultichainClient } from '@swarm-id/multichain'
 import { describe, expect, it, vi } from 'vitest'
 
 import type { Account } from '$lib/types'
 
-import { confirmTopUp, readStampsFromChain, reconcileStampFromChain } from './postage-onchain'
+import {
+  confirmTopUp,
+  preflightResize,
+  readStampsFromChain,
+  reconcileStampFromChain,
+} from './postage-onchain'
 
 vi.mock('$lib/payment/chain', () => ({ postageChain: vi.fn(), ownerFunds: vi.fn() }))
 
@@ -91,5 +96,22 @@ describe('readStampsFromChain', () => {
     const stamp = UNSEEN as Parameters<typeof reconcileStampFromChain>[1]
     await expect(reconcileStampFromChain(account, stamp, chain(1n).client)).resolves.toBe(false)
     expect(account.updateStamp).not.toHaveBeenCalled()
+  })
+})
+
+describe('preflightResize', () => {
+  const SIGNER = new PrivateKey('b'.repeat(64))
+  const OWNER = SIGNER.publicKey().address().toChecksum()
+  const DEPTH = 20
+
+  it('resizes an immutable batch the signer owns (#1056)', async () => {
+    const client = {
+      getPostageBatch: vi.fn(async () => ({ owner: OWNER, depth: DEPTH, immutableFlag: true })),
+      getPostageWriteConstraints: vi.fn(async () => ({ paused: false })),
+      getRemainingBalance: vi.fn(async () => BEFORE),
+    } as unknown as MultichainClient
+    await expect(preflightResize(STAMP, SIGNER, DEPTH + 1, client)).resolves.toMatchObject({
+      alreadyResized: false,
+    })
   })
 })

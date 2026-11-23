@@ -17,7 +17,7 @@ const DEPTH = 20
 
 function input(overrides: Partial<DilutionInput> = {}, remaining = 50n * MINIMUM): DilutionInput {
   return {
-    chain: { depth: DEPTH, remaining, owner: SIGNER, immutable: false },
+    chain: { depth: DEPTH, remaining, owner: SIGNER },
     signerAddress: SIGNER,
     minimumBalancePerChunk: MINIMUM,
     lastPrice: PRICE,
@@ -71,7 +71,6 @@ describe('planDeleteDilution', () => {
           depth: first.targetDepth,
           remaining: postDilution(remaining, first.targetDepth),
           owner: SIGNER,
-          immutable: false,
         },
       }),
     )
@@ -97,7 +96,7 @@ describe('planDeleteDilution', () => {
     expect(
       planDeleteDilution(
         input({
-          chain: { depth: DEPTH, remaining: 50n * MINIMUM, owner: OTHER, immutable: false },
+          chain: { depth: DEPTH, remaining: 50n * MINIMUM, owner: OTHER },
         }),
       ),
     ).toEqual({ skip: 'not-owned' })
@@ -111,21 +110,10 @@ describe('planDeleteDilution', () => {
             depth: DEPTH,
             remaining: 50n * MINIMUM,
             owner: SIGNER.toUpperCase().replace('0X', '0x'),
-            immutable: false,
           },
         }),
       ),
     ).toEqual({ targetDepth: DEPTH + 5 })
-  })
-
-  it('leaves an immutable batch alone', () => {
-    expect(
-      planDeleteDilution(
-        input({
-          chain: { depth: DEPTH, remaining: 50n * MINIMUM, owner: SIGNER, immutable: true },
-        }),
-      ),
-    ).toEqual({ skip: 'immutable' })
   })
 
   // A chain with no price yet (a fresh local contract) has a zero floor, which
