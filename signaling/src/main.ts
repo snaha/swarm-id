@@ -18,3 +18,14 @@ const allowedOrigins = process.env.ALLOWED_ORIGINS?.split(',')
 
 const server = await createSignalingServer({ port, allowedOrigins })
 console.log(`[signaling] listening on :${server.port}`)
+
+// The platform starts the next instance before it stops this one. A context
+// still served here would go on being confirmed in a room nobody new joins,
+// while its lanes are taken in the new instance's room. Dropping every socket
+// at once ends each of those holds: its context reconnects as a new one.
+for (const signal of ['SIGTERM', 'SIGINT'] as const) {
+  process.once(signal, () => {
+    console.log(`[signaling] ${signal}: closing every connection`)
+    void server.close().finally(() => process.exit(0))
+  })
+}

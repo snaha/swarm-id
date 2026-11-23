@@ -24,12 +24,10 @@ import {
 import { hexToUint8Array } from "../utils/hex"
 import {
   updateAfterWrite,
-  saveUtilizationState,
   calculateUtilization,
   UtilizationAwareStamper,
 } from "../utils/batch-utilization"
 import type { UtilizationStoreDB } from "../storage/utilization-store"
-import type { DebouncedUtilizationUploader } from "../storage/debounced-uploader"
 import type {
   AccountsStoreInterface,
   PostageStampsStoreInterface,
@@ -43,16 +41,10 @@ import {
   BatchWriteCoordinator,
   PartitionContendedError,
 } from "./batch-write-coordinator"
+import type { BusLanes } from "./bus-lease"
 import { accountStateToDeviceView, publishDeviceState } from "./device-state"
 import { rosterRetryDelayMs } from "./device-roster"
 import { getOrCreateDeviceId, detectDeviceName } from "../utils/device-id"
-import {
-  activeDeviceIds,
-  KNOWN_DEVICE_MAX_AGE_MS,
-} from "../utils/active-devices"
-
-// Timeout for utilization upload in milliseconds
-const UTILIZATION_UPLOAD_TIMEOUT_MS = 30000
 
 // Timeout for the full sync (upload + feed update) in milliseconds.
 // Bee client requests use bare fetch with no timeout, so a non-responding
@@ -75,16 +67,12 @@ export interface SyncAccountOptions {
   /** Utilization store for browser-based utilization tracking */
   utilizationStore: UtilizationStoreDB
 
-  /** Debounced uploader for batch utilization state */
-  utilizationUploader: DebouncedUtilizationUploader
-
   /**
-   * Devices heard live on the account bus (`PresenceTracker`), unioned into
-   * the partition rival set so this one-shot coordinator and the proxy's agree
-   * about who the rivals are. Optional: a caller with no bus has only the
-   * registry's recent sign-ins to go on.
+   * This context's lanes on the account bus. A batch split into partitions
+   * is written only by the context that holds one of its lanes, and a lane
+   * is taken by asking over the bus: without this the sync skips.
    */
-  liveDeviceIds?: () => string[]
+  lanes?: () => BusLanes | undefined
 }
 
 /**
@@ -125,14 +113,8 @@ function createChunksFromAddresses(addresses: Uint8Array[]): Chunk[] {
 export function createSyncAccount(
   options: SyncAccountOptions,
 ): SyncAccountFunction {
-  const {
-    bee,
-    accountsStore,
-    postageStampsStore,
-    utilizationStore,
-    utilizationUploader,
-    liveDeviceIds,
-  } = options
+  const { bee, accountsStore, postageStampsStore, utilizationStore, lanes } =
+    options
 
   /**
    * Handle utilization tracking after chunk upload
@@ -167,21 +149,9 @@ export function createSyncAccount(
     // Convert chunk addresses to Chunks
     const chunks = createChunksFromAddresses(chunkAddresses)
 
-    // Derive swarm encryption key from derivation key
-    const swarmEncryptionKey = await deriveSwarmEncryptionKey(
-      account.derivationKey,
-    )
-
-    // Derive owner address from backup key
-    const backupKeyHex = await deriveSecret(
-      swarmEncryptionKey,
-      BACKUP_KEY_LABEL,
-    )
-    const backupKey = new PrivateKey(backupKeyHex)
-    const owner = backupKey.publicKey().address()
-
-    // Update utilization state
-    const { state: utilizationState, tracker } = await updateAfterWrite(
+    // Count the chunks locally, for the usage the UI shows. The counters
+    // themselves travel as the lane's published state.
+    const { state: utilizationState } = await updateAfterWrite(
       batchID,
       chunks,
       stamp.depth,
@@ -195,48 +165,6 @@ export function createSyncAccount(
 
     // Update stamp in store (without triggering sync)
     postageStampsStore.updateStampUtilization(batchID, newUtilization)
-
-    // Schedule debounced upload of dirty chunks and WAIT for it
-    if (tracker.hasDirtyChunks()) {
-      // Get stamper for signing chunks (with loaded bucket state)
-      const stamper = await postageStampsStore.getStamper(batchID, {
-        owner,
-        encryptionKey: hexToUint8Array(swarmEncryptionKey),
-      })
-      if (!stamper) {
-        console.warn("[SyncCoordinator] Cannot create stamper, skipping upload")
-        return
-      }
-
-      const uploadPromise = utilizationUploader.scheduleUpload(
-        batchID.toHex(),
-        tracker,
-        async () => {
-          await saveUtilizationState(utilizationState, {
-            bee,
-            stamper,
-            encryptionKey: hexToUint8Array(swarmEncryptionKey),
-            cache: utilizationStore,
-            tracker,
-            reservedBuckets:
-              stamper instanceof UtilizationAwareStamper
-                ? stamper.getProtectedBuckets()
-                : undefined,
-          })
-
-          // Flush stamper bucket state updates to cache (if supported)
-          if (stamper.flush) {
-            await stamper.flush()
-          }
-        },
-      )
-
-      return withTimeout(
-        uploadPromise,
-        UTILIZATION_UPLOAD_TIMEOUT_MS,
-        `Utilization upload timeout (${UTILIZATION_UPLOAD_TIMEOUT_MS}ms)`,
-      )
-    }
   }
 
   /**
@@ -345,7 +273,8 @@ export function createSyncAccount(
     const { snapshot: state, encryptionKey, defaultStamp } = snapshotResult
     const partitionCount = state.metadata.partitionCount ?? 1
 
-    // Derive the account feed key (also the lock-SOC backup signer) + owner.
+    // Derive the account feed key (also the owner of a lane's published
+    // state) + owner.
     const backupKeyHex = await deriveSecret(encryptionKey, BACKUP_KEY_LABEL)
     const accountKey = new PrivateKey(backupKeyHex)
     const owner = accountKey.publicKey().address()
@@ -371,34 +300,17 @@ export function createSyncAccount(
     }
 
     // Route the publish through the shared coordinator (same Web Lock + same
-    // partition acquire the proxy uses). One-off mode: no refresh timer — the
-    // lease lapses by TTL. `wait: "skip"` claims a free/expired partition once
-    // and throws `PartitionContendedError` when every partition is held by a
-    // live foreign device, so we skip rather than wait.
+    // lane protocol the proxy uses). One-off mode: `wait: "skip"` waits only
+    // as long as a context alone in the room needs and throws
+    // `PartitionContendedError` when no lane could be taken, so we skip rather
+    // than wait. The lane is given up as soon as the sync is done.
     const coordinator = new BatchWriteCoordinator({
       bee,
       batchId: defaultStamp.batchID.toHex(),
       stamper,
       deviceId: getOrCreateDeviceId(),
       accountId,
-      // Read fresh so the presence/intent rounds see the current device
-      // registry — without this the background-sync acquire has no rivals to
-      // check and can collide with a live holder on another device.
-      //
-      // Bounded the same way the proxy bounds it (`knownDeviceIdsForAccount`).
-      // This path listed every device the account had ever seen, tombstoned and
-      // long-dead alike, so the two coordinators disagreed about who the rivals
-      // were — and each dead entry costs an absent intent read on every acquire.
-      knownDeviceIds: () => [
-        ...new Set([
-          ...activeDeviceIds(
-            accountsStore.getAccount(new EthAddress(accountId))?.devices ?? [],
-            Date.now(),
-            KNOWN_DEVICE_MAX_AGE_MS,
-          ),
-          ...(liveDeviceIds?.() ?? []),
-        ]),
-      ],
+      lanes: lanes?.(),
       backupSigner: accountKey,
       swarmEncryptionKey: hexToUint8Array(encryptionKey),
       partitionCount,
@@ -492,6 +404,10 @@ export function createSyncAccount(
         status: "error",
         error: error instanceof Error ? error.message : String(error),
       }
+    } finally {
+      // The coordinator lives for this one sync: give its lane up, so a
+      // context that asks for it is answered at once.
+      coordinator.teardown()
     }
   }
 

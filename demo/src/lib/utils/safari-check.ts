@@ -203,6 +203,14 @@ function writerPath(input: CheckInput): CheckResult {
         detail:
           'The account’s drive is new and the network has not seen its batch yet, so the session refuses to stamp and the writer path was never exercised. Wait a minute, then run this again.',
       }
+    case 'no-account-bus':
+      return {
+        id,
+        title,
+        verdict: 'unknown',
+        detail:
+          'The identity site has no signaling server, so it cannot agree with the account’s other devices who writes where, and the writer path was never exercised. Run this against an identity site built with one.',
+      }
     default:
       // Not red: `uploadUnavailableReason` is optional on the wire, so an older
       // identity deployment sends `unavailable` without one and this branch is

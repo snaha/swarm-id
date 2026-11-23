@@ -43,7 +43,7 @@ jobs:
       - uses: googleapis/release-please-action@45996ed1f6d02564a971a2fa1b5860e934307cf7 # v5.0.0
         id: release
 
-  # The partition-lease scenarios in real browsers against a real cluster
+  # The device scenarios in real browsers against a real cluster
   # (`three-devices.yml`), once a release exists and before it is published.
   # The tag is already cut by now; what a red run stops is the npm publish,
   # the step that cannot be taken back.

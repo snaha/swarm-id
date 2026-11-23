@@ -33,7 +33,6 @@ export interface FlushableStamper extends Stamper {
     partitionCount: number
     localCounter: Uint32Array
   }): void
-  buildLeaseLocalCounter?(): Uint32Array
 }
 
 /**

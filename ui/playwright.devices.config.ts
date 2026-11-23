@@ -8,8 +8,8 @@ import { defineConfig, devices } from '@playwright/test'
  * two drives (`tests/two-drives.test.ts`, #882), driven through the demo the
  * way a person drives it; and the synced deletions
  * (`tests/delete-account.test.ts`), which need the same warm cluster. Minutes per run by construction — the
- * lease TTL, the idle yield and the beacon grace are each 30 s and the suite
- * waits them out — so it is not part of `pnpm test:e2e`. It runs on its own
+ * suite waits out the protocol's own timings (8 s for a partition nobody
+ * answers for, the server's 2 s ticks) — so it is not part of `pnpm test:e2e`. It runs on its own
  * workflow (`.github/workflows/three-devices.yml`): on a PR that touches the
  * lease seams, nightly on main, before every npm publish, and on demand.
  * Locally:
@@ -22,12 +22,17 @@ import { defineConfig, devices } from '@playwright/test'
  */
 const BROWSERS = (process.env.DEVICE_BROWSERS ?? 'chromium').split(',')
 
-/** The whole cycle, with the TTL and idle waits inside it. */
+/** The whole cycle, with the protocol's waits inside it. */
 const TEST_TIMEOUT_MS = 6 * 60 * 1000
 
 export default defineConfig({
   testDir: './tests',
-  testMatch: ['**/three-devices.test.ts', '**/two-drives.test.ts', '**/delete-account.test.ts'],
+  testMatch: [
+    '**/three-devices.test.ts',
+    '**/two-drives.test.ts',
+    '**/delete-account.test.ts',
+    '**/drive-dilute-upload.test.ts',
+  ],
   fullyParallel: false,
   workers: 1,
   globalSetup: './tests/global-setup-devices.ts',

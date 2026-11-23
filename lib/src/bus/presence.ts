@@ -37,10 +37,8 @@ const THROTTLED_INTERVAL_MS = 60_000
  * Three missed beats — of the THROTTLED interval, not ours. A window of three
  * of our own beats sits exactly at a hidden tab's clamped cadence, so a
  * backgrounded-but-live device would flap in and out of its peers' live sets:
- * a blinking badge, and a coordinator repeatedly re-including the same peer in
- * an idle-yield round. Being slow to drop a device that really left costs only
- * an absent intent read, which is why the window errs long. Still well past
- * `LEASE_TTL_MS` and far inside `KNOWN_DEVICE_MAX_AGE_MS`.
+ * a blinking badge. Being slow to drop a device that really left costs only a
+ * badge that is late, which is why the window errs long.
  */
 export const PRESENCE_MAX_AGE_MS = 3 * THROTTLED_INTERVAL_MS
 

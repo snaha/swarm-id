@@ -71,7 +71,6 @@ import {
   STORAGE_KEY_NETWORK_SETTINGS,
   partitionSessionStorageKey,
   PartitionSessionSchemaV1,
-  leaseCacheStorageKey,
 } from "./types"
 import type { PopupToIframeMessage } from "./types"
 import {
@@ -90,7 +89,7 @@ import { AccountBus, BroadcastChannelTransport } from "./bus/account-bus"
 import { SignalingTransport } from "./bus/signaling-transport"
 import { deriveBusContext } from "./bus/bus-context"
 import type { BusContext } from "./bus/bus-context"
-import { PresenceTracker, PRESENCE_INTERVAL_MS } from "./bus/presence"
+import { PRESENCE_INTERVAL_MS } from "./bus/presence"
 import type { BeeRequestOptions } from "@ethersphere/bee-js"
 import {
   uploadData,
@@ -162,11 +161,13 @@ import {
   readPublishedCounter,
   type PublishedCounter,
 } from "./sync/published-counter"
-import { deviceHomePartition } from "./sync/partition-lock"
 import { withTimeout } from "./utils/promise"
 import { UtilizationStoreDB } from "./storage/utilization-store"
-import type { PartitionLeaseStateSnapshot } from "./sync/partition-lease"
-import { BatchWriteCoordinator } from "./sync/batch-write-coordinator"
+import {
+  BatchWriteCoordinator,
+  deviceHomePartition,
+} from "./sync/batch-write-coordinator"
+import { BusLanes } from "./sync/bus-lease"
 import {
   getOrCreateDeviceId,
   deviceRegistryChanged,
@@ -191,10 +192,6 @@ import {
 import { hexToUint8Array, uint8ArrayToHex, webBytes } from "./utils/hex"
 import { generatedAvatar } from "./utils/avatar"
 import { connectionInfoEqual } from "./utils/connection-info"
-import {
-  activeDeviceIds,
-  KNOWN_DEVICE_MAX_AGE_MS,
-} from "./utils/active-devices"
 import {
   createAsyncEpochFinder,
   createEpochUpdater,
@@ -248,34 +245,9 @@ import {
  */
 export const PUBLISH_DEBOUNCE_MS = 1500
 
-/** Min interval between pre-acquire device-registry pulls (throttles the
- *  slot-wait loop's repeated acquires from hammering the feed). */
+/** Min interval between device-registry pulls (a partition can change hands
+ *  often, and each take triggers one). */
 const DEVICE_REGISTRY_REFRESH_THROTTLE_MS = 8_000
-
-/**
- * Gap between consecutive ranks when holders take turns answering a peer's
- * `lease-request` (`yieldRankDelayMs`). It budgets ONE bus hop — the winner's
- * `lease-claim`, which it publishes before it starts releasing (instant over
- * BroadcastChannel, a server round trip over signaling) — and nothing else.
- * Sizing it against the release itself would be hopeless: that is two stamped
- * Swarm writes, so no step short enough to keep the fallthrough useful could
- * ever gate it.
- */
-const PEER_YIELD_RANK_STEP_MS = 250
-
-/** Hex chars of request id — parsed straight into the rank seed. */
-const LEASE_REQUEST_ID_LENGTH = 8
-
-/** Request ids remembered as already answered, so a `lease-claim` can still
- *  call off a yield whose rank timer has fired. Small: a round's id is spent
- *  the moment a holder claims it, and stale entries only cost a `Set` slot. */
-const ANSWERED_REQUEST_MEMORY = 32
-
-/** Identifies one slot-wait round, so every holder ranks itself the same way.
- *  A UUID's first block is hex, so this is hex without any rewriting. */
-function newLeaseRequestId(): string {
-  return crypto.randomUUID().slice(0, LEASE_REQUEST_ID_LENGTH)
-}
 
 const DEFAULT_ACT_FILENAME = "index.bin"
 const DEFAULT_ACT_CONTENT_TYPE = "application/octet-stream"
@@ -289,36 +261,6 @@ const MS_PER_SECOND = 1000
  */
 const WARM_UP_WINDOW_MS = 10 * 60 * MS_PER_SECOND
 const BLOCK_MS = GNOSIS_BLOCK_TIME * MS_PER_SECOND
-
-/**
- * localStorage key holding optional partition-coordination timing overrides
- * (`{ guardWindowMs?, guardPollMs?, readTimeoutMs? }`). Lets the gateway's
- * propagation tuning be adjusted at runtime (set by the /dev "Partition tuning"
- * panel) and picked up on the next connect — no rebuild. Absent → code defaults.
- */
-const PARTITION_TUNING_KEY = "swarm-id-partition-tuning"
-
-function readPartitionTuningOverride():
-  | { guardWindowMs?: number; guardPollMs?: number; readTimeoutMs?: number }
-  | undefined {
-  try {
-    if (typeof localStorage === "undefined") return undefined
-    const raw = localStorage.getItem(PARTITION_TUNING_KEY)
-    if (!raw) return undefined
-    const parsed: unknown = JSON.parse(raw)
-    if (typeof parsed !== "object" || parsed === null) return undefined
-    const pick = (v: unknown): number | undefined =>
-      typeof v === "number" && Number.isFinite(v) && v >= 0 ? v : undefined
-    const o = parsed as Record<string, unknown>
-    return {
-      guardWindowMs: pick(o.guardWindowMs),
-      guardPollMs: pick(o.guardPollMs),
-      readTimeoutMs: pick(o.readTimeoutMs),
-    }
-  } catch {
-    return undefined
-  }
-}
 
 /**
  * A hydrated account as the account-state snapshot the fold consumes.
@@ -467,19 +409,6 @@ export class SwarmIdProxy {
    *  transport encrypts with its construction-time key, so this — not whichever
    *  connection resolves now — is who a publish actually reaches. */
   private busBoundAccountId: string | undefined
-  /** Scheduled answers to peers' `lease-request`s, by request id, so a peer
-   *  earlier in the rank order can call ours off (`yieldRankDelayMs`). Each
-   *  names the batch it would yield, so tearing one drive down cancels only
-   *  that drive's. */
-  private pendingYields = new Map<
-    string,
-    { batchId: string; timer: ReturnType<typeof setTimeout> }
-  >()
-  /** Request ids somebody has claimed (us or a peer). Insertion-ordered and
-   *  capped at `ANSWERED_REQUEST_MEMORY`. Separate from `pendingYields`
-   *  because the cancel window has to outlive the rank timer: the timer only
-   *  starts the yield, whose first Swarm write is still ahead of it. */
-  private answeredRequests = new Set<string>()
   /**
    * Utilization deltas that arrived while the stamper had no lane, held until
    * a bind names one (`applyPendingLaneUpdate`). Keyed by lane so a delta for
@@ -512,8 +441,9 @@ export class SwarmIdProxy {
   private isConnecting: boolean = false
   private parentWindow: WindowProxy | undefined
   private bus: AccountBus
-  /** Who else is live in the account's room, from their `presence` beats. */
-  private presence = new PresenceTracker()
+  /** This context's part in who writes which lane: it answers every claim
+   *  in the room, for the lanes of drives it has and for those it has not. */
+  private lanes: BusLanes
   private presenceTimer: ReturnType<typeof setInterval> | undefined
   private subsidisedGatewayUrl: string | undefined
   /**
@@ -597,8 +527,8 @@ export class SwarmIdProxy {
       // Said out loud because the alternative is silence: without a URL the
       // bus never leaves this origin+partition, and a static build that lost
       // its `PUBLIC_BUS_SIGNALING_URL` looks exactly like a healthy one.
-      console.info(
-        "[Proxy] No account-bus signaling URL configured — cross-partition and cross-device coordination is off (docs/Account-Bus.md).",
+      console.warn(
+        "[Proxy] No account-bus signaling URL configured: this build cannot write to a drive shared between an account's devices (docs/Account-Bus.md).",
       )
     }
     this.setupMessageListener()
@@ -606,6 +536,7 @@ export class SwarmIdProxy {
 
     // Multi-tab coordination rides the account bus (docs/Account-Bus.md).
     this.bus = new AccountBus([])
+    this.lanes = new BusLanes(this.bus)
     this.setupBusListeners()
 
     // Announce readiness to parent window immediately
@@ -942,7 +873,6 @@ export class SwarmIdProxy {
   private teardownDrive(drive: DriveWritePath): void {
     // Scheduled answers describe a lease we are about to drop anyway, and
     // buffered lane deltas a lane we will not bind.
-    this.cancelPendingYields(drive.batchId)
     this.dropBufferedLanes(drive.batchId)
     drive.teardown()
     this.drives.delete(drive.batchId)
@@ -1197,11 +1127,8 @@ export class SwarmIdProxy {
   }
 
   /**
-   * Tear every write path down, announcing each partition held so waiting
-   * peers wake now instead of sleeping out their poll interval
-   * (docs/Account-Bus.md, bus-accelerated leases). The announcement races the
-   * Swarm release it describes, which is harmless: the lock SOCs stay the
-   * authority, so a peer woken too early just spends one extra read round.
+   * Tear every write path down. Each gives its lane up, and this context
+   * answers "free" to whoever asks for it from then on.
    */
   private teardownDrives(): void {
     for (const drive of [...this.drives.values()]) this.teardownDrive(drive)
@@ -1706,7 +1633,6 @@ export class SwarmIdProxy {
       clearInterval(this.presenceTimer)
       this.presenceTimer = undefined
     }
-    this.presence.clear()
   }
 
   /** Leave the account's bus room: both transports detached and closed, and
@@ -1732,8 +1658,7 @@ export class SwarmIdProxy {
     }
     this.unsubscribeStorageListeners = []
 
-    // Release the partition leases (best-effort) so peers see this device
-    // vacate its partitions promptly.
+    // Tear the write paths down, which gives up the lanes they hold.
     this.destroyed = true
     // Also clears the expiry timer: nothing is left to expire.
     this.teardownDrives()
@@ -1790,10 +1715,9 @@ export class SwarmIdProxy {
    * Fold the buffered delta for the lane `drive` just bound in, then drop
    * that batch's other buffered lanes — they are another device's business.
    * Other batches' stay: their drives have not bound yet.
-   * Called on every lease acquire: on the cold path the counters are already
-   * seeded from the durable partition-state feed, so this is a harmless
-   * monotonic no-op; on the adopt fast path they are not, and this is the
-   * whole point.
+   * Called on every lease acquire. The fold only ever raises a counter, so
+   * it changes nothing where the published state the lane was bound from
+   * already covers the delta.
    */
   private applyPendingLaneUpdate(drive: DriveWritePath): void {
     const stamper = drive.stamper
@@ -1819,127 +1743,11 @@ export class SwarmIdProxy {
   }
 
   /**
-   * Run this holder's answer to a peer's `lease-request`, announcing the
-   * partition it gave up so the waiter (and holders further down the rank
-   * order) hear about it.
-   *
-   * The `lease-claim` goes out FIRST. Releasing is two stamped Swarm writes
-   * (`yieldIdleLease` → `lease.release()`), which is orders of magnitude
-   * longer than a rank step, so announcing only on completion would reach the
-   * other holders long after every one of them had begun releasing too (#576).
-   * A claim is cheap to send and is what the rank step
-   * actually budgets for.
-   */
-  private answerLeaseRequest(
-    accountId: string,
-    batchId: string,
-    requestId: string,
-  ): void {
-    const coordinator = this.drives.get(batchId)?.coordinator
-    if (!coordinator) return
-    // Once the rank timer fires its handle is gone from `pendingYields`, so
-    // the answered-id memory is what keeps a round from being answered twice
-    // from here on. The claim below goes out in this same tick, so nothing
-    // can slip between the two — the guard is what keeps that true if a
-    // caller ever gets here after an await.
-    if (this.answeredRequests.has(requestId)) return
-    this.markRequestAnswered(requestId)
-    this.bus.publish({
-      type: "lease-claim",
-      accountId,
-      batchId,
-      fromDeviceId: this.requireDeviceId(),
-      requestId,
-    })
-    // The release itself is announced through `onLeaseReleased`.
-    coordinator.yieldForPeer(requestId).catch((error) => {
-      console.error("[Proxy] Peer lease yield failed:", error)
-    })
-  }
-
-  /**
-   * How long this holder waits before answering `requestId`.
-   *
-   * A waiter needs exactly ONE slot, but the request names no partition, so
-   * every idle holder used to release at once: with `partitionCount = 4` all
-   * four dropped their lease, each then paid a cold acquire on its next
-   * upload, and whoever lost the re-race got "Uploads are unavailable". The
-   * waiter re-broadcasts every round, so it repeated.
-   *
-   * The request id gives every holder the same permutation of the partitions,
-   * and each waits its own rank in it. Exactly one draws rank 0 and answers
-   * immediately — so the ordinary one-holder handover is not slowed at all —
-   * while the rest stand down as soon as they see its `lease-claim`. Only
-   * holders that would presently yield take a rank at all (`canYieldForPeer`),
-   * so a holder mid-burst does not sit at the front of the order and decline
-   * in silence; the next eligible rank answers a step later, which still beats
-   * waiting out a poll interval.
-   *
-   * `scripts/bus-handover-latency.ts` reimplements this election (these
-   * handlers are private) to measure the handover against a real cluster.
-   * Change the formula here and change it there, or the script starts
-   * measuring a race the product does not have.
-   */
-  private yieldRankDelayMs(
-    coordinator: BatchWriteCoordinator,
-    requestId: string,
-  ): number {
-    const partition = coordinator.currentPartition
-    const partitionCount = coordinator.partitionCount
-    if (partition === undefined || partitionCount <= 1) return 0
-    // The id is hex (schema-enforced), so the seed needs no hash function.
-    const seed = Number.parseInt(
-      requestId.slice(0, LEASE_REQUEST_ID_LENGTH),
-      16,
-    )
-    // Unreachable behind the schema, and deliberately LAST rather than first
-    // if it ever becomes reachable: a seed nobody can agree on must not put
-    // every holder at the front of the order — that is the bug, not the guard.
-    if (!Number.isFinite(seed)) {
-      return (partitionCount - 1) * PEER_YIELD_RANK_STEP_MS
-    }
-    return ((seed + partition) % partitionCount) * PEER_YIELD_RANK_STEP_MS
-  }
-
-  /** Stop answering `requestId` — somebody else claimed it (or we just did).
-   *  Remembered as well as cancelled, because the rank timer may already have
-   *  fired: it hands off to `answerLeaseRequest`, which re-checks this. */
-  private standDownFromRequest(requestId: string | undefined): void {
-    if (requestId === undefined) return
-    this.markRequestAnswered(requestId)
-    const scheduled = this.pendingYields.get(requestId)
-    if (scheduled === undefined) return
-    clearTimeout(scheduled.timer)
-    this.pendingYields.delete(requestId)
-  }
-
-  private markRequestAnswered(requestId: string): void {
-    this.answeredRequests.add(requestId)
-    if (this.answeredRequests.size <= ANSWERED_REQUEST_MEMORY) return
-    // Insertion-ordered: the oldest round is the one safest to forget.
-    const oldest = this.answeredRequests.values().next().value
-    if (oldest !== undefined) this.answeredRequests.delete(oldest)
-  }
-
-  /** Drop the scheduled answers for `batchId` — nothing they would release
-   *  is ours now. */
-  private cancelPendingYields(batchId: string): void {
-    for (const [requestId, scheduled] of this.pendingYields) {
-      if (scheduled.batchId !== batchId) continue
-      clearTimeout(scheduled.timer)
-      this.pendingYields.delete(requestId)
-    }
-  }
-
-  /**
-   * Account-bus subscription: utilization deltas from other contexts, and the
-   * lease fast path (docs/Account-Bus.md, bus-accelerated leases). The Swarm
-   * lock-SOC protocol stays authoritative — these messages only shortcut its
-   * timers.
+   * Account-bus subscription: utilization deltas, account deltas and
+   * presence. Who holds a lane is settled by `BusLanes` on the same bus.
    */
   private setupBusListeners(): void {
-    this.bus.onPeerLeft((peerId) => this.presence.forgetPeer(peerId))
-    this.bus.subscribe((message, from) => {
+    this.bus.subscribe((message) => {
       switch (message.type) {
         case "utilization-updated": {
           // Same batch AND same slot lane. The counters are per-partition
@@ -1959,11 +1767,9 @@ export class SwarmIdProxy {
           const lane = stamper.currentPartition
           if (lane === undefined) {
             // Unbound: the lane this delta belongs to may well be the one we
-            // are about to bind. Dropping it loses it for good — the adopt
-            // fast path re-binds from THIS tab's in-memory counters
-            // (`buildLeaseLocalCounter`), not from durable state, so a sibling
-            // tab's writes would be invisible and we would re-issue slots it
-            // already consumed. Hold it until the bind names our lane.
+            // are about to bind: a bind takes the lane's published counter,
+            // and stamps a sibling tab has made past it are only in these
+            // deltas. Hold it until the bind names our lane.
             // A legacy single-partition delta has no lease to wait for and
             // applies immediately.
             if (message.partition === 0 && message.partitionCount === 1) {
@@ -1988,90 +1794,8 @@ export class SwarmIdProxy {
           }
           return
         }
-        case "lease-request": {
-          // Routed by batch as well as account: a lane is one partition of ONE
-          // batch (#589), so a waiter on another batch contends with nothing
-          // that drive holds, and yielding it would drop a lease that helps
-          // neither of us. Each drive answers for its own (#862).
-          const coordinator = this.drives.get(message.batchId)?.coordinator
-          if (
-            !coordinator ||
-            message.accountId !== coordinator.accountId ||
-            message.fromDeviceId === this.deviceId
-          ) {
-            return
-          }
-          const { requestId } = message
-          // Idempotent per request: the same message reaches us over every
-          // attached transport, and the waiter re-broadcasts each round.
-          if (this.pendingYields.has(requestId)) return
-          if (this.answeredRequests.has(requestId)) return
-          // Only holders that would actually yield take a rank. Otherwise a
-          // holder mid-burst — with a 3 s idle threshold, the common case on
-          // an active account — sits at the front of the order and declines in
-          // silence, and every later rank falls through behind it.
-          if (!coordinator.canYieldForPeer) return
-          const timer = setTimeout(
-            () => {
-              this.pendingYields.delete(requestId)
-              this.answerLeaseRequest(
-                message.accountId,
-                message.batchId,
-                requestId,
-              )
-            },
-            this.yieldRankDelayMs(coordinator, requestId),
-          )
-          this.pendingYields.set(requestId, {
-            batchId: message.batchId,
-            timer,
-          })
-          return
-        }
-        case "lease-claim": {
-          const coordinator = this.drives.get(message.batchId)?.coordinator
-          if (
-            message.fromDeviceId === this.deviceId ||
-            message.accountId !== coordinator?.accountId
-          ) {
-            return
-          }
-          // A peer earlier in the rank order is answering this request — stand
-          // down rather than dropping a second lease for one waiter. No slot is
-          // free yet, so nothing wakes a waiting poll here.
-          this.standDownFromRequest(message.requestId)
-          return
-        }
-        case "lease-released": {
-          const coordinator = this.drives.get(message.batchId)?.coordinator
-          if (
-            !coordinator ||
-            message.fromDeviceId === this.deviceId ||
-            message.accountId !== coordinator.accountId
-          ) {
-            return
-          }
-          // The claim normally arrives first; this also covers a peer whose
-          // claim we missed, and a release that answers no request at all.
-          this.standDownFromRequest(message.requestId)
-          coordinator.notifySlotMaybeFree()
-          return
-        }
         case "account-delta": {
           this.applyAccountDelta(message.snapshot)
-          return
-        }
-        case "presence": {
-          // A sibling tab of this device shares the id over the local
-          // transport; it is not a rival. A beat naming another account did
-          // not come from this room's scope (belt and braces, as elsewhere).
-          if (
-            message.accountId !== this.busBoundAccountId ||
-            message.fromDeviceId === this.deviceId
-          ) {
-            return
-          }
-          this.presence.observe(message.fromDeviceId, Date.now(), from)
           return
         }
       }
@@ -2292,9 +2016,8 @@ export class SwarmIdProxy {
     if (superseded()) return
 
     // Build the write-path coordinator for this account+batch. It owns the
-    // cross-tab write lock, the partition-lease lifecycle, and the stamp flush.
-    // Lock-SOC routing on the stamper was auto-bound inside
-    // `UtilizationAwareStamper.create`. For multi-device accounts the
+    // cross-tab write lock, taking and holding a lane, and the stamp flush.
+    // For multi-device accounts the
     // coordinator eagerly pre-acquires a partition in the background
     // (`startLease`) so the first upload doesn't pay the acquire latency; a
     // concurrent first upload queues on the same write lock and then finds the
@@ -2303,7 +2026,6 @@ export class SwarmIdProxy {
     // `create` returns, because a utilization delta that arrives while there
     // is no stamper is dropped, so one a peer broadcast after `create` read
     // the stored counters would end up in neither.
-    const tuning = readPartitionTuningOverride()
     // The callbacks below outlive this narrowing, and the batch they name has
     // to be the one the coordinator serves, on both counts: its lease cache is
     // keyed on it, so a snapshot filed under a batch we have since moved off
@@ -2314,19 +2036,6 @@ export class SwarmIdProxy {
       batchId,
       stamper,
       deviceId: this.requireDeviceId(),
-      knownDeviceIds: () =>
-        this.knownDeviceIdsForAccount(accountInfo.accountId),
-      // Pull the latest device registry before a fresh acquire so a peer that
-      // signed in after we created the account is known (else we never read its
-      // beacon and dual-acquire). Throttled + best-effort inside.
-      refreshKnownDeviceIds: () =>
-        this.refreshDeviceRegistryFromSwarm(
-          accountInfo.accountId,
-          accountInfo.encryptionKey,
-        ),
-      intentReadTimeoutMs: tuning?.readTimeoutMs,
-      intentGuardWindowMs: tuning?.guardWindowMs,
-      intentGuardPollMs: tuning?.guardPollMs,
       accountId: accountInfo.accountId,
       backupSigner: new PrivateKey(
         deriveSecretSync(
@@ -2337,52 +2046,31 @@ export class SwarmIdProxy {
       swarmEncryptionKey: accountInfo.encryptionKey,
       partitionCount: accountInfo.partitionCount,
       mode: "persistent",
-      readLeaseCache: () => this.readLeaseCache(accountInfo.accountId, batchId),
-      writeLeaseCache: (snap) =>
-        this.writeLeaseCache(accountInfo.accountId, batchId, snap ?? null),
+      lanes: this.lanes,
       // Bound to this drive, not read at call time: a coordinator torn down
       // mid-write still runs these, and must not flush, or sign with, the
       // drive the session holds by then (#862).
       flushStamperState: () => this.saveStamperStateIfNeeded(drive),
       getWorkerPool: (count) => drive.getOrCreateWorkerPool(count),
       onLeaseChange: () => this.emitConnectionInfoIfChanged(),
-      // Each slot-wait poll round, ask live holders over the account bus to
-      // yield their partition (docs/Account-Bus.md, bus-accelerated leases).
-      // Fresh id per round: every holder derives the same rank order from it,
-      // so exactly one answers (see `yieldRankDelayMs`), and a new round is a
-      // new draw — a holder that was busy last time is not permanently first.
-      onSlotWait: () =>
-        this.bus.publish({
-          type: "lease-request",
-          accountId: accountInfo.accountId,
-          batchId,
-          fromDeviceId: this.requireDeviceId(),
-          requestId: newLeaseRequestId(),
-        }),
       // On first acquiring a partition, announce this device by publishing the
       // account snapshot (which includes ourselves in metadata.devices) to the
       // shared feed. Debounced + deferred so it runs OUTSIDE the acquiring write
       // lock (the publish re-enters the lock via the coordinator).
       //
       // Fold in any delta buffered while we had no lane FIRST, and
-      // synchronously: the bind that just happened may have seeded the counters
-      // from this tab's own in-memory state (the adopt fast path does), and the
-      // publish below reads those counters.
+      // synchronously: the bind that just happened seeded the counters from
+      // the lane's published state, which a buffered delta can be ahead of,
+      // and the publish below reads those counters.
       onLeaseAcquired: () => {
         this.applyPendingLaneUpdate(drive)
         this.schedulePublish("acquired")
-      },
-      // Every release — idle timer, a peer's request, teardown — wakes the
-      // waiters' slot polls; the announcement is not each path's to remember.
-      onLeaseReleased: (partition, requestId) => {
-        this.bus.publish({
-          type: "lease-released",
-          accountId: accountInfo.accountId,
-          batchId,
-          partition,
-          fromDeviceId: this.requireDeviceId(),
-          requestId,
-        })
+        // The poll that keeps the stored device list in step with the roster
+        // on Swarm. Throttled and best-effort inside.
+        void this.refreshDeviceRegistryFromSwarm(
+          accountInfo.accountId,
+          accountInfo.encryptionKey,
+        )
       },
     })
     drive.attach(
@@ -2412,31 +2100,6 @@ export class SwarmIdProxy {
   private requireDeviceId(): string {
     if (!this.deviceId) this.deviceId = getOrCreateDeviceId()
     return this.deviceId
-  }
-
-  private readLeaseCache(
-    accountId: string,
-    batchId: string,
-  ): PartitionLeaseStateSnapshot | undefined {
-    try {
-      const raw = localStorage.getItem(leaseCacheStorageKey(accountId, batchId))
-      return raw ? (JSON.parse(raw) as PartitionLeaseStateSnapshot) : undefined
-    } catch {
-      return undefined
-    }
-  }
-
-  private writeLeaseCache(
-    accountId: string,
-    batchId: string,
-    snap: PartitionLeaseStateSnapshot | null,
-  ): void {
-    const key = leaseCacheStorageKey(accountId, batchId)
-    if (snap === null) {
-      localStorage.removeItem(key)
-    } else {
-      localStorage.setItem(key, JSON.stringify(snap))
-    }
   }
 
   /**
@@ -2495,8 +2158,8 @@ export class SwarmIdProxy {
    * state; the proxy owns none of that.
    *
    * `targetOptions.counter`, when given, counts the chunks the write sends
-   * (#932): the lease's own lock, intent and state-publish chunks go out
-   * through the coordinator, not the target, and are not counted.
+   * (#932): the chunks of the partition state published after the write go
+   * out through the coordinator, not the target, and are not counted.
    *
    * A write that names its drive (`batchId`) goes to that drive's write path,
    * built on first use, and never falls back to the gateway: the app asked
@@ -3192,59 +2855,12 @@ export class SwarmIdProxy {
     }
   }
 
-  /**
-   * The partition rival set for `accountId`: every device heard live on the
-   * account bus, plus the recently signed-in devices of the stored registry
-   * (read fresh, so the intent round reflects a device that announced after
-   * the coordinator was built).
-   *
-   * The bus half is the liveness signal — a peer beating in the room is alive
-   * by construction, whether or not its roster append ever landed. The
-   * registry half is the bootstrap for contexts with no bus (no signaling
-   * server configured) and for a device that just signed in and has not
-   * beaten yet; it is bounded to `KNOWN_DEVICE_MAX_AGE_MS` because removed
-   * (tombstoned) devices won't write, and long-dead ghosts (the device list is
-   * append-only) would each add an absent intent read to every acquire — on a
-   * flaky gateway that can push a single acquire past its timeout, so a live
-   * device can't claim even a FREE partition. A genuinely-live holder this
-   * prune drops is still caught by the deviceId-independent occupancy beacon.
-   *
-   * On any storage error the bus half alone is returned — the lease then falls
-   * back to the guard+TTL acquire path against whoever is live.
-   */
-  private knownDeviceIdsForAccount(accountId: string): string[] {
-    const now = Date.now()
-    const live =
-      this.busBoundAccountId === accountId
-        ? this.presence.liveDeviceIds(now)
-        : []
-    try {
-      const account =
-        this.partitionAccount?.id.toHex() === accountId
-          ? this.partitionAccount
-          : createAccountsStorageManager()
-              .load()
-              .find((a) => a.id.toHex() === accountId)
-      if (!account || isSignedOutAccount(account)) return live
-      return [
-        ...new Set([
-          ...activeDeviceIds(account.devices, now, KNOWN_DEVICE_MAX_AGE_MS),
-          ...live,
-        ]),
-      ]
-    } catch {
-      return live
-    }
-  }
-
   private lastDeviceRegistryRefreshAt = 0
 
   /**
-   * Pull the latest account snapshot from the shared feed and union its
-   * `metadata.devices` into the locally-stored account, so `knownDeviceIds`
-   * reflects a peer that signed in AFTER this device created the account (else
-   * the claimer never reads the peer's beacon and they dual-acquire). Throttled
-   * (the slot-wait loop re-acquires) and best-effort — on any failure the
+   * Read the device roster from Swarm and union it into the locally-stored
+   * account, so the device list shows a peer that signed in AFTER this device
+   * created the account. Throttled and best-effort — on any failure the
    * current registry is used as-is.
    */
   private async refreshDeviceRegistryFromSwarm(
@@ -3263,10 +2879,8 @@ export class SwarmIdProxy {
       // A partitioned session cannot see shared storage — the hydrated account
       // view is both the source and the destination there. Without this branch
       // the load below returns nothing and the refresh silently no-ops, leaving
-      // a Safari writer's rival set frozen at whatever the connect popup handed
-      // over: the intent round never sees a peer that signs in later, and the
-      // idle-yield (gated on a known rival) never fires. Mirrors the same
-      // branch in `knownDeviceIdsForAccount`.
+      // a Safari session's device list frozen at whatever the connect popup
+      // handed over.
       const partitioned = this.partitionAccount?.id.toHex() === accountId
       const manager = partitioned ? undefined : createAccountsStorageManager()
       const accounts = manager?.load() ?? []
@@ -3293,9 +2907,9 @@ export class SwarmIdProxy {
         this.requireDeviceId(),
         this.announcedDeviceName(),
       )
-      // Persist when anything the rival set reads actually moved — a peer
-      // appearing, a refreshed sign-in, a tombstone — including the timestamp-only
-      // merges `activeDeviceIds` prunes on (#586). A poll does not stamp our own entry (#652), so
+      // Persist when anything in the registry actually moved — a peer
+      // appearing, a refreshed sign-in, a tombstone — timestamp-only merges
+      // included (#586). A poll does not stamp our own entry (#652), so
       // a quiet round compares equal and causes no cross-tab storage-event churn.
       if (
         deviceRegistryChanged(
@@ -3597,9 +3211,8 @@ export class SwarmIdProxy {
         // backoff: it re-reads the roster and appends once the scan is clean.
         //
         // Only while this session still holds a partition: the guard at the
-        // top of this method drops a retry that fires after the lease idled
-        // out (the first retry lands at `IDLE_YIELD_MS`), and the retry does
-        // not acquire one just to announce. The next acquire's own
+        // top of this method drops a retry that fires after the partition was
+        // handed over, and the retry does not take one just to announce. The next acquire's own
         // `onLeaseAcquired` announce re-reads the roster and appends then —
         // the gap is this device's roster entry, not the account, which the
         // identity UI's `syncAccount` retry keeps reachable.
@@ -3884,10 +3497,9 @@ export class SwarmIdProxy {
     }
     if (batchId === undefined && this.drive) this.refuseDrive(this.drive)
     // NB: the multi-device "all partitions held" case is NOT checked here.
-    // It's deferred to the coordinator's `withWrite`, which runs a fresh
-    // acquisition attempt (with slot-wait) under the write lock and then throws
-    // if no partition is held — so a read-only upload waits for a slot to free
-    // (turn-taking) instead of failing instantly.
+    // It's deferred to the coordinator's `withWrite`, which asks for a
+    // partition and throws if none is handed over in time — so a read-only
+    // upload waits for one (turn-taking) instead of failing instantly.
   }
 
   /**
@@ -3939,7 +3551,17 @@ export class SwarmIdProxy {
     // means no coordinator, and a user-stamp write would throw "Stamper not
     // initialized".
     if (!this.drive.stamper) return false
+    if (this.lacksAccountBus(this.drive)) return false
     return true
+  }
+
+  /**
+   * A split batch is written only by a context that can ask the account's
+   * other devices who writes where. A build with no signaling server never
+   * can, so it says so up front instead of failing each upload after a wait.
+   */
+  private lacksAccountBus(drive: DriveWritePath): boolean {
+    return !this.signalingUrl && (drive.coordinator?.partitionCount ?? 1) > 1
   }
 
   /**
@@ -4122,6 +3744,7 @@ export class SwarmIdProxy {
     // `initializeStamper` logs and returns rather than throwing, so this is the
     // only place that difference survives to the dApp.
     if (!this.drive.stamper) return "stamper-failed"
+    if (this.lacksAccountBus(this.drive)) return "no-account-bus"
     return undefined
   }
 
@@ -6746,7 +6369,6 @@ export class SwarmIdProxy {
             backupSigner,
             swarmEncryptionKey: encryptionKey,
             batchId: stamp.batchID,
-            batchDepth: stamp.depth,
             partition,
           },
           known.get(key),

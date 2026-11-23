@@ -1,6 +1,6 @@
 ---
 title: Multi-Device Postage Batches
-description: How several devices share one mutable Swarm postage batch and keep account state in sync — the on-chain layout, lock protocol, feeds, and key derivation needed to port this to another platform.
+description: How several devices share one mutable Swarm postage batch and keep account state in sync — the slot layout, the lane protocol, feeds, and key derivation needed to port this to another platform.
 ---
 
 This page is the definitive, implementation-level specification of how Swarm ID lets
@@ -9,32 +9,30 @@ the same time without corrupting each other's data. It is written so the scheme 
 re-implemented on another platform (native mobile, desktop, a different language) and
 **interoperate** with the reference TypeScript implementation in `@snaha/swarm-id`.
 
-Everything here is derived purely from Swarm primitives (chunks, single-owner chunks,
-epoch feeds) and a handful of deterministic key derivations. This layer is the record
-everything else defers to, and it needs **no server, no coordinator, and no shared mutable
-state other than what lives on Swarm itself**. The contexts of one account that are open at the same time also
-share the [account bus](../account-bus/), which shortens every wait described below to about
-one round trip; it never replaces the protocol here, and a port can leave it out.
+What is **stored** is derived purely from Swarm primitives (chunks, single-owner chunks,
+epoch feeds) and a handful of deterministic key derivations. Who may **write** a partition
+at a given moment is not stored at all: the contexts of an account that are open at the
+same time agree on it over the [account bus](../account-bus/), and a context that cannot
+reach the bus does not write a shared batch. A port has to speak that protocol too.
 
 ## Two independent systems
 
 The account shares one batch across devices. Two distinct problems arise, solved by two
 independent mechanisms:
 
-1. **Partition lease** — prevents two devices from stamping the _same_ `(bucket, slot)`
+1. **Partition lanes** — prevent two writers from stamping the _same_ `(bucket, slot)`
    of the batch (which would make one chunk silently overwrite the other on the network).
-   Each active device leases a **partition** of every bucket's slot space and only ever
+   Each active context holds a **partition** of every bucket's slot space and only ever
    stamps slots in its own lane.
 2. **Account-state sync** — keeps the account (connected apps, postage stamps, the device
    list, settings) converging across devices. Each device writes its own feed, and a reader
    folds every device's latest view into one account.
 
 They are independent: account-state sync would be needed even with one batch per device,
-and the partition lease would be needed even if account state never changed. A device
-that holds a partition lease is also the device permitted to publish account state (the
-"partition gate", below). The [account bus](../account-bus/) cuts across both: it carries a
-snapshot to live peers ahead of the feed, and lets a waiting device ask a live holder for
-its partition instead of polling for it.
+and the lanes would be needed even if account state never changed. A context that holds
+a partition is also the one permitted to publish account state (the "partition gate",
+below). The [account bus](../account-bus/) cuts across both: it carries a snapshot to live
+peers ahead of the feed, and it is where a partition is asked for and handed over.
 
 ## Key derivation (the interop root)
 
@@ -59,10 +57,10 @@ backupKey          = deriveSecret(swarmEncryptionKey,   "backup-key")         //
 
 - **`backupSigner`** = the secp256k1 private key whose scalar is `backupKey`. Its
   Ethereum address (`backupSigner.publicKey().address()`) is the **owner** of every feed
-  and every lock SOC in this document. Because the owner is per-account, the same
+  and every single-owner chunk in this document. Because the owner is per-account, the same
   identifier/topic across two different accounts still produces different chunk addresses —
   domain separation comes from the owner, not from baking the account ID into hashes.
-- **`swarmEncryptionKey`** encrypts the lock-SOC payloads, the intent beacons, and the
+- **`swarmEncryptionKey`** encrypts the state-pointer entries and the
   account feeds, and seeds the per-utilization-chunk key derivation.
 
 Per-device identity:
@@ -70,9 +68,6 @@ Per-device identity:
 - **`deviceId`** — a per-install UUID (`crypto.randomUUID()`), stored under the
   localStorage key `swarm-id-device-id`. Stable for the life of the install; **not**
   derived from the account, so each device has a distinct one.
-- **`tiebreaker`** = `hex( keccak256(utf8(deviceId))[0:8] )` — the first 8 bytes of the
-  keccak256 of the device ID, as hex. Used to deterministically order two writers that
-  share a millisecond timestamp. Two distinct device IDs collide with probability 2⁻⁶⁴.
 
 ## Batch slot layout & partitions
 
@@ -91,7 +86,7 @@ The slot space of _every_ bucket is divided into `PARTITION_COUNT = 2` interleav
 The lowest `PARTITION_COUNT` slots are **reserved** (not data):
 
 - Slot index `p` (for `p` in `[0, PARTITION_COUNT)`) is reserved for **partition `p`**'s
-  lock SOC and counter (utilization) chunks.
+  counter (utilization) chunks and state-pointer entries.
 - Data slots begin at `DATA_COUNTER_START = PARTITION_COUNT`.
 
 The physical slot for partition `p`'s `j`-th data chunk in a bucket
@@ -120,7 +115,7 @@ capacity = floor( 2^(D-16) / K ) − 1         // −1 for the reserved slot
 | 28        | 4 096        | 2 047                                   |
 
 Legacy single-device accounts use `partitionCount = 1` (reserved slot 0, data from slot 1
-onward) and skip the lease entirely.
+onward) and have no lanes.
 
 ## Utilization tracking
 
@@ -128,24 +123,22 @@ Each device tracks, per bucket, how many data chunks **its partition** has writt
 the `j` counter above. This is held in memory as a `Uint32Array(65536)` (`dataCounters`),
 always uint32 in memory regardless of how it is serialized.
 
-### On-disk / on-wire codec
+### The local cache's codec
 
-The counter array is serialized into fixed `CHUNK_SIZE = 4096`-byte chunks. The per-bucket
-counter is **uint16** when it always fits (`D ≤ 31`, max `2^15`), else **uint32**
-(`D ≥ 32`). This sets the chunk layout (`getChunkLayout`):
-
-| Codec  | Applies when | `bucketsPerChunk` | `numUtilizationChunks` |
-| ------ | ------------ | ----------------- | ---------------------- |
-| uint16 | `D ≤ 31`     | 2 048             | 32                     |
-| uint32 | `D ≥ 32`     | 1 024             | 64                     |
+This is the layout of the device's own cache and utilization backup, not of the published
+partition state (see [Wire format](#wire-format-byte-layout) for that). The counter array
+is serialized into fixed `CHUNK_SIZE = 4096`-byte chunks. The per-bucket
+counter is **uint32** at every depth, so a batch that is diluted keeps the rows it has
+(`getChunkLayout`): 1 024 buckets per chunk, 64 chunks.
 
 Counters are little-endian in the serialized chunk. Chunk `i` covers buckets
 `[i·bucketsPerChunk, (i+1)·bucketsPerChunk)`.
 
 ### Per-chunk encryption key
 
-Utilization chunks are uploaded as **encrypted content-addressed chunks**. The key for
-chunk `i` is deterministic so re-saves dedup:
+The cache records, for each row, the address it has as an **encrypted content-addressed
+chunk** (`contentHash`); the rows themselves are not uploaded. The key for row `i` is
+deterministic:
 
 ```text
 chunkKey = HMAC-SHA256(
@@ -155,10 +148,9 @@ chunkKey = HMAC-SHA256(
 ```
 
 `nonce` starts at 0 and is incremented only when the resulting encrypted address would
-land in the same bucket as another utilization chunk in the same save (collisions are
-vanishingly rare — ≈0.008 bumps per save with 32 chunks over 65 536 buckets). The nonce
-that produced a chunk is cached so an unchanged plaintext reuses the same key and the
-upload is skipped.
+land in the same bucket as another row's, or as a chunk of the published partition state.
+The nonce that produced a row's address is cached, so an unchanged plaintext keeps the
+same key.
 
 ### Local cache
 
@@ -168,312 +160,241 @@ storing `{ data, contentHash, nonce, lastAccess }`. A port may use any local KV 
 cache is an optimization, not part of the wire protocol. What a device resumes from across
 devices is the **published partition state** (below), not the cache.
 
-## Lock SOCs
+## Who holds a lane
 
-A **single-owner chunk (SOC)** per `(batch, partition)` is the cross-device authority for "who
-holds this lane right now." All of an account's devices share the `backupSigner`, so any of
-them can write any lane's lock SOC; concurrent writers are ordered by a fencing token.
+A **lane** is one partition of one batch. Nothing on Swarm says who holds it. The contexts
+of the account that are open right now (a tab, an embedded iframe) agree on it by exchanging
+a few small messages over the [account bus](../account-bus/). The protocol is small, and it was
+model-checked before it was built
+([`models/bus-lease`](https://github.com/snaha/swarm-id/tree/main/models/bus-lease)).
 
-The batch id is part of the identifier, not just the partition. A lane's slot space is computed
-_within_ a batch, and the state riding on it is published per batch, so keying the lock on the
-partition alone made lane `p` of batch X and lane `p` of batch Y the same chunk address — two
-coordinators that share no slot would take turns anyway. Per-app stamp overrides put two live
-coordinators on two batches without any multi-batch feature, so this is reachable in normal use
-([#589](https://github.com/snaha/swarm-id/issues/589)).
+### What a participant is
 
-```text
-identifier = keccak256( utf8("swarm-id-partition-lock-v1:" + batchIdHex + ":" + partition) )
-owner      = backupSigner address
-SOC address = keccak256( identifier ‖ owner )            // 32 bytes
-encryption = swarmEncryptionKey
-```
+One context, for as long as its connection to the signaling server lasts. Its name is the
+peer id the server gave that connection. Two tabs of one browser are two participants. A
+context that reconnects is a new participant and holds nothing.
 
-Payload (JSON, ~150 bytes, encrypted):
+### What the bus must provide
+
+- **A confirmed connection.** The server asks every room member to ping every 2 s
+  (`tick`), and answers each `ping` with a `pong`. A context's connection is _confirmed_ as
+  of the moment it sent the newest ping that was answered.
+- **The room.** The server tells every member who joins and who leaves. A member that
+  stops answering ticks is dropped.
+
+### The rules
+
+| Constant        | Value    | Meaning                                                               |
+| --------------- | -------- | --------------------------------------------------------------------- |
+| `LEASE_STOP_MS` | 6 000 ms | A holder whose connection has not been confirmed for this long stops. |
+| `LEASE_WAIT_MS` | 8 000 ms | How long everyone else must have been absent before a lane is taken.  |
+
+1. **Writing.** A context stamps only while it holds the lane **and** its connection was
+   confirmed less than `LEASE_STOP_MS` ago. A context whose confirmation is overdue
+   stops stamping and leaves claims unanswered. Once the same connection is confirmed again
+   it carries on with the lane; a new connection holds nothing.
+2. **Claiming.** A context that wants a lane sends `lane-claim` with a fresh random
+   `round`, to everyone, and again with every confirmation while the claim is open.
+3. **Taking.** The claimant holds the lane once every other context has either answered
+   `lane-free` for that `round`, or has been absent from the room for `LEASE_WAIT_MS`. A
+   context whose own stay in the room is shorter than that cannot know who left before
+   it came, and waits. A message from a context the room does not list restarts that
+   context's absence.
+4. **Answering a claim.**
+   - Not holding and not claiming the lane: answer `lane-free`.
+   - Claiming it too: the lower peer id keeps its claim; the higher one drops its own and
+     answers `lane-free`.
+   - Holding it: stop stamping, then answer `lane-free` (a handover), or keep the lane and
+     answer `lane-held`. The reference holder keeps it while an upload is in flight, for 3 s
+     after one, and when the claim is marked `gentle`. `lane-held` is a courtesy: no rule
+     reads it, and the lane is just as safe if it is lost.
+5. **Every context answers**, also for lanes of batches it never writes. A claimant waits
+   for everyone present.
 
 ```json
-{
-  "holderDeviceId": "uuid-or-empty-string",
-  "generation": { "timestampMs": 1730000000000, "tiebreaker": "a1b2c3d4e5f6a7b8" },
-  "acquiredAt": 1730000000000,
-  "leasedUntil": 1730000030000
-}
+{ "type": "lane-claim", "accountId": "<40 hex>", "batchId": "<64 hex>", "partition": 0,
+  "from": "<peer id>", "round": "<16 hex>", "gentle": true }
+{ "type": "lane-free",  "accountId": "<40 hex>", "batchId": "<64 hex>", "partition": 0,
+  "from": "<peer id>", "to": "<peer id>", "round": "<16 hex>" }
+{ "type": "lane-held",  "accountId": "<40 hex>", "batchId": "<64 hex>", "partition": 0,
+  "from": "<peer id>", "to": "<peer id>", "round": "<16 hex>" }
 ```
 
-- **`holderDeviceId`** — the current holder's device ID, or the sentinel
-  `NO_HOLDER_DEVICE_ID = ""` (empty string) after an explicit release.
-- **`generation`** — the fencing token. `compareGenerations(a, b)` orders by `timestampMs`
-  first, then by `tiebreaker` lexicographically. The higher generation always wins.
+Messages may be lost, late, repeated or reordered; the rules hold regardless. A message
+whose `from` is not the peer that delivered it is dropped.
 
-:::note[Why the tiebreaker is stored, not derived]
-In a normal claim `generation.tiebreaker` equals `keccak256(holderDeviceId)[0:8]`, so it looks
-redundant with `holderDeviceId`. It is stored anyway because the `generation` is a **self-contained
-fencing token attributable to whoever wrote the SOC** — a different question from `holderDeviceId`
-("who holds it now"), and `compareGenerations` orders writers purely from the token without
-re-hashing or reading `holderDeviceId`. The two diverge at the **release sentinel**: a release sets
-`holderDeviceId = ""` but carries the **released claim's** generation (whose tiebreaker is the
-releasing device's, since claims always mint their own), so it cannot be recovered from
-`holderDeviceId` (deriving it would yield `keccak256("")[0:8]`, attributable to no device).
-Storing it costs 16 hex chars and keeps the comparator decoupled from device-ID semantics.
-:::
+### Which lane
 
-### Release protocol (generation-fenced)
-
-A release is an action on a **specific claim**, not on the partition: the sentinel carries
-the generation of the claim it releases — never a fresh one — so any later claim
-(a successor on the same device, or a peer) is logically newer than the release. Before
-writing, the releaser re-reads the lock and **skips the sentinel** when the lock no longer
-carries the claim being released:
-
-- an existing sentinel (any generation) — already released; rewriting would mint a fresh
-  postage stamp that could clobber a claim landing in between;
-- a foreign claim, live or expired — never clobber a peer (expired already reads as
-  takeable);
-- our own claim with a **newer** generation — a successor re-acquired while the release
-  was publishing.
-
-Our own claim at a non-newer generation writes (`<=`, not `==`): a stale read returning an
-older refresh of the same holdership must not suppress the release. This matters because
-Bee replaces a same-address SOC whenever the new chunk's **postage stamp timestamp** is
-newer — without the fence, a detached release outliving a same-device re-acquire would
-deterministically clobber the successor's claim and peers would read the partition as
-free (turning one writer into two). In the reference implementation the sign-out release
-is additionally serialized under the same origin-wide write lock the acquire path uses,
-so its sentinel's stamp is always minted before a successor's claim stamp. A holder that
-nevertheless sights a sentinel on its own partition re-asserts its claim at the next
-upload or refresh tick.
-
-Residual (accepted): a releaser whose node serves a stale view (e.g. a caching gateway
-that never re-fetches) can still write its fenced sentinel over a peer claim it cannot
-see; recovery is the displaced peer's refresh re-assert, bounded by `LEASE_REFRESH_MS`.
-
-### Acquire / refresh protocol
-
-A SOC has no compare-and-swap; ordering comes from the generation fence plus a guard
-window `PARTITION_LOCK_GUARD_MS = 2000` ms:
-
-1. **Read** the lock SOC.
-2. If a **live foreign holder** exists (`holderDeviceId` is neither us nor empty, and
-   `leasedUntil > now`) → return **`blocked`**, write nothing.
-3. Otherwise write our claim (`holderDeviceId = us`, fresh `generation`, `leasedUntil =
-now + LEASE_TTL_MS`).
-4. **Wait `guardMs`**, then re-read.
-5. If our generation is still the latest visible → **`acquired`**. If a higher generation
-   appeared during the guard → **`lost-race`** (a peer beat us; fall back to read-only).
-6. If the verify-read fails to return anything (transient Bee error / propagation lag) →
-   optimistically **`acquired`** — we observed no live foreign holder before writing, so a
-   failed read is not proof of a race; the periodic refresh reconciles and only demotes on
-   a _confirmed_ live foreign holder.
-
-### Reserved-slot routing
-
-The lock SOC's chunk lands in some bucket (`bucket(SOC address)`). The stamper routes the
-overstamp to that bucket's **reserved slot = the partition index**, so the tight heartbeat
-cadence never consumes data-slot budget and the SOC always occupies the same slot. The
-counter (utilization) chunks for a partition are routed the same way.
-
-### Intent beacons
-
-The lock SOC has one fixed address, and a Bee node that has once served it may keep serving
-the cached copy. Two devices on different gateways that both find a partition free can then
-both claim it without ever seeing each other. The **intent beacon** closes that gap: before
-binding a free partition, a device writes a small SOC at an address that rotates every epoch
-and that only it writes, then reads every other known device's address for the same epoch:
+The reference client asks for every lane with `gentle: true` first, so it takes a lane
+nobody holds and leaves holders alone. Only once every lane has answered `lane-held` does
+it ask the holder of its home lane to hand over, and after each further 1.5 s the holder
+of the next lane. The home lane is
 
 ```text
-identifier  = keccak256( utf8("swarm-id-partition-intent-v1:" + partition + ":" + deviceId + ":" + epochBucket) )
-owner       = backupSigner address
-encryption  = swarmEncryptionKey
-epochBucket = floor( now / INTENT_EPOCH_MS )
+home = uint32_be( keccak256( utf8(deviceId) )[0:4] ) mod partitionCount
 ```
 
-A read of an address the node has never served cannot come from its cache, so it goes to
-the network, where the rival's write already sits. Contenders order themselves by
-`generation`; only the lowest binds the lock, the rest step back. A read that times out
-counts as "no intent", so one unreachable device cannot block everyone else. A second,
-device-independent **occupancy beacon** (`swarm-id-partition-occupancy-v1`) says whether the
-partition is in use at all, for a device whose list of peers is incomplete.
-
-Both beacons are stamped into the contended partition's reserved slot, so they can never
-share a `(bucket, slot)` with user data.
+A blocking write keeps asking for 30 s before it fails. Nothing is released on a timer: a
+holder keeps its lane while its tab is open and connected.
 
 ## Partition state
 
 Each `(batchId, partition)` has its own published **counter**: the holder's per-bucket data
-counter. The holder publishes it on every upload and on release; the next holder reads it on
-acquire and resumes from exactly that counter, so a hand-off never re-uses a slot.
+counter. The holder publishes it on every upload; the next holder reads it when it
+takes the lane and resumes from exactly that counter, so a hand-off never re-uses a slot.
 
 A write is reported complete only after the partition state that covers its slots is
 published. An upload that was still in flight when a holder disappeared was therefore never
 acknowledged, and the next holder may safely overwrite its slots.
 
 ```text
-topic = keccak256( utf8("swarm-id-partition-state-v1") ‖ batchId ‖ uint32_be(partition) )
+topic = keccak256( utf8(domain) ‖ batchId ‖ uint32_be(partition) )
 owner = backupSigner address
+domain = "swarm-id-partition-state-v2"
 ```
 
-The counter is not a single blob. It is split into the same `numUtilizationChunks` counter
-chunks, each uploaded with a **random** encryption key to the partition's reserved slot,
-yielding a 64-byte **encrypted reference** (`address ‖ key`). A single **reference chunk**
-concatenates those references (`N · 64 ≤ 4096` bytes, one chunk even at `N = 64`). A taking
-over device follows **pointer → reference chunk → counter chunks**, decrypting each from its
-embedded key.
+The counter is not a single blob. It is packed into **leaves** under a **frame** (see
+[Wire format](#wire-format-byte-layout) below), each leaf uploaded with a **random**
+encryption key to the partition's reserved slot, yielding a 64-byte **encrypted reference**
+(`address ‖ key`). A single **reference chunk** carries the frame, the exceptions and those
+references (`7 + 8·E + 64·L` bytes, one chunk at the width cap). A taking-over device follows
+**pointer → reference chunk → leaves**, decrypting each from its embedded key.
 
 ### The state pointer
 
-The reference chunk's address is published in a **state-pointer SOC** whose identifier
-rotates every epoch:
+Each publish writes the reference chunk's address as the next **state-pointer entry**:
+entry 1, 2, 3, …, each a SOC written once and never rewritten.
 
 ```text
-identifier = keccak256( topic ‖ uint64_be( floor(now / STATE_POINTER_EPOCH_MS) ) )
+identifier = keccak256( topic ‖ uint64_be( seq ) ‖ uint8( salt ) )
 owner      = backupSigner address
-STATE_POINTER_EPOCH_MS = 30 000
+payload    = { referenceHex, seq }   (encrypted)
 ```
 
-A reader computes the address directly, with no feed walk, and the rotating address cannot
-be served from a gateway's stale cache. The holder rewrites the pointer into the current
-epoch on every refresh, so an idle but live holder keeps a fresh resume point. A taking-over
-device reads the current and previous epoch around `now`; for a holder that is gone, it reads
-every epoch in the span `leasedUntil − LEASE_TTL_MS … leasedUntil` plus a little slack, all at
-once, so the lookup costs about one read timeout however long ago the holder stopped.
+A reader searches for the highest entry: it reads the powers of 8 to bracket the answer,
+then splits the bracket 8 ways until it is one entry wide. Each round is a handful of
+reads made at once. A device that remembers an entry starts from it, and when nothing
+newer was published the lookup is a single round. The lookup uses no clock, so it finds a
+state however long ago it was written.
 
-No pointer found **and** a clean lock means there is no state: resume from zero. No pointer
-found but an **unreadable** lock means fail safe: read-only, retry later, never seed a zero
-counter.
+Entries share the partition's reserved slot, so a later write in the same bucket replaces
+an earlier entry. The search is fixed (which entries it reads depends only on the
+answer), which leaves a small set of entries that a later search depends on (`searchPath`:
+18 after ten thousand publishes, no more than 47 in the first quarter of a million). A writer keeps
+its counter and reference chunks out of their buckets, and `salt` picks, by a rule the
+reader repeats, the first of 8 candidate addresses whose bucket is clear of the earlier
+entries on the entry's search path.
+
+A search in which the read of a possibly newer entry timed out is inconclusive: fail
+safe, read-only, retry later, never seed a zero counter. A holder never writes an entry
+twice: when it does not know the newest entry for sure, it searches before it publishes.
 
 ### Wire format (byte layout)
 
-The format is **binary** and is versioned by the topic domain
-(`swarm-id-partition-state-v1`); there is no in-blob version byte. A future v2 publishes
-under a v2 topic and never collides with v1 readers.
+The format is **binary** and is versioned by the topic domain; there is no in-blob version
+byte. A new version publishes under its own topic and never collides with older readers:
+`v1` was a fixed-width uint16/uint32 layout, left unread where it is.
 
-**Reference chunk** — exactly `N × 64` bytes, where
-`N = numUtilizationChunks(batchDepth)`:
+The counter table is packed with the leaf encoding of Nectar's **SBU1** usage snapshot
+([`docs/spec/sbu1.md`](https://github.com/nxm-rs/nectar/blob/main/docs/spec/sbu1.md) §4
+and §6; `lib/src/sync/counter-codec.ts`), byte for byte, so its golden vectors pin ours. A
+**frame** is a `base` (at most the smallest counter) and a bit width `w` (0 to 23). Every
+bucket stores `count − base` as a `w`-bit field, packed MSB-first with no gaps; a bucket
+whose delta does not fit is an **exception**: its field is all ones and its absolute count
+is listed in the reference chunk (at most 128). A leaf holds `floor(32768 / w)` buckets, so
+`L = ceil(65536 / floor(32768 / w))` leaves cover the table (none at `w = 0`), the last one
+short. The canonical encoder takes `base = min` and the width that minimizes the packed
+bits plus 8 bytes per exception plus a digest per leaf — under the 128-exception cap, the
+narrowest width that fits.
 
-| Offset        | Size | Content                                                             |
-| ------------- | ---- | ------------------------------------------------------------------- |
-| `i · 64`      | 32   | Swarm address of counter chunk `i`, or all zeros if never written   |
-| `i · 64 + 32` | 32   | Decryption key of counter chunk `i` (random, generated per publish) |
+The width follows the _spread_ of the counters, not the batch depth, so a dilute changes
+no published byte. Lane counters are Poisson over the buckets, so the spread grows with
+the square root of the fill and a real drive packs into far fewer chunks than the fixed
+width before it took (32 at uint16, 64 at uint32):
 
-A counter chunk that is entirely zero is not uploaded; its entry in the reference chunk is
-all zeros and the reader treats it as a zero chunk.
+| Data written by one lane | `w` | Leaves |
+| ------------------------ | --- | ------ |
+| 300 MB                   | 3   | 7      |
+| 2.5 GB                   | 5   | 11     |
+| 25 GB                    | 7   | 15     |
+| 1 TB                     | 9   | 19     |
+| 16 TB                    | 11  | 23     |
 
-**Counter chunk `i`** — exactly 4096 bytes (`CHUNK_SIZE`): `bucketsPerChunk` consecutive
-per-bucket counters, **little-endian**, covering buckets
-`[i · bucketsPerChunk, (i + 1) · bucketsPerChunk)`. The counter width depends on the batch
-depth (`getChunkLayout`):
+**Reference chunk** — `7 + 8·E + 64·L` bytes, big-endian, within one chunk at the width
+cap:
 
-| Batch depth                         | Counter width | `bucketsPerChunk` | `N` (chunks) |
-| ----------------------------------- | ------------- | ----------------- | ------------ |
-| `≤ 31` (`UINT16_COUNTER_MAX_DEPTH`) | `uint16` LE   | 2048              | 32           |
-| `≥ 32`                              | `uint32` LE   | 1024              | 64           |
+| Offset                 | Size | Content                                                    |
+| ---------------------- | ---- | ---------------------------------------------------------- |
+| 0                      | 1    | Width `w`                                                  |
+| 1                      | 4    | Base                                                       |
+| 5                      | 2    | Exception count `E`                                        |
+| `7 + k · 8`            | 4    | Bucket of exception `k` (strictly ascending)               |
+| `7 + k · 8 + 4`        | 4    | Its absolute count                                         |
+| `7 + 8E + i · 64`      | 32   | Swarm address of leaf `i`, or all zeros if never written   |
+| `7 + 8E + i · 64 + 32` | 32   | Decryption key of leaf `i` (random, generated per publish) |
 
-The decoded result is always a `Uint32Array(65536)` regardless of the on-wire width.
-`writePartitionState` validates its input against `PartitionStateSchemaV1`, and
-`readPartitionState` validates the reassembled counter, the reference chunk's length and
-each counter chunk's length before returning.
+A leaf whose bytes are all zero is not uploaded; its entry in the reference chunk is all
+zeros and the reader treats it as a zero leaf.
+
+**Leaf `i`** — `ceil(n · w / 8)` bytes for the `n` buckets it covers: their deltas packed
+MSB-first, the trailing padding bits zero.
+
+The decoded result is always a `Uint32Array(65536)`. `writePartitionState` validates its
+input against `PartitionStateSchemaV1`; `readPartitionState` validates the reference chunk
+against the frame it names, each leaf's length and padding, the exception list, and the
+reassembled counter before returning. There is no checksum: each reference binds its
+leaf's exact bytes.
 
 ### Incremental publish
 
-Given the previous publish's references and the counter it published, only the chunks whose
-bytes changed are uploaded again; unchanged chunks keep their reference. A typical upload
-changes one or two chunks, not all 32. On acquire the lease seeds this baseline from the
-resumed state, so even the first publish of a session is incremental.
+The previous publish's frame is kept while it still fits the counter, so leaf boundaries
+hold and only the leaves a write touched are re-uploaded. A frame that no longer fits packs
+under the canonical frame and publishes every non-zero leaf. A context that takes a lane
+seeds this baseline from the state it read, so even its first publish is incremental. The
+baseline must be exactly the counter the kept leaves encode: a kept leaf goes out under an
+exception list computed from the new counter, and one that encodes any other counter is a
+leaf the reference chunk does not describe.
 
 ### Read semantics
 
-Reads short-circuit on a cached "synced reference": if the pointer still names the reference
-a device last synced with, it skips the downloads and reuses its local counter.
+A context that finds nothing newer than a state it read or wrote itself downloads nothing
+and keeps its own counter.
 
-When the pointer exists but the reference chunk or any counter chunk cannot be read, or fails
+When the pointer exists but the reference chunk or any leaf cannot be read, or fails
 the checks above, the read reports failure without caching the bad reference, and the device
 falls back to **read-only without claiming the partition**, retried on the next acquire. It
 must not seed a zero counter: stamping from zero would re-issue every used slot and evict the
 partition's data chunk by chunk.
 
 Both sides also protect the published chunks from later overstamps: the publisher avoids the
-buckets of the partition's lock SOC and of its live utilization chunks, and every device
+buckets of its live utilization chunks, and every device
 records the published state chunks' buckets so its own utilization saves avoid placing chunks
 there. All of these chunks share the partition's reserved slot, and a collision would evict
 the resume point a later takeover depends on.
 
-:::note[Historical: device-claim feed]
-The first iteration used a per-device claim feed
-(`topic = keccak256(utf8("swarm-id-device-claim-v1:" + accountId + ":" + deviceId))`) as the
-holder authority. The shared per-partition lock SOC replaced it, and the claim-feed code is
-no longer in the library. A fresh port does not need it.
+:::note[Historical: lock chunk and device-claim feed]
+Earlier iterations recorded the holder on Swarm: first a per-device claim feed, then a
+per-partition lock SOC rewritten in place, with beacon chunks beside it. Rewriting one
+address proved unreliable on real nodes, and none of it is in the library any more. A fresh
+port does not need it.
 :::
 
-## Lease lifecycle
+## Taking over a partition
 
-The reference orchestrator is `PartitionLease`. Constants:
+A context that has taken a lane reads the partition state before it stamps:
 
-| Constant                  | Value      | Meaning                                                                   |
-| ------------------------- | ---------- | ------------------------------------------------------------------------- |
-| `LEASE_TTL_MS`            | 30 000 ms  | A lease is valid this long; a crashed holder is reclaimable after.        |
-| `LEASE_REFRESH_MS`        | 10 000 ms  | Holder re-writes the lock SOC this often (3 refreshes per TTL).           |
-| `IDLE_YIELD_MS`           | 30 000 ms  | Holder voluntarily releases after this long with no upload.               |
-| `PEER_YIELD_MIN_IDLE_MS`  | 3 000 ms   | Holder answers a peer's bus request only after this long with no upload.  |
-| `PARTITION_LOCK_GUARD_MS` | 2 000 ms   | Guard window between claim-write and verify-read.                         |
-| `SLOT_WAIT_TIMEOUT_MS`    | 30 000 ms  | A device with no free partition polls this long for one to free up.       |
-| `INTENT_EPOCH_MS`         | 30 000 ms  | Epoch of the intent and occupancy beacons.                                |
-| `INTENT_GUARD_WINDOW_MS`  | 12 000 ms  | How long a contender watches for rival intents before binding.            |
-| `STATE_POINTER_EPOCH_MS`  | 30 000 ms  | Rotation period of the state-pointer SOC.                                 |
-| `SYNC_READ_TIMEOUT_MS`    | 2 500 ms   | Bound on every lock, beacon, and roster read on the acquire path.         |
-| `PRESENCE_INTERVAL_MS`    | 20 000 ms  | Account-bus liveness message; feeds the rival set, not the lock.          |
-| `PRESENCE_MAX_AGE_MS`     | 180 000 ms | A device unheard this long leaves the rival set (three throttled beats).  |
-| `KNOWN_DEVICE_MAX_AGE_MS` | 30 min     | A device that signed in this recently counts as a rival even with no bus. |
+- **Nothing published** (a clean search finds no pointer entry): start from a zero counter.
+- **A published state**: resume from exactly that counter. An unclean stop that stamped
+  past its last publish loses only uploads that were never reported complete.
+- **A state that may exist but cannot be read**: do not write. Give the lane back and try
+  again later.
 
-`acquire(snapshot)`, where `snapshot` is `{ partitionCount }`, returning
-`{ partition, partitionCount, localCounter, isReadOnly, lockPayload? }`:
+A context that takes a lane it held before, with nothing published since, may keep the
+counter it has in memory. It must not trust a counter cached by another context of the
+same browser.
 
-1. If `partitionCount ≤ 1` → legacy single-device, no lease.
-2. Read, **concurrently**: every partition's lock SOC, the per-device intent and presence
-   beacons, the device-independent occupancy beacon, and a speculative state pointer. The extra
-   channels catch a live peer that has not yet written a lock.
-3. Choose the partition we already hold, else the lowest free/expired one
-   (`pickFreeOrExpired`). If every partition has a live foreign holder → **read-only**.
-4. `claimPartition` — seed the counter from the partition state, then run the lock
-   acquire/verify protocol. A contended fresh claim first runs an **intent round**; a device that
-   is demonstrably alone takes a solo-clean fast path that skips the guard window. On `acquired`,
-   bind the counter to the stamper; on `blocked`/`lost-race`, fall back to read-only.
-
-The whole call is bounded by `PARTITION_LEASE_ACQUIRE_TIMEOUT_MS` (45 s), within which a slot wait
-is bounded by `SLOT_WAIT_TIMEOUT_MS` (30 s).
-
-`refresh()` re-runs the lock protocol on the held partition to bump `leasedUntil` and heartbeats
-the state pointer. It returns a `LeaseRefreshOutcome`, not a boolean:
-
-- **`held`** — still ours.
-- **`lost`** — `blocked`, `lost-race` or `aborted`. (A refresh that overlaps an in-flight
-  `release()` aborts before writing, so it cannot mint a ghost claim the fenced release would
-  refuse to clear.)
-- **`displaced`** — a foreign beacon carries an earlier generation, so another device has a better
-  claim. The coordinator handles this differently from a plain loss.
-  `release(localCounter)` publishes the final counter to
-  the partition state and its pointer, then writes the generation-fenced release sentinel (see
-  "Release protocol" above) — skipped entirely when the lock no longer carries the claim
-  being released. `adoptIfLive()`/`hydrate()`/`serialize()` let a reload re-adopt a
-  still-valid lease from a local cache without a Swarm round-trip (re-validated on the next
-  refresh).
-
-### The four cases
-
-- **Case A — first device, fresh batch.** No lock SOC, no partition-state. Take partition
-  0, seed a zero counter.
-- **Case B — second device.** Partition 0 is live-held; take partition 1, seed its counter
-  from its published partition state (zero if never published).
-- **Case C — third+ device, turn-taking.** All `PARTITION_COUNT` partitions are held. The
-  new device asks the live holders for a slot over the [account bus](../account-bus/) each
-  round; exactly one idle holder answers, releases, and the waiter claims the freed
-  partition in about one round trip, resuming from the published counter. Without a live
-  answer it waits (`SLOT_WAIT_TIMEOUT_MS`, polling every `LEASE_REFRESH_MS`) for a holder
-  to go idle (`IDLE_YIELD_MS` → it releases) or for a lease to lapse.
-- **Case D — crash recovery.** A holder dies without releasing. Its `leasedUntil` expires
-  after `LEASE_TTL_MS`; a peer then reclaims the partition. Resume is from the last
-  _published_ counter — an unclean crash that stamped past its last publish loses only
-  uploads that were never reported complete.
-  If the published counter exists but cannot be read, the taker stays read-only and
-  retries rather than resuming from zero.
+After each upload the holder publishes the counter and only then reports the upload
+complete. Before publishing it checks that it still holds the lane.
 
 ## Account-state sync
 
@@ -523,8 +444,8 @@ device's full current view (`DeviceStateSnapshotSchemaV1`):
 
 A device writes its feed on a local change, never after a read, so write amplification is
 bounded and folding is repeatable. Both writers go through the batch write coordinator (the
-cross-tab lock plus the partition lease): the identity site publishes once per change, and the
-proxy iframe publishes with a short debounce when it acquires a lease or sees a local change.
+cross-tab lock plus a held partition): the identity site publishes once per change, and the
+proxy iframe publishes with a short debounce when it takes a partition or sees a local change.
 
 ### Read: the fold
 
@@ -560,13 +481,10 @@ default drive expires never reads the deletion, and keeps the account.
 
 ### The partition gate
 
-A device may publish account state **only if it holds a partition** (or can claim a
-free or expired one), because publishing writes chunks to the shared batch. The lock SOC
-decides who holds what. Which devices are worth checking for a competing claim, the rival
-set, comes from the account bus's presence messages together with devices that signed in
-within the last 30 minutes; a live peer that set misses is still caught by the occupancy
-beacon. If every partition is held by a live foreign device, the publish is skipped and a
-peer publishes instead.
+A context may publish account state **only if it holds a partition** (or can take one),
+because publishing writes chunks to the shared batch. If every partition is held by a
+context that is writing, or this context cannot reach the account bus, the publish is
+skipped and a peer publishes instead.
 
 ## Porting checklist
 
@@ -575,32 +493,28 @@ To interoperate with the reference implementation, an external client must:
 1. **Reconstruct the same `derivationKey`** after auth, then derive `swarmEncryptionKey`
    and `backupKey` via `deriveSecret` exactly as above (HMAC-SHA256, key-as-hex-bytes,
    context-as-UTF-8). The `backupSigner` address is the owner of everything.
-2. **Generate a stable per-install `deviceId`** (UUID) and the `tiebreaker`
-   (`keccak256(deviceId)[0:8]`).
-3. **Implement the lock-SOC protocol**: the identifier hash over **batch id and partition**
-   (not the partition alone), SOC address, encrypted JSON
-   payload, the read → guard (2 s) → verify acquire flow, the intent beacons, generation
-   fencing, and the
-   **generation-fenced** `""` release sentinel — the sentinel carries the released
-   claim's generation and is skipped when the lock no longer carries that claim. A port
-   that mints fresh sentinel generations or releases unconditionally re-introduces the
-   stale-release claim-clobbering race (#349).
-4. **Implement the slot formula** `slot = K + p + K·j` and route lock-SOC/counter chunks to
-   reserved slot `p`. Honour `PARTITION_COUNT = 2`, `DATA_COUNTER_START = 2`.
-5. **Implement the partition state**: the topic hash, the rotating state-pointer SOC, the
-   reference-chunk → counter-chunks structure, publish-before-acknowledge, and the
+2. **Generate a stable per-install `deviceId`** (UUID).
+3. **Implement the lane protocol** on the account bus: the confirmed connection, the
+   messages, and all five rules. A port that writes without holding a lane, or that does not
+   answer claims, breaks every other client of the account.
+4. **Implement the slot formula** `slot = K + p + K·j` and route the counter chunks and the
+   state pointer to reserved slot `p`. Honour `PARTITION_COUNT = 2`, `DATA_COUNTER_START = 2`.
+5. **Implement the partition state**: the topic hash, the numbered state-pointer entries and their search, the
+   reference chunk with its frame and exceptions, the SBU1 leaves, publish-before-acknowledge, and the
    fail-safe (read-only, never zero-seed) handling of an unreadable published counter.
    Skipping the last one re-introduces silent slot-reuse data loss.
-6. **Track per-bucket counters** with the uint16/uint32 codec and the
-   `swarm-id-util-chunk-v1` key derivation (only needed to publish counters that the
-   reference client can read).
+6. **Track per-bucket counters.** The uint32 rows and the `swarm-id-util-chunk-v1`
+   key derivation describe the reference client's own cache and backup; a port needs them
+   only to read those.
 7. **Implement account-state sync**: the append-only roster feed, one device-state epoch
    feed per device with the snapshot schema above, and the fold with its recency clocks
    and tombstones.
 8. **Respect the partition gate**: never publish account state without holding a partition.
 
 All hashes are keccak256; multi-byte integers in identifiers and topics are **big-endian**
-(`uint32` for partitions, `uint64` for epochs); serialized counters are **little-endian**;
+(`uint32` for partitions, `uint64` for epochs and state-pointer entry numbers), and so are
+those of the reference chunk; a leaf's counters are packed most significant bit first; the
+rows of the reference client's local cache are **little-endian** `uint32`;
 every feed and SOC is owned by the backup signer.
 
 ## Future work
@@ -611,7 +525,6 @@ Tracked under the multi-device umbrella
 - **SWIP-60 transport for the account bus**, so synced accounts get broker push through the
   Bee node instead of a separate signaling server. Waits on bee and bee-js releasing it;
   tracked in [#571](https://github.com/snaha/swarm-id/issues/571).
-- **Live-suite coverage of the bus handover** — sub-second with both peers live, timeout
-  fallback with one peer killed — in `lib/test/live/`.
-- **A stale lock read after a bus wake** still costs a full poll interval and can make a
-  second holder yield ([#724](https://github.com/snaha/swarm-id/issues/724)).
+- **Tabs of one browser sharing a lane.** Each tab holds a lane for itself today; sharing
+  needs the model extended first.
+- **Verifiable room membership.** The signaling server is trusted to say who is present.

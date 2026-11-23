@@ -8,7 +8,15 @@
  * devices on one drive's two partitions) and `two-drives.test.ts` (two devices
  * on two drives, #882); both run under `playwright.devices.config.ts`.
  */
-import { type Browser, type BrowserContext, type Page, expect, test } from '@playwright/test'
+import {
+  type Browser,
+  type BrowserContext,
+  type Page,
+  type Request,
+  expect,
+  test,
+} from '@playwright/test'
+import { randomBytes } from 'node:crypto'
 
 import { DEVICES_RUN_BZZ_PLUR, stockedSlot } from './global-setup-devices'
 import {
@@ -34,13 +42,24 @@ export const SIGNALING_HEALTH_URL = 'http://localhost:5520/healthz'
 
 // Production timings, restated: the lib ships one bundle and it is the browser
 // one, so importing the constants here dies on `window`. Keep in step with
-// `lib/src/sync/timing-constants.ts`, `lib/src/utils/batch-utilization.ts`,
-// `lib/src/sync/partition-intent.ts` and `lib/src/sync/batch-write-coordinator.ts`.
-export const LEASE_TTL_MS = 30_000
-export const LEASE_REFRESH_MS = 10_000
-export const IDLE_YIELD_MS = 30_000
+// `lib/src/sync/bus-lease.ts` and `lib/src/sync/batch-write-coordinator.ts`.
+/** How long everyone else must have been absent before a lane nobody answers
+ *  for is taken; also how long a context that just joined waits. */
+export const LEASE_WAIT_MS = 8_000
+/** How long a holder may go without a confirmed round trip and still stamp. */
+export const LEASE_STOP_MS = 6_000
+/** A holder that wrote within this does not hand its lane over. */
 export const PEER_YIELD_MIN_IDLE_MS = 3_000
-export const INTENT_LIVENESS_GRACE_MS = 30_000
+/** Once every lane is known to be held, one more holder is asked to move per step. */
+export const NEXT_LANE_AFTER_MS = 1_500
+/** The signaling server's tick: a pending claim is sent again at each. */
+export const TICK_MS = 2_000
+/** Tries at getting two devices to hold both partitions. */
+const HOLD_BOTH_ROUNDS = 3
+/** How often `longestPause` looks. */
+const PAUSE_BEAT_MS = 20
+/** Unanswered ticks after which the server drops a member (`MAX_SILENT_TICKS`). */
+export const MAX_SILENT_TICKS = 4
 
 /** How long a disconnected session is watched for coming back on its own. */
 export const DISCONNECT_SETTLE_MS = 5_000
@@ -53,23 +72,23 @@ export const UPLOAD_TIMEOUT_MS = 60_000
  *  stamping with it (#924): 50 s at anvil's 5 s block time, the proxy's
  *  per-block re-check, and margin. The demo's upload button follows `canUpload`. */
 export const WARM_UP_TIMEOUT_MS = 90_000
-/** A bus-accelerated handover is ~one round trip; this is the poll fallback plus margin. */
-export const HANDOVER_TIMEOUT_MS = LEASE_REFRESH_MS * 3
-/** How long a slot nobody released stays taken: its lock lapses at the TTL, its
- *  occupancy beacon a grace later, and a refresh tick acts on it. Nothing a
- *  waiter does shortens it — a closed tab announces nothing (#676). */
-export const TTL_LAPSE_MS = LEASE_TTL_MS + INTENT_LIVENESS_GRACE_MS + LEASE_REFRESH_MS
-/** Past the idle window with the refresh tick that acts on it. */
-export const IDLE_WAIT_MS = IDLE_YIELD_MS + LEASE_REFRESH_MS * 2
-/** How an upload fails when no holder answers its slot wait: the wait runs out, or the
- *  acquire around it does. */
-export const UNANSWERED_WAIT = /No partition available|Partition lease timed out/
-/** The proxy's log line per device-state publish, and the coordinator's per idle yield —
- *  both marked at their source as what this suite keys on. */
-export const PUBLISHED_LINE = 'Published device state'
-export const YIELDED_LINE = 'Released idle partition'
-/** Device-state publishes inside one idle window that say a holder was never idle (#707). */
-export const BUSY_PUBLISHES = 3
+/** A handover: the gentle ask and its answers, the ask to move, a tick for a
+ *  repeat, the new holder's read of the published counter, and margin. */
+export const HANDOVER_TIMEOUT_MS = NEXT_LANE_AFTER_MS + TICK_MS * 2 + 10_000
+/** A context that just joined takes a free lane once it has been in the room
+ *  for the wait; the read of the published counter and margin on top. */
+export const ACQUIRE_TIMEOUT_MS = LEASE_WAIT_MS + TICK_MS + 10_000
+/** How long the lane of a context that went away without a word stays taken:
+ *  the room sees its socket close, and everyone else waits out its absence.
+ *  Two ticks on top for the claim that then succeeds. */
+export const ABSENCE_LAPSE_MS = LEASE_WAIT_MS + TICK_MS * 2
+/** How an upload fails when no holder hands a lane over: the wait runs out, or the
+ *  acquisition around it does. */
+export const UNANSWERED_WAIT = /No partition available|Taking a partition timed out/
+/** The coordinator's log line when a held lane goes: handed over, or the
+ *  connection lapsed. A disconnect logs nothing. Marked at its source as what
+ *  this suite keys on. */
+export const LANE_LOST_LINE = 'is no longer held'
 
 export const PARTITION_LINE = /^Partition: /
 /** The sidebar's per-drive lane line: `Lane on <8 hex>…: <n|Inactive>`. */
@@ -95,6 +114,12 @@ export function skipScenario(reason: string): never {
   throw new Error(reason) // unreachable: test.skip throws
 }
 
+/** A data chunk leaving for the node, as opposed to the state pointer (`/soc/…`). */
+export const isDataWrite = (request: Request): boolean =>
+  request.method() === 'POST' &&
+  request.url().startsWith(BEE_API_URL) &&
+  /\/(bytes|chunks)(\?|$)/.test(request.url())
+
 /**
  * One device: one context, one (or more) demo tabs on it. Everything is read
  * from what the demo renders — the sidebar's `Partition:` line, the harness's
@@ -103,6 +128,8 @@ export function skipScenario(reason: string): never {
 export class Device {
   /** Console lines from every tab, proxy iframes included, with the time seen. */
   readonly log: { at: number; text: string }[] = []
+  /** Every upload this device was told had succeeded, and what it held. */
+  readonly acknowledged: { reference: string; payload: string }[] = []
 
   private constructor(
     readonly label: string,
@@ -117,17 +144,10 @@ export class Device {
     page.on('console', (message) => this.log.push({ at: Date.now(), text: message.text() }))
   }
 
-  /** How many device-state publishes this device made since `since`. Keyed on
-   *  the proxy's own log line (`swarm-id-proxy.ts`, `runAccountStatePublish`),
-   *  which says so beside it. */
-  publishesSince(since: number): number {
-    return this.log.filter((l) => l.at >= since && l.text.includes(PUBLISHED_LINE)).length
-  }
-
-  /** Whether this device idle-yielded since `since` — the one console line a
-   *  yield leaves, and one a teardown release does not. */
-  yieldedSince(since: number): boolean {
-    return this.log.some((l) => l.at >= since && l.text.includes(YIELDED_LINE))
+  /** Whether a lane of this device went since `since` other than by its own
+   *  disconnect — the one console line a handover leaves. */
+  lostLaneSince(since: number): boolean {
+    return this.log.some((l) => l.at >= since && l.text.includes(LANE_LOST_LINE))
   }
 
   static async open(
@@ -255,25 +275,27 @@ export class Device {
    * "Bucket is full" — a limit, not a lease event. Distinct content spreads
    * across buckets the way real uploads do.
    */
-  async upload(page: Page = this.page, batchHex?: string): Promise<string> {
+  async upload(
+    page: Page = this.page,
+    batchHex?: string,
+    padBytes = 0,
+    /** Runs once the payload is in the text box, before the upload starts. */
+    onEntered?: () => Promise<void>,
+  ): Promise<string> {
     // A named drive, else the primary: the sidebar's "Write to" select, shown
     // once the app holds more than one drive. It keeps its last choice, so an
     // unnamed upload sets it back rather than inheriting the previous target.
     const target = page.getByRole('combobox', { name: 'Write to' })
     if ((await target.count()) > 0) await target.selectOption(batchHex ?? '')
-    const payload = `${this.label} ${Date.now()} ${Math.random()}`
+    // Padded when the upload should span many chunks, so it has a middle.
+    const padding = padBytes > 0 ? ` ${randomBytes(padBytes / 2).toString('hex')}` : ''
+    const payload = `${this.label} ${Date.now()} ${Math.random()}${padding}`
     await page.getByPlaceholder('Enter data to upload...').fill(payload)
+    await onEntered?.()
     // The upload has started once a write leaves for the node (from the proxy
     // iframe — the page-level wait covers frames).
-    // The DATA write: a slot wait posts lock chunks of its own (`/soc/…`),
-    // which say nothing about whether the upload ever begins.
-    const started = page.waitForRequest(
-      (request) =>
-        request.method() === 'POST' &&
-        request.url().startsWith(BEE_API_URL) &&
-        /\/(bytes|chunks)(\?|$)/.test(request.url()),
-      { timeout: UPLOAD_TIMEOUT_MS },
-    )
+    // The DATA write: the state pointer is a write of its own (`/soc/…`).
+    const started = page.waitForRequest(isDataWrite, { timeout: UPLOAD_TIMEOUT_MS })
     // Enabled once the session will stamp with the primary: a freshly bought
     // drive is held back until the network has had its blocks to see the
     // batch (#924). A named drive has its own "Setting up" line meanwhile.
@@ -301,10 +323,12 @@ export class Device {
     await expect(page.getByRole('button', { name: 'Upload Data' })).toBeEnabled({
       timeout: UPLOAD_TIMEOUT_MS,
     })
-    const result = page.getByRole('main').getByText(REFERENCE_HEX)
+    // The first: a download shown further down the page may hold hex too.
+    const result = page.getByRole('main').getByText(REFERENCE_HEX).first()
     await expect(result, `${this.label}: the upload reported no reference`).toBeVisible()
     const reference = REFERENCE_HEX.exec(await result.innerText())![0]
     expect(await readFromBee(reference), `${this.label}: read-back differs`).toBe(payload)
+    this.acknowledged.push({ reference, payload })
     return reference
   }
 
@@ -329,6 +353,97 @@ export class Device {
     return (await this.lanes(page)).get(batchHex.slice(0, LANE_PREFIX_LENGTH))
   }
 
+  /**
+   * Keep the proxy iframe's thread busy for `ms`: nothing in it runs, so it
+   * neither answers the signaling server nor stamps. What a large upload's
+   * CPU work, a slow machine or a suspended tab does to it.
+   */
+  async stall(ms: number, page: Page = this.page): Promise<void> {
+    await this.proxyFrame(page).evaluate((duration) => {
+      const until = Date.now() + duration
+      while (Date.now() < until);
+    }, ms)
+  }
+
+  private proxyFrame(page: Page) {
+    const proxy = page.frames().find((frame) => frame.url().startsWith(ID_ORIGIN))
+    if (!proxy) throw new Error(`${this.label}: no proxy iframe`)
+    return proxy
+  }
+
+  /**
+   * The longest stretch, in ms, for which the proxy iframe's thread ran
+   * nothing else while `work` was under way: the gap between beats of a timer
+   * in it. Work that holds the thread that long cannot answer the signaling
+   * server meanwhile.
+   */
+  async longestPause(work: () => Promise<unknown>, page: Page = this.page): Promise<number> {
+    const stop = await this.watchPauses(page)
+    await work()
+    return stop()
+  }
+
+  /** `longestPause` from now until the returned function is called. */
+  async watchPauses(page: Page = this.page): Promise<() => Promise<number>> {
+    const proxy = this.proxyFrame(page)
+    await proxy.evaluate((beatMs) => {
+      const state = { last: performance.now(), longest: 0, timer: 0 }
+      state.timer = window.setInterval(() => {
+        const now = performance.now()
+        state.longest = Math.max(state.longest, now - state.last)
+        state.last = now
+      }, beatMs)
+      Object.assign(window, { __pause: state })
+    }, PAUSE_BEAT_MS)
+    return () =>
+      proxy.evaluate(() => {
+        const { __pause: state } = window as unknown as {
+          __pause: { last: number; longest: number; timer: number }
+        }
+        window.clearInterval(state.timer)
+        return Math.max(state.longest, performance.now() - state.last)
+      })
+  }
+
+  /** Download `reference` through the demo and return what it shows. */
+  async download(reference: string, page: Page = this.page): Promise<string> {
+    await page.getByPlaceholder('Reference (64 hex chars)').first().fill(reference)
+    await page.getByRole('button', { name: 'Download Data' }).click()
+    const main = page.getByRole('main')
+    await expect(main.getByText('Downloaded Data:')).toBeVisible({ timeout: UPLOAD_TIMEOUT_MS })
+    return main.innerText()
+  }
+
+  /**
+   * Move within the demo by its sidebar. Not `goto`: a page load is a new
+   * proxy iframe, a new context that holds nothing.
+   */
+  async openDemoPage(name: 'SOC' | 'Storage', page: Page = this.page): Promise<void> {
+    await page.getByRole('link', { name, exact: true }).click()
+    await expect(page).toHaveURL(new RegExp(`/${name.toLowerCase()}$`))
+  }
+
+  /**
+   * Upload a raw SOC under a fresh identifier, on the demo's SOC page (see
+   * `openDemoPage`). One stamp on the held lane.
+   */
+  async uploadSoc(page: Page = this.page): Promise<void> {
+    const upload = page.getByRole('button', { name: 'Upload Raw SOC' })
+    await expect(upload).toBeEnabled({ timeout: WARM_UP_TIMEOUT_MS })
+    await page
+      .getByPlaceholder('Identifier (64 hex chars)')
+      .first()
+      .fill(randomBytes(32).toString('hex'))
+    await upload.click()
+    const main = page.getByRole('main')
+    const done = main.getByText('Raw SOC Upload Result:')
+    const failed = main.getByText(/^Error:/)
+    await expect(done.or(failed)).toBeVisible({ timeout: UPLOAD_TIMEOUT_MS })
+    if (await failed.isVisible()) {
+      throw new Error(`${this.label}: SOC upload failed — ${await main.innerText()}`)
+    }
+  }
+
   /** Upload and return the partition the session held for it. */
   async uploadAndHold(page: Page = this.page): Promise<number> {
     await this.upload(page)
@@ -338,12 +453,14 @@ export class Device {
   }
 
   /**
-   * `uploadAndHold` for a device that has to be handed a slot by a holder.
-   * While the two holders keep publishing device state to each other (#707)
-   * neither is ever idle, no `lease-request` is answered, and the slot wait
-   * times out with "No partition available". That is the bug, not this
-   * scenario's subject, so the scenario is skipped with the pointer rather
-   * than failed — and passes on its own once the holders go quiet.
+   * `uploadAndHold` as a scenario's SETUP, for a device that may have to be
+   * handed a lane by a holder. While the two holders keep publishing device
+   * state to each other (#707) neither is ever idle, no claim is answered, and
+   * the wait times out with "No partition available". Where that is not the
+   * scenario's subject it is skipped with the pointer rather than failed.
+   *
+   * Never where the handover IS the subject: a protocol that answers no claim
+   * fails the same way, and must fail the scenario (`uploadAndHold`).
    */
   async uploadAndHoldOrSkip(page: Page = this.page): Promise<number> {
     try {
@@ -351,7 +468,7 @@ export class Device {
     } catch (error) {
       const shown = error instanceof Error ? error.message : String(error)
       if (UNANSWERED_WAIT.test(shown)) {
-        skipScenario(`${this.label}'s slot wait was never answered: holders stayed busy (#707)`)
+        skipScenario(`${this.label}'s claim was never answered: holders stayed busy (#707)`)
       }
       throw error
     }
@@ -373,9 +490,8 @@ export class Device {
     await page.getByRole('button', { name: 'Disconnect' }).click()
     await expect(page.getByText(PARTITION_LINE)).toBeHidden()
     // And it stays disconnected: a session that comes back by itself a few
-    // seconds later — a peer's delta folding its secret back in, and its own
-    // not-yet-released lock re-acquired — is a product failure this scenario
-    // exists to see (#712), not a flake.
+    // seconds later — a peer's delta folding its secret back in — is a
+    // product failure this scenario exists to see (#712), not a flake.
     await sleep(DISCONNECT_SETTLE_MS)
     await expect(
       page.getByText(PARTITION_LINE),
@@ -408,7 +524,7 @@ export class Device {
     }
     const lease = this.log
       .filter((l) =>
-        /BatchWriteCoordinator|PartitionLease\]|Published device state|lease/.test(l.text),
+        /BatchWriteCoordinator|BusLane\]|Published device state|partition/i.test(l.text),
       )
       .slice(-8)
       .map((l) => `  ${new Date(l.at).toISOString().slice(11, 19)} ${l.text.slice(0, 160)}`)
@@ -435,6 +551,25 @@ export async function expectNoDualHold(
   return held
 }
 
+/**
+ * Make `first` and `second` hold the two partitions between them, whoever
+ * held what before: the starting point of a scenario about a handover. Each
+ * uploads in turn until both hold; a third device that holds one is asked
+ * for it by those uploads like anyone else.
+ */
+export async function holdBothPartitions(first: Device, second: Device): Promise<void> {
+  for (let round = 0; round < HOLD_BOTH_ROUNDS; round++) {
+    for (const device of [first, second]) {
+      if ((await device.partition()) === undefined) await device.uploadAndHold()
+    }
+    const held = await expectNoDualHold([first, second])
+    if ([...held.values()].every((partition) => partition !== undefined)) return
+    // A holder that has just written does not hand over.
+    await sleep(PEER_YIELD_MIN_IDLE_MS)
+  }
+  throw new Error(`${first.label} and ${second.label} never both held a partition`)
+}
+
 /** Read a reference straight off the cluster, as another device would. */
 export async function readFromBee(reference: string): Promise<string> {
   const response = await fetch(`${BEE_API_URL}/bytes/${reference}`)
@@ -452,8 +587,8 @@ export async function demoReachable(): Promise<boolean> {
 }
 
 /**
- * The bus is what a handover rides on. Without the signaling server every
- * slot request goes unanswered, which reads exactly like #707's busy holders
+ * The bus is what holding a partition rides on. Without the signaling server
+ * no context can write at all, which reads exactly like #707's busy holders
  * — so its absence must fail the gate, not masquerade as that skip.
  */
 export async function busReachable(): Promise<boolean> {

@@ -1,8 +1,8 @@
 # The device scenarios (`ui/tests/three-devices.test.ts`, `ui/tests/two-drives.test.ts`,
 # and the synced deletions in `ui/tests/delete-account.test.ts`) in real browsers
-# against a real cluster. Minutes per run by design — the lease
-# TTL, the idle yield and the beacon grace are each 30 s and the suite waits
-# them out — so it does not run on every change:
+# against a real cluster. Minutes per run by design — the suite waits out the
+# protocol's own timings (eight seconds for a partition nobody answers for,
+# the server's ticks) with real browsers — so it does not run on every change:
 #
 #   - on a PR that touches the lease seams or the suite itself (advisory: not a
 #     required check while #707 makes some scenarios skip on evidence),
@@ -24,6 +24,8 @@ on:
       - 'lib/src/proxy/**'
       - 'lib/src/swarm-id-proxy.ts'
       - 'lib/src/utils/batch-utilization.ts'
+      - 'lib/src/storage/**'
+      - 'signaling/**'
       - 'ui/src/lib/stores/account-bus.ts'
       - 'ui/src/lib/stores/account-delta.ts'
       - 'ui/src/lib/stores/accounts.svelte.ts'
@@ -31,6 +33,8 @@ on:
       - 'ui/tests/three-devices.test.ts'
       - 'ui/tests/two-drives.test.ts'
       - 'ui/tests/delete-account.test.ts'
+      - 'ui/tests/drive-dilute-upload.test.ts'
+      - 'ui/tests/drive-onchain-setup.ts'
       - 'ui/src/lib/delete-account.ts'
       - 'ui/src/lib/account-deleted.ts'
       - 'ui/src/lib/components/delete-account-dialog.svelte'

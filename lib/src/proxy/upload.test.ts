@@ -115,3 +115,69 @@ describe("uploadData with an explicit encryption key", () => {
     expect(downloaded).toEqual(data)
   })
 })
+
+// Preparing a payload is CPU work on the thread that also answers the
+// account bus: 1.6 ms per encrypted chunk, so 10 MB in one stretch is four
+// seconds during which a holder cannot confirm its connection, and a longer
+// one costs it its partition.
+describe("uploadData while it prepares a large payload", () => {
+  const LARGE_BYTES = 256 * CHUNK_SIZE
+
+  /** Whether a task that was waiting got to run before the first stamp. */
+  async function otherTasksRanBeforeFirstStamp(
+    encrypt: boolean,
+  ): Promise<boolean> {
+    const { target } = setup()
+    if (target.mode !== "stamper") throw new Error("expected a stamper target")
+    const inner = target.stamper
+    let waitingTaskRan = false
+    let ranBeforeFirstStamp: boolean | undefined
+    const stamper = Object.assign(Object.create(inner) as typeof inner, {
+      stamp: (...args: Parameters<typeof inner.stamp>) => {
+        ranBeforeFirstStamp ??= waitingTaskRan
+        return inner.stamp(...args)
+      },
+    })
+    setTimeout(() => (waitingTaskRan = true), 0)
+    await uploadData(
+      { ...target, stamper },
+      makeData(LARGE_BYTES),
+      encrypt ? { encryptionKey: true } : undefined,
+    )
+    return ranBeforeFirstStamp === true
+  }
+
+  it("waits for the target to be ready before each stamp", async () => {
+    const { target } = setup()
+    let ready = false
+    const order: string[] = []
+    if (target.mode !== "stamper") throw new Error("expected a stamper target")
+    const inner = target.stamper
+    const stamper = Object.assign(Object.create(inner) as typeof inner, {
+      stamp: (...args: Parameters<typeof inner.stamp>) => {
+        order.push(ready ? "stamp" : "stamp-too-early")
+        return inner.stamp(...args)
+      },
+    })
+    await uploadData(
+      {
+        ...target,
+        stamper,
+        ready: async () => {
+          await new Promise((resolve) => setTimeout(resolve, 0))
+          ready = true
+        },
+      },
+      makeData(CHUNK_SIZE),
+    )
+    expect(order).toEqual(["stamp"])
+  })
+
+  it("gives way to other tasks while it encrypts", async () => {
+    expect(await otherTasksRanBeforeFirstStamp(true)).toBe(true)
+  })
+
+  it("gives way to other tasks while it addresses plain chunks", async () => {
+    expect(await otherTasksRanBeforeFirstStamp(false)).toBe(true)
+  })
+})

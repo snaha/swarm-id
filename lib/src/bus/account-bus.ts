@@ -30,7 +30,9 @@ export interface BusTransport {
    * lane-scoped traffic off the wire.
    */
   readonly local: boolean
-  publish(message: BusMessageInput): void
+  /** To everyone the transport reaches, or to `to` alone where the transport
+   *  can address one peer; one that cannot sends to everyone. */
+  publish(message: BusMessageInput, to?: string): void
   /**
    * `from` is the transport's own name for whoever sent the message — a peer
    * id on the signaling transport, absent on a transport that has no peers.
@@ -43,12 +45,44 @@ export interface BusTransport {
    * departures to report, which is a truthful answer rather than a gap.
    */
   onPeerLeft?(handler: (peerId: string) => void): () => void
+  /**
+   * The two things a lane (`sync/bus-lease.ts`) needs from a transport that crosses
+   * devices (models/bus-lease, #1017), and the whole of what it may assume
+   * about how the transport knows:
+   *
+   * - `confirmedAgoMs`: how long ago this context's own connection to the
+   *   service was last confirmed, `Infinity` when it is not.
+   * - `absentExceptMs`: for how long the service has shown no context other
+   *   than the given ones, known to this context or not; `0` when another is
+   *   present or the transport cannot tell.
+   *
+   * They must come from one authority: if a context is shown absent over
+   * some span, its own connection was not confirmed within that span.
+   *
+   * `onConfirmed` reports each confirmation with how long the context had
+   * been unconfirmed just before it (`Infinity` for the first of a
+   * connection), so a gap is seen even when nothing asked during it.
+   *
+   * A context is named by `selfId`, the same name `subscribe` reports as
+   * `from`. A reconnect is a new context: its name changes, and whatever the
+   * old one held or was promised is void.
+   */
+  selfId?(): string | undefined
+  confirmedAgoMs?(): number
+  absentExceptMs?(peerIds: ReadonlySet<string>): number
+  onConfirmed?(handler: (unconfirmedForMs: number) => void): () => void
+  /** A message from `peerId` arrived, on whatever path. */
+  notePeer?(peerId: string): void
   close(): void
 }
 
 /** Restricts a publish to transports that stay inside this browser profile. */
 export interface PublishOptions {
   localOnly?: boolean
+  /** The one context the message is for, by its name on the transport that
+   *  crosses devices. Others may still see it on a transport that cannot
+   *  address a single peer. */
+  to?: string
 }
 
 const CHANNEL_PREFIX = "swarm-id-bus-v1"
@@ -102,6 +136,15 @@ export class BroadcastChannelTransport implements BusTransport {
   }
 }
 
+/** The context a lane message says it is from. */
+function laneSender(message: BusMessage): string | undefined {
+  return message.type === "lane-claim" ||
+    message.type === "lane-free" ||
+    message.type === "lane-held"
+    ? message.from
+    : undefined
+}
+
 /**
  * Fans a publish out to every transport and funnels received messages through
  * schema validation to subscribers. Invalid messages are dropped silently
@@ -111,6 +154,7 @@ export class AccountBus {
   private transports: BusTransport[]
   private handlers = new Set<(message: BusMessage, from?: string) => void>()
   private peerLeftHandlers = new Set<(peerId: string) => void>()
+  private confirmedHandlers = new Set<(unconfirmedForMs: number) => void>()
   private transportUnsubscribers: (() => void)[]
   private closed = false
 
@@ -124,7 +168,16 @@ export class AccountBus {
   /** Both subscriptions a transport offers, as one list of removers. */
   private listenTo(transport: BusTransport): (() => void)[] {
     const removers = [
-      transport.subscribe((raw, from) => this.dispatch(raw, from)),
+      transport.subscribe((raw, from) => {
+        const message = this.dispatch(raw, from)
+        if (!message) return
+        // A path that names no sender (BroadcastChannel) still carries lane
+        // messages, and those say who sent them. Every transport hears of the
+        // sender: the one that keeps the room may not have it in view yet.
+        const sender = from ?? laneSender(message)
+        if (sender === undefined) return
+        for (const each of this.transports) each.notePeer?.(sender)
+      }),
     ]
     const onPeerLeft = transport.onPeerLeft?.((peerId) => {
       for (const handler of this.peerLeftHandlers) {
@@ -136,6 +189,16 @@ export class AccountBus {
       }
     })
     if (onPeerLeft) removers.push(onPeerLeft)
+    const onConfirmed = transport.onConfirmed?.((unconfirmedForMs) => {
+      for (const handler of this.confirmedHandlers) {
+        try {
+          handler(unconfirmedForMs)
+        } catch (error) {
+          console.error("[AccountBus] Confirmed handler error:", error)
+        }
+      }
+    })
+    if (onConfirmed) removers.push(onConfirmed)
     return removers
   }
 
@@ -151,7 +214,7 @@ export class AccountBus {
     if (this.closed) return
     for (const transport of this.transports) {
       if (options?.localOnly && !transport.local) continue
-      transport.publish(message)
+      transport.publish(message, options?.to)
     }
   }
 
@@ -204,6 +267,44 @@ export class AccountBus {
     return () => this.peerLeftHandlers.delete(handler)
   }
 
+  /**
+   * How long ago this context's connection was confirmed by every transport
+   * that crosses devices; `Infinity` with none attached. A context for which
+   * this is too old is read-only on its partitions.
+   */
+  confirmedAgoMs(): number {
+    const answers = this.transports.flatMap((transport) =>
+      transport.confirmedAgoMs ? [transport.confirmedAgoMs()] : [],
+    )
+    return answers.length === 0 ? Infinity : Math.max(...answers)
+  }
+
+  /** This context's name on the transport that crosses devices; undefined
+   *  while it has no confirmed place there. */
+  selfId(): string | undefined {
+    for (const transport of this.transports) {
+      const id = transport.selfId?.()
+      if (id !== undefined) return id
+    }
+    return undefined
+  }
+
+  /** How long every such transport has shown nobody but the given contexts;
+   *  `0` with none attached. */
+  absentExceptMs(peerIds: ReadonlySet<string>): number {
+    const answers = this.transports.flatMap((transport) =>
+      transport.absentExceptMs ? [transport.absentExceptMs(peerIds)] : [],
+    )
+    return answers.length === 0 ? 0 : Math.min(...answers)
+  }
+
+  /** Each confirmation of a transport that crosses devices, with how long it
+   *  had been unconfirmed just before. */
+  onConfirmed(handler: (unconfirmedForMs: number) => void): () => void {
+    this.confirmedHandlers.add(handler)
+    return () => this.confirmedHandlers.delete(handler)
+  }
+
   /** Idempotent, and terminal: a closed bus neither publishes nor attaches. */
   close(): void {
     this.closed = true
@@ -213,15 +314,17 @@ export class AccountBus {
     this.transportUnsubscribers = []
     this.handlers.clear()
     this.peerLeftHandlers.clear()
+    this.confirmedHandlers.clear()
     for (const transport of this.transports) {
       transport.close()
     }
     this.transports = []
   }
 
-  private dispatch(raw: unknown, from?: string): void {
+  /** Returns the message when it was well-formed. */
+  private dispatch(raw: unknown, from?: string): BusMessage | undefined {
     const result = BusMessageSchema.safeParse(raw)
-    if (!result.success) return
+    if (!result.success) return undefined
     for (const handler of this.handlers) {
       try {
         handler(result.data, from)
@@ -229,5 +332,6 @@ export class AccountBus {
         console.error("[AccountBus] Handler error:", error)
       }
     }
+    return result.data
   }
 }

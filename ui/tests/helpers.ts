@@ -8,7 +8,8 @@
 import { PrivateKey } from '@ethersphere/bee-js'
 import { type BrowserContext, type Locator, type Page, expect, test } from '@playwright/test'
 import { gnosisMainnetSettings } from '@swarm-id/multichain'
-import { fundLocalAccount } from '@swarm-id/multichain/dev'
+import { anvilSetBalance, devRpc, fundLocalAccount } from '@swarm-id/multichain/dev'
+import { encodeAbiParameters, keccak256, pad, toHex } from 'viem'
 
 import { workerFaucetKey } from './worker-faucet'
 
@@ -341,11 +342,17 @@ export async function addDrive(
     settle = true,
     method = 'built-in',
     kind,
-  }: { settle?: boolean; method?: 'built-in' | 'widget'; kind?: 'regular' | 'scratch' } = {},
+    depth,
+  }: {
+    settle?: boolean
+    method?: 'built-in' | 'widget'
+    kind?: 'regular' | 'scratch'
+    depth?: number
+  } = {},
 ) {
   await page.getByRole('tab', { name: 'Storage' }).click()
   await page.getByRole('button', { name: 'Add drive' }).click()
-  await buyDriveInDialog(page.getByRole('dialog'), { settle, method, kind })
+  await buyDriveInDialog(page.getByRole('dialog'), { settle, method, kind, depth })
 }
 
 /** The Add drive dialog's field labelled `label`: its innermost wrapper. */
@@ -368,12 +375,21 @@ export async function buyDriveInDialog(
     settle = true,
     method = 'built-in',
     kind,
-  }: { settle?: boolean; method?: 'built-in' | 'widget'; kind?: 'regular' | 'scratch' } = {},
+    depth,
+  }: {
+    settle?: boolean
+    method?: 'built-in' | 'widget'
+    kind?: 'regular' | 'scratch'
+    /** The size, as a batch depth; the smallest on offer when omitted. */
+    depth?: number
+  } = {},
 ) {
   // The dialog's own default otherwise: a popup's "Add drive" row presets it.
   if (kind) await dialogField(dialog, 'Drive type').getByRole('combobox').selectOption(kind)
   // The smallest size on offer — index 1, past the "Please select" placeholder.
-  await dialogField(dialog, 'Size up to').getByRole('combobox').selectOption({ index: 1 })
+  await dialogField(dialog, 'Size up to')
+    .getByRole('combobox')
+    .selectOption(depth === undefined ? { index: 1 } : String(depth))
   // ...and an explicit lifespan, rather than the dialog's default of a YEAR. A
   // drive costs `amountPerChunk << depth`, so both halves matter, and
   // `DRIVE_FUNDING` is a fixed 3 BZZ: a year at this size is ~15.8 BZZ, so the
@@ -443,6 +459,29 @@ export async function fundPostageSigner(
     { to, xdai: DRIVE_FUNDING.xdai, bzzPlur, from: workerFaucetKey(slot) },
     gnosisMainnetSettings({ rpcUrls: [CHAIN_RPC_URL] }),
   )
+}
+
+/** Where the local chain's BZZ token keeps its `balances` mapping. */
+const BZZ_BALANCES_SLOT = 3n
+
+/**
+ * Give the account's postage signer `bzzPlur` by writing the token's storage,
+ * and gas beside it. For a purchase no faucet could pay for: a depth-31 batch
+ * costs thousands of BZZ where the chain's whole faucet is baked with 250.
+ * The token's total supply is left as it was; nothing here reads it.
+ */
+export async function mintToPostageSigner(page: Page, bzzPlur: bigint) {
+  const to = await postageSignerAddress(page)
+  const { addresses } = gnosisMainnetSettings({ rpcUrls: [CHAIN_RPC_URL] })
+  const slot = keccak256(
+    encodeAbiParameters([{ type: 'address' }, { type: 'uint256' }], [to, BZZ_BALANCES_SLOT]),
+  )
+  await devRpc(CHAIN_RPC_URL, 'anvil_setStorageAt', [
+    addresses.bzz,
+    slot,
+    pad(toHex(bzzPlur), { size: 32 }),
+  ])
+  await anvilSetBalance(CHAIN_RPC_URL, to, 10n ** 18n)
 }
 
 /**
@@ -518,8 +557,8 @@ const INGEST_POLL_MS = 5_000
  *
  * A purchase settles on chain; the node only learns of it by watching, and
  * until it has, every stamped write is rejected with `invalid batch id` — the
- * partition-lock SOC included, so the failure surfaces as a lease that cannot
- * be acquired rather than as anything about the batch.
+ * partition's state pointer included, so the failure surfaces as an upload
+ * that cannot be acknowledged rather than as anything about the batch.
  */
 export async function waitForBatchIngestion(
   page: Page,

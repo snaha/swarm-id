@@ -1,7 +1,7 @@
 # `BatchWriteCoordinator` — the shared write path for a partitioned postage batch
 
 Status: **implemented** (GitHub issue [#336](https://github.com/snaha/swarm-id/issues/336)).
-The partitioning scheme itself — and the chunks, lock SOCs, and feeds written to Swarm, which are
+The partitioning scheme itself — and the chunks and feeds written to Swarm, which are
 part of the public API — is specified in
 [Multi-Device Postage Batches](https://swarm.snaha.net/docs/multi-device-postage-batches/) on the
 docs site (source: `docs-site/src/content/docs/multi-device-postage-batches.mdx`). This document
@@ -10,13 +10,14 @@ describes the internal component that coordinates writes against that scheme.
 ## What it is
 
 `BatchWriteCoordinator` (`lib/src/sync/batch-write-coordinator.ts`) is the write path for one
-account+batch. It owns everything needed to **write to a shared postage batch as a partition
-holder**, and nothing about client communication:
+account+batch. It owns everything needed to **write to a shared postage batch as the holder of
+one of its lanes**, and nothing about client communication:
 
+- taking a lane over the account bus (`lib/src/sync/bus-lease.ts`), and noticing when it is gone,
+- resuming and publishing the lane's counter (`lib/src/sync/lane-state.ts`),
 - the cross-tab Web Lock (`withBatchWriteLock`, `lib/src/utils/batch-write-lock.ts`) that
-  serializes all writers on a batch within a browser,
-- the partition-lease lifecycle — acquire, refresh, idle-yield, demote-on-displacement, teardown,
-- stamper-state flush after every write, under the lock.
+  serializes the stamper state of all writers on a batch within a browser, and the stamper-state
+  flush after every write under it.
 
 It deliberately does **not** own auth/identity, the postMessage protocol, ConnectionInfo emission,
 or subsidised-gateway mode — those stay in the proxy. The coordinator is the single shared
@@ -28,26 +29,21 @@ write-path implementation: every writer of a batch goes through it.
 SwarmIdProxy (iframe)            sync-account (SwarmID UI)
         │ persistent mode                │ oneshot mode
         └────────────┬───────────────────┘
-            BatchWriteCoordinator      ← write lock + lease lifecycle + stamper flush
-                     │
-              PartitionLease           ← one device's claim on one partition OF ONE BATCH
-                     │
-              partition-lock.ts        ← lock SOCs on Swarm: the cross-device authority
+            BatchWriteCoordinator      ← lane + published counter + write lock + stamper flush
+               │              │
+           BusLanes        LaneState   ← who holds a lane        ← what a holder resumes and publishes
+               │              │
+          account bus       Swarm      ← the room's membership   ← counter chunks + state pointer
 ```
 
-A lane is `(batchId, partition)`, and every address the protocol writes says so: the lock, intent
-and occupancy SOCs hash the batch alongside the partition, as the state pointer they guard already
-did (`makePartitionStateTopic`). Keying the lock on the partition alone made lane p of batch X and
-lane p of batch Y one chunk address, so two coordinators whose slot sets cannot overlap —
-`dataSlot` is computed within a batch — took turns anyway. Per-app stamp overrides put two live
-coordinators on two batches without any multi-batch feature
+A lane is `(batchId, partition)`, and every lane message and every state address says so. Two
+coordinators on two batches (a per-app stamp override) contend for nothing
 ([#589](https://github.com/snaha/swarm-id/issues/589)).
 
-The lock SOC on Swarm stays the source of truth for who holds a partition; the local lease cache
-(localStorage, persistent mode only) is just a hint — keyed
-`swarm-id-lease-v2:<accountId>:<batchId>`, because the lease it hints at belongs to one batch and an
-account with a per-app stamp override runs two coordinators. The coordinator is the lifecycle layer
-above `PartitionLease`.
+Who holds a lane is agreed between the account's live contexts over the bus and stored nowhere;
+the protocol is `models/bus-lease`, described in
+[`Postage-Batch-Partitioning.md`](./Postage-Batch-Partitioning.md) §7. A lane is held by a
+**context**: the proxy iframe and the SwarmID tab of one browser are two participants.
 
 ## API
 
@@ -57,137 +53,99 @@ new BatchWriteCoordinator(deps: BatchWriteCoordinatorDeps)
 
 Dependencies are injected — no global storage-manager reach-in:
 
-| Dep                                                                 | Role                                                                                                                                                                                                                                                                                |
-| ------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `bee`, `batchId`                                                    | Bee client; the batch id (hex) is also the `withBatchWriteLock` key                                                                                                                                                                                                                 |
-| `stamper`                                                           | `UtilizationAwareStamper`, already created + account-bound by the caller; the coordinator only binds/unbinds the held partition on it                                                                                                                                               |
-| `deviceId`, `accountId`                                             | This device's identity (one `getOrCreateDeviceId` per browser) and the account                                                                                                                                                                                                      |
-| `backupSigner`, `swarmEncryptionKey`                                | Own/read the lock SOCs for this batch's partitions                                                                                                                                                                                                                                  |
-| `partitionCount`                                                    | `<= 1` (legacy single-device accounts) means: never lease, lock-only coordination                                                                                                                                                                                                   |
-| `mode`                                                              | `"persistent"` (proxy) or `"oneshot"` (sync-account) — see below                                                                                                                                                                                                                    |
-| `readLeaseCache` / `writeLeaseCache`                                | Optional local lease-cache hint (persistent mode)                                                                                                                                                                                                                                   |
-| `flushStamperState`                                                 | Flush stamper bucket state after a write (proxy: `saveStamperStateIfNeeded`)                                                                                                                                                                                                        |
-| `getWorkerPool`                                                     | Build/reuse a parallel-signing worker pool for `useWorkers` uploads. The pool only signs: every slot still comes from `stamper` (`assignSlot`)                                                                                                                                      |
-| `onLeaseChange`                                                     | Fired on every partition / read-only transition (proxy → `emitConnectionInfoIfChanged`)                                                                                                                                                                                             |
-| `onLeaseAcquired`                                                   | Fired when a partition is (re)acquired (proxy → schedule an account-state publish)                                                                                                                                                                                                  |
-| `onSlotWait`                                                        | Fired each round of a slot wait (proxy → broadcast a `lease-request` on the account bus, see below)                                                                                                                                                                                 |
-| `onLeaseReleased`                                                   | Fired after every release of a held partition — idle yield, yield for a peer (with its `requestId`), teardown (proxy → `lease-released`)                                                                                                                                            |
-| `knownDeviceIds`                                                    | Optional. The rival set for the intent round and the idle yield: devices heard live on the account bus ∪ the registry's recent sign-ins; read fresh per acquire. Omitted by single-device / legacy callers, which fall back to guard+TTL alone                                      |
-| `refreshKnownDeviceIds`                                             | Optional. Pull the latest device registry from Swarm before a **fresh** acquire, so `knownDeviceIds` sees a peer that signed in after this device created the account — otherwise the claimer never reads that peer's beacon and dual-acquires. Best-effort; the provider throttles |
-| `intentReadTimeoutMs` / `intentGuardWindowMs` / `intentGuardPollMs` | Optional gateway-propagation tuning for the intent round, defaulting to the `INTENT_*` constants — lets the proxy pass runtime-tunable values                                                                                                                                       |
+| Dep                                  | Role                                                                                                                                           |
+| ------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------- |
+| `bee`, `batchId`                     | Bee client; the batch id (hex) is also the `withBatchWriteLock` key                                                                            |
+| `stamper`                            | `UtilizationAwareStamper`, already created + account-bound by the caller; the coordinator only binds/unbinds the held partition on it          |
+| `deviceId`, `accountId`              | This device's identity, which picks the lane asked for first (`deviceHomePartition`), and the account                                          |
+| `lanes`                              | This context's `BusLanes` on the account bus. Without it a partitioned batch cannot be written                                                 |
+| `backupSigner`, `swarmEncryptionKey` | Own and read the lane's published state                                                                                                        |
+| `partitionCount`                     | `<= 1` (legacy single-device accounts) means: no lanes, lock-only coordination                                                                 |
+| `mode`                               | `"persistent"` (proxy) or `"oneshot"` (sync-account) — see below                                                                               |
+| `flushStamperState`                  | Flush stamper bucket state after a write (proxy: `saveStamperStateIfNeeded`)                                                                   |
+| `getWorkerPool`                      | Build/reuse a parallel-signing worker pool for `useWorkers` uploads. The pool only signs: every slot still comes from `stamper` (`assignSlot`) |
+| `onLeaseChange`                      | Fired on every partition / read-only transition (proxy → `emitConnectionInfoIfChanged`)                                                        |
+| `onLeaseAcquired`                    | Fired when a lane is taken and its counter bound (proxy → schedule an account-state publish, poll the device roster)                           |
 
 Methods and getters:
 
-- **`withWrite(op, opts?)`** — the single write entry point. Takes the cross-tab Web Lock, ensures
-  a held partition (acquire / slot-wait, or skip-with-throw), builds a stamper `UploadTarget`
-  (optionally with a worker pool), brackets the in-flight upload count so the refresh tick's
-  idle-yield can't release the partition underneath it, runs `op(target)`, and flushes stamper
-  state in the lock's `finally`. `opts`: `useWorkers` / `workerCount` / `wait: "block" | "skip"`
-  (default follows the mode).
-- **`startLease()`** — persistent mode only: eagerly acquire a partition + start the refresh timer
-  in the background so the first upload doesn't pay the acquire latency. No-op in oneshot mode.
-- **`teardown()`** — stop all background work, best-effort release of the held partition so peers
-  see this device vacate promptly, invalidate-then-unbind the stamper, clear the cache. Never
-  throws. Sets a `disposed` flag (see below).
-- **`currentPartition`** / **`isReadOnly`** / **`stamperRef`** — read by the proxy's
-  `buildConnectionInfo` (partition, read-only state, appKey/uploadMode).
-- **`PartitionContendedError`** — thrown when there is genuinely no slot to claim (every partition
-  held by a live foreign device). Distinct from operational errors (missing stamper, a lock-SOC
-  write that threw), which propagate as-is so callers can log them differently.
-- **`isDisplaced(payload, now, selfDeviceId)`** — pure helper: a lock-SOC payload means
-  displacement only if it names a _different_, _live_ device. Missing/unreadable payloads (e.g. a
-  Bee 500), our own id, the release sentinel, and expired foreign holders are all NOT displacement.
+- **`withWrite(op, opts?)`** — the single write entry point. Makes sure a lane is held (outside
+  the Web Lock: that can take seconds), takes the lock, checks the hold again, builds a stamper
+  `UploadTarget` (optionally with a worker pool), runs `op(target)`, checks the hold once more,
+  publishes the counter, and flushes stamper state in the lock's `finally`. `opts`: `useWorkers` /
+  `workerCount` / `wait: "block" | "skip"` (default follows the mode) / `signal`.
+- **`startLease()`** — persistent mode only: take a lane in the background so the first upload
+  doesn't wait for it. No-op in oneshot mode.
+- **`teardown()`** — give every lane up and invalidate-then-unbind the stamper. Writes nothing and
+  never throws. Sets a `disposed` flag (see below).
+- **`currentPartition`** / **`partitionCount`** — read by the proxy's connection info: the
+  lane held, and whether the batch is split at all (a split batch needs the account bus).
+- **`PartitionContendedError`** — thrown when no lane could be taken: every lane is held by a
+  context that is writing, or this context has no confirmed connection to the bus. Distinct from
+  operational errors (missing stamper, an unreadable published state), which propagate as-is so
+  callers can log them differently.
 
 ## The two modes
 
-|                          | `persistent` (proxy)                                                                                                                                                                                           | `oneshot` (sync-account)                                           |
-| ------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------ |
-| Lease warm-up            | `startLease()` acquires eagerly in the background                                                                                                                                                              | none                                                               |
-| Refresh timer            | yes (`LEASE_REFRESH_MS`)                                                                                                                                                                                       | never armed                                                        |
-| `withWrite` default wait | `"block"`                                                                                                                                                                                                      | `"skip"`                                                           |
-| No slot available        | ask live holders over the account bus each round and wake on their answer (~one round trip); otherwise poll every `LEASE_REFRESH_MS` up to 30 s, inside a 45 s overall acquire timeout; then the upload errors | single claim attempt; throws `PartitionContendedError` immediately |
-| Lease end-of-life        | released on `teardown()` (sign-out / disconnect), or idle-yielded                                                                                                                                              | lapses by TTL                                                      |
+|                          | `persistent` (proxy)                                                           | `oneshot` (sync-account)                                              |
+| ------------------------ | ------------------------------------------------------------------------------ | --------------------------------------------------------------------- |
+| Warm-up                  | `startLease()` takes a lane in the background                                  | none                                                                  |
+| `withWrite` default wait | `"block"`                                                                      | `"skip"`                                                              |
+| No lane handed over      | keeps asking for 30 s, inside a 45 s overall cap; then the upload errors       | keeps asking for 10 s; then throws `PartitionContendedError`          |
+| End of life              | lanes given up on `teardown()` (sign-out / disconnect), or when the tab closes | `sync-account` tears the coordinator down as soon as the sync is done |
 
-## Lease lifecycle
+The one-off wait is 10 s and not zero because a context that has just joined the room may not
+take a lane nobody answers for until it has been there for 8 s.
 
-- **Acquire.** `PartitionLease.acquire` always re-reads and reconciles against the lock SOCs
-  before binding — the cache is only a `hydrate` hint. A still-valid cached lease (e.g. a page
-  reload within the TTL) is **re-adopted from local state alone** (`adoptIfLive`) with no lock-SOC
-  scan/write, so it survives transient Bee 500s; the refresh tick then reconciles with Swarm and
-  demotes only on a confirmed foreign holder. On success the stamper gets `bindPartition` and
-  `onLeaseAcquired` fires.
-- **Freshness check.** A held lease is re-validated against its lock SOC under the write lock,
-  before a write proceeds — throttled to once per `LEASE_REFRESH_MS`, **unless** the lease is
-  within `LEASE_SKEW_MARGIN_MS` of its local expiry (`leaseNearExpiry()`), which forces a re-read
-  even inside the throttle window: the refresh tick may have fallen behind (suspended tab, clock
-  jump, long upload), and writing on a lapsed lease is the reverse clobber. A read failure is
-  inconclusive — keep the lease and retry later.
-- **Refresh tick.** Persistent mode re-runs the lock protocol on a bare `setInterval`,
-  deliberately **not** under the write lock, so it can detect displacement while an upload is
-  mid-flight (see the race fix below). A failed refresh write is confirmed with one read before
-  demoting; transient errors keep the lease.
-- **Idle yield.** If no upload touched the lease for `IDLE_YIELD_MS` and none is in flight, the
-  tick voluntarily releases the partition so a waiting peer takes the slot without waiting out
-  the TTL; the next write re-acquires. The off-lock tick only _decides_ to yield — the yield
-  itself runs **under the write lock**, with re-checks inside (disposed / lease identity /
-  `activeUploadCount` / idle window), because releasing the slot and unbinding the stamper
-  off-lock underneath an upload that just entered `withWrite` would be the same corruption class
-  as the displacement race below.
-- **Yield on request.** A waiting peer does not have to wait for the idle tick: its slot wait
-  broadcasts a `lease-request` on the account bus each round (`onSlotWait`), a holder that
-  would presently yield (`canYieldForPeer`: idle for `PEER_YIELD_MIN_IDLE_MS`, nothing in
-  flight) releases through the same under-lock path (`yieldForPeer`) and answers
-  `lease-released`, and the waiter's sleep is woken (`notifySlotMaybeFree`). Exactly one
-  holder answers a given request, by a rank derived from the request id and the holder's
-  partition. The poll above is the
-  fallback when no live holder answers. Protocol and message shapes:
-  [`Account-Bus.md`](./Account-Bus.md).
-- **Disposed guard.** `teardown()` sets `disposed`; from then on the coordinator never re-acquires
-  a partition or arms a timer. This matters because an in-flight `withWrite` (a deferred publish,
-  or a normal upload) can outlive a disconnect/sign-out — without the guard its `ensureLease`
-  would re-lease the slot and start a detached refresh interval: a ghost lease the proxy could no
-  longer tear down.
-- **Lease-epoch guard.** The block-mode acquire races a 45 s timeout that cannot cancel the
-  losing acquire. Every lease reset (`pauseLeaseBackgroundWork`, `finalizeDemote`, idle yield,
-  `teardown`) bumps an epoch counter; an acquire that began under an older epoch discards its
-  result — on success _and_ on failure — instead of resurrecting or clobbering a lease the
-  coordinator re-established meanwhile. The slot-wait loop checks the epoch between its poll
-  sleep and the next claim so a detached loop never claims the lock SOC again after the timeout
-  already gave up. A claim discarded this way self-heals on Swarm via the lease TTL.
-- **Stale-tick guards.** Clearing the refresh interval cannot stop a `refreshTick` already in
-  flight (and a slow tick can overlap the next one). Every tick therefore re-checks
-  `disposed` / `partitionLease !== lease` at entry, before arming the displacement breaker,
-  inside the locked demote (mirroring the idle-yield guards), and before the tail heartbeat +
-  cache write — a stale tick must not re-claim a released partition, demote a re-acquired
-  lease, or resurrect a cleared lease cache that a later acquire would `adoptIfLive`.
-- **Failure unwind.** `acquire()`'s cleanup undoes a partial commit: if a consumer callback
-  (`writeLeaseCache`, `onLeaseAcquired`) throws after `bindPartition`/`startRefreshTimer`, the
-  catch clears the timer and invalidates + unbinds the stamper so neither outlives the dropped
-  lease record.
-- **Error classification.** `acquire()` propagates operational failures (a lock-SOC scan/claim
-  that threw) after clearing state. Skip mode therefore throws `PartitionContendedError` only
-  when the acquire _completed_ read-only — a Bee outage surfaces from `sync-account` as
+## Lane lifecycle
+
+- **Taking a lane.** `claimAny` asks for every lane gently (a lane nobody holds is taken, a
+  holder keeps its lane and answers "held"). Once every lane has answered "held" it insists,
+  on the device's home lane first and on one more lane every `NEXT_LANE_AFTER_MS`. The first lane held wins and the other claims are dropped. Then
+  `LaneState.resume()` reads the lane's published counter, the stamper gets `bindPartition`, and
+  `onLeaseAcquired` fires. While the counter is being read the context does not hand the lane
+  over; if its connection lapsed meanwhile it starts again.
+- **An unreadable state.** If the lane may have a published counter that could not be read, the
+  lane is given back at once and the write fails: stamping from a guess would re-issue used
+  slots.
+- **Holding.** `mayWrite()` is a local check: the lane is held and the connection was confirmed
+  within `LEASE_STOP_MS`. No network read, no timer. Each confirmation moves the stamper's
+  deadline forward (`setLeaseValidUntil`).
+- **Handing over.** A claim from another context is answered by `BusLane`: not while an upload
+  is in flight, nor within `PEER_YIELD_MIN_IDLE_MS` of the last one, nor to a gentle claim
+  (the lane then answers "held"). Otherwise the coordinator stops stamping (`invalidateLease`, unbind) and the lane answers
+  "free". The upload count is raised with no `await` since the hold check, so a handover cannot
+  land between the check and the upload.
+- **Disposed guard.** `teardown()` sets `disposed`; from then on the coordinator never takes a
+  lane. This matters because an in-flight `withWrite` (a deferred publish, or a normal upload) can
+  outlive a disconnect/sign-out.
+- **One acquisition at a time.** Writes that start together share one acquisition. It races a
+  45 s cap that cannot cancel it; an acquisition that outlived the cap binds nothing if a later
+  one has started.
+- **Error classification.** Skip mode throws `PartitionContendedError` only when no lane could be
+  taken — a Bee outage while reading the counter surfaces from `sync-account` as
   `status: "error"`, never as a quiet "all partitions held" skip.
 
-## The displacement-during-upload race fix
+## Losing the lane during an upload
 
-`refreshTick` runs off-lock, so it can detect that a peer took our partition while an upload is
-mid-`stamp()`. Demotion is therefore **two-phase**:
+An upload mid-`stamp()` can find its context's connection unconfirmed for `LEASE_STOP_MS`, and
+the lane goes for good if the connection is replaced; otherwise the stamp waits for the next
+confirmation. Three things keep such an upload from doing harm:
 
-1. **Immediately on confirmed displacement** (before taking any lock): `stamper.invalidateLease()`
-   only. That sets `leaseStale = true`, so the `stamp()` circuit breaker fires — the in-flight
-   upload aborts with `PartitionLeaseLostError` instead of writing into a slot a peer now owns.
-   The flag outlives `unbindPartition()` and only the next `bindPartition()` clears it.
-2. **Then unbind/clear under the write lock**: `unbindPartition()`, stop the timer, drop the lease
-   and cache, enter read-only, re-arm `pendingAcquire`. The lock serializes the unbind after the
-   in-flight upload's locked section completes or aborts, so no `stamp()` runs in the window
-   between invalidate and unbind.
+1. **The stamper's deadline.** `stamp()` throws `PartitionLeaseLostError` once it passes, whether
+   or not anything has noticed the lapse yet.
+2. **Invalidate before unbind.** When the coordinator stops holding the lane it calls
+   `stamper.invalidateLease()` at once. The flag outlives `unbindPartition()`, which is left to the
+   upload's own `finally` when one is in flight: an unbound stamper would otherwise stamp the rest
+   of that upload at legacy slots. Only the next `bindPartition()` clears the flag.
+3. **The hold an upload began with.** Every bind and every loss of the bound lane is a hold
+   of its own. The counter is not published unless the upload's hold still stands when its
+   chunks are written; the publish asks again just before it writes the pointer entry; and
+   the upload is acknowledged only if the hold stands after the publish too. A lane lost
+   and taken again meanwhile is another hold, whose counter knows nothing of the upload.
 
-Lock-synchronizing the demote _alone_ would be insufficient — it would merely order the demote
-after an upload that had already corrupted the peer's slot space. The same invalidate-before-unbind
-ordering is used in `teardown()`, which also runs off-lock and can land between two awaits of an
-in-flight `stamp()`: `unbindPartition` alone would drop the stamper back to legacy "any"-slot
-picking, while an invalidated stamper keeps refusing data stamps after the unbind.
+A handover never lands mid-upload, because a holder with a write in flight answers
+`lane-held` and keeps the lane.
 
 ## Consumers
 
@@ -229,14 +187,15 @@ the coordinator was torn down or replaced while the (async) snapshot assembly ra
 
 The SwarmID UI's sync builds a oneshot coordinator per sync (stamper from
 `postageStampsStore.getStamper`; for a shared, partitioned batch this is always a
-`UtilizationAwareStamper`) and publishes via
+`UtilizationAwareStamper`), with the tab's `BusLanes` from its account-bus store, and publishes via
 `coordinator.withWrite(target => publishDeviceState(...), { wait: "skip" })` — the **same** Web
-Lock and the same partition acquire the proxy uses, so a UI-driven change is published under the
-identical safety guarantees. Outcomes are split:
+Lock and the same lane protocol the proxy uses, so a UI-driven change is published under the
+identical safety guarantees. The coordinator is torn down when the sync is done, which gives its
+lane up. Outcomes are split:
 
 - **Genuine contention** → `PartitionContendedError` → a "Skipping sync …: all partitions are held
   by other devices." warn and `undefined` (a peer — or the proxy — publishes instead).
-- **Operational failure** (stamper missing, lock-SOC error, …) → a distinct error log and an
+- **Operational failure** (stamper missing, an unreadable published state, …) → a distinct error log and an
   `{ status: "error" }` result.
 
 The whole publish races a 60 s timeout (Bee client requests have no built-in timeout).
@@ -252,37 +211,37 @@ earlier single shared snapshot feed with a `publishAccountState` merge-read-rewr
 that doc's "Retired / legacy" note.)
 
 What the coordinator guarantees for it is unchanged: the per-device write rides the cross-tab lock +
-partition lease, so two devices' feeds are slot-disjoint on the shared batch, and stamper state is flushed
+held lane, so two devices' feeds are slot-disjoint on the shared batch, and stamper state is flushed
 in the lock's `finally`.
 
 ## Counter coherence across instances
 
-Two coordinator instances can write the same batch concurrently-ish (the proxy iframe and the
-SwarmID UI tab). Correctness relies on the **reload-before-write / flush-after-write under the Web
-Lock** discipline: `withWrite` flushes stamper state in the lock's `finally` (`flushStamperState`),
-and the stamper reads the latest counters from the shared IndexedDB utilisation cache. The proxy
-and SwarmUI share one `deviceId`, so a lock SOC written by either is recognised as self-held by
-the other — they cooperate on the same partition rather than contend.
+Two coordinator instances of one browser can write the same batch (the proxy iframe and the
+SwarmID UI tab). Each is its own participant: it takes a lane for itself, and the one that
+wants the lane the other holds is handed it when the other is not writing. Whoever takes a lane
+resumes from the counter **published on Swarm**, not from the stamper cache the two share in
+IndexedDB: the cache says what some tab of this browser last wrote, not what this tab's stamper
+has in memory. A context reuses its own in-memory counter only when the newest published state
+is one it read or wrote itself.
 
-That holds for contexts in the same storage partition. A **partitioned** proxy iframe (Safari,
-or any cross-site embedding) has its own `swarm-id-device-id`, its own utilisation cache, and
-its own lease — it is a separate device to this protocol and contends like one. Counter updates
-between contexts travel as lane-scoped `utilization-updated` messages on the account bus, folded
-only by a receiver on the same partition of the same batch, which is why a delta from a
-different device can never move this lane's counter ([`Account-Bus.md`](./Account-Bus.md)).
+The Web Lock still serializes the two on the shared stamper cache: `withWrite` flushes stamper
+state in the lock's `finally` (`flushStamperState`). Counter updates between contexts also travel
+as lane-scoped `utilization-updated` messages on the account bus, folded only by a receiver on
+the same partition of the same batch ([`Account-Bus.md`](./Account-Bus.md)).
 
 ## Files and tests
 
-| File                                                   | Role                                                                                          |
-| ------------------------------------------------------ | --------------------------------------------------------------------------------------------- |
-| `lib/src/sync/batch-write-coordinator.ts`              | The coordinator                                                                               |
-| `lib/src/sync/device-state.ts`                         | `publishDeviceState` — the per-device write the coordinator brackets (see `Account-State.md`) |
-| `lib/src/sync/partition-lease.ts`, `partition-lock.ts` | The layers below (claim + lock SOCs)                                                          |
-| `lib/src/utils/batch-write-lock.ts`                    | `withBatchWriteLock` (Web Lock + no-`navigator.locks` fallback)                               |
-| `lib/src/swarm-id-proxy.ts`                            | Persistent consumer + publish triggers                                                        |
-| `lib/src/sync/sync-account.ts`                         | Oneshot consumer                                                                              |
+| File                                         | Role                                                                                          |
+| -------------------------------------------- | --------------------------------------------------------------------------------------------- |
+| `lib/src/sync/batch-write-coordinator.ts`    | The coordinator                                                                               |
+| `lib/src/sync/device-state.ts`               | `publishDeviceState` — the per-device write the coordinator brackets (see `Account-State.md`) |
+| `lib/src/sync/bus-lease.ts`, `lane-state.ts` | The layers below (who holds a lane; its published counter)                                    |
+| `lib/src/utils/batch-write-lock.ts`          | `withBatchWriteLock` (Web Lock + no-`navigator.locks` fallback)                               |
+| `lib/src/swarm-id-proxy.ts`                  | Persistent consumer + publish triggers                                                        |
+| `lib/src/sync/sync-account.ts`               | Oneshot consumer                                                                              |
 
 The living spec is the test suite: `batch-write-coordinator.test.ts` (block-vs-skip, contention,
-lifecycle, the displacement race), `sync-account.test.ts` (use of the coordinator: publish,
+lifecycle, losing the lane), `bus-lease.test.ts` (the protocol), `lane-state.integration.test.ts`
+(resume and publish), `sync-account.test.ts` (use of the coordinator: publish,
 skip-on-contention, error split), `device-state.test.ts` / `merge-snapshot.test.ts` (the published
-per-device view + the fold/merge), `partition-lock.test.ts`, and `partition-lease.integration.test.ts`.
+per-device view + the fold/merge).

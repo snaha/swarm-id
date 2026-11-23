@@ -444,8 +444,8 @@ export const AccountMetadataSchemaV1 = z.object({
   /**
    * Number of partitions the postage-batch slot space is divided into.
    * `1` means "no partitioning, single-device behaviour" — this is the
-   * default for snapshots from before the partition-lease shipped. New
-   * accounts write the current `PARTITION_COUNT` (2) here.
+   * default for a snapshot that carries none. New accounts write the current
+   * `PARTITION_COUNT` (2) here.
    */
   partitionCount: z.number().int().min(1).default(1),
 })
@@ -503,60 +503,6 @@ export function isSignedOutAccount(
 ): account is SignedOutAccount {
   return account.signedOutAt !== undefined
 }
-
-// ============================================================================
-// Partition-Lease Wire Formats
-// ============================================================================
-
-/**
- * Fencing token for the partition lock. Two writers with equal `timestampMs`
- * are ordered by `tiebreaker` (hex of the first 8 bytes of
- * `keccak256(deviceId)`).
- */
-export const PartitionLockGenerationSchemaV1 = z.object({
-  timestampMs: z.number().int().nonnegative(),
-  tiebreaker: z.string().regex(/^[0-9a-f]{16}$/),
-})
-
-/**
- * Payload stored (as encrypted JSON) in a partition-lock SOC. The format is
- * versioned by the SOC identifier domain (`swarm-id-partition-lock-v1`), so no
- * in-payload version field is needed. `holderDeviceId` is `""` for the
- * `NO_HOLDER_DEVICE_ID` sentinel (e.g. after an explicit release).
- */
-export const PartitionLockPayloadSchemaV1 = z.object({
-  holderDeviceId: z.string(),
-  generation: PartitionLockGenerationSchemaV1,
-  acquiredAt: z.number().int().nonnegative(),
-  leasedUntil: z.number().int().nonnegative(),
-})
-
-export type PartitionLockGeneration = z.infer<
-  typeof PartitionLockGenerationSchemaV1
->
-export type PartitionLockPayload = z.infer<typeof PartitionLockPayloadSchemaV1>
-
-/**
- * Payload stored (as encrypted JSON) in a per-device partition-INTENT SOC,
- * which doubles as a holder PRESENCE BEACON. Written before a fresh claim so
- * rival contenders agree on a single winner by `generation`, AND re-published
- * by the holder on every refresh tick so a later joiner can detect the live
- * holder — both via a fresh per-epoch address that forces a network retrieval
- * (bypassing the gateway's frozen lock-SOC cache). `deviceId` is carried for
- * diagnostics (the address already encodes it). `leasedUntil` is present on a
- * heartbeat so a reader can apply the same `leasedUntil > now` liveness test
- * the lock SOC uses; it is omitted on a legacy pre-claim intent (then the
- * reader falls back to epoch-bucket freshness).
- */
-export const PartitionIntentPayloadSchemaV1 = z.object({
-  deviceId: z.string(),
-  generation: PartitionLockGenerationSchemaV1,
-  leasedUntil: z.number().int().nonnegative().optional(),
-})
-
-export type PartitionIntentPayload = z.infer<
-  typeof PartitionIntentPayloadSchemaV1
->
 
 // ============================================================================
 // Network Settings Schema

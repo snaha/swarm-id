@@ -6,19 +6,9 @@
 <script lang="ts">
   import { onMount } from 'svelte'
 
-  import { Bee } from '@ethersphere/bee-js'
-  import CircleCheckBig from '@lucide/svelte/icons/circle-check-big'
   import Laptop from '@lucide/svelte/icons/laptop'
   import RefreshCw from '@lucide/svelte/icons/refresh-cw'
-  import { hexToUint8Array } from '@snaha/swarm-id'
-  import {
-    PartitionLease,
-    type PartitionLeaseStateSnapshot,
-    type SyncedAccount,
-    deriveSwarmEncryptionKey,
-    getOrCreateDeviceId,
-    leaseCacheStorageKey,
-  } from '@snaha/swarm-id/internal'
+  import { type SyncedAccount, getOrCreateDeviceId } from '@snaha/swarm-id/internal'
 
   import { browser } from '$app/env'
 
@@ -27,14 +17,9 @@
   import { refreshAccountFromSwarm } from '$lib/dev/refresh-account-from-swarm'
   import { syncStore } from '$lib/dev/sync.svelte'
   import { accountBusStore } from '$lib/stores/account-bus'
-  import { networkSettingsStore } from '$lib/stores/network-settings.svelte'
 
   const { account }: { account: SyncedAccount } = $props()
 
-  // Re-read the shared lease cache this often so the self row picks up the
-  // proxy's per-tick `leasedUntil` advances even when `storage` events don't
-  // cross the iframe/tab boundary.
-  const LEASE_CACHE_POLL_MS = 3_000
   /** Quick enough that an Online badge follows a presence beat without a
    *  visible lag, and it re-renders the relative timestamps for free. */
   const RERENDER_MS = 5_000
@@ -53,48 +38,6 @@
   // an error — drives an informative note + "Publish backup now" action.
   let noBackup = $state(false)
   let publishing = $state(false)
-  // PEER active state, read through the PartitionLease model (lock SOCs on
-  // Swarm — the cross-device source of truth). Other machines don't share
-  // this tab's localStorage, so peers can only be observed via Swarm.
-  // Best-effort: empty when the Bee node can't serve the lock SOC chunk.
-  let holders = $state<{ partition: number; deviceId: string; leasedUntil: number }[]>([])
-
-  // SELF active state, read from the proxy-written localStorage lease cache
-  // (`swarm-id-lease-v2:<accountId>:<batchId>`). Shared across same-origin tabs,
-  // so it reflects the demo iframe's held partition without a Swarm read (which
-  // is currently 500ing). The proxy is the sole writer; refreshed ~every 10 s.
-  //
-  // The account default is the batch shown, matching the holders read below: a
-  // lane belongs to one batch, so an app running on a per-app stamp override
-  // caches under its own key and is not what this panel is about.
-  let leaseCache = $state<PartitionLeaseStateSnapshot | undefined>(undefined)
-
-  $effect(() => {
-    if (!browser) return
-    const defaultBatch = account.defaultPostageStampBatchID
-    if (!defaultBatch) {
-      leaseCache = undefined
-      return
-    }
-    const key = leaseCacheStorageKey(account.id.toHex(), defaultBatch.toHex())
-    const read = () => {
-      const raw = localStorage.getItem(key)
-      leaseCache = raw ? (JSON.parse(raw) as PartitionLeaseStateSnapshot) : undefined
-    }
-    read()
-    const onStorage = (e: StorageEvent) => {
-      if (e.key === key) read()
-    }
-    window.addEventListener('storage', onStorage)
-    // `storage` events don't reliably cross the iframe/tab boundary, so also
-    // poll the cache to pick up the proxy's per-tick `leasedUntil` advances.
-    const poll = setInterval(read, LEASE_CACHE_POLL_MS)
-    return () => {
-      window.removeEventListener('storage', onStorage)
-      clearInterval(poll)
-    }
-  })
-
   async function doRefresh() {
     if (refreshing) return
     refreshing = true
@@ -108,34 +51,6 @@
         noBackup = true
       } else {
         refreshError = result.error
-      }
-      // Always probe the lock SOCs even if the snapshot refresh failed —
-      // they're an independent source of truth for the active-state badge.
-      // Build a read-only PartitionLease and read its holders — the single
-      // in-code lease model (no parallel holder variable).
-      const partitionCount = account.partitionCount ?? 1
-      // The account default is the batch these lanes are about: lock, intent
-      // and occupancy addresses are per (batch, partition) since #589, so
-      // "who holds partition p" needs one named. An account with no drive has
-      // no partition writes to show.
-      const batchId = account.defaultPostageStampBatchID
-      if (partitionCount > 1 && account.derivationKey && batchId) {
-        try {
-          const bee = new Bee(networkSettingsStore.beeNodeUrl)
-          const swarmKeyHex = await deriveSwarmEncryptionKey(account.derivationKey)
-          const lease = await PartitionLease.fromSwarmEncryptionKey({
-            bee,
-            deviceId: thisDeviceId ?? '',
-            swarmEncryptionKey: hexToUint8Array(swarmKeyHex),
-            batchId,
-          })
-          await lease.refreshFromSwarm(partitionCount)
-          holders = lease.getHolders()
-        } catch (err) {
-          console.warn('[devices] reading lock SOCs failed:', err)
-        }
-      } else {
-        holders = []
       }
     } finally {
       refreshing = false
@@ -186,51 +101,17 @@
     return `${Math.floor(ago / 3_600_000)}h ago`
   }
 
-  // Debug helper: is a lease still live, relative to now?
-  function leaseLiveness(leasedUntil: number): string {
-    void tick // re-evaluate as time passes
-    const now = Date.now()
-    return leasedUntil > now
-      ? `LIVE (now ${formatDateTime(now)})`
-      : `EXPIRED ${Math.floor((now - leasedUntil) / 1000)}s ago (now ${formatDateTime(now)})`
-  }
-
   const deviceRows = $derived.by(() => {
-    // `tick` so the self lease-expiry check re-evaluates over time.
+    // `tick` so a presence beat that stopped shows as offline over time.
     void tick
-    const now = Date.now()
     // Liveness comes from the account bus (presence beats), not from any
-    // stored timestamp: `lastSignedInAt` is a sign-in, not a heartbeat.
+    // stored timestamp: `lastSignedInAt` is a sign-in, not a heartbeat. Which
+    // context holds which partition is not shown: it is agreed between live
+    // contexts over the bus and recorded nowhere.
     const live = accountBusStore.liveDeviceIds()
     return (account.devices ?? []).map((d) => {
       const isThis = d.deviceId === thisDeviceId
-      const isOnline = isThis || live.includes(d.deviceId)
-      if (isThis) {
-        // Self: read from the shared localStorage lease cache (proxy is the
-        // sole writer). The cache key is per-account and machine-local, so a
-        // live `self` lease in it means THIS machine holds that partition —
-        // independent of the device-id string stored inside (the proxy's
-        // captured id can differ from this tab's id even when the value is
-        // shared). So don't gate on the inner deviceId; just check liveness.
-        const self = leaseCache?.self
-        const active = self !== undefined && self.leasedUntil > now
-        return {
-          ...d,
-          isThis: true,
-          isOnline,
-          isActive: active,
-          partition: active ? self!.partition : undefined,
-        }
-      }
-      // Peers: cross-device, only observable via the lock SOC (Swarm).
-      const holderEntry = holders.find((h) => h.deviceId === d.deviceId)
-      return {
-        ...d,
-        isThis: false,
-        isOnline,
-        isActive: holderEntry !== undefined,
-        partition: holderEntry?.partition,
-      }
+      return { ...d, isThis, isOnline: isThis || live.includes(d.deviceId) }
     })
   })
 
@@ -273,7 +154,7 @@
         </Button>
       </div>
       <p class="text-muted-foreground text-sm">
-        Devices registered to this account. At most {account.partitionCount ?? 1} can upload simultaneously.
+        Devices registered to this account. At most {account.partitionCount ?? 1} tabs can upload simultaneously.
       </p>
       {#if refreshError}
         <p class="text-destructive text-sm">Refresh failed: {refreshError}</p>
@@ -324,14 +205,6 @@
               {#if row.isOnline}
                 <span class={`${BADGE_CLASS} bg-success text-success-foreground`}>Online</span>
               {/if}
-              {#if row.isActive}
-                <span class={`${BADGE_CLASS} bg-success text-success-foreground`}>
-                  <CircleCheckBig class="size-3" />
-                  Active · partition {row.partition}
-                </span>
-              {:else}
-                <span class={`${BADGE_CLASS} bg-muted text-muted-foreground`}>Inactive</span>
-              {/if}
             </div>
 
             <div class="text-muted-foreground flex gap-4 pl-6 text-sm">
@@ -347,37 +220,5 @@
         {/each}
       </div>
     {/if}
-
-    <!-- Debug: the self lease (shared localStorage cache) and the peer
-         holders (lock SOCs on Swarm), vs this device's id. -->
-    <div class="flex flex-col items-start gap-0.5">
-      <div class="bg-border h-px w-full"></div>
-      <p class="text-sm font-bold">Debug · lease state</p>
-      <p class="font-mono text-sm">this device: {thisDeviceId ?? '—'}</p>
-      {#if leaseCache?.self}
-        <p class="font-mono text-sm">
-          self (localStorage): partition {leaseCache.self.partition} — {leaseLiveness(
-            leaseCache.self.leasedUntil,
-          )}
-        </p>
-        <p class="font-mono text-sm">
-          self deviceId: {leaseCache.deviceId} (matches this device: {leaseCache.deviceId ===
-          thisDeviceId
-            ? 'yes'
-            : 'no'})
-        </p>
-      {:else}
-        <p class="font-mono text-sm">self (localStorage): none</p>
-      {/if}
-      {#if holders.length === 0}
-        <p class="text-sm">peers (lock SOCs): none observed</p>
-      {:else}
-        {#each holders as h (h.partition)}
-          <p class="font-mono text-sm">
-            peer partition {h.partition} → {h.deviceId} (until {formatDateTime(h.leasedUntil)})
-          </p>
-        {/each}
-      {/if}
-    </div>
   {/if}
 </div>
