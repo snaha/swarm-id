@@ -37,7 +37,6 @@ export class BasicSequentialUpdater implements SequentialUpdater {
 
     const result = await uploadSOC(target, this.signer, identifier, payload, {
       encryptionKey,
-      deferred: false,
     })
 
     this.nextIndex += 1n
