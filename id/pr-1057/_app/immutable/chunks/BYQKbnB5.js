@@ -1,1 +1,0 @@
-import"./DYrviY11.js";import"./CW17-71x.js";function e(){return`wss://swarm-id.snaha.net/bus`}export{e as t};
