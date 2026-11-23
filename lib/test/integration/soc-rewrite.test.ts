@@ -21,18 +21,32 @@ import { downloadSOC } from "../../src/proxy/download-data"
 import { WORKER_URLS, createQueenBee, createQueenStamper } from "./cluster"
 
 const KEY_BYTES = 32
-const WRITES = ["first", "second", "third"]
+const FIRST = "first"
+const REWRITES = ["second", "third"]
 /**
- * #1016 measured every node of the cluster serving a direct rewrite within
- * two seconds.
+ * How long every node may take to serve the first write at a fresh address.
+ * Not a rewrite, and not what this test bounds: on the local cluster the
+ * uploading node's first read of the address took up to 15 s, while the
+ * other nodes served it within 50 ms.
  */
-const OTHER_NODE_TIMEOUT_MS = 3_000
-const OTHER_NODE_INTERVAL_MS = 250
+const FIRST_READ_TIMEOUT_MS = 30_000
+/**
+ * How long after a rewrite's upload returns every node, the uploading one
+ * included, may still serve the previous write. Not zero: CI saw the
+ * uploading node serve the previous write right after the request returned.
+ * On the local cluster every node served each rewrite within 0.6 s, over 20
+ * runs; #1016 measured within two seconds.
+ */
+const REWRITE_READ_TIMEOUT_MS = 3_000
+const READ_BACK_INTERVAL_MS = 250
 
 describe("a SOC rewritten at its address (live Bee)", () => {
   it("reads back as the latest write, on every node, every time", async () => {
     const bee = createQueenBee()
-    const workers = WORKER_URLS.map((url) => new Bee(url))
+    const nodes = [
+      { label: "queen", bee },
+      ...WORKER_URLS.map((url) => ({ label: url, bee: new Bee(url) })),
+    ]
     const batchId = inject("clusterBatchId")
     const signer = new PrivateKey(
       crypto.getRandomValues(new Uint8Array(KEY_BYTES)),
@@ -46,7 +60,8 @@ describe("a SOC rewritten at its address (live Bee)", () => {
         (await downloadSOC(through, owner, identifier)).payload,
       )
 
-    for (const text of WRITES) {
+    /** Write `text` and wait for every node to serve it, within `bound`. */
+    const writeAndReadBack = async (text: string, bound: number) => {
       // A blank stamper per write stamps the same slot of the same bucket
       // with a newer timestamp, as the lease's reserved slot does for its lock.
       const target = {
@@ -60,16 +75,34 @@ describe("a SOC rewritten at its address (live Bee)", () => {
         identifier,
         new TextEncoder().encode(text),
       )
-      // A direct upload is readable on its own node once the request returns.
-      expect(await readBack(bee)).toBe(text)
-      for (const worker of workers) {
-        await expect
-          .poll(() => readBack(worker), {
-            timeout: OTHER_NODE_TIMEOUT_MS,
-            interval: OTHER_NODE_INTERVAL_MS,
-          })
-          .toBe(text)
-      }
+      const returned = Date.now()
+      // Every node at once, each timed from the upload's return, so one slow
+      // node does not use up another's bound.
+      await Promise.all(
+        nodes.map(async (node) => {
+          await expect
+            .poll(() => readBack(node.bee), {
+              timeout: bound,
+              interval: READ_BACK_INTERVAL_MS,
+              message: `${node.label} did not serve "${text}"`,
+            })
+            .toBe(text)
+          const took = Date.now() - returned
+          console.log(
+            `[soc-rewrite] ${node.label} served "${text}" ${took} ms after the upload returned`,
+          )
+          // The poll does not interrupt a read in flight, so a read that hangs
+          // past the bound and then answers would still pass it.
+          expect(took, `${node.label} took ${took} ms`).toBeLessThanOrEqual(
+            bound,
+          )
+        }),
+      )
+    }
+
+    await writeAndReadBack(FIRST, FIRST_READ_TIMEOUT_MS)
+    for (const text of REWRITES) {
+      await writeAndReadBack(text, REWRITE_READ_TIMEOUT_MS)
     }
   })
 })
