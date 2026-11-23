@@ -5,9 +5,9 @@ over the account bus and a device without a live connection to the signaling
 server is read-only. Background: [#1017](https://github.com/snaha/swarm-id/issues/1017).
 
 **Status.** The TLA+ spec was checked with TLC on 2026-11-18; results are in
-the table under "Running it". The Quint version in `quint/` and the
-three-device run are of the model as it stood on 2026-11-13, without the two
-rules marked "since" below; neither has been run again.
+the table under "Running it". The three-device run of the safe configuration
+is of the model as it stood on 2026-11-13, without the two rules marked
+"since" below, and has not been run again.
 
 ## The protocol being modelled
 
@@ -77,39 +77,11 @@ claim rounds per device, not larger sizes.
 The three failing variants each remove one rule, to show that the rule is
 needed and that the checker can find the fault.
 
-## Quint version
-
-`quint/BusLease.qnt` is the same model in [Quint](https://quint-lang.org), with
-one module per configuration (`Safe`, `ShortWait`, `NoRoundMatch`,
-`NoContactReset`, and `Safe3`, `ShortWait3` for three devices). Needs Node and
-Java 17 or newer; the checkers are downloaded on first use.
-
-```bash
-cd models/bus-lease/quint
-pnpm install --ignore-workspace
-pnpm exec quint typecheck BusLease.qnt
-pnpm exec quint verify --backend=tlc --main=Safe --invariant=exclusion BusLease.qnt
-```
-
-Measured on 2026-11-12 (Quint 0.33.1, 14 cores), on the model without
-`SessionAge` and `Stall`, which the Quint version does not have. The Apalache
-and simulation rows also predate the removal of the explicit message-loss
-steps:
-
-| Checker                   | Broken variants                          | `Safe`                                   |
-| ------------------------- | ---------------------------------------- | ---------------------------------------- |
-| `verify --backend=tlc`    | same violations as the TLA+ spec, 2–13 s | holds, the same 421,149 states, 11 s     |
-| `verify` (Apalache)       | `ShortWait` in 112 s; others over 30 min | not finished: step 10 of 15 after 30 min |
-| `run` (random simulation) | none found in 100,000 runs each          | no violation, which says little          |
-
-Use the TLC backend. Apalache runs on one core and slows sharply with each
-step on this model, and random simulation misses violations that need one
-specific sequence of ten or more steps.
-
 ## Three devices
 
-`ShortWait3` (Quint) is violated in 7 s. The safe configuration (`Safe3.cfg`,
-`Safe3`) is much larger. With one claim round per device, TLC ran for 2 hours
+`ShortWait3.cfg` (`Wait < TStop`, one claim round per device) is violated in
+10 steps, within seconds (2026-11-23). The safe configuration (`Safe3.cfg`) is
+much larger. With one claim round per device, TLC ran for 2 hours
 on 10 cores (2026-11-13) and stopped at its time limit: 464 million distinct
 states to depth 21, no violation, 162 million states still queued. So three
 devices is a bounded check, not a proof: every sequence of up to about 20

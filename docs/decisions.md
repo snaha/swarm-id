@@ -7,6 +7,19 @@ present and may point at an issue or PR; the reasons live here.
 
 A PR that makes or changes a decision adds the entry in the same PR.
 
+## 2026-11-23 The bus lease has one model, in TLA+
+
+**Context.** `models/bus-lease` held the model twice, in TLA+ and in Quint. The Quint copy
+had fallen behind: it lacked `SessionAge` and `Stall`, and its results predated them.
+
+**Decision.** The Quint copy is deleted. `BusLease.tla` is the model, checked with TLC; the
+three-device broken variant that existed only in Quint is `ShortWait3.cfg`.
+
+**Why.** The only Quint backend that finished on this model was TLC, with the same
+violations and state counts, so the copy was no second opinion, only a second text to keep
+in step by hand. Two models that drift each cover rules the other does not, and neither
+then says the protocol as a whole is safe.
+
 ## 2026-11-23 A lane message goes through the server, never a DataChannel
 
 **Context.** The signaling transport delivers per peer over that peer's DataChannel when it
