@@ -42,7 +42,7 @@ Verified 2026-07-31 against PostageStamp `0x45a1502382541Cd610CC9068e88727426b69
 | `increaseDepth(bytes32,uint8)` — `0x47aab79b` — is owner-only, transfers no tokens, has no meta-tx support                      | The derived owner key MUST be `msg.sender`; nothing else can dilute |
 | `remainingBalance = batch.normalisedBalance − currentTotalOutPayment()`, ages every block                                       | Planning math uses the live chain figure, never `stamp.amount`      |
 | `topUp` on an expired batch reverts `BatchExpired`; expired batches are deleted by `expireLimited`                              | Preflight expiry before requesting payment                          |
-| `immutableFlag` is not enforced by the contract on either op                                                                    | Chain imposes nothing; the UI blocks resize on immutable batches    |
+| `immutableFlag` is not enforced by the contract on either op                                                                    | Chain imposes nothing, and neither does the UI (#1056)              |
 | Both ops are `whenNotPaused`; `paused()` is `0x5c975abb`                                                                        | Preflight `paused()` and report it in words                         |
 | Batch IDs are `keccak256(creator, nonce)` — the creator, not the owner                                                          | Never derive a batchId; carry `stamp.batchID`                       |
 | BZZ is `0xdBF3Ea6F5beE45c02255B2c26a16F300502F68da`, **16 decimals** (1 BZZ = 1e16 PLUR)                                        | Standard ERC-20 fragments; watch the decimals                       |
@@ -155,7 +155,7 @@ Rules that hold across all of it:
   surfaces as "still pending" and is resolved by reconciliation on the next dialog open.
 - Preflights assemble from `getPostageBatch` + `getPostageWriteConstraints` and refuse the reachable
   reverts before any gas is spent — batch missing, expired, paused, and on a resize owned by another
-  key or immutable — throwing plain `Error`s carrying the wording below, not typed ones. The floor
+  key — throwing plain `Error`s carrying the wording below, not typed ones. The floor
   is not theirs to check (the plan clamps for it) and neither are funds (`ensureFunded` raises the
   payment seam), and a batch already at or above the target depth is reported on `alreadyResized`
   rather than refused.
@@ -183,8 +183,7 @@ they run one at a time. The steps, their order and their preconditions are ident
 **Resize** — `approve → topUp → increaseDepth`:
 
 1. `preflightResize`: `batch.owner === ownerAddress` (a hard requirement — imported foreign batches
-   get a clear "owned by a different key" error), not expired, not paused, and
-   `batch.immutableFlag === false`. A batch already at or above `newDepth` is not an error here: it
+   get a clear "owned by a different key" error), not expired, not paused. A batch already at or above `newDepth` is not an error here: it
    comes back as `alreadyResized`, which step 4 records.
 2. Funds check as above; BZZ is only needed when `topUpAmount > 0`.
 3. `ensureBzzAllowance` → `topUpOnChain(topUpAmount)` → `account.updateStamp(batchID, afterTopUp)`,

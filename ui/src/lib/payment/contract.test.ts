@@ -64,15 +64,12 @@ describe('fetchExistingBatchFromChain checks the owner', () => {
     )
   })
 
-  // A partition's lock and state chunks overstamp their slots, which an
-  // immutable batch refuses (#862). Checked after ownership, so the owner's
-  // own immutable batch is told why it cannot be a drive.
-  it('rejects an immutable batch, even one the signer owns', async () => {
+  // The flag is carried onto the stamp, never a reason to refuse (#1056).
+  it('imports an immutable batch the signer owns', async () => {
     const owner = SIGNER.publicKey().address().toChecksum()
     internal.fetchOnChainBatchStateResult.mockResolvedValue(found(owner, true))
-    await expect(fetchExistingBatchFromChain(BATCH_ID, SIGNER, undefined, RPC)).rejects.toThrow(
-      /immutable/,
-    )
+    const stamp = await fetchExistingBatchFromChain(BATCH_ID, SIGNER, undefined, RPC)
+    expect(stamp?.immutableFlag).toBe(true)
   })
 
   it('still returns undefined for a batch the contract does not know', async () => {

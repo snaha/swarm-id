@@ -84,9 +84,10 @@ and synced with the rest of `PostageStampSchemaV1`. A regular drive never become
 or the reverse: mixing counter-allocated and recycled slots on one batch would let an app
 overwrite regular data.
 
-SwarmID works with **mutable batches only**. Every purchase path already buys with
-`immutableFlag: false`; "Use existing batch" now **rejects an immutable batch** at import
-(today `/dev` only warns), and lets the user pick the kind, **regular by default**.
+Every purchase path buys with `immutableFlag: false`. "Use existing batch" does not check
+the flag: an immutable batch imports like any other
+([#1056](https://github.com/snaha/swarm-id/issues/1056), `docs/decisions.md`). It lets the
+user pick the kind, **regular by default**.
 
 ### Account default drive
 

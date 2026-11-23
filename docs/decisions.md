@@ -7,6 +7,26 @@ present and may point at an issue or PR; the reasons live here.
 
 A PR that makes or changes a decision adds the entry in the same PR.
 
+## 2026-11-23 `immutableFlag` is recorded, never checked
+
+**Context.** Three places decided on a batch's on-chain `immutableFlag`. "Use existing batch"
+refused a batch that has it set ([#862](https://github.com/snaha/swarm-id/issues/862), the
+immutable-import check of #864), on the reasoning that a partition's lock and state chunks overstamp their slots and a
+scratch drive reuses its data slots. Resize refused it, and delete-time dilution skipped it,
+because Bee's handling of a diluted immutable batch was undefined.
+[#1056](https://github.com/snaha/swarm-id/issues/1056) asks for such batches to be usable.
+
+**Decision.** Nothing in Swarm ID decides on `immutableFlag`: import, resize and delete-time
+dilution treat an immutable batch like any other. The flag is still recorded on the stamp, as
+the chain reports it. This reverses the mutable-only rule of #862; Swarm ID's own purchases
+keep passing `false`.
+
+**Why.** The flag's semantics are unclear and it is slated for removal from the contract
+([storage-incentives#317](https://github.com/ethersphere/storage-incentives/issues/317)).
+Whether data is immutable is then the application's choice, not a property of the batch, and
+the contract enforces nothing on it today either. Refusing on it locks out batches a user
+already paid for, on the strength of a property that may stop existing.
+
 ## 2026-11-18 Previews use production's signaling server; a PR that changes the server gets a Render instance
 
 **Context.** The GitHub Pages builds (`main` and the per-PR previews) had no signaling

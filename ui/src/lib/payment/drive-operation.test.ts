@@ -563,7 +563,6 @@ describe('runDeleteDilution', () => {
       depth: DRIVE_DEPTH,
       remaining: REMAINING,
       owner: SIGNER_ADDRESS,
-      immutable: false,
     })
     onchain.increaseDepthOnChain.mockResolvedValue(undefined)
   })
@@ -628,26 +627,18 @@ describe('runDeleteDilution', () => {
   })
 
   it('reports each skip reason the plan gives', async () => {
-    const account = makeAccount(drives(4))
+    const account = makeAccount(drives(3))
     onchain.readDilutionState
       .mockResolvedValueOnce(undefined)
       .mockResolvedValueOnce({
         depth: DRIVE_DEPTH,
         remaining: MINIMUM,
         owner: SIGNER_ADDRESS,
-        immutable: false,
       })
       .mockResolvedValueOnce({
         depth: DRIVE_DEPTH,
         remaining: REMAINING,
         owner: OWNER,
-        immutable: false,
-      })
-      .mockResolvedValueOnce({
-        depth: DRIVE_DEPTH,
-        remaining: REMAINING,
-        owner: SIGNER_ADDRESS,
-        immutable: true,
       })
 
     const result = await runDeleteDilution({
@@ -662,7 +653,6 @@ describe('runDeleteDilution', () => {
       'expired',
       'expires-soon',
       'not-owned',
-      'immutable',
     ])
     // Nothing to send, so nothing to fund.
     expect(onchain.fundingShortfall).not.toHaveBeenCalled()
