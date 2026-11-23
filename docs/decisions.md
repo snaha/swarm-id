@@ -7,6 +7,38 @@ present and may point at an issue or PR; the reasons live here.
 
 A PR that makes or changes a decision adds the entry in the same PR.
 
+## 2026-11-23 A stamped SOC upload says it is direct
+
+**Context.** Every stamped SOC upload carries a `Swarm-Tag`: `uploadSOC`
+creates one when the caller passes none. Up to Bee 2.8.0 `/soc` ignored the
+tag and pushed directly. From 2.8.1 a tag alone makes the upload deferred
+(bee#5461), and a deferred write to an address the node already holds is
+answered 201 and never leaves it: Bee's upload store does not replace a chunk,
+only its reserve does. Measured on 2.8.3 (#1016): after a deferred overwrite
+all four nodes of the local cluster still served the first version; after a
+direct one all four served the second within two seconds. The partition
+lease's writes passed no `deferred`, so a release never showed on another
+device (the three-device suite's "a disconnect releases the partition at
+once").
+
+**Decision.** A stamper-mode SOC upload always sends `Swarm-Deferred-Upload`,
+`false` unless the caller passes `deferred: true`. The subsidised path is
+unchanged.
+
+**Why.** A SOC is the one chunk that is written again at its address, and only
+a direct push replaces it. Stating the mode keeps the behaviour independent of
+what a Bee version infers from the other headers. The caller's `true` is still
+passed through, as for data and chunks (2026-09-21).
+
+**Not covered.** A node that holds no reserve copy and read the SOC with
+caching on keeps serving that version until its cache evicts it. A read with
+`Swarm-Cache: false` avoids it, but Bee's CORS policy does not allow that
+header, so a browser cannot send it. Dev mode was not run: the docs say a
+dev-mode node serves only deferred uploads, and the lease's writes pass no
+`deferred`, so against such a node they would wait out their timeout as any
+direct upload does. Before 2.8.1 `/soc` was always direct, so this restores
+that behaviour rather than introducing it.
+
 ## 2026-11-18 Previews use production's signaling server; a PR that changes the server gets a Render instance
 
 **Context.** The GitHub Pages builds (`main` and the per-PR previews) had no signaling
