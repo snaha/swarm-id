@@ -34,6 +34,8 @@ import { dirname, join } from 'node:path'
 
 import {
   BUSY_PUBLISHES,
+  CONNECT_TIMEOUT_MS,
+  DISCONNECT_SETTLE_MS,
   Device,
   HANDOVER_TIMEOUT_MS,
   IDLE_WAIT_MS,
@@ -232,20 +234,20 @@ test.describe('three devices on two partitions', () => {
   })
 
   test('a disconnect releases the partition at once, and a waiting device takes it', async () => {
+    // Six uploads at most (B, C, B again, C, A, B after its reconnect), B's
+    // reconnect, the disconnect, and the sleep before B uploads again.
+    test.setTimeout(
+      UPLOAD_TIMEOUT_MS * 6 + CONNECT_TIMEOUT_MS + DISCONNECT_SETTLE_MS + PEER_YIELD_MIN_IDLE_MS,
+    )
     for (const device of all()) await device.ensureConnected()
     // Fill both slots: B takes a free one, then C's request makes an idle
     // holder yield. The holder that yields may be B rather than A — then B
     // holds nothing to release, and the scenario has no subject (#798). One
     // more upload puts B back: C, just served, is inside the peer-yield
-    // window, so the idle holder that yields is A. B's acquire takes longer
-    // than that window, so C uploads once more to be inside it again when A
-    // asks below.
+    // window, so the idle holder that yields is A.
     await B.uploadAndHoldOrSkip(all())
     await C.uploadAndHoldOrSkip(all())
-    if ((await B.partition()) === undefined) {
-      await B.uploadAndHoldOrSkip(all())
-      await C.upload()
-    }
+    if ((await B.partition()) === undefined) await B.uploadAndHoldOrSkip(all())
     const before = await expectNoDualHold(all())
     const pB = before.get('B')
     if (pB === undefined || before.get('C') === undefined) {
@@ -257,9 +259,13 @@ test.describe('three devices on two partitions', () => {
     // A waits for a slot while B disconnects. The mechanism under test is the
     // teardown release: B's slot is freed at once and its `lease-released`
     // wakes A's wait. The other way A could be served — C idle-yielding to
-    // A's request — is kept out by C having just uploaded (inside the
-    // peer-yield window when A asks), and is detected if it happens anyway:
-    // a yield is the one release that logs, a teardown release does not.
+    // A's request — is kept out by C uploading right before A asks, which
+    // puts it inside the peer-yield window then; C holds, so that upload
+    // cannot block on a slot wait. Nothing bounds how long the upload's
+    // round trip takes after its last write, so a yield is detected if it
+    // happens anyway: it is the one release that logs, a teardown release
+    // does not.
+    await C.upload()
     const asked = Date.now()
     const aUpload = A.upload()
     await B.disconnect()
