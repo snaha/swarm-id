@@ -183,8 +183,8 @@ they run one at a time. The steps, their order and their preconditions are ident
 **Resize** — `approve → topUp → increaseDepth`:
 
 1. `preflightResize`: `batch.owner === ownerAddress` (a hard requirement — imported foreign batches
-   get a clear "owned by a different key" error), not expired, not paused. A batch already at or above `newDepth` is not an error here: it
-   comes back as `alreadyResized`, which step 4 records.
+   get a clear "owned by a different key" error), not expired, not paused. A batch already at or
+   above `newDepth` is not an error here: it comes back as `alreadyResized`, which step 4 records.
 2. Funds check as above; BZZ is only needed when `topUpAmount > 0`.
 3. `ensureBzzAllowance` → `topUpOnChain(topUpAmount)` → `account.updateStamp(batchID, afterTopUp)`,
    then `increaseDepthOnChain(newDepth)` → `reconcileStampFromChain` (falling back to `afterDilute`).
