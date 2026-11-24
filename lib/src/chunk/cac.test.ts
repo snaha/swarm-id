@@ -8,7 +8,7 @@
 import { describe, it, expect } from "vitest"
 import { Span } from "@ethersphere/bee-js"
 import { makeContentAddressedChunk } from "./cac"
-import { calculateChunkAddress } from "./bmt"
+import { calculateChunkAddress } from "./index"
 
 // ============================================================================
 // makeContentAddressedChunk Tests

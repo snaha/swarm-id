@@ -3,6 +3,7 @@
 
 import { secp256k1 } from "@noble/curves/secp256k1"
 import { Binary } from "cafe-utility"
+import { encryptData } from "@ethersphere/core-sdk"
 // An ACT access key is the same 32 random bytes a chunk encryption key is.
 // Re-exported so ACT callers keep reaching for it beside the rest of the ACT crypto.
 import { generateRandomKey } from "../../chunk"
@@ -19,7 +20,6 @@ const PUBLIC_KEY_COORD_SIZE = 32
 const COMPRESSED_PUBLIC_KEY_SIZE = 33
 const UNCOMPRESSED_PREFIX = 0x04
 const KEY_SIZE = 32
-const COUNTER_SIZE = 4
 
 /**
  * Derive public key from private key
@@ -113,36 +113,7 @@ export function counterModeEncrypt(
     throw new Error(`Key must be ${KEY_SIZE} bytes`)
   }
 
-  const result = new Uint8Array(data.length)
-  const numBlocks = Math.ceil(data.length / KEY_SIZE)
-
-  for (let i = 0; i < numBlocks; i++) {
-    // Create counter input: key || uint32LE(i)
-    // Must match Bee's Go implementation which uses binary.LittleEndian.PutUint32
-    const counterInput = new Uint8Array(key.length + COUNTER_SIZE)
-    counterInput.set(key)
-    // LITTLE ENDIAN counter (matches Bee's binary.LittleEndian.PutUint32)
-    counterInput[key.length] = i & 0xff
-    counterInput[key.length + 1] = (i >> 8) & 0xff
-    counterInput[key.length + 2] = (i >> 16) & 0xff
-    counterInput[key.length + 3] = (i >> 24) & 0xff
-
-    // First hash: keccak256(key || counter)
-    const ctrHash = Binary.keccak256(counterInput)
-
-    // Second hash for "selective disclosure" (matches Bee's implementation)
-    const keyStream = Binary.keccak256(ctrHash)
-
-    // XOR data block with keystream
-    const blockStart = i * KEY_SIZE
-    const blockEnd = Math.min(blockStart + KEY_SIZE, data.length)
-
-    for (let j = blockStart; j < blockEnd; j++) {
-      result[j] = data[j] ^ keyStream[j - blockStart]
-    }
-  }
-
-  return result
+  return encryptData(key, data)
 }
 
 /**

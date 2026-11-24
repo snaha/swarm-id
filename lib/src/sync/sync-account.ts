@@ -21,7 +21,7 @@ import {
   deriveSwarmEncryptionKey,
   BACKUP_KEY_LABEL,
 } from "../utils/key-derivation"
-import { hexToUint8Array } from "../utils/hex"
+import { hexToUint8Array, uint8ArrayToHex } from "../utils/hex"
 import {
   updateAfterWrite,
   saveUtilizationState,
@@ -106,10 +106,7 @@ function createChunksFromAddresses(addresses: Uint8Array[]): Chunk[] {
     return {
       address: {
         toUint8Array: () => address,
-        toHex: () =>
-          Array.from(address)
-            .map((b) => b.toString(16).padStart(2, "0"))
-            .join(""),
+        toHex: () => uint8ArrayToHex(address),
       },
       data: new Uint8Array(0), // Not used for utilization tracking
     } as Chunk

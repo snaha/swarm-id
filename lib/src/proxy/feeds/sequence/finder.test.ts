@@ -3,6 +3,7 @@
 
 import { describe, it, expect } from "vitest"
 import { Binary } from "cafe-utility"
+import { makeSOCAddress } from "@ethersphere/core-sdk"
 import { EthAddress, Topic } from "@ethersphere/bee-js"
 import { SyncSequentialFinder } from "./finder"
 
@@ -15,10 +16,7 @@ function addrForIndex(topic: Topic, index: bigint): string {
   const identifier = Binary.keccak256(
     Binary.concatBytes(topic.toUint8Array(), indexBytes),
   )
-  const address = Binary.keccak256(
-    Binary.concatBytes(identifier, OWNER.toUint8Array()),
-  )
-  return Binary.uint8ArrayToHex(address)
+  return makeSOCAddress(identifier, OWNER).toHex()
 }
 
 // Bee's /chunks endpoint returns 500 for a genuinely-absent chunk, so a miss is
