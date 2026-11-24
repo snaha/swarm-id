@@ -8,8 +8,8 @@
  *
  * These guard the span-based leaf detection on the download path against the
  * intermediate-chunk layout the upload path produces — in particular the
- * single-ref-tail case `buildEncryptedMerkleTree` passes through instead of
- * wrapping in a leaf-spanned "ghost intermediate" (see `upload.ts`). The
+ * single-ref tail the tree builder carries up instead of wrapping it in a
+ * leaf-spanned "ghost intermediate" (see `upload.ts`). The
  * SOC round-trips only cover single chunks; this covers multi-level trees.
  *
  * In-memory only: `MockBee` persists every uploaded chunk by its address and

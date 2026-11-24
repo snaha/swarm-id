@@ -244,19 +244,23 @@ describe("an aborted signal stops the write", () => {
           requestOptions,
         }),
     },
-  ])("adds the signal to the Bee options of a $write", async ({ run }) => {
+  ])("ties the Bee options of a $write to the signal", async ({ run }) => {
     const timeout = 1234
     const bee = new MockBee()
     const chunkUpload = vi.fn(bee.chunk.upload)
     bee.chunk.upload = chunkUpload
-    const { signal } = new AbortController()
+    const controller = new AbortController()
 
-    await run({ ...spiedStamper(signal).target, bee } as UploadTarget, {
-      timeout,
-    })
+    await run(
+      { ...spiedStamper(controller.signal).target, bee } as UploadTarget,
+      { timeout },
+    )
 
     const [, , , requestOptions] = chunkUpload.mock.calls[0]
-    expect(requestOptions).toEqual({ timeout, signal })
+    expect(requestOptions?.timeout).toBe(timeout)
+    expect(requestOptions?.signal?.aborted).toBe(false)
+    controller.abort()
+    expect(requestOptions?.signal?.aborted).toBe(true)
   })
 })
 
