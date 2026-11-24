@@ -7,6 +7,26 @@ present and may point at an issue or PR; the reasons live here.
 
 A PR that makes or changes a decision adds the entry in the same PR.
 
+## 2026-11-24 Issues carry a type, at most one stage label, and topic labels
+
+**Context.** The `Design` label meant both "needs designing" and "visual fix to built UI", and
+nothing said when a design was finished, so the issue stayed with the designer. `question` mixed
+design questions with technical ones, `bug`/`enhancement` repeated the org's issue types, and most
+open issues had no label at all ([#1063](https://github.com/snaha/swarm-id/issues/1063)).
+
+**Decision.** The kind of issue is its issue type (Bug, Feature, Task), not a label. Its stage is at
+most one of `needs design`, `needs decision`, `ready for implementation` and `blocked`; no stage
+label means not yet triaged. A design is handed off by swapping `needs design` for
+`ready for implementation`, with the final Figma frames in a comment, and the designer unassigning.
+Checking the built UI against the design is a PR review the designer is requested on. `Design` and
+`question` were renamed in place; `bug`, `enhancement`, `help wanted`, `good first issue`,
+`duplicate`, `invalid` and `wontfix` were deleted. The state before the change, with a restore
+script, is in a comment on #1063.
+
+**Why.** "Ready for implementation" is the moment work changes hands, so it needs a signal of its
+own that anyone can filter on. One stage at a time keeps that filter honest. Types and GitHub's
+close reasons already say what the deleted labels said.
+
 ## 2026-11-23 `immutableFlag` is recorded, never checked
 
 **Context.** Three places decided on a batch's on-chain `immutableFlag`. "Use existing batch"
