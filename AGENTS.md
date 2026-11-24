@@ -146,6 +146,19 @@ Chain-backed suites are NOT in `check:all` — they need a chain running. `pnpm 
 - Keep a **linear history**: rebase onto `main` to update a branch or resolve a conflict — never merge `main` into the branch. Rebasing a branch that is already pushed ends in `git push --force-with-lease`.
 - `docs/decisions.md` is the decision log: why something is the way it is, newest first, append only. A PR that makes or changes a decision adds its entry in the same PR; the code and its docs say what, the log says why and since when.
 
+## Issues
+
+- **Type** is the issue type field: Bug, Feature or Task. There are no type labels.
+- **Stage** is at most one label; none means not yet triaged:
+  - `needs design`: the designer is assigned. When the design is final, they comment with the
+    Figma frames, swap the label for `ready for implementation`, and unassign themselves.
+  - `needs decision`: an open question blocks the work. Whoever settles it records the decision
+    in a comment and moves the issue on.
+  - `ready for implementation`: scope and design are final. Assign yourself when you start.
+  - `blocked`: a comment links what it waits on.
+- **Topic** labels (`security`, `interop`) combine freely with the above.
+- The designer checks the built UI as a requested reviewer on the PR, not through a label.
+
 ## Deployment
 
 GitHub Pages (`gh-pages` branch, CNAME `swarm.snaha.net`) hosts the latest `main` build of every
