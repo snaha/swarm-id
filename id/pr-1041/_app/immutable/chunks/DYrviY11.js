@@ -1,1 +1,0 @@
-import{payload as e}from"../entry/payload.DSmR2FwN.js";var t=e.version;export{t};
