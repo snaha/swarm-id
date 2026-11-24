@@ -28,11 +28,14 @@ import {
   createMockStamper,
 } from "./feeds/epochs/test-utils"
 import type { UploadProgress } from "./types"
+import { withTimeout } from "../utils/promise"
 
 const GATEWAY = "https://gateway.example"
 const REFERENCE = "ab".repeat(32)
 const CONCURRENCY = 4
 const PIECE_SIZE = 64 * 1024
+/** Far longer than a failure takes to reach the caller, far shorter than the suite's timeout. */
+const PROMPTLY_MS = 5_000
 
 /** Every shape the Merkle tree can take at the boundaries that matter. */
 const SIZES = [
@@ -390,6 +393,43 @@ describe("uploadDataStream", () => {
       node.fail(new Error("batch is full"))
 
       await expect(upload).rejects.toThrow("batch is full")
+    })
+
+    it("aborts the HTTP sends still in flight instead of waiting for them", async () => {
+      const { bee, target } = stamperSetup()
+      const failure = new Error("batch is full")
+      let started = 0
+      let siblingsAborted = 0
+      let siblingStarted!: () => void
+      const sibling = new Promise<void>((resolve) => {
+        siblingStarted = resolve
+      })
+      bee.chunk.upload = async (_stamp, _data, _options, requestOptions) => {
+        started++
+        if (started === 1) {
+          await sibling
+          throw failure
+        }
+        siblingStarted()
+        // A node that never answers, as bee-js waits with no timeout of its own.
+        return new Promise<never>((_resolve, reject) => {
+          requestOptions?.signal?.addEventListener("abort", () => {
+            siblingsAborted++
+            reject(new Error("Request aborted"))
+          })
+        })
+      }
+
+      const upload = uploadDataStream(
+        target,
+        piecesOf(makeData(CHUNK_SIZE * 3), PIECE_SIZE),
+        { httpConcurrency: 2 },
+      )
+
+      await expect(
+        withTimeout(upload, PROMPTLY_MS, "the upload waited on its sibling"),
+      ).rejects.toBe(failure)
+      expect(siblingsAborted).toBe(1)
     })
 
     it("drains to a failure recorded once nothing is left in flight", async () => {

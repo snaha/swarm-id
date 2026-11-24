@@ -443,8 +443,9 @@ interface ChunkSender {
   /** End an upload whose chunks all landed. */
   close: () => Promise<void>
   /**
-   * End a failed upload at once: the acks still due are not waited for, so
-   * the caller sees the chunk's error, not the transport's closing.
+   * End a failed upload at once: the sends still out are stopped, not waited
+   * for (the WebSocket's acks still due, the HTTP requests still open), so the
+   * caller sees the chunk's error, not the transport's closing.
    */
   abandon: () => void
 }
@@ -470,6 +471,7 @@ async function openChunkSender(
         )
       },
       close: async () => {},
+      // One send at a time: when it fails, no other is out to stop.
       abandon: () => {},
     }
   }
@@ -502,7 +504,13 @@ async function openChunkSender(
     tag,
     deferred: options?.deferred ?? false,
   }
-  const requestOptions = withSignal(options?.requestOptions, signal)
+  // Aborts the requests still out once one has failed: bee-js sets no timeout
+  // of its own, so one that never answers would hold the upload's failure.
+  const abandoned = new AbortController()
+  const requestOptions = withSignal(
+    options?.requestOptions,
+    signal ? AbortSignal.any([signal, abandoned.signal]) : abandoned.signal,
+  )
   return {
     concurrency:
       options?.httpConcurrency ??
@@ -518,7 +526,7 @@ async function openChunkSender(
         requestOptions,
       ),
     close: async () => {},
-    abandon: () => {},
+    abandon: () => abandoned.abort(),
   }
 }
 
@@ -875,7 +883,7 @@ async function writeTreeIn<R extends PlainRef>(
   } finally {
     // Not awaited: it queues behind a `next()` the source may never answer.
     void payloads.return(undefined).catch(() => {})
-    // Abandoned first: it rejects the acks still due, which settles their sends.
+    // Abandoned first: it stops the sends still out, which settles them.
     if (!closed) sender.abandon()
     await sends.settled()
   }
