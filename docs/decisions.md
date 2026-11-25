@@ -78,28 +78,32 @@ request was posted. A write behind a long upload therefore timed out while
 nothing was wrong, and then ran anyway once the drive was free, spending
 stamps for a caller already told it had failed.
 
-**Decision.** While a write waits for its drive the proxy says `requestQueued`
-on a 5-second beat, the client waits the longer of the request's timeout and
-90 seconds between beats, and `requestStarted` restarts the timeout at its
-full length. A request that expires on that silence says so, and how long it
-waited. Nothing caps the queue in all: on the local cluster an encrypted
-upload moves about 1.8 MiB a second, so a file of a few GiB holds its drive
-for hours. Every request that expires on the client is aborted in the proxy,
-and a write aborted while it queues for the lock, or waits for a partition
-slot, stops waiting at once and claims none.
+**Decision.** Once a write has waited a second for its drive the proxy says
+`requestQueued`, then on a 5-second beat; the client waits the longer of the
+request's timeout and 90 seconds between beats, and `requestStarted`, said
+only after `requestQueued`, restarts the timeout at its full length. A write
+that gets its drive within the second says neither. A request that expires on
+that silence says so, and how long it waited. Nothing caps the queue in all:
+on the local cluster an encrypted upload moves about 1.8 MiB a second, so a
+file of a few GiB holds its drive for hours. Every request that expires on the
+client is aborted in the proxy, and a write aborted while it queues for the
+lock, or waits for a partition slot, stops waiting at once and claims none.
 This narrows "A per-call timeout bounds the whole round trip" below. An
 upload's progress is posted at most every 250 ms, the last report always.
 (#1042)
 
-**Why.** The beat is what tells a long queue from a proxy that has died: a
-dead one says nothing and is still caught within 90 seconds, or the request's
-timeout when that is longer. A browser may run a hidden page's repeating
-timers only once a minute, so a live proxy's beats can arrive a minute apart:
-90 seconds is that minute plus slack. No fixed cap fits both a small write and
-one behind a multi-hour upload, and the holder is ended by its own deadlines;
-a caller who will not wait passes `requestOptions.signal`. A report per chunk
-is hundreds of thousands of messages for a large file, each parsed on the
-dApp's main thread.
+**Why.** A lone write is most writes, and saying nothing for it costs no
+messages and shows an older client, which knows neither, nothing it would
+reject; a second is short enough that a caller's timeout does not run out
+before the client hears the write is queued. The beat is what tells a long
+queue from a proxy that has died: a dead one says nothing and is still caught
+within 90 seconds, or the request's timeout when that is longer. A browser may
+run a hidden page's repeating timers only once a minute, so a live proxy's
+beats can arrive a minute apart: 90 seconds is that minute plus slack. No
+fixed cap fits both a small write and one behind a multi-hour upload, and the
+holder is ended by its own deadlines; a caller who will not wait passes
+`requestOptions.signal`. A report per chunk is hundreds of thousands of
+messages for a large file, each parsed on the dApp's main thread.
 
 ## 2026-11-18 Every upload builds its Merkle tree as the chunks are sent
 

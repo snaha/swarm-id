@@ -17,7 +17,11 @@ import {
   type Bridge,
 } from "./bridge-test-utils"
 import { CHUNK_SIZE } from "./proxy/chunking"
-import { PROGRESS_INTERVAL_MS } from "./utils/constants"
+import {
+  PROGRESS_INTERVAL_MS,
+  REQUEST_QUEUED_ANNOUNCE_DELAY_MS,
+  REQUEST_QUEUED_INTERVAL_MS,
+} from "./utils/constants"
 import { DriveWritePath } from "./proxy/drive-write-path"
 import type { UploadTarget } from "./proxy/upload"
 import type {
@@ -30,7 +34,10 @@ import { FakeLockManager } from "./utils/fake-web-locks"
 
 const SETTLE_MS = 20
 
-type ClientInternals = { pendingRequests: Map<string, unknown> }
+type ClientInternals = {
+  pendingRequests: Map<string, unknown>
+  handleIframeMessage: (message: { type: string }) => void
+}
 type ProxyInternals = {
   inFlightRequests: Map<string, AbortController>
   drives: Map<string, DriveWritePath>
@@ -63,6 +70,23 @@ describe("a write across the bridge", () => {
     const client = bridge.client as unknown as ClientInternals
     expect(client.pendingRequests.size).toBe(0)
     expect(proxy.inFlightRequests.size).toBe(0)
+  }
+
+  /** The types of the proxy's `requestQueued` / `requestStarted` messages, in order. */
+  const watchTheQueue = () => {
+    const client = bridge.client as unknown as ClientInternals
+    const said: string[] = []
+    const handle = client.handleIframeMessage.bind(client)
+    vi.spyOn(client, "handleIframeMessage").mockImplementation((message) => {
+      if (
+        message.type === "requestQueued" ||
+        message.type === "requestStarted"
+      ) {
+        said.push(message.type)
+      }
+      handle(message)
+    })
+    return said
   }
 
   /** Make the gateway keep every chunk waiting until `release` is called. */
@@ -137,6 +161,52 @@ describe("a write across the bridge", () => {
       await Promise.all([first, second])
       expect(finished).toEqual(["holder", "queued"])
       // The heartbeat stopped with the wait.
+      expect(vi.getTimerCount()).toBe(0)
+      expectNothingLeftBehind()
+    })
+
+    it("says nothing of a queue to a write that finds its drive free", async () => {
+      vi.useFakeTimers({
+        toFake: ["setTimeout", "clearTimeout", "setInterval", "clearInterval"],
+      })
+      const said = watchTheQueue()
+      const release = holdTheGateway()
+      const upload = bridge.client.uploadData(makeData(CHUNK_SIZE))
+
+      // Running, not queued, however long the write itself takes.
+      await vi.advanceTimersByTimeAsync(
+        REQUEST_QUEUED_ANNOUNCE_DELAY_MS + REQUEST_QUEUED_INTERVAL_MS,
+      )
+      release()
+      await upload
+
+      expect(said).toEqual([])
+      expect(vi.getTimerCount()).toBe(0)
+      expectNothingLeftBehind()
+    })
+
+    it("says it is queued once it has waited, then on a beat, then that it started", async () => {
+      vi.useFakeTimers({
+        toFake: ["setTimeout", "clearTimeout", "setInterval", "clearInterval"],
+      })
+      const said = watchTheQueue()
+      const release = holdTheGateway()
+      const first = bridge.client.uploadData(makeData(CHUNK_SIZE))
+      await vi.advanceTimersByTimeAsync(SETTLE_MS)
+      const second = bridge.client.uploadData(makeData(CHUNK_SIZE + 1))
+
+      await vi.advanceTimersByTimeAsync(
+        REQUEST_QUEUED_ANNOUNCE_DELAY_MS - 2 * SETTLE_MS,
+      )
+      expect(said).toEqual([])
+      await vi.advanceTimersByTimeAsync(2 * SETTLE_MS)
+      expect(said).toEqual(["requestQueued"])
+      await vi.advanceTimersByTimeAsync(REQUEST_QUEUED_INTERVAL_MS)
+      expect(said).toEqual(["requestQueued", "requestQueued"])
+
+      release()
+      await Promise.all([first, second])
+      expect(said).toEqual(["requestQueued", "requestQueued", "requestStarted"])
       expect(vi.getTimerCount()).toBe(0)
       expectNothingLeftBehind()
     })

@@ -1714,8 +1714,10 @@ export const DownloadDataResponseMessageSchema = z.object({
 
 /**
  * A write on `requestId` is waiting for its drive (the write path, the
- * cross-tab lock, the partition lease). Said as the wait begins and on a
- * beat while it lasts; the client's timeout does not run meanwhile
+ * cross-tab lock, the partition lease). Said once the wait has lasted
+ * `REQUEST_QUEUED_ANNOUNCE_DELAY_MS` and on a beat while it goes on; the
+ * client's timeout does not run meanwhile. A write that gets its drive
+ * sooner is never said to be queued
  */
 export const RequestQueuedMessageSchema = z.object({
   type: z.literal("requestQueued"),
@@ -1723,8 +1725,8 @@ export const RequestQueuedMessageSchema = z.object({
 })
 
 /**
- * The write on `requestId` has its drive: the client's wait for the answer
- * starts over, at its full timeout
+ * The write on `requestId`, said to be queued, has its drive: the client's
+ * wait for the answer starts over, at its full timeout
  */
 export const RequestStartedMessageSchema = z.object({
   type: z.literal("requestStarted"),

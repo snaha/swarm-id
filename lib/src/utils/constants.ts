@@ -24,8 +24,15 @@ export const DAY = 24 * HOUR
 export const DEFAULT_REQUEST_TIMEOUT_MS = 30 * SECOND
 
 /**
+ * How long a write waits for its drive before the proxy first says it is
+ * queued (`requestQueued`): a write that finds its drive free says nothing.
+ * Short, so a caller's own timeout does not run out before the client hears.
+ */
+export const REQUEST_QUEUED_ANNOUNCE_DELAY_MS = 1 * SECOND
+
+/**
  * How often the proxy says a write waiting for its drive is still queued
- * (`requestQueued`), the first time as soon as it starts waiting.
+ * (`requestQueued`), once {@link REQUEST_QUEUED_ANNOUNCE_DELAY_MS} is up.
  */
 export const REQUEST_QUEUED_INTERVAL_MS = 5 * SECOND
 

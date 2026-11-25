@@ -231,6 +231,7 @@ import {
 } from "./schemas"
 import {
   PROGRESS_INTERVAL_MS,
+  REQUEST_QUEUED_ANNOUNCE_DELAY_MS,
   REQUEST_QUEUED_INTERVAL_MS,
   appSessionDuration,
 } from "./utils/constants"
@@ -2552,7 +2553,7 @@ export class SwarmIdProxy {
    * `request`, when given, hears `requestQueued` while the write waits for
    * its drive, which another write may hold for as long as a streaming upload
    * runs, and `requestStarted` once it has it: its caller's timeout counts
-   * none of that wait.
+   * none of that wait. A write that gets its drive at once hears neither.
    */
   private async withModeAwareWriteLock<T>(
     targetOptions:
@@ -2621,10 +2622,12 @@ export class SwarmIdProxy {
   }
 
   /**
-   * Say `requestQueued` for a write now and on a heartbeat while it waits for
-   * its drive, and `requestStarted` as it starts: the client's wait for the
-   * answer then begins when the write does. `stop` ends the heartbeat when
-   * the wait fails instead.
+   * Say `requestQueued` for a write once it has waited
+   * {@link REQUEST_QUEUED_ANNOUNCE_DELAY_MS} for its drive, then on a
+   * heartbeat, and `requestStarted` as it starts if it said it was queued:
+   * the client's wait for the answer then begins when the write does. A
+   * write that gets its drive sooner says neither, so a lone write costs no
+   * messages. `stop` ends the wait's timers when the wait fails instead.
    */
   private keepAliveWhileQueued(request: WriteRequest | undefined): {
     started: () => void
@@ -2634,16 +2637,24 @@ export class SwarmIdProxy {
     const { event, message } = request
     const say = (type: "requestQueued" | "requestStarted") =>
       this.postMessage(event, { type, requestId: message.requestId })
-    say("requestQueued")
-    const heartbeat = setInterval(
-      () => say("requestQueued"),
-      REQUEST_QUEUED_INTERVAL_MS,
-    )
-    const stop = () => clearInterval(heartbeat)
+    let saidQueued = false
+    let heartbeat: ReturnType<typeof setInterval> | undefined
+    const sayQueued = () => {
+      saidQueued = true
+      say("requestQueued")
+    }
+    const announce = setTimeout(() => {
+      sayQueued()
+      heartbeat = setInterval(sayQueued, REQUEST_QUEUED_INTERVAL_MS)
+    }, REQUEST_QUEUED_ANNOUNCE_DELAY_MS)
+    const stop = () => {
+      clearTimeout(announce)
+      clearInterval(heartbeat)
+    }
     return {
       started: () => {
         stop()
-        say("requestStarted")
+        if (saidQueued) say("requestStarted")
       },
       stop,
     }
