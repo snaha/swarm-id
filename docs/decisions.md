@@ -70,6 +70,65 @@ GitHub holds one pending run per group, so a queued PR run would be dropped for
 a later run on another ref, and the nightly run tests `main`, never that PR's
 head. The 429s that remain are the suite's to handle (#1049).
 
+## 2026-11-18 Streaming transfers are pulled over `postMessage`
+
+**Context.** `uploadData` and `actUploadData` took only a `Uint8Array`, so a
+caller read a whole file into memory and the iframe bridge copied it again
+(#930, #523). Measured with the demo's `/safari-check` page on the #979
+preview, 2026-11-17: desktop Safari 26.5.2 throws `DataCloneError` on a
+transferred `ReadableStream`, while desktop Safari 27.2 and iOS 27.2 Safari
+(simulator) transfer it. All three hand a 5 MB blob back from `Blob.stream()`
+as one piece. The page re-runs both measurements, under Transport, in
+whichever browser opens it, with no connection needed.
+
+**Decision.** A `Blob`, `File` or `ReadableStream` crosses the bridge as
+pieces of up to 256 KiB, one per pull from the receiving side, buffers
+transferred; a `Blob` is read with `slice()`. `uploadFile`, `uploadFiles` and
+`downloadFileStream` use the same transport, and a folder's files are pulled
+one at a time, each pull naming its file. For a streamed input,
+`requestOptions.timeout` bounds silence rather than the whole call, which
+narrows "A per-call timeout bounds the whole round trip" below: the client
+lets the proxy stay silent for it, at least 2 minutes by default, and the
+proxy lets the source, or a download's reader, stay silent for at least 2
+minutes or a longer `timeout`, then fails the transfer. An upload's source
+gets 10 minutes at most whatever `timeout` asks; a download's reader has no
+such ceiling. While the client reads the source it waits on the proxy's
+deadline for it plus 10 seconds, so a proxy that has gone cannot leave the
+call pending forever. `uploadFiles` gives its drive's write lock up at the
+next file boundary once it has held it for 30 seconds, and queues for it again,
+saying `requestQueued` as any write does, before the next file; the manifest
+is written in the last session. A single file holds the lock for its whole
+length. A file that cannot be read fails the folder with an error saying the
+files before it were uploaded but no reference reaches them. The browser test
+of all this runs on a workflow of its own, `streaming-transfer.yml`, filtered
+to the streaming code, not inside the device suites' run. (#1043)
+
+**Why.** One transport that works on every engine beats a fast path plus a
+fallback for the Safari versions still without stream transfer, and a pull
+costs under 0.25 ms against a node that takes milliseconds per chunk. Pulling
+is the backpressure: nothing is read faster than the node takes chunks. A
+whole-call bound cannot fit an upload of unknown length, so silence is what is
+bounded. The source's own deadline exists because the upload holds the drive's
+cross-tab write lock: without it, one app's stalled source blocks every writer
+to that drive on the device, the identity UI included. For the same reason a
+caller's long `timeout` does not lift it past 10 minutes: a source that silent
+has stalled, and every other writer is waiting on it. A download's unread
+stream holds no lock, so its caller's `timeout` stands. What a write queued
+behind such an upload does is the entry below.
+
+A folder streamed from disk can hold its drive for hours, and every other
+write to that drive on the device, account sync and the identity UI included,
+would wait the whole time. A file boundary is where the lock can go at no
+cost: a file's reference is final once its tree is up, and the session that
+ends validates the lease and publishes the partition state as any write does,
+which is what makes the finished files' chunks durable. Thirty seconds keeps a
+folder of small files in one session rather than paying a lock cycle and a
+partition-state publish per file. Inside one file there is no such boundary:
+yielding there would carry a half-built tree across sessions, so one huge file
+holds the drive for as long as it takes. That is accepted: the lock is still
+released when the file is done, and a stalled source still fails at its
+deadline.
+
 ## 2026-11-18 A request's timeout does not count the wait for its drive
 
 **Context.** Writes to one drive run one at a time, under its cross-tab lock

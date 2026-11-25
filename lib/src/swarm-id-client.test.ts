@@ -1298,7 +1298,8 @@ describe("SwarmIdClient request seam", () => {
 
   // #750: the folder API takes what bee-js takes — a FileList, File[], or
   // `{ path, file }` pairs — and ships `{ path, data, contentType }` so the
-  // proxy builds the manifest. A File's own path comes from webkitdirectory.
+  // proxy builds the manifest, each file's bytes pulled as the proxy gets to
+  // it. A File's own path comes from webkitdirectory.
   it("uploadFiles normalizes File[] and { path, file } pairs into one message", async () => {
     const picked = new File(["<h1>hi</h1>"], "index.html", {
       type: "text/html",
@@ -1326,12 +1327,12 @@ describe("SwarmIdClient request seam", () => {
     expect(sent.files).toEqual([
       {
         path: "index.html",
-        data: new TextEncoder().encode("<h1>hi</h1>"),
+        data: { pulled: true, size: "<h1>hi</h1>".length },
         contentType: "text/html",
       },
       {
         path: "assets/a.bin",
-        data: new Uint8Array([1, 2]),
+        data: { pulled: true, size: 2 },
         contentType: undefined,
       },
     ])

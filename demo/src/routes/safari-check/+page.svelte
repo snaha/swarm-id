@@ -18,9 +18,10 @@
 
   import { clientStore } from '$lib/stores/client.svelte'
   import { logStore } from '$lib/stores/log.svelte'
-  import { formatReport, runChecks } from '$lib/utils/safari-check'
-  import type { CheckInput } from '$lib/utils/safari-check'
+  import { describeTransport, formatReport, runChecks } from '$lib/utils/safari-check'
+  import type { CheckInput, TransportInput } from '$lib/utils/safari-check'
   import { resolveProxyOrigin } from '$lib/utils/environment'
+  import { probeBlobStream, probeStreamTransfer } from '$lib/utils/transport-probes'
 
   /** This page's own (first-party) record of what earlier loads saw. */
   const SEEN_KEY = 'safari-check-device'
@@ -42,6 +43,8 @@
   let uploading = $state(false)
   let reference = $state<string | undefined>(undefined)
   let copied = $state(false)
+  let transportInput = $state<TransportInput>({})
+  let probing = $state(false)
 
   const input = $derived<CheckInput>({
     connection: clientStore.authenticated
@@ -58,6 +61,7 @@
     uploadError,
   })
   const results = $derived(runChecks(input))
+  const transport = $derived(describeTransport(transportInput))
 
   // Everything the report needs to be read without a follow-up question. The
   // first run came back missing exactly this: uploadMode and the drive state
@@ -86,7 +90,31 @@
     pageLoad ??= readPageLoad()
     previousDeviceId = pageLoad.previousDeviceId
     loadCount = pageLoad.loadCount
+    // The transport probes need no connection: they ask the engine itself.
+    void runTransportProbes()
   })
+
+  async function runTransportProbes() {
+    probing = true
+    transportInput = {}
+    try {
+      const [streamTransfer, blobStream] = await Promise.all([
+        probeStreamTransfer(),
+        probeBlobStream(),
+      ])
+      transportInput = { streamTransfer, blobStream }
+      for (const probe of describeTransport(transportInput)) {
+        logStore.log(`Safari check: ${probe.title} — ${probe.observed}`)
+      }
+    } catch (error) {
+      logStore.log(
+        `Safari check: transport probes failed — ${error instanceof Error ? error.message : String(error)}`,
+        'error',
+      )
+    } finally {
+      probing = false
+    }
+  }
 
   function readPageLoad() {
     const count = Number(localStorage.getItem(LOADS_KEY) ?? '0') + 1
@@ -128,7 +156,7 @@
   }
 
   async function copyReport() {
-    await navigator.clipboard.writeText(formatReport(results, environment))
+    await navigator.clipboard.writeText(formatReport(results, environment, transport))
     copied = true
     setTimeout(() => (copied = false), COPY_RESET_MS)
   }
@@ -210,6 +238,32 @@
       <div><span class="font-semibold">reference:</span> {reference}</div>
     {/if}
   </div>
+
+  <section class="space-y-3" aria-labelledby="transport-heading">
+    <div>
+      <h2 id="transport-heading" class="text-lg font-semibold text-foreground">Transport</h2>
+      <p class="text-sm text-muted-foreground">
+        What this browser does with the two things the iframe bridge could carry a file on. These
+        are observations, not pass or fail: the bridge pulls pieces of at most 256 KB over
+        postMessage on every browser, and these are the measurements behind that choice. No
+        connection needed.
+      </p>
+    </div>
+    {#each transport as probe (probe.id)}
+      <div class="rounded-lg border border-border p-4">
+        <div class="font-semibold text-foreground">{probe.title}</div>
+        <p class="mt-1 text-sm text-foreground">{probe.observed}</p>
+        <p class="mt-1 text-sm text-muted-foreground">{probe.meaning}</p>
+      </div>
+    {/each}
+    <button
+      class="rounded-md border border-border px-4 py-3 text-sm font-medium text-foreground disabled:opacity-50"
+      onclick={runTransportProbes}
+      disabled={probing}
+    >
+      {probing ? 'Probing…' : 'Run transport probes again'}
+    </button>
+  </section>
 
   <details class="rounded-lg border border-border p-4 text-sm text-muted-foreground">
     <summary class="cursor-pointer font-semibold text-foreground">How to run it</summary>

@@ -12,6 +12,9 @@ import { defineConfig, devices } from '@playwright/test'
  * waits them out — so it is not part of `pnpm test:e2e`. It runs on its own
  * workflow (`.github/workflows/three-devices.yml`): on a PR that touches the
  * lease seams, nightly on main, before every npm publish, and on demand.
+ * The streaming transfers use the same rig on one device and run through
+ * `playwright.streaming.config.ts`, which takes this config with its own
+ * `testMatch`.
  * Locally:
  *
  *   pnpm dev:local                      # cluster + chain + solver + apps
