@@ -1,0 +1,1 @@
+import"./BWGO2B2n.js";
