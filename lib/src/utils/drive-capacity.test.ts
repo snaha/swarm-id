@@ -3,6 +3,7 @@
 
 import { describe, it, expect } from "vitest"
 import { RedundancyLevel, Utils } from "@ethersphere/bee-js"
+import { getMaxShards, getParities } from "@ethersphere/core-sdk"
 import { CHUNK_SIZE, NUM_BUCKETS, partitionCapacity } from "./batch-utilization"
 import {
   DEFAULT_FIT_CONFIDENCE,
@@ -84,6 +85,19 @@ describe("chunksForBytes", () => {
   it("packs 128 references per intermediate chunk when unencrypted", () => {
     expect(chunksForBytes(PLAIN_FAN_OUT * CHUNK_SIZE, false)).toBe(
       PLAIN_FAN_OUT + 1 + SAVE_OVERHEAD_CHUNKS,
+    )
+  })
+
+  it("adds a batch's parity and the root's replicas at a redundancy level", () => {
+    const MEDIUM = 1
+    const MEDIUM_REPLICAS = 2
+    const batch = getMaxShards(MEDIUM, true)
+    expect(chunksForBytes(batch * CHUNK_SIZE, true, MEDIUM)).toBe(
+      batch +
+        getParities(MEDIUM, batch, true) +
+        1 +
+        MEDIUM_REPLICAS +
+        SAVE_OVERHEAD_CHUNKS,
     )
   })
 })

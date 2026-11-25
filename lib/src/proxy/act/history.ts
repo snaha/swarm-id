@@ -374,25 +374,9 @@ export async function loadHistoryEntries(
         throw new Error("Fork node selfAddress is not set")
       }
 
-      // Load the child node data
-      const childRef = uint8ArrayToHex(fork.node.selfAddress)
-      const childData = await loadData(childRef)
-
-      // Deserialize the child node
-      const childNode = MantarayNode.unmarshalFromData(
-        childData,
-        fork.node.selfAddress,
-      )
-
-      // Copy the loaded data to the fork node
-      fork.node.targetAddress = childNode.targetAddress
-      fork.node.forks = childNode.forks
-      fork.node.obfuscationKey = childNode.obfuscationKey
-
-      // Fix parent pointers for nested forks
-      for (const nestedFork of fork.node.forks.values()) {
-        nestedFork.node.parent = fork.node
-      }
+      // Load the stub in place, so it stays wired into its parent and
+      // counts as loaded for a later `addFork`
+      fork.node.hydrate(await loadData(uint8ArrayToHex(fork.node.selfAddress)))
 
       // Recursively load any nested forks
       await loadRecursively(fork.node)

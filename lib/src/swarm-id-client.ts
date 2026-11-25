@@ -89,6 +89,7 @@ import type {
   DriveTargetOptions,
   DriveCapacity,
   FitOptions,
+  CapacityReadOptions,
 } from "./types"
 import {
   IframeToParentMessageSchema,
@@ -1076,7 +1077,9 @@ export class SwarmIdClient {
    * device writes to; `partitions` breaks the drive down. Reads Swarm for the
    * partitions this session does not hold, so call it when showing storage,
    * not on every connection change. `undefined` for a scratch drive, which
-   * overwrites its oldest data instead of filling.
+   * overwrites its oldest data instead of filling. The byte figures assume
+   * encrypted saves at `redundancyLevel` (default 0), since parity takes
+   * slots too (#928).
    *
    * @example
    * ```typescript
@@ -1085,7 +1088,7 @@ export class SwarmIdClient {
    * ```
    */
   async getDriveCapacity(
-    options?: DriveTargetOptions,
+    options?: CapacityReadOptions,
   ): Promise<DriveCapacity | undefined> {
     this.ensureReady()
     const response = await this.sendRequest<{
@@ -1096,6 +1099,7 @@ export class SwarmIdClient {
       type: "getDriveCapacity",
       requestId: this.generateRequestId(),
       batchID: options?.batchID,
+      redundancyLevel: options?.redundancyLevel,
     })
     return response.capacity
   }
@@ -1129,6 +1133,7 @@ export class SwarmIdClient {
       bytes: Math.ceil(bytes),
       batchID: options?.batchID,
       encrypt: options?.encrypt,
+      redundancyLevel: options?.redundancyLevel,
     })
     return response.probability
   }

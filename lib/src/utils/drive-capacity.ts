@@ -27,12 +27,12 @@ import {
   PARTITION_COUNT,
   partitionCapacity,
 } from "./batch-utilization"
-import {
-  ENCRYPTED_REFS_PER_CHUNK,
-  PLAIN_REFS_PER_CHUNK,
-  estimateTotalChunks,
-} from "../proxy/chunking"
-import type { DriveCapacity, PartitionCapacity } from "../types"
+import { estimateTotalChunks } from "../proxy/chunking"
+import type {
+  DriveCapacity,
+  PartitionCapacity,
+  RedundancyLevel,
+} from "../types"
 
 /**
  * The fit probability `leftBytes` and `sizeBytes` are reported at. The
@@ -60,21 +60,28 @@ export interface CapacityOptions {
   partitionCount?: number
   /** Whether the saves are encrypted, which halves the tree's fan-out */
   encrypt?: boolean
+  /** The saves' erasure-coding level, whose parity takes slots too (#928) */
+  redundancyLevel?: RedundancyLevel
 }
 
 /** Every chunk a save of `bytes` writes */
-export function chunksForBytes(bytes: number, encrypt = true): number {
+export function chunksForBytes(
+  bytes: number,
+  encrypt = true,
+  redundancyLevel: RedundancyLevel = 0,
+): number {
   return (
-    estimateTotalChunks(
-      bytes,
-      encrypt ? ENCRYPTED_REFS_PER_CHUNK : PLAIN_REFS_PER_CHUNK,
-    ) + SAVE_OVERHEAD_CHUNKS
+    estimateTotalChunks(bytes, encrypt, redundancyLevel) + SAVE_OVERHEAD_CHUNKS
   )
 }
 
 /** The largest save, in bytes, that writes at most `chunks` chunks */
-export function bytesForChunks(chunks: number, encrypt = true): number {
-  if (chunks < chunksForBytes(0, encrypt)) {
+export function bytesForChunks(
+  chunks: number,
+  encrypt = true,
+  redundancyLevel: RedundancyLevel = 0,
+): number {
+  if (chunks < chunksForBytes(0, encrypt, redundancyLevel)) {
     return 0
   }
   // `chunksForBytes` grows with the leaf count, so search on whole leaves
@@ -82,7 +89,9 @@ export function bytesForChunks(chunks: number, encrypt = true): number {
   let high = chunks
   while (low < high) {
     const leaves = Math.ceil((low + high) / 2)
-    if (chunksForBytes(leaves * CHUNK_SIZE, encrypt) <= chunks) {
+    if (
+      chunksForBytes(leaves * CHUNK_SIZE, encrypt, redundancyLevel) <= chunks
+    ) {
       low = leaves
     } else {
       high = leaves - 1
@@ -166,6 +175,7 @@ export function estimatePartitionCapacity(
     confidence = DEFAULT_FIT_CONFIDENCE,
     partitionCount = PARTITION_COUNT,
     encrypt = true,
+    redundancyLevel = 0,
   } = options
   const capacity = Math.max(0, partitionCapacity(depth, partitionCount))
   let usedChunks = 0
@@ -175,6 +185,7 @@ export function estimatePartitionCapacity(
   const sizeBytes = bytesForChunks(
     chunksThatFitEmpty(capacity, depth, partitionCount, confidence),
     encrypt,
+    redundancyLevel,
   )
   const usedBytes = usedChunks * CHUNK_SIZE
   const current = headroomHistogram(dataCounters, depth, partitionCount)
@@ -182,7 +193,11 @@ export function estimatePartitionCapacity(
   // `used + left` above `size`; capped, "left of size" adds up. Once used
   // passes size, left reads 0 while a small save may still fit
   const leftBytes = Math.min(
-    bytesForChunks(chunksThatFit(current, confidence), encrypt),
+    bytesForChunks(
+      chunksThatFit(current, confidence),
+      encrypt,
+      redundancyLevel,
+    ),
     Math.max(0, sizeBytes - usedBytes),
   )
   return { partition, sizeBytes, usedBytes, leftBytes }

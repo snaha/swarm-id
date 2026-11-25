@@ -64,8 +64,8 @@ importers:
         specifier: 10.0.1
         version: 10.0.1(eslint@10.9.1(jiti@2.6.1))
       '@ethersphere/bee-js':
-        specifier: 13.0.0
-        version: 13.0.0
+        specifier: 13.2.0
+        version: 13.2.0
       '@snaha/swarm-id':
         specifier: workspace:*
         version: link:../lib
@@ -163,11 +163,11 @@ importers:
   lib:
     dependencies:
       '@ethersphere/bee-js':
-        specifier: 13.0.0
-        version: 13.0.0
+        specifier: 13.2.0
+        version: 13.2.0
       '@ethersphere/core-sdk':
-        specifier: 0.1.1
-        version: 0.1.1
+        specifier: 0.2.2
+        version: 0.2.2
       '@noble/curves':
         specifier: 1.2.0
         version: 1.2.0
@@ -319,8 +319,8 @@ importers:
   ui:
     dependencies:
       '@ethersphere/bee-js':
-        specifier: 13.0.0
-        version: 13.0.0
+        specifier: 13.2.0
+        version: 13.2.0
       '@relayprotocol/relay-sdk':
         specifier: 7.0.2
         version: 7.0.2(viem@2.55.13(typescript@6.0.3)(zod@3.25.76))
@@ -1152,13 +1152,13 @@ packages:
     resolution: {integrity: sha512-+CNAzxglkrpNf/kKywqQfk74QjtceuOE7Qm+AF8miRvPF/wmmK5+OJOgVh3AVTT3RP2mH3+FOaxlE5v72owk0A==}
     engines: {node: ^20.19.0 || ^22.13.0 || >=24}
 
-  '@ethersphere/bee-js@13.0.0':
-    resolution: {integrity: sha512-nNBCafuMSsJ9MsZzwhy0moBvjE/unRfvKC/D/zxVH7t1CMSJn3UkAv16t/pcO4iwMIUX+W6du2jYq/ZO03G0Ow==}
-    engines: {bee: 2.8.1-7cf53193, beeApiVersion: 8.1.0}
+  '@ethersphere/bee-js@13.2.0':
+    resolution: {integrity: sha512-GAl6xkAWwPvy2sxUkzWpaF3JULtOvZ3S1U3JwL5S24sYFjPoGbbsqdUz2TVQxoTMLHx1BRmLGbIExtMs9pl6Ag==}
+    engines: {bee: 2.8.3, beeApiVersion: 8.2.0}
     hasBin: true
 
-  '@ethersphere/core-sdk@0.1.1':
-    resolution: {integrity: sha512-qnDZleD2YK3s5PN/tXc8LnEtzh6BdcPTBjv7baoKSPMQPLeZ9wN/9qH1Zr2FNwhMgAIhgsqV7fB65LlzQ/a7oQ==}
+  '@ethersphere/core-sdk@0.2.2':
+    resolution: {integrity: sha512-hfnjPlJbo+LKL34iTeUUVPc8mArMPkFhuKInbTqlwpNlpljeODbMNS3G39kDQHaMZi7zanMDGoD5INTjvokgyg==}
     engines: {node: '>=22'}
 
   '@expressive-code/core@0.44.0':
@@ -6545,9 +6545,9 @@ snapshots:
       '@eslint/core': 1.2.1
       levn: 0.4.1
 
-  '@ethersphere/bee-js@13.0.0':
+  '@ethersphere/bee-js@13.2.0':
     dependencies:
-      '@ethersphere/core-sdk': 0.1.1
+      '@ethersphere/core-sdk': 0.2.2
       cafe-utility: 34.0.0
       debug: 4.4.3
       isomorphic-ws: 5.0.0(ws@8.22.1)
@@ -6559,7 +6559,7 @@ snapshots:
       - supports-color
       - utf-8-validate
 
-  '@ethersphere/core-sdk@0.1.1':
+  '@ethersphere/core-sdk@0.2.2':
     dependencies:
       '@noble/curves': 1.9.7
       '@noble/hashes': 1.8.0
@@ -7517,7 +7517,7 @@ snapshots:
 
   '@scure/bip32@1.7.0':
     dependencies:
-      '@noble/curves': 1.9.1
+      '@noble/curves': 1.9.7
       '@noble/hashes': 1.8.0
       '@scure/base': 1.2.6
 

@@ -125,9 +125,24 @@ export const DriveTargetSchema = z
   )
   .optional()
 
+/**
+ * Erasure-coding level of an upload, Bee's `swarm-redundancy-level` (#307):
+ * 0 none, 1 medium, 2 strong, 3 insane, 4 paranoid.
+ */
+export const RedundancyLevelSchema = z.union([
+  z.literal(0),
+  z.literal(1),
+  z.literal(2),
+  z.literal(3),
+  z.literal(4),
+])
+
+export type RedundancyLevel = z.infer<typeof RedundancyLevelSchema>
+
 const UploadOptionsObjectSchema = z.object({
   batchID: DriveTargetSchema,
   pin: z.boolean().optional(),
+  redundancyLevel: RedundancyLevelSchema.optional(),
   encrypt: z.boolean().optional(),
   encryptManifest: z.boolean().optional(),
   tag: z.number().optional(),
@@ -184,6 +199,15 @@ export interface UploadOptions {
   pin?: boolean
   encrypt?: boolean
   encryptManifest?: boolean
+  /**
+   * Erasure coding (#307), Bee's `swarm-redundancy-level`: 0 none (default),
+   * 1 medium, 2 strong, 3 insane, 4 paranoid. Each level adds Reed-Solomon
+   * parity chunks to every batch of the content's chunks and replicas of its
+   * root, so the content can be read with some chunks gone. The parity takes
+   * drive space: pass the same level to `getDriveCapacity`/`fitProbability`.
+   * The manifest of a file or folder upload is not erasure-coded.
+   */
+  redundancyLevel?: RedundancyLevel
   tag?: number
   deferred?: boolean
   onProgress?: (progress: UploadProgress) => void
@@ -431,7 +455,16 @@ export type Drive = z.infer<typeof DriveSchema>
 export type DriveTargetOptions = Pick<UploadOptions, "batchID">
 
 /** Which drive `fitProbability()` asks about, and whether the save is encrypted (the default) */
-export type FitOptions = Pick<UploadOptions, "batchID" | "encrypt">
+export type FitOptions = Pick<
+  UploadOptions,
+  "batchID" | "encrypt" | "redundancyLevel"
+>
+
+/** Which drive {@link SwarmIdClient.getDriveCapacity} reads, and how saves are made */
+export type CapacityReadOptions = Pick<
+  UploadOptions,
+  "batchID" | "redundancyLevel"
+>
 
 const DRIVE_DESCRIPTION_MAX_LENGTH = 120
 const DRIVE_REQUEST_MAX_ROWS = 8
@@ -1493,6 +1526,7 @@ export const GetDriveCapacityMessageSchema = z.object({
   type: z.literal("getDriveCapacity"),
   requestId: z.string(),
   batchID: DriveTargetSchema,
+  redundancyLevel: RedundancyLevelSchema.optional(),
 })
 
 export const FitProbabilityMessageSchema = z.object({
@@ -1501,6 +1535,7 @@ export const FitProbabilityMessageSchema = z.object({
   bytes: z.number().int().min(0),
   batchID: DriveTargetSchema,
   encrypt: z.boolean().optional(),
+  redundancyLevel: RedundancyLevelSchema.optional(),
 })
 
 /**

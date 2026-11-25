@@ -13,7 +13,12 @@ import { MantarayNode } from "@ethersphere/core-sdk"
 import { uploadData, uploadChunk, type UploadTarget } from "./upload"
 import { saveMantarayTree, loadMantarayTreeWithChunkAPI } from "./mantaray"
 import { hexToUint8Array, uint8ArrayToHex } from "../utils/hex"
-import type { UploadProgress, CollectionFile, CollectionEntry } from "../types"
+import type {
+  UploadProgress,
+  CollectionFile,
+  CollectionEntry,
+  RedundancyLevel,
+} from "../types"
 
 const DEFAULT_CONTENT_TYPE = "application/octet-stream"
 
@@ -25,6 +30,8 @@ export interface UploadCollectionOptions {
   pin?: boolean
   deferred?: boolean
   tag?: number
+  /** Erasure-coding level of each file's content (#307) */
+  redundancyLevel?: RedundancyLevel
   /** Served for the bare `/bzz/<reference>/` (`website-index-document`) */
   indexDocument?: string
   /** Served for a path that is not in the folder (`website-error-document`) */
@@ -74,6 +81,7 @@ export async function uploadCollection(
   for (const file of files) {
     const { reference } = await uploadData(target, file.data, {
       ...chunkOptions,
+      redundancyLevel: options?.redundancyLevel,
       encryptionKey: encryptContent ? true : undefined,
     })
     manifest.addFork(file.path, hexToUint8Array(reference), {

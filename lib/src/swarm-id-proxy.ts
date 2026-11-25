@@ -4547,6 +4547,7 @@ export class SwarmIdProxy {
           async (target) => {
             const result = await uploadData(target, data, {
               encryptionKey: options?.encrypt ? true : undefined,
+              redundancyLevel: options?.redundancyLevel,
               pin: options?.pin,
               deferred: options?.deferred,
               tag: options?.tag,
@@ -4651,6 +4652,7 @@ export class SwarmIdProxy {
 
             const contentUpload = await uploadData(target, data, {
               encryptionKey: encryption.content ? true : undefined,
+              redundancyLevel: options?.redundancyLevel,
               pin: options?.pin,
               deferred: options?.deferred,
               tag: uploadTag,
@@ -6212,6 +6214,7 @@ export class SwarmIdProxy {
           // the ACT's own chunks go over HTTP.
           const contentUploadResult = await uploadData(target, data, {
             encryptionKey: options?.encrypt !== false ? true : undefined,
+            redundancyLevel: options?.redundancyLevel,
             pin: options?.pin,
             deferred: options?.deferred,
             tag: options?.tag,
@@ -6564,7 +6567,10 @@ export class SwarmIdProxy {
           read.partitions,
           stamp.depth,
           read.writePartition,
-          { partitionCount: read.partitionCount },
+          {
+            partitionCount: read.partitionCount,
+            redundancyLevel: message.redundancyLevel,
+          },
         )
       }
       this.postMessage(event, {
@@ -6595,7 +6601,11 @@ export class SwarmIdProxy {
         const [{ dataCounters }] = read.partitions
         probability = fitProbability(
           headroomHistogram(dataCounters, stamp.depth, read.partitionCount),
-          chunksForBytes(message.bytes, message.encrypt ?? true),
+          chunksForBytes(
+            message.bytes,
+            message.encrypt ?? true,
+            message.redundancyLevel,
+          ),
         )
       }
       this.postMessage(event, {
