@@ -48,8 +48,12 @@ export const DEFAULT_FIT_CONFIDENCE = 0.999
  */
 export const SAVE_OVERHEAD_CHUNKS = 4
 
-/** The manifest nodes among {@link SAVE_OVERHEAD_CHUNKS}, each replicated at a redundancy level */
-const SAVE_MANIFEST_NODES = 3
+/**
+ * The manifest nodes among {@link SAVE_OVERHEAD_CHUNKS}, each replicated at a
+ * redundancy level. Like that overhead, it assumes a file save: a bare
+ * `uploadData` writes no manifest, so it is counted a little high, never low.
+ */
+export const SAVE_MANIFEST_NODES = 3
 
 /** Buckets per headroom: how many more chunks each bucket still takes */
 export type HeadroomHistogram = ReadonlyMap<number, number>

@@ -265,6 +265,7 @@ export interface UploadFilesOptions extends Pick<
   | "pin"
   | "encrypt"
   | "encryptManifest"
+  | "redundancyLevel"
   | "tag"
   | "deferred"
   | "onProgress"

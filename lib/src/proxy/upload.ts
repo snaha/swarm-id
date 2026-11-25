@@ -39,7 +39,12 @@ import {
   IDENTIFIER_SIZE,
   SOC_HEADER_SIZE,
 } from "../chunk"
-import { CHUNK_SIZE, estimateTotalChunks, rechunk } from "./chunking"
+import {
+  CHUNK_SIZE,
+  estimateTotalChunks,
+  rechunk,
+  replicaCount,
+} from "./chunking"
 import { ChunkUploadStream } from "./chunk-upload-stream"
 import {
   ChunkBuilder,
@@ -760,7 +765,7 @@ async function writeTree(
   // ponytail: one pipeline for every level, 0 included, built by core-sdk's
   // splitter. Its ceiling: the splitter holds a whole batch of sealed chunks
   // (up to 128) before handing any on, and seals a leaf only once the next
-  // one starts, where a leaf used to go out as soon as it was cut. Streaming
+  // one starts, rather than sending each leaf as it is cut. Streaming
   // memory grows by that batch, and a stalled source sends nothing until a
   // batch fills. Parity needs the batch; level 0 does not, so the fix
   // belongs upstream in core-sdk: hand level-0 chunks on as they seal.
@@ -795,16 +800,15 @@ async function writeTree(
     closed = true
     // Bee's dispersed replicas of the root, so a reader finds it with the
     // root's own neighbourhood gone. Tag 0 is no tag: a direct stream has none.
+    // Counted before they go, so progress without a size keeps a total.
+    submitted += replicaCount(level)
     await uploadReplicas(
       target,
       rootChunk.chunkData,
       level,
       {
         tag: sender.tagUid ?? 0,
-        // As the content went: a gateway's own default when unset, else direct
-        deferred: isSubsidisedTarget(target)
-          ? options?.deferred
-          : (options?.deferred ?? false),
+        deferred: options?.deferred,
         pin: options?.pin,
         requestOptions: options?.requestOptions,
       },
@@ -1027,6 +1031,13 @@ export async function uploadReplicas(
   )
   stored.writer.buffer.set(chunkData.subarray(SPAN_SIZE))
   const owner = new EthAddress(REPLICAS_OWNER)
+  // As the chunk itself went: a gateway's own default when unset, else direct
+  const replicaOptions = {
+    ...options,
+    deferred: isSubsidisedTarget(target)
+      ? options.deferred
+      : (options.deferred ?? false),
+  }
   // At once: up to 16 of them, each its own request. A replica wraps the chunk
   // as stored, as Bee's does: core-sdk's carries it padded to 4104 bytes, and
   // the signature covers only the address, which the padding does not move.
@@ -1043,7 +1054,7 @@ export async function uploadReplicas(
           socAddress: address.toUint8Array(),
           socBody: chunkData,
         },
-        options,
+        replicaOptions,
       )
       onSent?.(address.toUint8Array())
     }),

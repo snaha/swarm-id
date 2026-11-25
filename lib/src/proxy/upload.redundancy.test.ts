@@ -14,7 +14,7 @@ import {
   REPLICAS_OWNER,
   rsDecode,
 } from "@ethersphere/core-sdk"
-import { uploadData, type UploadTarget } from "./upload"
+import { uploadData, uploadDataStream, type UploadTarget } from "./upload"
 import { downloadDataWithChunkAPI } from "./download-data"
 import { CHUNK_SIZE, estimateTotalChunks } from "./chunking"
 import {
@@ -75,7 +75,7 @@ describe("uploadData with a redundancy level", () => {
   for (const level of LEVELS) {
     for (const encrypted of [false, true]) {
       // A full batch plus one leaf: the lone leaf moves up to sit beside the
-      // batch's intermediate, which core-sdk 0.1 got wrong (core-sdk#9, #10).
+      // batch's intermediate (core-sdk#9, #10).
       const sizes = {
         "two levels": LEAF_COUNT * CHUNK_SIZE + 1,
         "a lone last leaf": getMaxShards(level, encrypted) * CHUNK_SIZE + 1,
@@ -177,6 +177,26 @@ describe("uploadData with a redundancy level", () => {
       progress.push(p),
     )
 
+    for (const { total, processed } of progress) {
+      expect(processed).toBeLessThanOrEqual(total)
+    }
+  })
+
+  it("keeps a stream's progress within its total, replicas included", async () => {
+    const PARANOID = 4
+    const { target } = setup()
+    async function* source(): AsyncGenerator<Uint8Array> {
+      yield makeData(LEAF_COUNT * CHUNK_SIZE)
+    }
+    const progress: { total: number; processed: number }[] = []
+
+    // No size: the total grows with what was sent
+    await uploadDataStream(target, source(), {
+      redundancyLevel: PARANOID,
+      onProgress: (p) => progress.push(p),
+    })
+
+    expect(progress.length).toBeGreaterThan(0)
     for (const { total, processed } of progress) {
       expect(processed).toBeLessThanOrEqual(total)
     }

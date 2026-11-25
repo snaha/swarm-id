@@ -63,8 +63,11 @@ describe("uploadCollection", () => {
       return upload(...args)
     }
     const socPosts: string[] = []
-    vi.stubGlobal("fetch", async (url: string) => {
+    const deferredHeaders: string[] = []
+    vi.stubGlobal("fetch", async (url: string, init: RequestInit) => {
       socPosts.push(url)
+      const headers = init.headers as Record<string, string>
+      deferredHeaders.push(headers["swarm-deferred-upload"])
       return new Response(undefined, { status: 201 })
     })
 
@@ -75,6 +78,8 @@ describe("uploadCollection", () => {
 
     expect(stored).toBeGreaterThan(2)
     expect(socPosts).toHaveLength(stored * MEDIUM_REPLICAS)
+    // Direct, as the nodes and file roots they replicate went
+    expect(new Set(deferredHeaders)).toEqual(new Set(["false"]))
   })
 
   it("lists back every file with its content type, and each reference downloads to its bytes", async () => {

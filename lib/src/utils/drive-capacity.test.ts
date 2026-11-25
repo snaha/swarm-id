@@ -8,6 +8,7 @@ import { CHUNK_SIZE, NUM_BUCKETS, partitionCapacity } from "./batch-utilization"
 import {
   DEFAULT_FIT_CONFIDENCE,
   SAVE_OVERHEAD_CHUNKS,
+  SAVE_MANIFEST_NODES,
   bytesForChunks,
   chunksForBytes,
   chunksThatFit,
@@ -98,8 +99,8 @@ describe("chunksForBytes", () => {
         1 +
         MEDIUM_REPLICAS +
         SAVE_OVERHEAD_CHUNKS +
-        // The save's three manifest nodes are replicated too
-        3 * MEDIUM_REPLICAS,
+        // The save's manifest nodes are replicated too
+        SAVE_MANIFEST_NODES * MEDIUM_REPLICAS,
     )
   })
 })
