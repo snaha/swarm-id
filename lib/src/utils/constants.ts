@@ -69,6 +69,14 @@ export const STREAM_SOURCE_IDLE_MAX_MS = 10 * MINUTE
 export const STREAM_SOURCE_DEADLINE_SLACK_MS = 10 * SECOND
 
 /**
+ * How long a folder upload (`uploadFiles`) holds its drive's write lock before
+ * it gives the lock up at the next file boundary, so the device's other writes
+ * to the drive get in between its files. A folder that goes through faster
+ * takes the lock once. A single file holds it for its whole length.
+ */
+export const LOCK_YIELD_AFTER_MS = 30 * SECOND
+
+/**
  * The proxy posts an upload's progress at most this often: a report per chunk
  * would be hundreds of thousands of messages for a large file, each parsed on
  * the dApp's main thread. A report held back is posted once the interval is

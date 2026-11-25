@@ -124,6 +124,7 @@ import {
   uploadCollection,
   listCollection,
   manifestEncryption,
+  type WriteSession,
 } from "./proxy/collection"
 import { createFeedManifestDirect } from "./proxy/feed-manifest"
 import {
@@ -2738,7 +2739,7 @@ export class SwarmIdProxy {
    * is required for the same reason: a write must not outlive its abort, and
    * its caller must hear that it is still queued.
    */
-  private async withCountedWrite<T>(
+  private withCountedWrite<T>(
     request: WriteRequest & {
       useWorkers?: boolean
       workerCount?: number
@@ -2746,14 +2747,38 @@ export class SwarmIdProxy {
     operation: (target: UploadTarget) => Promise<T>,
     batchId?: string,
   ): Promise<{ result: T; stampedChunks: number }> {
+    return this.withCountedWriteSessions(
+      request,
+      (session) => session(operation),
+      batchId,
+    )
+  }
+
+  /**
+   * {@link withCountedWrite} for a write that may take its drive's lock more
+   * than once: `operation` runs each step in a session of its own, each
+   * queued, announced and committed as one write is. One counter, one abort
+   * signal for them all, and a session asked for after the abort fails
+   * without waiting for the lock.
+   */
+  private async withCountedWriteSessions<T>(
+    request: WriteRequest & {
+      useWorkers?: boolean
+      workerCount?: number
+    },
+    operation: (session: WriteSession) => Promise<T>,
+    batchId?: string,
+  ): Promise<{ result: T; stampedChunks: number }> {
     const { event, message, ...pool } = request
     const counter: ChunkCounter = { chunks: 0 }
-    const result = await this.withModeAwareWriteLock(
-      { ...pool, counter, signal: message.requestOptions.signal },
-      operation,
-      batchId,
-      { event, message },
-    )
+    const session: WriteSession = (work) =>
+      this.withModeAwareWriteLock(
+        { ...pool, counter, signal: message.requestOptions.signal },
+        work,
+        batchId,
+        { event, message },
+      )
+    const result = await operation(session)
     return { result, stampedChunks: counter.chunks }
   }
 
@@ -5174,10 +5199,11 @@ export class SwarmIdProxy {
             ? data
             : this.pullPieces(event, requestId, requestOptions, index),
       }))
-      const { result, stampedChunks } = await this.withCountedWrite(
+      // A long folder gives its drive up between files (`uploadCollection`).
+      const { result, stampedChunks } = await this.withCountedWriteSessions(
         { event, message, useWorkers, workerCount },
-        (target) =>
-          uploadCollection(target, entries, {
+        (session) =>
+          uploadCollection(session, entries, {
             ...options,
             tag,
             onProgress: progress?.report,

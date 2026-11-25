@@ -728,7 +728,7 @@ For a stream or `Blob`, `requestOptions.timeout` does not bound the whole upload
 
 No write's timeout counts the wait for its drive: an upload queued behind another one to the same drive waits its turn, however long that takes, because the identity iframe keeps saying it is still there. That wait is unbounded; to cap it, pass `requestOptions.signal` and abort it. A request that does time out, or is aborted, is stopped inside the iframe too, so a queued write never runs after its promise rejected.
 
-The upload holds the drive's write lock for as long as it runs, and every writer to that drive on the device waits for it: other apps and the identity UI too. So your source may stay silent for 2 minutes, or for a longer `requestOptions.timeout` up to 10 minutes whatever it asks, before the upload fails with `timeout` and frees the drive.
+The upload holds the drive's write lock for as long as it runs, and every writer to that drive on the device waits for it: other apps and the identity UI too. So your source may stay silent for 2 minutes, or for a longer `requestOptions.timeout` up to 10 minutes whatever it asks, before the upload fails with `timeout` and frees the drive. [`uploadFiles`](#uploadfilesfiles-options-requestoptions) gives the lock up between the files of a long folder.
 
 **Parameters:**
 
@@ -982,6 +982,8 @@ Uploads a folder as one manifest: a fork per file with its path and content type
 Read a folder back with [`listFiles`](#listfilesreference-requestoptions) and [`downloadData`](#downloaddatareference-options-requestoptions) per entry, or one file with [`downloadFile`](#downloadfilereference-path-options-requestoptions) and its path.
 
 Each file is read piece by piece when the upload reaches it, one file at a time, so a folder is never held whole on either side of the iframe. A file that cannot be read therefore fails the upload only when the upload reaches it, after the earlier files' chunks are already stamped.
+
+Once the upload has held the drive's write lock for 30 seconds it gives the lock up at the next file and queues for it again, so other writers to the drive on the device get in between its files; a folder that goes through faster takes the lock once. One large file holds the lock for as long as it takes, as with [`uploadData`](#uploaddatadata-options-requestoptions). While the folder queues again `requestOptions.timeout` is paused, as for any write queued behind another.
 
 **Parameters:**
 

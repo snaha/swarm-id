@@ -19,10 +19,11 @@ import {
   type BridgeGateway,
 } from "./bridge-test-utils"
 import { SwarmIdClient } from "./swarm-id-client"
-import type { IframeToParentMessage } from "./types"
+import type { IframeToParentMessage, RequestOptions } from "./types"
 import { CHUNK_SIZE, STREAM_PIECE_SIZE } from "./proxy/chunking"
 import {
   HOUR,
+  LOCK_YIELD_AFTER_MS,
   PROGRESS_INTERVAL_MS,
   STREAM_IDLE_TIMEOUT_MS,
   STREAM_SOURCE_DEADLINE_SLACK_MS,
@@ -44,6 +45,8 @@ import { Inbox } from "./utils/inbox"
 
 const IFRAME_ORIGIN = "https://id.example.com"
 const SETTLE_MS = 20
+const LOCKED_BATCH_ID = "cd".repeat(32)
+const LOCKED_SIGNER_KEY = "ef".repeat(32)
 
 type ClientInternals = {
   ready: boolean
@@ -622,9 +625,44 @@ describe("streaming across the bridge", () => {
     })
   })
 
+  /**
+   * Give the proxy a drive whose writes queue on its cross-tab lock, as a
+   * coordinator's do, and land on the stand-in node. `onLock` hears each
+   * write as it takes the lock, by the request id it runs for.
+   */
+  const attachLockedDrive = (onLock?: (requestId: string) => void) => {
+    vi.stubGlobal("navigator", { locks: new FakeLockManager() })
+    const drive = new DriveWritePath(LOCKED_BATCH_ID, LOCKED_SIGNER_KEY, {
+      createdAt: 0,
+    })
+    const requestIdOf = (signal: AbortSignal | undefined) =>
+      [...proxy.inFlightRequests].find(
+        ([, controller]) => controller.signal === signal,
+      )?.[0] ?? "unknown"
+    const coordinator = {
+      withWrite: <T>(
+        op: (target: UploadTarget) => Promise<T>,
+        opts?: WithWriteOptions,
+      ) =>
+        withBatchWriteLock(
+          LOCKED_BATCH_ID,
+          () => {
+            onLock?.(requestIdOf(opts?.signal))
+            return op({ mode: "subsidised", gatewayUrl: BRIDGE_GATEWAY_URL })
+          },
+          opts?.signal,
+        ),
+    }
+    drive.attach(
+      {} as UtilizationAwareStamper,
+      "test-fingerprint",
+      coordinator as unknown as BatchWriteCoordinator,
+    )
+    proxy.drives.set(LOCKED_BATCH_ID, drive)
+    proxy.primaryBatchId = LOCKED_BATCH_ID
+  }
+
   describe("a write queued behind a streaming upload to the same drive", () => {
-    const BATCH_ID = "cd".repeat(32)
-    const SIGNER_KEY = "ef".repeat(32)
     const QUEUED_TIMEOUT_MS = 10_000
     const HELD_MS = STREAM_IDLE_TIMEOUT_MS / 2
 
@@ -650,30 +688,7 @@ describe("streaming across the bridge", () => {
       return { stream, release }
     }
 
-    beforeEach(() => {
-      vi.stubGlobal("navigator", { locks: new FakeLockManager() })
-      // A drive whose writes queue on its cross-tab lock, as a coordinator's
-      // do, and land on the stand-in node.
-      const drive = new DriveWritePath(BATCH_ID, SIGNER_KEY, { createdAt: 0 })
-      const coordinator = {
-        withWrite: <T>(
-          op: (target: UploadTarget) => Promise<T>,
-          opts?: WithWriteOptions,
-        ) =>
-          withBatchWriteLock(
-            BATCH_ID,
-            () => op({ mode: "subsidised", gatewayUrl: BRIDGE_GATEWAY_URL }),
-            opts?.signal,
-          ),
-      }
-      drive.attach(
-        {} as UtilizationAwareStamper,
-        "test-fingerprint",
-        coordinator as unknown as BatchWriteCoordinator,
-      )
-      proxy.drives.set(BATCH_ID, drive)
-      proxy.primaryBatchId = BATCH_ID
-    })
+    beforeEach(() => attachLockedDrive())
 
     afterEach(() => {
       vi.useRealTimers()
@@ -736,6 +751,167 @@ describe("streaming across the bridge", () => {
       // The stream's leaf only: the aborted write sent no chunk of its own.
       expect(fetchSpy).toHaveBeenCalledTimes(1)
       expect(vi.getTimerCount()).toBe(0)
+      expectNothingLeftBehind()
+    })
+  })
+
+  describe("a folder upload's hold on its drive", () => {
+    const PLAIN = { encrypt: false }
+    const FOLDER = ["a.txt", "b.txt", "c.txt"].map((path, index) => ({
+      path,
+      file: new Blob([makeData(CHUNK_SIZE).map((byte) => byte ^ index)]),
+    }))
+    /** The write that queues behind the folder: one chunk of its own. */
+    const QUEUED_DATA = makeData(CHUNK_SIZE).map((byte) => byte ^ 0xff)
+    /** The gateway's call for the folder's first chunk, and the queued write's. */
+    const FIRST_FILE_CHUNK = 1
+    const QUEUED_CHUNK = 2
+    const FAKE_ALL = [
+      "Date",
+      "setTimeout",
+      "clearTimeout",
+      "setInterval",
+      "clearInterval",
+    ] as const
+
+    /** Who took the drive's lock, and which of the folder's files were pulled, in order. */
+    let events: string[]
+    let folderId: string | undefined
+    let pulled: Set<number | undefined>
+    const startRecording = () => {
+      events = []
+      folderId = undefined
+      pulled = new Set()
+    }
+
+    beforeEach(() => {
+      startRecording()
+      attachLockedDrive((requestId) => {
+        folderId ??= requestId
+        events.push(`lock ${requestId === folderId ? "folder" : "queued"}`)
+      })
+      const internals = client as unknown as ClientInternals
+      const deliver = internals.handleIframeMessage.bind(client)
+      vi.spyOn(internals, "handleIframeMessage").mockImplementation(
+        (message) => {
+          if (
+            message.type === "uploadSourcePull" &&
+            !pulled.has(message.index)
+          ) {
+            pulled.add(message.index)
+            events.push(`pull ${message.index}`)
+          }
+          deliver(message)
+        },
+      )
+    })
+
+    afterEach(() => {
+      vi.useRealTimers()
+    })
+
+    /** Make the gateway keep chunk `chunkNumber` waiting for `ms`. */
+    const holdChunk = (chunkNumber: number, ms: number) => {
+      const before = gateway.hold
+      gateway.hold = (n) => {
+        if (n === chunkNumber) {
+          return new Promise<void>((resolve) => setTimeout(resolve, ms))
+        }
+        return before?.(n)
+      }
+    }
+
+    /**
+     * Start the folder with its first file's chunk held for `firstFileMs`,
+     * and a write to the same drive once the folder has the lock.
+     */
+    const startFolderAndQueuedWrite = async (
+      firstFileMs: number,
+      folderOptions?: RequestOptions,
+    ) => {
+      holdChunk(FIRST_FILE_CHUNK, firstFileMs)
+      const folder = client.uploadFiles(FOLDER, PLAIN, folderOptions)
+      await vi.waitFor(() =>
+        expect(fetchSpy).toHaveBeenCalledTimes(FIRST_FILE_CHUNK),
+      )
+      const queued = client.uploadData(QUEUED_DATA, undefined, {
+        timeout: HOUR,
+      })
+      await vi.advanceTimersByTimeAsync(SETTLE_MS)
+      return { folder, queued }
+    }
+
+    it("goes through in one lock session when it is quick", async () => {
+      await client.uploadFiles(FOLDER, PLAIN)
+
+      expect(events).toEqual(["lock folder", "pull 0", "pull 1", "pull 2"])
+      expectNothingLeftBehind()
+    })
+
+    it(`gives the lock up at the next file once it has held it ${LOCK_YIELD_AFTER_MS}ms, and lands on the root one session gives`, async () => {
+      const quick = await client.uploadFiles(FOLDER, PLAIN)
+      startRecording()
+      fetchSpy.mockClear()
+      vi.useFakeTimers({ toFake: [...FAKE_ALL] })
+      const { folder, queued } =
+        await startFolderAndQueuedWrite(LOCK_YIELD_AFTER_MS)
+
+      await vi.advanceTimersByTimeAsync(LOCK_YIELD_AFTER_MS)
+      const [result] = await Promise.all([folder, queued])
+
+      expect(events).toEqual([
+        "lock folder",
+        "pull 0",
+        "lock queued",
+        "lock folder",
+        "pull 1",
+        "pull 2",
+      ])
+      expect(result.reference).toBe(quick.reference)
+      expect(result.stampedChunks).toBe(quick.stampedChunks)
+      expect(vi.getTimerCount()).toBe(0)
+      expectNothingLeftBehind()
+    })
+
+    it("keeps its caller waiting while it queues again, past its own timeout", async () => {
+      vi.useFakeTimers({ toFake: [...FAKE_ALL] })
+      const QUEUED_HOLD_MS = 3 * STREAM_IDLE_TIMEOUT_MS
+      holdChunk(QUEUED_CHUNK, QUEUED_HOLD_MS)
+      const { folder, queued } = await startFolderAndQueuedWrite(
+        LOCK_YIELD_AFTER_MS,
+        { timeout: STREAM_IDLE_TIMEOUT_MS },
+      )
+      const folderSettled = vi.fn()
+      folder.then(folderSettled, folderSettled)
+
+      await vi.advanceTimersByTimeAsync(LOCK_YIELD_AFTER_MS + QUEUED_HOLD_MS)
+
+      expect(folderSettled).not.toHaveBeenCalledWith(
+        expect.objectContaining({ code: "timeout" }),
+      )
+      await Promise.all([folder, queued])
+      expect(events.filter((event) => event === "lock folder")).toHaveLength(2)
+      expectNothingLeftBehind()
+    })
+
+    it("stops without taking the lock again when aborted between sessions", async () => {
+      vi.useFakeTimers({ toFake: [...FAKE_ALL] })
+      holdChunk(QUEUED_CHUNK, STREAM_IDLE_TIMEOUT_MS)
+      const controller = new AbortController()
+      const { folder, queued } = await startFolderAndQueuedWrite(
+        LOCK_YIELD_AFTER_MS,
+        { signal: controller.signal },
+      )
+      const rejected = expect(folder).rejects.toMatchObject({ code: "aborted" })
+      await vi.advanceTimersByTimeAsync(LOCK_YIELD_AFTER_MS + SETTLE_MS)
+      expect(events.at(-1)).toBe("lock queued")
+
+      controller.abort()
+      await rejected
+      await vi.advanceTimersByTimeAsync(STREAM_IDLE_TIMEOUT_MS)
+      await queued
+
+      expect(events).toEqual(["lock folder", "pull 0", "lock queued"])
       expectNothingLeftBehind()
     })
   })
@@ -865,7 +1041,7 @@ describe("streaming across the bridge", () => {
 
     it("gives the root an in-memory upload of the same files gives", async () => {
       const { reference: inMemory } = await uploadCollection(
-        { mode: "subsidised", gatewayUrl: BRIDGE_GATEWAY_URL },
+        (work) => work({ mode: "subsidised", gatewayUrl: BRIDGE_GATEWAY_URL }),
         FOLDER,
         PLAIN,
       )
@@ -1255,6 +1431,37 @@ describe("the wait for a streaming upload", () => {
       deliver({ type: "uploadProgress", requestId, total: 5, processed: i })
     }
     deliver({ ...REPLY, requestId })
+
+    await expect(upload).resolves.toMatchObject({
+      reference: REPLY.reference,
+    })
+  })
+
+  // A long folder gives its drive up between files and queues for it again.
+  it("waits out a second queue for the drive after the write has started", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] })
+    const QUEUED_FOR_MS = SHORT_MS * 3
+    const upload = client.uploadFiles(
+      [{ path: "a.bin", file: new Blob([makeData(8)]) }],
+      undefined,
+      { timeout: SHORT_MS },
+    )
+    const settled = vi.fn()
+    upload.then(settled, settled)
+    const requestId = requestIdOf()
+
+    for (let queue = 0; queue < 2; queue++) {
+      deliver({ type: "requestQueued", requestId })
+      await vi.advanceTimersByTimeAsync(QUEUED_FOR_MS)
+      deliver({ type: "requestStarted", requestId })
+      await vi.advanceTimersByTimeAsync(SHORT_MS / 2)
+    }
+    expect(settled).not.toHaveBeenCalled()
+    deliver({
+      type: "uploadFilesResponse",
+      requestId,
+      reference: REPLY.reference,
+    })
 
     await expect(upload).resolves.toMatchObject({
       reference: REPLY.reference,

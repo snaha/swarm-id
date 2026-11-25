@@ -7,16 +7,18 @@
  * defaults — lives here so a dApp only has to produce `{ path, data }` pairs.
  */
 
-import { describe, it, expect } from "vitest"
+import { describe, it, expect, vi } from "vitest"
 import { MantarayNode as BeeMantarayNode } from "@ethersphere/bee-js"
 import {
   uploadCollection,
   listCollection,
   manifestEncryption,
+  type WriteSession,
 } from "./collection"
 import { loadMantarayTreeWithChunkAPI } from "./mantaray"
 import { downloadDataWithChunkAPI } from "./download-data"
 import type { UploadTarget } from "./upload"
+import { LOCK_YIELD_AFTER_MS } from "../utils/constants"
 import {
   MockBee,
   MockChunkStore,
@@ -43,9 +45,17 @@ const FILES = [
   { path: "data.bin", data: new Uint8Array(MULTI_CHUNK_SIZE).fill(7) },
 ]
 
-function setup(): { bee: MockBee; target: UploadTarget } {
+/** One write session on `target`, for every step of the upload. */
+function sessionOn(target: UploadTarget): WriteSession {
+  return (work) => work(target)
+}
+
+function setup(): { bee: MockBee; target: WriteSession } {
   const bee = new MockBee(new MockChunkStore())
-  return { bee, target: { mode: "stamper", bee, stamper: createMockStamper() } }
+  return {
+    bee,
+    target: sessionOn({ mode: "stamper", bee, stamper: createMockStamper() }),
+  }
 }
 
 describe("uploadCollection", () => {
@@ -126,7 +136,9 @@ describe("uploadCollection", () => {
       stamper: createMockStamper(),
     }
     const twice = [FILES[0], FILES[1], { ...FILES[2], path: FILES[0].path }]
-    await expect(uploadCollection(target, twice)).rejects.toThrow("index.html")
+    await expect(uploadCollection(sessionOn(target), twice)).rejects.toThrow(
+      "index.html",
+    )
     expect(store.size()).toBe(0)
   })
 
@@ -163,6 +175,51 @@ describe("uploadCollection", () => {
         file.data,
       )
     }
+  })
+
+  it(`ends a write session at the next file once it has run ${LOCK_YIELD_AFTER_MS}ms, and lands on the root one session gives`, async () => {
+    vi.useFakeTimers({ toFake: ["Date"] })
+    try {
+      const { target } = setup()
+      const { reference: inOne } = await uploadCollection(target, FILES, {
+        encrypt: false,
+      })
+      /** How many files were up as each session began */
+      const sessions: number[] = []
+      let processed = 0
+      const counting: WriteSession = (work) => {
+        sessions.push(processed)
+        return target(work)
+      }
+
+      const { reference } = await uploadCollection(counting, FILES, {
+        encrypt: false,
+        onProgress: (progress) => {
+          processed = progress.processed
+          if (processed === 1)
+            vi.setSystemTime(Date.now() + LOCK_YIELD_AFTER_MS)
+        },
+      })
+
+      expect(sessions).toEqual([0, 1])
+      expect(reference).toBe(inOne)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it("fails, rather than asking for sessions forever, when one does not run its work", async () => {
+    const MANY = 3
+    let asked = 0
+    const idle: WriteSession = async <T>() => {
+      if (++asked > MANY) throw new Error("asked once too often")
+      return undefined as T
+    }
+
+    await expect(uploadCollection(idle, FILES)).rejects.toThrow(
+      "without running",
+    )
+    expect(asked).toBe(1)
   })
 
   it("reports progress once per file", async () => {

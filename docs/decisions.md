@@ -94,7 +94,11 @@ minutes or a longer `timeout`, then fails the transfer. An upload's source
 gets 10 minutes at most whatever `timeout` asks; a download's reader has no
 such ceiling. While the client reads the source it waits on the proxy's
 deadline for it plus 10 seconds, so a proxy that has gone cannot leave the
-call pending forever. (#1043)
+call pending forever. `uploadFiles` gives its drive's write lock up at the
+next file boundary once it has held it for 30 seconds, and queues for it again,
+saying `requestQueued` as any write does, before the next file; the manifest
+is written in the last session. A single file holds the lock for its whole
+length. (#1043)
 
 **Why.** One transport that works on every engine beats a fast path plus a
 fallback for the Safari versions still without stream transfer, and a pull
@@ -108,6 +112,19 @@ caller's long `timeout` does not lift it past 10 minutes: a source that silent
 has stalled, and every other writer is waiting on it. A download's unread
 stream holds no lock, so its caller's `timeout` stands. What a write queued
 behind such an upload does is the entry below.
+
+A folder streamed from disk can hold its drive for hours, and every other
+write to that drive on the device, account sync and the identity UI included,
+would wait the whole time. A file boundary is where the lock can go at no
+cost: a file's reference is final once its tree is up, and the session that
+ends validates the lease and publishes the partition state as any write does,
+which is what makes the finished files' chunks durable. Thirty seconds keeps a
+folder of small files in one session rather than paying a lock cycle and a
+partition-state publish per file. Inside one file there is no such boundary:
+yielding there would carry a half-built tree across sessions, so one huge file
+holds the drive for as long as it takes. That is accepted: the lock is still
+released when the file is done, and a stalled source still fails at its
+deadline.
 
 ## 2026-11-18 A request's timeout does not count the wait for its drive
 
