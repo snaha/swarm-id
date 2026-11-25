@@ -98,7 +98,8 @@ call pending forever. `uploadFiles` gives its drive's write lock up at the
 next file boundary once it has held it for 30 seconds, and queues for it again,
 saying `requestQueued` as any write does, before the next file; the manifest
 is written in the last session. A single file holds the lock for its whole
-length. The browser test
+length. A file that cannot be read fails the folder with an error saying the
+files before it were uploaded but no reference reaches them. The browser test
 of all this runs on a workflow of its own, `streaming-transfer.yml`, filtered
 to the streaming code, not inside the device suites' run. (#1043)
 

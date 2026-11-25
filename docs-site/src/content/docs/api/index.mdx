@@ -981,7 +981,7 @@ Uploads a folder as one manifest: a fork per file with its path and content type
 
 Read a folder back with [`listFiles`](#listfilesreference-requestoptions) and [`downloadData`](#downloaddatareference-options-requestoptions) per entry, or one file with [`downloadFile`](#downloadfilereference-path-options-requestoptions) and its path.
 
-Each file is read piece by piece when the upload reaches it, one file at a time, so a folder is never held whole on either side of the iframe. A file that cannot be read therefore fails the upload only when the upload reaches it, after the earlier files' chunks are already stamped.
+Each file is read piece by piece when the upload reaches it, one file at a time, so a folder is never held whole on either side of the iframe. A file that cannot be read therefore fails the upload only when the upload reaches it, after the earlier files' chunks are already stamped: the error names the file and says the files before it were uploaded but no reference reaches them, so upload the folder again.
 
 Once the upload has held the drive's write lock for 30 seconds it gives the lock up at the next file and queues for it again, so other writers to the drive on the device get in between its files; a folder that goes through faster takes the lock once. One large file holds the lock for as long as it takes, as with [`uploadData`](#uploaddatadata-options-requestoptions). While the folder queues again `requestOptions.timeout` is paused, as for any write queued behind another.
 

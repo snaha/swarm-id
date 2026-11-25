@@ -109,6 +109,7 @@ import { buildAuthUrl } from "./utils/url"
 import { MAX_TIMER_DELAY_MS, TimeoutError, withTimeout } from "./utils/promise"
 import { uploadSourceIdleTimeout } from "./utils/stream-deadline"
 import {
+  folderFileSource,
   openBlobSource,
   openPieceSource,
   type PieceSource,
@@ -2398,7 +2399,9 @@ export class SwarmIdClient {
       item instanceof File ? { path: collectionPath(item), file: item } : item,
     )
     // One source per file, by its position: the proxy's pulls name it.
-    const sources = entries.map(({ file }) => openBlobSource(file))
+    const sources = entries.map(({ path, file }, index) =>
+      folderFileSource(openBlobSource(file), path, index),
+    )
 
     const stopProgress = this.listenForProgress(requestId, onProgress)
     try {

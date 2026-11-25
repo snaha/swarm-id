@@ -49,6 +49,42 @@ export function openBlobSource(blob: Blob): PieceSource {
   }
 }
 
+/**
+ * The source of the folder's file at `index`, `path` inside it, whose read
+ * failure says what the upload leaves behind: the files before it are
+ * uploaded and stamped, but the manifest that would reach them is never
+ * written, so the folder has to be uploaded again.
+ */
+export function folderFileSource(
+  source: PieceSource,
+  path: string,
+  index: number,
+): PieceSource {
+  const leftBehind =
+    index === 0
+      ? ""
+      : index === 1
+        ? " The file before it was uploaded, but no reference reaches it: retry the upload."
+        : ` The ${index} files before it were uploaded, but no reference reaches them: retry the upload.`
+  return {
+    size: source.size,
+    next: async () => {
+      try {
+        return await source.next()
+      } catch (error) {
+        const reason = error instanceof Error ? error.message : String(error)
+        throw new SwarmIdError(
+          "invalid-request",
+          `Reading "${path}" failed: ${reason}.${leftBehind}`,
+          { cause: error },
+        )
+      }
+    },
+    cancel: source.cancel,
+    release: source.release,
+  }
+}
+
 function streamSource(stream: ReadableStream<Uint8Array>): PieceSource {
   if (stream.locked) {
     throw new SwarmIdError(

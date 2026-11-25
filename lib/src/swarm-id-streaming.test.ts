@@ -1104,6 +1104,60 @@ describe("streaming across the bridge", () => {
       expect(closedBeforeNextPull).toEqual(Array(FOLDER.length - 1).fill(true))
     })
 
+    describe("a file that cannot be read", () => {
+      const UNREADABLE = new Error("The file changed on disk")
+      /** The folder with the file at `index` failing on its first read. */
+      const withUnreadable = (index: number) =>
+        asBlobs().map((entry, at) => {
+          if (at !== index) return entry
+          const file = new Blob([FOLDER[at].data])
+          file.slice = () =>
+            ({ arrayBuffer: () => Promise.reject(UNREADABLE) }) as Blob
+          return { ...entry, file }
+        })
+
+      it("says the files before it are up but unreachable, and to retry", async () => {
+        // The last: the empty file before it is never read at all.
+        const failing = FOLDER.length - 1
+
+        const error = await client
+          .uploadFiles(withUnreadable(failing))
+          .catch((e: unknown) => e)
+
+        expect(error).toMatchObject({ code: "invalid-request" })
+        expect((error as Error).cause).toBe(UNREADABLE)
+        expect((error as Error).message).toBe(
+          `Reading "${FOLDER[failing].path}" failed: ${UNREADABLE.message}. ` +
+            `The ${failing} files before it were uploaded, but no reference reaches them: retry the upload.`,
+        )
+        await settle()
+        expectNothingLeftBehind()
+      })
+
+      it("says the one file before it is up but unreachable", async () => {
+        const error = await client
+          .uploadFiles(withUnreadable(1))
+          .catch((e: unknown) => e)
+
+        expect((error as Error).message).toBe(
+          `Reading "${FOLDER[1].path}" failed: ${UNREADABLE.message}. ` +
+            "The file before it was uploaded, but no reference reaches it: retry the upload.",
+        )
+      })
+
+      it("leaves nothing behind to mention when it is the first", async () => {
+        const error = await client
+          .uploadFiles(withUnreadable(0))
+          .catch((e: unknown) => e)
+
+        expect(error).toMatchObject({ code: "invalid-request" })
+        expect((error as Error).cause).toBe(UNREADABLE)
+        expect((error as Error).message).toBe(
+          `Reading "${FOLDER[0].path}" failed: ${UNREADABLE.message}.`,
+        )
+      })
+    })
+
     it("counts files in its progress", async () => {
       const progress: Array<{ total: number; processed: number }> = []
 
