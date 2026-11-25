@@ -1044,6 +1044,8 @@ describe("SwarmIdProxy partitioned write enablement", () => {
         const drivesBefore = drivesAnnounced()
         // The second drive goes, the primary stays: nothing in the info moves.
         grantOnly(BATCH_ID_HEX)
+        // Waited on, not timed, as below.
+        await vi.waitFor(() => expect(announced()).toBe(before + 1))
         await flushBus()
         expect(announced()).toBe(before + 1)
         expect(lastInfo().canUpload).toBe(true)
