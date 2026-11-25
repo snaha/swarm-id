@@ -3,7 +3,8 @@
 #
 #   TLA2TOOLS=/path/to/tla2tools.jar APALACHE=/path/to/apalache-mc ./check.sh
 #
-# Add FULL=1 for the four-device induction (about 2 minutes on its own).
+# Add FULL=1 for the four-device induction and TLC's search of Safe.cfg
+# (each a few minutes).
 set -uo pipefail
 cd "$(dirname "$0")"
 
@@ -40,24 +41,35 @@ tlc() { java -XX:+UseParallelGC -cp "$TLA2TOOLS" tlc2.TLC -workers auto \
 induct() { "$APALACHE" check --out-dir="$out/apa" --cinit="$1" --init=IndInit \
   --next=Next --inv="${2:-Inv}" --length=1 ApaInd.tla; }
 
-# Breadth-first search of the reachable states, as in the README's table.
-expect pass Safe tlc Safe
+# Breadth-first search of the reachable states, as in the README's table:
+# each variant that drops a rule has a real counterexample.
+if [ "${FULL:-}" = 1 ]; then expect pass Safe tlc Safe; fi
 expect fail Reachable tlc Reachable
 expect fail ShortWait tlc ShortWait
 expect fail NoRoundMatch tlc NoRoundMatch
 expect fail NoContactReset tlc NoContactReset
 expect fail ShortWait3 tlc ShortWait3
+expect fail DriftShort tlc DriftShort
+expect fail NoAckCheck tlc NoAckCheck
 
-# Induction: Init satisfies Inv, Inv implies Exclusion, Next keeps Inv.
+# Does Inv imply the goals (Exclusion, AckedExclusive) under `$1`?
+goals() { "$APALACHE" check --out-dir="$out/apa" --cinit="$1" --init=IndInit \
+  --inv=Goals --length=0 ApaInd.tla; }
+
+# Induction: Init satisfies Inv, Inv implies the goals, Next keeps Inv.
 expect pass base-case "$APALACHE" check --out-dir="$out/apa" --cinit=Two \
   --init=Init --inv=Inv --length=0 ApaInd.tla
-expect pass strong-enough "$APALACHE" check --out-dir="$out/apa" --cinit=Two \
-  --init=IndInit --inv=Exclusion --length=0 ApaInd.tla
+expect pass strong-enough goals Two
+expect pass strong-enough-drift goals TwoDrift
 expect pass induction-2 induct Two
 expect pass induction-3 induct Three
+expect pass induction-2-drift induct TwoDrift
+expect pass induction-3-drift induct ThreeDrift
 if [ "${FULL:-}" = 1 ]; then expect pass induction-4 induct Four; fi
 expect fail non-vacuous induct Two NobodyPotent
 expect fail induction-ShortWait induct ShortWait
+expect fail induction-ShortWaitDrift induct ShortWaitDrift
+expect fail strong-enough-NoAckCheck goals NoAckCheck
 expect fail induction-NoRoundMatch induct NoRoundMatch
 expect fail induction-NoContactReset induct NoContactReset
 expect fail induction-NoSessionAge induct NoSessionAge

@@ -45,28 +45,36 @@ Msgs ==
   /\ \A c \in Devices : mode[c] = "claiming" =>
        \A p \in acks[c] : p # c /\ Free(p, c, round[c]) \in msgs
 
+(* Two timers of different devices, started in that order, compared across
+   clocks. In real time, `later` has run no longer than `earlier`; each clock
+   advances RMin to RMax per tick, so RMin * later <= RMax * earlier, until
+   `earlier` stops at its cap. *)
+NotLonger(later, earlier, earlierCap) ==
+  Min(RMin * later, RMax * earlierCap) <= RMax * earlier
+
 (* b's absence timer for a is backed by a real absence of a: a is offline;
    or a left the room and has had no heartbeat for at least as long; or a
    joined while b's stream was stalled, so a's session is younger than b's
    own silence. *)
 Fresh(b, a) ==
   \/ ~online[a]
-  \/ a \notin room /\ ~Up(a) /\ since[a] >= Min(absent[b][a], TStop)
-  \/ ~Up(b) /\ a \in changed[b] /\ Min(age[a], TStop) <= since[b]
+  \/ a \notin room /\ ~Up(a) /\ NotLonger(absent[b][a], since[a], TStop)
+  \/ ~Up(b) /\ a \in changed[b] /\ NotLonger(age[a], since[b], TStop)
 
 Timers ==
   \A b \in Devices : \A a \in Others(b) :
     /\ online[b] /\ absent[b][a] > 0 => Fresh(b, a)
     \* a peer that joined during b's stall, and that b has not seen yet
     /\ online[b] /\ ~Up(b) /\ a \in changed[b] /\ a \notin view[b] /\ online[a]
-         => Min(age[a], TStop) <= since[b]
+         => NotLonger(age[a], since[b], TStop)
 
 (* c heard p's claim, which restarted c's timer for p (ResetOnContact): the
    timer has run no longer than c's own heartbeat silence, or p is gone from
    the room and silent at least as long. *)
 HeardSince(c, p) ==
+  \* both c's own clock
   \/ Min(absent[c][p], TStop) <= since[c]
-  \/ p \notin room /\ ~Up(p) /\ since[p] >= Min(absent[c][p], TStop)
+  \/ p \notin room /\ ~Up(p) /\ NotLonger(absent[c][p], since[p], TStop)
 
 \* c answered "free" to p's current round, and p still claims or holds.
 Answered(c, p) == mode[p] # "idle" /\ Free(c, p, round[p]) \in msgs
@@ -82,7 +90,18 @@ Claims ==
 
 PotentExclusion == \A a, b \in Devices : a # b => ~(Potent(a) /\ Potent(b))
 
-Core == Struct /\ Msgs /\ Timers /\ Claims /\ PotentExclusion
+(* A write overlapped by another holder can no longer be acknowledged: its
+   device is out of the room with its heartbeat overdue, for as long as it
+   stays in that hold. *)
+Writes ==
+  \A d \in Devices :
+    /\ writing[d] # 0 => 1 <= writing[d] /\ writing[d] <= round[d]
+    /\ overlap[d] => writing[d] # 0
+    \* a write begins in a hold, and a new claim is a new round
+    /\ writing[d] # 0 /\ writing[d] = round[d] => mode[d] # "claiming"
+    /\ overlap[d] /\ writing[d] = round[d] /\ mode[d] = "holding" => ~Alive(d)
+
+Core == Struct /\ Msgs /\ Timers /\ Claims /\ PotentExclusion /\ Writes
 
 (* TypeOK with integer bounds written out, since Apalache needs constant
    ranges and TStop and Wait are symbolic there. *)
@@ -98,9 +117,11 @@ Bounds ==
        /\ view[d] \subseteq Devices /\ acks[d] \subseteq Devices
        /\ changed[d] \subseteq Devices
        /\ \A p \in Devices : 0 <= absent[d][p] /\ absent[d][p] <= Wait
+       /\ 0 <= writing[d] /\ writing[d] <= MaxRound
+       /\ overlap[d] \in BOOLEAN
 
 Inv == Bounds /\ Core
 
-\* The invariant is strong enough: Holds implies Potent.
-InvImpliesExclusion == Inv => Exclusion
+\* Strong enough: Holds implies Potent, and MayAck excludes an overlap.
+Goals == Exclusion /\ AckedExclusive
 =============================================================================
