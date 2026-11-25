@@ -112,7 +112,7 @@
 <td><code dir="auto">options.timeout</code></td>
 <td><code dir="auto">number</code></td>
 <td>No</td>
-<td>Request timeout in milliseconds (defaults to <code dir="auto">30000</code>). Bounds each call’s whole round trip through the iframe, not counting time queued behind another write on the same drive; a call’s own <code dir="auto">requestOptions.timeout</code> replaces it for that call</td>
+<td>Request timeout in milliseconds (defaults to <code dir="auto">30000</code>). Bounds each call’s whole round trip through the iframe; a call’s own <code dir="auto">requestOptions.timeout</code> replaces it for that call. A write’s time queued behind another write on the same drive is not counted and is unbounded: pass <code dir="auto">requestOptions.signal</code> to cap it</td>
 </tr>
 <tr>
 <td><code dir="auto">options.initializationTimeout</code></td>
@@ -891,7 +891,7 @@
 <div class="sl-heading-wrapper level-h3"><h3 id="uploaddatadata-options-requestoptions"><code dir="auto">uploadData(data, options?, requestOptions?)</code></h3><a class="sl-anchor-link" href="#uploaddatadata-options-requestoptions"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 1 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 0 0-1.42-1.42m8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 1 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 0 0 0 1.42 1 1 0 0 0 1.42 0l3.88-3.89a4.49 4.49 0 0 0 0-6.33M8.83 15.17a1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.92-4.92a1 1 0 1 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42"></path></svg></span><span class="sr-only" data-pagefind-ignore>Section titled “uploadData(data, options?, requestOptions?)”</span></a></div>
 <p>Uploads raw binary data to the Swarm network. The reference it returns is read back with <a href="#downloaddatareference-options-requestoptions"><code dir="auto">downloadData</code></a>, or from a gateway at <code dir="auto">/bytes/&lt;reference&gt;</code>; it carries no manifest, so <code dir="auto">downloadFile</code> and <code dir="auto">/bzz/</code> cannot resolve it.</p>
 <p>The data is uploaded using the authenticated user’s postage stamp. Progress can be tracked via the <code dir="auto">options.onProgress</code> callback.</p>
-<p>No call’s timeout counts the wait for the drive’s write lock: an upload queued behind another one to the same drive waits its turn, however long that takes, because the identity iframe keeps saying it is still there. A request that does time out, or is aborted, is stopped inside the iframe too, so a queued write never runs after its promise rejected.</p>
+<p>No write’s timeout counts the wait for its drive: an upload queued behind another one to the same drive waits its turn, however long that takes, because the identity iframe keeps saying it is still there. That wait is unbounded; to cap it, pass <code dir="auto">requestOptions.signal</code> and abort it. A request that does time out, or is aborted, is stopped inside the iframe too, so a queued write never runs after its promise rejected.</p>
 <p><strong>Parameters:</strong></p>
 <table>
 <thead>
@@ -967,7 +967,7 @@
 <td><code dir="auto">requestOptions.timeout</code></td>
 <td><code dir="auto">number</code></td>
 <td>No</td>
-<td>Request timeout in milliseconds for this call. Replaces the client’s default (30 s) for the whole upload — the round trip through the iframe as well as the Bee request, not counting time queued behind another write on the same drive; a file of a few MB over a testnet or the public gateway needs more, here or in <code dir="auto">new SwarmIdClient({ timeout })</code></td>
+<td>Request timeout in milliseconds for this call. Replaces the client’s default (30 s) for the whole upload — the round trip through the iframe as well as the Bee request; a file of a few MB over a testnet or the public gateway needs more, here or in <code dir="auto">new SwarmIdClient({ timeout })</code>. Time queued behind another write on the same drive is not counted and is unbounded: pass <code dir="auto">requestOptions.signal</code> to cap it</td>
 </tr>
 <tr>
 <td><code dir="auto">requestOptions.headers</code></td>
@@ -1096,7 +1096,7 @@
 <td><code dir="auto">requestOptions.timeout</code></td>
 <td><code dir="auto">number</code></td>
 <td>No</td>
-<td>Request timeout in milliseconds for this call. Replaces the client’s default (30 s) for the whole round trip, not only the Bee request, not counting time queued behind another write on the same drive</td>
+<td>Request timeout in milliseconds for this call. Replaces the client’s default (30 s) for the whole round trip, not only the Bee request</td>
 </tr>
 <tr>
 <td><code dir="auto">requestOptions.headers</code></td>
@@ -1190,7 +1190,7 @@
 <td><code dir="auto">requestOptions.timeout</code></td>
 <td><code dir="auto">number</code></td>
 <td>No</td>
-<td>Request timeout in milliseconds for this call. Replaces the client’s default (30 s) for the whole upload — the round trip through the iframe as well as the Bee request, not counting time queued behind another write on the same drive; a file of a few MB over a testnet or the public gateway needs more, here or in <code dir="auto">new SwarmIdClient({ timeout })</code></td>
+<td>Request timeout in milliseconds for this call. Replaces the client’s default (30 s) for the whole upload — the round trip through the iframe as well as the Bee request; a file of a few MB over a testnet or the public gateway needs more, here or in <code dir="auto">new SwarmIdClient({ timeout })</code>. Time queued behind another write on the same drive is not counted and is unbounded: pass <code dir="auto">requestOptions.signal</code> to cap it</td>
 </tr>
 <tr>
 <td><code dir="auto">requestOptions.headers</code></td>
@@ -1265,7 +1265,7 @@
 <td><code dir="auto">requestOptions.timeout</code></td>
 <td><code dir="auto">number</code></td>
 <td>No</td>
-<td>Request timeout in milliseconds for this call. Replaces the client’s default (30 s) for the whole round trip, not only the Bee request, not counting time queued behind another write on the same drive</td>
+<td>Request timeout in milliseconds for this call. Replaces the client’s default (30 s) for the whole round trip, not only the Bee request</td>
 </tr>
 <tr>
 <td><code dir="auto">requestOptions.headers</code></td>
@@ -1527,7 +1527,7 @@
 <td><code dir="auto">requestOptions.timeout</code></td>
 <td><code dir="auto">number</code></td>
 <td>No</td>
-<td>Request timeout in milliseconds for this call. Replaces the client’s default (30 s) for the whole round trip, not only the Bee request, not counting time queued behind another write on the same drive</td>
+<td>Request timeout in milliseconds for this call. Replaces the client’s default (30 s) for the whole round trip, not only the Bee request. Time queued behind another write on the same drive is not counted and is unbounded: pass <code dir="auto">requestOptions.signal</code> to cap it</td>
 </tr>
 <tr>
 <td><code dir="auto">requestOptions.headers</code></td>
@@ -1595,7 +1595,7 @@
 <td><code dir="auto">requestOptions.timeout</code></td>
 <td><code dir="auto">number</code></td>
 <td>No</td>
-<td>Request timeout in milliseconds for this call. Replaces the client’s default (30 s) for the whole round trip, not only the Bee request, not counting time queued behind another write on the same drive</td>
+<td>Request timeout in milliseconds for this call. Replaces the client’s default (30 s) for the whole round trip, not only the Bee request</td>
 </tr>
 <tr>
 <td><code dir="auto">requestOptions.headers</code></td>
@@ -1658,7 +1658,7 @@
 <td><code dir="auto">requestOptions.timeout</code></td>
 <td><code dir="auto">number</code></td>
 <td>No</td>
-<td>Request timeout in milliseconds for this call. Replaces the client’s default (30 s) for the whole round trip, not only the Bee request, not counting time queued behind another write on the same drive</td>
+<td>Request timeout in milliseconds for this call. Replaces the client’s default (30 s) for the whole round trip, not only the Bee request</td>
 </tr>
 <tr>
 <td><code dir="auto">requestOptions.headers</code></td>
@@ -1740,7 +1740,7 @@
 <td><code dir="auto">requestOptions.timeout</code></td>
 <td><code dir="auto">number</code></td>
 <td>No</td>
-<td>Request timeout in milliseconds for this call. Replaces the client’s default (30 s) for the whole round trip, not only the Bee request, not counting time queued behind another write on the same drive</td>
+<td>Request timeout in milliseconds for this call. Replaces the client’s default (30 s) for the whole round trip, not only the Bee request. Time queued behind another write on the same drive is not counted and is unbounded: pass <code dir="auto">requestOptions.signal</code> to cap it</td>
 </tr>
 <tr>
 <td><code dir="auto">requestOptions.headers</code></td>
@@ -1961,7 +1961,7 @@
 <td><code dir="auto">requestOptions.timeout</code></td>
 <td><code dir="auto">number</code></td>
 <td>No</td>
-<td>Request timeout in milliseconds for this call. Replaces the client’s default (30 s) for the whole round trip, not only the Bee request, not counting time queued behind another write on the same drive</td>
+<td>Request timeout in milliseconds for this call. Replaces the client’s default (30 s) for the whole round trip, not only the Bee request</td>
 </tr>
 <tr>
 <td><code dir="auto">requestOptions.headers</code></td>
@@ -2133,7 +2133,7 @@
 <td><code dir="auto">requestOptions.timeout</code></td>
 <td><code dir="auto">number</code></td>
 <td>No</td>
-<td>Request timeout in milliseconds for this call. Replaces the client’s default (30 s) for the whole round trip, not only the Bee request, not counting time queued behind another write on the same drive</td>
+<td>Request timeout in milliseconds for this call. Replaces the client’s default (30 s) for the whole round trip, not only the Bee request. Time queued behind another write on the same drive is not counted and is unbounded: pass <code dir="auto">requestOptions.signal</code> to cap it</td>
 </tr>
 <tr>
 <td><code dir="auto">requestOptions.headers</code></td>
@@ -2580,7 +2580,7 @@
 <td><code dir="auto">requestOptions.timeout</code></td>
 <td><code dir="auto">number</code></td>
 <td>No</td>
-<td>Request timeout in milliseconds for this call. Replaces the client’s default (30 s) for the whole round trip, not only the Bee request, not counting time queued behind another write on the same drive</td>
+<td>Request timeout in milliseconds for this call. Replaces the client’s default (30 s) for the whole round trip, not only the Bee request. Time queued behind another write on the same drive is not counted and is unbounded: pass <code dir="auto">requestOptions.signal</code> to cap it</td>
 </tr>
 <tr>
 <td><code dir="auto">requestOptions.headers</code></td>
@@ -2704,7 +2704,7 @@
 <td><code dir="auto">requestOptions.timeout</code></td>
 <td><code dir="auto">number</code></td>
 <td>No</td>
-<td>Request timeout in milliseconds for this call. Replaces the client’s default (30 s) for the whole round trip, not only the Bee request, not counting time queued behind another write on the same drive</td>
+<td>Request timeout in milliseconds for this call. Replaces the client’s default (30 s) for the whole round trip, not only the Bee request. Time queued behind another write on the same drive is not counted and is unbounded: pass <code dir="auto">requestOptions.signal</code> to cap it</td>
 </tr>
 <tr>
 <td><code dir="auto">requestOptions.headers</code></td>
@@ -2826,7 +2826,7 @@
 <td><code dir="auto">requestOptions.timeout</code></td>
 <td><code dir="auto">number</code></td>
 <td>No</td>
-<td>Request timeout in milliseconds for this call. Replaces the client’s default (30 s) for the whole round trip, not only the Bee request, not counting time queued behind another write on the same drive</td>
+<td>Request timeout in milliseconds for this call. Replaces the client’s default (30 s) for the whole round trip, not only the Bee request. Time queued behind another write on the same drive is not counted and is unbounded: pass <code dir="auto">requestOptions.signal</code> to cap it</td>
 </tr>
 <tr>
 <td><code dir="auto">requestOptions.headers</code></td>
@@ -2956,7 +2956,7 @@
 <td><code dir="auto">requestOptions.timeout</code></td>
 <td><code dir="auto">number</code></td>
 <td>No</td>
-<td>Request timeout in milliseconds for this call. Replaces the client’s default (30 s) for the whole round trip, not only the Bee request, not counting time queued behind another write on the same drive</td>
+<td>Request timeout in milliseconds for this call. Replaces the client’s default (30 s) for the whole round trip, not only the Bee request</td>
 </tr>
 <tr>
 <td><code dir="auto">requestOptions.headers</code></td>
@@ -3025,7 +3025,7 @@
 <td><code dir="auto">requestOptions.timeout</code></td>
 <td><code dir="auto">number</code></td>
 <td>No</td>
-<td>Request timeout in milliseconds for this call. Replaces the client’s default (30 s) for the whole round trip, not only the Bee request, not counting time queued behind another write on the same drive</td>
+<td>Request timeout in milliseconds for this call. Replaces the client’s default (30 s) for the whole round trip, not only the Bee request. Time queued behind another write on the same drive is not counted and is unbounded: pass <code dir="auto">requestOptions.signal</code> to cap it</td>
 </tr>
 <tr>
 <td><code dir="auto">requestOptions.headers</code></td>
@@ -3137,7 +3137,7 @@ under a new ACT.</p></div></aside>
 <td><code dir="auto">requestOptions.timeout</code></td>
 <td><code dir="auto">number</code></td>
 <td>No</td>
-<td>Request timeout in milliseconds for this call. Replaces the client’s default (30 s) for the whole round trip, not only the Bee request, not counting time queued behind another write on the same drive</td>
+<td>Request timeout in milliseconds for this call. Replaces the client’s default (30 s) for the whole round trip, not only the Bee request. Time queued behind another write on the same drive is not counted and is unbounded: pass <code dir="auto">requestOptions.signal</code> to cap it</td>
 </tr>
 <tr>
 <td><code dir="auto">requestOptions.headers</code></td>
@@ -3237,7 +3237,7 @@ under a new ACT.</p></div></aside>
 <td><code dir="auto">requestOptions.timeout</code></td>
 <td><code dir="auto">number</code></td>
 <td>No</td>
-<td>Request timeout in milliseconds for this call. Replaces the client’s default (30 s) for the whole round trip, not only the Bee request, not counting time queued behind another write on the same drive</td>
+<td>Request timeout in milliseconds for this call. Replaces the client’s default (30 s) for the whole round trip, not only the Bee request</td>
 </tr>
 <tr>
 <td><code dir="auto">requestOptions.headers</code></td>
