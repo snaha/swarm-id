@@ -17,7 +17,15 @@ import type { RedundancyLevel } from "../../src/types"
 import { createClusterContext } from "./cluster"
 
 const LEVELS: RedundancyLevel[] = [1, 2, 3, 4]
-const TWO_LEVEL_LEAVES = 140
+/** One leaf too many for a batch: past the batch's carrier leaf (core-sdk#9, #10) */
+const loneLastLeaf = (level: RedundancyLevel, encrypted: boolean) =>
+  getMaxShards(level, encrypted) * CHUNK_SIZE + 1
+/**
+ * One batch with parity: enough to cover the stream path. This file shares
+ * the cluster with the other suites, whose direct uploads wait on push-sync,
+ * so its own uploads are kept no larger than the tree they test needs.
+ */
+const ONE_BATCH = 10 * CHUNK_SIZE
 const UPLOAD_TIMEOUT_MS = 120_000
 /**
  * Deferred, as bee-js's own upload is: the queen serves the reads either way,
@@ -47,39 +55,32 @@ describe("erasure-coded uploads against live cluster", () => {
   })
 
   for (const level of LEVELS) {
-    const sizes = {
-      "two levels": TWO_LEVEL_LEAVES * CHUNK_SIZE + 1,
-      // A full batch and a lone leaf carried up beside it (core-sdk#9, #10)
-      "a lone last leaf": getMaxShards(level, false) * CHUNK_SIZE + 1,
-    }
-    for (const [shape, size] of Object.entries(sizes)) {
-      it(
-        `agrees with Bee on the reference of ${shape} at level ${level}`,
-        async () => {
-          const data = randomPayload(size)
+    it(
+      `agrees with Bee on the reference of a lone last leaf at level ${level}`,
+      async () => {
+        const data = randomPayload(loneLastLeaf(level, false))
 
-          const ours = await uploadData(target, data, {
-            ...DEFERRED,
-            redundancyLevel: level,
-          })
-          const bees = await bee.data.upload(batchId, data, {
-            redundancyLevel: level,
-          })
+        const ours = await uploadData(target, data, {
+          ...DEFERRED,
+          redundancyLevel: level,
+        })
+        const bees = await bee.data.upload(batchId, data, {
+          redundancyLevel: level,
+        })
 
-          expect(ours.reference).toBe(bees.reference.toHex())
-          expect(
-            (await bee.data.download(ours.reference)).toUint8Array(),
-          ).toEqual(data)
-        },
-        UPLOAD_TIMEOUT_MS,
-      )
-    }
+        expect(ours.reference).toBe(bees.reference.toHex())
+        expect(
+          (await bee.data.download(ours.reference)).toUint8Array(),
+        ).toEqual(data)
+      },
+      UPLOAD_TIMEOUT_MS,
+    )
   }
 
   it(
     "agrees with Bee over the chunk stream too",
     async () => {
-      const data = randomPayload(TWO_LEVEL_LEAVES * CHUNK_SIZE + 1)
+      const data = randomPayload(ONE_BATCH)
 
       const ours = await uploadData(target, data, {
         ...DEFERRED,
@@ -99,7 +100,7 @@ describe("erasure-coded uploads against live cluster", () => {
   it(
     "reads back through Bee an encrypted upload it erasure-coded",
     async () => {
-      const data = randomPayload(TWO_LEVEL_LEAVES * CHUNK_SIZE + 1)
+      const data = randomPayload(loneLastLeaf(1, true))
 
       const { reference } = await uploadData(target, data, {
         ...DEFERRED,
@@ -116,7 +117,7 @@ describe("erasure-coded uploads against live cluster", () => {
   it(
     "reads an upload Bee erasure-coded",
     async () => {
-      const data = randomPayload(TWO_LEVEL_LEAVES * CHUNK_SIZE + 1)
+      const data = randomPayload(loneLastLeaf(2, true))
 
       const { reference } = await bee.data.upload(batchId, data, {
         redundancyLevel: 2,
