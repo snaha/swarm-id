@@ -96,6 +96,7 @@ import {
   uploadData,
   uploadSOC,
   uploadChunk,
+  uploadReplicas,
   refuseChunkStreamConflicts,
   stamperUploadTag,
   type ChunkCounter,
@@ -4680,12 +4681,20 @@ export class SwarmIdProxy {
             const result = await saveMantarayTree(
               manifest,
               async (chunkData, isRoot) => {
-                await uploadChunk(target, chunkData, {
+                const nodeOptions = {
                   pin: options?.pin,
                   deferred: options?.deferred,
                   tag: uploadTag,
                   requestOptions,
-                })
+                }
+                await uploadChunk(target, chunkData, nodeOptions)
+                // Every manifest node gets its replicas, as Bee gives them
+                await uploadReplicas(
+                  target,
+                  chunkData,
+                  options?.redundancyLevel ?? 0,
+                  { ...nodeOptions, tag: uploadTag ?? 0 },
+                )
                 return { tagUid: isRoot ? uploadTag : undefined }
               },
               { encrypt: encryption.manifest },

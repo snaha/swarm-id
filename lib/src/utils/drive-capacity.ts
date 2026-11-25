@@ -27,7 +27,7 @@ import {
   PARTITION_COUNT,
   partitionCapacity,
 } from "./batch-utilization"
-import { estimateTotalChunks } from "../proxy/chunking"
+import { estimateTotalChunks, replicaCount } from "../proxy/chunking"
 import type {
   DriveCapacity,
   PartitionCapacity,
@@ -47,6 +47,9 @@ export const DEFAULT_FIT_CONFIDENCE = 0.999
  * feed update. Only noticeable for small saves.
  */
 export const SAVE_OVERHEAD_CHUNKS = 4
+
+/** The manifest nodes among {@link SAVE_OVERHEAD_CHUNKS}, each replicated at a redundancy level */
+const SAVE_MANIFEST_NODES = 3
 
 /** Buckets per headroom: how many more chunks each bucket still takes */
 export type HeadroomHistogram = ReadonlyMap<number, number>
@@ -71,7 +74,9 @@ export function chunksForBytes(
   redundancyLevel: RedundancyLevel = 0,
 ): number {
   return (
-    estimateTotalChunks(bytes, encrypt, redundancyLevel) + SAVE_OVERHEAD_CHUNKS
+    estimateTotalChunks(bytes, encrypt, redundancyLevel) +
+    SAVE_OVERHEAD_CHUNKS +
+    SAVE_MANIFEST_NODES * replicaCount(redundancyLevel)
   )
 }
 

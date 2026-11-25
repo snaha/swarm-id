@@ -10,7 +10,12 @@
 import { NULL_ADDRESS } from "@ethersphere/bee-js"
 import type { Bee, BeeRequestOptions } from "@ethersphere/bee-js"
 import { MantarayNode } from "@ethersphere/core-sdk"
-import { uploadData, uploadChunk, type UploadTarget } from "./upload"
+import {
+  uploadData,
+  uploadChunk,
+  uploadReplicas,
+  type UploadTarget,
+} from "./upload"
 import { saveMantarayTree, loadMantarayTreeWithChunkAPI } from "./mantaray"
 import { hexToUint8Array, uint8ArrayToHex } from "../utils/hex"
 import type {
@@ -30,7 +35,7 @@ export interface UploadCollectionOptions {
   pin?: boolean
   deferred?: boolean
   tag?: number
-  /** Erasure-coding level of each file's content (#307) */
+  /** Erasure-coding level of each file's content and the manifest's nodes (#307) */
   redundancyLevel?: RedundancyLevel
   /** Served for the bare `/bzz/<reference>/` (`website-index-document`) */
   indexDocument?: string
@@ -105,6 +110,11 @@ export async function uploadCollection(
     manifest,
     async (chunkData, isRoot) => {
       await uploadChunk(target, chunkData, chunkOptions)
+      // Every manifest node gets its replicas, as Bee gives them
+      await uploadReplicas(target, chunkData, options?.redundancyLevel ?? 0, {
+        ...chunkOptions,
+        tag: options?.tag ?? 0,
+      })
       return { tagUid: isRoot ? options?.tag : undefined }
     },
     { encrypt: encryptManifest },

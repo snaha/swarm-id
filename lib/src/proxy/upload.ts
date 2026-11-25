@@ -42,19 +42,18 @@ import {
 import { CHUNK_SIZE, estimateTotalChunks, rechunk } from "./chunking"
 import { ChunkUploadStream } from "./chunk-upload-stream"
 import {
+  ChunkBuilder,
   ChunkSplitter,
   convertEnvelopeToMarshaledStamp,
   encryptData,
   encryptSpan,
   getMaxShards,
-  makeEncryptedReplicas,
   makeErasureBatch,
   makeIntermediateChunkHandler,
   makeReplicas,
   makeSOCAddress,
   REPLICAS_OWNER,
 } from "@ethersphere/core-sdk"
-import type { ChunkBuilder } from "@ethersphere/core-sdk"
 import type { RedundancyLevel } from "../types"
 import type { UploadProgress } from "./types"
 import type { StampWorkerPool } from "./stamp-worker-pool"
@@ -796,12 +795,10 @@ async function writeTree(
     closed = true
     // Bee's dispersed replicas of the root, so a reader finds it with the
     // root's own neighbourhood gone. Tag 0 is no tag: a direct stream has none.
-    const replicas = key
-      ? makeEncryptedReplicas(root, key, level)
-      : makeReplicas(root, level)
     await uploadReplicas(
       target,
-      replicas,
+      rootChunk.chunkData,
+      level,
       {
         tag: sender.tagUid ?? 0,
         deferred: options?.deferred ?? false,
@@ -999,22 +996,35 @@ async function postSOC(
 }
 
 /**
- * Upload the root replicas of an erasure-coded tree (#307): single-owner
- * chunks under Bee's well-known replica owner, which go through `/soc` like
- * any SOC. bee-js's chunk upload refuses them as oversized, and the chunk
- * stream is not where Bee takes SOCs.
+ * Upload Bee's dispersed replicas of one stored chunk at `redundancyLevel`
+ * (#307): 2, 4, 8 or 16 single-owner chunks under Bee's well-known replica
+ * owner, so a reader finds the chunk with its own neighbourhood gone. Bee
+ * gives them to the root of every erasure-coded tree and to every manifest
+ * node. `chunkData` is the chunk as stored, encrypted or not: a replica wraps
+ * those bytes and is signed over their address. They go through `/soc` like
+ * any SOC: bee-js's chunk upload refuses them as oversized, and the chunk
+ * stream is not where Bee takes SOCs. Nothing at level 0.
  */
-async function uploadReplicas(
+export async function uploadReplicas(
   target: UploadTarget,
-  replicas: { address: { toUint8Array(): Uint8Array }; data: Uint8Array }[],
+  chunkData: Uint8Array,
+  redundancyLevel: number,
   options: Pick<
     UploadSOCOptions,
     "tag" | "deferred" | "pin" | "requestOptions"
   >,
-  onSent: (address: Uint8Array) => void,
+  onSent?: (address: Uint8Array) => void,
 ): Promise<void> {
+  const stored = new ChunkBuilder(
+    new DataView(
+      chunkData.buffer,
+      chunkData.byteOffset,
+      SPAN_SIZE,
+    ).getBigUint64(0, true),
+  )
+  stored.writer.buffer.set(chunkData.subarray(SPAN_SIZE))
   const owner = new EthAddress(REPLICAS_OWNER)
-  for (const { address, data } of replicas) {
+  for (const { address, data } of makeReplicas(stored, redundancyLevel)) {
     await postSOC(
       target,
       {
@@ -1028,7 +1038,7 @@ async function uploadReplicas(
       },
       options,
     )
-    onSent(address.toUint8Array())
+    onSent?.(address.toUint8Array())
   }
 }
 

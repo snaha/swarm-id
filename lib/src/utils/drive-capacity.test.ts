@@ -88,7 +88,7 @@ describe("chunksForBytes", () => {
     )
   })
 
-  it("adds a batch's parity and the root's replicas at a redundancy level", () => {
+  it("adds a batch's parity, the root's replicas and the manifest's at a redundancy level", () => {
     const MEDIUM = 1
     const MEDIUM_REPLICAS = 2
     const batch = getMaxShards(MEDIUM, true)
@@ -97,7 +97,9 @@ describe("chunksForBytes", () => {
         getParities(MEDIUM, batch, true) +
         1 +
         MEDIUM_REPLICAS +
-        SAVE_OVERHEAD_CHUNKS,
+        SAVE_OVERHEAD_CHUNKS +
+        // The save's three manifest nodes are replicated too
+        3 * MEDIUM_REPLICAS,
     )
   })
 })

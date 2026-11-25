@@ -18,7 +18,9 @@ only behind its own `ChunkSplitter`.
 **Decision.** `redundancyLevel` (0–4, Bee's `swarm-redundancy-level`) is an upload option, set per
 write, and `getDriveCapacity`/`fitProbability` take it too. A default kept on the drive is a
 follow-up. Every upload, level 0 included, is built by core-sdk's `ChunkSplitter`. The lib's own
-`ReferenceTree` is deleted. The root replicas go to `/soc`. Reading an erasure-coded tree skips its
+`ReferenceTree` is deleted. The root replicas go to `/soc`. A file or folder upload gives every
+manifest node its replicas too. That is what Bee does with a `/bzz` upload at a level, checked on
+the local cluster. A node is a single chunk, so it gets no parity. Reading an erasure-coded tree skips its
 parity references. Recovering a missing chunk from parity on read is a follow-up. core-sdk moves
 to 0.2.2 and bee-js to 13.2.0, so the two share one copy of core-sdk's classes: 0.1.1 corrupted a
 lone last leaf at any level above 0 (core-sdk#9, #10).

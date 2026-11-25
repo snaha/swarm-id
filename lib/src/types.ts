@@ -205,7 +205,7 @@ export interface UploadOptions {
    * parity chunks to every batch of the content's chunks and replicas of its
    * root, so the content can be read with some chunks gone. The parity takes
    * drive space: pass the same level to `getDriveCapacity`/`fitProbability`.
-   * The manifest of a file or folder upload is not erasure-coded.
+   * A file or folder upload replicates each manifest node too, as Bee does.
    */
   redundancyLevel?: RedundancyLevel
   tag?: number

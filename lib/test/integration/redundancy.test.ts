@@ -9,7 +9,14 @@
 
 import { describe, it, expect, beforeAll, inject } from "vitest"
 import type { Bee } from "@ethersphere/bee-js"
-import { getMaxShards } from "@ethersphere/core-sdk"
+import {
+  ChunkBuilder,
+  getMaxShards,
+  makeReplicas,
+  MantarayNode,
+} from "@ethersphere/core-sdk"
+import { uploadCollection } from "../../src/proxy/collection"
+import { hexToUint8Array, uint8ArrayToHex } from "../../src/utils/hex"
 import { uploadData, type UploadTarget } from "../../src/proxy/upload"
 import { downloadDataWithChunkAPI } from "../../src/proxy/download-data"
 import { CHUNK_SIZE } from "../../src/proxy/chunking"
@@ -33,8 +40,9 @@ const UPLOAD_TIMEOUT_MS = 120_000
  * other files' direct uploads on the shared cluster.
  */
 const DEFERRED = { deferred: true } as const
+const SPAN_BYTES = 8
 
-function randomPayload(size: number): Uint8Array {
+function randomPayload(size: number): Uint8Array<ArrayBuffer> {
   const data = new Uint8Array(size)
   // getRandomValues takes at most 65,536 bytes at a time
   const MAX_RANDOM_BYTES = 65_536
@@ -42,6 +50,30 @@ function randomPayload(size: number): Uint8Array {
     crypto.getRandomValues(data.subarray(i, i + MAX_RANDOM_BYTES))
   }
   return data
+}
+
+/** How many of `reference`'s replicas at `level` the node serves */
+async function replicasServed(
+  bee: Bee,
+  reference: string,
+  level: RedundancyLevel,
+): Promise<{ expected: number; served: number }> {
+  const chunk = (await bee.chunk.download(reference)).slice()
+  const stored = new ChunkBuilder(
+    new DataView(chunk.buffer).getBigUint64(0, true),
+  )
+  stored.writer.buffer.set(chunk.subarray(SPAN_BYTES))
+  const replicas = makeReplicas(stored, level)
+  let served = 0
+  for (const { address } of replicas) {
+    try {
+      await bee.chunk.download(address.toHex())
+      served++
+    } catch {
+      // not served
+    }
+  }
+  return { expected: replicas.length, served }
 }
 
 describe("erasure-coded uploads against live cluster", () => {
@@ -76,6 +108,59 @@ describe("erasure-coded uploads against live cluster", () => {
       UPLOAD_TIMEOUT_MS,
     )
   }
+
+  it(
+    "replicates every manifest node and file root of a folder, as Bee does",
+    async () => {
+      const level = 2
+      const files = [
+        { path: "index.html", data: randomPayload(100) },
+        { path: "assets/app.js", data: randomPayload(200) },
+      ]
+
+      const { reference } = await uploadCollection(target, files, {
+        ...DEFERRED,
+        redundancyLevel: level,
+        encrypt: false,
+      })
+
+      // Walk the manifest: every node, and every file root it points at
+      const references = [reference]
+      const nodes = [
+        MantarayNode.unmarshalFromData(
+          (await bee.chunk.download(reference)).slice(SPAN_BYTES),
+          hexToUint8Array(reference),
+        ),
+      ]
+      while (nodes.length > 0) {
+        const node = nodes.pop()
+        for (const fork of node?.forks.values() ?? []) {
+          const address = fork.node.selfAddress ?? new Uint8Array()
+          references.push(uint8ArrayToHex(address))
+          const child = MantarayNode.unmarshalFromData(
+            (await bee.chunk.download(uint8ArrayToHex(address))).slice(
+              SPAN_BYTES,
+            ),
+            address,
+          )
+          const target = child.targetAddress
+          if (target && target.some((byte) => byte !== 0)) {
+            references.push(uint8ArrayToHex(target))
+          }
+          nodes.push(child)
+        }
+      }
+
+      expect(references.length).toBeGreaterThan(files.length + 1)
+      for (const ref of references) {
+        expect(await replicasServed(bee, ref, level)).toEqual({
+          expected: 4,
+          served: 4,
+        })
+      }
+    },
+    UPLOAD_TIMEOUT_MS,
+  )
 
   it(
     "agrees with Bee over the chunk stream too",

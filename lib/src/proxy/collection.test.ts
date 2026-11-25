@@ -7,7 +7,7 @@
  * defaults — lives here so a dApp only has to produce `{ path, data }` pairs.
  */
 
-import { describe, it, expect } from "vitest"
+import { describe, it, expect, vi, afterEach } from "vitest"
 import { MantarayNode as BeeMantarayNode } from "@ethersphere/bee-js"
 import {
   uploadCollection,
@@ -48,6 +48,35 @@ function setup(): { bee: MockBee; target: UploadTarget } {
 }
 
 describe("uploadCollection", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals()
+  })
+
+  it("replicates every manifest node and file root at a redundancy level, as Bee does", async () => {
+    const { bee, target } = setup()
+    const MEDIUM = 1
+    const MEDIUM_REPLICAS = 2
+    let stored = 0
+    const upload = bee.chunk.upload
+    bee.chunk.upload = (...args) => {
+      stored++
+      return upload(...args)
+    }
+    const socPosts: string[] = []
+    vi.stubGlobal("fetch", async (url: string) => {
+      socPosts.push(url)
+      return new Response(undefined, { status: 201 })
+    })
+
+    // Single-chunk files: every chunk stored is a file's root or a manifest node
+    await uploadCollection(target, FILES.slice(0, 2), {
+      redundancyLevel: MEDIUM,
+    })
+
+    expect(stored).toBeGreaterThan(2)
+    expect(socPosts).toHaveLength(stored * MEDIUM_REPLICAS)
+  })
+
   it("lists back every file with its content type, and each reference downloads to its bytes", async () => {
     const { bee, target } = setup()
     const { reference } = await uploadCollection(target, FILES)

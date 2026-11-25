@@ -15,6 +15,11 @@ export const ENCRYPTED_REFS_PER_CHUNK = 64 // 4096 / 64 = 64 encrypted refs per 
  */
 const REPLICA_COUNTS = [0, 2, 4, 8, 16]
 
+/** The dispersed replicas Bee keeps of a tree's root or a manifest node */
+export function replicaCount(redundancyLevel: number): number {
+  return REPLICA_COUNTS[redundancyLevel]
+}
+
 /**
  * Chunks a file of `span` bytes is uploaded as, for upload progress and drive
  * capacity: leaves, intermediates and, at a redundancy level above 0, every
@@ -30,7 +35,7 @@ export function estimateTotalChunks(
   const fanout = getMaxShards(redundancyLevel, encrypted)
   const parities = (shards: number) =>
     getParities(redundancyLevel, shards, encrypted)
-  let total = 1 + REPLICA_COUNTS[redundancyLevel]
+  let total = 1 + replicaCount(redundancyLevel)
   let nodes = Math.max(1, Math.ceil(span / CHUNK_SIZE))
   while (nodes > 1) {
     const rest = nodes % fanout
