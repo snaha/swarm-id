@@ -51,7 +51,8 @@
     "concurrently": "9.2.5",
     "prettier": "3.8.1",
     "prettier-plugin-svelte": "3.4.0",
-    "serve": "14.2.6"
+    "serve": "14.2.6",
+    "typescript": "6.0.3"
   },
   "keywords": [
     "swarm",
