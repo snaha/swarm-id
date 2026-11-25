@@ -44,6 +44,7 @@ import { FakeLockManager } from "./utils/fake-web-locks"
 import { Inbox } from "./utils/inbox"
 
 const IFRAME_ORIGIN = "https://id.example.com"
+const text = new TextEncoder()
 const SETTLE_MS = 20
 const LOCKED_BATCH_ID = "cd".repeat(32)
 const LOCKED_SIGNER_KEY = "ef".repeat(32)
@@ -1156,6 +1157,45 @@ describe("streaming across the bridge", () => {
           `Reading "${FOLDER[0].path}" failed: ${UNREADABLE.message}.`,
         )
       })
+    })
+
+    // Nothing is pulled once the last file's source is read: what is left of
+    // its tree, and the manifest, go up with no pull to restart the wait.
+    it("keeps its caller waiting through the tail after the last pull, with no onProgress", async () => {
+      vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] })
+      try {
+        const TIMEOUT_MS = 10_000
+        /** Each step of the tail takes most of the timeout, the two more than all of it. */
+        const TAIL_STEP_MS = (TIMEOUT_MS * 3) / 4
+        const LAST_FILE_CHUNK = 2
+        const MANIFEST_CHUNK = 3
+        gateway.hold = (n) =>
+          n === LAST_FILE_CHUNK || n === MANIFEST_CHUNK
+            ? new Promise<void>((resolve) => setTimeout(resolve, TAIL_STEP_MS))
+            : undefined
+        const upload = client.uploadFiles(
+          ["a.txt", "b.txt"].map((path) => ({
+            path,
+            file: new Blob([text.encode(path)]),
+          })),
+          PLAIN,
+          { timeout: TIMEOUT_MS },
+        )
+        const settled = vi.fn()
+        upload.then(settled, settled)
+
+        for (const chunk of [LAST_FILE_CHUNK, MANIFEST_CHUNK]) {
+          await vi.waitFor(() => expect(fetchSpy).toHaveBeenCalledTimes(chunk))
+          await vi.advanceTimersByTimeAsync(TAIL_STEP_MS)
+        }
+
+        await expect(upload).resolves.toMatchObject({
+          reference: expect.any(String),
+        })
+        expectNothingLeftBehind()
+      } finally {
+        vi.useRealTimers()
+      }
     })
 
     it("counts files in its progress", async () => {

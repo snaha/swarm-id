@@ -971,7 +971,8 @@ export class SwarmIdClient {
     const stopProgress = this.listenForProgress(requestId, onProgress)
     try {
       const response = await this.sendRequest<TResponse>(
-        // A streaming upload always wants progress: it is its sign of life.
+        // A streaming upload always wants progress: it is its sign of life,
+        // the only one once the source is read and the rest of the tree goes up.
         message({ data, enableProgress: !!onProgress || source !== undefined }),
         source,
       )
@@ -2422,7 +2423,9 @@ export class SwarmIdClient {
           })),
           options: serializableOptions,
           requestOptions,
-          enableProgress: !!onProgress,
+          // As for `sendUpload`: progress is a streaming upload's sign of life,
+          // the only one once the last file is read.
+          enableProgress: !!onProgress || sources.length > 0,
           useWorkers,
           workerCount,
         },
