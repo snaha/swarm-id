@@ -4,10 +4,11 @@ A TLA+ model of mutual exclusion on one batch partition when devices coordinate
 over the account bus and a device without a live connection to the signaling
 server is read-only. Background: [#1017](https://github.com/snaha/swarm-id/issues/1017).
 
-**Status.** The TLA+ spec was checked with TLC on 2026-11-18; results are in
-the table under "Running it". The three-device run of the safe configuration
-is of the model as it stood on 2026-11-13, without the two rules marked
-"since" below, and has not been run again.
+**Status.** `Exclusion` is proved by an inductive invariant (`IndInv.tla`,
+2026-11-25) for two, three and four devices, every `TStop >= 1` and every
+`Wait >= TStop`; see "Proof by induction". The TLC searches under "Running it"
+still run, as the counterexamples for the broken variants. `check.sh` runs
+everything, and CI runs it when anything under `models/` changes.
 
 ## The protocol being modelled
 
@@ -63,6 +64,13 @@ cd models/bus-lease
 java -cp /path/to/tla2tools.jar tlc2.TLC -config Safe.cfg BusLease.tla
 ```
 
+Or every check at once, each against the outcome it must have (about 3½
+minutes; Apalache from its [releases](https://github.com/apalache-mc/apalache/releases)):
+
+```bash
+TLA2TOOLS=/path/to/tla2tools.jar APALACHE=/path/to/apalache/bin/apalache-mc ./check.sh
+```
+
 | Config               | Change from `Safe.cfg`                         | Result                                          |
 | -------------------- | ---------------------------------------------- | ----------------------------------------------- |
 | `Safe.cfg`           | none: `Wait = TStop`, both checks on           | `Exclusion` holds: 1,168,225 states, depth 32   |
@@ -77,6 +85,44 @@ claim rounds per device, not larger sizes.
 The three failing variants each remove one rule, to show that the rule is
 needed and that the checker can find the fault.
 
+## Proof by induction
+
+`IndInv.tla` states an invariant `Inv` with three properties, which Apalache
+checks (`ApaInd.tla`, `check.sh`):
+
+- `Init` satisfies `Inv`;
+- `Inv` implies `Exclusion`;
+- from **any** state satisfying `Inv`, reachable or not, every step of `Next`
+  leads to a state satisfying `Inv`.
+
+Together they prove `Exclusion` for every run, however long, without
+searching the runs. `TStop` and `Wait` are symbolic, so one check covers every
+`TStop >= 1` with `Wait >= TStop`. Bounded are the devices (two and three in
+CI, four with `FULL=1`, about 2 minutes) and the claim rounds (three: only
+their equality matters to the protocol).
+
+What `Inv` says, in short:
+
+- **The views are honest.** A device with a working socket sees the room
+  exactly; a stalled one is wrong only about peers it has been told changed;
+  a running absence timer means the peer is out of view.
+- **Absence timers are honest (`Fresh`).** If `b` has seen `a` absent for `k`
+  ticks, then `a` is offline; or it left the room and has had no heartbeat
+  for at least `k` ticks; or it joined while `b` was stalled, so its session
+  is younger than `b`'s own silence.
+- **Answers stay true (`Claims`).** If `c` answered "free" to `p`'s current
+  round, `c`'s timer for `p` restarted then, so it cannot run to `Wait` while
+  `c` can still write; the two did not both answer each other's current
+  rounds; and `c` does not hold while `p` can still take the lane on its word.
+- **No two potent holders (`PotentExclusion`).** No two devices are holding and
+  able to write, now or after a heartbeat on the same session. An overdue
+  holder still in the room counts, since it writes again after a heartbeat.
+
+The variants that break one rule (`Wait < TStop`, no `MatchRound`, no
+`ResetOnContact`, no `SessionAge`) each make `Inv` fail to be inductive.
+
+The proof is of the model, not of `lib/src/sync/bus-lease.ts`.
+
 ## Three devices
 
 `ShortWait3.cfg` (`Wait < TStop`, one claim round per device) is violated in
@@ -84,8 +130,8 @@ needed and that the checker can find the fault.
 much larger. With one claim round per device, TLC ran for 2 hours
 on 10 cores (2026-11-13) and stopped at its time limit: 464 million distinct
 states to depth 21, no violation, 162 million states still queued. So three
-devices is a bounded check, not a proof: every sequence of up to about 20
-steps is safe. The run wrote 56 GB of state files; point `-metadir` at a disk
+devices is a bounded check by TLC: every sequence of up to about 20 steps is
+safe. The proof by induction above covers every sequence. The run wrote 56 GB of state files; point `-metadir` at a disk
 with room.
 
 ## Names in the spec and what they stand for

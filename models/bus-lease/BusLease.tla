@@ -31,13 +31,21 @@
 EXTENDS Naturals, FiniteSets
 
 CONSTANTS
+  \* @type: Set(Int);
   Devices,        \* device ids, a set of naturals; the lower id wins a tie
+  \* @type: Int;
   TStop,          \* ticks without a heartbeat after which a device stops writing
+  \* @type: Int;
   Wait,           \* ticks a peer must be seen absent before it is ignored
+  \* @type: Int;
   MaxRound,       \* claim rounds per device (bounds the model)
+  \* @type: Bool;
   MatchRound,     \* TRUE: an answer counts only for the claim round it answers
+  \* @type: Bool;
   ResetOnContact, \* TRUE: hearing from a peer restarts its absence timer
+  \* @type: Bool;
   SessionAge,     \* TRUE: acquire only once this session is Wait ticks old
+  \* @type: Bool;
   Stall           \* TRUE: a down link may come back on the same session
 
 ASSUME /\ Devices \subseteq Nat
@@ -48,17 +56,29 @@ ASSUME /\ Devices \subseteq Nat
        /\ ResetOnContact \in BOOLEAN
 
 VARIABLES
+  \* @type: Int -> Str;
   mode,    \* per device: "idle" (read-only), "claiming" or "holding"
+  \* @type: Int -> Str;
   link,    \* per device: whether its socket to the server really works
+  \* @type: Int -> Bool;
   online,  \* per device: whether the device believes it has a socket
+  \* @type: Set(Int);
   room,    \* devices the server believes are connected
+  \* @type: Int -> Set(Int);
   view,    \* per device: the room as last reported to it
+  \* @type: Int -> Int;
   since,   \* per device: ticks since its last heartbeat round trip
+  \* @type: Int -> (Int -> Int);
   absent,  \* per device and peer: ticks the device has seen the peer absent
+  \* @type: Int -> Int;
   round,   \* per device: number of its current claim round
+  \* @type: Int -> Set(Int);
   acks,    \* per device: peers that answered "free" in the current round
+  \* @type: Set({type: Str, from: Int, to: Int, r: Int});
   msgs,    \* messages in flight between devices
+  \* @type: Int -> Int;
   age,     \* per device: ticks since its Join (session age)
+  \* @type: Int -> Set(Int);
   changed  \* per device: peers that joined or left while its stream was stalled
 
 vars == <<mode, link, online, room, view, since, absent, round, acks, msgs, age, changed>>
@@ -207,6 +227,7 @@ Heard(p, c) ==
   THEN [absent EXCEPT ![p][c] = 0]
   ELSE absent
 
+\* @type: ({type: Str, from: Int, to: Int, r: Int}, Str) => {type: Str, from: Int, to: Int, r: Int};
 Reply(m, type) ==
   [type |-> type, from |-> m.to, to |-> m.from, r |-> m.r]
 
