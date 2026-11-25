@@ -7,6 +7,24 @@ present and may point at an issue or PR; the reasons live here.
 
 A PR that makes or changes a decision adds the entry in the same PR.
 
+## 2026-11-25 The bus lease is proved by an inductive invariant, checked in CI
+
+**Context.** TLC searched the bus lease model's reachable states: complete for two devices
+at `TStop = Wait = 2`, and for three devices it stopped after 2 hours at depth 21. That says
+nothing about other timings or deeper runs.
+
+**Decision.** `models/bus-lease/IndInv.tla` states an invariant that implies `Exclusion`,
+and Apalache checks that `Init` satisfies it and that every step from any state satisfying
+it keeps it, with `TStop` and `Wait` symbolic. `.github/workflows/models.yml` runs these
+checks with the TLC runs, on changes to `models/` only.
+
+**Why.** An inductive invariant is a proof, not a search: it covers every depth, and with
+symbolic constants every `Wait >= TStop`. It also ran in 45 s for three devices. CI runs it
+only when a model changes because it proves the model, not `bus-lease.ts`: a code change
+cannot change its result. Whether the code follows the model is a separate test. Apalache
+over TLAPS for now: TLAPS would cover any number of devices, but only after hand-written
+proof steps, and the bounded result already covers up to four.
+
 ## 2026-11-23 The bus lease has one model, in TLA+
 
 **Context.** `models/bus-lease` held the model twice, in TLA+ and in Quint. The Quint copy

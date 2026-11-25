@@ -1,0 +1,43 @@
+name: Models
+
+# The checks prove the models, not the code, so only a change to a model can
+# change their result.
+on:
+  push:
+    branches: [main]
+    paths: ['models/**', '.github/workflows/models.yml']
+  pull_request:
+    paths: ['models/**', '.github/workflows/models.yml']
+
+env:
+  TLA2TOOLS_VERSION: v1.7.4
+  TLA2TOOLS_SHA256: 936a262061c914694dfd669a543be24573c45d5aa0ff20a8b96b23d01e050e88
+  APALACHE_VERSION: 0.63.0
+  APALACHE_SHA256: a756e96af249bf33cd7629667a49472cb26ac8227c48583da139b414834d59df
+
+jobs:
+  bus-lease:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      # The runner's preinstalled JDK (17 or later) runs both tools.
+      - name: Fetch TLC and Apalache
+        run: |
+          mkdir -p "$RUNNER_TEMP/tools" && cd "$RUNNER_TEMP/tools"
+          curl -fsSLo tla2tools.jar \
+            "https://github.com/tlaplus/tlaplus/releases/download/$TLA2TOOLS_VERSION/tla2tools.jar"
+          curl -fsSLo apalache.tgz \
+            "https://github.com/apalache-mc/apalache/releases/download/v$APALACHE_VERSION/apalache-$APALACHE_VERSION.tgz"
+          echo "$TLA2TOOLS_SHA256  tla2tools.jar" | sha256sum -c
+          echo "$APALACHE_SHA256  apalache.tgz" | sha256sum -c
+          tar xzf apalache.tgz
+
+      - name: Check the bus lease model
+        env:
+          TLA2TOOLS: ${{ runner.temp }}/tools/tla2tools.jar
+          APALACHE: ${{ runner.temp }}/tools/apalache-${{ env.APALACHE_VERSION }}/bin/apalache-mc
+        run: models/bus-lease/check.sh
