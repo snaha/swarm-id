@@ -30,6 +30,8 @@ const LEVELS = [1, 2, 3, 4] as const
 // levels of intermediates and a short last batch.
 const LEAF_COUNT = 140
 const PLAIN_REF_BYTES = 32
+// Fewer leaves than any level's batch: one root holds them and their parity
+const BATCH_LEAVES = 10
 // Bee's `replicas.Counts`: root replicas per level
 const REPLICAS = [0, 2, 4, 8, 16]
 
@@ -123,13 +125,69 @@ describe("uploadData with a redundancy level", () => {
     })
   }
 
+  it("wraps the chunk as stored in each replica, as Bee does", async () => {
+    const SMALL_PAYLOAD = 300
+    const { store, target } = setup()
+    const bodies: number[] = []
+    vi.stubGlobal("fetch", async (_url: string, init: RequestInit) => {
+      bodies.push((init.body as Uint8Array).length)
+      return new Response(undefined, { status: 201 })
+    })
+
+    const { reference } = await uploadData(target, makeData(SMALL_PAYLOAD), {
+      redundancyLevel: 1,
+    })
+
+    const stored = await store.get(reference)
+    expect(stored).toHaveLength(SPAN_SIZE + SMALL_PAYLOAD)
+    expect(bodies).toEqual([stored.length, stored.length])
+  })
+
+  it("leaves a gateway's replicas to its own deferred default, as the content", async () => {
+    const GATEWAY = "https://gateway.example"
+    const deferredHeaders: (string | undefined)[] = []
+    vi.stubGlobal("fetch", async (url: string, init: RequestInit) => {
+      const headers = init.headers as Record<string, string>
+      deferredHeaders.push(headers["swarm-deferred-upload"])
+      return url.includes("/soc/")
+        ? new Response(undefined, { status: 201 })
+        : Response.json({ reference: "ab".repeat(PLAIN_REF_BYTES) })
+    })
+
+    await uploadData(
+      { mode: "subsidised", gatewayUrl: GATEWAY },
+      makeData(CHUNK_SIZE),
+      { redundancyLevel: 1 },
+    )
+
+    expect(deferredHeaders).toHaveLength(1 + REPLICAS[1])
+    expect(deferredHeaders.every((header) => header === undefined)).toBe(true)
+  })
+
+  it("reports download progress within its total for an erasure-coded tree", async () => {
+    const PARANOID = 4
+    const { bee, target } = setup()
+    const data = makeData(LEAF_COUNT * CHUNK_SIZE)
+    const { reference } = await uploadData(target, data, {
+      redundancyLevel: PARANOID,
+    })
+
+    const progress: { total: number; processed: number }[] = []
+    await downloadDataWithChunkAPI(bee, reference, undefined, (p) =>
+      progress.push(p),
+    )
+
+    for (const { total, processed } of progress) {
+      expect(processed).toBeLessThanOrEqual(total)
+    }
+  })
+
   it("sends parity that rebuilds a lost data chunk", async () => {
     const { store, target } = setup()
     const level = 1
     // One batch of leaves under a single root, so the root's refs are the
     // leaves followed by their parity.
-    const leaves = 10
-    const data = makeData(leaves * CHUNK_SIZE)
+    const data = makeData(BATCH_LEAVES * CHUNK_SIZE)
 
     const { reference } = await uploadData(target, data, {
       redundancyLevel: level,
@@ -146,7 +204,7 @@ describe("uploadData with a redundancy level", () => {
       if (ref.every((byte) => byte === 0)) break
       refs.push(uint8ArrayToHex(ref))
     }
-    const parities = refs.length - leaves
+    const parities = refs.length - BATCH_LEAVES
     expect(parities).toBeGreaterThan(0)
 
     // External API: rsDecode marks a missing shard with null.
@@ -160,7 +218,7 @@ describe("uploadData with a redundancy level", () => {
     )
     const lost = shards[0]
     shards[0] = null
-    const rebuilt = rsDecode(shards, leaves, parities)
+    const rebuilt = rsDecode(shards, BATCH_LEAVES, parities)
     expect(rebuilt[0]).toEqual(lost)
   })
 })

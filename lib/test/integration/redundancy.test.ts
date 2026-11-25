@@ -19,7 +19,7 @@ import { uploadCollection } from "../../src/proxy/collection"
 import { hexToUint8Array, uint8ArrayToHex } from "../../src/utils/hex"
 import { uploadData, type UploadTarget } from "../../src/proxy/upload"
 import { downloadDataWithChunkAPI } from "../../src/proxy/download-data"
-import { CHUNK_SIZE } from "../../src/proxy/chunking"
+import { CHUNK_SIZE, replicaCount } from "../../src/proxy/chunking"
 import type { RedundancyLevel } from "../../src/types"
 import { createClusterContext } from "./cluster"
 
@@ -32,7 +32,8 @@ const loneLastLeaf = (level: RedundancyLevel, encrypted: boolean) =>
  * the cluster with the other suites, whose direct uploads wait on push-sync,
  * so its own uploads are kept no larger than the tree they test needs.
  */
-const ONE_BATCH = 10 * CHUNK_SIZE
+const BATCH_LEAVES = 10
+const ONE_BATCH = BATCH_LEAVES * CHUNK_SIZE
 const UPLOAD_TIMEOUT_MS = 120_000
 /**
  * Deferred, as bee-js's own upload is: the queen serves the reads either way,
@@ -41,6 +42,8 @@ const UPLOAD_TIMEOUT_MS = 120_000
  */
 const DEFERRED = { deferred: true } as const
 const SPAN_BYTES = 8
+/** Under a chunk: each file is its own tree's root */
+const SMALL_FILE_BYTES = 100
 
 function randomPayload(size: number): Uint8Array<ArrayBuffer> {
   const data = new Uint8Array(size)
@@ -114,8 +117,8 @@ describe("erasure-coded uploads against live cluster", () => {
     async () => {
       const level = 2
       const files = [
-        { path: "index.html", data: randomPayload(100) },
-        { path: "assets/app.js", data: randomPayload(200) },
+        { path: "index.html", data: randomPayload(SMALL_FILE_BYTES) },
+        { path: "assets/app.js", data: randomPayload(2 * SMALL_FILE_BYTES) },
       ]
 
       const { reference } = await uploadCollection(target, files, {
@@ -154,8 +157,8 @@ describe("erasure-coded uploads against live cluster", () => {
       expect(references.length).toBeGreaterThan(files.length + 1)
       for (const ref of references) {
         expect(await replicasServed(bee, ref, level)).toEqual({
-          expected: 4,
-          served: 4,
+          expected: replicaCount(level),
+          served: replicaCount(level),
         })
       }
     },

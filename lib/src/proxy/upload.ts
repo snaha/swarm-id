@@ -801,7 +801,10 @@ async function writeTree(
       level,
       {
         tag: sender.tagUid ?? 0,
-        deferred: options?.deferred ?? false,
+        // As the content went: a gateway's own default when unset, else direct
+        deferred: isSubsidisedTarget(target)
+          ? options?.deferred
+          : (options?.deferred ?? false),
         pin: options?.pin,
         requestOptions: options?.requestOptions,
       },
@@ -1024,22 +1027,27 @@ export async function uploadReplicas(
   )
   stored.writer.buffer.set(chunkData.subarray(SPAN_SIZE))
   const owner = new EthAddress(REPLICAS_OWNER)
-  for (const { address, data } of makeReplicas(stored, redundancyLevel)) {
-    await postSOC(
-      target,
-      {
-        owner,
-        identifier: new Identifier(data.subarray(0, IDENTIFIER_SIZE)),
-        signature: new Signature(
-          data.subarray(IDENTIFIER_SIZE, SOC_HEADER_SIZE),
-        ),
-        socAddress: address.toUint8Array(),
-        socBody: data.subarray(SOC_HEADER_SIZE),
-      },
-      options,
-    )
-    onSent?.(address.toUint8Array())
-  }
+  // At once: up to 16 of them, each its own request. A replica wraps the chunk
+  // as stored, as Bee's does: core-sdk's carries it padded to 4104 bytes, and
+  // the signature covers only the address, which the padding does not move.
+  await Promise.all(
+    makeReplicas(stored, redundancyLevel).map(async ({ address, data }) => {
+      await postSOC(
+        target,
+        {
+          owner,
+          identifier: new Identifier(data.subarray(0, IDENTIFIER_SIZE)),
+          signature: new Signature(
+            data.subarray(IDENTIFIER_SIZE, SOC_HEADER_SIZE),
+          ),
+          socAddress: address.toUint8Array(),
+          socBody: chunkData,
+        },
+        options,
+      )
+      onSent?.(address.toUint8Array())
+    }),
+  )
 }
 
 // ============================================================================

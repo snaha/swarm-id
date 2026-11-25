@@ -356,7 +356,9 @@ export async function downloadDataWithChunkAPI(
 
   // Estimate total chunks for progress tracking
   // Data chunks only: parity is never fetched.
-  const estimatedTotal = estimateTotalChunks(span, isEncrypted)
+  const estimatedTotal = estimateTotalChunks(span, isEncrypted, level, {
+    dataOnly: true,
+  })
   let processedChunks = 1 // Already downloaded root
 
   const onChunkDownloaded = () => {

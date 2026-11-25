@@ -25,17 +25,19 @@ export function replicaCount(redundancyLevel: number): number {
  * capacity: leaves, intermediates and, at a redundancy level above 0, every
  * batch's Reed-Solomon parity and the root's replicas. It ignores the carry of
  * a lone last reference into the level above, so it can overcount by a chunk
- * (and its parity) per level, never undercount.
+ * (and its parity) per level, never undercount. `dataOnly` counts what a
+ * reader fetches: the tree at the level's fan-out, without parity or replicas.
  */
 export function estimateTotalChunks(
   span: number,
   encrypted: boolean,
   redundancyLevel = 0,
+  { dataOnly = false } = {},
 ): number {
   const fanout = getMaxShards(redundancyLevel, encrypted)
   const parities = (shards: number) =>
-    getParities(redundancyLevel, shards, encrypted)
-  let total = 1 + replicaCount(redundancyLevel)
+    dataOnly ? 0 : getParities(redundancyLevel, shards, encrypted)
+  let total = 1 + (dataOnly ? 0 : replicaCount(redundancyLevel))
   let nodes = Math.max(1, Math.ceil(span / CHUNK_SIZE))
   while (nodes > 1) {
     const rest = nodes % fanout

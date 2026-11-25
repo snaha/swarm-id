@@ -206,6 +206,8 @@ export interface UploadOptions {
    * root, so the content can be read with some chunks gone. The parity takes
    * drive space: pass the same level to `getDriveCapacity`/`fitProbability`.
    * A file or folder upload replicates each manifest node too, as Bee does.
+   * An ACT upload erasure-codes its content only. SOC and feed writes take no
+   * level: they accept the option and ignore it.
    */
   redundancyLevel?: RedundancyLevel
   tag?: number
