@@ -120,6 +120,8 @@ import {
   STREAM_SOURCE_DEADLINE_SLACK_MS,
 } from "./utils/constants"
 const DEFAULT_INITIALIZATION_TIMEOUT_MS = 30000
+/** How many pieces a streaming download asks the proxy for ahead of its reader */
+const DOWNLOAD_READ_AHEAD_PIECES = 1
 /**
  * The round trip of a `requestPermissions` message: the proxy answers it
  * once its popup closes, at the latest after `PERMISSIONS_POPUP_MAX_MS` — so
@@ -984,8 +986,9 @@ export class SwarmIdClient {
 
   /**
    * Wire up the stream the proxy answers once it has resolved a streaming
-   * download. Nothing is asked of the proxy until the reader wants a piece,
-   * and each piece asked for is waited on for the idle timeout at most.
+   * download. The proxy is asked for one piece ahead of what the reader has
+   * taken and no more, and each piece asked for is waited on for the idle
+   * timeout at most.
    */
   private openDownloadStream(
     requestId: string,
@@ -1063,7 +1066,10 @@ export class SwarmIdClient {
           this.sendAbort(requestId)
         },
       },
-      { highWaterMark: 0 },
+      // One piece read ahead: the proxy fetches the next while the reader
+      // takes this one, rather than a round trip per piece, and memory stays
+      // bounded at one piece more.
+      { highWaterMark: DOWNLOAD_READ_AHEAD_PIECES },
     )
 
     this.downloadStreams.set(requestId, {
@@ -2054,8 +2060,9 @@ export class SwarmIdClient {
   /**
    * {@link downloadData} for reading as the bytes arrive, so a large file is
    * never held whole on either side of the iframe. The returned stream is
-   * pulled: it fetches nothing until read. Read it to the end, or cancel it
-   * or abort `requestOptions.signal` to stop the proxy.
+   * pulled: it fetches one piece ahead of its reader and no further. Read it
+   * to the end, or cancel it or abort `requestOptions.signal` to stop the
+   * proxy.
    *
    * `requestOptions.timeout` is how long the proxy may stay silent per piece
    * (default: at least 2 minutes), not a bound on the whole download.

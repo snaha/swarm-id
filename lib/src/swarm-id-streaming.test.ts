@@ -1161,28 +1161,38 @@ describe("streaming across the bridge", () => {
       })
     }
 
-    it("fetches nothing past the root until the stream is read", async () => {
-      const reference = await upload(makeData(CHUNK_SIZE * 150))
-      const download = vi.spyOn(bee.chunk, "download")
+    it("asks for one piece ahead of its reader, and no further", async () => {
+      const reference = await upload(makeData(STREAM_PIECE_SIZE * 4))
+      const posted = recordPosted()
+      const pulls = () =>
+        posted.filter(({ type }) => type === "downloadStreamPull").length
 
-      await client.downloadDataStream(reference)
+      const { stream } = await client.downloadDataStream(reference)
       await settle()
+      expect(pulls()).toBe(1)
 
-      expect(download).toHaveBeenCalledTimes(1)
+      const reader = stream.getReader()
+      for (let read = 1; read <= 2; read++) {
+        await reader.read()
+        await settle()
+        expect(pulls()).toBe(read + 1)
+      }
+      await reader.cancel()
     })
 
-    it("delivers pieces within the limit and only when asked", async () => {
+    it("delivers pieces within the limit, and fetches nothing more while the reader holds off", async () => {
       const reference = await upload(makeData(STREAM_PIECE_SIZE * 3))
       const { stream } = await client.downloadDataStream(reference)
       const download = vi.spyOn(bee.chunk, "download")
       const reader = stream.getReader()
 
       const first = await reader.read()
-      const fetchedForFirst = download.mock.calls.length
+      await settle()
+      const fetchedWithReadAhead = download.mock.calls.length
       await settle()
 
       expect(first.value?.length).toBe(STREAM_PIECE_SIZE)
-      expect(download.mock.calls.length).toBe(fetchedForFirst)
+      expect(download.mock.calls.length).toBe(fetchedWithReadAhead)
       await reader.cancel()
     })
 
