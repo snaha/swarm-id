@@ -83,8 +83,10 @@ stamps for a caller already told it had failed.
 request's timeout and 90 seconds between beats, and `requestStarted`, said
 only after `requestQueued`, restarts the timeout at its full length. A write
 that gets its drive within the second says neither. A request that expires on
-that silence says so, and how long it waited. Nothing caps the queue in all:
-on the local cluster an encrypted upload moves about 1.8 MiB a second, so a
+that silence says so, and how long it waited. Nothing caps the queue, the
+request's timeout included: a write's time queued behind another write on the
+same drive is unbounded, and `requestOptions.signal` is how a caller caps it.
+On the local cluster an encrypted upload moves about 1.8 MiB a second, so a
 file of a few GiB holds its drive for hours. Every request that expires on the
 client is aborted in the proxy, and a write aborted while it queues for the
 lock, or waits for a partition slot, stops waiting at once and claims none.
