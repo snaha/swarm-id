@@ -907,6 +907,8 @@ describe("SwarmIdClient request seam", () => {
     const REPLY_REFERENCE = "ab".repeat(32)
     /** How often a browser may run a hidden page's repeating timers */
     const THROTTLED_BEAT_MS = MINUTE
+    /** A throttled beat that also lands late, inside the allowance's slack */
+    const LATE_THROTTLED_BEAT_MS = 70 * SECOND
     const QUEUED_ALLOWANCE_MS = 90 * SECOND
 
     afterEach(() => {
@@ -1026,6 +1028,23 @@ describe("SwarmIdClient request seam", () => {
       }
 
       expect(settled).not.toHaveBeenCalled()
+    })
+
+    it("keeps a queued request alive when a throttled beat arrives late, 70 seconds after the last", async () => {
+      vi.useFakeTimers()
+      const { settled, requestId } = queuedWrite()
+      deliver({ type: "requestQueued", requestId })
+
+      for (let i = 0; i < BEATS; i++) {
+        await vi.advanceTimersByTimeAsync(LATE_THROTTLED_BEAT_MS)
+        deliver({ type: "requestQueued", requestId })
+      }
+      expect(settled).not.toHaveBeenCalled()
+
+      await vi.advanceTimersByTimeAsync(QUEUED_ALLOWANCE_MS)
+      expect(settled).toHaveBeenCalledWith(
+        expect.objectContaining({ code: "timeout" }),
+      )
     })
 
     it("times out a queued request after 90 seconds of silence", async () => {
