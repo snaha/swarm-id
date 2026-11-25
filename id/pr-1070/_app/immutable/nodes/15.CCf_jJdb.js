@@ -1,1 +1,0 @@
-import"../chunks/DLAPimam.js";import"../chunks/COvr2phz.js";import{t as e}from"../chunks/CEfx2C7d.js";function t(t){e(t,{})}export{t as component};
