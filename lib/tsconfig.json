@@ -25,6 +25,7 @@
     "node_modules",
     "dist",
     "**/*.test.ts",
-    "src/bridge-test-utils.ts"
+    "src/bridge-test-utils.ts",
+    "src/utils/fake-web-locks.ts"
   ]
 }
