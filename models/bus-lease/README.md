@@ -4,9 +4,10 @@ A TLA+ model of mutual exclusion on one batch partition when devices coordinate
 over the account bus and a device without a live connection to the signaling
 server is read-only. Background: [#1017](https://github.com/snaha/swarm-id/issues/1017).
 
-**Status.** `Exclusion` is proved by an inductive invariant (`IndInv.tla`,
-2026-11-25) for two, three and four devices, every `TStop >= 1` and every
-`Wait >= TStop`; see "Proof by induction". The TLC searches under "Running it"
+**Status.** `Exclusion` and `AckedExclusive` are proved by an inductive
+invariant (`IndInv.tla`, 2026-11-25) for two, three and four devices, every
+`TStop >= 1` and every `Wait >= TStop`, and with clocks whose rates differ by up
+to 4:3 for every `3 * Wait >= 4 * TStop`; see "Proof by induction". The TLC searches under "Running it"
 still run, as the counterexamples for the broken variants. `check.sh` runs
 everything, and CI runs it when anything under `models/` changes.
 
@@ -24,6 +25,10 @@ everything, and CI runs it when anything under `models/` changes.
 - A holder that is asked and is idle hands over; a busy one refuses.
 - A holder whose heartbeat is overdue answers no claim, and writes again once
   the same connection completes one (since 2026-11-17).
+- A write takes time. It starts while its device may write, and is
+  acknowledged only if, when it ends, the device still holds and may write,
+  in the hold it started in (since 2026-11-25; `commit()` in
+  `batch-write-coordinator.ts`). Otherwise it fails.
 
 The signaling server only reports who is connected. It grants nothing and
 stores nothing.
@@ -37,6 +42,9 @@ stores nothing.
   This is two tabs of one browser, which also talk over `BroadcastChannel`.
   It is the case that needs `ResetOnContact` on every path a lane message
   arrives by.
+- Clocks run at different rates, and not at a steady one: each tick of real
+  time, a device's clock advances by anything from `RMin` to `RMax` (since
+  2026-11-25). `RMin = RMax = 1` is a clock that keeps time.
 - Any message between devices is lost, delayed, reordered or delivered twice,
   over the relay or a WebRTC DataChannel, with or without a live server socket.
   A sent message stays deliverable for good and may be delivered at any later
@@ -45,9 +53,9 @@ stores nothing.
   rule reads it. With those three as explicit steps the same check took
   77,321,799 states and 19 minutes.
 
-Not modelled: Swarm (finding and publishing the utilization state), clocks that
-run at different rates, a write in flight when a device stops, several tabs of
-one device, and more than one partition.
+Not modelled: Swarm (finding and publishing the utilization state, so what a
+failed write leaves behind for the next holder), several tabs of one device,
+and more than one partition.
 
 In the implementation (`lib/src/sync/bus-lease.ts`) a "device" of the model is
 one context: a tab or an iframe, for as long as its connection lasts. Tabs of
@@ -64,26 +72,26 @@ cd models/bus-lease
 java -cp /path/to/tla2tools.jar tlc2.TLC -config Safe.cfg BusLease.tla
 ```
 
-Or every check at once, each against the outcome it must have (about 3½
-minutes; Apalache from its [releases](https://github.com/apalache-mc/apalache/releases)):
+Or every check at once, each against the outcome it must have (about 6
+minutes; `FULL=1` adds the four-device induction and `Safe.cfg`; Apalache from its [releases](https://github.com/apalache-mc/apalache/releases)):
 
 ```bash
 TLA2TOOLS=/path/to/tla2tools.jar APALACHE=/path/to/apalache/bin/apalache-mc ./check.sh
 ```
 
-| Config               | Change from `Safe.cfg`                         | Result                                          |
-| -------------------- | ---------------------------------------------- | ----------------------------------------------- |
-| `Safe.cfg`           | none: `Wait = TStop`, both checks on           | `Exclusion` holds: 1,168,225 states, depth 32   |
-| `Reachable.cfg`      | checks `NobodyEverHolds` instead               | fails in 6 steps, as intended (holding happens) |
-| `ShortWait.cfg`      | `Wait < TStop`                                 | `Exclusion` violated in 9 steps                 |
-| `NoRoundMatch.cfg`   | a "free" answer counts for any claim round     | `Exclusion` violated in 15 steps                |
-| `NoContactReset.cfg` | hearing from a peer does not restart its timer | `Exclusion` violated in 16 steps                |
+| Config               | Change from `Safe.cfg`                           | Result                                                                          |
+| -------------------- | ------------------------------------------------ | ------------------------------------------------------------------------------- |
+| `Safe.cfg`           | none: `Wait = TStop`, every check on             | `Exclusion` and `AckedExclusive` hold: 10,209,522 states, depth 45 (3½ minutes) |
+| `Reachable.cfg`      | checks `NobodyEverHolds` instead                 | fails in 6 steps, as intended (holding happens)                                 |
+| `ShortWait.cfg`      | `Wait < TStop`                                   | `Exclusion` violated in 9 steps                                                 |
+| `NoRoundMatch.cfg`   | a "free" answer counts for any claim round       | `Exclusion` violated in 15 steps                                                |
+| `NoContactReset.cfg` | hearing from a peer does not restart its timer   | `Exclusion` violated in 16 steps                                                |
+| `DriftShort.cfg`     | clocks at 3 to 4 per tick, `Wait = TStop = 4`    | `Exclusion` violated in 13 steps                                                |
+| `NoAckCheck.cfg`     | a write is acknowledged if it began in this hold | `AckedExclusive` violated in 14 steps                                           |
 
-All five finish within half a minute. The result covers two devices, `TStop = Wait = 2` and two
-claim rounds per device, not larger sizes.
-
-The three failing variants each remove one rule, to show that the rule is
-needed and that the checker can find the fault.
+The failing variants finish within seconds; each removes one rule, to show
+that the rule is needed and that the checker can find the fault. A search
+covers only its own sizes; the proof below covers the rest.
 
 ## Proof by induction
 
@@ -91,13 +99,16 @@ needed and that the checker can find the fault.
 checks (`ApaInd.tla`, `check.sh`):
 
 - `Init` satisfies `Inv`;
-- `Inv` implies `Exclusion`;
+- `Inv` implies `Exclusion` and `AckedExclusive` (`Goals`);
 - from **any** state satisfying `Inv`, reachable or not, every step of `Next`
   leads to a state satisfying `Inv`.
 
-Together they prove `Exclusion` for every run, however long, without
-searching the runs. `TStop` and `Wait` are symbolic, so one check covers every
-`TStop >= 1` with `Wait >= TStop`. Bounded are the devices (two and three in
+Together they prove both for every run, however long, without searching the
+runs. `TStop` and `Wait` are symbolic, so one check covers every `TStop >= 1`
+with `Wait >= TStop`, and with clocks at 3 to 4 per tick every
+`3 * Wait >= 4 * TStop`. That is the margin `LEASE_WAIT_MS / LEASE_STOP_MS =
+8000 / 6000` gives the code: one clock may run up to a third faster than
+another. Bounded are the devices (two and three in
 CI, four with `FULL=1`, about 2 minutes) and the claim rounds (three: only
 their equality matters to the protocol).
 
@@ -108,8 +119,9 @@ What `Inv` says, in short:
   a running absence timer means the peer is out of view.
 - **Absence timers are honest (`Fresh`).** If `b` has seen `a` absent for `k`
   ticks, then `a` is offline; or it left the room and has had no heartbeat
-  for at least `k` ticks; or it joined while `b` was stalled, so its session
-  is younger than `b`'s own silence.
+  for at least as long; or it joined while `b` was stalled, so its session
+  is younger than `b`'s own silence. "As long" is across two clocks
+  (`NotLonger`): `RMin * k <= RMax * since[a]`.
 - **Answers stay true (`Claims`).** If `c` answered "free" to `p`'s current
   round, `c`'s timer for `p` restarted then, so it cannot run to `Wait` while
   `c` can still write; the two did not both answer each other's current
@@ -117,9 +129,15 @@ What `Inv` says, in short:
 - **No two potent holders (`PotentExclusion`).** No two devices are holding and
   able to write, now or after a heartbeat on the same session. An overdue
   holder still in the room counts, since it writes again after a heartbeat.
+- **An overlapped write is lost (`Writes`).** If another device held while a
+  write was in flight, its device is out of the room with its heartbeat
+  overdue for as long as it stays in that hold, so the write cannot be
+  acknowledged.
 
-The variants that break one rule (`Wait < TStop`, no `MatchRound`, no
-`ResetOnContact`, no `SessionAge`) each make `Inv` fail to be inductive.
+The variants that break one rule (`Wait < TStop`, a wait short of the drift
+margin, no `MatchRound`, no `ResetOnContact`, no `SessionAge`) each make
+`Inv` fail to be inductive; without the check at the end of a write, `Inv` no
+longer implies `AckedExclusive`.
 
 The proof is of the model, not of `lib/src/sync/bus-lease.ts`.
 
@@ -145,3 +163,5 @@ with room.
 | `round`              | a per-claim nonce                                             |
 | `TStop`              | how long a holder may write without hearing from the server   |
 | `Wait`               | how long a claimant waits after `peer-left`                   |
+| `RMin`, `RMax`       | how far a device's clock may run slow or fast                 |
+| `writing`, `MayAck`  | an upload in flight, and `commit()` acknowledging it          |

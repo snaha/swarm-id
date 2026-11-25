@@ -7,6 +7,30 @@ present and may point at an issue or PR; the reasons live here.
 
 A PR that makes or changes a decision adds the entry in the same PR.
 
+## 2026-11-25 The bus lease model has drifting clocks and writes that take time
+
+**Context.** The bus lease model counted time the same on every device, and a write was one
+instant. `LEASE_WAIT_MS = 8000` against `LEASE_STOP_MS = 6000` was meant to cover clocks
+that do not keep the same time, by an amount nobody had worked out. And a write that is
+still in flight when its device stops holding was not modelled at all.
+
+**Decision.** Each tick, every device's clock advances by its own amount from `RMin` to
+`RMax`. A write starts while its device may write and ends later; it may be acknowledged
+only if its device still holds, and may write, in the hold it started in, which is what
+`commit()` in `batch-write-coordinator.ts` checks. The new property `AckedExclusive` says
+no acknowledged write overlapped another device's hold. Both are in the inductive
+invariant, and `check.sh` runs them.
+
+**Why.** The induction now states the margin: safe exactly when `RMin * Wait >= RMax *
+TStop`, so 8000 / 6000 tolerates one clock running up to a third faster than another, and
+a wait short of that has a real counterexample (`DriftShort.cfg`). Real clocks differ by
+parts per million, and `absentExceptMs` uses only the monotonic clock while
+`confirmedAgoMs` takes the larger of monotonic and wall, so a clock step can only make a
+holder stop sooner. For writes, a check at the start alone admits an acknowledged write
+that overlapped another holder (`NoAckCheck.cfg`); the check at the end is what makes
+acknowledgement safe. What a failed write leaves on Swarm for the next holder is still
+outside the model.
+
 ## 2026-11-25 The bus lease is proved by an inductive invariant, checked in CI
 
 **Context.** TLC searched the bus lease model's reachable states: complete for two devices
