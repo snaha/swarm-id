@@ -112,7 +112,7 @@
 <td><code dir="auto">options.timeout</code></td>
 <td><code dir="auto">number</code></td>
 <td>No</td>
-<td>Request timeout in milliseconds (defaults to <code dir="auto">30000</code>). Bounds each call’s whole round trip through the iframe, not counting time queued behind another write on the same drive; a call’s own <code dir="auto">requestOptions.timeout</code> replaces it for that call</td>
+<td>Request timeout in milliseconds (defaults to <code dir="auto">30000</code>). Bounds each call’s whole round trip through the iframe; a call’s own <code dir="auto">requestOptions.timeout</code> replaces it for that call. A write’s time queued behind another write on the same drive is not counted and is unbounded: pass <code dir="auto">requestOptions.signal</code> to cap it</td>
 </tr>
 <tr>
 <td><code dir="auto">options.initializationTimeout</code></td>
@@ -893,8 +893,8 @@
 <p>The data is uploaded using the authenticated user’s postage stamp. Progress can be tracked via the <code dir="auto">options.onProgress</code> callback.</p>
 <p>Pass a <code dir="auto">Blob</code>, <code dir="auto">File</code> or <code dir="auto">ReadableStream&lt;Uint8Array&gt;</code> for a large file: it is read piece by piece, no faster than the node takes chunks, so it is never held whole on either side of the iframe. A <code dir="auto">Uint8Array</code> is copied across the iframe in one go. The same bytes give the same reference through every input type (with <code dir="auto">encrypt</code>, each upload uses fresh keys and so gets its own reference).</p>
 <p>For a stream or <code dir="auto">Blob</code>, <code dir="auto">requestOptions.timeout</code> does not bound the whole upload. It is how long the identity iframe may stay silent, restarted with every chunk it reports and paused while your source has nothing to give, and it defaults to at least 2 minutes. A <code dir="auto">ReadableStream</code> is locked while the upload reads it and handed back once read to the end; on failure, or when <code dir="auto">requestOptions.signal</code> aborts, it is cancelled.</p>
-<p>No call’s timeout counts the wait for the drive’s write lock: an upload queued behind another one to the same drive waits its turn, however long that takes, because the identity iframe keeps saying it is still there. A request that does time out, or is aborted, is stopped inside the iframe too, so a queued write never runs after its promise rejected.</p>
-<p>The upload holds the drive’s write lock for as long as it runs, and every writer to that drive on the device waits for it: other apps and the identity UI too. So your source may stay silent for 2 minutes, or for a longer <code dir="auto">requestOptions.timeout</code> up to 10 minutes whatever it asks, before the upload fails with <code dir="auto">timeout</code> and frees the drive.</p>
+<p>No write’s timeout counts the wait for its drive: an upload queued behind another one to the same drive waits its turn, however long that takes, because the identity iframe keeps saying it is still there. That wait is unbounded; to cap it, pass <code dir="auto">requestOptions.signal</code> and abort it. A request that does time out, or is aborted, is stopped inside the iframe too, so a queued write never runs after its promise rejected.</p>
+<p>The upload holds the drive’s write lock for as long as it runs, and every writer to that drive on the device waits for it: other apps and the identity UI too. So your source may stay silent for 2 minutes, or for a longer <code dir="auto">requestOptions.timeout</code> up to 10 minutes whatever it asks, before the upload fails with <code dir="auto">timeout</code> and frees the drive. <a href="#uploadfilesfiles-options-requestoptions"><code dir="auto">uploadFiles</code></a> gives the lock up between the files of a long folder.</p>
 <p><strong>Parameters:</strong></p>
 <table>
 <thead>
@@ -970,7 +970,7 @@
 <td><code dir="auto">requestOptions.timeout</code></td>
 <td><code dir="auto">number</code></td>
 <td>No</td>
-<td>Request timeout in milliseconds for this call. Replaces the client’s default (30 s) for the whole upload — the round trip through the iframe as well as the Bee request, not counting time queued behind another write on the same drive; a file of a few MB over a testnet or the public gateway needs more, here or in <code dir="auto">new SwarmIdClient({ timeout })</code>. For a stream or <code dir="auto">Blob</code>, see above</td>
+<td>Request timeout in milliseconds for this call. Replaces the client’s default (30 s) for the whole upload — the round trip through the iframe as well as the Bee request; a file of a few MB over a testnet or the public gateway needs more, here or in <code dir="auto">new SwarmIdClient({ timeout })</code>. Time queued behind another write on the same drive is not counted and is unbounded: pass <code dir="auto">requestOptions.signal</code> to cap it. For a stream or <code dir="auto">Blob</code>, see above</td>
 </tr>
 <tr>
 <td><code dir="auto">requestOptions.headers</code></td>
@@ -1099,7 +1099,7 @@
 <td><code dir="auto">requestOptions.timeout</code></td>
 <td><code dir="auto">number</code></td>
 <td>No</td>
-<td>Request timeout in milliseconds for this call. Replaces the client’s default (30 s) for the whole round trip, not only the Bee request, not counting time queued behind another write on the same drive</td>
+<td>Request timeout in milliseconds for this call. Replaces the client’s default (30 s) for the whole round trip, not only the Bee request</td>
 </tr>
 <tr>
 <td><code dir="auto">requestOptions.headers</code></td>
@@ -1132,7 +1132,7 @@
 <div class="expressive-code"><figure class="frame not-content"><figcaption class="header"></figcaption><pre data-language="typescript"><code><div class="ec-line"><div class="code"><span style="--0:#C792EA;--1:#8844AE">const </span><span style="--0:#82AAFF;--1:#3B61B0">data</span><span style="--0:#C792EA;--1:#8844AE"> = await </span><span style="--0:#D6DEEB;--1:#403F53">client</span><span style="--0:#C792EA;--1:#8844AE">.</span><span style="--0:#82AAFF;--1:#3B61B0">downloadData</span><span style="--0:#D6DEEB;--1:#403F53">(</span><span style="--0:#D9F5DD;--1:#111111">'</span><span style="--0:#ECC48D;--1:#984E4D">a1b2c3...</span><span style="--0:#D9F5DD;--1:#111111">'</span><span style="--0:#D6DEEB;--1:#403F53">)</span><span style="--0:#C792EA;--1:#8844AE"> </span><span style="--0:#919F9F;--1:#5D6376">// 64 char hex reference</span></div></div><div class="ec-line"><div class="code"><span style="--0:#C792EA;--1:#8844AE">const </span><span style="--0:#82AAFF;--1:#3B61B0">text</span><span style="--0:#C792EA;--1:#8844AE"> = </span><span style="--0:#7FDBCA;--1:#096E72">new</span><span style="--0:#C792EA;--1:#8844AE"> </span><span style="--0:#82AAFF;--1:#3B61B0">TextDecoder</span><span style="--0:#D6DEEB;--1:#403F53">()</span><span style="--0:#C792EA;--1:#8844AE">.</span><span style="--0:#82AAFF;--1:#3B61B0">decode</span><span style="--0:#D6DEEB;--1:#403F53">(data)</span></div></div><div class="ec-line"><div class="code"><span style="--0:#D6DEEB;--1:#403F53">console</span><span style="--0:#C792EA;--1:#8844AE">.</span><span style="--0:#82AAFF;--1:#3B61B0">log</span><span style="--0:#D6DEEB;--1:#403F53">(</span><span style="--0:#D9F5DD;--1:#111111">'</span><span style="--0:#ECC48D;--1:#984E4D">Downloaded:</span><span style="--0:#D9F5DD;--1:#111111">'</span><span style="--0:#D6DEEB;--1:#403F53">, text)</span></div></div></code></pre><div class="copy"><div aria-live="polite"></div><button title="Copy to clipboard" data-copied="Copied!" data-code="const data = await client.downloadData(&#x27;a1b2c3...&#x27;) // 64 char hex referenceconst text = new TextDecoder().decode(data)console.log(&#x27;Downloaded:&#x27;, text)"><div></div></button></div></figure></div>
 <hr>
 <div class="sl-heading-wrapper level-h3"><h3 id="downloaddatastreamreference-requestoptions"><code dir="auto">downloadDataStream(reference, requestOptions?)</code></h3><a class="sl-anchor-link" href="#downloaddatastreamreference-requestoptions"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 1 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 0 0-1.42-1.42m8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 1 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 0 0 0 1.42 1 1 0 0 0 1.42 0l3.88-3.89a4.49 4.49 0 0 0 0-6.33M8.83 15.17a1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.92-4.92a1 1 0 1 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42"></path></svg></span><span class="sr-only" data-pagefind-ignore>Section titled “downloadDataStream(reference, requestOptions?)”</span></a></div>
-<p>Reads raw binary data as it arrives, for a file too large to hold whole: the streaming counterpart of <a href="#downloaddatareference-options-requestoptions"><code dir="auto">downloadData</code></a>, without its <code dir="auto">options</code>. The returned stream is pulled: nothing past the root chunk is fetched until it is read, and it fetches no further ahead of the reader than one small batch per tree level.</p>
+<p>Reads raw binary data as it arrives, for a file too large to hold whole: the streaming counterpart of <a href="#downloaddatareference-options-requestoptions"><code dir="auto">downloadData</code></a>, without its <code dir="auto">options</code>. The returned stream is pulled: it asks for one piece ahead of the reader, so the next piece is on its way while the reader takes this one, and fetches no further ahead than that piece and one small batch per tree level.</p>
 <p>Read the stream to the end, or cancel it, or abort <code dir="auto">requestOptions.signal</code>: otherwise the request stays open inside the identity iframe until the stream has gone unread for 2 minutes, or a longer <code dir="auto">requestOptions.timeout</code>, and then errors with <code dir="auto">timeout</code>. <code dir="auto">requestOptions.timeout</code> is how long the iframe may stay silent for each piece (default: at least 2 minutes), not a bound on the whole download.</p>
 <p><strong>Returns:</strong> <code dir="auto">Promise&lt;DataDownload&gt;</code></p>
 <table>
@@ -1226,7 +1226,7 @@
 <td><code dir="auto">requestOptions.timeout</code></td>
 <td><code dir="auto">number</code></td>
 <td>No</td>
-<td>Request timeout in milliseconds for this call. Replaces the client’s default (30 s) for the whole upload — the round trip through the iframe as well as the Bee request, not counting time queued behind another write on the same drive; a file of a few MB over a testnet or the public gateway needs more, here or in <code dir="auto">new SwarmIdClient({ timeout })</code>. For a stream or <code dir="auto">Blob</code>, see above</td>
+<td>Request timeout in milliseconds for this call. Replaces the client’s default (30 s) for the whole upload — the round trip through the iframe as well as the Bee request; a file of a few MB over a testnet or the public gateway needs more, here or in <code dir="auto">new SwarmIdClient({ timeout })</code>. Time queued behind another write on the same drive is not counted and is unbounded: pass <code dir="auto">requestOptions.signal</code> to cap it. For a stream or <code dir="auto">Blob</code>, see above</td>
 </tr>
 <tr>
 <td><code dir="auto">requestOptions.headers</code></td>
@@ -1302,7 +1302,7 @@
 <td><code dir="auto">requestOptions.timeout</code></td>
 <td><code dir="auto">number</code></td>
 <td>No</td>
-<td>Request timeout in milliseconds for this call. Replaces the client’s default (30 s) for the whole round trip, not only the Bee request, not counting time queued behind another write on the same drive</td>
+<td>Request timeout in milliseconds for this call. Replaces the client’s default (30 s) for the whole round trip, not only the Bee request</td>
 </tr>
 <tr>
 <td><code dir="auto">requestOptions.headers</code></td>
@@ -1357,7 +1357,7 @@
 </div></div><div class="ec-line"><div class="code"><span style="--0:#919F9F;--1:#5D6376">// Create download link</span></div></div><div class="ec-line"><div class="code"><span style="--0:#C792EA;--1:#8844AE">const </span><span style="--0:#82AAFF;--1:#3B61B0">blob</span><span style="--0:#C792EA;--1:#8844AE"> = </span><span style="--0:#7FDBCA;--1:#096E72">new</span><span style="--0:#C792EA;--1:#8844AE"> </span><span style="--0:#82AAFF;--1:#3B61B0">Blob</span><span style="--0:#D6DEEB;--1:#403F53">([file</span><span style="--0:#C792EA;--1:#8844AE">.</span><span style="--0:#7FDBCA;--1:#096E72">data</span><span style="--0:#D6DEEB;--1:#403F53">])</span></div></div><div class="ec-line"><div class="code"><span style="--0:#C792EA;--1:#8844AE">const </span><span style="--0:#82AAFF;--1:#3B61B0">url</span><span style="--0:#C792EA;--1:#8844AE"> = </span><span style="--0:#82AAFF;--1:#3B61B0">URL</span><span style="--0:#C792EA;--1:#8844AE">.</span><span style="--0:#82AAFF;--1:#3B61B0">createObjectURL</span><span style="--0:#D6DEEB;--1:#403F53">(blob)</span></div></div></code></pre><div class="copy"><div aria-live="polite"></div><button title="Copy to clipboard" data-copied="Copied!" data-code="const file = await client.downloadFile(&#x27;a1b2c3...&#x27;)console.log(&#x27;Filename:&#x27;, file.name)// Create download linkconst blob = new Blob([file.data])const url = URL.createObjectURL(blob)"><div></div></button></div></figure></div>
 <hr>
 <div class="sl-heading-wrapper level-h3"><h3 id="downloadfilestreamreference-path-requestoptions"><code dir="auto">downloadFileStream(reference, path?, requestOptions?)</code></h3><a class="sl-anchor-link" href="#downloadfilestreamreference-path-requestoptions"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 1 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 0 0-1.42-1.42m8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 1 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 0 0 0 1.42 1 1 0 0 0 1.42 0l3.88-3.89a4.49 4.49 0 0 0 0-6.33M8.83 15.17a1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.92-4.92a1 1 0 1 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42"></path></svg></span><span class="sr-only" data-pagefind-ignore>Section titled “downloadFileStream(reference, path?, requestOptions?)”</span></a></div>
-<p>Reads a file as it arrives, for a file too large to hold whole: the streaming counterpart of <a href="#downloadfilereference-path-options-requestoptions"><code dir="auto">downloadFile</code></a>, without its <code dir="auto">options</code>. The manifest and the path are resolved as there, then the content streams with the contract of <a href="#downloaddatastreamreference-requestoptions"><code dir="auto">downloadDataStream</code></a>: nothing past the content’s root chunk is fetched until the stream is read, <code dir="auto">requestOptions.timeout</code> is how long the iframe may stay silent for each piece, and the stream must be read to the end, cancelled, or stopped with <code dir="auto">requestOptions.signal</code>.</p>
+<p>Reads a file as it arrives, for a file too large to hold whole: the streaming counterpart of <a href="#downloadfilereference-path-options-requestoptions"><code dir="auto">downloadFile</code></a>, without its <code dir="auto">options</code>. The manifest and the path are resolved as there, then the content streams with the contract of <a href="#downloaddatastreamreference-requestoptions"><code dir="auto">downloadDataStream</code></a>: one piece is fetched ahead of the reader and no more, <code dir="auto">requestOptions.timeout</code> is how long the iframe may stay silent for each piece, and the stream must be read to the end, cancelled, or stopped with <code dir="auto">requestOptions.signal</code>.</p>
 <p><strong>Returns:</strong> <code dir="auto">Promise&lt;FileDownload&gt;</code></p>
 <table>
 <thead>
@@ -1397,7 +1397,8 @@
 <div class="sl-heading-wrapper level-h3"><h3 id="uploadfilesfiles-options-requestoptions"><code dir="auto">uploadFiles(files, options?, requestOptions?)</code></h3><a class="sl-anchor-link" href="#uploadfilesfiles-options-requestoptions"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 1 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 0 0-1.42-1.42m8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 1 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 0 0 0 1.42 1 1 0 0 0 1.42 0l3.88-3.89a4.49 4.49 0 0 0 0-6.33M8.83 15.17a1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.92-4.92a1 1 0 1 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42"></path></svg></span><span class="sr-only" data-pagefind-ignore>Section titled “uploadFiles(files, options?, requestOptions?)”</span></a></div>
 <p>Uploads a folder as one manifest: a fork per file with its path and content type. A gateway serves a plain folder, uploaded with <code dir="auto">encrypt: false</code>, at <code dir="auto">/bzz/&lt;reference&gt;/&lt;path&gt;</code>; the default reference carries the key and stays out of gateway URLs. Takes what bee-js takes — the <code dir="auto">FileList</code> of an <code dir="auto">&lt;input type="file" webkitdirectory&gt;</code> or a dropped directory, a <code dir="auto">File[]</code>, or <code dir="auto">{ path, file }</code> pairs for a folder the app assembled itself. A <code dir="auto">File</code>’s path is its <code dir="auto">webkitRelativePath</code> with the picked folder’s own name removed, or its name. Which files to include is the app’s decision; the library uploads what it is given.</p>
 <p>Read a folder back with <a href="#listfilesreference-requestoptions"><code dir="auto">listFiles</code></a> and <a href="#downloaddatareference-options-requestoptions"><code dir="auto">downloadData</code></a> per entry, or one file with <a href="#downloadfilereference-path-options-requestoptions"><code dir="auto">downloadFile</code></a> and its path.</p>
-<p>Each file is read piece by piece when the upload reaches it, one file at a time, so a folder is never held whole on either side of the iframe. A file that cannot be read therefore fails the upload only when the upload reaches it, after the earlier files’ chunks are already stamped.</p>
+<p>Each file is read piece by piece when the upload reaches it, one file at a time, so a folder is never held whole on either side of the iframe. A file that cannot be read therefore fails the upload only when the upload reaches it, after the earlier files’ chunks are already stamped: the error names the file and says the files before it were uploaded but no reference reaches them, so upload the folder again.</p>
+<p>Once the upload has held the drive’s write lock for 30 seconds it gives the lock up at the next file and queues for it again, so other writers to the drive on the device get in between its files; a folder that goes through faster takes the lock once. One large file holds the lock for as long as it takes, as with <a href="#uploaddatadata-options-requestoptions"><code dir="auto">uploadData</code></a>. While the folder queues again <code dir="auto">requestOptions.timeout</code> is paused, as for any write queued behind another.</p>
 <p><strong>Parameters:</strong></p>
 <table>
 <thead>
@@ -1602,7 +1603,7 @@
 <td><code dir="auto">requestOptions.timeout</code></td>
 <td><code dir="auto">number</code></td>
 <td>No</td>
-<td>Request timeout in milliseconds for this call. Replaces the client’s default (30 s) for the whole round trip, not only the Bee request, not counting time queued behind another write on the same drive</td>
+<td>Request timeout in milliseconds for this call. Replaces the client’s default (30 s) for the whole round trip, not only the Bee request. Time queued behind another write on the same drive is not counted and is unbounded: pass <code dir="auto">requestOptions.signal</code> to cap it</td>
 </tr>
 <tr>
 <td><code dir="auto">requestOptions.headers</code></td>
@@ -1670,7 +1671,7 @@
 <td><code dir="auto">requestOptions.timeout</code></td>
 <td><code dir="auto">number</code></td>
 <td>No</td>
-<td>Request timeout in milliseconds for this call. Replaces the client’s default (30 s) for the whole round trip, not only the Bee request, not counting time queued behind another write on the same drive</td>
+<td>Request timeout in milliseconds for this call. Replaces the client’s default (30 s) for the whole round trip, not only the Bee request</td>
 </tr>
 <tr>
 <td><code dir="auto">requestOptions.headers</code></td>
@@ -1733,7 +1734,7 @@
 <td><code dir="auto">requestOptions.timeout</code></td>
 <td><code dir="auto">number</code></td>
 <td>No</td>
-<td>Request timeout in milliseconds for this call. Replaces the client’s default (30 s) for the whole round trip, not only the Bee request, not counting time queued behind another write on the same drive</td>
+<td>Request timeout in milliseconds for this call. Replaces the client’s default (30 s) for the whole round trip, not only the Bee request</td>
 </tr>
 <tr>
 <td><code dir="auto">requestOptions.headers</code></td>
@@ -1815,7 +1816,7 @@
 <td><code dir="auto">requestOptions.timeout</code></td>
 <td><code dir="auto">number</code></td>
 <td>No</td>
-<td>Request timeout in milliseconds for this call. Replaces the client’s default (30 s) for the whole round trip, not only the Bee request, not counting time queued behind another write on the same drive</td>
+<td>Request timeout in milliseconds for this call. Replaces the client’s default (30 s) for the whole round trip, not only the Bee request. Time queued behind another write on the same drive is not counted and is unbounded: pass <code dir="auto">requestOptions.signal</code> to cap it</td>
 </tr>
 <tr>
 <td><code dir="auto">requestOptions.headers</code></td>
@@ -2036,7 +2037,7 @@
 <td><code dir="auto">requestOptions.timeout</code></td>
 <td><code dir="auto">number</code></td>
 <td>No</td>
-<td>Request timeout in milliseconds for this call. Replaces the client’s default (30 s) for the whole round trip, not only the Bee request, not counting time queued behind another write on the same drive</td>
+<td>Request timeout in milliseconds for this call. Replaces the client’s default (30 s) for the whole round trip, not only the Bee request</td>
 </tr>
 <tr>
 <td><code dir="auto">requestOptions.headers</code></td>
@@ -2208,7 +2209,7 @@
 <td><code dir="auto">requestOptions.timeout</code></td>
 <td><code dir="auto">number</code></td>
 <td>No</td>
-<td>Request timeout in milliseconds for this call. Replaces the client’s default (30 s) for the whole round trip, not only the Bee request, not counting time queued behind another write on the same drive</td>
+<td>Request timeout in milliseconds for this call. Replaces the client’s default (30 s) for the whole round trip, not only the Bee request. Time queued behind another write on the same drive is not counted and is unbounded: pass <code dir="auto">requestOptions.signal</code> to cap it</td>
 </tr>
 <tr>
 <td><code dir="auto">requestOptions.headers</code></td>
@@ -2655,7 +2656,7 @@
 <td><code dir="auto">requestOptions.timeout</code></td>
 <td><code dir="auto">number</code></td>
 <td>No</td>
-<td>Request timeout in milliseconds for this call. Replaces the client’s default (30 s) for the whole round trip, not only the Bee request, not counting time queued behind another write on the same drive</td>
+<td>Request timeout in milliseconds for this call. Replaces the client’s default (30 s) for the whole round trip, not only the Bee request. Time queued behind another write on the same drive is not counted and is unbounded: pass <code dir="auto">requestOptions.signal</code> to cap it</td>
 </tr>
 <tr>
 <td><code dir="auto">requestOptions.headers</code></td>
@@ -2779,7 +2780,7 @@
 <td><code dir="auto">requestOptions.timeout</code></td>
 <td><code dir="auto">number</code></td>
 <td>No</td>
-<td>Request timeout in milliseconds for this call. Replaces the client’s default (30 s) for the whole round trip, not only the Bee request, not counting time queued behind another write on the same drive</td>
+<td>Request timeout in milliseconds for this call. Replaces the client’s default (30 s) for the whole round trip, not only the Bee request. Time queued behind another write on the same drive is not counted and is unbounded: pass <code dir="auto">requestOptions.signal</code> to cap it</td>
 </tr>
 <tr>
 <td><code dir="auto">requestOptions.headers</code></td>
@@ -2902,7 +2903,7 @@
 <td><code dir="auto">requestOptions.timeout</code></td>
 <td><code dir="auto">number</code></td>
 <td>No</td>
-<td>Request timeout in milliseconds for this call. Replaces the client’s default (30 s) for the whole round trip, not only the Bee request, not counting time queued behind another write on the same drive</td>
+<td>Request timeout in milliseconds for this call. Replaces the client’s default (30 s) for the whole round trip, not only the Bee request. Time queued behind another write on the same drive is not counted and is unbounded: pass <code dir="auto">requestOptions.signal</code> to cap it</td>
 </tr>
 <tr>
 <td><code dir="auto">requestOptions.headers</code></td>
@@ -3032,7 +3033,7 @@
 <td><code dir="auto">requestOptions.timeout</code></td>
 <td><code dir="auto">number</code></td>
 <td>No</td>
-<td>Request timeout in milliseconds for this call. Replaces the client’s default (30 s) for the whole round trip, not only the Bee request, not counting time queued behind another write on the same drive</td>
+<td>Request timeout in milliseconds for this call. Replaces the client’s default (30 s) for the whole round trip, not only the Bee request</td>
 </tr>
 <tr>
 <td><code dir="auto">requestOptions.headers</code></td>
@@ -3104,7 +3105,7 @@
 <td><code dir="auto">requestOptions.timeout</code></td>
 <td><code dir="auto">number</code></td>
 <td>No</td>
-<td>Request timeout in milliseconds for this call. Replaces the client’s default (30 s) for the whole round trip, not only the Bee request, not counting time queued behind another write on the same drive</td>
+<td>Request timeout in milliseconds for this call. Replaces the client’s default (30 s) for the whole round trip, not only the Bee request. Time queued behind another write on the same drive is not counted and is unbounded: pass <code dir="auto">requestOptions.signal</code> to cap it</td>
 </tr>
 <tr>
 <td><code dir="auto">requestOptions.headers</code></td>
@@ -3216,7 +3217,7 @@ under a new ACT.</p></div></aside>
 <td><code dir="auto">requestOptions.timeout</code></td>
 <td><code dir="auto">number</code></td>
 <td>No</td>
-<td>Request timeout in milliseconds for this call. Replaces the client’s default (30 s) for the whole round trip, not only the Bee request, not counting time queued behind another write on the same drive</td>
+<td>Request timeout in milliseconds for this call. Replaces the client’s default (30 s) for the whole round trip, not only the Bee request. Time queued behind another write on the same drive is not counted and is unbounded: pass <code dir="auto">requestOptions.signal</code> to cap it</td>
 </tr>
 <tr>
 <td><code dir="auto">requestOptions.headers</code></td>
@@ -3316,7 +3317,7 @@ under a new ACT.</p></div></aside>
 <td><code dir="auto">requestOptions.timeout</code></td>
 <td><code dir="auto">number</code></td>
 <td>No</td>
-<td>Request timeout in milliseconds for this call. Replaces the client’s default (30 s) for the whole round trip, not only the Bee request, not counting time queued behind another write on the same drive</td>
+<td>Request timeout in milliseconds for this call. Replaces the client’s default (30 s) for the whole round trip, not only the Bee request</td>
 </tr>
 <tr>
 <td><code dir="auto">requestOptions.headers</code></td>
