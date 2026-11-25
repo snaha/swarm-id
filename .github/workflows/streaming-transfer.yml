@@ -1,0 +1,171 @@
+# The streaming transfers (`ui/tests/streaming-transfer.test.ts`) in a real
+# browser against a real cluster: a `File` pulled across the identity iframe in
+# pieces, a folder's files one at a time, a download streamed back to disk. It
+# needs one device and a funded drive, not the device rig's three, so it runs
+# apart from `three-devices.yml` and on the streaming code alone:
+#
+#   - on a PR that touches the streaming modules, the client, or the suite
+#     and its rig,
+#   - nightly on main, so a regression is dated to a day,
+#   - before every npm publish (`release.yml` calls it beside the device
+#     suites; a red run stops the publish),
+#   - on demand from the Actions tab.
+#
+# The job log carries every verdict and every skip's reason; the HTML report
+# and the traces are uploaded when something fails.
+name: Streaming Transfer
+
+on:
+  pull_request:
+    paths:
+      - 'lib/src/swarm-id-client.ts'
+      - 'lib/src/utils/piece-source.ts'
+      - 'lib/src/utils/stream-deadline.ts'
+      - 'lib/src/utils/inbox.ts'
+      - 'lib/src/proxy/collection.ts'
+      - 'lib/src/proxy/download-data.ts'
+      - 'demo/src/lib/utils/bridge-traffic.ts'
+      - 'demo/src/lib/utils/save-stream.ts'
+      - 'ui/tests/streaming-transfer.test.ts'
+      - 'ui/tests/devices-rig.ts'
+      - 'ui/tests/global-setup-devices.ts'
+      - 'ui/tests/helpers.ts'
+      - 'ui/tests/worker-faucet.ts'
+      - 'ui/playwright.devices.config.ts'
+      - 'ui/playwright.streaming.config.ts'
+      - '.github/workflows/streaming-transfer.yml'
+  schedule:
+    - cron: '47 3 * * *'
+  workflow_dispatch:
+  workflow_call:
+
+# Cancel superseded runs on the same ref.
+concurrency:
+  group: streaming-transfer-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  streaming-transfer:
+    name: Streaming transfers through the demo
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+        with:
+          run_install: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
+          cache: 'pnpm'
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Cache Playwright browsers
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml') }}
+
+      - name: Install Playwright browsers
+        working-directory: ./ui
+        timeout-minutes: 10
+        # Without `--with-deps`: the runner image already carries the system
+        # libraries Chromium needs, and installing them again goes through
+        # Ubuntu's mirror, which the runner at times cannot resolve.
+        run: pnpm exec playwright install chromium
+
+      - name: Build lib dependency
+        working-directory: ./lib
+        run: pnpm build
+
+      # The same image cache as the integration job: images only, never
+      # volumes, so the chain state baked into the image is always fresh —
+      # which is also what keeps the worker faucet stocked for every run.
+      # Keyed on the bee-compose and Bee versions, the only things the images
+      # are built from, so a lockfile touched for anything else still hits.
+      - name: Resolve the cluster version
+        id: bee-compose
+        run: .github/scripts/cluster-cache-key.sh
+
+      - name: Cache Bee cluster images
+        id: bee-images
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: /tmp/bee-images
+          key: bee-images-${{ steps.bee-compose.outputs.version }}-v1
+
+      - name: Load cached cluster images
+        if: steps.bee-images.outputs.cache-hit == 'true'
+        run: |
+          for f in /tmp/bee-images/*.tar; do docker load -i "$f"; done
+          docker images --filter 'reference=bee-compose:*'
+
+      - name: Start Bee cluster
+        if: steps.bee-images.outputs.cache-hit == 'true'
+        run: pnpm dev:cluster:start
+
+      # On a miss, `up` builds the images itself and labels the containers it
+      # creates with the build digest rather than the image id it reads for an
+      # image it finds — so the workers' `up` takes the queen and the chain for
+      # outdated and recreates them seconds into their boot, after which the
+      # cluster takes ~15 min to serve a direct upload. `--pull` builds every
+      # image before either `up`, so both find theirs the way a hit does.
+      - name: Build and start Bee cluster
+        if: steps.bee-images.outputs.cache-hit != 'true'
+        run: pnpm dev:cluster:start --pull
+
+      - name: Save cluster images to cache
+        if: steps.bee-images.outputs.cache-hit != 'true'
+        run: |
+          mkdir -p /tmp/bee-images
+          imgs=$(docker images --filter 'reference=bee-compose:*' --format '{{.Repository}}:{{.Tag}}')
+          echo "Saving images: $imgs"
+          docker save $imgs -o /tmp/bee-images/cluster.tar
+
+      # Readiness is a served direct upload, not the queen's /readiness: the
+      # suite's every write is one, and a cold cluster answers them 30 s late.
+      - name: Wait for the cluster to serve uploads
+        run: bash .github/scripts/wait-for-cluster.sh
+        env:
+          CLUSTER_WAIT_MINUTES: 15
+
+      # The identity UI, the demo and the signaling server are started by the
+      # suite's own config (`webServer`), the way `pnpm dev` starts them.
+      - name: Run the streaming suite
+        working-directory: ./ui
+        run: pnpm test:streaming
+        env:
+          CHAIN_RPC_URL: http://localhost:9545
+
+      - name: Dump cluster logs on failure
+        if: failure()
+        run: |
+          docker ps -a || true
+          echo "::group::blockchain logs"
+          pnpm dev:cluster logs blockchain --tail 200 || true
+          echo "::endgroup::"
+          echo "::group::queen logs"
+          pnpm dev:cluster logs queen --tail 300 || true
+          echo "::endgroup::"
+
+      - name: Stop Bee cluster
+        if: always()
+        run: pnpm dev:cluster stop || true
+
+      - name: Upload report and traces
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: failure() || cancelled()
+        with:
+          name: streaming-transfer-report
+          path: |
+            ui/playwright-report/
+            ui/test-results/
+          retention-days: 7

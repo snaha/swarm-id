@@ -10,11 +10,11 @@
  * with the save picker taken away, as here, it falls back to a Blob download,
  * which Playwright catches.
  *
- * Runs under `playwright.devices.config.ts` with the device rig: one device,
- * one drive, a real cluster.
+ * Runs under `playwright.streaming.config.ts` with the device rig: one
+ * device, one drive, a real cluster.
  *
  *   pnpm dev:local                      # cluster, chain, solver, apps
- *   pnpm test:devices                   # chromium
+ *   pnpm test:streaming                 # chromium
  *
  * Skips when the chain, the Bee cluster, the demo or the signaling server is
  * not up.

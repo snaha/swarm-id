@@ -52,7 +52,7 @@ const POPUP_BLOCKER_SPEC = '**/popup-blocker.test.ts'
 const DEVICES_SPEC = '**/three-devices.test.ts'
 /**
  * Streaming transfers through the demo: a drive bought and megabytes uploaded,
- * on the device rig, so they run only through `playwright.devices.config.ts`.
+ * on the device rig, so they run only through `playwright.streaming.config.ts`.
  */
 const STREAMING_SPEC = '**/streaming-transfer.test.ts'
 

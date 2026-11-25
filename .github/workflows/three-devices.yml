@@ -1,7 +1,7 @@
 # The device scenarios (`ui/tests/three-devices.test.ts`, `ui/tests/two-drives.test.ts`,
-# the synced deletions in `ui/tests/delete-account.test.ts`, and the streaming
-# transfers in `ui/tests/streaming-transfer.test.ts`) in real browsers
-# against a real cluster. Minutes per run by design — the lease
+# and the synced deletions in `ui/tests/delete-account.test.ts`) in real browsers
+# against a real cluster. The streaming transfers need a funded drive, not
+# three devices, and run on their own workflow (`streaming-transfer.yml`). Minutes per run by design — the lease
 # TTL, the idle yield and the beacon grace are each 30 s and the suite waits
 # them out — so it does not run on every change:
 #
@@ -32,13 +32,6 @@ on:
       - 'ui/tests/three-devices.test.ts'
       - 'ui/tests/two-drives.test.ts'
       - 'ui/tests/delete-account.test.ts'
-      - 'ui/tests/streaming-transfer.test.ts'
-      - 'lib/src/utils/piece-source.ts'
-      - 'lib/src/utils/stream-deadline.ts'
-      - 'lib/src/utils/inbox.ts'
-      - 'lib/src/swarm-id-client.ts'
-      - 'demo/src/lib/utils/bridge-traffic.ts'
-      - 'demo/src/lib/utils/save-stream.ts'
       - 'ui/src/lib/delete-account.ts'
       - 'ui/src/lib/account-deleted.ts'
       - 'ui/src/lib/components/delete-account-dialog.svelte'
