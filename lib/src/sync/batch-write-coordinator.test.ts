@@ -345,6 +345,96 @@ describe("BatchWriteCoordinator.withWrite — aborted while queued", () => {
       signal,
     )
   })
+
+  it("stops waiting for a partition slot at once, and claims none", async () => {
+    vi.useFakeTimers()
+    try {
+      // Every partition is held by a live peer, so the write waits for a slot.
+      const leaseOpts: Parameters<typeof makeLease>[0] = {
+        acquireResult: {
+          partition: undefined,
+          partitionCount: 4,
+          isReadOnly: true,
+        },
+      }
+      const lease = makeLease(leaseOpts)
+      leaseController.lease = lease
+      const stamper = makeStamper([])
+      const onSlotWait = vi.fn()
+      const coordinator = new BatchWriteCoordinator(
+        makeDeps({
+          stamper: stamper as unknown as BatchWriteCoordinatorDeps["stamper"],
+          mode: "oneshot",
+          onSlotWait,
+        }),
+      )
+      const controller = new AbortController()
+      const op = vi.fn(async () => "ok")
+      const outcome = vi.fn()
+      coordinator
+        .withWrite(op, { wait: "block", signal: controller.signal })
+        .then(outcome, outcome)
+      await vi.advanceTimersByTimeAsync(0)
+      expect(onSlotWait).toHaveBeenCalledTimes(1)
+
+      // A slot frees up after the abort: a wait that went on would claim it.
+      leaseOpts.acquireResult = {
+        partition: 2,
+        partitionCount: 4,
+        localCounter: new Uint32Array(8),
+        isReadOnly: false,
+      }
+      controller.abort()
+      await vi.advanceTimersByTimeAsync(0)
+
+      expect(outcome).toHaveBeenCalledWith(
+        expect.objectContaining({ code: "aborted" }),
+      )
+      await vi.advanceTimersByTimeAsync(SLOT_WAIT_TIMEOUT_MS)
+      expect(lease.acquire).toHaveBeenCalledTimes(1)
+      expect(stamper.bindPartition).not.toHaveBeenCalled()
+      expect(coordinator.currentPartition).toBeUndefined()
+      expect(op).not.toHaveBeenCalled()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it("finishes a claim the abort lands in the middle of, and does not write", async () => {
+    const lease = makeLease()
+    let finishClaim: () => void = () => {}
+    lease.acquire.mockImplementationOnce(async () => {
+      await new Promise<void>((resolve) => (finishClaim = resolve))
+      return {
+        partition: 1,
+        partitionCount: 4,
+        localCounter: new Uint32Array(8),
+        isReadOnly: false,
+      }
+    })
+    leaseController.lease = lease
+    const stamper = makeStamper([])
+    const coordinator = new BatchWriteCoordinator(
+      makeDeps({
+        stamper: stamper as unknown as BatchWriteCoordinatorDeps["stamper"],
+        mode: "oneshot",
+      }),
+    )
+    const controller = new AbortController()
+    const op = vi.fn(async () => "ok")
+    const write = coordinator.withWrite(op, {
+      wait: "block",
+      signal: controller.signal,
+    })
+    await vi.waitFor(() => expect(lease.acquire).toHaveBeenCalledTimes(1))
+
+    controller.abort()
+    finishClaim()
+
+    await expect(write).rejects.toMatchObject({ code: "aborted" })
+    expect(stamper.bindPartition).toHaveBeenCalledTimes(1)
+    expect(op).not.toHaveBeenCalled()
+  })
 })
 
 describe("BatchWriteCoordinator.withWrite — wait fork", () => {

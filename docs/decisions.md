@@ -85,7 +85,8 @@ full length. A request that expires on that silence says so, and how long it
 waited. Nothing caps the queue in all: on the local cluster an encrypted
 upload moves about 1.8 MiB a second, so a file of a few GiB holds its drive
 for hours. Every request that expires on the client is aborted in the proxy,
-and a write aborted while it queues for the lock leaves the queue at once.
+and a write aborted while it queues for the lock, or waits for a partition
+slot, stops waiting at once and claims none.
 This narrows "A per-call timeout bounds the whole round trip" below. An
 upload's progress is posted at most every 250 ms, the last report always.
 (#1042)

@@ -45,7 +45,7 @@ import {
   IDLE_YIELD_MS,
   UtilizationAwareStamper,
 } from "../utils/batch-utilization"
-import { abortedError } from "../errors"
+import { SwarmIdError, abortedError } from "../errors"
 import { withBatchWriteLock } from "../utils/batch-write-lock"
 import { withTimeout } from "../utils/promise"
 import { PartitionLease } from "./partition-lease"
@@ -115,7 +115,11 @@ export interface WithWriteOptions {
   workerCount?: number
   /** Override the mode default: persistent → "block", oneshot → "skip". */
   wait?: "block" | "skip"
-  /** A write aborted while it queues for the lock leaves the queue at once. */
+  /**
+   * A write aborted while it queues for the lock leaves the queue at once,
+   * and one aborted while it waits for a partition slot stops waiting
+   * without claiming one.
+   */
   signal?: AbortSignal
 }
 
@@ -330,7 +334,10 @@ export class BatchWriteCoordinator {
       opts?.wait ?? (this.deps.mode === "persistent" ? "block" : "skip")
     return this.lockAndFlush(async () => {
       if (opts?.signal?.aborted) throw abortedError(opts.signal)
-      await this.ensureLease(wait)
+      await this.ensureLease(wait, opts?.signal)
+      // A claim already under way when the abort came is finished, not
+      // abandoned: the write stops here instead.
+      if (opts?.signal?.aborted) throw abortedError(opts.signal)
       this.ensureHeldForUpload()
       const target = await this.buildStamperTarget(opts)
       // Bracket the in-flight upload so the refresh tick's idle-yield can't
@@ -474,9 +481,13 @@ export class BatchWriteCoordinator {
    * lock (called from `withWrite`/`startLease`). Re-arms a pending acquire
    * when no lease is held or we are read-only, then either acquires (with
    * slot-wait in "block" mode, or once-then-throw in "skip" mode) or runs the
-   * throttled freshness check on the held lease.
+   * throttled freshness check on the held lease. `signal` ends a slot-wait
+   * between its rounds, rejecting with `aborted`.
    */
-  private async ensureLease(wait: "block" | "skip"): Promise<void> {
+  private async ensureLease(
+    wait: "block" | "skip",
+    signal?: AbortSignal,
+  ): Promise<void> {
     try {
       // Single-partition (legacy) accounts never lease — nothing to do (and no
       // ghost-lease risk, so the disposed guard below doesn't apply to them).
@@ -508,11 +519,16 @@ export class BatchWriteCoordinator {
         }
         try {
           await withTimeout(
-            this.acquireWithSlotWait(),
+            this.acquireWithSlotWait(signal),
             PARTITION_LEASE_ACQUIRE_TIMEOUT_MS,
             `Partition lease timed out after ${PARTITION_LEASE_ACQUIRE_TIMEOUT_MS}ms`,
           )
         } catch (error) {
+          // The caller gave up: the wait ended between rounds, so nothing is
+          // left running to pause, and the next write acquires afresh.
+          if (error instanceof SwarmIdError && error.code === "aborted") {
+            throw error
+          }
           console.warn(
             "[BatchWriteCoordinator] Partition lease acquisition failed, pausing background work:",
             error,
@@ -702,9 +718,11 @@ export class BatchWriteCoordinator {
   /**
    * Wait-for-slot wrapper around `acquire`. When the initial acquire returns
    * read-only (every partition held by a live foreign holder), poll every
-   * `LEASE_REFRESH_MS` up to `SLOT_WAIT_TIMEOUT_MS`.
+   * `LEASE_REFRESH_MS` up to `SLOT_WAIT_TIMEOUT_MS`. `signal` wakes the poll's
+   * sleep and ends the wait with `aborted` before the next acquire, never
+   * during one: a claim is not left half-written.
    */
-  private async acquireWithSlotWait(): Promise<void> {
+  private async acquireWithSlotWait(signal?: AbortSignal): Promise<void> {
     const deadline = Date.now() + SLOT_WAIT_TIMEOUT_MS
     // Epoch capture: when the `withTimeout` in `ensureLease` fires, this
     // loop keeps running detached (the race can't cancel it) and would
@@ -722,7 +740,7 @@ export class BatchWriteCoordinator {
     }
     this.slotWait = state
     try {
-      await this.pollForSlot(deadline, epoch, state)
+      await this.pollForSlot(deadline, epoch, state, signal)
     } finally {
       // However this exits — return, throw, or the disposed check — this
       // wait's state describes a sleep that is over. Only clear it if it is
@@ -735,8 +753,10 @@ export class BatchWriteCoordinator {
     deadline: number,
     epoch: number,
     state: SlotWaitState,
+    signal: AbortSignal | undefined,
   ): Promise<void> {
     while (true) {
+      if (signal?.aborted) throw abortedError(signal)
       await this.acquire()
       // Disposed mid-wait (disconnect during the slot poll): stop waiting for a
       // slot we'd never be able to use.
@@ -771,12 +791,12 @@ export class BatchWriteCoordinator {
         // the holder that already yielded cannot stand the others down
         // against it (#724).
         state.rescansLeft--
-        await this.sleepUntilWoken(state, ANNOUNCED_RESCAN_INTERVAL_MS)
+        await this.sleepUntilWoken(state, ANNOUNCED_RESCAN_INTERVAL_MS, signal)
       } else {
         // Ask live holders to yield (re-broadcast every round — idempotent),
         // then sleep the poll interval, waking early on `notifySlotMaybeFree`.
         this.deps.onSlotWait?.()
-        await this.sleepUntilWoken(state, LEASE_REFRESH_MS)
+        await this.sleepUntilWoken(state, LEASE_REFRESH_MS, signal)
       }
       // Checked between the sleep and the next acquire: a fresh `acquire()`
       // call would capture the bumped epoch as its own baseline and commit.
@@ -784,10 +804,16 @@ export class BatchWriteCoordinator {
     }
   }
 
-  private sleepUntilWoken(state: SlotWaitState, ms: number): Promise<void> {
+  /** Sleep `ms`, or until a peer's announcement or `signal`'s abort wakes it. */
+  private sleepUntilWoken(
+    state: SlotWaitState,
+    ms: number,
+    signal: AbortSignal | undefined,
+  ): Promise<void> {
     return new Promise<void>((resolve) => {
       const wake = () => {
         clearTimeout(timer)
+        signal?.removeEventListener("abort", wake)
         state.wake = undefined
         // Consumed by this wake — it is the reason we are awake.
         state.maybeFree = false
@@ -795,6 +821,7 @@ export class BatchWriteCoordinator {
       }
       const timer = setTimeout(wake, ms)
       state.wake = wake
+      signal?.addEventListener("abort", wake, { once: true })
     })
   }
 
