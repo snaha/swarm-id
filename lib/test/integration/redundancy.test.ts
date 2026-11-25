@@ -19,6 +19,12 @@ import { createClusterContext } from "./cluster"
 const LEVELS: RedundancyLevel[] = [1, 2, 3, 4]
 const TWO_LEVEL_LEAVES = 140
 const UPLOAD_TIMEOUT_MS = 120_000
+/**
+ * Deferred, as bee-js's own upload is: the queen serves the reads either way,
+ * and a direct upload's every chunk waits on push-sync, which starves the
+ * other files' direct uploads on the shared cluster.
+ */
+const DEFERRED = { deferred: true } as const
 
 function randomPayload(size: number): Uint8Array {
   const data = new Uint8Array(size)
@@ -53,6 +59,7 @@ describe("erasure-coded uploads against live cluster", () => {
           const data = randomPayload(size)
 
           const ours = await uploadData(target, data, {
+            ...DEFERRED,
             redundancyLevel: level,
           })
           const bees = await bee.data.upload(batchId, data, {
@@ -75,6 +82,7 @@ describe("erasure-coded uploads against live cluster", () => {
       const data = randomPayload(TWO_LEVEL_LEAVES * CHUNK_SIZE + 1)
 
       const ours = await uploadData(target, data, {
+        ...DEFERRED,
         redundancyLevel: 1,
         webSocket: {},
       })
@@ -94,6 +102,7 @@ describe("erasure-coded uploads against live cluster", () => {
       const data = randomPayload(TWO_LEVEL_LEAVES * CHUNK_SIZE + 1)
 
       const { reference } = await uploadData(target, data, {
+        ...DEFERRED,
         redundancyLevel: 1,
         encryptionKey: true,
       })
