@@ -24,7 +24,6 @@ import type {
   UploadOptions,
   EnvelopeWithBatchId,
 } from "@ethersphere/bee-js"
-import { Binary } from "cafe-utility"
 import {
   makeContentAddressedChunk,
   makeEncryptedContentAddressedChunk,
@@ -45,6 +44,7 @@ import { ChunkUploadStream } from "./chunk-upload-stream"
 import {
   convertEnvelopeToMarshaledStamp,
   makeSOCAddress,
+  Bytes,
 } from "@ethersphere/core-sdk"
 import type { UploadProgress } from "./types"
 import type { StampWorkerPool } from "./stamp-worker-pool"
@@ -366,7 +366,7 @@ async function uploadStampedChunkViaWebSocket(
   address: Uint8Array,
 ): Promise<void> {
   const envelope = await stamp(address)
-  const stamped = Binary.concatBytes(
+  const stamped = Bytes.concat(
     convertEnvelopeToMarshaledStamp(envelope).toUint8Array(),
     chunkData,
   )
@@ -734,14 +734,14 @@ function encryptedMode(
       const span = sumSpans(refs)
       const { key, encryptedSpan, encryptedData } =
         newChunkEncrypter().encryptChunk(
-          Binary.concatBytes(Span.fromBigInt(span).toUint8Array(), payload),
+          Bytes.concat(Span.fromBigInt(span).toUint8Array(), payload),
         )
-      const chunkData = Binary.concatBytes(encryptedSpan, encryptedData)
+      const chunkData = Bytes.concat(encryptedSpan, encryptedData)
       const address = calculateChunkAddress(chunkData).toUint8Array()
       await sends.submit(chunkData, address)
       return { address, key, span }
     },
-    rootBytes: (root) => Binary.concatBytes(root.address, root.key),
+    rootBytes: (root) => Bytes.concat(root.address, root.key),
   }
 }
 
@@ -950,7 +950,7 @@ export async function uploadSOC(
   // Sign: hash(identifier + chunkAddress)
   // For encrypted SOCs, this is the encrypted chunk address
   // For plain SOCs, this is the unencrypted chunk address
-  const toSign = Binary.concatBytes(identifier.toUint8Array(), chunkAddress)
+  const toSign = Bytes.concat(identifier.toUint8Array(), chunkAddress)
   const signature = signer.sign(toSign)
 
   const socAddressBytes = makeSOCAddress(identifier, owner).toUint8Array()

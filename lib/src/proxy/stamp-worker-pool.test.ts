@@ -6,20 +6,14 @@
  * signing message and the nanosecond timestamp on the main thread, ECDSA
  * signing in a worker — so a slip in any of them ships a stamp Bee accepts but
  * that no longer matches what the sync `Stamper` writes. These tests hold the
- * two to the same bytes in every field but the signature, and hold the
- * signature to what Bee checks: that it recovers to the batch owner over the
- * very message core-sdk signs.
+ * two to the same bytes in every field, the signature included: both sign
+ * through core-sdk, so the same digest yields the same signature. They also
+ * hold the signature to what Bee checks: that it recovers to the batch owner
+ * over the very message core-sdk signs.
  *
  * The slot is not the pool's to pick: it comes from the stamper the pool signs
  * for. The second suite holds a pooled stamp to the slot, the lease fence and
  * the counters `UtilizationAwareStamper.stamp` would have given it.
- *
- * The signature bytes themselves cannot be compared. Both signers are
- * deterministic, but cafe-utility derives its nonce as
- * keccak256(keccak256(key) || hash) while core-sdk signs through noble with
- * RFC 6979, so the same digest yields two different, equally valid
- * signatures. (bee-js 11 signed with cafe-utility too, which is why the two
- * paths used to agree byte for byte.)
  *
  * Node has no `Worker`, so the pool runs against a fake that hands each
  * message to the real worker handler in-process and echoes the response on
@@ -29,8 +23,12 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest"
 import { BatchId, PrivateKey, Stamper } from "@ethersphere/bee-js"
 import type { EnvelopeWithBatchId } from "@ethersphere/bee-js"
-import { stamp, convertEnvelopeToMarshaledStamp } from "@ethersphere/core-sdk"
-import { Binary } from "cafe-utility"
+import {
+  stamp,
+  convertEnvelopeToMarshaledStamp,
+  Bytes,
+} from "@ethersphere/core-sdk"
+import { uint8ArrayToHex } from "../utils/hex"
 import { StampWorkerPool } from "./stamp-worker-pool"
 import { uploadData } from "./upload"
 import { CHUNK_SIZE } from "./chunking"
@@ -107,8 +105,8 @@ function slotOf(envelope: EnvelopeWithBatchId): number {
 
 /** The stamp fields Bee reads off the wire, minus the signature. */
 function unsignedFieldsHex(envelope: EnvelopeWithBatchId): string {
-  return Binary.uint8ArrayToHex(
-    Binary.concatBytes(
+  return uint8ArrayToHex(
+    Bytes.concat(
       envelope.batchId.toUint8Array(),
       envelope.index,
       envelope.timestamp,
@@ -121,7 +119,7 @@ function signedMessage(
   address: Uint8Array,
   envelope: EnvelopeWithBatchId,
 ): Uint8Array {
-  return Binary.concatBytes(
+  return Bytes.concat(
     address,
     envelope.batchId.toUint8Array(),
     envelope.index,
@@ -140,7 +138,7 @@ function expectSignedByIssuer(
   expect(recovered.toHex()).toBe(envelope.issuer.toHex())
 }
 
-/** Same unsigned fields, and a signature the batch owner could have produced. */
+/** Same bytes in every field, and a signature the batch owner produced. */
 function expectEquivalentStamps(
   address: Uint8Array,
   actual: EnvelopeWithBatchId,
@@ -148,6 +146,7 @@ function expectEquivalentStamps(
 ): void {
   expect(unsignedFieldsHex(actual)).toBe(unsignedFieldsHex(expected))
   expect(actual.issuer.toHex()).toBe(expected.issuer.toHex())
+  expect(actual.signature.toHex()).toBe(expected.signature.toHex())
   expectSignedByIssuer(address, actual)
   expectSignedByIssuer(address, expected)
 }

@@ -23,8 +23,7 @@ import {
   SPAN_SIZE,
   UNENCRYPTED_REF_SIZE,
 } from "../chunk"
-import { Binary } from "cafe-utility"
-import { makeSOCAddress } from "@ethersphere/core-sdk"
+import { makeSOCAddress, Bytes, equals } from "@ethersphere/core-sdk"
 import {
   ENCRYPTED_REFS_PER_CHUNK,
   PLAIN_REFS_PER_CHUNK,
@@ -32,7 +31,7 @@ import {
 } from "./chunking"
 import type { UploadProgress } from "./types"
 import type { SingleOwnerChunk } from "../types"
-import { hexToUint8Array } from "../utils/hex"
+import { hexToUint8Array, uint8ArrayToHex } from "../utils/hex"
 
 /**
  * The slice of a Bee client that reading chunks needs.
@@ -66,7 +65,7 @@ function makeSingleOwnerChunkFromData(
   const signature = Signature.fromSlice(data, IDENTIFIER_SIZE)
   const cacData = data.slice(SOC_HEADER_SIZE)
   const cacAddress = calculateChunkAddress(cacData)
-  const digest = Binary.concatBytes(
+  const digest = Bytes.concat(
     identifier.toUint8Array(),
     cacAddress.toUint8Array(),
   )
@@ -77,7 +76,7 @@ function makeSingleOwnerChunkFromData(
   }
 
   const socAddress = makeSOCAddress(identifier, recoveredOwner)
-  if (!Binary.equals(address.toUint8Array(), socAddress.toUint8Array())) {
+  if (!equals(address.toUint8Array(), socAddress.toUint8Array())) {
     throw new Error("SOC data does not match given address")
   }
 
@@ -92,7 +91,7 @@ function makeSingleOwnerChunkFromData(
     const span = readSpan(spanBytes)
     payload = decrypted.slice(SPAN_SIZE, SPAN_SIZE + span)
 
-    rebuiltData = Binary.concatBytes(
+    rebuiltData = Bytes.concat(
       identifier.toUint8Array(),
       signature.toUint8Array(),
       spanBytes,
@@ -208,7 +207,7 @@ async function downloadAndProcessChunk(
   ref: ChunkRef,
   requestOptions?: BeeRequestOptions,
 ): Promise<{ span: number; payload: Uint8Array }> {
-  const addressHex = Binary.uint8ArrayToHex(ref.address)
+  const addressHex = uint8ArrayToHex(ref.address)
   let rawChunk: Uint8Array
   try {
     rawChunk = await bee.chunk.download(addressHex, undefined, requestOptions)
@@ -323,7 +322,7 @@ export async function downloadDataWithChunkAPI(
   // Log only the address half: for encrypted references the trailing
   // 32 bytes are the decryption key and must never reach the console.
   console.log(
-    `[DownloadData] start addr=${Binary.uint8ArrayToHex(rootRef.address)} encrypted=${isEncrypted} bee.url=${bee.url}`,
+    `[DownloadData] start addr=${uint8ArrayToHex(rootRef.address)} encrypted=${isEncrypted} bee.url=${bee.url}`,
   )
 
   // First, download root chunk to get span for progress estimation

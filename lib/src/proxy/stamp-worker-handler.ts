@@ -6,10 +6,19 @@
  * global so the main thread's tests can drive it in-process. `stamp-worker.ts`
  * is the entry point that wires it to `self.onmessage`.
  *
- * Imports only from cafe-utility — no DOM dependencies, fully worker-compatible.
+ * Imports only from core-sdk and the hex helpers — no DOM dependencies, fully worker-compatible.
  */
 
-import { Binary, Elliptic } from "cafe-utility"
+import {
+  Bytes,
+  keccak256,
+  numberToUint256,
+  privateKeyToPublicKey,
+  publicKeyToAddress,
+  signMessage,
+  uint256ToNumber,
+} from "@ethersphere/core-sdk"
+import { hexToUint8Array, uint8ArrayToHex } from "../utils/hex"
 
 const ENCODER = new TextEncoder()
 const ETH_PREFIX = ENCODER.encode("\x19Ethereum Signed Message:\n32")
@@ -50,42 +59,42 @@ export type StampWorkerResponse =
 /**
  * Handle an incoming message from the main thread.
  *
- * Replicates core-sdk's `PrivateKey.sign()`:
+ * Signs as core-sdk's `PrivateKey.sign()` does:
  *   1. digest = concat(ETH_PREFIX, keccak256(message))
- *   2. [r, s, v] = Elliptic.signMessage(digest, privateKey)
+ *   2. [r, s, v] = signMessage(digest, privateKey)
  *   3. signature = concat(r[32], s[32], v[1])
  */
 export function handleMessage(msg: StampWorkerMessage): StampWorkerResponse {
   if (msg.type === "init") {
-    const keyBytes = Binary.hexToUint8Array(msg.signerKeyHex)
-    privateKeyBigInt = Binary.uint256ToNumber(keyBytes, "BE")
+    const keyBytes = hexToUint8Array(msg.signerKeyHex)
+    privateKeyBigInt = uint256ToNumber(keyBytes, "BE")
 
     // Derive issuer address: publicKey → keccak256 → last 20 bytes
-    const [x, y] = Elliptic.privateKeyToPublicKey(privateKeyBigInt)
-    const pubKeyBytes = Binary.concatBytes(
-      Binary.numberToUint256(x, "BE"),
-      Binary.numberToUint256(y, "BE"),
+    const [x, y] = privateKeyToPublicKey(privateKeyBigInt)
+    const pubKeyBytes = Bytes.concat(
+      numberToUint256(x, "BE"),
+      numberToUint256(y, "BE"),
     )
     const [px, py] = [
-      Binary.uint256ToNumber(pubKeyBytes.slice(0, 32), "BE"),
-      Binary.uint256ToNumber(pubKeyBytes.slice(32, 64), "BE"),
+      uint256ToNumber(pubKeyBytes.slice(0, 32), "BE"),
+      uint256ToNumber(pubKeyBytes.slice(32, 64), "BE"),
     ]
-    issuerBytes = Elliptic.publicKeyToAddress([px, py])
+    issuerBytes = publicKeyToAddress([px, py])
 
-    return { type: "ready", issuerHex: Binary.uint8ArrayToHex(issuerBytes) }
+    return { type: "ready", issuerHex: uint8ArrayToHex(issuerBytes) }
   }
 
   // type === 'sign'
-  const digest = Binary.concatBytes(ETH_PREFIX, Binary.keccak256(msg.message))
-  const [r, s, v] = Elliptic.signMessage(digest, privateKeyBigInt)
-  const signature = Binary.concatBytes(
-    Binary.numberToUint256(r, "BE"),
-    Binary.numberToUint256(s, "BE"),
+  const digest = Bytes.concat(ETH_PREFIX, keccak256(msg.message))
+  const [r, s, v] = signMessage(digest, privateKeyBigInt)
+  const signature = Bytes.concat(
+    numberToUint256(r, "BE"),
+    numberToUint256(s, "BE"),
     new Uint8Array([Number(v)]),
   )
   return {
     type: "signed",
     id: msg.id,
-    signatureHex: Binary.uint8ArrayToHex(signature),
+    signatureHex: uint8ArrayToHex(signature),
   }
 }

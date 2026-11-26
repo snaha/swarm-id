@@ -38,8 +38,8 @@ import {
   Topic,
   type Stamper,
 } from "@ethersphere/bee-js"
-import { Binary } from "cafe-utility"
-import { makeSOCAddress } from "@ethersphere/core-sdk"
+import { uint8ArrayToHex } from "../utils/hex"
+import { makeSOCAddress, Bytes, equals, keccak256 } from "@ethersphere/core-sdk"
 import { z } from "zod"
 import {
   downloadDataWithChunkAPI,
@@ -118,8 +118,8 @@ export function makePartitionStateTopic(
 ): Topic {
   const partitionBytes = new Uint8Array(UINT32_BYTES)
   new DataView(partitionBytes.buffer).setUint32(0, partition, false)
-  const hash = Binary.keccak256(
-    Binary.concatBytes(
+  const hash = keccak256(
+    Bytes.concat(
       new TextEncoder().encode(PARTITION_STATE_TOPIC_DOMAIN),
       batchId.toUint8Array(),
       partitionBytes,
@@ -202,7 +202,7 @@ function makeStatePointerIdentifier(
   const bucketBytes = new Uint8Array(8)
   new DataView(bucketBytes.buffer).setBigUint64(0, BigInt(epochBucket), false)
   return new Identifier(
-    Binary.keccak256(Binary.concatBytes(topic.toUint8Array(), bucketBytes)),
+    keccak256(Bytes.concat(topic.toUint8Array(), bucketBytes)),
   )
 }
 
@@ -616,7 +616,7 @@ export async function readPartitionState(
       references.map((ref, i) =>
         bytesAllZero(ref)
           ? undefined
-          : downloadDataWithChunkAPI(bee, Binary.uint8ArrayToHex(ref)).then(
+          : downloadDataWithChunkAPI(bee, uint8ArrayToHex(ref)).then(
               (data) => ({ i, ref, data }),
             ),
       ),
@@ -826,7 +826,7 @@ export async function writePartitionState(opts: {
   const uploadIndices = incremental
     ? allIndices.filter(
         (i) =>
-          !Binary.equals(
+          !equals(
             extractChunk(localCounter, i, batchDepth),
             extractChunk(previousCounter, i, batchDepth),
           ),
@@ -919,11 +919,11 @@ export async function writePartitionState(opts: {
   })
 
   // The reference chunk lists every ref (N·64 bytes; ≤ 4096 even at N=64).
-  const referenceChunk = Binary.concatBytes(...references)
+  const referenceChunk = Bytes.concat(...references)
   const refPicked = pickReservedChunkKey(referenceChunk, claimedBuckets)
   reserve?.markReservedUtilizationChunk(refPicked.address, partition)
 
-  const referenceHex = Binary.uint8ArrayToHex(refPicked.reference)
+  const referenceHex = uint8ArrayToHex(refPicked.reference)
 
   // Invariant the parallel PUTs below rely on: every reserved-slot chunk this
   // publish uploads must occupy a DISTINCT bucket. They all land at

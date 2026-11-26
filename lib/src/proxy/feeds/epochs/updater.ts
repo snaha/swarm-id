@@ -8,9 +8,8 @@
  * epoch and uploading chunks.
  */
 
-import { Binary } from "cafe-utility"
 import { EthAddress, Topic, PrivateKey } from "@ethersphere/bee-js"
-import { makeSOCAddress } from "@ethersphere/core-sdk"
+import { makeSOCAddress, Bytes } from "@ethersphere/core-sdk"
 import { EpochIndex, MAX_LEVEL, makeEpochIdentifier } from "./epoch"
 import { uploadSOC, isStamperTarget, type UploadTarget } from "../../upload"
 import type { EpochUpdater, EpochUpdateHints, EpochUpdateResult } from "./types"
@@ -183,7 +182,7 @@ export class BasicEpochUpdater implements EpochUpdater {
     // Payload: timestamp + reference = 40 or 72 bytes
     // The upload function will wrap this in a CAC (adding span) to get 48 or 80 bytes
     // which is the v1 format Bee expects for /bzz/ compatibility
-    const payload = Binary.concatBytes(timestamp, reference)
+    const payload = Bytes.concat(timestamp, reference)
 
     const result = await uploadSOC(target, this.signer, identifier, payload, {
       encryptionKey,
