@@ -1420,10 +1420,15 @@ describe("SwarmIdProxy subsidised-mode selection", () => {
         source: parentWindow,
       } as unknown as MessageEvent)
 
+    /** The request's answer: its response or error, not a queue beat. */
     const answer = () =>
       parentWindow.postMessage.mock.calls
         .map(([message]) => message)
-        .find((message) => message?.requestId === "w1")
+        .find(
+          (message) =>
+            message?.requestId === "w1" &&
+            (message.type === "error" || message.type.endsWith("Response")),
+        )
 
     /** A user-stamp session whose writes run against a mock Bee. */
     async function userStampSession() {

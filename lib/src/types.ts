@@ -1712,6 +1712,27 @@ export const DownloadDataResponseMessageSchema = z.object({
   data: z.instanceof(Uint8Array),
 })
 
+/**
+ * A write on `requestId` is waiting for its drive (the write path, the
+ * cross-tab lock, the partition lease). Said once the wait has lasted
+ * `REQUEST_QUEUED_ANNOUNCE_DELAY_MS` and on a beat while it goes on; the
+ * client's timeout does not run meanwhile. A write that gets its drive
+ * sooner is never said to be queued
+ */
+export const RequestQueuedMessageSchema = z.object({
+  type: z.literal("requestQueued"),
+  requestId: z.string(),
+})
+
+/**
+ * The write on `requestId`, said to be queued, has its drive: the client's
+ * wait for the answer starts over, at its full timeout
+ */
+export const RequestStartedMessageSchema = z.object({
+  type: z.literal("requestStarted"),
+  requestId: z.string(),
+})
+
 export const DeriveAppSecretResponseMessageSchema = z.object({
   type: z.literal("deriveAppSecretResponse"),
   requestId: z.string(),
@@ -2149,6 +2170,8 @@ export const IframeToParentMessageSchema = z.discriminatedUnion("type", [
   AuthSuccessMessageSchema,
   UploadDataResponseMessageSchema,
   DownloadDataResponseMessageSchema,
+  RequestQueuedMessageSchema,
+  RequestStartedMessageSchema,
   DeriveAppSecretResponseMessageSchema,
   UploadFileResponseMessageSchema,
   DownloadFileResponseMessageSchema,
