@@ -244,9 +244,6 @@ importers:
 
   multichain:
     dependencies:
-      cafe-utility:
-        specifier: 33.8.0
-        version: 33.8.0
       viem:
         specifier: 2.55.13
         version: 2.55.13(typescript@6.0.3)(zod@4.6.7)
@@ -3109,9 +3106,6 @@ packages:
   bytes@3.1.2:
     resolution: {integrity: sha512-/Nf7TyzTx6S3yRJObOAV7956r8cr2+Oj8AC5dt8wSP3BQAoeX58NoHyCU8P8zGkNXStjTSi6fzO6F0pBdcYbEg==}
     engines: {node: '>= 0.8'}
-
-  cafe-utility@33.8.0:
-    resolution: {integrity: sha512-qfbG8nHTY5jBfCSedG9+b57avhKePdiHfj2w0FMGokJuQU+3dxeT9+qasMReoXHBDp38CFHMSEvz5X0SDCXbWA==}
 
   cafe-utility@34.0.0:
     resolution: {integrity: sha512-4gxiVyngFbRa1G10+DIDUjk/Qu8OMxgK5bnNXMj4y80Tc+RLdZlk+pE7scgediQS2cxn8L+3XauS8tE62EfsTg==}
@@ -9378,8 +9372,6 @@ snapshots:
   bytes@3.0.0: {}
 
   bytes@3.1.2: {}
-
-  cafe-utility@33.8.0: {}
 
   cafe-utility@34.0.0: {}
 

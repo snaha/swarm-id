@@ -3,7 +3,7 @@
 // Adapted from @upcoming/multichain-library (ISC)
 // https://github.com/ethersphere/multichain-library
 
-import { RollingValueProvider, Types } from "cafe-utility"
+import type { RollingValueProvider } from "./rolling-value-provider"
 import { jsonRpc, jsonRpcOrUndefined } from "./fetch"
 import { legacyGasPrice } from "./fees"
 import type { MultichainSettings } from "./settings"
@@ -17,6 +17,13 @@ export interface TransactionReceipt {
   to: `0x${string}`
   transactionHash: `0x${string}`
   logs: Array<{ address: `0x${string}`; topics: `0x${string}`[] }>
+}
+
+function hexQuantity(value: unknown): string {
+  if (typeof value !== "string" || value.trim() === "") {
+    throw new TypeError(`Expected string, got: ${String(value)}`)
+  }
+  return value
 }
 
 /** @returns the receipt, or undefined while the transaction is still pending. */
@@ -36,7 +43,10 @@ export async function getTransactionReceipt(
   if (result === undefined) {
     return undefined
   }
-  return Types.asObject(result) as unknown as TransactionReceipt
+  if (!result || typeof result !== "object" || Array.isArray(result)) {
+    throw new TypeError(`Expected object, got: ${String(result)}`)
+  }
+  return result as TransactionReceipt
 }
 
 /** Pending-block nonce, so sequential sends chain without waiting. */
@@ -51,7 +61,7 @@ export async function getTransactionCount(
     "eth_getTransactionCount",
     [address, "pending"],
   )
-  return Number(BigInt(Types.asString(result)))
+  return Number(BigInt(hexQuantity(result)))
 }
 
 export async function getGasPrice(
@@ -59,7 +69,7 @@ export async function getGasPrice(
   rpcProvider: RollingValueProvider<string>,
 ): Promise<bigint> {
   const result = await jsonRpc(rpcProvider, settings, "eth_gasPrice", [])
-  return BigInt(Types.asString(result))
+  return BigInt(hexQuantity(result))
 }
 
 /**
@@ -97,7 +107,7 @@ export async function getMaxPriorityFeePerGas(
       "eth_maxPriorityFeePerGas",
       [],
     )
-    return BigInt(Types.asString(result))
+    return BigInt(hexQuantity(result))
   } catch {
     return 0n
   }
@@ -123,7 +133,7 @@ export async function estimateTransferGas(
   const result = await jsonRpc(rpcProvider, settings, "eth_estimateGas", [
     { from, to, value: `0x${value.toString(16)}` },
   ])
-  return BigInt(Types.asString(result))
+  return BigInt(hexQuantity(result))
 }
 
 export async function getChainId(
@@ -131,7 +141,7 @@ export async function getChainId(
   rpcProvider: RollingValueProvider<string>,
 ): Promise<number> {
   const result = await jsonRpc(rpcProvider, settings, "eth_chainId", [])
-  return Number(BigInt(Types.asString(result)))
+  return Number(BigInt(hexQuantity(result)))
 }
 
 export async function getNativeBalance(
@@ -143,5 +153,5 @@ export async function getNativeBalance(
     address,
     "latest",
   ])
-  return BigInt(Types.asString(result))
+  return BigInt(hexQuantity(result))
 }

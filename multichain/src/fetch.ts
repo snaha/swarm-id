@@ -3,7 +3,8 @@
 // Adapted from @upcoming/multichain-library (ISC)
 // https://github.com/ethersphere/multichain-library
 
-import { Dates, RollingValueProvider, System } from "cafe-utility"
+import type { RollingValueProvider } from "./rolling-value-provider"
+import { withRetries } from "./poll"
 import {
   checkStatus,
   checkedResult,
@@ -15,6 +16,8 @@ import {
 import type { MultichainSettings } from "./settings"
 
 const RETRY_ATTEMPTS = 5
+const RETRY_FIRST_DELAY_MILLIS = 1_000
+const RETRY_LAST_DELAY_MILLIS = 5_000
 
 /**
  * POST against the current RPC URL with retries, rotating to the next
@@ -34,7 +37,7 @@ async function durableFetch(
   subject: string,
   body: unknown,
 ): Promise<{ response: Response; label: string }> {
-  return System.withRetries(
+  return withRetries(
     async () => {
       // Read the url INSIDE the attempt: the provider rotates between attempts,
       // so one captured outside would name an endpoint that never answered.
@@ -49,11 +52,15 @@ async function durableFetch(
       checkStatus(response, subject, label)
       return { response, label }
     },
-    RETRY_ATTEMPTS,
-    Dates.seconds(1),
-    Dates.seconds(5),
-    console.error,
-    () => rpcProvider.next(),
+    {
+      allowedFailures: RETRY_ATTEMPTS,
+      firstDelayMillis: RETRY_FIRST_DELAY_MILLIS,
+      lastDelayMillis: RETRY_LAST_DELAY_MILLIS,
+      onFailure: (error, attempt) => {
+        console.error("RPC request failed, retrying", { attempt, error })
+        rpcProvider.next()
+      },
+    },
   )
 }
 

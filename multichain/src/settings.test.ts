@@ -25,4 +25,9 @@ describe("settings presets", () => {
       "0xdbf3ea6f5bee45c02255b2c26a16f300502f68da",
     )
   })
+
+  it("an override left undefined keeps the preset's value", () => {
+    const settings = gnosisMainnetSettings({ chainName: undefined })
+    expect(settings.chainName).toBe("Gnosis")
+  })
 })
