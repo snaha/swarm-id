@@ -3,10 +3,12 @@
 
 import { describe, it, expect } from "vitest"
 import { RedundancyLevel, Utils } from "@ethersphere/bee-js"
+import { getMaxShards, getParities } from "@ethersphere/core-sdk"
 import { CHUNK_SIZE, NUM_BUCKETS, partitionCapacity } from "./batch-utilization"
 import {
   DEFAULT_FIT_CONFIDENCE,
   SAVE_OVERHEAD_CHUNKS,
+  SAVE_MANIFEST_NODES,
   bytesForChunks,
   chunksForBytes,
   chunksThatFit,
@@ -84,6 +86,21 @@ describe("chunksForBytes", () => {
   it("packs 128 references per intermediate chunk when unencrypted", () => {
     expect(chunksForBytes(PLAIN_FAN_OUT * CHUNK_SIZE, false)).toBe(
       PLAIN_FAN_OUT + 1 + SAVE_OVERHEAD_CHUNKS,
+    )
+  })
+
+  it("adds a batch's parity, the root's replicas and the manifest's at a redundancy level", () => {
+    const MEDIUM = 1
+    const MEDIUM_REPLICAS = 2
+    const batch = getMaxShards(MEDIUM, true)
+    expect(chunksForBytes(batch * CHUNK_SIZE, true, MEDIUM)).toBe(
+      batch +
+        getParities(MEDIUM, batch, true) +
+        1 +
+        MEDIUM_REPLICAS +
+        SAVE_OVERHEAD_CHUNKS +
+        // The save's manifest nodes are replicated too
+        SAVE_MANIFEST_NODES * MEDIUM_REPLICAS,
     )
   })
 })

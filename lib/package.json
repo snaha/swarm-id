@@ -54,8 +54,8 @@
     "provenance": true
   },
   "dependencies": {
-    "@ethersphere/bee-js": "13.0.0",
-    "@ethersphere/core-sdk": "0.1.1",
+    "@ethersphere/bee-js": "13.2.0",
+    "@ethersphere/core-sdk": "0.2.2",
     "@noble/curves": "1.2.0",
     "@noble/hashes": "1.3.2",
     "cafe-utility": "34.0.0",

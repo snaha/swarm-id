@@ -85,6 +85,21 @@ describe("saveMantarayTreeRecursively with a payload-wrapping uploader", () => {
     expect(fork).toBeDefined()
     expect(fork?.node.metadata?.Filename).toBe(FILENAME)
   })
+
+  it("loads a manifest that can be edited below its root", async () => {
+    const { bee, target } = setup()
+    const { rootReference } = await saveMantarayTreeRecursively(
+      makeManifest(),
+      async (data) => uploadData(target, data),
+    )
+
+    const loaded = await loadMantarayTreeWithChunkAPI(bee, rootReference)
+
+    // Down the loaded fork: core-sdk 0.2 refuses to edit a node it did not load
+    expect(() =>
+      loaded.addFork(`${FILENAME}.bak`, hexToUint8Array(CONTENT_REFERENCE)),
+    ).not.toThrow()
+  })
 })
 
 describe("saveMantarayTree with a payload-wrapping uploader", () => {

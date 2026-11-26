@@ -16,7 +16,12 @@
 
 import { SwarmIdError, abortedError } from "../errors"
 import { refusedPath } from "./errors"
-import { Reference, PrivateKey, Identifier, Span } from "@ethersphere/bee-js"
+import {
+  PrivateKey,
+  Identifier,
+  EthAddress,
+  Signature,
+} from "@ethersphere/bee-js"
 import type {
   Bee,
   BeeRequestOptions,
@@ -29,23 +34,32 @@ import {
   makeContentAddressedChunk,
   makeEncryptedContentAddressedChunk,
   calculateChunkAddress,
-  newChunkEncrypter,
   DEFAULT_UPLOAD_CONCURRENCY,
-  ENCRYPTED_REF_SIZE,
-  UNENCRYPTED_REF_SIZE,
+  SPAN_SIZE,
+  IDENTIFIER_SIZE,
+  SOC_HEADER_SIZE,
 } from "../chunk"
 import {
   CHUNK_SIZE,
-  ENCRYPTED_REFS_PER_CHUNK,
-  PLAIN_REFS_PER_CHUNK,
   estimateTotalChunks,
   rechunk,
+  replicaCount,
 } from "./chunking"
 import { ChunkUploadStream } from "./chunk-upload-stream"
 import {
+  ChunkBuilder,
+  ChunkSplitter,
   convertEnvelopeToMarshaledStamp,
+  encryptData,
+  encryptSpan,
+  getMaxShards,
+  makeErasureBatch,
+  makeIntermediateChunkHandler,
+  makeReplicas,
   makeSOCAddress,
+  REPLICAS_OWNER,
 } from "@ethersphere/core-sdk"
+import type { RedundancyLevel } from "../types"
 import type { UploadProgress } from "./types"
 import type { StampWorkerPool } from "./stamp-worker-pool"
 import { createTagIfSupported, tryCreateTag } from "../utils/tag"
@@ -139,6 +153,12 @@ export interface UploadDataOptions {
   encryptionKey?: Uint8Array | true
   /** Pin the uploaded data (stamper mode only; a subsidised gateway never sees it, #752) */
   pin?: boolean
+  /**
+   * Erasure-coding level, Bee's `swarm-redundancy-level` (#307): 0 none
+   * (default), 1 medium, 2 strong, 3 insane, 4 paranoid. Each level adds
+   * Reed-Solomon parity per batch of chunks and replicas of the root.
+   */
+  redundancyLevel?: RedundancyLevel
   /** Use deferred upload mode */
   deferred?: boolean
   /** Tag for tracking upload progress */
@@ -607,141 +627,42 @@ export class SendWindow {
 // Merkle Tree Building
 // ============================================================================
 
-/** One child of an intermediate chunk of a plain tree. */
-interface PlainRef {
-  address: Uint8Array
-  span: bigint
-}
-
-/** One child of an intermediate chunk of an encrypted tree: its key too. */
-interface EncryptedRef extends PlainRef {
-  key: Uint8Array
-}
+const ENCRYPTION_KEY_SIZE = 32
 
 /**
- * Send the intermediate chunk over `refs` and resolve with its reference. A
- * reference is known from the bytes alone, so chunks may land in any order and
- * the tree never waits for an answer from the node.
+ * A sealed chunk of core-sdk's splitter as it goes on the wire: encrypted
+ * with its key when it has one, otherwise trimmed to what was written into
+ * it, as Bee stores a chunk. Parity is the exception and goes out whole:
+ * core-sdk builds a parity chunk from its bytes without writing them, so its
+ * writer cursor stays 0, and every chunk the splitter hands on with nothing
+ * written is one. (The empty file's single chunk has nothing written either,
+ * but it is the root, which never reaches `makeErasureBatch`.)
+ *
+ * ponytail: the splitter already hashed (and, for an encrypted tree,
+ * encrypted) every chunk to reference it, but core-sdk 0.2's `ChunkEntry`
+ * hands on neither the address nor the encrypted bytes, so each chunk is
+ * hashed and encrypted a second time here. core-sdk 0.3 puts the address on
+ * the entry (core-sdk#23); take it once bee-js depends on 0.3, so both share
+ * one copy of core-sdk's classes.
  */
-type WrapChunk<R extends PlainRef> = (refs: R[]) => Promise<R>
-
-/**
- * Builds a Merkle tree from its leaves as they arrive, holding one partial
- * intermediate per level rather than every reference: a full level is wrapped
- * at once and only the wrapper is carried up.
- */
-class ReferenceTree<R extends PlainRef> {
-  private readonly levels: R[][] = [[]]
-
-  constructor(
-    private readonly fanout: number,
-    private readonly wrap: WrapChunk<R>,
-  ) {}
-
-  async add(ref: R, level = 0): Promise<void> {
-    const refs = (this.levels[level] ??= [])
-    refs.push(ref)
-    if (refs.length < this.fanout) return
-    this.levels[level] = []
-    await this.add(await this.wrap(refs), level + 1)
-  }
-
-  async finish(): Promise<R> {
-    for (let level = 0; ; level++) {
-      const refs = this.levels[level]
-      const nothingAbove = this.levels
-        .slice(level + 1)
-        .every((above) => above.length === 0)
-      if (nothingAbove && refs.length === 1) return refs[0]
-      if (refs.length === 0) continue
-      this.levels[level] = []
-      // Bee's "carrier chunk" rule: a lone reference moves up unwrapped. A
-      // ghost intermediate with span ≤ 4096 would read back as a leaf.
-      const carried = refs.length === 1 ? refs[0] : await this.wrap(refs)
-      ;(this.levels[level + 1] ??= []).push(carried)
-    }
-  }
-}
-
-/** How one kind of tree, plain or encrypted, makes and references its chunks. */
-interface TreeMode<R extends PlainRef> {
-  encrypted: boolean
-  fanout: number
-  /** The leaf chunk over `payload`, and its reference */
-  leaf: (payload: Uint8Array) => { chunkData: Uint8Array; ref: R }
-  wrap: (sends: SendWindow) => WrapChunk<R>
-  /** The bytes of the upload's reference, from its root */
-  rootBytes: (root: R) => Uint8Array
-}
-
-function sumSpans(refs: PlainRef[]): bigint {
-  return refs.reduce((sum, ref) => sum + ref.span, 0n)
-}
-
-const PLAIN_MODE: TreeMode<PlainRef> = {
-  encrypted: false,
-  fanout: PLAIN_REFS_PER_CHUNK,
-  leaf: (payload) => {
-    const chunk = makeContentAddressedChunk(payload)
-    return {
-      chunkData: chunk.data,
-      ref: {
-        address: chunk.address.toUint8Array(),
-        span: BigInt(payload.length),
-      },
-    }
-  },
-  wrap: (sends) => async (refs) => {
-    const payload = new Uint8Array(refs.length * UNENCRYPTED_REF_SIZE)
-    refs.forEach((ref, index) => {
-      payload.set(ref.address, index * UNENCRYPTED_REF_SIZE)
-    })
-    // An intermediate chunk's span is the data length its children cover, not
-    // the length of its references: the downloader tells it from a leaf by it.
-    const span = sumSpans(refs)
-    const chunk = makeContentAddressedChunk(payload, span)
-    const address = chunk.address.toUint8Array()
-    await sends.submit(chunk.data, address)
-    return { address, span }
-  },
-  rootBytes: (root) => root.address,
-}
-
-function encryptedMode(
-  explicitKey: Uint8Array | undefined,
-): TreeMode<EncryptedRef> {
+function wireChunk(
+  chunk: ChunkBuilder,
+  key?: Uint8Array,
+  isRoot = false,
+): { chunkData: Uint8Array; address: Uint8Array } {
+  const built = chunk.build()
+  const isParity = chunk.writer.cursor === 0 && !isRoot
+  const chunkData = key
+    ? Binary.concatBytes(
+        encryptSpan(key, built.subarray(0, SPAN_SIZE)),
+        encryptData(key, chunk.writer.buffer),
+      )
+    : isParity
+      ? built
+      : built.subarray(0, SPAN_SIZE + chunk.writer.cursor)
   return {
-    encrypted: true,
-    fanout: ENCRYPTED_REFS_PER_CHUNK,
-    leaf: (payload) => {
-      const chunk = makeEncryptedContentAddressedChunk(payload, explicitKey)
-      return {
-        chunkData: chunk.data,
-        ref: {
-          address: chunk.address.toUint8Array(),
-          key: chunk.encryptionKey,
-          span: BigInt(payload.length),
-        },
-      }
-    },
-    wrap: (sends) => async (refs) => {
-      // Padded with zeros to a full chunk before encryption
-      const payload = new Uint8Array(CHUNK_SIZE)
-      refs.forEach((ref, index) => {
-        payload.set(ref.address, index * ENCRYPTED_REF_SIZE)
-        payload.set(ref.key, index * ENCRYPTED_REF_SIZE + UNENCRYPTED_REF_SIZE)
-      })
-      const span = sumSpans(refs)
-      const { key, encryptedSpan, encryptedData } =
-        newChunkEncrypter().encryptChunk(
-          Binary.concatBytes(Span.fromBigInt(span).toUint8Array(), payload),
-        )
-      const chunkData = Binary.concatBytes(encryptedSpan, encryptedData)
-      const address = calculateChunkAddress(chunkData).toUint8Array()
-      await sends.submit(chunkData, address)
-      return { address, key, span }
-    },
-    rootBytes: (root) => Binary.concatBytes(root.address, root.key),
+    chunkData,
+    address: calculateChunkAddress(chunkData).toUint8Array(),
   }
 }
 
@@ -806,34 +727,26 @@ async function writeTree(
   const { signal } = target
   if (signal?.aborted) throw abortedError(signal)
 
-  if (options?.encryptionKey === undefined) {
-    return writeTreeIn(PLAIN_MODE, target, source, options, known)
-  }
-  const explicitKey =
-    options.encryptionKey instanceof Uint8Array
+  const { chunkAddresses } = known
+  const level = options?.redundancyLevel ?? 0
+  const encrypted = options?.encryptionKey !== undefined
+  // Only the root can take a caller's key: `uploadData` refuses one for more
+  // than a chunk, so the root is then the only chunk.
+  const rootKey =
+    options?.encryptionKey instanceof Uint8Array
       ? options.encryptionKey
       : undefined
-  return writeTreeIn(encryptedMode(explicitKey), target, source, options, known)
-}
-
-async function writeTreeIn<R extends PlainRef>(
-  mode: TreeMode<R>,
-  target: UploadTarget,
-  source: AsyncIterable<Uint8Array>,
-  options: UploadDataOptions | UploadDataStreamOptions | undefined,
-  known: { size?: number; chunkAddresses?: Uint8Array[] },
-): Promise<UploadDataResult> {
-  const { fanout } = mode
-  const { chunkAddresses } = known
 
   const estimated =
-    known.size !== undefined ? estimateTotalChunks(known.size, fanout) : 0
+    known.size !== undefined
+      ? estimateTotalChunks(known.size, encrypted, level)
+      : 0
   let submitted = 0
   let processed = 0
   const reportProgress = (total = Math.max(estimated, submitted)) =>
     options?.onProgress?.({ total, processed })
 
-  const sender = await openChunkSender(target, mode.encrypted, options)
+  const sender = await openChunkSender(target, encrypted, options)
   const sends = new SendWindow(
     sender.concurrency,
     (chunkData, address) => {
@@ -846,37 +759,71 @@ async function writeTreeIn<R extends PlainRef>(
       reportProgress()
     },
   )
-  const tree = new ReferenceTree(fanout, mode.wrap(sends))
+  const submit = ({ chunkData, address }: ReturnType<typeof wireChunk>) =>
+    sends.submit(chunkData, address)
 
-  const sendLeaf = async (payload: Uint8Array): Promise<void> => {
-    const { chunkData, ref } = mode.leaf(payload)
-    await sends.submit(chunkData, ref.address)
-    return tree.add(ref)
-  }
+  // ponytail: one pipeline for every level, 0 included, built by core-sdk's
+  // splitter. Its ceiling: the splitter holds a whole batch of sealed chunks
+  // (up to 128) before handing any on, and seals a leaf only once the next
+  // one starts, rather than sending each leaf as it is cut. Streaming
+  // memory grows by that batch, and a stalled source sends nothing until a
+  // batch fills. Parity needs the batch; level 0 does not, so the fix
+  // belongs upstream in core-sdk: hand level-0 chunks on as they seal.
+  const tree = new ChunkSplitter(
+    makeErasureBatch(level, encrypted, (chunk, key) =>
+      submit(wireChunk(chunk, key)),
+    ),
+    getMaxShards(level, encrypted),
+    encrypted,
+    makeIntermediateChunkHandler(level),
+  )
 
   const payloads = rechunk(source, CHUNK_SIZE)
   let closed = false
   try {
-    let hasContent = false
     while (true) {
       // A send can fail while the source has nothing to give.
       const next = await sends.orFailure(payloads.next())
       if (next.done) break
-      hasContent = true
-      await sendLeaf(next.value)
+      await sends.orFailure(tree.append(next.value))
     }
-    // Zero-length content is a single empty chunk (span 0): Bee's canonical
-    // representation of an empty file.
-    if (!hasContent) await sendLeaf(new Uint8Array(0))
-
-    const root = await tree.finish()
+    // Zero-length content leaves the root an empty chunk (span 0): Bee's
+    // canonical representation of an empty file.
+    const root = await sends.orFailure(tree.finalize())
+    const key = encrypted
+      ? (rootKey ?? crypto.getRandomValues(new Uint8Array(ENCRYPTION_KEY_SIZE)))
+      : undefined
+    const rootChunk = wireChunk(root, key, true)
+    await submit(rootChunk)
     await sends.drain()
     await sender.close()
     closed = true
+    // Bee's dispersed replicas of the root, so a reader finds it with the
+    // root's own neighbourhood gone. Tag 0 is no tag: a direct stream has none.
+    // Counted before they go, so progress without a size keeps a total.
+    submitted += replicaCount(level)
+    await uploadReplicas(
+      target,
+      rootChunk.chunkData,
+      level,
+      {
+        tag: sender.tagUid ?? 0,
+        deferred: options?.deferred,
+        pin: options?.pin,
+        requestOptions: options?.requestOptions,
+      },
+      (address) => {
+        chunkAddresses?.push(address)
+        processed++
+        reportProgress()
+      },
+    )
     if (estimated !== processed) reportProgress(processed)
 
     return {
-      reference: new Reference(mode.rootBytes(root)).toHex(),
+      reference: uint8ArrayToHex(
+        key ? Binary.concatBytes(rootChunk.address, key) : rootChunk.address,
+      ),
       tagUid: sender.tagUid,
       chunkAddresses,
     }
@@ -954,20 +901,53 @@ export async function uploadSOC(
   const signature = signer.sign(toSign)
 
   const socAddressBytes = makeSOCAddress(identifier, owner).toUint8Array()
+  const tagUid = await postSOC(
+    target,
+    { owner, identifier, signature, socAddress: socAddressBytes, socBody },
+    options,
+  )
+  return {
+    socAddress: socAddressBytes,
+    encryptionKey: encryptionKeyResult,
+    tagUid,
+  }
+}
+
+/** A signed single-owner chunk, split the way Bee's `/soc` endpoint takes it. */
+interface SignedSOC {
+  owner: EthAddress
+  identifier: Identifier
+  signature: Signature
+  socAddress: Uint8Array
+  /** Span and payload of the wrapped content-addressed chunk */
+  socBody: Uint8Array
+}
+
+/**
+ * POST a signed SOC to `/soc`, stamped in stamper mode. Resolves with the
+ * tag it went under: `options.tag`, or one created for it in stamper mode.
+ */
+async function postSOC(
+  target: UploadTarget,
+  soc: SignedSOC,
+  options?: Pick<
+    UploadSOCOptions,
+    "tag" | "deferred" | "pin" | "requestOptions"
+  >,
+): Promise<number | undefined> {
+  const { owner, identifier, signature, socAddress, socBody } = soc
+  const path = `/soc/${owner.toHex()}/${identifier.toHex()}?sig=${signature.toHex()}`
 
   if (isSubsidisedTarget(target)) {
     // Subsidised gateway mode - no stamp needed
-    const url = `${normalizeUrl(target.gatewayUrl)}/soc/${owner.toHex()}/${identifier.toHex()}?sig=${signature.toHex()}`
-
     const headers: Record<string, string> = {
       "content-type": "application/octet-stream",
     }
-
     if (options?.deferred !== undefined) {
       headers["swarm-deferred-upload"] = options.deferred.toString()
     }
 
-    const response = await fetch(url, {
+    const response = await fetch(`${normalizeUrl(target.gatewayUrl)}${path}`, {
       method: "POST",
       headers,
       body: webBytes(socBody),
@@ -983,55 +963,102 @@ export async function uploadSOC(
       )
     }
     if (target.counter) target.counter.chunks++
-
-    return {
-      socAddress: socAddressBytes,
-      encryptionKey: encryptionKeyResult,
-    }
-  } else {
-    // Stamper mode
-    const { bee, stamper } = target
-    const tag = options?.tag ?? (await tryCreateTag(bee))
-
-    const { signal } = withSignal(options?.requestOptions, target.signal) ?? {}
-    if (signal?.aborted) throw abortedError(signal)
-    const envelope = stamper.stamp(socAddressBytes)
-    if (target.counter) target.counter.chunks++
-
-    const stampHex = convertEnvelopeToMarshaledStamp(envelope).toHex()
-    const url = `${bee.url}/soc/${owner.toHex()}/${identifier.toHex()}?sig=${signature.toHex()}`
-
-    const headers: Record<string, string> = {
-      ...beeHeaders(bee, options?.requestOptions),
-      "content-type": "application/octet-stream",
-      "swarm-postage-stamp": stampHex,
-    }
-    if (tag) headers["swarm-tag"] = tag.toString()
-    if (options?.deferred !== undefined) {
-      headers["swarm-deferred-upload"] = options.deferred.toString()
-    }
-    if (options?.pin !== undefined) {
-      headers["swarm-pin"] = options.pin.toString()
-    }
-
-    const response = await fetch(url, {
-      method: "POST",
-      headers,
-      body: webBytes(socBody),
-      signal,
-    })
-
-    if (!response.ok) {
-      const errorText = await response.text()
-      throw new SocUploadError(response.status, response.statusText, errorText)
-    }
-
-    return {
-      socAddress: socAddressBytes,
-      encryptionKey: encryptionKeyResult,
-      tagUid: tag,
-    }
+    return undefined
   }
+
+  // Stamper mode
+  const { bee, stamper } = target
+  const tag = options?.tag ?? (await tryCreateTag(bee))
+
+  const { signal } = withSignal(options?.requestOptions, target.signal) ?? {}
+  if (signal?.aborted) throw abortedError(signal)
+  const envelope = stamper.stamp(socAddress)
+  if (target.counter) target.counter.chunks++
+
+  const headers: Record<string, string> = {
+    ...beeHeaders(bee, options?.requestOptions),
+    "content-type": "application/octet-stream",
+    "swarm-postage-stamp": convertEnvelopeToMarshaledStamp(envelope).toHex(),
+  }
+  if (tag) headers["swarm-tag"] = tag.toString()
+  if (options?.deferred !== undefined) {
+    headers["swarm-deferred-upload"] = options.deferred.toString()
+  }
+  if (options?.pin !== undefined) {
+    headers["swarm-pin"] = options.pin.toString()
+  }
+
+  const response = await fetch(`${bee.url}${path}`, {
+    method: "POST",
+    headers,
+    body: webBytes(socBody),
+    signal,
+  })
+
+  if (!response.ok) {
+    const errorText = await response.text()
+    throw new SocUploadError(response.status, response.statusText, errorText)
+  }
+  return tag
+}
+
+/**
+ * Upload Bee's dispersed replicas of one stored chunk at `redundancyLevel`
+ * (#307): 2, 4, 8 or 16 single-owner chunks under Bee's well-known replica
+ * owner, so a reader finds the chunk with its own neighbourhood gone. Bee
+ * gives them to the root of every erasure-coded tree and to every manifest
+ * node. `chunkData` is the chunk as stored, encrypted or not: a replica wraps
+ * those bytes and is signed over their address. They go through `/soc` like
+ * any SOC: bee-js's chunk upload refuses them as oversized, and the chunk
+ * stream is not where Bee takes SOCs. Nothing at level 0.
+ */
+export async function uploadReplicas(
+  target: UploadTarget,
+  chunkData: Uint8Array,
+  redundancyLevel: number,
+  options: Pick<
+    UploadSOCOptions,
+    "tag" | "deferred" | "pin" | "requestOptions"
+  >,
+  onSent?: (address: Uint8Array) => void,
+): Promise<void> {
+  const stored = new ChunkBuilder(
+    new DataView(
+      chunkData.buffer,
+      chunkData.byteOffset,
+      SPAN_SIZE,
+    ).getBigUint64(0, true),
+  )
+  stored.writer.buffer.set(chunkData.subarray(SPAN_SIZE))
+  const owner = new EthAddress(REPLICAS_OWNER)
+  // As the chunk itself went: a gateway's own default when unset, else direct
+  const replicaOptions = {
+    ...options,
+    deferred: isSubsidisedTarget(target)
+      ? options.deferred
+      : (options.deferred ?? false),
+  }
+  // At once: up to 16 of them, each its own request. A replica wraps the chunk
+  // as stored, as Bee's does: core-sdk's carries it padded to 4104 bytes, and
+  // the signature covers only the address, which the padding does not move.
+  await Promise.all(
+    makeReplicas(stored, redundancyLevel).map(async ({ address, data }) => {
+      await postSOC(
+        target,
+        {
+          owner,
+          identifier: new Identifier(data.subarray(0, IDENTIFIER_SIZE)),
+          signature: new Signature(
+            data.subarray(IDENTIFIER_SIZE, SOC_HEADER_SIZE),
+          ),
+          socAddress: address.toUint8Array(),
+          socBody: chunkData,
+        },
+        replicaOptions,
+      )
+      onSent?.(address.toUint8Array())
+    }),
+  )
 }
 
 // ============================================================================

@@ -233,8 +233,13 @@ describe("uploadDataStream", () => {
   })
 
   describe("memory", () => {
-    /** One piece being cut up, the window in flight, the chunk at hand. */
-    const boundFor = (window: number) => PIECE_SIZE + (window + 1) * CHUNK_SIZE
+    /**
+     * One piece being cut up, the batch core-sdk's splitter holds until it
+     * fills (at most a plain tree's 128 leaves), the window in flight, the
+     * chunk at hand.
+     */
+    const boundFor = (window: number) =>
+      PIECE_SIZE + (PLAIN_REFS_PER_CHUNK + window + 1) * CHUNK_SIZE
 
     it("stops reading the source while the node holds every chunk back", async () => {
       const { bee, target } = stamperSetup()
@@ -380,16 +385,18 @@ describe("uploadDataStream", () => {
     it("ends with a failed chunk even while the source is silent", async () => {
       const { bee, target } = stamperSetup()
       const node = heldBack(bee)
-      async function* stallsAfterAChunk(): AsyncGenerator<Uint8Array> {
-        yield makeData(CHUNK_SIZE)
+      // A whole batch and a chunk: the splitter sends nothing of a batch
+      // before it fills, and seals a leaf only once the next one starts.
+      async function* stallsAfterABatch(): AsyncGenerator<Uint8Array> {
+        yield makeData(CHUNK_SIZE * (ENCRYPTED_REFS_PER_CHUNK + 1))
         await new Promise(() => {})
       }
 
-      const upload = uploadDataStream(target, stallsAfterAChunk(), {
+      const upload = uploadDataStream(target, stallsAfterABatch(), {
         encryptionKey: true,
         httpConcurrency: CONCURRENCY,
       })
-      await vi.waitFor(() => expect(node.started()).toBe(1))
+      await vi.waitFor(() => expect(node.started()).toBe(CONCURRENCY))
       node.fail(new Error("batch is full"))
 
       await expect(upload).rejects.toThrow("batch is full")
@@ -484,7 +491,9 @@ describe("uploadDataStream", () => {
         openGate = resolve
       })
       async function* waitsForTheGate(): AsyncGenerator<Uint8Array> {
-        yield makeData(CHUNK_SIZE)
+        // A whole batch and a chunk: the splitter sends nothing of a batch
+        // before it fills, and seals a leaf only once the next one starts.
+        yield makeData(CHUNK_SIZE * (PLAIN_REFS_PER_CHUNK + 1))
         await gate
         yield* piecesOf(makeData(CHUNK_SIZE * 3), CHUNK_SIZE)
       }

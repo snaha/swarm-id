@@ -1,38 +1,53 @@
 // Copyright 2026 The Swarm Authors. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import { getMaxShards, getParities } from "@ethersphere/core-sdk"
+
 // Constants
 export const CHUNK_SIZE = 4096
 export const PLAIN_REFS_PER_CHUNK = 128 // 4096 / 32 = 128 plain (unencrypted) refs per intermediate chunk
 export const ENCRYPTED_REFS_PER_CHUNK = 64 // 4096 / 64 = 64 encrypted refs per intermediate chunk
 
 /**
- * Chunks a file of `span` bytes splits into, for upload progress and drive
- * capacity. The branching factor depends on the reference width: 128 refs per
- * intermediate for plain trees (32-byte refs), 64 for encrypted trees (64-byte
- * refs). It ignores the carry of a lone last reference into the level above,
- * so it can overcount by a chunk per level, never undercount.
+ * Root replicas Bee spreads per redundancy level (`replicas.Counts`), each a
+ * stamped chunk of its own. core-sdk's `makeReplicas` makes them but does not
+ * export the counts.
+ */
+const REPLICA_COUNTS = [0, 2, 4, 8, 16]
+
+/** The dispersed replicas Bee keeps of a tree's root or a manifest node */
+export function replicaCount(redundancyLevel: number): number {
+  return REPLICA_COUNTS[redundancyLevel]
+}
+
+/**
+ * Chunks a file of `span` bytes is uploaded as, for upload progress and drive
+ * capacity: leaves, intermediates and, at a redundancy level above 0, every
+ * batch's Reed-Solomon parity and the root's replicas. It ignores the carry of
+ * a lone last reference into the level above, so it can overcount by a chunk
+ * (and its parity) per level, never undercount. `dataOnly` counts what a
+ * reader fetches: the tree at the level's fan-out, without parity or replicas.
  */
 export function estimateTotalChunks(
   span: number,
-  refsPerChunk: number,
+  encrypted: boolean,
+  redundancyLevel = 0,
+  { dataOnly = false } = {},
 ): number {
-  if (span <= CHUNK_SIZE) {
-    return 1
+  const fanout = getMaxShards(redundancyLevel, encrypted)
+  const parities = (shards: number) =>
+    dataOnly ? 0 : getParities(redundancyLevel, shards, encrypted)
+  let total = 1 + (dataOnly ? 0 : replicaCount(redundancyLevel))
+  let nodes = Math.max(1, Math.ceil(span / CHUNK_SIZE))
+  while (nodes > 1) {
+    const rest = nodes % fanout
+    total +=
+      nodes +
+      Math.floor(nodes / fanout) * parities(fanout) +
+      (rest > 0 ? parities(rest) : 0)
+    nodes = Math.ceil(nodes / fanout)
   }
-
-  // Number of leaf chunks
-  const leafChunks = Math.ceil(span / CHUNK_SIZE)
-
-  // Intermediate chunks for a tree with refsPerChunk-way branching
-  let intermediateChunks = 0
-  let level = leafChunks
-  while (level > 1) {
-    level = Math.ceil(level / refsPerChunk)
-    intermediateChunks += level
-  }
-
-  return leafChunks + intermediateChunks
+  return total
 }
 
 /**

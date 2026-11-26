@@ -231,20 +231,9 @@ export async function loadMantarayTreeWithChunkAPI(
         undefined,
         requestOptions,
       )
-      const childNode = MantarayNode.unmarshalFromData(
-        childData,
-        fork.node.selfAddress,
-      )
-
-      fork.node.targetAddress = childNode.targetAddress
-      fork.node.forks = childNode.forks
-      fork.node.obfuscationKey = childNode.obfuscationKey
-      fork.node.path = fork.prefix
-      fork.node.parent = node
-
-      for (const nestedFork of fork.node.forks.values()) {
-        nestedFork.node.parent = fork.node
-      }
+      // Loaded in place, so the stub stays wired into its parent and counts as
+      // loaded for a later `addFork`/`removeFork` (core-sdk 0.2)
+      fork.node.hydrate(childData)
 
       await loadRecursively(fork.node)
     }

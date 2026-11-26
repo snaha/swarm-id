@@ -9,8 +9,17 @@ import {
   IframeToParentMessageSchema,
   ParentToIframeMessageSchema,
 } from "./types"
+import type { UploadFilesOptions } from "./types"
 
 const REFERENCE = "a".repeat(64)
+
+describe("UploadFilesOptions", () => {
+  it("takes a redundancy level, as the folder upload does (#307)", () => {
+    // A compile-time check: tsc refuses the literal without the key
+    const options: UploadFilesOptions = { redundancyLevel: 1 }
+    expect(options.redundancyLevel).toBe(1)
+  })
+})
 
 describe("DownloadOptionsSchema (#420)", () => {
   it("accepts plain non-ACT options", () => {

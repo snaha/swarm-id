@@ -7,7 +7,7 @@
  * defaults — lives here so a dApp only has to produce `{ path, data }` pairs.
  */
 
-import { describe, it, expect } from "vitest"
+import { describe, it, expect, vi, afterEach } from "vitest"
 import { MantarayNode as BeeMantarayNode } from "@ethersphere/bee-js"
 import {
   uploadCollection,
@@ -48,6 +48,40 @@ function setup(): { bee: MockBee; target: UploadTarget } {
 }
 
 describe("uploadCollection", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals()
+  })
+
+  it("replicates every manifest node and file root at a redundancy level, as Bee does", async () => {
+    const { bee, target } = setup()
+    const MEDIUM = 1
+    const MEDIUM_REPLICAS = 2
+    let stored = 0
+    const upload = bee.chunk.upload
+    bee.chunk.upload = (...args) => {
+      stored++
+      return upload(...args)
+    }
+    const socPosts: string[] = []
+    const deferredHeaders: string[] = []
+    vi.stubGlobal("fetch", async (url: string, init: RequestInit) => {
+      socPosts.push(url)
+      const headers = init.headers as Record<string, string>
+      deferredHeaders.push(headers["swarm-deferred-upload"])
+      return new Response(undefined, { status: 201 })
+    })
+
+    // Single-chunk files: every chunk stored is a file's root or a manifest node
+    await uploadCollection(target, FILES.slice(0, 2), {
+      redundancyLevel: MEDIUM,
+    })
+
+    expect(stored).toBeGreaterThan(2)
+    expect(socPosts).toHaveLength(stored * MEDIUM_REPLICAS)
+    // Direct, as the nodes and file roots they replicate went
+    expect(new Set(deferredHeaders)).toEqual(new Set(["false"]))
+  })
+
   it("lists back every file with its content type, and each reference downloads to its bytes", async () => {
     const { bee, target } = setup()
     const { reference } = await uploadCollection(target, FILES)

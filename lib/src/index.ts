@@ -25,6 +25,8 @@ export type {
   DriveCapacity,
   PartitionCapacity,
   FitOptions,
+  CapacityReadOptions,
+  RedundancyLevel,
   DriveKind,
   DriveRequest,
   DriveRequirement,

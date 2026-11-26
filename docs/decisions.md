@@ -7,6 +7,33 @@ present and may point at an issue or PR; the reasons live here.
 
 A PR that makes or changes a decision adds the entry in the same PR.
 
+## 2026-11-25 Erasure coding is set per write, and core-sdk's splitter builds every tree
+
+**Context.** File Manager sizes its drives for encrypted uploads with medium erasure coding, and
+passes a level that `SwarmIdClient` dropped ([#307](https://github.com/snaha/swarm-id/issues/307),
+[#928](https://github.com/snaha/swarm-id/issues/928)). The lib built its Merkle trees itself.
+core-sdk has the Reed-Solomon parity, the span encoding of the level and the root replicas, but
+only behind its own `ChunkSplitter`.
+
+**Decision.** `redundancyLevel` (0–4, Bee's `swarm-redundancy-level`) is an upload option, set per
+write, and `getDriveCapacity`/`fitProbability` take it too. A default kept on the drive is a
+follow-up. Every upload, level 0 included, is built by core-sdk's `ChunkSplitter`. The lib's own
+`ReferenceTree` is deleted. The root replicas go to `/soc`. A file or folder upload gives every
+manifest node its replicas too. That is what Bee does with a `/bzz` upload at a level, checked on
+the local cluster. A node is a single chunk, so it gets no parity. Reading an erasure-coded tree skips its
+parity references. Recovering a missing chunk from parity on read is a follow-up. core-sdk moves
+to 0.2.2 and bee-js to 13.2.0, so the two share one copy of core-sdk's classes: 0.1.1 corrupted a
+lone last leaf at any level above 0 (core-sdk#9, #10).
+
+**Why.** Per write is what FM already sends, and it needs no schema or UI change. One pipeline
+instead of a second one for erasure coding keeps one tree that agrees with Bee. The integration
+suite checks that a plain upload's reference equals Bee's at every level. The cost is that the
+splitter holds a whole batch (up to 128 chunks) before handing it on, where a leaf used to go out
+as soon as it was cut. Streaming memory grows by that batch, and a stalled source sends nothing
+until a batch fills. The splitter also hashes every chunk a second time. Both are for core-sdk to
+fix: 0.3 puts the address on the entry (core-sdk#23), and an eager level-0 batch would restore
+per-leaf sending.
+
 ## 2026-11-24 Issues carry a type, at most one stage label, and topic labels
 
 **Context.** The `Design` label meant both "needs designing" and "visual fix to built UI", and

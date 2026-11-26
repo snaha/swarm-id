@@ -24,12 +24,12 @@ import {
   UNENCRYPTED_REF_SIZE,
 } from "../chunk"
 import { Binary } from "cafe-utility"
-import { makeSOCAddress } from "@ethersphere/core-sdk"
 import {
-  ENCRYPTED_REFS_PER_CHUNK,
-  PLAIN_REFS_PER_CHUNK,
-  estimateTotalChunks,
-} from "./chunking"
+  decodeRedundancyLevel,
+  makeSOCAddress,
+  referenceCount,
+} from "@ethersphere/core-sdk"
+import { estimateTotalChunks } from "./chunking"
 import type { UploadProgress } from "./types"
 import type { SingleOwnerChunk } from "../types"
 import { hexToUint8Array } from "../utils/hex"
@@ -47,13 +47,17 @@ export type ChunkDownloader = Pick<Bee, "url"> & {
   chunk: Pick<Bee["chunk"], "download">
 }
 
-function readSpan(spanBytes: Uint8Array): number {
+function readRawSpan(spanBytes: Uint8Array): bigint {
   const view = new DataView(
     spanBytes.buffer,
     spanBytes.byteOffset,
     spanBytes.byteLength,
   )
-  return Number(view.getBigUint64(0, true))
+  return view.getBigUint64(0, true)
+}
+
+function readSpan(spanBytes: Uint8Array): number {
+  return Number(readRawSpan(spanBytes))
 }
 
 function makeSingleOwnerChunkFromData(
@@ -161,6 +165,7 @@ function extractReferences(
   payload: Uint8Array,
   totalSpan: number,
   isEncrypted: boolean,
+  redundancyLevel: number,
 ): ChunkRef[] {
   const refs: ChunkRef[] = []
   const refSize = isEncrypted ? ENCRYPTED_REF_SIZE : UNENCRYPTED_REF_SIZE
@@ -175,7 +180,13 @@ function extractReferences(
 
   // We need to determine how many refs are actually in this chunk
   // For intermediate chunks at higher levels, the number of children varies
-  const numRefs = Math.min(maxRefs, expectedLeafChunks)
+  // An erasure-coded chunk's data refs are followed by parity refs, which
+  // only recovery reads (#307); the span says how many are data.
+  const numRefs =
+    redundancyLevel > 0
+      ? referenceCount(BigInt(totalSpan), redundancyLevel, isEncrypted)
+          .dataShardCount
+      : Math.min(maxRefs, expectedLeafChunks)
 
   for (let i = 0; i < numRefs; i++) {
     const offset = i * refSize
@@ -207,7 +218,7 @@ async function downloadAndProcessChunk(
   bee: ChunkDownloader,
   ref: ChunkRef,
   requestOptions?: BeeRequestOptions,
-): Promise<{ span: number; payload: Uint8Array }> {
+): Promise<{ span: number; level: number; payload: Uint8Array }> {
   const addressHex = Binary.uint8ArrayToHex(ref.address)
   let rawChunk: Uint8Array
   try {
@@ -227,10 +238,12 @@ async function downloadAndProcessChunk(
     chunkData = rawChunk
   }
 
-  const span = readSpan(chunkData.slice(0, SPAN_SIZE))
+  const { level, span } = decodeRedundancyLevel(
+    readRawSpan(chunkData.subarray(0, SPAN_SIZE)),
+  )
   const payload = chunkData.slice(SPAN_SIZE)
 
-  return { span, payload }
+  return { span: Number(span), level, payload }
 }
 
 /**
@@ -245,7 +258,7 @@ async function joinChunks(
   onChunkDownloaded: () => void,
   requestOptions?: BeeRequestOptions,
 ): Promise<Uint8Array> {
-  const { span, payload } = await downloadAndProcessChunk(
+  const { span, level, payload } = await downloadAndProcessChunk(
     bee,
     ref,
     requestOptions,
@@ -258,7 +271,7 @@ async function joinChunks(
   }
 
   // Intermediate chunk: contains references to other chunks
-  const childRefs = extractReferences(payload, span, isEncrypted)
+  const childRefs = extractReferences(payload, span, isEncrypted, level)
 
   if (childRefs.length === 0) {
     throw new Error("No valid references found in intermediate chunk")
@@ -327,7 +340,7 @@ export async function downloadDataWithChunkAPI(
   )
 
   // First, download root chunk to get span for progress estimation
-  const { span, payload } = await downloadAndProcessChunk(
+  const { span, level, payload } = await downloadAndProcessChunk(
     bee,
     rootRef,
     requestOptions,
@@ -342,10 +355,10 @@ export async function downloadDataWithChunkAPI(
   }
 
   // Estimate total chunks for progress tracking
-  const estimatedTotal = estimateTotalChunks(
-    span,
-    isEncrypted ? ENCRYPTED_REFS_PER_CHUNK : PLAIN_REFS_PER_CHUNK,
-  )
+  // Data chunks only: parity is never fetched.
+  const estimatedTotal = estimateTotalChunks(span, isEncrypted, level, {
+    dataOnly: true,
+  })
   let processedChunks = 1 // Already downloaded root
 
   const onChunkDownloaded = () => {
@@ -361,7 +374,7 @@ export async function downloadDataWithChunkAPI(
   }
 
   // Extract child references and join recursively
-  const childRefs = extractReferences(payload, span, isEncrypted)
+  const childRefs = extractReferences(payload, span, isEncrypted, level)
 
   if (childRefs.length === 0) {
     throw new Error("No valid references found in root chunk")
